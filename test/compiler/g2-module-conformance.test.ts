@@ -1844,6 +1844,52 @@ function composedApplicationWithoutSales(): Record<string, unknown> {
       ? { ...plainItemPage, workspace: { membership: 'contextual' } }
       : surface,
   );
+  // WAREHOUSE-MODE: the warehouse launcher's Pick and ship tile and its
+  // sales order and shipment scan targets open Sales' pages; without Sales
+  // it keeps the tiles and targets whose Lists, queries and pages remain.
+  const surfaceIds = new Set(
+    (definition.surfaces as Array<Record<string, unknown>>).map((surface) =>
+      String(surface.surfaceId),
+    ),
+  );
+  const queryIds = new Set(
+    (definition.queries as Array<Record<string, unknown>>).map((query) =>
+      String(query.queryId),
+    ),
+  );
+  definition.surfaces = (
+    definition.surfaces as Array<Record<string, unknown>>
+  ).map((surface) => {
+    const launcher = surface.launcher as
+      | {
+          tiles: Array<{ surface: string }>;
+          scan?: { targets: Array<{ query: string; surface: string }> };
+        }
+      | undefined;
+    return launcher
+      ? {
+          ...surface,
+          launcher: {
+            ...launcher,
+            tiles: launcher.tiles.filter((tile) =>
+              surfaceIds.has(tile.surface),
+            ),
+            ...(launcher.scan
+              ? {
+                  scan: {
+                    ...launcher.scan,
+                    targets: launcher.scan.targets.filter(
+                      (target) =>
+                        queryIds.has(target.query) &&
+                        surfaceIds.has(target.surface),
+                    ),
+                  },
+                }
+              : {}),
+          },
+        }
+      : surface;
+  });
   return definition;
 }
 

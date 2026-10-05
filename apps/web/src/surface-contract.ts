@@ -7,8 +7,10 @@ import {
   SurfaceWorkspaceSchema,
   SurfaceDocumentEditorSchema,
   SurfaceFormSchema,
+  SurfaceLauncherSchema,
   SurfaceListSchema,
   type SurfaceForm,
+  type SurfaceLauncher,
   type SurfaceList,
   type SurfaceWorkspace,
   type SurfaceDocumentEditor,
@@ -297,6 +299,8 @@ export interface CompiledSurfaceDefinition {
    * records -- and the fields it leaves to a Task of the record's page.
    */
   readonly form?: SurfaceForm;
+  /** A launcher Task's tiles and scan box (surface floor 18). */
+  readonly launcher?: SurfaceLauncher;
   readonly workspace?: SurfaceWorkspace;
   readonly documentEditor?: SurfaceDocumentEditor;
   readonly composition?: SurfaceComposition;
@@ -1016,6 +1020,9 @@ function parseSurface(
     ...(value.form === undefined
       ? {}
       : { form: SurfaceFormSchema.parse(value.form) }),
+    ...(value.launcher === undefined
+      ? {}
+      : { launcher: SurfaceLauncherSchema.parse(value.launcher) }),
     ...(value.documentEditor === undefined
       ? {}
       : {

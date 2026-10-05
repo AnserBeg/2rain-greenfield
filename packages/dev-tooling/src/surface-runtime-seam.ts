@@ -41,6 +41,7 @@ const paths = Object.freeze({
   skill: '.agents/skills/ux-grammar/SKILL.md',
   surfaceContract: 'apps/web/src/surface-contract.ts',
   surfaceComposition: 'apps/web/src/surface-composition.ts',
+  surfaceLauncher: 'apps/web/src/surface-launcher.ts',
   surfaceRuntime: 'apps/web/src/surface-runtime.ts',
   workspaceEntry: 'apps/web/src/workspace-entry.ts',
 });
@@ -616,8 +617,10 @@ function scanForBypass(
     return;
   }
   const allowedMarkup = new Set<string>([
-    // Generic v6 interpreter delegated only by SurfaceRuntime and its registry.
+    // Generic v6 interpreters delegated only by SurfaceRuntime and its
+    // registry: compositions, and a launcher Task's tiles and scan box.
     paths.surfaceComposition,
+    paths.surfaceLauncher,
     paths.componentRegistry,
     paths.documentEditor,
     // The editor's own typed controls, consumed only by the generic editor.
@@ -633,6 +636,7 @@ function scanForBypass(
   const allowedSurfaceConsumers = new Set<string>([
     paths.controlSemantics,
     paths.surfaceComposition,
+    paths.surfaceLauncher,
     paths.componentRegistry,
     paths.documentEditor,
     paths.editorControls,
@@ -670,6 +674,17 @@ function scanForBypass(
         repoPath,
         'SURF001_RUNTIME_BYPASS',
         'only SurfaceRuntime and its closed registry may delegate to the composition interpreter',
+      );
+    if (
+      repoPath !== paths.surfaceRuntime &&
+      repoPath !== paths.componentRegistry &&
+      /from ['"][^'"]*surface-launcher\.js['"]/.test(source)
+    )
+      add(
+        violations,
+        repoPath,
+        'SURF001_RUNTIME_BYPASS',
+        'only SurfaceRuntime and its closed registry may delegate to the launcher interpreter',
       );
     // The editor's controls are part of the generic editor delegate, not a
     // second surface authority: nothing but that editor may render them.

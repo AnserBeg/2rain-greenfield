@@ -280,8 +280,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // (SALES-PARITY), + the invoice, its lines, payments and credits (twelve),
   // + PURCHASING-PARITY's Expected receipts List, + PAYABLES' vendor bill,
   // its lines, payments and credits (twelve), + REPLENISHMENT's Stock by item
-  // and Buying worklist, + CATALOG-EXTRAS' item aliases (three).
-  assert.equal(groupedManifest.surfaces.length, 106);
+  // and Buying worklist, + CATALOG-EXTRAS' item aliases (three), +
+  // WAREHOUSE-MODE's Warehouse.
+  assert.equal(groupedManifest.surfaces.length, 107);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -306,12 +307,13 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // field-scoped stock and movements (INVENTORY-PARITY) require 15; a stock
   // document's create values require 16; List figures, views keeping a band
   // and the item form's location choice (REPLENISHMENT) require 17; the
+  // Warehouse launcher's tiles and scan box (WAREHOUSE-MODE) require 18; the
   // location form's omitted status and the usable figures' parent reached
-  // through a reference field (LOCATIONS) require 19 (18 is WAREHOUSE-MODE's);
-  // searches through an item's aliases, the reorder point chosen by an item's
-  // rule, bands by an item's inventory policy and the merge Task's choice that
-  // leaves the item out (CATALOG-EXTRAS) require 20; the Sales orders List's
-  // supply, its Blocked by supply and Reserved views and its "Post shipment"
+  // through a reference field (LOCATIONS) require 19; searches through an
+  // item's aliases, the reorder point chosen by an item's rule, bands by an
+  // item's inventory policy and the merge Task's choice that leaves the item
+  // out (CATALOG-EXTRAS) require 20; the Sales orders List's supply, its
+  // Blocked by supply and Reserved views and its "Post shipment"
   // (SUPPLY-WARNINGS) require 21.
   assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 21);
   // Workspace owners and setup lists are in navigation; contextual document,
@@ -321,8 +323,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // the Invoices list joins Sales beside its orders. PURCHASING-PARITY:
   // Expected receipts joins Purchasing beside its orders; PAYABLES: so does
   // the Bills list. REPLENISHMENT: Stock by item and the Buying worklist,
-  // Catalog's Lists, join Inventory's group.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 18);
+  // Catalog's Lists, join Inventory's group. WAREHOUSE-MODE: the Warehouse
+  // launcher joins Inventory, the one Task navigation names.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 19);
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
@@ -354,6 +357,7 @@ test('compiled navigation stays flat within budget and groups mounted modules be
     'northstar.app:surface.inventory_movement_list',
     'northstar.app:surface.inventory_period_lock_list',
     'northstar.app:surface.inventory_transaction_list',
+    'northstar.app:surface.inventory_warehouse',
     'northstar.app:surface.item_buying_list',
     'northstar.app:surface.item_stock_list',
     'northstar.app:surface.legal_entity_list',

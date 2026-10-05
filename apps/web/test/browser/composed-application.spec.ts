@@ -665,6 +665,22 @@ async function readFocusRingCoverage(
       label: 'declared list with rows',
     },
     {
+      // The Warehouse (WAREHOUSE-MODE): its tiles carry a ring of their own,
+      // and its scan box and Open button the shared control ring, each on the
+      // ground it sits on.
+      go: async () => {
+        await page.goto(
+          scopedSurfaceUrl(
+            baseUrl,
+            'inventory_warehouse',
+            await loadSurfaceScopeParameterId('inventory_warehouse'),
+            browserLegalEntityId,
+          ),
+        );
+      },
+      label: 'launcher',
+    },
+    {
       // A plain record page with its field sections: a tax code's. A party's
       // page is its customer workspace and a location's its own (LOCATIONS),
       // and no other plain page with sections is seeded, so the state saves
@@ -1027,6 +1043,7 @@ async function inventoryNavigationJourney(
     'Inventory movement',
     'Inventory period lock',
     'Inventory transactions',
+    'Warehouse',
     'Buying worklist',
     'Stock by item',
     'Legal entity',
@@ -1102,6 +1119,7 @@ async function inventoryNavigationJourney(
       'Inventory movement',
       'Inventory period lock',
       'Inventory transactions',
+      'Warehouse',
       'Buying worklist',
       'Stock by item',
       'Legal entity',
@@ -1181,6 +1199,7 @@ async function inventoryNavigationJourney(
     'Inventory movement',
     'Inventory period lock',
     'Inventory transactions',
+    'Warehouse',
     // REPLENISHMENT: Catalog's items, read in the company like the rest.
     'Buying worklist',
     'Stock by item',

@@ -173,8 +173,11 @@ export async function resolveWorkspaceEntry(
     // Only workspace entry can default; existing documents and tasks require
     // pinned URLs. A record every company shares may: it is the same record
     // in each company, so the choice decides only whose sections it shows.
+    // So may a launcher: it is a destination of its own, opened from
+    // navigation like a List, and it acts on no record.
     mayDefault:
       shared ||
+      surface.launcher !== undefined ||
       (surface.surfaceRole === 'list' && !url.searchParams.has('record')),
   });
   if (explicit.length) {

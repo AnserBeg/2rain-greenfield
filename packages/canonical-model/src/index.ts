@@ -54,6 +54,8 @@ export {
   type SurfaceListRowAction,
   SurfaceFormSchema,
   type SurfaceForm,
+  SurfaceLauncherSchema,
+  type SurfaceLauncher,
   FieldNumberingSchema,
   type FieldNumbering,
   SurfaceDocumentEditorSchema,

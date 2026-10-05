@@ -25,6 +25,8 @@ import {
 import { inventoryDocumentWorkspace } from '../inventory/workspace.js';
 import { itemStockWorkspace } from '../inventory/item-stock-workspace.js';
 import { locationWorkspace } from '../location/workspace.js';
+import { periodLockWorkspace } from '../inventory/period-lock-workspace.js';
+import { warehouseSurface } from '../inventory/warehouse-workspace.js';
 
 const version = 'v6' as const;
 const normalizationProfileVersion = 'northstar.normalization/v6' as const;
@@ -125,6 +127,8 @@ const RECORD_COMPOSITIONS: Readonly<
   // A location's type and inventory status, changed with a reason
   // (LOCATIONS).
   location_detail: locationWorkspace,
+  // The period lock's Close and Reopen commands (WAREHOUSE-MODE).
+  inventory_period_lock_detail: periodLockWorkspace,
 });
 
 /**
@@ -235,7 +239,7 @@ export function composedApplicationDefinition(): Record<string, unknown> {
     ),
   ];
 
-  return withDeclaredLists({
+  const application = withDeclaredLists({
     assertions: merged(definitions, 'assertions'),
     capabilityRequirements: [sharedCapability, ...moduleCapabilities],
     entities: merged(definitions, 'entities'),
@@ -320,6 +324,12 @@ export function composedApplicationDefinition(): Record<string, unknown> {
                       LINES_LEAD.has(local) ? 70 : 50,
                     ),
                   ]),
+              // ... and its record commands in the command bar, which a
+              // read-only record never declared (the period lock's).
+              ...(slots.some((value) => value.slot === 'commandBar') ||
+              !(composition.actions as unknown[]).length
+                ? []
+                : [slot('commandBar', 'command_bar', 30)]),
               slot('childTables', 'children', 60),
             ],
           };
@@ -328,6 +338,15 @@ export function composedApplicationDefinition(): Record<string, unknown> {
       merged(definitions, 'queries') as Record<string, unknown>[],
     ),
   });
+  // Warehouse mode (WAREHOUSE-MODE): a launcher over the Lists above, declared
+  // beside them with its own workspace.
+  return {
+    ...application,
+    surfaces: [
+      ...application.surfaces,
+      warehouseSurface(APPLICATION_NAMESPACE),
+    ],
+  };
 }
 
 /** A worklist's List surface joins the composed surfaces beside its source. */

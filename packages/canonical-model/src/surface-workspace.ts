@@ -32,11 +32,21 @@ export function validateSurfaceWorkspaces(
   for (const surface of model.surfaces) {
     if ('workspace' in surface && surface.workspace) {
       const workspace = surface.workspace;
+      // A launcher Task is a destination of its own -- the warehouse view --
+      // and the one Task navigation may name.
+      const launcherTask =
+        surface.archetype === 'task' &&
+        'launcher' in surface &&
+        surface.launcher !== undefined;
       if (
         workspace.membership !== 'contextual' &&
-        surface.surfaceRole !== 'list'
+        surface.surfaceRole !== 'list' &&
+        !launcherTask
       )
-        fail(surface.surfaceId, 'navigation members must be Lists');
+        fail(
+          surface.surfaceId,
+          'navigation members must be Lists or launcher Tasks',
+        );
       // Placement only: a navigation List listed under another declared
       // module's group -- a List over Catalog's items that is an Inventory
       // destination -- because a surface shares its query's module.

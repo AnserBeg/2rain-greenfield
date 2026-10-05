@@ -717,6 +717,10 @@ const DECLARED_NO_REAL_PATH_DRIVER: Readonly<
     'The real reserve, ship and release paths render this in meta-sales.spec.ts; the independent census checks its registered message text.',
   LIST_EXPORT_OVER_LIMIT:
     'A declared List refuses an export larger than its query limit; test/postgres/declared-list.test.ts drives it through a compiled variant whose limit is 5 against real PostgreSQL. A real-path driver here would need 5,001 records.',
+  SCAN_NO_MATCH:
+    'A launcher scan that opens nothing; inventory-warehouse-mode.spec.ts drives it through the Warehouse against real PostgreSQL. The shell fixture this census serves declares no launcher.',
+  SCAN_NOT_EXACT:
+    'A launcher scan that matches only a name; inventory-warehouse-mode.spec.ts drives it through the Warehouse against real PostgreSQL. The shell fixture this census serves declares no launcher.',
   COMPOSITION_INPUT_INVALID:
     'Negative quantity retention is driven through the browser task in meta-sales.spec.ts. This census checks the catalog treatment independently.',
   COMPOSITION_SELECTION_REQUIRED:

@@ -150,6 +150,76 @@ function assertDocumentComposition(
 }
 
 /**
+ * The period lock page (WAREHOUSE-MODE): its own two operations as record
+ * commands -- each binds the record, its revision and a UTC instant into
+ * Closed through, and nothing else -- with the command bar, sections and child
+ * tables slots that render them; every other slot keeps its binding.
+ */
+function assertPeriodLockComposition(
+  namespace: string,
+  source: Value,
+  composition: unknown,
+  slots: unknown,
+): void {
+  const id = (kind: string, local: string) => `${namespace}:${kind}.${local}`;
+  record(composition);
+  assert.equal(composition.kind, 'surfaceComposition');
+  assert.deepEqual(composition.children, [], 'the period lock shows no rows');
+  const closedThrough = id('field', 'inventory_period_lock_closed_through');
+  assert.deepEqual(
+    (composition.actions as Value[]).map((action) => [
+      (
+        (action.inputs as Value[]).map((input) => input.type) as unknown[]
+      ).join(),
+      (action.steps as Value[]).map((step) => [
+        (step.operation as Value).targetId,
+        (step.bindings as Value[]).map((binding) => [
+          (binding.path as string[]).join('.'),
+          (binding.value as Value).source,
+        ]),
+      ]),
+    ]),
+    ['advance_period_lock', 'reopen_period'].map((operation) => [
+      'instant',
+      [
+        [
+          id('operation', operation),
+          [
+            ['recordId', 'record'],
+            ['expectedRevision', 'record'],
+            [`patch.${closedThrough}`, 'input'],
+          ],
+        ],
+      ],
+    ]),
+    'the period lock commands are its own two operations over Closed through',
+  );
+  const original = source.slots as Value[];
+  const slotId = `${String(source.surfaceId).replace(':surface.', ':slot.')}`;
+  const content = original[0]!.content;
+  const slot = (name: string, suffix: string, orderKey: number) => ({
+    kind: 'surfaceSlot',
+    schemaVersion: 'v6',
+    slot: name,
+    slotId: `${slotId}_${suffix}`,
+    orderKey,
+    content,
+  });
+  assert.deepEqual(
+    slots,
+    [
+      ...original.map((value) =>
+        value.slot === 'keyFacts' ? { ...value, orderKey: 90 } : value,
+      ),
+      slot('sections', 'sections', 50),
+      slot('commandBar', 'command_bar', 30),
+      slot('childTables', 'children', 60),
+    ],
+    'the period lock composition may only add the slots that render it',
+  );
+}
+
+/**
  * The stock document editor, pinned by what makes it this document's: its
  * pages, lines, draft state and the values its first save writes -- the draft
  * state, the document itself as its posting source, the save's time and the
@@ -280,6 +350,8 @@ export function assertComposedInventoryCollection(
       );
     if (document)
       assertDocumentComposition(namespace, local, source, composition, slots);
+    else if (local === 'inventory_period_lock_detail')
+      assertPeriodLockComposition(namespace, source, composition, slots);
     else {
       assert.equal(
         composition,

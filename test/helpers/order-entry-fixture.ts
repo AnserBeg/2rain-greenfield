@@ -1205,12 +1205,25 @@ async function seed(
         },
       );
       await done('shipment_post', shipment.recordId, shipment.revision);
+      // The server-assigned numbers, for a scan to open each document by
+      // (WAREHOUSE-MODE).
+      const number = (
+        record: { values: Readonly<Record<string, ImmutableJsonValue>> },
+        local: string,
+      ) => String(record.values[`${ns}:field.${local}_number`]);
       return {
         phase,
         itemId: item,
         main: location,
         overflow,
         shipmentId: shipment.recordId,
+        numbers: {
+          adjustment: number(adjustment, 'inventory_transaction'),
+          purchase: number(purchase, 'purchase_order'),
+          receipt: number(receipt, 'goods_receipt'),
+          order: number(order, 'sales_order'),
+          shipment: number(shipment, 'shipment'),
+        },
         observed: true,
       };
     }

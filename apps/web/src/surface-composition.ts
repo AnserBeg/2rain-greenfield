@@ -1221,6 +1221,49 @@ function boundInputField(
 }
 
 /**
+ * An instant input bound to a UTC date-time field: offered as the explicit-UTC
+ * date-and-time picker the draft editor uses, to the second, and sent in the
+ * field's own canonical spelling. Any other instant input keeps its text box.
+ */
+function utcInstantInput(
+  view: RequestRuntimeView,
+  action: Action,
+  input: TaskInput,
+): CompiledSurfaceInputField | null {
+  if (input.type !== 'instant') return null;
+  const bound = boundInputField(view, action, input.inputId);
+  return bound?.kind === 'dateTimeFieldType' &&
+    bound.temporal?.timezoneSemantics === 'utcInstant'
+    ? bound
+    : null;
+}
+
+/**
+ * The picker's value as the bound field stores it -- `2026-09-30T23:59` or
+ * `...:59` becomes `2026-09-30T23:59:59.000Z` at millisecond precision -- or
+ * null when it is no date and time. The instant is the one shown: UTC.
+ */
+function canonicalUtcInstant(
+  value: string,
+  field: CompiledSurfaceInputField,
+): string | null {
+  const match =
+    /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?Z?$/u.exec(
+      value,
+    );
+  if (!match) return null;
+  const fraction = (match[5] ?? '').padEnd(3, '0');
+  if (field.temporal?.precision !== 'millisecond' && Number(fraction) !== 0)
+    return null;
+  const canonical = `${match[1]}T${match[2]}:${match[3]}:${match[4] ?? '00'}${field.temporal?.precision === 'millisecond' ? `.${fraction}` : ''}Z`;
+  const parsed = new Date(canonical);
+  return Number.isFinite(parsed.getTime()) &&
+    parsed.toISOString().slice(0, 19) === canonical.slice(0, 19)
+    ? canonical
+    : null;
+}
+
+/**
  * A derived input's value, read on the server from the row the action
  * selected: the declared column's field, through its declared exact get where
  * the column names one. It is never taken from the submission, so an operator
@@ -1828,6 +1871,14 @@ export async function submitCompositionAction(
           if (problem) fieldErrors.set(input.inputId, problem);
           else value = canonicalDecimal(value) ?? value;
         }
+      } else if (value && input.type === 'instant') {
+        const bound = utcInstantInput(view, current.action, input);
+        if (bound) {
+          const canonical = canonicalUtcInstant(value, bound);
+          if (canonical === null)
+            fieldErrors.set(input.inputId, 'Enter a date and time.');
+          else value = canonical;
+        }
       }
       if (input.type === 'quantity' && value && !POSITIVE_DECIMAL.test(value))
         fieldErrors.set(input.inputId, 'Enter a positive exact quantity.');
@@ -2169,7 +2220,14 @@ export async function submitCompositionAction(
         );
       else if (presentation?.kind === 'multiline')
         control = `<textarea name="${h(input.inputId)}" rows="3"${required}${invalid}>${h(value)}</textarea>`;
-      else {
+      else if (utcInstantInput(view, current.action, input)) {
+        // The explicit-UTC picker, to the second; a reviewed value shows as
+        // it was entered, without the zone the label already names.
+        const shown = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?)/u.exec(
+          displayInputs[input.inputId] ?? '',
+        );
+        control = `<input type="datetime-local" step="1" name="${h(input.inputId)}" value="${h(shown?.[1] ?? '')}"${required}${invalid}>`;
+      } else {
         const bound =
           input.type === 'text'
             ? boundInputField(view, current.action, input.inputId)
@@ -2181,7 +2239,8 @@ export async function submitCompositionAction(
       }
       // The problem describes the input (aria-describedby); it is not part of
       // its accessible name, so it sits after the label.
-      return `<div class="composition-input"><label class="field">${h(input.label)}${control}</label>${problem ? `<small class="field-error" id="${h(input.inputId)}-error">${h(problem)}</small>` : ''}</div>`;
+      const utc = utcInstantInput(view, current.action, input) ? ' (UTC)' : '';
+      return `<div class="composition-input"><label class="field">${h(input.label)}${utc}${control}</label>${problem ? `<small class="field-error" id="${h(input.inputId)}-error">${h(problem)}</small>` : ''}</div>`;
     });
     // A multi-row Task's rows: one line each, its figures for context and an
     // input for each value asked per row, named with the line it belongs to.

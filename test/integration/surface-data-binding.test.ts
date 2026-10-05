@@ -48,6 +48,7 @@ import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
   SEMANTIC_OPERATION_RESULT_VERSION,
   SemanticOperationGateway,
+  parsePinnedOperationCatalog,
   SemanticOperationMediationAuthority,
   type RegisteredCapabilityOperationExecutor,
   type SemanticOperationExecutionRequest,
@@ -5235,6 +5236,36 @@ class OrderEntryExecutor
             totalCount: matching.length,
             ...echoed,
           },
+        };
+      }
+      // Like the PostgreSQL resolve: an exact case-folded match of the text
+      // on the declared keys; one identifier match and no name match is
+      // exact, anything else that matched is ambiguous (WAREHOUSE-MODE).
+      if (request.definition.queryType === 'resolve') {
+        const text = String(args.text ?? '').toLowerCase();
+        const matching = (authority: 'advisory' | 'identifier') =>
+          selected.filter((row) =>
+            (request.definition.resolveMatchKeys ?? []).some(
+              (key) =>
+                key.authority === authority &&
+                String(row.values[key.fieldId] ?? '').toLowerCase() === text,
+            ),
+          );
+        const identifiers = matching('identifier');
+        const advisories = matching('advisory');
+        const resolved = [...new Set([...identifiers, ...advisories])];
+        return {
+          kind: 'semanticQueryResult',
+          schemaVersion: SEMANTIC_QUERY_RESULT_VERSION,
+          queryId: request.definition.queryId,
+          outcome:
+            resolved.length === 0
+              ? 'not-found'
+              : identifiers.length === 1 && advisories.length === 0
+                ? 'exact'
+                : 'ambiguous',
+          records: resolved,
+          unsupportedReason: null,
         };
       }
       const records = request.list ? narrowed.map(project) : selected;
@@ -13884,4 +13915,475 @@ test('CATALOG-EXTRAS: an alias finds its item in the Items List and a product pi
   assert.equal(asRecord(merged[1]!.input).recordId, duplicate);
   // The duplicate's SKU now finds the notebook, and the duplicate is gone.
   assert.deepEqual(await items('NB-80-DUP'), [notebook]);
+});
+
+test('WAREHOUSE-MODE: the warehouse opens each List view with its count in the company, and a scanned number or SKU opens its record, else keeps the code and says why', async () => {
+  const f = await orderEntryWitness();
+  // Counts page like the PostgreSQL executor: one row and the total.
+  f.executor.pageLists = true;
+  const ns = f.ns;
+  const [scope, foreign] = f.scopes as [string, string];
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const field = (local: string) => id('field', local);
+  const warehouse = id('surface', 'inventory_warehouse');
+  const scopeParameter = id('parameter', 'on_hand_legal_entity_id');
+  // Purchase orders: one released with something to arrive, one received in
+  // full, a draft, and one released in the other company.
+  const purchase = (
+    number: string,
+    state: string,
+    ordered: number,
+    received: number,
+    company = scope,
+  ) => {
+    const orderId = f.executor.seed(
+      'purchase_order',
+      {
+        [field('purchase_order_number')]: number,
+        [field('purchase_order_supplier_party_id')]: f.party,
+        [field('purchase_order_expected_date')]: '2026-10-01T00:00:00.000Z',
+        [field('purchase_order_currency')]: 'CAD',
+        [id('derived_state_field', 'machine.purchase_order_lifecycle')]: id(
+          'state',
+          `purchase_order_${state}`,
+        ),
+      },
+      company,
+    );
+    const lineId = f.executor.seed(
+      'purchase_order_line',
+      {
+        [field('purchase_order_line_ordered_quantity')]: String(ordered),
+        [id('relation', 'purchase_order_line_order')]: orderId,
+      },
+      company,
+    );
+    if (received)
+      f.executor.seed(
+        'purchase_order_received',
+        {
+          [field('purchase_order_received_received_quantity')]:
+            String(received),
+          [id('relation', 'purchase_order_received_order_line')]: lineId,
+        },
+        company,
+      );
+    return orderId;
+  };
+  const toReceive = purchase('PO-000001', 'released', 5, 0);
+  purchase('PO-000002', 'released', 3, 3);
+  purchase('PO-000003', 'draft', 7, 0);
+  purchase('PO-000009', 'released', 9, 0, foreign);
+  // Sales orders: one released with something still to ship, one shipped.
+  const sale = (number: string, ordered: number, shipped: number) => {
+    const orderId = f.executor.seed(
+      'sales_order',
+      {
+        [field('sales_order_number')]: number,
+        [field('sales_order_customer_party_id')]: f.party,
+        [field('sales_order_currency')]: 'CAD',
+        [id('derived_state_field', 'machine.sales_order_lifecycle')]: id(
+          'state',
+          'sales_order_released',
+        ),
+      },
+      scope,
+    );
+    const lineId = f.executor.seed(
+      'sales_order_line',
+      {
+        [field('sales_order_line_ordered_quantity')]: String(ordered),
+        [id('relation', 'sales_order_line_order')]: orderId,
+      },
+      scope,
+    );
+    if (shipped)
+      f.executor.seed(
+        'sales_order_shipped',
+        {
+          [field('sales_order_shipped_shipped_quantity')]: String(shipped),
+          [id('relation', 'sales_order_shipped_order_line')]: lineId,
+        },
+        scope,
+      );
+    return orderId;
+  };
+  const toShip = sale('SO-000001', 4, 1);
+  sale('SO-000002', 2, 2);
+  // Stock documents: two transfers and an adjustment here, a transfer there.
+  const stock = (number: string, type: string, company = scope) =>
+    f.executor.seed(
+      'inventory_transaction',
+      {
+        [field('inventory_transaction_number')]: number,
+        [field('inventory_transaction_type')]: id(
+          'option',
+          `inventory_transaction_type_${type}`,
+        ),
+        [field('inventory_transaction_state')]: id(
+          'option',
+          'inventory_transaction_state_draft',
+        ),
+      },
+      company,
+    );
+  const transfer = stock('STK-000001', 'transfer');
+  stock('STK-000002', 'transfer');
+  stock('STK-000003', 'adjustment');
+  stock('STK-000004', 'transfer', foreign);
+  const receipt = f.executor.seed(
+    'goods_receipt',
+    { [field('goods_receipt_number')]: 'RCV-000001' },
+    scope,
+  );
+  const shipment = f.executor.seed(
+    'shipment',
+    { [field('shipment_number')]: 'SHP-000001' },
+    scope,
+  );
+  const vest = f.executor.seed('item', {
+    [field('item_sku')]: 'VEST-M',
+    [field('item_name')]: 'Safety vest',
+    [field('item_base_unit')]: 'EA',
+  });
+  // A second item NAMED like a code: typing its name opens nothing.
+  f.executor.seed('item', {
+    [field('item_sku')]: 'GLOVE-L',
+    [field('item_name')]: 'Gloves',
+    [field('item_base_unit')]: 'PAIR',
+  });
+  const page = (parameters: Record<string, string> = {}) =>
+    `/?${new URLSearchParams({ surface: warehouse, ...parameters }).toString()}`;
+  const render = (parameters: Record<string, string> = {}) =>
+    renderSurfaceRuntimeWithData(f.view, page(parameters), {
+      ...f.gateways,
+      clock: () => new Date('2026-10-02T12:00:00.000Z'),
+    });
+  const surfaceOf = (local: string) =>
+    f.surfaces.find((surface) => surface.surfaceId === id('surface', local))!;
+  const scopeOf = (local: string) =>
+    readCompiledSurfaceDataBinding(f.view, surfaceOf(local)).query
+      .legalEntityScope!.operand.parameterId;
+
+  // Navigation names the Warehouse among Inventory's destinations.
+  const unchosen = await render();
+  assert.match(
+    unchosen.html,
+    new RegExp(
+      `<a href="/\\?surface=${encodeURIComponent(warehouse).replace(/%/gu, '%')}[^"]*"[^>]*><span class="nav-icon" aria-hidden="true">W</span><span>Warehouse</span>`,
+      'u',
+    ),
+  );
+  // Two authorized companies and no choice yet: the page asks for one and
+  // reads nothing for the tiles.
+  assert.equal(unchosen.statusCode, 422);
+  assert.match(
+    unchosen.html,
+    /data-diagnostic-code="QUERY_LEGAL_ENTITY_SCOPE_REQUIRED"/u,
+  );
+  assert.doesNotMatch(unchosen.html, /data-launcher-tile=/u);
+
+  const chosen = await render({ [scopeParameter]: scope });
+  assert.equal(chosen.statusCode, 200);
+  assert.match(chosen.html, /<h1>Warehouse<\/h1>/u);
+  const tiles = [
+    ...chosen.html.matchAll(
+      /<a class="launcher-tile" href="([^"]+)" data-launcher-tile="([^"]+)"><strong class="launcher-tile__label">([^<]+)<\/strong>(?:<span class="launcher-tile__count" data-launcher-count>(\d+)<\/span>)?(?:<span class="launcher-tile__view">([^<]+)<\/span>)?/gu,
+    ),
+  ].map((match) => ({
+    href: match[1]!.replaceAll('&amp;', '&'),
+    tileId: match[2]!,
+    label: match[3]!,
+    count: match[4] === undefined ? null : Number(match[4]),
+    view: match[5] ?? null,
+  }));
+  // Each tile opens its List at its view in the chosen company, and counts
+  // that view as the List counts its own tab: the other company's
+  // documents, the closed and the draft ones are not work here.
+  assert.deepEqual(
+    tiles.map(({ label, count, view }) => [label, count, view]),
+    [
+      ['Receive', 1, 'To receive'],
+      ['Put away', 2, 'Transfers'],
+      ['Pick and ship', 1, 'To ship'],
+    ],
+  );
+  const href = (list: string, view: string) =>
+    `/?${new URLSearchParams({
+      surface: id('surface', list),
+      view: id('list_view', `${list}_${view}`),
+      [scopeOf(list)]: scope,
+    }).toString()}`;
+  assert.deepEqual(
+    tiles.map((tile) => tile.href),
+    [
+      href('expected_receipt_list', 'to_receive'),
+      href('inventory_transaction_list', 'transfers'),
+      href('sales_order_list', 'to_ship'),
+    ],
+  );
+  // The scan box: one field, focused, submitted as a GET in this company.
+  assert.match(
+    chosen.html,
+    new RegExp(
+      `<form id="launcher-scan-[^"]+" class="launcher-scan__form" method="get" action="/" role="search"><input type="hidden" name="surface" value="${warehouse}"><input type="hidden" name="${scopeParameter}" value="${scope}"><label class="launcher-scan__field"><span>Scan or type a SKU or document number</span><input name="scan" value="" data-scan-input="true"[^>]* required autofocus></label></form>`,
+      'u',
+    ),
+  );
+  assert.match(
+    chosen.html,
+    /<button type="submit" form="launcher-scan-[^"]+">Open<\/button>/u,
+  );
+
+  // A number opens its document in the company, whatever its case; a SKU
+  // opens the item at its stock.
+  const opened = async (code: string) => {
+    const response = await render({ [scopeParameter]: scope, scan: code });
+    assert.equal(response.statusCode, 303, `${code} opens its record`);
+    return response.location;
+  };
+  const recordPage = (local: string, recordId: string, parameter: string) =>
+    `/?${new URLSearchParams({
+      surface: id('surface', local),
+      record: recordId,
+      [parameter]: scope,
+    }).toString()}`;
+  assert.equal(
+    await opened('po-000001'),
+    recordPage(
+      'purchase_order_detail',
+      toReceive,
+      scopeOf('purchase_order_detail'),
+    ),
+  );
+  assert.equal(
+    await opened(' SO-000001 '),
+    recordPage('sales_order_detail', toShip, scopeOf('sales_order_detail')),
+  );
+  assert.equal(
+    await opened('RCV-000001'),
+    recordPage(
+      'goods_receipt_detail',
+      receipt,
+      scopeOf('goods_receipt_detail'),
+    ),
+  );
+  assert.equal(
+    await opened('SHP-000001'),
+    recordPage('shipment_detail', shipment, scopeOf('shipment_detail')),
+  );
+  assert.equal(
+    await opened('STK-000001'),
+    recordPage(
+      'inventory_transaction_detail',
+      transfer,
+      scopeOf('inventory_transaction_detail'),
+    ),
+  );
+  // An item is every company's: it opens in this one, under the company
+  // parameter its own page's entry reads.
+  assert.equal(
+    await opened('VEST-M'),
+    recordPage(
+      'item_detail',
+      vest,
+      id('parameter', 'posted_stock_balance_list_legal_entity_scope'),
+    ),
+  );
+
+  // Another company's number, or nothing at all, opens nothing; the code
+  // stays in the box beside the reason.
+  const refused = async (code: string, outcome: string) => {
+    const response = await render({ [scopeParameter]: scope, scan: code });
+    assert.equal(response.statusCode, 422, `${code} opens nothing`);
+    assert.match(
+      response.html,
+      new RegExp(`data-message="${outcome}"`, 'u'),
+      `${code} reads ${outcome}`,
+    );
+    assert.match(
+      response.html,
+      new RegExp(
+        `<input name="scan" value="${code}"[^>]* aria-invalid="true"`,
+        'u',
+      ),
+    );
+    // The tiles still offer the work.
+    assert.match(response.html, /data-launcher-tile=/u);
+    return response;
+  };
+  await refused('PO-000009', 'SCAN_NO_MATCH');
+  await refused('NOPE-1', 'SCAN_NO_MATCH');
+  // A name is not a code: it matches, but never opens.
+  await refused('Safety vest', 'SCAN_NOT_EXACT');
+  // A blank scan asks nothing.
+  const reads = f.policy.calls.length;
+  const blank = await render({ [scopeParameter]: scope, scan: '   ' });
+  assert.equal(blank.statusCode, 200);
+  assert.ok(
+    f.policy.calls
+      .slice(reads)
+      .every(
+        (call) =>
+          (call.decisionInput as { queryId?: string }).queryId?.endsWith(
+            '_resolve',
+          ) !== true,
+      ),
+  );
+
+  // A document current policy withholds is passed over without a word that
+  // it exists: the same answer as no document at all.
+  f.deniedReads.add(id('permission', 'goods_receipt_read'));
+  await refused('RCV-000001', 'SCAN_NO_MATCH');
+  // ... and a List current policy withholds keeps its tile, uncounted.
+  f.deniedReads.add(id('permission', 'inventory_transaction_read'));
+  const withheld = await render({ [scopeParameter]: scope });
+  assert.match(
+    withheld.html,
+    /data-launcher-tile="[^"]*put_away"><strong class="launcher-tile__label">Put away<\/strong><span class="launcher-tile__view">Transfers<\/span>/u,
+  );
+});
+
+test('WAREHOUSE-MODE: the period lock page closes the period through a UTC instant and reopens it to an earlier one, each reviewed and confirmed under its own operation', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const [scope] = f.scopes as [string, string];
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const closedThrough = id('field', 'inventory_period_lock_closed_through');
+  const lock = f.executor.seed(
+    'inventory_period_lock',
+    { [closedThrough]: null },
+    scope,
+  );
+  const surface = f.surfaces.find(
+    (candidate) =>
+      candidate.surfaceId === id('surface', 'inventory_period_lock_detail'),
+  )!;
+  const url = `/?${new URLSearchParams({
+    surface: surface.surfaceId,
+    record: lock,
+    [readCompiledSurfaceDataBinding(f.view, surface).query.legalEntityScope!
+      .operand.parameterId]: scope,
+  }).toString()}`;
+  const command = (local: string) =>
+    id('action', `inventory_period_lock_${local}`);
+  const input = (local: string) =>
+    id('input', `inventory_period_lock_${local}_through`);
+
+  // An open period offers only Close: there is nothing to reopen.
+  const open = await renderSurfaceRuntimeWithData(f.view, url, f.gateways);
+  assert.equal(open.statusCode, 200);
+  assert.match(open.html, /<h2>Posting period<\/h2>/u);
+  assert.match(
+    open.html,
+    new RegExp(
+      `<input type="hidden" name="compositionAction" value="${command('close')}"><button type="submit">Close period through</button>`,
+      'u',
+    ),
+  );
+  assert.doesNotMatch(open.html, /Reopen to/u);
+  // The lock offers no other record action: no empty disclosure is shown.
+  assert.doesNotMatch(
+    open.html,
+    /<details class="composition-record-actions">/u,
+  );
+
+  const task = async (local: string) => {
+    const submit = (body: Record<string, string>) =>
+      submitSurfaceRuntimeIntent(
+        f.view,
+        url,
+        { compositionAction: command(local), ...body },
+        f.gateways,
+      );
+    const initial = await submit({});
+    return {
+      initial,
+      submit,
+      taskToken: hiddenValue(initial.html, 'taskToken'),
+    };
+  };
+
+  // Close: an explicit-UTC date and time, to the second.
+  const close = await task('close');
+  assert.match(
+    close.initial.html,
+    new RegExp(
+      `<label class="field">Close through \\(UTC\\)<input type="datetime-local" step="1" name="${input('close')}" value="" required>`,
+      'u',
+    ),
+  );
+  const unreadable = await close.submit({
+    taskToken: close.taskToken,
+    taskStage: 'prepare',
+    [input('close')]: 'end of September',
+  });
+  assert.match(unreadable.html, /COMPOSITION_INPUT_INVALID/u);
+  assert.match(unreadable.html, /Enter a date and time\./u);
+  assert.equal(f.executor.calls.length, 0);
+  // Reviewed as the field stores it, and only a confirmation changes it.
+  const review = await close.submit({
+    taskToken: close.taskToken,
+    taskStage: 'prepare',
+    [input('close')]: '2026-09-30T23:59:59',
+  });
+  assert.match(review.html, /2026-09-30T23:59:59\.000Z/u);
+  assert.match(review.html, /Confirm Close period through/u);
+  assert.equal(f.executor.calls.length, 0);
+  await close.submit({
+    taskToken: close.taskToken,
+    taskStage: 'confirm',
+    preparedId: hiddenValue(review.html, 'preparedId'),
+  });
+  assert.equal(f.executor.calls.length, 1);
+  const advanced = f.executor.calls[0]!;
+  assert.equal(
+    advanced.definition.operationId,
+    id('operation', 'advance_period_lock'),
+  );
+  assert.deepEqual(advanced.input, {
+    recordId: lock,
+    expectedRevision: 1,
+    patch: { [closedThrough]: '2026-09-30T23:59:59.000Z' },
+  });
+
+  // A closed period offers Reopen, whose operation also asks for its human
+  // confirmation: the Task's confirmation carries the grant.
+  const closed = await renderSurfaceRuntimeWithData(f.view, url, f.gateways);
+  assert.match(closed.html, /Reopen to/u);
+  const reopen = await task('reopen');
+  assert.match(
+    reopen.initial.html,
+    /Reopen to \(UTC\)<input type="datetime-local"/u,
+  );
+  const reopenReview = await reopen.submit({
+    taskToken: reopen.taskToken,
+    taskStage: 'prepare',
+    [input('reopen')]: '2026-09-15T00:00',
+  });
+  assert.match(reopenReview.html, /2026-09-15T00:00:00\.000Z/u);
+  await reopen.submit({
+    taskToken: reopen.taskToken,
+    taskStage: 'confirm',
+    preparedId: hiddenValue(reopenReview.html, 'preparedId'),
+  });
+  assert.equal(f.executor.calls.length, 2);
+  const reopened = f.executor.calls[1]!;
+  assert.equal(
+    reopened.definition.operationId,
+    id('operation', 'reopen_period'),
+  );
+  assert.deepEqual(reopened.input, {
+    recordId: lock,
+    expectedRevision: 2,
+    patch: { [closedThrough]: '2026-09-15T00:00:00.000Z' },
+  });
+  // The gateway executes a human-confirmed operation only with a grant for
+  // exactly this input; the Task's confirmation issued it.
+  assert.equal(
+    parsePinnedOperationCatalog(f.view.projections.operation.payload).find(
+      (operation) => operation.operationId === id('operation', 'reopen_period'),
+    )?.confirmation,
+    'humanRequired',
+  );
 });
