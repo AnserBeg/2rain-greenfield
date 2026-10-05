@@ -62,9 +62,34 @@ Base: `packet/INVENTORY-PARITY` at `e3da0a39`. Reference: PaneFlow `d057daff` (`
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WAREHOUSE-MODE",
   "base": "e3da0a3918620c5ce3e494eba3fdf1b3f8c91c4a",
-  "head": "HEAD_PLACEHOLDER",
-  "changedPaths": [],
-  "symbols": []
+  "head": "b4821ea95faf1a51978a76554ddb3cfcaff165de",
+  "changedPaths": [
+    "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts",
+    "apps/web/src/message-catalog.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-contract.ts",
+    "apps/web/src/surface-launcher.ts", "apps/web/src/surface-runtime.ts", "apps/web/src/workspace-entry.ts",
+    "apps/web/test/browser/composed-application.spec.ts", "apps/web/test/browser/inventory-warehouse-mode.spec.ts", "apps/web/test/browser/message-catalog.spec.ts",
+    "apps/web/test/surface-runtime-contract.test.ts", "package.json", "packages/canonical-model/src/index.ts",
+    "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-launcher.ts",
+    "packages/canonical-model/src/surface-workspace.ts", "packages/compiler/src/projections.ts", "packages/dev-tooling/src/surface-runtime-seam.ts",
+    "packages/domain/src/app/builder.ts", "packages/domain/src/inventory/period-lock-workspace.ts", "packages/domain/src/inventory/warehouse-workspace.ts",
+    "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/runtime/src/request-runtime-view.ts", "test/architecture/repository-hygiene.test.ts",
+    "test/architecture/surface-grammar-conformance.test.ts", "test/compiler/g2-module-conformance.test.ts", "test/compiler/g2-module-storage.test.ts",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/assert-composed-inventory.ts", "test/helpers/order-entry-fixture.ts",
+    "test/integration/surface-data-binding.test.ts", "test/postgres/composed-application.test.ts", "test/postgres/period-lock-commands.test.ts",
+    "test/postgres/request-runtime-view.test.ts", "test/unit/canonical-model/surface-launcher.test.ts"
+  ],
+  "symbols": [
+    {"path": "apps/web/src/surface-composition.ts", "name": "canonicalUtcInstant"},
+    {"path": "apps/web/src/surface-composition.ts", "name": "utcInstantInput"},
+    {"path": "apps/web/src/surface-launcher.ts", "name": "companyParameterFor"},
+    {"path": "apps/web/src/surface-launcher.ts", "name": "launcherTiles"},
+    {"path": "apps/web/src/surface-launcher.ts", "name": "resolveLauncherScan"},
+    {"path": "packages/canonical-model/src/schemas.ts", "name": "SurfaceLauncherSchema"},
+    {"path": "packages/canonical-model/src/surface-launcher.ts", "name": "validateSurfaceLaunchers"},
+    {"path": "packages/domain/src/inventory/period-lock-workspace.ts", "name": "periodLockWorkspace"},
+    {"path": "packages/domain/src/inventory/warehouse-workspace.ts", "name": "warehouseSurface"},
+    {"path": "packages/postgres-provider/src/module-runtime-interpreter.ts", "name": "requirePeriodLockDirection"}
+  ]
 }
 ```
 
