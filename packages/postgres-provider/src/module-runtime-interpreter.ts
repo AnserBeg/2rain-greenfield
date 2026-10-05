@@ -3141,7 +3141,9 @@ function searchChildrenPlan(
   list: AuthorizedSharedListRequest,
 ): readonly SearchChildPlan[] | null {
   const requested = list.query.searchChildren;
-  if (!requested) return null;
+  // Nothing to search, nothing read: the gateway authorizes the children
+  // only for a search, and the statement adds them only to one.
+  if (!requested || list.query.search.trim() === '') return null;
   const refuse = (subject: string, message: string): never => {
     throw new SharedListContractError(
       'LIST_FIELD_NOT_AUTHORIZED',
@@ -3526,7 +3528,9 @@ async function listSharedRecords(
       ? { progress: list.query.progress }
       : {}),
     ...(figures && list.query.figures ? { figures: list.query.figures } : {}),
-    ...(searchChildren && list.query.searchChildren
+    // Echoed when applied, and when there was no text to apply them to.
+    ...(list.query.searchChildren &&
+    (searchChildren !== null || list.query.search.trim() === '')
       ? { searchChildren: list.query.searchChildren }
       : {}),
     ...(list.query.beforeFilters

@@ -1581,8 +1581,20 @@ export async function submitCompositionAction(
       view,
       surface.dataSourceQueryId,
     );
-    const scope = definition?.legalEntityScope
-      ? url.searchParams.get(definition.legalEntityScope.operand.parameterId)
+    // A record every company shares (an item) has no company of its own: its
+    // page carries the company its entry names under the authorization
+    // List's operand, as `resolveWorkspaceEntry` reads it, and its Tasks read
+    // their company sections there too (CATALOG-EXTRAS).
+    const operand =
+      definition?.legalEntityScope ??
+      (surface.surfaceRole === 'record' && surface.workspace?.entry
+        ? registeredSemanticQueryFromPinnedView(
+            view,
+            surface.workspace.entry.authorizationQueryId,
+          )?.legalEntityScope
+        : undefined);
+    const scope = operand
+      ? url.searchParams.get(operand.operand.parameterId)
       : null;
     const result = await query(
       view,

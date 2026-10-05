@@ -1203,9 +1203,13 @@ async function authorizeSharedListProjection(
   }
   // CATALOG-EXTRAS: children whose text also answers the search. The match
   // reads the child entity whole, so its list must show the whole entity:
-  // an admitted Q0 predicate, no company scope and no read model.
+  // an admitted Q0 predicate, no company scope and no read model. Read only
+  // when there is text to search: an unsearched List reads no child, so a
+  // withheld child read refuses the search, never the List.
   const searchChildren: AuthorizedSharedListSearchChild[] = [];
-  for (const child of query.searchChildren ?? []) {
+  for (const child of query.search.trim() === ''
+    ? []
+    : (query.searchChildren ?? [])) {
     const childDefinition = registeredQueryFromPinnedView(view, child.queryId);
     if (
       !childDefinition ||

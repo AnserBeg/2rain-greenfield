@@ -1,6 +1,9 @@
 import type { SurfaceComposition } from '../../packages/canonical-model/src/index.js';
 import { documentEditor } from '../../apps/web/src/document-editor.js';
-import { resolveWorkspaceEntry } from '../../apps/web/src/workspace-entry.js';
+import {
+  resolveWorkspaceEntry,
+  workspaceSearch,
+} from '../../apps/web/src/workspace-entry.js';
 import {
   loadSurfaceComposition,
   submitCompositionAction,
@@ -2490,6 +2493,11 @@ function listCoverage(
     returnedCount,
     schemaVersion: 'northstar.shared-list-result/v1',
     search: request.list.query.search,
+    // Echoed as the PostgreSQL executor does (CATALOG-EXTRAS): the children
+    // a search also matches through.
+    ...(request.list.query.searchChildren
+      ? { searchChildren: request.list.query.searchChildren }
+      : {}),
     sort: request.list.query.sort,
     totalCount: request.list.query.pageOffset + returnedCount,
     truncatedByMaximum: request.list.query.truncatedByMaximum,
@@ -4840,6 +4848,40 @@ class OrderEntryExecutor
             ? null
             : Number(stated);
         };
+        // CATALOG-EXTRAS: by the row's own enumeration, a field, a figure,
+        // or the List company's percentage of one; nothing stated, nothing.
+        const taken = (
+          value:
+            | { figureId: string }
+            | { fieldId: string }
+            | {
+                percent: {
+                  of: { figureId: string } | { fieldId: string };
+                  company: { queryId: string; fieldId: string };
+                };
+              }
+            | undefined,
+        ) => {
+          if (value === undefined) return null;
+          if (!('percent' in value)) return operand(value);
+          const of = operand(value.percent.of);
+          const company = this.rows.get(String(scope));
+          const percent =
+            company?.entityId === entityOf(value.percent.company.queryId)
+              ? company.values[value.percent.company.fieldId]
+              : undefined;
+          return of === null || percent === null || percent === undefined
+            ? null
+            : (of * Number(percent)) / 100;
+        };
+        for (const choice of listed.figures.choices ?? []) {
+          const by = String(row.values[choice.byFieldId] ?? '');
+          const hit = choice.cases.find((entry) => entry.values.includes(by));
+          numbers.set(
+            choice.figureId,
+            hit ? taken(hit.value) : taken(choice.otherwise),
+          );
+        }
         for (const total of listed.figures.totals ?? []) {
           const parts = [
             ...total.plus.map((value) => operand(value)),
@@ -4864,6 +4906,10 @@ class OrderEntryExecutor
         for (const band of listed.figures.bands ?? []) {
           const of = numbers.get(band.of) ?? null;
           const hit = band.cases.find((entry) => {
+            if (entry.when)
+              return entry.when.values.includes(
+                String(row.values[entry.when.fieldId]),
+              );
             const compared = entry.below ?? entry.atMost!;
             const threshold =
               'value' in compared ? Number(compared.value) : operand(compared);
@@ -4963,13 +5009,27 @@ class OrderEntryExecutor
       if (request.list && this.pageLists) {
         const query = request.list.query;
         const term = query.search.trim().toLowerCase();
+        const children = request.list.searchChildren ?? [];
         const matching = term
-          ? narrowed.filter((row) =>
-              request.definition.selections.some(({ fieldId }) =>
-                String(row.values[fieldId] ?? '')
-                  .toLowerCase()
-                  .includes(term),
-              ),
+          ? narrowed.filter(
+              (row) =>
+                request.definition.selections.some(({ fieldId }) =>
+                  String(row.values[fieldId] ?? '')
+                    .toLowerCase()
+                    .includes(term),
+                ) ||
+                // CATALOG-EXTRAS: or through an active child holding it.
+                children.some((child) =>
+                  [...this.rows.values()].some(
+                    (candidate) =>
+                      candidate.entityId === child.childEntityId &&
+                      !candidate.archived &&
+                      candidate.values[child.relationId] === row.recordId &&
+                      String(candidate.values[child.fieldId] ?? '')
+                        .toLowerCase()
+                        .includes(term),
+                  ),
+                ),
             )
           : narrowed;
         const page = matching.slice(
@@ -10987,6 +11047,12 @@ test('INVENTORY-PARITY: the item page lists the stock and movements of one compa
     [field('item_standard_cost_cad')]: null,
     [field('item_standard_cost_usd')]: null,
     [field('item_standard_cost_eur')]: null,
+    // CATALOG-EXTRAS: as PostgreSQL stores them unless set: their defaults.
+    [field('item_inventory_policy')]: id(
+      'option',
+      'item_inventory_policy_stocked',
+    ),
+    [field('item_reorder_rule')]: id('option', 'item_reorder_rule_manual'),
   });
   const location = (code: string) =>
     f.executor.seed('location', {
@@ -11824,6 +11890,11 @@ test('REPLENISHMENT: Stock by item and the Buying worklist add up each item in o
       [field('item_standard_cost_cad')]: '12.5',
       [field('item_standard_cost_usd')]: null,
       [field('item_standard_cost_eur')]: null,
+      [field('item_inventory_policy')]: id(
+        'option',
+        'item_inventory_policy_stocked',
+      ),
+      [field('item_reorder_rule')]: id('option', 'item_reorder_rule_manual'),
     });
   const valve = item('VALVE-10', 'Valve', '10', '40');
   const bolt = item('BOLT-20', 'Bolt', '5', null);
@@ -12099,6 +12170,8 @@ test('REPLENISHMENT: Stock by item and the Buying worklist add up each item in o
     ].sort(),
     [
       'commercial_lines',
+      // CATALOG-EXTRAS: the company's reorder percentage.
+      'legal_entity_list',
       'posted_stock_balance_list',
       'purchase_order_line_list',
       'purchase_order_list',
@@ -12109,14 +12182,31 @@ test('REPLENISHMENT: Stock by item and the Buying worklist add up each item in o
       'workspace_stock_reservations',
     ].map((local) => id('query', local)),
   );
+  // The company's own record is read as a label is, without a company.
+  const companyRead = (call: (typeof stockCalls)[number]) =>
+    (call.decisionInput as { queryId: string }).queryId ===
+    id('query', 'legal_entity_list');
   assert.ok(
-    stockCalls.every(
-      (call) =>
-        JSON.stringify(
-          (call.decisionInput as { arguments: Record<string, unknown> })
-            .arguments[parameter('item_stock_list')],
-        ) === JSON.stringify([scope]),
-    ),
+    stockCalls
+      .filter((call) => !companyRead(call))
+      .every(
+        (call) =>
+          JSON.stringify(
+            (call.decisionInput as { arguments: Record<string, unknown> })
+              .arguments[parameter('item_stock_list')],
+          ) === JSON.stringify([scope]),
+      ),
+  );
+  assert.ok(
+    stockCalls
+      .filter(companyRead)
+      .every(
+        (call) =>
+          Object.keys(
+            (call.decisionInput as { arguments: Record<string, unknown> })
+              .arguments,
+          ).join() === 'fieldIds,relationIds',
+      ),
   );
 
   // A tab counts and pages the rows its band keeps.
@@ -12221,6 +12311,8 @@ test('REPLENISHMENT: Stock by item and the Buying worklist add up each item in o
   assert.deepEqual(
     preset.figureLabels?.[id('list_figure', 'item_stock_list_status')],
     {
+      // CATALOG-EXTRAS: a non-stocked item's band, named first.
+      [id('list_band', 'item_stock_list_not_stocked')]: 'Not stocked',
       [id('list_band', 'item_stock_list_shortage')]: 'Shortage',
       [id('list_band', 'item_stock_list_reorder')]: 'Reorder',
       [id('list_band', 'item_stock_list_healthy')]: 'Healthy',
@@ -12316,6 +12408,11 @@ test('REPLENISHMENT: the item form chooses its preferred location from the locat
     [field('item_standard_cost_cad')]: '12.500000000000000000',
     [field('item_standard_cost_usd')]: null,
     [field('item_standard_cost_eur')]: null,
+    [field('item_inventory_policy')]: id(
+      'option',
+      'item_inventory_policy_stocked',
+    ),
+    [field('item_reorder_rule')]: id('option', 'item_reorder_rule_manual'),
   });
   const form = (record?: string) =>
     renderSurfaceRuntimeWithData(
@@ -12399,4 +12496,221 @@ test('REPLENISHMENT: the item form chooses its preferred location from the locat
     select((await form(valve)).html) ?? '',
     new RegExp(`<option value="${vancouver}" selected>Unavailable \\(`, 'u'),
   );
+});
+
+/**
+ * CATALOG-EXTRAS through the real gateway, list runtime and Task runtime: the
+ * Items List and a product picker find an item by an active alias -- reading
+ * the aliases only when there is text to search -- and the merge Task never
+ * offers the item as its own survivor, then writes the merged-SKU alias on
+ * the survivor before archiving the duplicate.
+ */
+test('CATALOG-EXTRAS: an alias finds its item in the Items List and a product picker, and the merge Task never merges an item into itself', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const [scope] = f.scopes as [string, string];
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const field = (local: string) => id('field', local);
+  f.executor.pageLists = true;
+  const item = (sku: string, name: string) =>
+    f.executor.seed('item', {
+      [field('item_sku')]: sku,
+      [field('item_name')]: name,
+      [field('item_description')]: null,
+      [field('item_base_unit')]: 'EA',
+      [field('item_price_cad')]: null,
+      [field('item_price_usd')]: null,
+      [field('item_price_eur')]: null,
+      [field('item_reorder_point')]: null,
+      [field('item_reorder_up_to')]: null,
+      [field('item_preferred_location_id')]: null,
+      [field('item_standard_cost_cad')]: null,
+      [field('item_standard_cost_usd')]: null,
+      [field('item_standard_cost_eur')]: null,
+      [field('item_inventory_policy')]: id(
+        'option',
+        'item_inventory_policy_stocked',
+      ),
+      [field('item_reorder_rule')]: id('option', 'item_reorder_rule_manual'),
+    });
+  const notebook = item('NB-80', 'Notebook');
+  const duplicate = item('NB-80-DUP', 'Notebook');
+  const alias = (value: string, kind: string) =>
+    f.executor.seed('item_alias', {
+      [field('item_alias_value')]: value,
+      [field('item_alias_kind')]: id('option', `item_alias_kind_${kind}`),
+      [id('relation', 'item_alias_item')]: notebook,
+    });
+  alias('BC-0042', 'barcode');
+  const removed = alias('OLD-7', 'alternate_sku');
+  f.executor.rows.set(removed, {
+    ...f.executor.rows.get(removed)!,
+    archived: true,
+  });
+  const childReads = () =>
+    f.policy.calls.filter(
+      (call) =>
+        (call.decisionInput as { kind?: string }).kind ===
+        'registeredSemanticListSearchChildPolicyInput',
+    );
+  const items = async (q?: string) => {
+    const page = await renderSurfaceRuntimeWithData(
+      f.view,
+      `/?${new URLSearchParams({ surface: id('surface', 'item_list'), ...(q ? { q } : {}) }).toString()}`,
+      f.gateways,
+    );
+    assert.equal(page.statusCode, 200);
+    return [...page.html.matchAll(/data-record-id="([^"]+)"/gu)].map(
+      (match) => match[1]!,
+    );
+  };
+  // The Items List finds the notebook by its barcode, in any case; never by
+  // an alias it no longer has.
+  const before = childReads().length;
+  assert.deepEqual(await items('bc-0042'), [notebook]);
+  const read = childReads().slice(before);
+  assert.ok(read.length > 0);
+  assert.ok(
+    read.every(
+      (call) =>
+        (call.decisionInput as { queryId: string }).queryId ===
+        id('query', 'item_alias_list'),
+    ),
+  );
+  assert.deepEqual(await items('old-7'), []);
+  // An unsearched List reads no alias at all.
+  const unsearched = childReads().length;
+  assert.ok((await items()).includes(notebook));
+  assert.equal(childReads().length, unsearched);
+  // A product picker searches the same way, through its declared children.
+  type Editor = {
+    lineFields: Array<{
+      fieldId: string;
+      reference?: {
+        queryId: string;
+        searchChildren?: Array<{
+          fieldId: string;
+          queryId: string;
+          relationId: string;
+        }>;
+      };
+    }>;
+  };
+  const editor = readCompiledSurfaceManifest(f.view).surfaces.find(
+    (value) => value.surfaceId === id('surface', 'sales_order_detail'),
+  )!.documentEditor as unknown as Editor;
+  const product = editor.lineFields.find(
+    (value) => value.fieldId === field('sales_order_line_item_id'),
+  )!.reference!;
+  const found = await workspaceSearch(
+    f.view,
+    f.gateways.queryGateway,
+    product.queryId,
+    scope,
+    'BC-0042',
+    null,
+    undefined,
+    undefined,
+    product.searchChildren,
+  );
+  assert.deepEqual(
+    found.records.map((record) => record.recordId),
+    [notebook],
+  );
+
+  // Merging the duplicate: the notebook is offered, the duplicate is not.
+  const surface = readCompiledSurfaceManifest(f.view).surfaces.find(
+    (value) => value.surfaceId === id('surface', 'item_detail'),
+  )!;
+  const url = `/?${new URLSearchParams({
+    surface: surface.surfaceId,
+    record: duplicate,
+    [id('parameter', 'posted_stock_balance_list_legal_entity_scope')]: scope,
+  }).toString()}`;
+  const survivor = id('input', 'item_survivor');
+  // The item page reads its stock through the fulfillment read model the
+  // product registers.
+  const pageGateways = {
+    ...f.gateways,
+    queryGateway: new SemanticQueryGateway(
+      f.policy,
+      f.executor,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        'northstar.sales:capability.fulfillment': fulfillmentReadModel,
+        'northstar.sales:capability.commercial': async ({
+          result,
+        }: {
+          result: SemanticQueryResultEnvelope;
+        }) => result,
+      },
+    ),
+  };
+  const submit = (body: Record<string, string>) =>
+    submitCompositionAction(
+      f.view,
+      surface,
+      url,
+      { compositionAction: id('action', 'item_merge'), ...body },
+      pageGateways,
+      (html) => ({ statusCode: 200, html }),
+    );
+  const initial = await submit({});
+  const offered = [
+    ...(
+      new RegExp(
+        `<select name="${survivor.replaceAll('.', '\\.')}"[^>]*>([\\s\\S]*?)</select>`,
+        'u',
+      ).exec(initial.html)?.[1] ?? ''
+    ).matchAll(/<option value="([^"]+)"/gu),
+  ].map((match) => match[1]!);
+  assert.ok(offered.includes(notebook));
+  assert.ok(!offered.includes(duplicate));
+  const taskToken = hiddenValue(initial.html, 'taskToken');
+  const calls = f.executor.calls.length;
+  // A forged choice of the item itself is refused before anything runs:
+  // it never reaches review.
+  const forged = await submit({
+    taskToken,
+    taskStage: 'prepare',
+    [survivor]: duplicate,
+  });
+  assert.doesNotMatch(forged.html, /name="preparedId"/u);
+  assert.match(
+    forged.html,
+    /Choose an available reference\.|COMPOSITION_TASK_UNAVAILABLE/u,
+  );
+  assert.equal(f.executor.calls.length, calls);
+  const review = await submit({
+    taskToken,
+    taskStage: 'prepare',
+    [survivor]: notebook,
+  });
+  const done = await submit({
+    taskToken,
+    taskStage: 'confirm',
+    preparedId: hiddenValue(review.html, 'preparedId'),
+  });
+  // Both steps committed; the duplicate it retired can no longer be shown,
+  // so the Task says it is complete rather than re-reading it.
+  assert.match(done.html, /data-task-result|COMPOSITION_COMPLETE/u);
+  const merged = f.executor.calls.slice(calls);
+  assert.deepEqual(
+    merged.map((call) => call.definition.operationId),
+    [id('operation', 'item_alias_create'), id('operation', 'item_archive')],
+  );
+  const created = asRecord(merged[0]!.input);
+  assert.deepEqual(asRecord(created.values), {
+    [field('item_alias_value')]: 'NB-80-DUP',
+    [field('item_alias_kind')]: id('option', 'item_alias_kind_merged_sku'),
+  });
+  assert.deepEqual(asRecord(created.relations), {
+    [id('relation', 'item_alias_item')]: notebook,
+  });
+  assert.equal(asRecord(merged[1]!.input).recordId, duplicate);
+  // The duplicate's SKU now finds the notebook, and the duplicate is gone.
+  assert.deepEqual(await items('NB-80-DUP'), [notebook]);
 });
