@@ -15,8 +15,8 @@ import type { SharedListQueryRequest } from './index.js';
  * CURSOR IDENTITY. A page window only means something against the exact query
  * shape it was minted for, so the binding digest covers every member that can
  * move a row into or out of the set -- archive inclusion, match mode, search,
- * sort, relation labels, the parent scope, progress and before filters -- and
- * the cursor carries a checksum over that digest. A cursor minted for one
+ * sort, relation labels, the parent scope, progress, figures and before
+ * filters -- and the cursor carries a checksum over that digest. A cursor minted for one
  * shape, one parent or one relation therefore cannot decode against another;
  * it is refused rather than silently reinterpreted as an offset into a
  * different set.
@@ -98,6 +98,7 @@ export function sharedListBindingDigest(
     | 'fieldFilters'
     | 'relatedFilter'
     | 'progress'
+    | 'figures'
     | 'beforeFilters'
     | 'relationLabels'
     | 'referenceLabels'
@@ -119,6 +120,8 @@ export function sharedListBindingDigest(
     // A window over orders with something open is not a window over all of
     // them, and yesterday's "before today" is not today's.
     ...(query.progress ? { progress: query.progress } : {}),
+    // A window over items short of stock is not a window over all of them.
+    ...(query.figures ? { figures: query.figures } : {}),
     ...(query.beforeFilters ? { beforeFilters: query.beforeFilters } : {}),
     queryId,
     relationLabels: query.relationLabels,

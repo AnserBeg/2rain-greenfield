@@ -14,6 +14,7 @@ import {
   declaredListArguments,
   declaredListCsv,
   exportFileName,
+  figureBandLabel,
   readDeclaredListState,
   viewNeedsProgress,
   withheldProgressQuery,
@@ -628,6 +629,9 @@ async function exportDeclaredList(
   return Object.freeze({
     download: Object.freeze({
       body: declaredListCsv(list, result.records, (record, fieldId, value) => {
+        // A band's value is a code; its declared label is what it means.
+        const band = figureBandLabel(list, fieldId, value);
+        if (band !== null) return band;
         const presented = displayFieldValue(view, record, fieldId, value);
         // Only an enumeration's label replaces its stored value in a file.
         return typeof value === 'string' &&

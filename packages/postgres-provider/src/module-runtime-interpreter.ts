@@ -60,11 +60,15 @@ import {
   encodeSharedListCursor,
   SHARED_LIST_RESULT_VERSION,
   SharedListContractError,
+  sharedListFigureKinds,
   type AuthorizedSharedListRelationLabel,
   type AuthorizedSharedListReferenceLabel,
   type AuthorizedSharedListRequest,
   type SharedListBeforeFilter,
   type SharedListCoverage,
+  type SharedListFigureOperand,
+  type SharedListFigureThreshold,
+  type SharedListFigureWithin,
 } from '../../runtime/src/list-behavior/index.js';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 
@@ -1282,6 +1286,10 @@ async function executeQueryOnClient(
     definition.queryType === 'list' && list
       ? listProgressPlan(storage, entity, list)
       : null;
+  const figuresPlan =
+    definition.queryType === 'list' && list
+      ? listFiguresPlan(storage, entity, list)
+      : null;
   const readScope = await verifyLegalEntityReadScope(
     client,
     storage,
@@ -1290,6 +1298,7 @@ async function executeQueryOnClient(
       entity,
       ...relationPlans.map((plan) => plan.target),
       ...(progressPlan ? [progressPlan.lines, progressPlan.done] : []),
+      ...(figuresPlan?.entities ?? []),
     ],
   );
   if (definition.queryType === 'aggregate') {
@@ -1356,6 +1365,7 @@ async function executeQueryOnClient(
           parentScopePlan(storage, entity, list),
           relatedFilterPlan(storage, entity, list),
           progressPlan,
+          figuresPlan,
         );
       }
       const limit = boundedLimit(args.limit, definition.maximumResultCount);
@@ -2439,6 +2449,523 @@ function canonicalProgressDecimal(value: unknown): string {
   return sign && digits !== '0' ? `-${digits}` : digits;
 }
 
+type StorageColumn = StorageEntity['columns'][number];
+
+interface FigureRowsPlan {
+  readonly entity: StorageEntity;
+  /** The rows' text column that holds the listed record's id. */
+  readonly matchColumn: string;
+  readonly quantityColumn: string | null;
+}
+
+interface FigureWithinPlan {
+  readonly parent: StorageEntity;
+  /** The rows' column that holds their parent's record id. */
+  readonly relationColumn: string;
+  readonly stateColumn: StorageColumn;
+  readonly values: readonly string[];
+}
+
+interface FigureRelatedPlan {
+  readonly entity: StorageEntity;
+  /** The related rows' column that holds a figure row's record id. */
+  readonly relationColumn: string;
+  readonly quantityColumn: string;
+}
+
+type FigureOperandPlan =
+  | { readonly figureId: string }
+  | { readonly column: string };
+
+type FigureThresholdPlan =
+  | { readonly column: string }
+  | { readonly value: string };
+
+interface ListFiguresPlan {
+  readonly sums: readonly {
+    readonly figureId: string;
+    readonly rows: FigureRowsPlan;
+    readonly within: FigureWithinPlan | null;
+    readonly related: FigureRelatedPlan | null;
+    readonly sum: 'related' | 'remaining' | 'rows';
+  }[];
+  readonly totals: readonly {
+    readonly figureId: string;
+    readonly plus: readonly FigureOperandPlan[];
+    readonly minus: readonly FigureOperandPlan[];
+    readonly floor: boolean;
+  }[];
+  readonly bands: readonly {
+    readonly figureId: string;
+    readonly of: string;
+    readonly cases: readonly {
+      readonly value: string;
+      readonly comparison: 'atMost' | 'below';
+      readonly threshold: FigureThresholdPlan;
+    }[];
+    readonly otherwise: string;
+  }[];
+  readonly latest: readonly {
+    readonly figureId: string;
+    readonly rows: FigureRowsPlan;
+    readonly within: FigureWithinPlan;
+    readonly byColumn: string;
+    readonly valueColumn: string;
+    readonly label: { readonly entity: StorageEntity; readonly column: StorageColumn };
+  }[];
+  readonly keep: {
+    readonly figureId: string;
+    readonly values: readonly string[];
+  } | null;
+  /** Every figure id, in the order the statement computes and projects them. */
+  readonly order: readonly {
+    readonly figureId: string;
+    readonly kind: 'band' | 'latest' | 'number';
+  }[];
+  /** Every entity the figures read, for the read-scope verification. */
+  readonly entities: readonly StorageEntity[];
+}
+
+/**
+ * Resolves list figures against the PINNED COMPILED storage, never against
+ * caller input: each query the gateway authorized names its entity; the
+ * match, quantity, state, date and value columns must be compiled columns of
+ * the kind the figure needs; a parent is reached through the rows' compiled
+ * relation to it and related rows through theirs to the rows; a listed row's
+ * operand is a compiled exact decimal of the queried entity. Anything else
+ * fails closed rather than summing a column a request happened to name.
+ */
+function listFiguresPlan(
+  storage: StorageTargetPayloadV1,
+  entity: StorageEntity,
+  list: AuthorizedSharedListRequest,
+): ListFiguresPlan | null {
+  const requested = list.query.figures;
+  if (!requested) return null;
+  const authorized = list.figures;
+  const refuse = (subject: string, message: string): never => {
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      message,
+      subject,
+    );
+  };
+  if (!authorized)
+    return refuse(
+      requested.sums[0]!.rows.queryId,
+      'list figures reached the executor without authorization',
+    );
+  const entities = new Map<string, StorageEntity>();
+  const entityOf = (queryId: string) => {
+    const entityId = authorized.entityIds[queryId];
+    if (!entityId)
+      return refuse(queryId, 'a figure query reached the executor unauthorized');
+    const target = requiredEntity(storage, entityId);
+    entities.set(target.entityId, target);
+    return target;
+  };
+  const column = (
+    target: StorageEntity,
+    fieldId: string,
+    kinds: readonly string[],
+    message: string,
+  ) => {
+    const found = target.columns.find(
+      (candidate) => candidate.canonicalFieldId === fieldId,
+    );
+    if (!found || !kinds.includes(found.fieldContract.fieldKind))
+      return refuse(fieldId, message);
+    return found;
+  };
+  const rowsPlan = (
+    queryId: string,
+    matchFieldId: string,
+    quantityFieldId?: string,
+  ): FigureRowsPlan => {
+    const target = entityOf(queryId);
+    return Object.freeze({
+      entity: target,
+      matchColumn: column(
+        target,
+        matchFieldId,
+        ['textFieldType'],
+        'a figure matches the listed record by a compiled text column',
+      ).physicalName,
+      quantityColumn:
+        quantityFieldId === undefined
+          ? null
+          : column(
+              target,
+              quantityFieldId,
+              ['exactDecimalFieldType'],
+              'a figure sums a compiled exact decimal column',
+            ).physicalName,
+    });
+  };
+  const withinPlan = (
+    rows: FigureRowsPlan,
+    within: SharedListFigureWithin,
+  ): FigureWithinPlan => {
+    const parent = entityOf(within.queryId);
+    const relation = storage.relations.find(
+      (candidate) =>
+        candidate.relationId === within.relationId &&
+        candidate.sourceEntityId === rows.entity.entityId &&
+        candidate.targetEntityId === parent.entityId,
+    );
+    if (!relation)
+      return refuse(
+        within.relationId,
+        "a figure's parent does not match the compiled storage relations",
+      );
+    const stateColumn = parent.columns.find(
+      (candidate) => candidate.canonicalFieldId === within.fieldId,
+    );
+    if (!stateColumn)
+      return refuse(
+        within.fieldId,
+        "a figure's parent values name a compiled column of the parent",
+      );
+    return Object.freeze({
+      parent,
+      relationColumn: relation.relationColumn.physicalName,
+      stateColumn,
+      values: within.values,
+    });
+  };
+  const listedDecimal = (fieldId: string) =>
+    column(
+      entity,
+      fieldId,
+      ['exactDecimalFieldType'],
+      'a figure adds or compares a compiled exact decimal of the listed entity',
+    ).physicalName;
+  const operand = (
+    value: SharedListFigureOperand,
+  ): FigureOperandPlan =>
+    'figureId' in value
+      ? Object.freeze({ figureId: value.figureId })
+      : Object.freeze({ column: listedDecimal(value.fieldId) });
+  const threshold = (value: SharedListFigureThreshold): FigureThresholdPlan =>
+    'fieldId' in value
+      ? Object.freeze({ column: listedDecimal(value.fieldId) })
+      : Object.freeze({ value: value.value });
+  const sums = requested.sums.map((sum) => {
+    const rows = rowsPlan(
+      sum.rows.queryId,
+      sum.rows.matchFieldId,
+      sum.rows.quantityFieldId,
+    );
+    const related = sum.related
+      ? (() => {
+          const pointing = entityOf(sum.related.queryId);
+          const relation = storage.relations.find(
+            (candidate) =>
+              candidate.relationId === sum.related!.relationId &&
+              candidate.sourceEntityId === pointing.entityId &&
+              candidate.targetEntityId === rows.entity.entityId,
+          );
+          if (!relation)
+            return refuse(
+              sum.related.relationId,
+              "a figure's related rows do not match the compiled storage relations",
+            );
+          return Object.freeze({
+            entity: pointing,
+            relationColumn: relation.relationColumn.physicalName,
+            quantityColumn: column(
+              pointing,
+              sum.related.fieldId,
+              ['exactDecimalFieldType'],
+              'a figure sums a compiled exact decimal column',
+            ).physicalName,
+          });
+        })()
+      : null;
+    return Object.freeze({
+      figureId: sum.figureId,
+      rows,
+      within: sum.within ? withinPlan(rows, sum.within) : null,
+      related,
+      sum: sum.sum,
+    });
+  });
+  const totals = (requested.totals ?? []).map((total) =>
+    Object.freeze({
+      figureId: total.figureId,
+      plus: total.plus.map(operand),
+      minus: total.minus.map(operand),
+      floor: total.floor === 'zero',
+    }),
+  );
+  const bands = (requested.bands ?? []).map((band) =>
+    Object.freeze({
+      figureId: band.figureId,
+      of: band.of,
+      cases: band.cases.map((entry) =>
+        Object.freeze({
+          value: entry.value,
+          comparison: entry.below ? ('below' as const) : ('atMost' as const),
+          threshold: threshold((entry.below ?? entry.atMost)!),
+        }),
+      ),
+      otherwise: band.otherwise,
+    }),
+  );
+  const latest = (requested.latest ?? []).map((figure) => {
+    const rows = rowsPlan(figure.rows.queryId, figure.rows.matchFieldId);
+    const within = withinPlan(rows, figure.within);
+    const by = column(
+      within.parent,
+      figure.byFieldId,
+      ['dateFieldType', 'dateTimeFieldType'],
+      'a latest figure orders by a compiled date or UTC instant column',
+    );
+    if (
+      by.fieldContract.fieldKind === 'dateTimeFieldType' &&
+      by.fieldContract.temporal.timezoneSemantics !== 'utcInstant'
+    )
+      refuse(
+        figure.byFieldId,
+        'a latest figure orders by a compiled date or UTC instant column',
+      );
+    const labelEntity = entityOf(figure.label.queryId);
+    const labelColumn = labelEntity.columns.find(
+      (candidate) => candidate.canonicalFieldId === figure.label.fieldId,
+    );
+    if (!labelColumn)
+      return refuse(
+        figure.label.fieldId,
+        'a latest label reads a compiled column of its entity',
+      );
+    return Object.freeze({
+      figureId: figure.figureId,
+      rows,
+      within,
+      byColumn: by.physicalName,
+      valueColumn: column(
+        within.parent,
+        figure.valueFieldId,
+        ['textFieldType'],
+        'a latest figure reads a compiled text column',
+      ).physicalName,
+      label: Object.freeze({ entity: labelEntity, column: labelColumn }),
+    });
+  });
+  return Object.freeze({
+    sums,
+    totals,
+    bands,
+    latest,
+    keep: requested.keep ?? null,
+    order: Object.freeze(
+      [...sharedListFigureKinds(requested)].map(([figureId, kind]) =>
+        Object.freeze({ figureId, kind }),
+      ),
+    ),
+    entities: Object.freeze([...entities.values()]),
+  });
+}
+
+const FIGURE_SUMS_ALIAS = 'table_figure_sums';
+const FIGURES_ALIAS = 'table_figures';
+
+/**
+ * Per listed row, two lateral answers in FROM: every sum and latest value in
+ * one, then every total, band and label over them, so the count and the page
+ * read the same figures and a kept band filters before both. Every joined row
+ * is pinned to the listed row's tenant and environment, to the issued read
+ * scope, and -- parent and related rows -- to its own row's company; the rows
+ * that hold the listed record's id compare that id as text.
+ */
+function listFiguresFromSql(
+  entity: StorageEntity,
+  sourceAlias: string,
+  plan: ListFiguresPlan,
+  readScope: VerifiedLegalEntityReadScope | null,
+  values: unknown[],
+): string {
+  const sameCompany = (
+    alias: string,
+    target: StorageEntity,
+    anchorAlias: string,
+    anchor: StorageEntity,
+  ) => {
+    const joined = legalEntityReadScopeRequirement(target);
+    const owner = legalEntityReadScopeRequirement(anchor);
+    return joined && owner
+      ? `
+          AND ${qualified(alias, joined.column)} = ${qualified(anchorAlias, owner.column)}`
+      : '';
+  };
+  const matching = (rows: FigureRowsPlan, alias: string) =>
+    `${qualified(alias, 'tenant_id')} = ${qualified(sourceAlias, 'tenant_id')}
+          AND ${qualified(alias, 'environment_id')} = ${qualified(sourceAlias, 'environment_id')}
+          AND ${qualified(alias, rows.matchColumn)}::text = ${qualified(sourceAlias, entity.recordIdentity.column)}::text
+          AND ${qualified(alias, rows.entity.archive.archivedAtColumn)} IS NULL${legalEntityReadScopeJoinConjunction(rows.entity, readScope, values, alias)}`;
+  const parentJoin = (
+    within: FigureWithinPlan,
+    rows: FigureRowsPlan,
+    rowsAlias: string,
+    alias: string,
+  ) => `
+         JOIN north_star_module.${quoted(within.parent.physicalTableName)} AS ${quoted(alias)}
+           ON ${qualified(alias, 'tenant_id')} = ${qualified(rowsAlias, 'tenant_id')}
+          AND ${qualified(alias, 'environment_id')} = ${qualified(rowsAlias, 'environment_id')}
+          AND ${qualified(alias, within.parent.recordIdentity.column)} = ${qualified(rowsAlias, within.relationColumn)}
+          AND ${qualified(alias, within.parent.archive.archivedAtColumn)} IS NULL${sameCompany(alias, within.parent, rowsAlias, rows.entity)}${legalEntityReadScopeJoinConjunction(within.parent, readScope, values, alias)}
+          AND ${qualified(alias, within.stateColumn.physicalName)}::text = ANY(${parameter(values, [...within.values])}::text[])`;
+  const relatedTotal = (
+    related: FigureRelatedPlan,
+    rows: FigureRowsPlan,
+    rowsAlias: string,
+    alias: string,
+  ) => `(SELECT coalesce(sum(${qualified(alias, related.quantityColumn)}), 0)
+           FROM north_star_module.${quoted(related.entity.physicalTableName)} AS ${quoted(alias)}
+          WHERE ${qualified(alias, 'tenant_id')} = ${qualified(rowsAlias, 'tenant_id')}
+            AND ${qualified(alias, 'environment_id')} = ${qualified(rowsAlias, 'environment_id')}
+            AND ${qualified(alias, related.relationColumn)} = ${qualified(rowsAlias, rows.entity.recordIdentity.column)}
+            AND ${qualified(alias, related.entity.archive.archivedAtColumn)} IS NULL${sameCompany(alias, related.entity, rowsAlias, rows.entity)}${legalEntityReadScopeJoinConjunction(related.entity, readScope, values, alias)})`;
+  const sumColumns = plan.sums.map((sum, index) => {
+    const rowsAlias = `table_figure_${String(index)}_rows`;
+    const parentAlias = `table_figure_${String(index)}_parent`;
+    const relatedAlias = `table_figure_${String(index)}_related`;
+    const quantity = sum.rows.quantityColumn
+      ? qualified(rowsAlias, sum.rows.quantityColumn)
+      : null;
+    const related = sum.related
+      ? relatedTotal(sum.related, sum.rows, rowsAlias, relatedAlias)
+      : null;
+    // Per row, before adding: what remains is never below zero, so an
+    // over-recorded row cannot cancel what another row still has open.
+    const term =
+      sum.sum === 'rows'
+        ? quantity!
+        : sum.sum === 'related'
+          ? related!
+          : `greatest(${quantity!} - ${related!}, 0)`;
+    return `(SELECT coalesce(sum(${term}), 0)
+         FROM north_star_module.${quoted(sum.rows.entity.physicalTableName)} AS ${quoted(rowsAlias)}${sum.within ? parentJoin(sum.within, sum.rows, rowsAlias, parentAlias) : ''}
+        WHERE ${matching(sum.rows, rowsAlias)}) AS ${quoted(`sum_${String(index)}`)}`;
+  });
+  const latestColumns = plan.latest.map((figure, index) => {
+    const rowsAlias = `table_latest_${String(index)}_rows`;
+    const parentAlias = `table_latest_${String(index)}_parent`;
+    return `(SELECT ${qualified(parentAlias, figure.valueColumn)}::text
+         FROM north_star_module.${quoted(figure.rows.entity.physicalTableName)} AS ${quoted(rowsAlias)}${parentJoin(figure.within, figure.rows, rowsAlias, parentAlias)}
+        WHERE ${matching(figure.rows, rowsAlias)}
+        ORDER BY ${qualified(parentAlias, figure.byColumn)} DESC NULLS LAST,
+                 ${qualified(parentAlias, figure.within.parent.recordIdentity.column)} DESC
+        LIMIT 1) AS ${quoted(`latest_${String(index)}`)}`;
+  });
+  // Totals, bands and labels read the sums by id; a total names only figures
+  // declared before it, so each expression is built from finished ones.
+  const expressions = new Map<string, string>();
+  plan.sums.forEach((sum, index) =>
+    expressions.set(
+      sum.figureId,
+      qualified(FIGURE_SUMS_ALIAS, `sum_${String(index)}`),
+    ),
+  );
+  const operandSql = (value: FigureOperandPlan) => {
+    if ('column' in value) return qualified(sourceAlias, value.column);
+    const expression = expressions.get(value.figureId);
+    if (!expression)
+      throw failure(
+        'MODULE_LIST_RESULT_INVALID',
+        'a list figure names a figure not computed before it',
+        value.figureId,
+      );
+    return expression;
+  };
+  const figureColumns: string[] = [];
+  plan.totals.forEach((total, index) => {
+    const signed = [
+      ...total.plus.map((value) => `+ ${operandSql(value)}`),
+      ...total.minus.map((value) => `- ${operandSql(value)}`),
+    ].join(' ');
+    const sum = `(0 ${signed})`;
+    // A total over an unstated field stays unstated: never floored to zero.
+    const expression = total.floor
+      ? `(CASE WHEN ${sum} < 0 THEN 0 ELSE ${sum} END)`
+      : sum;
+    expressions.set(total.figureId, expression);
+    figureColumns.push(`${expression} AS ${quoted(`total_${String(index)}`)}`);
+  });
+  plan.bands.forEach((band, index) => {
+    const of = operandSql({ figureId: band.of });
+    const cases = band.cases
+      .map((entry) => {
+        const threshold =
+          'column' in entry.threshold
+            ? qualified(sourceAlias, entry.threshold.column)
+            : `${parameter(values, entry.threshold.value)}::numeric`;
+        return `WHEN ${of} ${entry.comparison === 'below' ? '<' : '<='} ${threshold} THEN ${parameter(values, entry.value)}::text`;
+      })
+      .join(' ');
+    figureColumns.push(
+      `(CASE ${cases} ELSE ${parameter(values, band.otherwise)}::text END) AS ${quoted(`band_${String(index)}`)}`,
+    );
+  });
+  plan.latest.forEach((figure, index) => {
+    const alias = `table_latest_${String(index)}_label`;
+    figureColumns.push(
+      `(SELECT ${visibleFieldExpression(figure.label.column, alias)}
+          FROM north_star_module.${quoted(figure.label.entity.physicalTableName)} AS ${quoted(alias)}
+         WHERE ${qualified(alias, 'tenant_id')} = ${qualified(sourceAlias, 'tenant_id')}
+           AND ${qualified(alias, 'environment_id')} = ${qualified(sourceAlias, 'environment_id')}
+           AND ${qualified(alias, figure.label.entity.recordIdentity.column)}::text = ${qualified(FIGURE_SUMS_ALIAS, `latest_${String(index)}`)}${legalEntityReadScopeJoinConjunction(figure.label.entity, readScope, values, alias)}) AS ${quoted(`label_${String(index)}`)}`,
+    );
+  });
+  return `CROSS JOIN LATERAL (
+    SELECT ${[...sumColumns, ...latestColumns].join(',
+           ')}
+  ) AS ${quoted(FIGURE_SUMS_ALIAS)}
+  CROSS JOIN LATERAL (
+    SELECT ${['1 AS "figures"', ...figureColumns].join(',
+           ')}
+  ) AS ${quoted(FIGURES_ALIAS)}`;
+}
+
+/** Where each figure's value -- and a latest one's label -- is projected. */
+function listFigureColumns(plan: ListFiguresPlan): readonly {
+  readonly figureId: string;
+  readonly kind: 'band' | 'latest' | 'number';
+  readonly value: string;
+  readonly label: string | null;
+}[] {
+  const sums = new Map(plan.sums.map((sum, index) => [sum.figureId, index]));
+  const totals = new Map(
+    plan.totals.map((total, index) => [total.figureId, index]),
+  );
+  const bands = new Map(plan.bands.map((band, index) => [band.figureId, index]));
+  const latest = new Map(
+    plan.latest.map((figure, index) => [figure.figureId, index]),
+  );
+  return plan.order.map(({ figureId, kind }) => {
+    const sum = sums.get(figureId);
+    const total = totals.get(figureId);
+    const band = bands.get(figureId);
+    const last = latest.get(figureId);
+    return Object.freeze({
+      figureId,
+      kind,
+      value:
+        sum !== undefined
+          ? qualified(FIGURE_SUMS_ALIAS, `sum_${String(sum)}`)
+          : total !== undefined
+            ? qualified(FIGURES_ALIAS, `total_${String(total)}`)
+            : band !== undefined
+              ? qualified(FIGURES_ALIAS, `band_${String(band)}`)
+              : qualified(FIGURE_SUMS_ALIAS, `latest_${String(last!)}`),
+      label:
+        last !== undefined
+          ? qualified(FIGURES_ALIAS, `label_${String(last)}`)
+          : null,
+    });
+  });
+}
+
 /**
  * Resolves a related-record existence filter against the PINNED COMPILED
  * relation: the related entity must be the relation's source and the queried
@@ -2536,6 +3063,7 @@ async function listSharedRecords(
   parentScope: ListParentScopePlan | null,
   relatedFilter: ListRelatedFilterPlan | null = null,
   progress: ListProgressPlan | null = null,
+  figures: ListFiguresPlan | null = null,
 ): Promise<SemanticQueryResultEnvelope> {
   const sourceAlias = 'table_source';
   const selectedColumns = definition.selections.map((selection) => {
@@ -2557,7 +3085,11 @@ async function listSharedRecords(
     ...(progress
       ? [listProgressFromSql(entity, sourceAlias, progress, readScope, values)]
       : []),
+    ...(figures
+      ? [listFiguresFromSql(entity, sourceAlias, figures, readScope, values)]
+      : []),
   ].join('\n');
+  const figureColumns = figures ? listFigureColumns(figures) : [];
   const predicates = listArchivePredicates(
     entity,
     sourceAlias,
@@ -2645,6 +3177,23 @@ async function listSharedRecords(
   // exactly that set.
   if (progress?.openOnly)
     predicates.push(`${qualified(PROGRESS_ALIAS, 'open_total')} > 0`);
+  // A kept band, like an open view: the tab counts and pages exactly the rows
+  // whose band the statement itself judged.
+  if (figures?.keep) {
+    const kept = figures.keep;
+    const band = figureColumns.find(
+      (column) => column.figureId === kept.figureId && column.kind === 'band',
+    );
+    if (!band)
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        'a kept figure is a band the statement computes',
+        kept.figureId,
+      );
+    predicates.push(
+      `${band.value} = ANY(${parameter(values, [...kept.values])}::text[])`,
+    );
+  }
   appendListBeforePredicates(
     selectedColumns,
     sourceAlias,
@@ -2668,7 +3217,7 @@ async function listSharedRecords(
   const limitSql = parameter(pageValues, list.query.effectivePageSize + 1);
   const offsetSql = parameter(pageValues, list.query.pageOffset);
   const rows = await client.query<QueryResultRow>(
-    `SELECT ${listSelectList(entity, sourceAlias, selectedColumns, relationPlans, progress !== null)}
+    `SELECT ${listSelectList(entity, sourceAlias, selectedColumns, relationPlans, progress !== null, figureColumns)}
        ${fromSql}
       WHERE ${whereSql}
       ORDER BY ${listOrderBy(
@@ -2684,7 +3233,14 @@ async function listSharedRecords(
   const hasMore = rows.rows.length > list.query.effectivePageSize;
   const pageRows = rows.rows.slice(0, list.query.effectivePageSize);
   const records = pageRows.map((row) =>
-    toListDto(entity, row, selectedColumns, relationPlans, progress),
+    toListDto(
+      entity,
+      row,
+      selectedColumns,
+      relationPlans,
+      progress,
+      figureColumns,
+    ),
   );
   const nextOffset = list.query.pageOffset + records.length;
   const listCoverage: SharedListCoverage = Object.freeze({
@@ -2710,6 +3266,7 @@ async function listSharedRecords(
     ...(progress && list.query.progress
       ? { progress: list.query.progress }
       : {}),
+    ...(figures && list.query.figures ? { figures: list.query.figures } : {}),
     ...(list.query.beforeFilters
       ? { beforeFilters: list.query.beforeFilters }
       : {}),
@@ -2865,6 +3422,7 @@ function listSelectList(
   selectedColumns: readonly StorageEntity['columns'][number][],
   relations: readonly ListRelationPlan[],
   progress = false,
+  figures: ReturnType<typeof listFigureColumns> = [],
 ): string {
   const rawColumns = [
     entity.recordIdentity.column,
@@ -2886,11 +3444,20 @@ function listSelectList(
           `${qualified(PROGRESS_ALIAS, `${figure}_total`)}::text AS ${quoted(`nsm_table_progress_${figure}`)}`,
       )
     : [];
+  const figureValues = figures.flatMap((figure, index) => [
+    `${figure.value}::text AS ${quoted(`nsm_table_figure_${String(index)}`)}`,
+    ...(figure.label
+      ? [
+          `${figure.label} AS ${quoted(`nsm_table_figure_label_${String(index)}`)}`,
+        ]
+      : []),
+  ]);
   return [
     ...rawColumns,
     ...displays,
     ...relationValues,
     ...progressValues,
+    ...figureValues,
   ].join(', ');
 }
 
@@ -2948,6 +3515,7 @@ function toListDto(
   selectedColumns: readonly StorageEntity['columns'][number][],
   relations: readonly ListRelationPlan[],
   progress: ListProgressPlan | null = null,
+  figures: ReturnType<typeof listFigureColumns> = [],
 ): SemanticRecordDto {
   const projected = toDto(
     entity,
@@ -2973,13 +3541,51 @@ function toListDto(
         }),
       })
     : projected;
+  // Each figure rides the row's values under its id: a sum or a total as a
+  // canonical exact decimal (unstated reads null), a band as its value, a
+  // latest record id as it is -- with that record's label beside it.
+  const figured =
+    figures.length > 0
+      ? Object.freeze({
+          ...base,
+          values: Object.freeze({
+            ...base.values,
+            ...Object.fromEntries(
+              figures.map((figure, index) => {
+                const value = row[`nsm_table_figure_${String(index)}`] as
+                  unknown;
+                return [
+                  figure.figureId,
+                  value === null || value === undefined
+                    ? null
+                    : figure.kind === 'number'
+                      ? canonicalProgressDecimal(value)
+                      : nullableDisplayValue(value),
+                ];
+              }),
+            ),
+          }),
+        })
+      : base;
   const displayValues = Object.freeze(
-    Object.fromEntries(
-      selectedColumns.map((column, index) => [
+    Object.fromEntries([
+      ...selectedColumns.map((column, index) => [
         column.canonicalFieldId,
         nullableDisplayValue(row[`nsm_table_display_${String(index)}`]),
       ]),
-    ),
+      ...figures.flatMap((figure, index) =>
+        figure.label
+          ? [
+              [
+                figure.figureId,
+                nullableDisplayValue(
+                  row[`nsm_table_figure_label_${String(index)}`],
+                ),
+              ],
+            ]
+          : [],
+      ),
+    ]),
   );
   const relationLabels = Object.freeze(
     Object.fromEntries(
@@ -2992,7 +3598,7 @@ function toListDto(
       ]),
     ),
   );
-  return Object.freeze({ ...base, displayValues, relationLabels });
+  return Object.freeze({ ...figured, displayValues, relationLabels });
 }
 
 function visibleFieldExpression(

@@ -46,6 +46,7 @@ import {
   requireSharedListEcho,
   requireSharedListResult,
   SharedListContractError,
+  type AuthorizedSharedListFigures,
   type AuthorizedSharedListProgress,
   type AuthorizedSharedListRelatedFilter,
   type AuthorizedSharedListReferenceLabel,
@@ -917,6 +918,111 @@ async function authorizeSharedListProjection(
       linesEntityId: entityIds.lines,
     });
   }
+  let figures: AuthorizedSharedListFigures | undefined;
+  if (query.figures) {
+    // Every query the figures read, with the fields and relations they name:
+    // one current-policy decision per query and request, decided for the
+    // companies the List reads, as progress is. A label query is read without
+    // a company, so it must be one that shows the whole entity.
+    const reads = new Map<
+      string,
+      {
+        fieldIds: Set<string>;
+        relationIds: Set<string>;
+        label: boolean;
+      }
+    >();
+    const use = (
+      queryId: string,
+      fieldIds: readonly string[],
+      relationId?: string,
+      label = false,
+    ) => {
+      const entry = reads.get(queryId) ?? {
+        fieldIds: new Set<string>(),
+        relationIds: new Set<string>(),
+        label: false,
+      };
+      for (const fieldId of fieldIds) entry.fieldIds.add(fieldId);
+      if (relationId) entry.relationIds.add(relationId);
+      entry.label ||= label;
+      reads.set(queryId, entry);
+    };
+    for (const sum of query.figures.sums) {
+      use(sum.rows.queryId, [
+        sum.rows.matchFieldId,
+        ...(sum.rows.quantityFieldId ? [sum.rows.quantityFieldId] : []),
+      ]);
+      if (sum.within)
+        use(sum.within.queryId, [sum.within.fieldId], sum.within.relationId);
+      if (sum.related)
+        use(
+          sum.related.queryId,
+          [sum.related.fieldId],
+          sum.related.relationId,
+        );
+    }
+    for (const latest of query.figures.latest ?? []) {
+      use(latest.rows.queryId, [latest.rows.matchFieldId]);
+      use(
+        latest.within.queryId,
+        [latest.within.fieldId, latest.byFieldId, latest.valueFieldId],
+        latest.within.relationId,
+      );
+      use(latest.label.queryId, [latest.label.fieldId], undefined, true);
+    }
+    const entityIds: Record<string, string> = {};
+    for (const [queryId, read] of reads) {
+      const figured = registeredQueryFromPinnedView(view, queryId);
+      if (
+        !figured ||
+        figured.lifecycle !== 'active' ||
+        figured.tier !== 'q0' ||
+        figured.queryType !== 'list' ||
+        figured.readModel !== undefined ||
+        (read.label && figured.legalEntityScope !== undefined) ||
+        ![...read.fieldIds].every((fieldId) =>
+          figured.selections.some((selection) => selection.fieldId === fieldId),
+        )
+      ) {
+        throw new SharedListContractError(
+          'LIST_FIELD_NOT_AUTHORIZED',
+          'list figures must read selected fields of active pinned list queries',
+          queryId,
+        );
+      }
+      const decision = await authorizeCurrentPolicy(
+        currentPolicy,
+        view,
+        figured.permissionId,
+        Object.freeze({
+          arguments: Object.freeze({
+            fieldIds: Object.freeze([...read.fieldIds].sort()),
+            relationIds: Object.freeze([...read.relationIds].sort()),
+            ...(scope && figured.legalEntityScope !== undefined
+              ? { [scope.parameterId]: Object.freeze([...scope.members]) }
+              : {}),
+          }),
+          kind: 'registeredSemanticListFiguresPolicyInput',
+          queryId: figured.queryId,
+          requestId: view.requestId,
+          schemaVersion: QUERY_POLICY_INPUT_VERSION,
+        }),
+      );
+      if (decision.decision === 'DENY') {
+        await recordDenied(figured.queryId, decision.policyVersion);
+        throw new SemanticQueryPolicyDeniedError(figured.queryId, view);
+      }
+      const predicateReceipt = inspectPredicateForExecution(figured.filter);
+      observePredicateReceiptSafely(observePredicateReceipt, predicateReceipt);
+      if (predicateReceipt.outcome !== 'accepted') return null;
+      entityIds[figured.queryId] = figured.sourceEntityId;
+    }
+    figures = Object.freeze({
+      entityIds: Object.freeze(entityIds),
+      figures: query.figures,
+    });
+  }
   const relationLabels = [];
   for (const relation of query.relationLabels) {
     const targetDefinition = registeredQueryFromPinnedView(
@@ -1092,6 +1198,7 @@ async function authorizeSharedListProjection(
       : {}),
     ...(relatedFilter ? { relatedFilter } : {}),
     ...(progress ? { progress } : {}),
+    ...(figures ? { figures } : {}),
   });
 }
 

@@ -34,6 +34,21 @@ export function validateSurfaceWorkspaces(
         surface.surfaceRole !== 'list'
       )
         fail(surface.surfaceId, 'navigation members must be Lists');
+      // Placement only: a navigation List listed under another declared
+      // module's group -- a List over Catalog's items that is an Inventory
+      // destination -- because a surface shares its query's module.
+      if (
+        workspace.navigationModuleId !== undefined &&
+        (workspace.membership === 'contextual' ||
+          workspace.navigationModuleId === surface.module.targetId ||
+          !model.modules.some(
+            (module) => module.moduleId === workspace.navigationModuleId,
+          ))
+      )
+        fail(
+          surface.surfaceId,
+          "a navigation module names another declared module of a navigation List",
+        );
       if (workspace.ownerSurfaceId) {
         const owner = surfaces.get(workspace.ownerSurfaceId);
         if (
@@ -637,6 +652,82 @@ export function validateSurfaceWorkspaces(
         fail(
           surface.surfaceId,
           'a create value is a header field no editor field offers, holding a value it admits',
+        );
+    }
+  }
+  validateSurfaceForms(model);
+}
+
+/**
+ * A Record form's reference presentation is proven against the form's own
+ * query and the list it chooses from, so the runtime only ever offers records
+ * a gateway read returns and submits the id the field already admits.
+ */
+function validateSurfaceForms(model: VersionedNormalizedApplicationPackage) {
+  const queries = new Map(
+    model.queries.map((value) => [String(value.queryId), value]),
+  );
+  const fields = new Map(
+    model.fields.map((value) => [String(value.fieldId), value]),
+  );
+  const fail = (id: string, reason: string): never => {
+    throw new CanonicalModelError([
+      diagnostic(
+        'CANON_SCHEMA_INVALID',
+        '$.surfaces.form',
+        reason,
+        'declare references over text fields the form reads, chosen from an unscoped list',
+        id,
+      ),
+    ]);
+  };
+  for (const surface of model.surfaces) {
+    if (!('form' in surface) || !surface.form) continue;
+    const id = String(surface.surfaceId);
+    const query = queries.get(String(surface.dataSource.targetId));
+    if (
+      surface.archetype !== 'record' ||
+      surface.surfaceRole !== 'form' ||
+      !query ||
+      query.queryType === 'aggregate'
+    )
+      fail(id, 'form references belong to a Record form');
+    const selected = new Set(
+      query!.queryType === 'aggregate'
+        ? []
+        : query!.selections.map((selection) => String(selection.field.targetId)),
+    );
+    const seen = new Set<string>();
+    for (const reference of surface.form.references) {
+      if (seen.has(reference.field))
+        fail(id, 'a form field is chosen by one reference');
+      seen.add(reference.field);
+      const field = fields.get(reference.field);
+      // A record id is 36 characters; a shorter field could not hold one.
+      if (
+        !selected.has(reference.field) ||
+        field?.fieldType.kind !== 'textFieldType' ||
+        field.fieldType.maximumLength < 36
+      )
+        fail(
+          id,
+          'a form reference chooses a text field the form reads, long enough for a record id',
+        );
+      const choices = queries.get(reference.query.targetId);
+      if (
+        !choices ||
+        choices.queryType !== 'list' ||
+        choices.lifecycle !== 'active' ||
+        choices.tier !== 'q0' ||
+        ('legalEntityScope' in choices && choices.legalEntityScope) ||
+        !choices.selections.some(
+          (selection) =>
+            selection.field.targetId === reference.labelField.targetId,
+        )
+      )
+        fail(
+          id,
+          'a form reference is chosen from an active unscoped q0 list query that selects its label',
         );
     }
   }
