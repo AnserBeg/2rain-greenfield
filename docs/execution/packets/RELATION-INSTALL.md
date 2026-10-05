@@ -17,22 +17,23 @@ Design: `DROP-SHIP-RELATION-INSTALL-design.md` at DROP-SHIP `4000c486` (owner se
 - `locateColumn` retains field lookup, then matches a non-field relation by relation ID and physical column name; ambiguous or absent targets still refuse.
 - Return relation storage attributes with nullable default semantics through the existing `applyDdlElement` inertness and grant checks; FK/index installers and creation-time grant enumeration are unchanged.
 - No app definition, release output or lineage change; no posting kernel, serializer, trigger/rebuild, activation, verification, trust, migration or RLS change.
-- Evidence lives in the already CI-reachable composed PostgreSQL test; its synthetic successor is not written to the app release.
+- Evidence lives in the CI-reachable composed PostgreSQL test: a synthetic initial release of the recorded head definition, persisted base rows, then a relation successor on that same tenant. Neither fixture release is written to the app artifacts; product lineage is unchanged.
 
 ## Controls
 
 - `relation-install-target-missing` -> claim 1: disable the new relation lookup branch.
 - `relation-install-foreign-company-target` -> claim 2: remove company columns only when resolving the newly added relation.
 - `relation-install-column-write-grant-absent` -> claim 3: omit add-column UPDATE admission.
-- Manifest: `test/evidence/RELATION-INSTALL.expected-red.json`; execution pending, after executable commit, on AC with >=2 GB free Windows memory.
+- Manifest: `test/evidence/RELATION-INSTALL.expected-red.json`; valid executions pending, after executable commit, on AC with >=2 GB free Windows memory.
+- First target-missing attempt ran but failed the restored-green prerequisite; no discriminating red is claimed. Its container was removed and source restored. Further unmutated diagnosis expired at the lock before starting. The test now exposes typed preparation codes and isolates this transition from unrelated historical installs; bounds unchanged.
 
 ## Gates
 
 - Typecheck PASS; focused Prettier PASS.
-- Focused real PostgreSQL transition reached nullable storage, scoped FK/index, exact grants and a valid gateway create; fixture refusal expectation corrected to observed `MODULE_RELATION_VIOLATION` at `e1e8c70f`. Final restored run pending; no PostgreSQL PASS claimed.
-- Static expected-red validation PASS (161 entries / 14 manifests) on saved checkpoint. Mutation controls pending; no file mutated by a control yet.
-- Check-records PASS (162 records, 17 declaring; 534 paths and 152 symbols observed); focused lint and formatting PASS. The record-claim now names executable `e1e8c70f`.
-- Full hosted CI and owner Critical review: pending; draft PR https://github.com/AnserBeg/2rain-greenfield/pull/20. Controls remain gated on AC and >=2 GB Windows free memory, checked outside the lock (latest about 1.25 GB).
+- Full hosted [CI PASS](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37268185759) at `66cf178a`, including the real PostgreSQL transition. Its refusal expectation is the observed `MODULE_RELATION_VIOLATION`; revised bounded test at `f62caa52` awaits fresh PostgreSQL/CI evidence.
+- Static expected-red validation PASS (161 entries / 14 manifests). Three valid mutation-control outcomes remain pending; first attempt failed restored-green, not accepted as evidence.
+- Check-records, typecheck, focused lint and formatting PASS. Record-claim names executable `f62caa52`; production code remains the same 17-line `locateColumn` addition.
+- Refreshed hosted CI and owner Critical review pending; draft PR https://github.com/AnserBeg/2rain-greenfield/pull/20. Controls check AC and >=2 GB Windows free memory outside the lock (latest about 2.4 GB).
 
 ## Test it yourself
 
@@ -48,14 +49,14 @@ DROP-SHIP's user-facing delivery workflow is the next authorized checkpoint afte
 
 ## Review prompt
 
-`RELATION-INSTALL-review-prompt.md` names executable `e1e8c70f`; facts and questions only, 20 lines. Owner-run review pending; no self-review.
+`RELATION-INSTALL-review-prompt.md` names executable `f62caa52`; facts and questions only. Owner-run review pending; no self-review.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RELATION-INSTALL",
   "base": "b91c5284e163d19a834802479dd2dc1e3a1201d1",
-  "head": "e1e8c70f6692ffd11d4b270a2cc8bc8e70d192d3",
+  "head": "f62caa5273271c7dcf41914cdc865addc1768767",
   "changedPaths": [
     "packages/postgres-provider/src/module-storage-materializer.ts",
     "test/postgres/composed-application.test.ts",
@@ -65,14 +66,13 @@ DROP-SHIP's user-facing delivery workflow is the next authorized checkpoint afte
     { "path": "packages/postgres-provider/src/module-storage-materializer.ts", "name": "locateColumn" },
     { "path": "packages/postgres-provider/src/module-storage-materializer.ts", "name": "applyDdlElement" },
     { "path": "test/postgres/composed-application.test.ts", "name": "appendRelationSuccessor" },
+    { "path": "test/postgres/composed-application.test.ts", "name": "relationInstallBase" },
     { "path": "test/postgres/composed-application.test.ts", "name": "copyRelationFixtureRow" }
   ]
 }
 ```
 
-## Restart checkpoint — 2026-10-04
+## Continuation checkpoint — 2026-10-05
 
-- Saved paths: the materializer's 17-line relation lookup, the composed PostgreSQL transition test, the three-control manifest and this record.
-- Next: run static controls on the committed tree, then the focused PostgreSQL test after checking free Windows memory outside the exclusive lock; fix any real failure; freeze and run each Critical control on AC with >=2 GB free Windows memory.
-- Resume progress: fixture correction committed as `a87e719d`; record-claim and facts/questions-only prompt written. Still owed: PostgreSQL result, control outcomes, draft RELATION-INSTALL PR and full green CI. No app release or lineage artifact changed.
-- DROP-SHIP worktree was not touched. Its saved tip is `4000c48663aca79b4ac5e5c87b72f7b0bdb772f3`, draft PR #19. Return there only at authorized step 6 to merge this bridge, regenerate the schema snapshot and run its PostgreSQL/browser gates.
+- Next: focused revised PostgreSQL transition, all three controls and fresh CI; no application artifact, deadline or readiness change.
+- Authorized step 6 is active: DROP-SHIP merged `66cf178a`; draft PR #19 continues on its own worktree. It still owes schema regeneration, local PostgreSQL/browser and full green CI.
