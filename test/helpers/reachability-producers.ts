@@ -119,9 +119,10 @@ export const reachabilityProducers = [
       'test/postgres/receiving-authorization.test.ts',
     ],
   ),
-  // The browser suite runs as three jobs under the same bound, split by file
+  // The browser suite runs as four jobs under the same bound, split by file
   // name (apps/web/playwright.shared.ts): the Sales and platform specs, the
-  // operations specs, and the composed application's journeys.
+  // operations specs, the inventory specs, and the composed application's
+  // journeys.
   playwrightProducer(
     'browser',
     'test:browser',
@@ -131,6 +132,11 @@ export const reachabilityProducers = [
     'browser-operations',
     'test:browser:operations',
     'apps/web/playwright.operations.config.ts',
+  ),
+  playwrightProducer(
+    'browser-inventory',
+    'test:browser:inventory',
+    'apps/web/playwright.inventory.config.ts',
   ),
   playwrightProducer(
     'browser-composed',

@@ -208,6 +208,7 @@ echo "PERFORMANCE_GATE_PASS_SHA=$SHA" | tee -a "$LOG"
   corepack pnpm test:locale &&
   corepack pnpm test:browser &&
   corepack pnpm test:browser:operations &&
+  corepack pnpm test:browser:inventory &&
   corepack pnpm test:browser:composed
 } 2>&1 | tee -a "$LOG"
 RC="${PIPESTATUS[0]}"

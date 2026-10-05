@@ -424,7 +424,6 @@ test('the Playwright producers run every browser spec in exactly one job and rep
   // file name alone.
   const charted = [
     'expected-receipts',
-    'item-stock',
     'order-lists',
     'order-pages',
     'payables',
@@ -520,6 +519,19 @@ test('the Playwright producers run every browser spec in exactly one job and rep
       selectedBy.get(spec),
       ['browser-composed'],
       `${relative(process.cwd(), spec)} would not run in the composed job`,
+    );
+  }
+  // The inventory and item stock specs run in a job of their own, beside the
+  // operations specs rather than after them (INTEGRATION).
+  const inventory = specs.filter((spec) =>
+    /(?:inventory|item-stock)[^/]*\.spec\.ts$/u.test(spec),
+  );
+  assert.ok(inventory.length > 0, 'no inventory spec was found');
+  for (const spec of inventory) {
+    assert.deepEqual(
+      selectedBy.get(spec),
+      ['browser-inventory'],
+      `${relative(process.cwd(), spec)} would not run in the inventory job`,
     );
   }
   // A config that names no producer, or a non-Playwright one, is refused.
