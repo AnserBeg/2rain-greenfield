@@ -1,53 +1,40 @@
-# SALES-PARITY — review round 8 prompt (ONLINE confirm arm, user-run)
+# SALES-PARITY — review round 9 prompt (ONLINE confirm arm, user-run)
+Repository `AnserBeg/2rain-greenfield`, branch `packet/SALES-PARITY`, frozen executable SHA `8ee86f85`, base round 8's
+frozen `7d254902`. `fe864f66` changes `packages/postgres-provider/src/release-verification-service.ts` (the only
+Critical-set path changed); `2af96a5a` changes `document-numbering.test.ts` and `SALES-PARITY.expected-red.json`;
+`8ee86f85` merges both. `008adff9`, between the two SHAs, merges CI and script changes, no Critical path.
 
-Repository `AnserBeg/2rain-greenfield`, branch `packet/SALES-PARITY`, frozen executable SHA `7d254902`.
+Round 8's findings, as reported: (1) `#searchWitness` used the first executed plain search with the literal `true`
+filter, and one positive field per search, without reading whether it returned the arranged record; a later Q0
+literal-true search capped at one result, whose positive field is a searchable enum other records share, returned
+another record ahead of an earlier Q1 `not(false)` search that returns it by text: `VERIFICATION_SEARCH_POSITIVE_FAILED`.
+(2) `returnsAnyLiveRecordById` admitted only the literal `true`, so an admitted Q1 get filtered `not(false)` was no
+reader; with read-back through a Q0 read-model get, cleanup refused `VERIFICATION_PROBE_RECORD_UNREADABLE`.
+Changed in `fe864f66`, by function:
+- `#searchWitness` reads each pair of an executed plain search and a positive field it selects until one returns the
+  arranged record: searches for which `restrictsNothing` holds first, then the rest, each in catalog order; within a
+  search, text inputs, then assigned numbers, then enums. A pair whose answer lacks the record is passed over;
+  `VERIFICATION_SEARCH_WITNESS_UNCONSTRUCTABLE`, naming every pair tried, when none returns it.
+- New `constantPredicateValue` (the value of a predicate built only from boolean literals with not/all/any, else
+  undefined) and `restrictsNothing` (that value is `true`); `returnsAnyLiveRecordById` is now `gatewayExecutes` and
+  `restrictsNothing` (it was `gatewayExecutes` and the literal `true`).
+- Unchanged: `#searchableExclusion` (it still asserts the positive record), `gatewayExecutes`, `#findQueryForEntity`,
+  `#queryForEntity`, `archiveProbeRecords`, `#assignedWitness`, `#typedErrorSurface`.
+Claims: cleanup and the number witness read through a plain get the gateway executes whose filter restricts nothing;
+the search probe refuses only when no pair returns the arranged record.
 
-Commits since round 7's frozen `0e30b6b1`:
-- `64493a52` changes `packages/postgres-provider/src/release-verification-service.ts`, the only Critical-set
-  path changed.
-- `7c82ea9b` changes `test/postgres/document-numbering.test.ts` and `test/evidence/SALES-PARITY.expected-red.json`.
-- `7d254902` merges both into `packet/SALES-PARITY`.
-
-Round 7's finding, as reported: `#searchableExclusion` took the entity's first plain search admitted by
-`gatewayExecutes`. With `northstar.party:query.party_search` (active, plain, Q1, filter literal `false`, with a
-compiled filter plan) sorting before `northstar.party:query.party_z_search` (active, plain, Q0, filter literal
-`true`), release verification failed with `VERIFICATION_SEARCH_POSITIVE_FAILED`. The reviewer reported the same
-mechanism for satisfiable Q1 filters that the generically arranged record does not meet.
-
-Functions changed in `64493a52`: `#searchableExclusion` (changed) and `#searchWitness` (new). Not changed in it:
-`gatewayExecutes`, `returnsAnyLiveRecordById`, `#findQueryForEntity`, `#queryForEntity`, `archiveProbeRecords`,
-`#assignedWitness`, `#typedErrorSurface`.
-
-Questions. Answer each from the code, and report production defects separately from evidence, wording and naming,
-which are filed, not fixed:
-1. Is round 7's finding fixed for every admitted declaration?
-2. For each of the four callers that select a query (`archiveProbeRecords`, `#assignedWitness`,
-   `#searchableExclusion` with `#searchWitness`, `#typedErrorSurface`), does any admitted declaration make its
-   selection pick an unsuitable query or miss a suitable one? Consider lifecycle, tier, filter (literal or
-   predicate), read model, selections and catalog order.
-3. Do round 5's findings (P2a, P2b) and round 6's finding remain fixed?
-4. Did `64493a52` break anything else?
-
-Where to look:
-- `release-verification-service.ts`: the functions above.
-- `semantic-query-gateway.ts` `invoke`; `semantic-operation-gateway.ts` (read-back admission);
-  `module-runtime-interpreter.ts` `executeQueryOnClient`; `predicate-kernel.ts` `inspectPredicateForExecution`;
-  `normalize.ts` (query filter and parameter rules).
-- Tests: `test/postgres/document-numbering.test.ts`.
-- Controls: `test/evidence/SALES-PARITY.expected-red.json`, entries whose `file` is
-  `release-verification-service.ts`.
-
-Filed items, already known:
-- E1: the assigned-number probe shows distinct values and input ownership, not a stored fold; a number that no
-  qualifying get selects is taken as its sentinel unread.
-- E2: document-numbering's executed-id set is scoped by release root, not by one activation.
-- W1: "keep distinct numbers" overclaims a 64-bit hash.
-- E3: `#declaredEvidence` records a query assertion's answer without comparing it with the assertion's expected
-  outcome.
-- `#declaredEvidence` and the refused create in `#assignedUniqueness` do not register records they would create.
-- `archiveProbeRecords` can leave a record it cannot read live, stops at a failed archive, and, run from
-  `finally`, its exception can replace the scenario's own error.
-- `#typedErrorSurface` can select an executable restrictive Q1 get and record its empty `not-found` as its
-  positive probe.
-
-Not the packet records. Say plainly if this prompt steers you.
+Questions. Answer each from the code; report production defects separately from evidence, wording and naming:
+1. Are round 8's two findings fixed for every admitted declaration?
+2. For each caller that selects a query (`archiveProbeRecords`, `#assignedWitness`, `#searchableExclusion` with
+   `#searchWitness`, `#typedErrorSurface`), is the selection exhaustive over the admitted queries, and for search the
+   positive fields, that could serve it? Consider capped results, alternate positive fields, constant predicates,
+   lifecycle, tier, read model and catalog order.
+3. For each predicate to which `constantPredicateValue` assigns a value, does the gateway's execution agree with it?
+4. Do the findings of rounds 5-7 remain fixed? Did `fe864f66` break anything else?
+Where to look: the functions above; `semantic-query-gateway.ts` `invoke`; `semantic-operation-gateway.ts` (read-back
+admission); `module-runtime-interpreter.ts` `executeQueryOnClient`; `predicate-kernel.ts`; `normalize.ts`;
+`document-numbering.test.ts`; manifest entries whose `file` is `release-verification-service.ts`. Not the records.
+Filed, already known: evidence limits of the assigned-number probe; unregistered creates in `#declaredEvidence` and
+`#assignedUniqueness`; cleanup's failure handling; `#declaredEvidence` not comparing an answer with its expected
+outcome; `#typedErrorSurface` recording a restrictive Q1 get's `not-found` as its positive probe.
+Say plainly if this prompt steers you.
