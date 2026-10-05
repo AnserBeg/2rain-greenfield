@@ -19,6 +19,7 @@ Base: `packet/PAYABLES` at `96ac2341`. Reference: PaneFlow `d057daff` (`db/schem
 4. Generic writes change a custody only while New and an event only while a draft (create image included), so only the capability moves a figure.
 5. Metadata: the custody page (figures, events, Issue, Return, Forfeit, Refund deposit, each offered only where its figures admit it); the party page's Returnables section with Open custody and Issue returnables; Party's Returnable type, Returnables out and Returnables held Lists (views Open, Awaiting refund, Closed, All, each keeping its direction; currency filter; CSV).
 6. Shared runtime: a tenant-level record page whose workspace declares a company entry (the party page) enters a company for its company-owned children as a List does — the URL's choice validated against the caller's authorized companies, else the only or preferred one pinned by redirect — and reads none while it has no company, so its own tasks still serve (`workspaceEntryParameter`).
+7. Shared runtime CSS: a List table wider than its panel scrolls inside its wrapper (`.data-table-wrap`, now the containing block of its hidden header hints), so no List widens the page (`59e16ff5`).
 
 ## Decisions
 
@@ -27,13 +28,21 @@ Base: `packet/PAYABLES` at `96ac2341`. Reference: PaneFlow `d057daff` (`db/schem
 - An event names its custody by reference, not as an owned child: an owned child is written only while its parent's generic writes are admitted, and a custody stops admitting them at its first Issue (found by the PostgreSQL proof, fixed `5a0bcca1`).
 - A deposit is recorded on its event, not as a PAY-/VPAY- row: a customer payment settles an invoice's balance (its invoice link is required and its post is bounded by that balance), and modules do not relate across each other (filed).
 - A Return makes the deposit on it refundable; the refund is its own event (PaneFlow's "Deposit refund remains a separate financial action"). A refused post leaves its draft event, shown as Draft, as a refused payment does.
+- The asset class keeps its six classes, which the grammar renders as a typed suggestion field (five-option select limit); the spec and the test-it-yourself enter it that way.
+- Returnables out keeps its nine columns; wider than the panel at 1280 px, its table scrolls inside the panel (the shared CSS fix `59e16ff5`) rather than losing columns.
+- The owner asked for a round-1 review although no arm is owed outside the Critical set; the prompt asks neutral questions only.
 
 ## Gates
 
 - `abbdfdd5`..`5e4427a5` (own worktree, on AC): full tsc clean; eslint and prettier clean; unit 196/196 (returnables 6/6; `dev-environment` not run, container lifecycle); compiler 180/180 (the performance budget passes alone; it runs alone on CI); integration 241/241; architecture 200/200; web contract 35/35; agent 3/3.
 - Release entry 6 on PAYABLES's 5 (`--check` PASS). Pins from a compile: surfaces 101 -> 111, navigation surfaces 16 -> 19, verification scenarios 573 -> 634 (557 executed, 77 derived; returnable type 14, custody 27, event 20), RTN- numbered (11 uniqueness probes), 16 policy bindings, the inventory-contract golden (three families, two relation rules), the press-law debt. Coverage unchanged: 2654 obligations, 811 observed (no re-derivation owed). Surface floor unchanged (no new key).
 - PostgreSQL `returnables` (local, one file under the lock, on AC): 2/2 in 336 s at `4bfc5779`; its first run found the owned-child defect fixed at `5a0bcca1`. Full-replay snapshot regenerated on GitHub (run 37338740492, additions only: 3 tables), committed `226c2c01`.
-- CI at `8752aa3e`: quality, browser (3 jobs), PostgreSQL schema/isolation and commercial passed; composed failed only on the then-stale snapshot (fixed `226c2c01`). CI at `226c2c01`: pending at checkpoint; the new PostgreSQL and browser `returnables` files first run there. Browser `receivables-returnables.spec.ts` not run locally (host memory).
+- CI at `8752aa3e`: quality, browser (3 jobs), PostgreSQL schema/isolation and commercial passed; composed failed only on the then-stale snapshot (fixed `226c2c01`).
+- Architecture 200/200 locally at `ffc0dcf6` (rerun after the record-claim fill).
+- CI at `ffc0dcf6` (run 37341436034): quality, browser, composed browser, PostgreSQL schema/isolation and commercial (`returnables` 2/2, first GitHub run) passed. Three reds, none a returnables fact: the performance budget `COMPILE_BUDGET_INDETERMINATE` (CPU idle 73.9% < 90%, the GitHub flake; not relaxed); PostgreSQL composed out of data disk at six lineage entries (the two lineage-advancing tests get 1 GB, as LOCATIONS `86b5537f`: `c233beda`); the browser spec's locators (Party group label, the six-class datalist, task selects by accessible name: `b7137ea6`, `059d008f`, `5babf180`).
+- CI at `5babf180` (run 37344849073): the browser spec ran the whole custody journey, both refusals included, and stopped at the Returnables out capture: a 1292 px page at 1280 px. Measured on rendered List HTML in headless Chromium: a sortable header's `.sr-only` hint in a column past the panel escaped the table's scrolling wrapper. Fixed in the shared runtime CSS (`59e16ff5`, `.data-table-wrap{position:relative}`): page 1280 px, the table scrolls in its panel; 390 px unchanged.
+- After `59e16ff5`: tsc, eslint, prettier, `check:app-release` clean; unit (returnables, workspace contract, hex ratchet) 26/26; web contract 35/35; integration 241/241. Local browser run stopped for the owner's Docker pause (no container left); CI runs the spec.
+- CI at the head carrying `59e16ff5`: running at this commit; the green run is added when it lands.
 
 ## Test it yourself
 
@@ -45,15 +54,16 @@ Base: `packet/PAYABLES` at `96ac2341`. Reference: PaneFlow `d057daff` (`db/schem
 - Deposit payments and refunds as PAY-/VPAY- rows on the receivables and payables pages (RA-B): needs a payment that settles no invoice.
 - A tenant with several companies and no company preference reaches a party's returnables after choosing a company on a List; the party page has no company switcher, and its Issue returnables refuses until one is entered.
 - A refused first Issue from the party page leaves its New custody record and draft event (archivable), as a refused post leaves its draft elsewhere.
+- At 1280 px Returnables out scrolls its last columns inside the panel (a 1054 px table in 922 px); a column priority that hides some first is a List-grammar choice.
 
-Review: not owed — outside the Critical set.
+Review: no arm owed (outside the Critical set); the owner asked for round 1 anyway: `RETURNABLE-ASSETS-review-prompt.md`.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RETURNABLE-ASSETS",
   "base": "96ac234122322b2cbe18349299664f56c8f5190a",
-  "head": "226c2c01c6d33e61e94860d0b3446292223a7187",
+  "head": "59e16ff5677d67297a12dae103137132d636277f",
   "changedPaths": [
     "apps/api/src/composition-root.ts", "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json",
     "apps/web/release/current-policy-bindings.json", "apps/web/src/surface-composition.ts", "apps/web/src/surface-runtime.ts",

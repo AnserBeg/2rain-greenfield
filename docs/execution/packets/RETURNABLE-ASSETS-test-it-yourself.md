@@ -6,8 +6,8 @@ then open the printed URL. Ctrl-C stops it and removes its container. Under ten 
 
 ## §1 A returnable type
 
-1. Navigation → **Party** → **Returnable type** → **New**: Code `KEG-50`, Name `50 L keg`, Asset class **Keg**,
-   Deposit cad `30` → Save.
+1. Navigation → **Party** → **Returnable type** → **New**: Code `KEG-50`, Name `50 L keg`, Asset class: type `keg`
+   and pick **Keg** from the suggestions (six classes make it a typed field, not a menu), Deposit cad `30` → Save.
 2. Leave Deposit usd empty: an Issue in USD of this type is refused until you state one (0 for none).
 
 ## §2 Out with a customer
