@@ -329,23 +329,39 @@ async function journey(
   );
 
   // The rest of this journey is also browser work, not service/fixture proof.
-  const orderLineUrl = url('purchase_order_line', 'detail', orderLineId);
-  await page.goto(orderLineUrl);
+  // Approval is off in this fixture: the declared amendment Task applies its
+  // proposal immediately, without the old line-page staged-form command.
+  await page.goto(orderUrl);
   await page
-    .getByRole('link', { name: 'Request quantity amendment', exact: true })
+    .locator(
+      `[data-composition-dataset$="dataset.purchasing_lines"] tbody tr[data-record-id="${orderLineId}"]`,
+    )
+    .getByRole('link', { name: 'Select', exact: true })
     .click();
-  await fill('Number', `RECEIPT-AM-${suffix}`);
-  await fill('Line revision', '1');
-  await fill('Quantity', '3');
-  await fill(
-    'Amendment reason',
-    'Correct ordered quantity to actual required quantity',
+  await page
+    .getByRole('button', { name: 'Request quantity amendment', exact: true })
+    .click();
+  await page.getByLabel('New ordered quantity', { exact: true }).fill('3');
+  await page
+    .getByLabel('Reason', { exact: true })
+    .fill('Correct ordered quantity to actual required quantity');
+  await page
+    .getByRole('dialog')
+    .getByRole('button', {
+      name: 'Review Request quantity amendment',
+      exact: true,
+    })
+    .click();
+  await page
+    .getByRole('dialog')
+    .getByRole('button', {
+      name: 'Confirm Request quantity amendment',
+      exact: true,
+    })
+    .click();
+  await expect(page.getByRole('status').first()).toContainText(
+    'Request quantity amendment: done',
   );
-  await relation('purchase_order_amendment_order_line', orderLineId);
-  await save();
-  await page.goto(orderLineUrl);
-  await command('Amend');
-  await expect(page.getByRole('status')).toContainText('Amend complete');
   await page.goto(orderUrl);
   await expectOrderProgress('3', '3', '0');
 
