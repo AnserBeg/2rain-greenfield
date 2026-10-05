@@ -1500,6 +1500,213 @@ async function seed(
         observed: true,
       };
     }
+    if (phase === 'supply') {
+      // SUPPLY-WARNINGS: Field notebook's opening 10 at the warehouse, 20
+      // more by adjustment and 4 moved into a quarantined QA-HOLD, then
+      // confirmed orders and a draft, each step through its governed
+      // operation as the order pages' own Tasks take it:
+      // - ELSEWHERE reserves 2 at the warehouse (stock reserved elsewhere);
+      // - HELD reserves its 3 in quarantine, covering itself but holding
+      //   nothing usable;
+      // - PART reserves 3 at the warehouse and ships 2 of them;
+      // - SHORT asks for 20 and 10 with 4 of its own reserved;
+      // - FINE asks for 5; DRAFT, unconfirmed, for 30.
+      // Usable on hand is 24 (30 - 4 - 2 shipped); reservations hold 2 + 1
+      // + 4 of it, so 17 are free: SHORT's two lines share them and are 9
+      // short, DRAFT 13; nothing else is.
+      const at = () => new Date().toISOString();
+      const done = async (local: string, recordId: string, revision: number) =>
+        assert.equal(
+          (await invoke(local, { recordId, expectedRevision: revision }))
+            .outcome,
+          'succeeded',
+        );
+      const number = (record: { values: Readonly<Record<string, unknown>> }) =>
+        String(record.values[`${ns}:field.sales_order_number`]);
+      const adjustment = await stockDocument({
+        effective_at: at(),
+        reason_code: 'SETUP',
+        reason_narrative: 'Supply warnings stock',
+        type: `${ns}:option.inventory_transaction_type_adjustment`,
+      });
+      await create(
+        'inventory_transaction_line',
+        {
+          from_location_id: null,
+          to_location_id: location,
+          item_id: item,
+          line_number: '1',
+          quantity: '20',
+          unit_id: 'EA',
+        },
+        { transaction: adjustment.recordId },
+      );
+      await done(
+        'inventory_transaction_post',
+        adjustment.recordId,
+        adjustment.revision,
+      );
+      const hold = await create(
+        'location',
+        {
+          code: 'QA-HOLD',
+          name: 'Quality hold',
+          type: `${ns}:option.location_type_quarantine`,
+        },
+        {},
+        false,
+      );
+      const quarantined = await invoke('location_update', {
+        recordId: hold.recordId,
+        expectedRevision: hold.revision,
+        patch: {
+          [`${ns}:field.location_status`]: `${ns}:option.location_status_quarantine`,
+          [`${ns}:field.location_status_reason`]: 'Held for inspection',
+          [`${ns}:field.location_status_changed_at`]: at(),
+        },
+      });
+      assert.equal(quarantined.outcome, 'succeeded');
+      const transfer = await stockDocument({
+        effective_at: at(),
+        reason_code: 'HOLD',
+        reason_narrative: 'Held for inspection',
+        type: `${ns}:option.inventory_transaction_type_transfer`,
+      });
+      await create(
+        'inventory_transaction_line',
+        {
+          from_location_id: location,
+          to_location_id: hold.recordId,
+          item_id: item,
+          line_number: '1',
+          quantity: '4',
+          unit_id: 'EA',
+        },
+        { transaction: transfer.recordId },
+      );
+      await done(
+        'inventory_transaction_post',
+        transfer.recordId,
+        transfer.revision,
+      );
+      const order = async (quantities: readonly string[], confirm = true) => {
+        const created = await create('sales_order', {
+          customer_party_id: customer,
+          order_date: at(),
+          requested_date: at(),
+          currency: 'CAD',
+          notes: null,
+          ...shipTo,
+        });
+        const lines = [];
+        for (const [index, quantity] of quantities.entries())
+          lines.push(
+            await create(
+              'sales_order_line',
+              {
+                item_id: item,
+                line_number: String(index + 1),
+                ordered_quantity: quantity,
+                unit_id: 'EA',
+                unit_price: null,
+              },
+              { order: created.recordId },
+            ),
+          );
+        if (confirm)
+          await done('sales_order_release', created.recordId, created.revision);
+        return { order: created, lines };
+      };
+      const reserve = async (
+        line: { recordId: string },
+        quantity: string,
+        at_location = location,
+      ) => {
+        const reservation = await create(
+          'reservation',
+          {
+            item_id: item,
+            location_id: at_location,
+            number: `RSV-${randomUUID()}`,
+            quantity,
+            reason: 'Supply warnings fixture',
+            state: `${ns}:option.reservation_state_draft`,
+            unit_id: 'EA',
+          },
+          { order_line: line.recordId },
+        );
+        await done(
+          'reservation_reserve',
+          reservation.recordId,
+          reservation.revision,
+        );
+        return reservation;
+      };
+      const elsewhere = await order(['2']);
+      await reserve(elsewhere.lines[0]!, '2');
+      const held = await order(['3']);
+      await reserve(held.lines[0]!, '3', hold.recordId);
+      const part = await order(['3']);
+      const partReservation = await reserve(part.lines[0]!, '3');
+      const shipment = await create(
+        'shipment',
+        {
+          carrier: 'Northline Freight',
+          shipping_reference_kind: `${ns}:option.shipment_shipping_reference_kind_tracking`,
+          shipping_reference: 'TRK-SUPPLY',
+          state: `${ns}:option.shipment_state_draft`,
+          kind: `${ns}:option.shipment_kind_initial`,
+          effective_at: at(),
+          location_id: location,
+          external_reference: null,
+          reason_code: 'SHIP',
+          reason_narrative: 'Supply warnings fixture',
+          ...shipTo,
+        },
+        { order: part.order.recordId },
+      );
+      await create(
+        'shipment_line',
+        {
+          line_number: '1',
+          item_id: item,
+          quantity: '2',
+          unit_id: 'EA',
+          reversal_of_movement_id: null,
+        },
+        {
+          shipment: shipment.recordId,
+          order_line: part.lines[0]!.recordId,
+          reservation: partReservation.recordId,
+        },
+      );
+      await done('shipment_post', shipment.recordId, shipment.revision);
+      const short = await order(['20', '10']);
+      await reserve(short.lines[0]!, '4');
+      const fine = await order(['5']);
+      const draft = await order(['30'], false);
+      const seeded = (value: Awaited<ReturnType<typeof order>>) => ({
+        number: number(value.order),
+        recordId: value.order.recordId,
+        lines: value.lines.map((line) => line.recordId),
+      });
+      return {
+        phase,
+        item,
+        warehouse: location,
+        hold: hold.recordId,
+        orders: {
+          elsewhere: seeded(elsewhere),
+          held: seeded(held),
+          part: seeded(part),
+          short: seeded(short),
+          fine: seeded(fine),
+          draft: seeded(draft),
+        },
+        scope,
+        observed: true,
+      };
+    }
     if (phase === 'second_company') {
       const company = await create(
         'legal_entity',

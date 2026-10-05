@@ -305,8 +305,11 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // document's create values require 16; List figures, views keeping a band
   // and the item form's location choice (REPLENISHMENT) require 17; the
   // location form's omitted status and the usable figures' parent reached
-  // through a reference field (LOCATIONS) require 19 (18 is WAREHOUSE-MODE's).
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 19);
+  // through a reference field (LOCATIONS) require 19 (18 is WAREHOUSE-MODE's);
+  // the Sales orders List's supply, its Blocked by supply and Reserved views
+  // and its "Post shipment" (SUPPLY-WARNINGS) require 21 (20 is
+  // CATALOG-EXTRAS').
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 21);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.

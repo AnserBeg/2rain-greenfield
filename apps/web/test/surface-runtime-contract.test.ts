@@ -72,9 +72,12 @@ import {
   figureBandLabel,
   overdueDays,
   readDeclaredListState,
+  shortMarked,
   startOfTodayUtc,
   viewNeedsProgress,
+  viewNeedsSupply,
   withheldProgressQuery,
+  withheldSupplyQuery,
 } from '../src/list-declaration.js';
 import { renderSurfaceRuntime } from '../src/surface-runtime.js';
 import {
@@ -1685,6 +1688,346 @@ test('a declared List links a row to its first applicable action and reads witho
       String(value),
     ),
     '\uFEFFNumber,ordered,shipped,open,Total\r\nSO-1,,,,\r\n',
+  );
+});
+
+test('a declared List sends its supply with its progress, keeps each supply tab, marks what a row is short and reads without a withheld supply', () => {
+  const ns = 'northstar.fixture';
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const released = id('state', 'order_released');
+  const draft = id('state', 'order_draft');
+  const state = id('field', 'order_state');
+  const output = (local: string) => id('list_output', `orders_${local}`);
+  const ref = (targetId: string) => ({
+    kind: 'queryReference',
+    schemaVersion: 'v6',
+    targetId,
+  });
+  const usable = (reference: string) => ({
+    reference,
+    query: ref(id('query', 'location_list')),
+    field: id('field', 'location_status'),
+    values: [id('option', 'location_status_usable')],
+  });
+  const balances = {
+    query: ref(id('query', 'reservation_balance_list')),
+    relation: id('relation', 'reservation_balance_reservation'),
+    quantity: id('field', 'reservation_balance_remaining_quantity'),
+  };
+  const list = SurfaceListSchema.parse({
+    kind: 'surfaceList',
+    schemaVersion: 'v6',
+    pageSize: 2,
+    columns: [
+      {
+        columnId: id('list_column', 'orders_number'),
+        label: 'Number',
+        orderKey: 10,
+        field: id('field', 'order_number'),
+        role: 'title',
+        priority: 0,
+        sortable: true,
+      },
+      ...(['open', 'short'] as const).map((local, index) => ({
+        columnId: id('list_column', `orders_${local}`),
+        label: local === 'open' ? 'Open' : 'Short',
+        orderKey: 20 + index * 10,
+        field: output(local),
+        role: 'value',
+        priority: 1 + index,
+        sortable: false,
+      })),
+    ],
+    defaultSort: [
+      { columnId: id('list_column', 'orders_number'), direction: 'ascending' },
+    ],
+    views: [
+      {
+        viewId: id('list_view', 'orders_all'),
+        label: 'All',
+        orderKey: 10,
+        filters: [],
+      },
+      {
+        viewId: id('list_view', 'orders_blocked'),
+        label: 'Blocked by supply',
+        orderKey: 20,
+        filters: [{ field: state, value: released }],
+        supply: 'short',
+      },
+      {
+        viewId: id('list_view', 'orders_reserved'),
+        label: 'Reserved',
+        orderKey: 30,
+        filters: [{ field: state, value: released }],
+        supply: 'covered',
+      },
+    ],
+    filters: [],
+    export: { format: 'csv' },
+    progress: {
+      lines: {
+        query: ref(id('query', 'order_line_list')),
+        relation: id('relation', 'order_line_order'),
+        quantity: id('field', 'order_line_quantity'),
+      },
+      done: {
+        query: ref(id('query', 'order_shipped_list')),
+        relation: id('relation', 'order_shipped_line'),
+        quantity: id('field', 'order_shipped_quantity'),
+      },
+      openIn: { field: state, values: [released] },
+      outputs: {
+        ordered: output('ordered'),
+        done: output('shipped'),
+        open: output('open'),
+      },
+      whenDenied: 'omit',
+      supply: {
+        coverage: {
+          query: ref(id('query', 'reservations')),
+          relation: id('relation', 'reservation_order_line'),
+          related: balances,
+        },
+        item: id('field', 'order_line_item_id'),
+        free: {
+          plus: [
+            {
+              rows: {
+                query: ref(id('query', 'stock')),
+                match: id('field', 'stock_item_id'),
+                quantity: id('field', 'stock_quantity'),
+              },
+              within: usable(id('field', 'stock_location_id')),
+              sum: 'rows',
+            },
+          ],
+          minus: [
+            {
+              rows: {
+                query: ref(id('query', 'stock_reservations')),
+                match: id('field', 'reservation_item_id'),
+              },
+              within: usable(id('field', 'reservation_location_id')),
+              related: balances,
+              sum: 'related',
+            },
+          ],
+        },
+        shortIn: { field: state, values: [draft, released] },
+        outputs: { covered: output('covered'), short: output('short') },
+        whenDenied: 'omit',
+      },
+    },
+    rowActions: [
+      {
+        actionId: id('list_row_action', 'orders_post_shipment'),
+        label: 'Post shipment',
+        orderKey: 10,
+        when: {
+          filters: [{ field: state, value: released }],
+          supply: 'covered',
+        },
+        section: id('dataset', 'fulfillment_lines'),
+      },
+      {
+        actionId: id('list_row_action', 'orders_fulfill'),
+        label: 'Fulfill',
+        orderKey: 20,
+        when: { filters: [{ field: state, value: released }], open: true },
+        section: id('dataset', 'fulfillment_lines'),
+      },
+      {
+        actionId: id('list_row_action', 'orders_view'),
+        label: 'View',
+        orderKey: 30,
+      },
+    ],
+  });
+  const now = new Date('2026-10-05T12:00:00.000Z');
+  const queryId = id('query', 'orders');
+  type Sent = {
+    list: {
+      progress?: {
+        openOnly?: true;
+        supply?: { keep?: string; outputs: Record<string, string> };
+      };
+      cursor: string | null;
+    } & Record<string, unknown>;
+  };
+  const sent = (
+    viewId: string | null,
+    options: { withoutProgress?: boolean; withoutSupply?: boolean } = {},
+  ) =>
+    declaredListArguments(
+      list,
+      readDeclaredListState(list, new URL('http://list.local/')),
+      {
+        mode: 'count',
+        now,
+        queryId,
+        scopeArguments: {},
+        viewId,
+        ...options,
+      },
+    ) as unknown as Sent;
+  // Every request carries the supply inside its progress; a supply tab adds
+  // its keep, for its page and its count alike.
+  const all = sent(id('list_view', 'orders_all'));
+  assert.deepEqual(all.list.progress?.supply?.outputs, {
+    covered: output('covered'),
+    short: output('short'),
+  });
+  assert.equal(all.list.progress?.supply?.keep, undefined);
+  assert.equal(
+    sent(id('list_view', 'orders_blocked')).list.progress?.supply?.keep,
+    'short',
+  );
+  assert.equal(
+    sent(id('list_view', 'orders_reserved')).list.progress?.supply?.keep,
+    'covered',
+  );
+  // The gateway's closed contract reads it back.
+  const parse = (value: Sent) =>
+    listBehavior.parseSharedListArguments(
+      value as unknown as Parameters<
+        typeof listBehavior.parseSharedListArguments
+      >[0],
+      {
+        declaredParameterIds: [],
+        exportMaximumResultCount: 5000,
+        maximumResultCount: 100,
+        queryId,
+      },
+    );
+  const parsed = parse(sent(id('list_view', 'orders_blocked')))?.progress;
+  assert.equal(parsed?.supply?.keep, 'short');
+  assert.equal(parsed?.supply?.itemFieldId, id('field', 'order_line_item_id'));
+  assert.deepEqual(parsed?.supply?.free.plus[0]?.within, {
+    fieldId: id('field', 'location_status'),
+    queryId: id('query', 'location_list'),
+    referenceFieldId: id('field', 'stock_location_id'),
+    values: [id('option', 'location_status_usable')],
+  });
+  // A keep that is neither, an output shadowing a progress output and an
+  // unknown member never reach a statement.
+  const supply = all.list.progress!.supply!;
+  for (const malformed of [
+    { ...supply, keep: 'incoming' },
+    { ...supply, outputs: { ...supply.outputs, short: output('open') } },
+    { ...supply, outputs: { covered: output('x'), short: output('x') } },
+    { ...supply, incoming: true },
+  ])
+    assert.throws(
+      () =>
+        parse({
+          list: {
+            ...all.list,
+            progress: { ...all.list.progress!, supply: malformed },
+          },
+        }),
+      /list supply|list progress|closed contract/u,
+    );
+  // Without its supply the progress still goes; a supply tab is never read
+  // without it, nor without the progress it extends.
+  const withoutSupply = sent(id('list_view', 'orders_all'), {
+    withoutSupply: true,
+  });
+  assert.ok(withoutSupply.list.progress);
+  assert.equal('supply' in withoutSupply.list.progress, false);
+  for (const options of [{ withoutSupply: true }, { withoutProgress: true }])
+    assert.throws(() => sent(id('list_view', 'orders_blocked'), options));
+  assert.equal(viewNeedsSupply(list, id('list_view', 'orders_blocked')), true);
+  assert.equal(viewNeedsSupply(list, id('list_view', 'orders_all')), false);
+  assert.equal(
+    viewNeedsProgress(list, id('list_view', 'orders_reserved')),
+    true,
+  );
+
+  // The row's action: reserved stock still to ship first, then open work.
+  const row = (values: Record<string, string | null>) => ({
+    archived: false,
+    entityId: id('entity', 'order'),
+    recordId: '00000000-0000-4000-8000-000000000003',
+    revision: 1,
+    values: {
+      [state]: released,
+      [id('field', 'order_number')]: 'SO-3',
+      [output('open')]: '11',
+      [output('covered')]: '3',
+      [output('short')]: '6',
+      ...values,
+    },
+  });
+  const chosen = (values: Record<string, string | null>) =>
+    declaredRowAction(list, row(values))?.label;
+  assert.equal(chosen({}), 'Post shipment');
+  for (const values of [
+    { [output('covered')]: '0' },
+    { [output('covered')]: '0.000' },
+    { [output('covered')]: null },
+  ])
+    assert.equal(chosen(values), 'Fulfill', JSON.stringify(values));
+  assert.equal(chosen({ [state]: draft }), 'View');
+  const withheld = row({});
+  delete (withheld.values as Record<string, unknown>)[output('covered')];
+  assert.equal(declaredRowAction(list, withheld)?.label, 'Fulfill');
+  // Only a positive Short is marked, and only in the Short column.
+  const [, open, short] = list.columns;
+  assert.equal(shortMarked(list, short!, row({})), true);
+  assert.equal(shortMarked(list, open!, row({})), false);
+  for (const value of ['0', '0.000', null])
+    assert.equal(
+      shortMarked(list, short!, row({ [output('short')]: value })),
+      false,
+      String(value),
+    );
+  assert.equal(shortMarked(list, short!, withheld), true);
+  // The file keeps the machine value.
+  assert.equal(
+    declaredListCsv(list, [row({})], (_record, _fieldId, value) =>
+      String(value),
+    ),
+    '\uFEFFNumber,Open,Short\r\nSO-3,11,6\r\n',
+  );
+
+  // Only a policy refusal of a supply query is a withheld supply, and only
+  // on a List that declares its supply supplementary.
+  const deniedFor = (denied: string) =>
+    new queryGateway.SemanticQueryPolicyDeniedError(denied, {
+      release: { contentHash: 'fixture', releaseId: 'fixture' },
+    } as unknown as IssuedRequestRuntimeView);
+  for (const local of [
+    'reservations',
+    'reservation_balance_list',
+    'stock',
+    'location_list',
+    'stock_reservations',
+  ])
+    assert.equal(
+      withheldSupplyQuery(list, deniedFor(id('query', local))),
+      id('query', local),
+    );
+  for (const refusal of [
+    deniedFor(id('query', 'order_line_list')),
+    deniedFor(queryId),
+    new Error(`current policy denied query ${id('query', 'stock')}`),
+  ])
+    assert.equal(withheldSupplyQuery(list, refusal), null);
+  assert.equal(
+    withheldProgressQuery(list, deniedFor(id('query', 'stock'))),
+    null,
+  );
+  const purpose = SurfaceListSchema.parse({
+    ...list,
+    progress: {
+      ...list.progress,
+      supply: { ...list.progress!.supply, whenDenied: undefined },
+    },
+  });
+  assert.equal(
+    withheldSupplyQuery(purpose, deniedFor(id('query', 'stock'))),
+    null,
   );
 });
 
