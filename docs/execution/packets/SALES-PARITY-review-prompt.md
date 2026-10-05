@@ -1,64 +1,62 @@
-# SALES-PARITY — review round 6 prompt (ONLINE confirm arm, user-run)
+# SALES-PARITY — review round 7 prompt (ONLINE confirm arm, user-run)
 
-Repository `AnserBeg/2rain-greenfield`, branch `packet/SALES-PARITY`, frozen executable SHA `28ecce28`.
-Review the fix `f339e83c` (tests and controls `45b4733c`), merged at `28ecce28`. Since round 5's `bf24b925` the
-only Critical-set change is `packages/postgres-provider/src/release-verification-service.ts` in `f339e83c`.
-Read wider code as you need.
+Repository `AnserBeg/2rain-greenfield`, branch `packet/SALES-PARITY`, frozen executable SHA `ac52f21b`.
+Since round 6's frozen `28ecce28`, the only Critical-set path changed is
+`packages/postgres-provider/src/release-verification-service.ts`, in `893a10df`. `fca4719e` adds a test and an
+expected-red control; `ac52f21b` merges both. Read wider code as you need.
 
-R1 (round 4): `#create` required every server-assigned document number in the create's read-back and
-registered the record for cleanup only afterwards; its fix reads an omitted number through a plain get that
-selects it, else uses the record's deterministic sentinel (`verificationSentinelNumber`) unread, and
-registers each create before reading its numbers.
+Round 6 reported: at `28ecce28`, `#findQueryForEntity` applied `gatewayExecutesQ0` (active, Q0, a filter that
+`inspectPredicateForExecution` accepts) for every caller, including the search `#searchableExclusion` takes. A
+declaration whose plain search is an active Q1 query with the literal `true` filter and a compiled filter plan,
+sorting before an active Q0 search filtered `false`, failed verification with `VERIFICATION_QUERY_MISSING`.
 
-Round 5 found R1 not closed for every admitted declaration. The compiler admits any boolean filter on a Q0
-query, but the query gateway runs a Q0 read only when `inspectPredicateForExecution(filter)` accepts it (the
-literal `true`) and answers any other `unsupported` without reading. P2a: `#assignedWitness` read a number
-the create's read-back omits through the first active plain q0 get that selects it, without that admission,
-so a get filtered `booleanPredicate false` made a stored number read as missing (a false
-`VERIFICATION_ASSIGNED_VALUE_MISSING`). P2b, pre-existing: cleanup's `#queryForEntity` could pick such a get
-as the entity's first plain get, and `archiveProbeRecords` treated its no-row answer as already archived, so
-probe records were left live.
+What `893a10df` changes, with the reason each code comment gives:
+- `gatewayExecutes(query)`: the query is active, and either Q0 with a filter `inspectPredicateForExecution`
+  accepts, or Q1 with a truthy `filterPlan`. Its comment says this is the decision `SemanticQueryGateway.invoke`
+  makes.
+- `gatewayExecutesQ0(query)`: `query.tier === 'q0' && gatewayExecutes(query)`. Its comment: a get it admits
+  returns any live record by id; a Q1 get's filter could hide a live record, which cleanup would take as archived.
+- `#findQueryForEntity(entityId, queryType, admits)`: the entity's first query of that type with no read model
+  that `admits` accepts. `#queryForEntity` throws `VERIFICATION_QUERY_MISSING`, naming the admission, when there
+  is none.
+- Selection per caller:
+  - `archiveProbeRecords` (cleanup): `gatewayExecutesQ0`; it reads each probe record by id to archive it.
+  - `#assignedWitness` (the number witness): its own selection, still `gatewayExecutesQ0` plus "selects the
+    field"; not changed by `893a10df`.
+  - `#searchableExclusion`: `gatewayExecutes`; the probe reads through the search's own filter, and its positive
+    branch requires the probe record back.
+  - `#typedErrorSurface`: `gatewayExecutes`; it records its get's answer as the positive probe and asserts
+    nothing of it.
+- The query contract type gains `filterPlan?`. Cleanup's unreadable note now names its rule.
+Not changed since `28ecce28`: the witness's missing and mismatch checks, cleanup's `not-found` skip and its
+deferred `VERIFICATION_PROBE_RECORD_UNREADABLE` refusal, the compiler, the plan, the evidence schema and the
+derivation reasons.
 
-The fix, provider-only: `gatewayExecutesQ0(query)` is active + Q0 + the gateway's own fence accepting the
-filter. The witness reads only through the first plain get that selects the field and that the gateway
-executes, else uses the record's sentinel unread; a get that ran must answer `exact` with the record's
-sentinel (`VERIFICATION_ASSIGNED_VALUE_MISSING`/`_MISMATCH` otherwise, now naming the query and its answer).
-`#queryForEntity` (over `#findQueryForEntity`) returns the first plain query of the type that the gateway
-executes. `archiveProbeRecords` skips only `not-found` with no records; a record it cannot read (its entity
-has no get the gateway executes, or the answer is neither the record nor `not-found`) is collected and,
-after every readable record is archived, refused as `VERIFICATION_PROBE_RECORD_UNREADABLE` naming each one.
-The compiler, the plan, the evidence schema and the derivation reasons are unchanged.
-
-Question: are P2a and P2b closed for every admitted declaration, and did the fix introduce a new production
-defect? Try to break it. Report production defects separately from evidence, wording and naming, which are
-filed, not fixed.
+Questions. Answer each from the code, and report production defects separately from evidence, wording and naming,
+which are filed, not fixed:
+1. Is the Q1-search regression fixed for every admitted declaration?
+2. Do round 5's findings, P2a (the number witness) and P2b (cleanup), remain fixed?
+3. Did `893a10df` break anything else?
 
 Where to look:
-- `release-verification-service.ts`: `gatewayExecutesQ0`, `#assignedWitness`, `#findQueryForEntity` and its
-  callers (`archiveProbeRecords`, `#queryForEntity` for `#searchableExclusion` and `#typedErrorSurface`),
-  `queryAnswer`.
-- The gateway's own admission: `semantic-query-gateway.ts` `invoke` (lifecycle, tier, filter fence),
-  `predicate-kernel.ts` `inspectPredicateForExecution`; `module-runtime-interpreter.ts` `executeQueryOnClient`.
-- Tests: `test/postgres/document-numbering.test.ts`, the new test (Party with `party_account_get` filtered
-  `false` and sorted before `party_get`, `party_z_account_get` executed, `party_role_number_get` filtered
-  `false`; then a verification whose executor answers `party_get` `unsupported`) and the R1 test.
-- Controls: `test/evidence/SALES-PARITY.expected-red.json` `verification-witness-reads-through-executed-gets`,
-  `verification-refuses-unreadable-probe-records`, `verification-reads-numbers-the-read-back-omits`.
+- `release-verification-service.ts`: `gatewayExecutes`, `gatewayExecutesQ0`, `#findQueryForEntity`,
+  `#queryForEntity`, `archiveProbeRecords`, `#searchableExclusion`, `#typedErrorSurface`, `#assignedWitness`.
+- `semantic-query-gateway.ts` `invoke`; `semantic-operation-gateway.ts` (the read-back admission);
+  `module-runtime-interpreter.ts` `executeQueryOnClient`; `predicate-kernel.ts` `inspectPredicateForExecution`.
+- Tests: `test/postgres/document-numbering.test.ts` (the Q1-search test, the round-5 test, the R1 test).
+- Controls: `test/evidence/SALES-PARITY.expected-red.json` `verification-searches-through-an-executed-q1-search`,
+  `verification-witness-reads-through-executed-gets`, `verification-refuses-unreadable-probe-records`,
+  `verification-reads-numbers-the-read-back-omits`.
 
-Consider at least: whether `gatewayExecutesQ0` can disagree with the gateway for any get or search
-verification invokes (retired, q1, a scope operand, a read model); whether the narrower `#queryForEntity`
-can refuse (`VERIFICATION_QUERY_MISSING`) a release that should verify; whether `not-found` can mean anything
-but "a probe archived it"; whether deferring the refusal can archive a record a scenario still needs or hide
-another failure; and whether any probe now passes without reading what it claims.
-
-Already filed (judge severity if you disagree, but they are known): E1 the assigned-number probe shows
-distinct values and input ownership, not a stored fold; E2 document-numbering's executed-id set is scoped by
-release root, not by one activation; W1 "keep distinct numbers" overclaims a 64-bit hash; E3 (noted while
-fixing round 5) `#declaredEvidence` records a query assertion's answer, `unsupported` included, without
-comparing it with the assertion's expected outcome (no product assertion targets a query the gateway does
-not execute); latent, unreached by any admitted declaration: `#declaredEvidence` and the refused create in
-`#assignedUniqueness` do not register records they would create, and `archiveProbeRecords` stops at its
-first failed archive (an unreadable record no longer stops it) and, from `finally`, can mask the scenario's
-own error.
+Filed items (known; judge their severity if you disagree):
+- E1: the assigned-number probe shows distinct values and input ownership, not a stored fold.
+- E2: document-numbering's executed-id set is scoped by release root, not by one activation.
+- W1: "keep distinct numbers" overclaims a 64-bit hash.
+- E3: `#declaredEvidence` records a query assertion's answer without comparing it with the assertion's expected
+  outcome.
+- Some assigned-number probes use the record's sentinel without reading the assigned field.
+- `#declaredEvidence` and the refused create in `#assignedUniqueness` do not register records they would create.
+- `archiveProbeRecords` can leave a record it cannot read live, stops at a failed archive, and, run from
+  `finally`, its exception can replace the scenario's own error.
 
 Not the packet records. Say plainly if this prompt steers you.
