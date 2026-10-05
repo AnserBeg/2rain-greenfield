@@ -1158,7 +1158,9 @@ function relationInstallBase(compiledApplication: unknown): unknown {
   // No checked-in application release or lineage is changed.
   const initial = compileApplication({
     dependencies: [],
-    expectedActiveRelease: null,
+    expectedActiveRelease: expectedActiveReleaseFrom(
+      previous.bootstrap.compiled,
+    ),
     kind: 'compilerInput',
     limits: { ...DEFAULT_COMPILER_LIMITS },
     normalizedDefinitionBytes: bytes,
