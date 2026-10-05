@@ -228,9 +228,24 @@ export function withShipmentValuation<
     queries: dependencies,
     resultFields: outputs(false),
   };
+  const storedGets = Object.keys(models).map((local) => {
+    const source = application.queries.find(
+      (query) => query.queryId === `${namespace}:query.${local}`,
+    );
+    if (!source || source.readModel)
+      throw new Error(`Shipment valuation requires plain ${local}`);
+    const name = local.replace('_get', '_stored_get');
+    return JSON.parse(
+      JSON.stringify(source)
+        .replaceAll(`:query.${local}`, `:query.${name}`)
+        .replaceAll(`:selection.${local}_`, `:selection.${name}_`)
+        .replaceAll(`:parameter.${local}_`, `:parameter.${name}_`),
+    ) as Record<string, unknown>;
+  });
   return {
     ...application,
     queries: [
+      ...storedGets,
       ...application.queries.map((query) => {
         const local = String(query.queryId).split(':query.')[1]!;
         if (local === 'commercial_order_get') {

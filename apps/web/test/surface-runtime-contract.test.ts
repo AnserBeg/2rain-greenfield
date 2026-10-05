@@ -1,3 +1,4 @@
+import { governedProjection } from '../../../test/helpers/governed-storage-target.js';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -2401,7 +2402,7 @@ test('inventory value is a declared List and item cost is a compiled record comp
   assert.deepEqual(composition.actions, []);
 });
 
-test('inventory shipment cost is declared separately from packed facts and customer invoice print fields', () => {
+test('inventory shipment cost is declared separately from packed facts and customer invoice print fields', async () => {
   const app = composedApplicationDefinition();
   const ns = 'northstar.app';
   const surfaces = app.surfaces as Record<string, unknown>[];
@@ -2442,7 +2443,35 @@ test('inventory shipment cost is declared separately from packed facts and custo
   assert.ok(
     !printed.includes(margin.columnId) && !printed.includes(cost.columnId),
   );
+  const compiled = await governedProjection<{
+    queries: {
+      queryId: string;
+      sourceEntityId: string;
+      queryType: string;
+      readModel?: unknown;
+    }[];
+  }>('northstar.compiler:projection-family.query-catalog');
   for (const local of ['shipment_get', 'customer_invoice_get']) {
+    assert.ok(
+      compiled.payload.queries.some(
+        (query) =>
+          query.sourceEntityId ===
+            `${ns}:entity.${local.replace('_get', '')}` &&
+          query.queryType === 'get' &&
+          query.readModel === undefined,
+      ),
+      'the serving compiled artifact retains a plain get for admission',
+    );
+    const stored = queries.find(
+      (query) =>
+        query.queryId === `${ns}:query.${local.replace('_get', '_stored_get')}`,
+    )!;
+    assert.ok(
+      stored,
+      'release admission retains a plain get for each costed entity',
+    );
+    assert.equal(stored.readModel, undefined);
+    assert.equal(stored.queryType, 'get');
     const model = queries.find(
       (query) => query.queryId === `${ns}:query.${local}`,
     )!.readModel as {

@@ -93,7 +93,9 @@ and discount with its relieved cost; unshipped revenue is excluded. Shipment
 line relief is a separate read-only child table beside the original packed
 facts. Cost, coverage and margin are internal record fields, excluded from the
 customer invoice print declaration. Existing query identities and company
-operands are retained so document links remain valid.
+operands are retained so document links remain valid. Dedicated plain stored
+get queries remain available for each costed entity; release admission and
+other consumers of stored facts do not depend on derived costing.
 
 ## Slice 3 — landed cost
 
