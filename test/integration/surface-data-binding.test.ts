@@ -4638,7 +4638,32 @@ class OrderEntryExecutor
     this.rows.set(recordId, {
       recordId,
       entityId: `${this.namespace}:entity.${entity}`,
-      values,
+      values: {
+        ...(entity === 'purchase_order'
+          ? Object.fromEntries(
+              [
+                'name',
+                'street',
+                'city',
+                'region',
+                'postal_code',
+                'country',
+                'address_id',
+              ].map((name) => [
+                `${this.namespace}:field.purchase_order_ship_to_${name}`,
+                null,
+              ]),
+            )
+          : {}),
+        ...(entity === 'sales_order_line'
+          ? {
+              [`${this.namespace}:field.sales_order_line_fulfillment_route`]: `${this.namespace}:option.fulfillment_route_stock`,
+              [`${this.namespace}:field.sales_order_line_drop_ship_supplier_id`]:
+                null,
+            }
+          : {}),
+        ...values,
+      },
       revision: 1,
       archived: false,
     });
@@ -4743,14 +4768,35 @@ class OrderEntryExecutor
               total + Number(entry.values[progress.done.fieldId]),
             0,
           );
+        const additional = progress.additionalDone;
+        const delivered = additional
+          ? [...this.rows.values()]
+              .filter(
+                (candidate) =>
+                  active(candidate, progress.additionalDoneEntityId!) &&
+                  lines.some(
+                    (line) =>
+                      candidate.values[additional.relationId] === line.recordId,
+                  ) &&
+                  additional.fieldFilters.every(
+                    (filter) =>
+                      candidate.values[filter.fieldId] === filter.value,
+                  ),
+              )
+              .reduce(
+                (total, entry) =>
+                  total + Number(entry.values[additional.fieldId]),
+                0,
+              )
+          : 0;
         const open =
           !progress.openIn ||
           progress.openIn.values.includes(
             String(row.values[progress.openIn.fieldId]),
           )
-            ? ordered - done
+            ? ordered - done - delivered
             : 0;
-        return { ordered, done, open };
+        return { ordered, done, open, delivered };
       };
       const narrowed = selected.filter(
         (row) =>
@@ -4774,6 +4820,13 @@ class OrderEntryExecutor
                 [progress.outputs.ordered]: String(summed.ordered),
                 [progress.outputs.done]: String(summed.done),
                 [progress.outputs.open]: String(summed.open),
+                ...(progress.additionalDone
+                  ? {
+                      [progress.additionalDone.output]: String(
+                        summed.delivered,
+                      ),
+                    }
+                  : {}),
               },
             }
           : projected;
@@ -5010,7 +5063,19 @@ async function orderEntryWitness(
       undefined,
       undefined,
       {
-        'northstar.sales:capability.fulfillment': async ({ result }) => result,
+        'northstar.sales:capability.fulfillment': async ({
+          definition,
+          result,
+        }) => ({
+          ...result,
+          records: result.records.map((record) => ({
+            ...record,
+            values: {
+              ...record.values,
+              ...witnessLineFacts(definition.readModel!.resultFields, record),
+            },
+          })),
+        }),
         // The purchase order page reads its record with its totals
         // (PURCHASING-PARITY); this witness states none of them, as the read
         // model does for a figure it cannot state.
@@ -5028,6 +5093,7 @@ async function orderEntryWitness(
                   (fieldId) => [fieldId, null],
                 ),
               ),
+              ...witnessLineFacts(definition.readModel!.resultFields, record),
             },
           })),
         }),
@@ -8372,6 +8438,7 @@ test('PURCHASING-PARITY: Expected receipts sums, counts and marks late orders in
   assert.deepEqual(
     [...new Set(progressCalls.map((call) => call.permissionId))].sort(),
     [
+      id('permission', 'drop_ship_delivery_read'),
       id('permission', 'purchase_order_line_read'),
       id('permission', 'purchase_order_received_read'),
     ],
@@ -8399,7 +8466,7 @@ test('PURCHASING-PARITY: Expected receipts sums, counts and marks late orders in
     .split('\r\n');
   assert.equal(
     rows[0],
-    'Number,Supplier,Expected,Ordered,Received,Open,Currency',
+    'Number,Supplier,Expected,Ordered,Received,Open,Currency,Delivered',
   );
   assert.equal(rows.length - 1, 4);
   assert.ok(
@@ -8613,6 +8680,7 @@ test('PURCHASING-PARITY: a line with nothing left to arrive offers no receipt; a
                   ],
                 ),
               ),
+              ...witnessLineFacts(definition.readModel!.resultFields, record),
             },
           })),
         }),
@@ -8828,12 +8896,13 @@ test('ORDER-PARITY: order Lists sum their lines, link each row to its work, and 
   assert.deepEqual(
     [...new Set(progressCalls.map((call) => call.permissionId))].sort(),
     [
+      id('permission', 'drop_ship_delivery_read'),
       id('permission', 'sales_order_line_read'),
       id('permission', 'sales_order_shipped_read'),
     ],
   );
-  // One page, six tab counts: each passed both reads.
-  assert.equal(progressCalls.length, 2 * 7);
+  // One page, six tab counts: each passed all three progress reads.
+  assert.equal(progressCalls.length, 3 * 7);
   const toShip = await renderSurfaceRuntimeWithData(
     f.view,
     salesUrl({ view: salesView('to_ship') }),
@@ -8899,9 +8968,9 @@ test('ORDER-PARITY: order Lists sum their lines, link each row to its work, and 
     .split('\r\n');
   assert.equal(
     csv[0],
-    'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Currency',
+    'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Currency,Delivered',
   );
-  assert.ok(csv.some((line) => /^SO-OPEN,.*,,,,CAD$/u.test(line)));
+  assert.ok(csv.some((line) => /^SO-OPEN,.*,,,,CAD,$/u.test(line)));
   const refusedExport = await renderSurfaceRuntimeWithData(
     f.view,
     salesUrl({ view: salesView('to_ship'), export: 'csv' }),
@@ -9345,6 +9414,28 @@ function seedPurchaseOrder(
   );
   return { order, lines: lineIds };
 }
+/** The order witnesses have no deliveries/links; their route is the stored choice. */
+function witnessLineFacts(
+  fields: Record<string, string>,
+  record: SemanticRecordDto,
+): Record<string, ImmutableJsonValue> {
+  const route =
+    record.values['northstar.app:field.sales_order_line_fulfillment_route'] ===
+    'northstar.app:option.fulfillment_route_drop_ship'
+      ? 'Drop ship'
+      : 'Stock';
+  return Object.fromEntries(
+    Object.entries(fields)
+      .filter(([key]) =>
+        ['route', 'linked_line', 'linked_order', 'delivered'].includes(key),
+      )
+      .map(([key, field]) => [
+        field,
+        key === 'route' ? route : key === 'delivered' ? '0' : null,
+      ]),
+  );
+}
+
 /** A gateway whose read models state the figures a test gives them. */
 function statingGateways(
   f: OrderEntryWitness,
@@ -9387,6 +9478,7 @@ function statingGateways(
               ([key, fieldId]) => [fieldId, state ? state(key, record) : null],
             ),
           ),
+          ...witnessLineFacts(definition.readModel!.resultFields, record),
         },
       })),
     });
@@ -10795,4 +10887,93 @@ test('PAYABLES (PY-G): each order line shows its three-way match as the read mod
   assert.equal(fact(withheld.html), '—');
   assert.match(withheld.html, /BILL-000007/u);
   f.deniedReads.delete(id('permission', 'purchase_order_read'));
+});
+
+test('DROP-SHIP: creating linked supply is offered only for a selected drop-ship line on a confirmed order', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const scope = f.scopes[0]!;
+  const surface = f.surfaces.find(
+    (entry) => entry.surfaceId === id('surface', 'sales_order_detail'),
+  )!;
+  const child = surface.composition!.children.find(
+    (entry) => entry.datasetId === id('dataset', 'fulfillment_lines'),
+  )!;
+  const empty = (queryId: string) => {
+    const query = registeredSemanticQueryFromPinnedView(f.view, queryId)!;
+    if (!('selections' in query)) throw new Error('This witness reads records');
+    return Object.fromEntries(
+      query.selections.map(({ fieldId }) => [fieldId, null]),
+    );
+  };
+  const state = id('derived_state_field', 'machine.sales_order_lifecycle');
+  const order = f.executor.seed(
+    'sales_order',
+    {
+      ...empty(surface.dataSourceQueryId),
+      [id('field', 'sales_order_number')]: 'SO-DROP',
+      [id('field', 'sales_order_customer_party_id')]: f.party,
+      [id('field', 'sales_order_currency')]: 'CAD',
+      [state]: id('state', 'sales_order_released'),
+    },
+    scope,
+  );
+  const line = (route: string) =>
+    f.executor.seed(
+      'sales_order_line',
+      {
+        ...empty(child.query.targetId),
+        [id('field', 'sales_order_line_line_number')]: route,
+        [id('field', 'sales_order_line_item_id')]: f.item,
+        [id('field', 'sales_order_line_ordered_quantity')]: '3',
+        [id('field', 'sales_order_line_unit_id')]: 'EA',
+        [id('field', 'sales_order_line_fulfillment_route')]: id(
+          'option',
+          `fulfillment_route_${route}`,
+        ),
+        [id('field', 'sales_order_line_drop_ship_supplier_id')]:
+          route === 'drop_ship' ? f.party : null,
+        [id('relation', 'sales_order_line_order')]: order,
+      },
+      scope,
+    );
+  const stock = line('stock');
+  const dropShip = line('drop_ship');
+  const gateways = statingGateways(f, {
+    fulfillment: () => '0',
+    commercial: () => '0',
+  });
+  const page = (selected?: string) =>
+    renderSurfaceRuntimeWithData(
+      f.view,
+      `/?${new URLSearchParams({
+        surface: surface.surfaceId,
+        record: order,
+        [id('parameter', 'commercial_order_get_legal_entity_scope')]: scope,
+        ...(selected
+          ? {
+              dataset: child.datasetId,
+              selected,
+              [`select:${child.datasetId}`]: selected,
+            }
+          : {}),
+      })}`,
+      gateways,
+    );
+  const offered = /value="northstar\.app:action\.create_drop_ship_po"/u;
+  assert.doesNotMatch((await page()).html, offered);
+  assert.doesNotMatch((await page(stock)).html, offered);
+  const selected = await page(dropShip);
+  assert.match(selected.html, offered);
+  assert.doesNotMatch(
+    selected.html,
+    /value="northstar\.app:action\.reserve_stock"/u,
+  );
+  const stored = f.executor.rows.get(order)!;
+  f.executor.rows.set(order, {
+    ...stored,
+    values: { ...stored.values, [state]: id('state', 'sales_order_draft') },
+  });
+  assert.doesNotMatch((await page(dropShip)).html, offered);
 });

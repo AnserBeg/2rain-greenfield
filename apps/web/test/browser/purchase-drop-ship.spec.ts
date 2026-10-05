@@ -58,9 +58,10 @@ test('a supplier delivery appears on both linked orders and reverses with its re
       await dialog
         .getByRole('button', { name: `Confirm ${label}`, exact: true })
         .click();
-      await expect(page.getByRole('status').first()).toContainText(
-        `${label}: done`,
-      );
+      await expect(
+        page.getByRole('status').first(),
+        await dialog.innerText(),
+      ).toContainText(`${label}: done`);
     };
     const dataset = (local: string) =>
       page.locator(`[data-composition-dataset$="dataset.${local}"]`);
@@ -74,6 +75,11 @@ test('a supplier delivery appears on both linked orders and reverses with its re
       })
       .click();
     const salesUrl = page.url();
+    await dataset('fulfillment_lines')
+      .locator('tbody tr')
+      .first()
+      .getByRole('link', { name: 'Select', exact: true })
+      .click();
     await page
       .getByRole('button', { name: 'Create drop-ship PO', exact: true })
       .click();
@@ -123,11 +129,11 @@ test('a supplier delivery appears on both linked orders and reverses with its re
     await page.goto(salesUrl);
     const salesLine = dataset('fulfillment_lines').locator('tbody tr').first();
     await expect(salesLine).toContainText('Drop ship');
-    await salesLine.getByRole('checkbox').check();
+    await salesLine.getByRole('link', { name: 'Select', exact: true }).click();
     await expect(
       page.getByRole('button', { name: 'Reserve stock', exact: true }),
     ).toHaveCount(0);
-    await salesLine
+    await page
       .getByRole('link', { name: 'Open purchase order', exact: true })
       .click();
     const purchaseUrl = page.url();
@@ -140,7 +146,9 @@ test('a supplier delivery appears on both linked orders and reverses with its re
     await page.goto(purchaseUrl);
     const purchaseRow = dataset('purchasing_lines').locator('tbody tr').first();
     await expect(purchaseRow).toContainText('Drop ship');
-    await purchaseRow.getByRole('checkbox').check();
+    await purchaseRow
+      .getByRole('link', { name: 'Select', exact: true })
+      .click();
     await expect(
       page.getByRole('button', {
         name: 'Receive with actual cost',

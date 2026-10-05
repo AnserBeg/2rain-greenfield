@@ -12,7 +12,7 @@ Open the printed URL. Ctrl-C stops the fixture and removes its container.
 
 1. Sales → Sales orders → Create. Choose Alpine, CAD and its complete customer ship-to.
 2. Add OFF-100, quantity 5, unit EA, price 12. Fulfillment route defaults to Stock; change it to Drop ship and choose Alpine as the supplier. Save and Confirm.
-3. Create drop-ship PO → Review → Confirm. The sales line shows its route and linked purchase line/order. Running the action again reuses the link.
+3. Select the Drop ship line, then Create drop-ship PO → Review → Confirm. The action creates supply for the order's drop-ship lines. Each sales line shows its route and linked purchase line/order; repeating the action reuses the links.
 4. Open purchase order from the sales line. Its ship-to is the customer's address. Edit the draft line's unit cost to 7 and save; Release (place) the order.
 
 ## Delivery is not warehouse stock

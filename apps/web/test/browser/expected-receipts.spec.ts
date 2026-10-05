@@ -119,14 +119,14 @@ test('Expected receipts lists what is still to arrive, counts its tabs, marks th
       .trimEnd()
       .split('\r\n');
     expect(csv[0]).toBe(
-      'Number,Supplier,Expected,Ordered,Received,Open,Currency',
+      'Number,Supplier,Expected,Ordered,Received,Open,Currency,Delivered',
     );
     expect(csv.length - 1).toBe(2);
     expect(
       csv.some(
         (line) =>
           line.startsWith(`${orders.late.number},`) &&
-          line.endsWith(',15,4,11,CAD'),
+          line.endsWith(',15,4,11,CAD,0'),
       ),
     ).toBe(true);
 

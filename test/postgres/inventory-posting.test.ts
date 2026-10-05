@@ -104,6 +104,7 @@ import {
   reconcileReceivedQuantities,
 } from '../../packages/postgres-provider/src/received-quantity-projection.js';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
+import { PAYABLES_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/payables-capability-executor.js';
 import type { RegisteredCapabilityOperationExecutionRequest } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import { SemanticQueryGateway } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { PostgresInventoryReconciliationService } from '../../packages/postgres-provider/src/inventory-reconciliation-service.js';
@@ -2720,14 +2721,14 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
       { [COMMERCIAL_CAPABILITY_ID]: commercialReadModel },
     );
     const fixture = await compiledFixture();
-    const executor = RECEIVING_CAPABILITY_EXECUTOR_FACTORY.create({
+    const capabilityContext = {
       actorIssuer: issuer,
       pool: database.runtimePool,
       currentInstant: () => recordedAt,
       queryGateway,
       releaseId: database.registration.releaseId,
       releaseContentHash: database.registration.releaseContentHash,
-      projection: (familyId) => {
+      projection: (familyId: string) => {
         const projection = projectionPayload<unknown>(
           fixture.inventory,
           familyId,
@@ -2737,7 +2738,9 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
           contentHash: projection.contentHash,
         };
       },
-    });
+    };
+    const executor =
+      RECEIVING_CAPABILITY_EXECUTOR_FACTORY.create(capabilityContext);
     const mediation = new SemanticOperationMediationAuthority();
     let tamperReceivingExecution:
       | ((
@@ -2771,6 +2774,7 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
             }
           },
         },
+        PAYABLES_CAPABILITY_EXECUTOR_FACTORY.create(capabilityContext),
       ],
     );
     const entry = new AuthenticatedRequestRuntimeEntryAdapter(

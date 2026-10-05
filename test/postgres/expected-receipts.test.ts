@@ -470,13 +470,14 @@ test(
         .split('\r\n');
       assert.equal(
         csv[0],
-        'Number,Supplier,Expected,Ordered,Received,Open,Currency',
+        'Number,Supplier,Expected,Ordered,Received,Open,Currency,Delivered',
       );
       assert.equal(csv.length - 1, open.length);
       assert.ok(
         csv.some(
           (row) =>
-            row.startsWith(`${fractional},`) && row.endsWith(',2.5,1,1.5,CAD'),
+            row.startsWith(`${fractional},`) &&
+            row.endsWith(',2.5,1,1.5,CAD,0'),
         ),
       );
 

@@ -41,6 +41,7 @@ import {
   dropShipColumn as column,
   dropShipEntity as entity,
   dropShipQuantity as quantity,
+  dropShipQuantityText,
   dropShipQuote as q,
   dropShipRefused as refused,
   dropShipRelation as relation,
@@ -409,7 +410,8 @@ class DropShipExecutor implements RegisteredCapabilityOperationExecutor {
     return recordId;
   }
   #field(row: DropShipRow, local: string, name: string): unknown {
-    return row[column(entity(this.storage, local), `${local}_${name}`)];
+    const value = row[column(entity(this.storage, local), `${local}_${name}`)];
+    return value instanceof Date ? value.toISOString() : value;
   }
   #state(row: DropShipRow, local: string): string {
     return String(
@@ -541,11 +543,9 @@ class DropShipExecutor implements RegisteredCapabilityOperationExecutor {
         {
           line_number: String(next),
           item_id: this.#field(line, 'sales_order_line', 'item_id') as string,
-          ordered_quantity: this.#field(
-            line,
-            'sales_order_line',
-            'ordered_quantity',
-          ) as string,
+          ordered_quantity: dropShipQuantityText(
+            quantity(this.#field(line, 'sales_order_line', 'ordered_quantity')),
+          ),
         },
         { order: String(header.record_id), sales_line: String(line.record_id) },
       );

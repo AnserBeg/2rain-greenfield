@@ -317,7 +317,7 @@ test(
         .split('\r\n');
       assert.equal(
         csv[0],
-        'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Currency',
+        'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Currency,Delivered',
       );
       assert.equal(csv.length - 1, toShip.length);
 

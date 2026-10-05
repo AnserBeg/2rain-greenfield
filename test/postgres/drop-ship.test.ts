@@ -156,7 +156,7 @@ test('D-A/B/C: linked supplier delivery settles both orders without stock and re
     const draft = await fixture.create('sales_order', {
       customer_party_id: fixture.customer,
       order_date: new Date().toISOString(),
-      requested_date: null,
+      requested_date: '2026-10-08T12:00:00.000Z',
       currency: 'CAD',
       ...shipTo,
     });
@@ -245,6 +245,10 @@ test('D-A/B/C: linked supplier delivery settles both orders without stock and re
       purchaseLine.relationLabels![relation('purchase_order_line_order')]!
         .recordId!;
     let purchaseOrder = await get('purchase_order', purchaseId);
+    assert.equal(
+      purchaseOrder.values[field('purchase_order_expected_date')],
+      '2026-10-08T12:00:00.000Z',
+    );
     await assert.rejects(
       () =>
         fixture.invoke('purchase_order_update', {

@@ -13,6 +13,10 @@ test('D-B: supplier delivery bounds are exact on both linked lines', () => {
     dropShipQuantityText(dropShipQuantity('2.500000000000000000')),
     '2.5',
   );
+  assert.equal(
+    dropShipQuantityText(dropShipQuantity('5.000000000000000000')),
+    '5',
+  );
   dropShipBound(amount, amount, amount);
   for (const [delivered, sales, purchase] of [
     ['0', '1', '1'],

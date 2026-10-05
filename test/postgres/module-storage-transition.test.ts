@@ -5717,6 +5717,68 @@ function withoutModuleForTransition(
     1,
     `transition fixture must remove the ${label} module exactly once`,
   );
+  if (label === 'sales') {
+    const delivery = `${APPLICATION_NAMESPACE}:entity.drop_ship_delivery`;
+    const targetsDelivery = (value: unknown) =>
+      value !== null &&
+      typeof value === 'object' &&
+      (value as { targetId?: unknown }).targetId === delivery;
+    const belongsToDelivery = (entry: Record<string, unknown>) =>
+      entry.entityId === delivery ||
+      targetsDelivery(entry.entity) ||
+      targetsDelivery(entry.sourceEntity) ||
+      targetsDelivery(entry.resource) ||
+      String(entry.operationId ?? entry.surfaceId ?? '').includes(
+        ':operation.drop_ship_delivery_',
+      ) ||
+      String(entry.surfaceId ?? '').includes(':surface.drop_ship_delivery_');
+    for (const collection of [
+      'entities',
+      'fields',
+      'queries',
+      'permissions',
+      'operations',
+      'surfaces',
+      'stateMachines',
+      'storageMappings',
+    ])
+      application[collection] = (
+        application[collection] as Record<string, unknown>[]
+      ).filter((entry) => !belongsToDelivery(entry));
+  }
+  const entities = new Set(
+    (application.entities as { entityId: string }[]).map(
+      (entry) => entry.entityId,
+    ),
+  );
+  application.relations = (
+    application.relations as {
+      sourceEntity: { targetId: string };
+      targetEntity: { targetId: string };
+    }[]
+  ).filter(
+    (entry) =>
+      entities.has(entry.sourceEntity.targetId) &&
+      entities.has(entry.targetEntity.targetId),
+  );
+  const queries = application.queries as {
+    queryId: string;
+    readModel?: { queries: Record<string, { targetId: string }> };
+  }[];
+  const queryIds = new Set(queries.map((entry) => entry.queryId));
+  for (const query of queries)
+    if (
+      query.readModel &&
+      Object.values(query.readModel.queries).some(
+        (entry) => !queryIds.has(entry.targetId),
+      )
+    )
+      delete query.readModel;
+  // These predecessors judge storage installation, not cross-module page grammar.
+  for (const surface of application.surfaces as Record<string, unknown>[]) {
+    delete surface.composition;
+    delete surface.list;
+  }
   return application;
 }
 

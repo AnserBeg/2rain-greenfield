@@ -641,6 +641,7 @@ export function withDropShip<T extends Node>(application: T): T {
         inputs: [],
         steps: [],
         datasetId: lines.datasetId,
+        presentation: { placement: 'selection' },
         conditions: [
           {
             value: value('selected', id('metric', `${side}_line_linked_order`)),
@@ -665,6 +666,8 @@ export function withDropShip<T extends Node>(application: T): T {
             'Create drop-ship PO',
             'sales_order_create_drop_ship_po',
           ),
+          datasetId: lines.datasetId,
+          presentation: { placement: 'selection' },
           conditions: [
             {
               value: value(
@@ -673,6 +676,11 @@ export function withDropShip<T extends Node>(application: T): T {
               ),
               operator: 'equals',
               compare: id('state', 'sales_order_released'),
+            },
+            {
+              value: value('selected', id('metric', 'sales_line_route')),
+              operator: 'equals',
+              compare: 'Drop ship',
             },
           ],
         });

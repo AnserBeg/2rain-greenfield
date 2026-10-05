@@ -43740,6 +43740,7 @@
             "inputs": [],
             "steps": [],
             "datasetId": "northstar.app:dataset.fulfillment_lines",
+            "presentation": { "placement": "selection" },
             "conditions": [
               {
                 "value": {
@@ -43780,6 +43781,14 @@
                 },
                 "operator": "equals",
                 "compare": "northstar.app:state.sales_order_released"
+              },
+              {
+                "value": {
+                  "source": "selected",
+                  "field": "northstar.app:metric.sales_line_route"
+                },
+                "operator": "equals",
+                "compare": "Drop ship"
               }
             ],
             "inputs": [],
@@ -43802,7 +43811,9 @@
                   }
                 ]
               }
-            ]
+            ],
+            "datasetId": "northstar.app:dataset.fulfillment_lines",
+            "presentation": { "placement": "selection" }
           },
           {
             "actionId": "northstar.app:action.sales_order_open_delivery",
@@ -51852,6 +51863,7 @@
             "inputs": [],
             "steps": [],
             "datasetId": "northstar.app:dataset.purchasing_lines",
+            "presentation": { "placement": "selection" },
             "conditions": [
               {
                 "value": {

@@ -6500,7 +6500,8 @@ function assertReceivingVerificationCoverage(
     // exclusion), tax code, freight and fee with codes and frozen rates;
     // the line's discount, tax code and frozen rate; then its receive-into
     // location.
-    purchase_order: 22,
+    // DROP-SHIP: seven copied customer ship-to fields.
+    purchase_order: 29,
     purchase_order_line: 15,
   })) {
     assert.equal(
@@ -6533,7 +6534,8 @@ function assertSalesVerificationCoverage(compiledApplication: unknown): void {
     // then the tax code and two charges with codes and frozen rates.
     sales_order: 29,
     // SALES-PARITY: list price, discount, tax code and frozen rate.
-    sales_order_line: 20,
+    // DROP-SHIP route/supplier fields and retained (not restrictive) line links.
+    sales_order_line: 19,
     sales_order_shipped: 10,
     // SALES-PARITY: carrier, reference type and reference, then six ship-to lines.
     shipment: 29,
@@ -6781,7 +6783,7 @@ function assertIndependentConstructibilityPartition(
   );
 }
 
-function createRuntime(
+async function createRuntime(
   compiledApplication: unknown,
   databaseUrl: string,
   tenantSlug: string,
@@ -6794,25 +6796,35 @@ function createRuntime(
   ) => Promise<void>,
   monotonicMilliseconds?: () => number,
 ) {
-  return createComposedApplicationRuntime({
-    ...(monotonicMilliseconds ? { monotonicMilliseconds } : {}),
-    ...(afterFreshTenantIntermediateActivation
-      ? { afterFreshTenantIntermediateActivation }
-      : {}),
-    compiledApplication,
-    capabilityOperationExecutorFactories: [
-      INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
-      RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
-      DROP_SHIP_CAPABILITY_EXECUTOR_FACTORY,
-    ],
-    databaseUrl,
-    inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
-    localDemoIdentity: true,
-    migrationsDirectory,
-    providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
-    ...(releaseSelection ? { releaseSelection } : {}),
-    tenantSlug,
-  });
+  // Recycle test-cluster WAL between installs within its existing 256 MB
+  // tmpfs. The recorded application lineage and every verifier still run.
+  const checkpoint = new pg.Client({ connectionString: databaseUrl });
+  await checkpoint.connect();
+  try {
+    await checkpoint.query('CHECKPOINT');
+    return await createComposedApplicationRuntime({
+      ...(monotonicMilliseconds ? { monotonicMilliseconds } : {}),
+      afterFreshTenantIntermediateActivation: async (observation) => {
+        await afterFreshTenantIntermediateActivation?.(observation);
+        await checkpoint.query('CHECKPOINT');
+      },
+      compiledApplication,
+      capabilityOperationExecutorFactories: [
+        INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+        RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+        DROP_SHIP_CAPABILITY_EXECUTOR_FACTORY,
+      ],
+      databaseUrl,
+      inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
+      localDemoIdentity: true,
+      migrationsDirectory,
+      providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+      ...(releaseSelection ? { releaseSelection } : {}),
+      tenantSlug,
+    });
+  } finally {
+    await checkpoint.end();
+  }
 }
 
 function connectionUrl(connection: pg.PoolConfig): string {
