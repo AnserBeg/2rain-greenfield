@@ -9,7 +9,21 @@ export const COMMERCIAL_READ_MODEL_BINDINGS = Object.freeze({
   // The same figures for a purchase order (ruling B extended to purchasing).
   purchaseLine: 'northstar.sales:read_model.commercial_purchase_line',
   purchaseOrder: 'northstar.sales:read_model.commercial_purchase_order',
+  // A customer's credit on its own page (SALES-EXTRAS).
+  customerCredit: 'northstar.sales:read_model.party_credit',
 });
+/**
+ * A customer's credit (SALES-EXTRAS): its limit, what its open invoices owe,
+ * what its confirmed orders will still invoice, what the limit leaves, and
+ * how that stands -- on the customer's page and on each of its orders.
+ */
+export const CREDIT_READ_MODEL_OUTPUTS = Object.freeze([
+  'customer_credit_limit',
+  'customer_open_balance',
+  'customer_on_order',
+  'customer_available_credit',
+  'customer_credit_status',
+] as const);
 /** The commercial outputs, by read-model binding. */
 export const COMMERCIAL_READ_MODEL_OUTPUTS = Object.freeze({
   line: ['line_amount', 'line_tax', 'price_basis'],
@@ -29,6 +43,7 @@ export const COMMERCIAL_READ_MODEL_OUTPUTS = Object.freeze({
     'order_tax',
     'order_total',
   ],
+  customerCredit: CREDIT_READ_MODEL_OUTPUTS,
 } as const);
 /**
  * A purchase order's received quantity not yet on a live vendor bill
@@ -439,6 +454,46 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
       totalColumn('charges', 'Charges', 71),
       totalColumn('tax', 'Tax', 72),
       totalColumn('total', 'Total', 73),
+      // The customer's credit (SALES-EXTRAS), stated by the read model in
+      // this order's currency across every company.
+      column(
+        'customer_credit_status',
+        'Credit',
+        74,
+        id('metric', 'customer_credit_status'),
+      ),
+      money(
+        column(
+          'customer_credit_limit',
+          'Credit limit',
+          75,
+          id('metric', 'customer_credit_limit'),
+        ),
+      ),
+      money(
+        column(
+          'customer_open_balance',
+          'Open balance',
+          76,
+          id('metric', 'customer_open_balance'),
+        ),
+      ),
+      money(
+        column(
+          'customer_on_order',
+          'Confirmed, not invoiced',
+          77,
+          id('metric', 'customer_on_order'),
+        ),
+      ),
+      money(
+        column(
+          'customer_available_credit',
+          'Available credit',
+          78,
+          id('metric', 'customer_available_credit'),
+        ),
+      ),
     ],
     children: [
       {
@@ -1035,6 +1090,20 @@ export function salesWorkspaceQueries(
     clone('sales_order_line_list', 'commercial_order_lines'),
     {},
   );
+  // A customer's credit (SALES-EXTRAS) is read wherever the application
+  // composes customers and companies: on the customer's page, and on each of
+  // its orders in that order's currency.
+  const credit =
+    queries.some((query) => query.queryId === `${namespace}:query.party_get`) &&
+    queries.some(
+      (query) => query.queryId === `${namespace}:query.legal_entity_list`,
+    );
+  const creditQueries = {
+    companies: 'legal_entity_list',
+    invoices: 'customer_invoice_list',
+    orders: 'sales_order_list',
+    lines: 'commercial_lines',
+  };
   const orderTotals = commercial(
     'order',
     clone('sales_order_get', 'commercial_order_get'),
@@ -1043,8 +1112,27 @@ export function salesWorkspaceQueries(
       shipped: 'sales_order_shipped_get',
       invoices: 'customer_invoice_list',
       invoiceLines: 'customer_invoice_line_list',
+      ...(credit
+        ? {
+            party: 'party_get',
+            companies: 'legal_entity_list',
+            orders: 'sales_order_list',
+          }
+        : {}),
     },
+    credit
+      ? [...COMMERCIAL_READ_MODEL_OUTPUTS.order, ...CREDIT_READ_MODEL_OUTPUTS]
+      : COMMERCIAL_READ_MODEL_OUTPUTS.order,
   );
+  const customerCredit = credit
+    ? [
+        commercial(
+          'customerCredit',
+          clone('party_get', 'party_credit_get'),
+          creditQueries,
+        ),
+      ]
+    : [];
   // A purchase order's priced lines and totals, the same figures read the
   // same way, when the application composes purchasing with its terms.
   const purchasing = queries.some(
@@ -1174,6 +1262,7 @@ export function salesWorkspaceQueries(
     commercialLines,
     pricedLines,
     orderTotals,
+    ...customerCredit,
     ...purchaseCommercial,
     fulfillmentLines,
   ];

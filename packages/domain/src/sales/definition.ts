@@ -34,7 +34,10 @@ const STATES = [
 ] as const;
 
 const TRANSITIONS = [
-  ['release', 'Confirm order', 10, 'draft', 'released', 'release', true],
+  // Confirm is the receivables capability's (SALES-EXTRAS): it reads the
+  // customer's credit -- its hold, its limit and what it already owes --
+  // under a lock no other confirmation of that customer passes.
+  ['release', 'Confirm order', 10, 'draft', 'released', 'release', false],
   ['draft_cancel', 'Cancel order', 20, 'draft', 'cancelled', 'cancel', true],
   ['close', 'Close order', 30, 'released', 'closed', 'close', false],
   ['cancel', 'Cancel order', 40, 'released', 'cancelled', 'cancel', false],
@@ -648,23 +651,35 @@ export function salesModuleDefinition(
         ),
         precondition: inState(stateFieldId, definitionIds.stateIds.closed),
       },
+      // Confirm (SALES-EXTRAS): a draft with a complete ship-to -- a
+      // confirmed order's header is no longer editable, and it may only ship
+      // to a complete address -- whose customer is not on credit hold and
+      // stays within its credit limit. The capability re-checks all of it
+      // under the order's lock; the command answers at once, as it did.
+      {
+        ...receivablesOperation(
+          definitionIds,
+          'sales_order',
+          'release',
+          'release',
+        ),
+        confirmation: 'none',
+        label: 'Confirm',
+        precondition: {
+          kind: 'allPredicate',
+          schemaVersion: version,
+          terms: [
+            inState(stateFieldId, definitionIds.stateIds.draft),
+            shipToComplete(namespace, 'sales_order'),
+          ],
+        },
+      },
       ...DRIVEN_TRANSITIONS.map(([local, , , fromState, , permission]) =>
         transitionOperation(
           definitionIds,
           local,
           permission,
-          // Confirm needs a complete ship-to: a confirmed order's header is
-          // no longer editable, and it may only ship to a complete address.
-          local === 'release'
-            ? {
-                kind: 'allPredicate',
-                schemaVersion: version,
-                terms: [
-                  inState(stateFieldId, definitionIds.stateIds[fromState]),
-                  shipToComplete(namespace, 'sales_order'),
-                ],
-              }
-            : inState(stateFieldId, definitionIds.stateIds[fromState]),
+          inState(stateFieldId, definitionIds.stateIds[fromState]),
         ),
       ),
     ],
@@ -1259,8 +1274,6 @@ function transitionOperation(
       transition: reference('transitionReference', ids.transitionIds[action]),
     },
     kind: 'operationDefinition',
-    // The command words; the stable id keeps its verb (ADR-0056 ordering).
-    ...(action === 'release' ? { label: 'Confirm' } : {}),
     module: reference('moduleReference', ids.moduleId),
     operationId: `${ids.namespace}:operation.sales_order_${action}`,
     permission: reference(

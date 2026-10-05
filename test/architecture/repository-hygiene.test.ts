@@ -129,6 +129,7 @@ const suiteDefinitions = [
     excludedFiles: [
       'test/postgres/composed-application.test.ts',
       'test/postgres/commercial-totals.test.ts',
+      'test/postgres/customer-credit.test.ts',
       'test/postgres/expected-receipts.test.ts',
       'test/postgres/fulfillment.test.ts',
       'test/postgres/order-lists.test.ts',
@@ -184,9 +185,10 @@ const suiteDefinitions = [
   },
   {
     discoveryPattern:
-      'test/postgres/**/@(commercial-totals|expected-receipts|fulfillment|order-lists|order-pages|packing-retrieval|payables|purchase-order-ending|receivables|receiving-authorization).test.ts',
+      'test/postgres/**/@(commercial-totals|customer-credit|expected-receipts|fulfillment|order-lists|order-pages|packing-retrieval|payables|purchase-order-ending|receivables|receiving-authorization).test.ts',
     expectedFiles: [
       'test/postgres/commercial-totals.test.ts',
+      'test/postgres/customer-credit.test.ts',
       'test/postgres/expected-receipts.test.ts',
       'test/postgres/fulfillment.test.ts',
       'test/postgres/order-lists.test.ts',

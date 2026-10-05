@@ -3523,10 +3523,12 @@ async function assertBoundedFreshTenantInstallEvidence(
   // compiled plan: vendor bill (23), bill line (17), vendor payment (17) and
   // vendor credit (15) -- the receivables documents' shapes; the supplier's
   // invoice number is searchable, so it adds no search exclusion.
+  // SALES-EXTRAS adds 2, measured from the compiled plan: a search exclusion
+  // for each of Party's credit limit and credit hold.
   assert.equal(
     servingScenarioCount,
-    573,
-    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, and 72 for payables',
+    575,
+    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, and 2 for credit control',
   );
   await assertFreshInstallLineageEvidence(
     pool,
@@ -5862,11 +5864,12 @@ async function assertExactPartitionEvidence(
   // on the purchase order, its line, the goods receipt and the amendment
   // request, each with a generic create: 501, 424. PAYABLES' 72 execute too
   // (each vendor document has a generic create, replayed by this oracle over
-  // the compiled head): 573, 496.
+  // the compiled head): 573, 496. SALES-EXTRAS' 2 search exclusions on
+  // Party, which has a generic create, execute: 575, 498.
   assert.equal(
     evidence.results.length,
-    496,
-    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, and payables 72',
+    498,
+    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72, and credit control 2',
   );
   assert.equal(
     derivations.length,

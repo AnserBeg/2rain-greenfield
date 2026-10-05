@@ -113,6 +113,8 @@ const LINES_LEAD: ReadonlySet<string> = new Set([
 const RECORD_DATA_SOURCES: Readonly<Record<string, string>> = Object.freeze({
   sales_order_detail: 'commercial_order_get',
   purchase_order_detail: 'commercial_purchase_order_get',
+  // A customer's page states its credit (SALES-EXTRAS).
+  party_detail: 'party_credit_get',
 });
 
 /**

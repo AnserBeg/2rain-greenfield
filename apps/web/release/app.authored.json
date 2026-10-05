@@ -8252,6 +8252,50 @@
     },
     {
       "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.party"
+      },
+      "fieldId": "northstar.app:field.party_credit_limit",
+      "fieldType": {
+        "kind": "exactDecimalFieldType",
+        "precision": 38,
+        "representation": "canonicalString",
+        "scale": 18,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Credit limit",
+      "orderKey": 160,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.party"
+      },
+      "fieldId": "northstar.app:field.party_credit_hold",
+      "fieldType": { "kind": "booleanFieldType", "schemaVersion": "v6" },
+      "kind": "fieldDefinition",
+      "label": "On credit hold",
+      "orderKey": 170,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
       "collation": "unicodeCaseInsensitive",
       "defaultSemantics": "none",
       "entity": {
@@ -11103,16 +11147,15 @@
     {
       "confirmation": "none",
       "effect": {
-        "kind": "transitionStateEffect",
+        "kind": "registeredCapabilityEffect",
         "schemaVersion": "v6",
-        "transition": {
-          "kind": "transitionReference",
+        "capability": {
+          "kind": "capabilityReference",
           "schemaVersion": "v6",
-          "targetId": "northstar.app:transition.sales_order_release"
+          "targetId": "northstar.sales:capability.receivables"
         }
       },
       "kind": "operationDefinition",
-      "label": "Confirm",
       "module": {
         "kind": "moduleReference",
         "schemaVersion": "v6",
@@ -11124,6 +11167,14 @@
         "schemaVersion": "v6",
         "targetId": "northstar.app:permission.sales_order_release"
       },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.sales_order_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o1",
+      "label": "Confirm",
       "precondition": {
         "kind": "allPredicate",
         "schemaVersion": "v6",
@@ -11210,14 +11261,7 @@
             ]
           }
         ]
-      },
-      "readBack": {
-        "kind": "queryReference",
-        "schemaVersion": "v6",
-        "targetId": "northstar.app:query.sales_order_get"
-      },
-      "schemaVersion": "v6",
-      "tier": "o0"
+      }
     },
     {
       "confirmation": "humanRequired",
@@ -33047,6 +33091,28 @@
           "orderKey": 80,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.party_get_8"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_credit_limit"
+          },
+          "kind": "querySelection",
+          "orderKey": 90,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_get_9"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_credit_hold"
+          },
+          "kind": "querySelection",
+          "orderKey": 100,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_get_10"
         }
       ],
       "sourceEntity": {
@@ -33160,6 +33226,28 @@
           "orderKey": 80,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.party_list_8"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_credit_limit"
+          },
+          "kind": "querySelection",
+          "orderKey": 90,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_list_9"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_credit_hold"
+          },
+          "kind": "querySelection",
+          "orderKey": 100,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_list_10"
         }
       ],
       "sourceEntity": {
@@ -33273,6 +33361,28 @@
           "orderKey": 80,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.party_search_8"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_credit_limit"
+          },
+          "kind": "querySelection",
+          "orderKey": 90,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_search_9"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_credit_hold"
+          },
+          "kind": "querySelection",
+          "orderKey": 100,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_search_10"
         }
       ],
       "sourceEntity": {
@@ -33412,6 +33522,28 @@
           "orderKey": 80,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.party_resolve_8"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_credit_limit"
+          },
+          "kind": "querySelection",
+          "orderKey": 90,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_resolve_9"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_credit_hold"
+          },
+          "kind": "querySelection",
+          "orderKey": 100,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_resolve_10"
         }
       ],
       "sourceEntity": {
@@ -35931,6 +36063,21 @@
             "kind": "queryReference",
             "schemaVersion": "v6",
             "targetId": "northstar.app:query.customer_invoice_line_list"
+          },
+          "party": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.party_get"
+          },
+          "companies": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.legal_entity_list"
+          },
+          "orders": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.sales_order_list"
           }
         },
         "resultFields": {
@@ -35938,7 +36085,184 @@
           "order_charges": "northstar.app:metric.order_charges",
           "order_tax": "northstar.app:metric.order_tax",
           "order_total": "northstar.app:metric.order_total",
-          "order_to_invoice": "northstar.app:metric.order_to_invoice"
+          "order_to_invoice": "northstar.app:metric.order_to_invoice",
+          "customer_credit_limit": "northstar.app:metric.customer_credit_limit",
+          "customer_open_balance": "northstar.app:metric.customer_open_balance",
+          "customer_on_order": "northstar.app:metric.customer_on_order",
+          "customer_available_credit": "northstar.app:metric.customer_available_credit",
+          "customer_credit_status": "northstar.app:metric.customer_credit_status"
+        }
+      }
+    },
+    {
+      "kind": "queryDefinition",
+      "maximumResultCount": 1,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.party"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.party_read"
+      },
+      "queryId": "northstar.app:query.party_credit_get",
+      "queryType": "get",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_number"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_credit_get_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_name"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_credit_get_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_contact_summary"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_credit_get_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_default_currency"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_credit_get_4"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_payment_terms"
+          },
+          "kind": "querySelection",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_credit_get_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_default_salesperson_party_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_credit_get_6"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_default_ship_to_address_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 70,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_credit_get_7"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_default_tax_code_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 80,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_credit_get_8"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_credit_limit"
+          },
+          "kind": "querySelection",
+          "orderKey": 90,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_credit_get_9"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.party_credit_hold"
+          },
+          "kind": "querySelection",
+          "orderKey": 100,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.party_credit_get_10"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.party"
+      },
+      "tier": "q0",
+      "readModel": {
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.sales:capability.commercial"
+        },
+        "binding": "northstar.sales:read_model.party_credit",
+        "queries": {
+          "companies": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.legal_entity_list"
+          },
+          "invoices": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.customer_invoice_list"
+          },
+          "orders": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.sales_order_list"
+          },
+          "lines": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_lines"
+          }
+        },
+        "resultFields": {
+          "customer_credit_limit": "northstar.app:metric.customer_credit_limit",
+          "customer_open_balance": "northstar.app:metric.customer_open_balance",
+          "customer_on_order": "northstar.app:metric.customer_on_order",
+          "customer_available_credit": "northstar.app:metric.customer_available_credit",
+          "customer_credit_status": "northstar.app:metric.customer_credit_status"
         }
       }
     },
@@ -39782,6 +40106,40 @@
             "label": "Total",
             "orderKey": 73,
             "field": "northstar.app:metric.order_total",
+            "format": "money"
+          },
+          {
+            "columnId": "northstar.app:column.customer_credit_status",
+            "label": "Credit",
+            "orderKey": 74,
+            "field": "northstar.app:metric.customer_credit_status"
+          },
+          {
+            "columnId": "northstar.app:column.customer_credit_limit",
+            "label": "Credit limit",
+            "orderKey": 75,
+            "field": "northstar.app:metric.customer_credit_limit",
+            "format": "money"
+          },
+          {
+            "columnId": "northstar.app:column.customer_open_balance",
+            "label": "Open balance",
+            "orderKey": 76,
+            "field": "northstar.app:metric.customer_open_balance",
+            "format": "money"
+          },
+          {
+            "columnId": "northstar.app:column.customer_on_order",
+            "label": "Confirmed, not invoiced",
+            "orderKey": 77,
+            "field": "northstar.app:metric.customer_on_order",
+            "format": "money"
+          },
+          {
+            "columnId": "northstar.app:column.customer_available_credit",
+            "label": "Available credit",
+            "orderKey": 78,
+            "field": "northstar.app:metric.customer_available_credit",
             "format": "money"
           }
         ],
@@ -54542,7 +54900,7 @@
       "dataSource": {
         "kind": "queryReference",
         "schemaVersion": "v6",
-        "targetId": "northstar.app:query.party_get"
+        "targetId": "northstar.app:query.party_credit_get"
       },
       "kind": "surfaceDefinition",
       "label": "Party detail",
@@ -54642,7 +55000,8 @@
               "northstar.app:column.party_payment_terms",
               "northstar.app:column.party_default_salesperson",
               "northstar.app:column.party_default_ship_to",
-              "northstar.app:column.party_default_tax_code"
+              "northstar.app:column.party_default_tax_code",
+              "northstar.app:column.party_credit_status"
             ]
           },
           "context": {
@@ -54737,6 +55096,40 @@
                 "targetId": "northstar.app:field.tax_code_code"
               }
             }
+          },
+          {
+            "columnId": "northstar.app:column.party_credit_limit",
+            "label": "Credit limit",
+            "orderKey": 90,
+            "field": "northstar.app:field.party_credit_limit",
+            "format": "money"
+          },
+          {
+            "columnId": "northstar.app:column.party_open_balance",
+            "label": "Open balance",
+            "orderKey": 91,
+            "field": "northstar.app:metric.customer_open_balance",
+            "format": "money"
+          },
+          {
+            "columnId": "northstar.app:column.party_on_order",
+            "label": "Confirmed, not invoiced",
+            "orderKey": 92,
+            "field": "northstar.app:metric.customer_on_order",
+            "format": "money"
+          },
+          {
+            "columnId": "northstar.app:column.party_available_credit",
+            "label": "Available credit",
+            "orderKey": 93,
+            "field": "northstar.app:metric.customer_available_credit",
+            "format": "money"
+          },
+          {
+            "columnId": "northstar.app:column.party_credit_status",
+            "label": "Credit",
+            "orderKey": 94,
+            "field": "northstar.app:metric.customer_credit_status"
           }
         ],
         "children": [
@@ -55156,6 +55549,170 @@
                       "source": "input",
                       "inputId": "northstar.app:input.party_tax_code"
                     }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "actionId": "northstar.app:action.party_set_credit_limit",
+            "label": "Set credit limit",
+            "description": "An order is not confirmed when this customer’s open invoices, confirmed orders not yet invoiced and that order would exceed the limit. 0 sets none. The currency is also its new orders’ default.",
+            "orderKey": 36,
+            "conditions": [],
+            "inputs": [
+              {
+                "inputId": "northstar.app:input.party_credit_limit",
+                "label": "Credit limit (0 for none)",
+                "orderKey": 10,
+                "type": "text",
+                "required": true
+              },
+              {
+                "inputId": "northstar.app:input.party_credit_currency",
+                "label": "Currency",
+                "orderKey": 20,
+                "type": "text",
+                "required": true,
+                "presentation": {
+                  "kind": "choice",
+                  "options": [
+                    {
+                      "value": "northstar.app:option.party_default_currency_cad",
+                      "label": "CAD · Canadian dollar"
+                    },
+                    {
+                      "value": "northstar.app:option.party_default_currency_usd",
+                      "label": "USD · US dollar"
+                    },
+                    {
+                      "value": "northstar.app:option.party_default_currency_eur",
+                      "label": "EUR · Euro"
+                    }
+                  ],
+                  "defaultValue": "northstar.app:option.party_default_currency_cad",
+                  "defaultFrom": {
+                    "source": "record",
+                    "field": "northstar.app:field.party_default_currency"
+                  }
+                }
+              }
+            ],
+            "steps": [
+              {
+                "stepId": "northstar.app:step.party_credit_limit_update",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.party_update"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "record", "field": "recordId" }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": { "source": "record", "field": "revision" }
+                  },
+                  {
+                    "path": ["patch", "northstar.app:field.party_credit_limit"],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.party_credit_limit"
+                    }
+                  },
+                  {
+                    "path": [
+                      "patch",
+                      "northstar.app:field.party_default_currency"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.party_credit_currency"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "actionId": "northstar.app:action.party_hold_credit",
+            "label": "Put on credit hold",
+            "description": "None of this customer’s orders can be confirmed until the hold is released. Orders already confirmed are not changed.",
+            "orderKey": 37,
+            "conditions": [
+              {
+                "value": {
+                  "source": "record",
+                  "field": "northstar.app:field.party_credit_hold"
+                },
+                "operator": "notEquals",
+                "compare": true
+              }
+            ],
+            "inputs": [],
+            "steps": [
+              {
+                "stepId": "northstar.app:step.party_credit_hold",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.party_update"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "record", "field": "recordId" }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": { "source": "record", "field": "revision" }
+                  },
+                  {
+                    "path": ["patch", "northstar.app:field.party_credit_hold"],
+                    "value": { "source": "literal", "value": true }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "actionId": "northstar.app:action.party_release_credit",
+            "label": "Release credit hold",
+            "description": "This customer’s orders can be confirmed again, within its credit limit.",
+            "orderKey": 38,
+            "conditions": [
+              {
+                "value": {
+                  "source": "record",
+                  "field": "northstar.app:field.party_credit_hold"
+                },
+                "operator": "equals",
+                "compare": true
+              }
+            ],
+            "inputs": [],
+            "steps": [
+              {
+                "stepId": "northstar.app:step.party_credit_release",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.party_update"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "record", "field": "recordId" }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": { "source": "record", "field": "revision" }
+                  },
+                  {
+                    "path": ["patch", "northstar.app:field.party_credit_hold"],
+                    "value": { "source": "literal", "value": false }
                   }
                 ]
               }

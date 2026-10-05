@@ -516,6 +516,41 @@ async function seed(
         observed: true,
       };
     }
+    if (phase === 'credit_order') {
+      // SALES-EXTRAS: a draft sales order for the demo customer of 4 EA at
+      // 12.50, taxed 5% -- 52.50 -- with a complete ship-to, for a browser
+      // proof to confirm against the customer's credit hold and limit.
+      const order = await create('sales_order', {
+        customer_party_id: customer,
+        order_date: new Date().toISOString(),
+        requested_date: null,
+        currency: 'CAD',
+        notes: null,
+        ...shipTo,
+      });
+      await create(
+        'sales_order_line',
+        {
+          item_id: item,
+          unit_id: 'EA',
+          line_number: '1',
+          ordered_quantity: '4',
+          unit_price: '12.5',
+          list_price: '12.5',
+          discount_percent: null,
+          tax_code_id: taxCode.recordId,
+          tax_rate_percent: '5',
+        },
+        { order: order.recordId },
+      );
+      return {
+        phase,
+        number: String(order.values[`${ns}:field.sales_order_number`]),
+        recordId: order.recordId,
+        customer,
+        observed: true,
+      };
+    }
     if (phase === 'payables') {
       // PAYABLES: a released, priced purchase order at Net 30 with freight
       // and a fee, two of its three units received, for a browser proof to

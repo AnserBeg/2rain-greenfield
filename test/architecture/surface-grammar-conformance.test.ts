@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
+import { dropDanglingReadModels } from '../helpers/drop-dangling-read-models.js';
 
 import {
   CanonicalModelError,
@@ -949,7 +950,7 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
     salesModuleDefinition('northstar.app'),
     'sales',
   );
-  return composed;
+  return dropDanglingReadModels(composed);
 }
 
 function withoutModule(

@@ -45,7 +45,10 @@ export function partyWorkspace(namespace: string): Record<string, unknown> {
   });
   const record = (name: string) => ({ source: 'record', field: name });
   const selected = (name: string) => ({ source: 'selected', field: name });
-  const literal = (value: string | null) => ({ source: 'literal', value });
+  const literal = (value: string | boolean | null) => ({
+    source: 'literal',
+    value,
+  });
   const input = (name: string) => ({
     source: 'input',
     inputId: id('input', `party_${name}`),
@@ -78,6 +81,16 @@ export function partyWorkspace(namespace: string): Record<string, unknown> {
     required,
     ...(presentation ? { presentation } : {}),
   });
+  // Shown with grouped digits and two decimals, never rounded.
+  const money = <T extends object>(value: T) => ({
+    ...value,
+    format: 'money' as const,
+  });
+  const onHold = (operator: 'equals' | 'notEquals') => ({
+    value: record(field('party_credit_hold')),
+    operator,
+    compare: true,
+  });
   const roles = id('dataset', 'party_roles');
   const addresses = id('dataset', 'party_addresses');
   const address = (name: string) => field(`party_address_${name}`);
@@ -94,6 +107,7 @@ export function partyWorkspace(namespace: string): Record<string, unknown> {
           id('column', 'party_default_salesperson'),
           id('column', 'party_default_ship_to'),
           id('column', 'party_default_tax_code'),
+          id('column', 'party_credit_status'),
         ],
       },
       context: {
@@ -141,6 +155,41 @@ export function partyWorkspace(namespace: string): Record<string, unknown> {
         80,
         field('party_default_tax_code_id'),
         ['tax_code_get', 'tax_code_code'],
+      ),
+      // Credit control (SALES-EXTRAS): the stored limit, and the figures the
+      // customer read model states from its invoices and confirmed orders.
+      money(
+        column('credit_limit', 'Credit limit', 90, field('party_credit_limit')),
+      ),
+      money(
+        column(
+          'open_balance',
+          'Open balance',
+          91,
+          id('metric', 'customer_open_balance'),
+        ),
+      ),
+      money(
+        column(
+          'on_order',
+          'Confirmed, not invoiced',
+          92,
+          id('metric', 'customer_on_order'),
+        ),
+      ),
+      money(
+        column(
+          'available_credit',
+          'Available credit',
+          93,
+          id('metric', 'customer_available_credit'),
+        ),
+      ),
+      column(
+        'credit_status',
+        'Credit',
+        94,
+        id('metric', 'customer_credit_status'),
       ),
     ],
     children: [
@@ -374,6 +423,67 @@ export function partyWorkspace(namespace: string): Record<string, unknown> {
             default_tax_code_id: input('tax_code'),
           }),
         ],
+      },
+      {
+        // Credit control (SALES-EXTRAS): the limit is in the customer's own
+        // currency, which its new orders also start in.
+        actionId: id('action', 'party_set_credit_limit'),
+        label: 'Set credit limit',
+        description:
+          'An order is not confirmed when this customer’s open invoices, confirmed orders not yet invoiced and that order would exceed the limit. 0 sets none. The currency is also its new orders’ default.',
+        orderKey: 36,
+        conditions: [],
+        inputs: [
+          text('credit_limit', 'Credit limit (0 for none)', 10, true),
+          text('credit_currency', 'Currency', 20, true, {
+            kind: 'choice',
+            options: [
+              {
+                value: id('option', 'party_default_currency_cad'),
+                label: 'CAD · Canadian dollar',
+              },
+              {
+                value: id('option', 'party_default_currency_usd'),
+                label: 'USD · US dollar',
+              },
+              {
+                value: id('option', 'party_default_currency_eur'),
+                label: 'EUR · Euro',
+              },
+            ],
+            defaultValue: id('option', 'party_default_currency_cad'),
+            defaultFrom: {
+              source: 'record',
+              field: field('party_default_currency'),
+            },
+          }),
+        ],
+        steps: [
+          update('credit_limit_update', {
+            credit_limit: input('credit_limit'),
+            default_currency: input('credit_currency'),
+          }),
+        ],
+      },
+      {
+        actionId: id('action', 'party_hold_credit'),
+        label: 'Put on credit hold',
+        description:
+          'None of this customer’s orders can be confirmed until the hold is released. Orders already confirmed are not changed.',
+        orderKey: 37,
+        conditions: [onHold('notEquals')],
+        inputs: [],
+        steps: [update('credit_hold', { credit_hold: literal(true) })],
+      },
+      {
+        actionId: id('action', 'party_release_credit'),
+        label: 'Release credit hold',
+        description:
+          'This customer’s orders can be confirmed again, within its credit limit.',
+        orderKey: 38,
+        conditions: [onHold('equals')],
+        inputs: [],
+        steps: [update('credit_release', { credit_hold: literal(false) })],
       },
       {
         actionId: id('action', 'party_add_address'),

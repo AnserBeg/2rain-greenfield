@@ -126,10 +126,10 @@ test('the state machine releases and cancels only through compiled targets', () 
       .filter((operation) => operation.effect.kind === 'transitionStateEffect')
       .map((operation) => operation.operationId),
     [
-      'northstar.sales:operation.sales_order_release',
       'northstar.sales:operation.sales_order_draft_cancel',
       // Ruling F (SALES-PARITY) reopens a closed order through the
-      // receivables capability, which reads the order's invoices.
+      // receivables capability, which reads the order's invoices; Confirm
+      // (SALES-EXTRAS) goes the same way, to read the customer's credit.
     ],
   );
   const stateField = (
@@ -378,12 +378,13 @@ test('sales leads compiled business navigation and fulfillment is registered beh
   const salesOperations = composed.operations.filter((operation) =>
     operation.operationId.includes(':operation.sales_order'),
   );
-  // Close and cancel (fulfillment), and reopen (receivables, ruling F).
+  // Close and cancel (fulfillment), reopen (receivables, ruling F) and
+  // confirm (receivables, SALES-EXTRAS: the customer's credit).
   assert.equal(
     salesOperations.filter(
       (operation) => operation.effect.kind === 'registeredCapabilityEffect',
     ).length,
-    3,
+    4,
   );
   assert.match(JSON.stringify(salesModuleDefinition()), /reservation/gu);
   assert.match(JSON.stringify(salesModuleDefinition()), /shipment/gu);
@@ -414,6 +415,20 @@ test('ruling F and shipping: the release command reads Confirm, a closed order r
   // Presentation only: the stable id keeps its verb, so ADR-0056 still puts
   // it first on the command bar.
   assert.equal(operation('sales_order_release').label, 'Confirm');
+  // SALES-EXTRAS: Confirm reads the customer's credit through the receivables
+  // capability, under the order's release permission, and answers at once.
+  const confirm = operation('sales_order_release') as unknown as {
+    confirmation: string;
+    effect: { kind: string; capability?: { targetId: string } };
+    permission: { targetId: string };
+  };
+  assert.equal(confirm.effect.kind, 'registeredCapabilityEffect');
+  assert.equal(confirm.effect.capability?.targetId, RECEIVABLES_CAPABILITY_ID);
+  assert.equal(confirm.confirmation, 'none');
+  assert.equal(
+    confirm.permission.targetId,
+    'northstar.sales:permission.sales_order_release',
+  );
   const reopen = operation('sales_order_reopen');
   assert.equal(reopen.confirmation, 'humanRequired');
   assert.equal(
@@ -566,6 +581,7 @@ test('ruling C: receivables documents change only as drafts, post once through t
       `${ns}:operation.customer_payment_post`,
       `${ns}:operation.customer_credit_post`,
       `${ns}:operation.sales_order_reopen`,
+      `${ns}:operation.sales_order_release`,
     ],
   );
 });
