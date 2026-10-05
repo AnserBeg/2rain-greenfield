@@ -992,6 +992,15 @@
       "requiredProjections": ["operation", "surface", "verification"],
       "schemaVersion": "v6",
       "supportStatus": "supported"
+    },
+    {
+      "capabilityId": "northstar.inventory:capability.valuation",
+      "capabilityVersion": 1,
+      "declaredEffects": ["read"],
+      "kind": "capabilityRequirement",
+      "requiredProjections": ["query", "surface", "agent", "reporting"],
+      "schemaVersion": "v6",
+      "supportStatus": "supported"
     }
   ],
   "entities": [
@@ -17043,6 +17052,939 @@
     }
   ],
   "queries": [
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.shipment_get_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.shipment_get_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 1,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.sales"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.shipment_read"
+      },
+      "queryId": "northstar.app:query.valuation_shipment_get",
+      "queryType": "get",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_number"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_get_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_state"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_get_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_kind"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_get_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_effective_at"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_get_4"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_location_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_get_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_external_reference"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_get_6"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_reason_code"
+          },
+          "kind": "querySelection",
+          "orderKey": 70,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_get_7"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_reason_narrative"
+          },
+          "kind": "querySelection",
+          "orderKey": 80,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_get_8"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_carrier"
+          },
+          "kind": "querySelection",
+          "orderKey": 90,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_get_9"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_shipping_reference_kind"
+          },
+          "kind": "querySelection",
+          "orderKey": 100,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_get_10"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_shipping_reference"
+          },
+          "kind": "querySelection",
+          "orderKey": 110,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_get_11"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_ship_to_name"
+          },
+          "kind": "querySelection",
+          "orderKey": 120,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_get_12"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_ship_to_street"
+          },
+          "kind": "querySelection",
+          "orderKey": 130,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_get_13"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_ship_to_city"
+          },
+          "kind": "querySelection",
+          "orderKey": 140,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_get_14"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_ship_to_region"
+          },
+          "kind": "querySelection",
+          "orderKey": 150,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_get_15"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_ship_to_postal_code"
+          },
+          "kind": "querySelection",
+          "orderKey": 160,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_get_16"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_ship_to_country"
+          },
+          "kind": "querySelection",
+          "orderKey": 170,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_get_17"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.shipment"
+      },
+      "tier": "q0",
+      "readModel": {
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.inventory:capability.valuation"
+        },
+        "binding": "northstar.inventory:read_model.shipment_cost",
+        "queries": {
+          "inventory_movement": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.inventory_movement_list"
+          },
+          "goods_receipt": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.goods_receipt_list"
+          },
+          "goods_receipt_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.goods_receipt_line_list"
+          },
+          "shipment": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.shipment_list"
+          },
+          "shipment_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.shipment_line_list"
+          },
+          "sales_order": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.sales_order_list"
+          },
+          "sales_order_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_lines"
+          },
+          "customer_invoice": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.customer_invoice_list"
+          },
+          "customer_invoice_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.customer_invoice_line_list"
+          },
+          "vendor_bill": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_list"
+          },
+          "vendor_bill_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_line_list"
+          },
+          "purchase_order": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.purchase_order_list"
+          },
+          "purchase_order_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_purchase_lines"
+          }
+        },
+        "resultFields": {
+          "cost_of_goods": "northstar.app:metric.cost_of_goods",
+          "cost_unvalued_quantity": "northstar.app:metric.cost_unvalued_quantity",
+          "cost_coverage": "northstar.app:metric.cost_coverage"
+        }
+      }
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.customer_invoice_get_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.customer_invoice_get_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 1,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.sales"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.customer_invoice_read"
+      },
+      "queryId": "northstar.app:query.valuation_customer_invoice_get",
+      "queryType": "get",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.customer_invoice_number"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.customer_invoice_state"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.customer_invoice_invoice_date"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.customer_invoice_due_date"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_4"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.customer_invoice_customer_party_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.customer_invoice_currency"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_6"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.customer_invoice_payment_terms"
+          },
+          "kind": "querySelection",
+          "orderKey": 70,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_7"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.customer_invoice_subtotal"
+          },
+          "kind": "querySelection",
+          "orderKey": 80,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_8"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.customer_invoice_charges"
+          },
+          "kind": "querySelection",
+          "orderKey": 90,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_9"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.customer_invoice_tax"
+          },
+          "kind": "querySelection",
+          "orderKey": 100,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_10"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.customer_invoice_total"
+          },
+          "kind": "querySelection",
+          "orderKey": 110,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_11"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.customer_invoice_paid_amount"
+          },
+          "kind": "querySelection",
+          "orderKey": 120,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_12"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.customer_invoice_credited_amount"
+          },
+          "kind": "querySelection",
+          "orderKey": 130,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_13"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.customer_invoice_balance"
+          },
+          "kind": "querySelection",
+          "orderKey": 140,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_14"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.customer_invoice"
+      },
+      "tier": "q0",
+      "readModel": {
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.inventory:capability.valuation"
+        },
+        "binding": "northstar.inventory:read_model.invoice_cost",
+        "queries": {
+          "inventory_movement": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.inventory_movement_list"
+          },
+          "goods_receipt": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.goods_receipt_list"
+          },
+          "goods_receipt_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.goods_receipt_line_list"
+          },
+          "shipment": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.shipment_list"
+          },
+          "shipment_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.shipment_line_list"
+          },
+          "sales_order": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.sales_order_list"
+          },
+          "sales_order_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_lines"
+          },
+          "customer_invoice": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.customer_invoice_list"
+          },
+          "customer_invoice_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.customer_invoice_line_list"
+          },
+          "vendor_bill": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_list"
+          },
+          "vendor_bill_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_line_list"
+          },
+          "purchase_order": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.purchase_order_list"
+          },
+          "purchase_order_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_purchase_lines"
+          }
+        },
+        "resultFields": {
+          "cost_of_goods": "northstar.app:metric.cost_of_goods",
+          "cost_unvalued_quantity": "northstar.app:metric.cost_unvalued_quantity",
+          "cost_coverage": "northstar.app:metric.cost_coverage",
+          "product_margin": "northstar.app:metric.product_margin"
+        }
+      }
+    },
+    {
+      "kind": "queryDefinition",
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.catalog"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.item_read"
+      },
+      "queryId": "northstar.app:query.inventory_value_list",
+      "queryType": "list",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_sku"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.inventory_value_list_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_name"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.inventory_value_list_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_description"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.inventory_value_list_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_base_unit"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.inventory_value_list_4"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_price_cad"
+          },
+          "kind": "querySelection",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.inventory_value_list_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_price_usd"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.inventory_value_list_6"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_price_eur"
+          },
+          "kind": "querySelection",
+          "orderKey": 70,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.inventory_value_list_7"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.item"
+      },
+      "tier": "q0",
+      "exportMaximumResultCount": 5000,
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "schemaVersion": "v6",
+          "parameterId": "northstar.app:parameter.inventory_value_list_company",
+          "orderKey": 10
+        }
+      ],
+      "legalEntityScope": {
+        "kind": "queryLegalEntityScope",
+        "schemaVersion": "v6",
+        "cardinality": "exactlyOne",
+        "operand": {
+          "kind": "queryParameterReference",
+          "schemaVersion": "v6",
+          "parameterId": "northstar.app:parameter.inventory_value_list_company"
+        }
+      },
+      "readModel": {
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.inventory:capability.valuation"
+        },
+        "binding": "northstar.inventory:read_model.item_cost",
+        "queries": {
+          "inventory_movement": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.inventory_movement_list"
+          },
+          "goods_receipt": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.goods_receipt_list"
+          },
+          "goods_receipt_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.goods_receipt_line_list"
+          },
+          "vendor_bill": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_list"
+          },
+          "vendor_bill_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_line_list"
+          },
+          "purchase_order": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.purchase_order_list"
+          },
+          "purchase_order_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_purchase_lines"
+          }
+        },
+        "resultFields": {
+          "on_hand": "northstar.app:metric.on_hand",
+          "average_cost": "northstar.app:metric.average_cost",
+          "inventory_value": "northstar.app:metric.inventory_value",
+          "unvalued_quantity": "northstar.app:metric.unvalued_quantity",
+          "landed_cost_coverage": "northstar.app:metric.landed_cost_coverage"
+        }
+      }
+    },
+    {
+      "kind": "queryDefinition",
+      "maximumResultCount": 1,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.catalog"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.item_read"
+      },
+      "queryId": "northstar.app:query.inventory_value_get",
+      "queryType": "get",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_sku"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.inventory_value_get_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_name"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.inventory_value_get_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_description"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.inventory_value_get_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_base_unit"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.inventory_value_get_4"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_price_cad"
+          },
+          "kind": "querySelection",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.inventory_value_get_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_price_usd"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.inventory_value_get_6"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.item_price_eur"
+          },
+          "kind": "querySelection",
+          "orderKey": 70,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.inventory_value_get_7"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.item"
+      },
+      "tier": "q0",
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "schemaVersion": "v6",
+          "parameterId": "northstar.app:parameter.inventory_value_get_company",
+          "orderKey": 10
+        }
+      ],
+      "legalEntityScope": {
+        "kind": "queryLegalEntityScope",
+        "schemaVersion": "v6",
+        "cardinality": "exactlyOne",
+        "operand": {
+          "kind": "queryParameterReference",
+          "schemaVersion": "v6",
+          "parameterId": "northstar.app:parameter.inventory_value_get_company"
+        }
+      },
+      "readModel": {
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.inventory:capability.valuation"
+        },
+        "binding": "northstar.inventory:read_model.item_cost",
+        "queries": {
+          "inventory_movement": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.inventory_movement_list"
+          },
+          "goods_receipt": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.goods_receipt_list"
+          },
+          "goods_receipt_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.goods_receipt_line_list"
+          },
+          "vendor_bill": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_list"
+          },
+          "vendor_bill_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_line_list"
+          },
+          "purchase_order": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.purchase_order_list"
+          },
+          "purchase_order_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_purchase_lines"
+          }
+        },
+        "resultFields": {
+          "on_hand": "northstar.app:metric.on_hand",
+          "average_cost": "northstar.app:metric.average_cost",
+          "inventory_value": "northstar.app:metric.inventory_value",
+          "unvalued_quantity": "northstar.app:metric.unvalued_quantity",
+          "landed_cost_coverage": "northstar.app:metric.landed_cost_coverage"
+        }
+      }
+    },
     {
       "kind": "queryDefinition",
       "legalEntityScope": {
@@ -35931,6 +36873,71 @@
             "kind": "queryReference",
             "schemaVersion": "v6",
             "targetId": "northstar.app:query.customer_invoice_line_list"
+          },
+          "inventory_movement": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.inventory_movement_list"
+          },
+          "goods_receipt": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.goods_receipt_list"
+          },
+          "goods_receipt_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.goods_receipt_line_list"
+          },
+          "shipment": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.shipment_list"
+          },
+          "shipment_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.shipment_line_list"
+          },
+          "sales_order": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.sales_order_list"
+          },
+          "sales_order_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_lines"
+          },
+          "customer_invoice": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.customer_invoice_list"
+          },
+          "customer_invoice_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.customer_invoice_line_list"
+          },
+          "vendor_bill": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_list"
+          },
+          "vendor_bill_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_line_list"
+          },
+          "purchase_order": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.purchase_order_list"
+          },
+          "purchase_order_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_purchase_lines"
           }
         },
         "resultFields": {
@@ -35938,7 +36945,11 @@
           "order_charges": "northstar.app:metric.order_charges",
           "order_tax": "northstar.app:metric.order_tax",
           "order_total": "northstar.app:metric.order_total",
-          "order_to_invoice": "northstar.app:metric.order_to_invoice"
+          "order_to_invoice": "northstar.app:metric.order_to_invoice",
+          "cost_of_goods": "northstar.app:metric.cost_of_goods",
+          "cost_unvalued_quantity": "northstar.app:metric.cost_unvalued_quantity",
+          "cost_coverage": "northstar.app:metric.cost_coverage",
+          "product_margin": "northstar.app:metric.product_margin"
         }
       }
     },
@@ -37286,6 +38297,184 @@
           "reversible": "northstar.app:metric.reversible",
           "reversal_quantity": "northstar.app:metric.reversal_quantity",
           "order_line": "northstar.app:metric.order_line"
+        }
+      }
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.valuation_shipment_line_list_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.valuation_shipment_line_list_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.sales"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.shipment_line_read"
+      },
+      "queryId": "northstar.app:query.valuation_shipment_line_list",
+      "queryType": "list",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_line_line_number"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_line_list_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_line_item_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_line_list_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_line_quantity"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_line_list_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_line_unit_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_line_list_4"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.shipment_line_reversal_of_movement_id"
+          },
+          "kind": "querySelection",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.valuation_shipment_line_list_5"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.shipment_line"
+      },
+      "tier": "q0",
+      "readModel": {
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.inventory:capability.valuation"
+        },
+        "binding": "northstar.inventory:read_model.shipment_line_cost",
+        "queries": {
+          "inventory_movement": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.inventory_movement_list"
+          },
+          "goods_receipt": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.goods_receipt_list"
+          },
+          "goods_receipt_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.goods_receipt_line_list"
+          },
+          "shipment": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.shipment_list"
+          },
+          "shipment_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.shipment_line_list"
+          },
+          "sales_order": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.sales_order_list"
+          },
+          "sales_order_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_lines"
+          },
+          "customer_invoice": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.customer_invoice_list"
+          },
+          "customer_invoice_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.customer_invoice_line_list"
+          },
+          "vendor_bill": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_list"
+          },
+          "vendor_bill_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_line_list"
+          },
+          "purchase_order": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.purchase_order_list"
+          },
+          "purchase_order_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_purchase_lines"
+          }
+        },
+        "resultFields": {
+          "cost_of_goods": "northstar.app:metric.cost_of_goods",
+          "cost_unvalued_quantity": "northstar.app:metric.cost_unvalued_quantity",
+          "cost_coverage": "northstar.app:metric.cost_coverage"
         }
       }
     }
@@ -39783,6 +40972,30 @@
             "orderKey": 73,
             "field": "northstar.app:metric.order_total",
             "format": "money"
+          },
+          {
+            "columnId": "northstar.app:column.sales_order_detail_cost_of_goods",
+            "field": "northstar.app:metric.cost_of_goods",
+            "label": "Known cost of goods",
+            "orderKey": 200
+          },
+          {
+            "columnId": "northstar.app:column.sales_order_detail_cost_unvalued_quantity",
+            "field": "northstar.app:metric.cost_unvalued_quantity",
+            "label": "Unvalued shipped quantity",
+            "orderKey": 210
+          },
+          {
+            "columnId": "northstar.app:column.sales_order_detail_cost_coverage",
+            "field": "northstar.app:metric.cost_coverage",
+            "label": "Cost coverage",
+            "orderKey": 220
+          },
+          {
+            "columnId": "northstar.app:column.sales_order_detail_product_margin",
+            "field": "northstar.app:metric.product_margin",
+            "label": "Shipped product margin",
+            "orderKey": 230
           }
         ],
         "children": [
@@ -41059,7 +42272,7 @@
               "query": {
                 "kind": "queryReference",
                 "schemaVersion": "v6",
-                "targetId": "northstar.app:query.customer_invoice_get"
+                "targetId": "northstar.app:query.valuation_customer_invoice_get"
               },
               "record": { "source": "selected", "field": "recordId" }
             }
@@ -41092,7 +42305,7 @@
               "query": {
                 "kind": "queryReference",
                 "schemaVersion": "v6",
-                "targetId": "northstar.app:query.shipment_get"
+                "targetId": "northstar.app:query.valuation_shipment_get"
               },
               "record": { "source": "selected", "field": "recordId" }
             }
@@ -42809,7 +44022,7 @@
       "dataSource": {
         "kind": "queryReference",
         "schemaVersion": "v6",
-        "targetId": "northstar.app:query.shipment_get"
+        "targetId": "northstar.app:query.valuation_shipment_get"
       },
       "kind": "surfaceDefinition",
       "label": "Shipment detail",
@@ -43027,6 +44240,24 @@
             "label": "Ship-to country",
             "orderKey": 75,
             "field": "northstar.app:field.shipment_ship_to_country"
+          },
+          {
+            "columnId": "northstar.app:column.shipment_detail_cost_of_goods",
+            "field": "northstar.app:metric.cost_of_goods",
+            "label": "Known cost of goods",
+            "orderKey": 200
+          },
+          {
+            "columnId": "northstar.app:column.shipment_detail_cost_unvalued_quantity",
+            "field": "northstar.app:metric.cost_unvalued_quantity",
+            "label": "Unvalued shipped quantity",
+            "orderKey": 210
+          },
+          {
+            "columnId": "northstar.app:column.shipment_detail_cost_coverage",
+            "field": "northstar.app:metric.cost_coverage",
+            "label": "Cost coverage",
+            "orderKey": 220
           }
         ],
         "children": [
@@ -43087,6 +44318,68 @@
                 "presentation": { "role": "secondary", "priority": 40 }
               }
             ]
+          },
+          {
+            "datasetId": "northstar.app:dataset.shipment_relief",
+            "label": "Relieved inventory cost",
+            "presentation": { "selection": "none", "compact": "scrollTable" },
+            "orderKey": 20,
+            "query": {
+              "kind": "queryReference",
+              "schemaVersion": "v6",
+              "targetId": "northstar.app:query.valuation_shipment_line_list"
+            },
+            "parent": {
+              "relationId": "northstar.app:relation.shipment_line_shipment",
+              "ownership": "parentScopedChild",
+              "value": { "source": "record", "field": "recordId" }
+            },
+            "columns": [
+              {
+                "columnId": "northstar.app:column.shipment_relief_0",
+                "label": "Line",
+                "orderKey": 10,
+                "field": "northstar.app:field.shipment_line_line_number",
+                "presentation": { "role": "secondary", "priority": 10 }
+              },
+              {
+                "columnId": "northstar.app:column.shipment_relief_1",
+                "label": "Item",
+                "orderKey": 20,
+                "field": "northstar.app:field.shipment_line_item_id",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:query.item_get"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:field.item_name"
+                  }
+                },
+                "presentation": { "role": "primary", "priority": 20 }
+              },
+              {
+                "columnId": "northstar.app:column.line_shipment_detail_cost_of_goods",
+                "field": "northstar.app:metric.cost_of_goods",
+                "label": "Known cost of goods",
+                "orderKey": 200
+              },
+              {
+                "columnId": "northstar.app:column.line_shipment_detail_cost_unvalued_quantity",
+                "field": "northstar.app:metric.cost_unvalued_quantity",
+                "label": "Unvalued shipped quantity",
+                "orderKey": 210
+              },
+              {
+                "columnId": "northstar.app:column.line_shipment_detail_cost_coverage",
+                "field": "northstar.app:metric.cost_coverage",
+                "label": "Cost coverage",
+                "orderKey": 220
+              }
+            ]
           }
         ],
         "actions": []
@@ -43109,7 +44402,7 @@
       "dataSource": {
         "kind": "queryReference",
         "schemaVersion": "v6",
-        "targetId": "northstar.app:query.shipment_get"
+        "targetId": "northstar.app:query.valuation_shipment_get"
       },
       "kind": "surfaceDefinition",
       "label": "Shipment form",
@@ -43880,7 +45173,7 @@
       "dataSource": {
         "kind": "queryReference",
         "schemaVersion": "v6",
-        "targetId": "northstar.app:query.customer_invoice_get"
+        "targetId": "northstar.app:query.valuation_customer_invoice_get"
       },
       "kind": "surfaceDefinition",
       "label": "Invoice detail",
@@ -44126,6 +45419,30 @@
             "orderKey": 56,
             "field": "northstar.app:field.customer_invoice_balance",
             "format": "money"
+          },
+          {
+            "columnId": "northstar.app:column.customer_invoice_detail_cost_of_goods",
+            "field": "northstar.app:metric.cost_of_goods",
+            "label": "Known cost of goods",
+            "orderKey": 200
+          },
+          {
+            "columnId": "northstar.app:column.customer_invoice_detail_cost_unvalued_quantity",
+            "field": "northstar.app:metric.cost_unvalued_quantity",
+            "label": "Unvalued shipped quantity",
+            "orderKey": 210
+          },
+          {
+            "columnId": "northstar.app:column.customer_invoice_detail_cost_coverage",
+            "field": "northstar.app:metric.cost_coverage",
+            "label": "Cost coverage",
+            "orderKey": 220
+          },
+          {
+            "columnId": "northstar.app:column.customer_invoice_detail_product_margin",
+            "field": "northstar.app:metric.product_margin",
+            "label": "Product margin (before charges and tax)",
+            "orderKey": 230
           }
         ],
         "children": [
@@ -44719,7 +46036,7 @@
       "dataSource": {
         "kind": "queryReference",
         "schemaVersion": "v6",
-        "targetId": "northstar.app:query.customer_invoice_get"
+        "targetId": "northstar.app:query.valuation_customer_invoice_get"
       },
       "kind": "surfaceDefinition",
       "label": "Invoice form",
@@ -55952,7 +57269,7 @@
       "dataSource": {
         "kind": "queryReference",
         "schemaVersion": "v6",
-        "targetId": "northstar.app:query.item_get"
+        "targetId": "northstar.app:query.inventory_value_get"
       },
       "kind": "surfaceDefinition",
       "label": "Item detail",
@@ -56006,7 +57323,7 @@
             "targetId": "northstar.app:capability.standard_surface_content"
           },
           "kind": "surfaceSlot",
-          "orderKey": 40,
+          "orderKey": 90,
           "schemaVersion": "v6",
           "slot": "keyFacts",
           "slotId": "northstar.app:slot.item_detail_key_facts"
@@ -56022,12 +57339,133 @@
           "schemaVersion": "v6",
           "slot": "sections",
           "slotId": "northstar.app:slot.item_detail_sections"
+        },
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v6",
+          "slot": "childTables",
+          "slotId": "northstar.app:slot.item_detail_children",
+          "orderKey": 60,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          }
         }
       ],
       "statusRoles": [],
       "surfaceId": "northstar.app:surface.item_detail",
       "surfaceRole": "record",
-      "workspace": { "membership": "contextual" }
+      "composition": {
+        "kind": "surfaceComposition",
+        "schemaVersion": "v6",
+        "presentation": {
+          "header": {
+            "title": "northstar.app:column.item_cost_name",
+            "subtitle": ["northstar.app:column.item_cost_sku"],
+            "facts": [
+              "northstar.app:column.item_cost_base_unit",
+              "northstar.app:column.item_cost_on_hand",
+              "northstar.app:column.item_cost_average_cost",
+              "northstar.app:column.item_cost_inventory_value",
+              "northstar.app:column.item_cost_unvalued_quantity",
+              "northstar.app:column.item_cost_landed_cost_coverage"
+            ]
+          },
+          "recordActions": "progressive",
+          "technicalDetails": "progressive"
+        },
+        "fields": [
+          {
+            "columnId": "northstar.app:column.item_cost_sku",
+            "label": "SKU",
+            "field": "northstar.app:field.item_sku",
+            "orderKey": 10
+          },
+          {
+            "columnId": "northstar.app:column.item_cost_name",
+            "label": "Name",
+            "field": "northstar.app:field.item_name",
+            "orderKey": 20
+          },
+          {
+            "columnId": "northstar.app:column.item_cost_description",
+            "label": "Description",
+            "field": "northstar.app:field.item_description",
+            "orderKey": 30
+          },
+          {
+            "columnId": "northstar.app:column.item_cost_base_unit",
+            "label": "Base unit",
+            "field": "northstar.app:field.item_base_unit",
+            "orderKey": 40
+          },
+          {
+            "columnId": "northstar.app:column.item_cost_on_hand",
+            "label": "On hand",
+            "field": "northstar.app:metric.on_hand",
+            "orderKey": 50
+          },
+          {
+            "columnId": "northstar.app:column.item_cost_average_cost",
+            "label": "Average cost",
+            "field": "northstar.app:metric.average_cost",
+            "orderKey": 60
+          },
+          {
+            "columnId": "northstar.app:column.item_cost_inventory_value",
+            "label": "Known value",
+            "field": "northstar.app:metric.inventory_value",
+            "orderKey": 70
+          },
+          {
+            "columnId": "northstar.app:column.item_cost_unvalued_quantity",
+            "label": "Unvalued quantity",
+            "field": "northstar.app:metric.unvalued_quantity",
+            "orderKey": 80
+          },
+          {
+            "columnId": "northstar.app:column.item_cost_landed_cost_coverage",
+            "label": "Landed cost coverage",
+            "field": "northstar.app:metric.landed_cost_coverage",
+            "orderKey": 90
+          },
+          {
+            "columnId": "northstar.app:column.item_cost_price_cad",
+            "label": "Selling price (CAD)",
+            "field": "northstar.app:field.item_price_cad",
+            "format": "money",
+            "orderKey": 100
+          },
+          {
+            "columnId": "northstar.app:column.item_cost_price_usd",
+            "label": "Selling price (USD)",
+            "field": "northstar.app:field.item_price_usd",
+            "format": "money",
+            "orderKey": 110
+          },
+          {
+            "columnId": "northstar.app:column.item_cost_price_eur",
+            "label": "Selling price (EUR)",
+            "field": "northstar.app:field.item_price_eur",
+            "format": "money",
+            "orderKey": 120
+          }
+        ],
+        "children": [],
+        "actions": []
+      },
+      "workspace": {
+        "membership": "contextual",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.inventory_value_list"
+        }
+      }
     },
     {
       "archetype": "record",
@@ -56554,6 +57992,163 @@
       "surfaceId": "northstar.app:surface.location_form",
       "surfaceRole": "form",
       "workspace": { "membership": "contextual" }
+    },
+    {
+      "archetype": "list",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.inventory_value_list"
+      },
+      "kind": "surfaceDefinition",
+      "label": "Inventory value",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.catalog"
+      },
+      "schemaVersion": "v6",
+      "slots": [
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "slot": "title",
+          "slotId": "northstar.app:slot.inventory_value_list_title"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "slot": "dataGrid",
+          "slotId": "northstar.app:slot.inventory_value_list_data_grid"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "slot": "bulkActions",
+          "slotId": "northstar.app:slot.inventory_value_list_bulk_actions"
+        },
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v6",
+          "slot": "savedViews",
+          "slotId": "northstar.app:slot.inventory_value_list_saved_views",
+          "orderKey": 15,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          }
+        }
+      ],
+      "statusRoles": [],
+      "surfaceId": "northstar.app:surface.inventory_value_list",
+      "surfaceRole": "list",
+      "workspace": {
+        "membership": "operational",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.inventory_value_list"
+        }
+      },
+      "list": {
+        "kind": "surfaceList",
+        "schemaVersion": "v6",
+        "pageSize": 25,
+        "columns": [
+          {
+            "columnId": "northstar.app:list_column.inventory_value_list_item",
+            "label": "Item",
+            "orderKey": 10,
+            "field": "northstar.app:field.item_name",
+            "role": "title",
+            "priority": 0,
+            "sortable": true
+          },
+          {
+            "columnId": "northstar.app:list_column.inventory_value_list_on_hand",
+            "label": "On hand",
+            "orderKey": 20,
+            "field": "northstar.app:metric.on_hand",
+            "role": "value",
+            "priority": 1,
+            "sortable": false
+          },
+          {
+            "columnId": "northstar.app:list_column.inventory_value_list_average_cost",
+            "label": "Average cost",
+            "orderKey": 30,
+            "field": "northstar.app:metric.average_cost",
+            "role": "value",
+            "priority": 2,
+            "sortable": false
+          },
+          {
+            "columnId": "northstar.app:list_column.inventory_value_list_inventory_value",
+            "label": "Known value",
+            "orderKey": 40,
+            "field": "northstar.app:metric.inventory_value",
+            "role": "value",
+            "priority": 3,
+            "sortable": false
+          },
+          {
+            "columnId": "northstar.app:list_column.inventory_value_list_unvalued_quantity",
+            "label": "Unvalued quantity",
+            "orderKey": 50,
+            "field": "northstar.app:metric.unvalued_quantity",
+            "role": "value",
+            "priority": 4,
+            "sortable": false
+          },
+          {
+            "columnId": "northstar.app:list_column.inventory_value_list_landed_cost_coverage",
+            "label": "Landed cost coverage",
+            "orderKey": 60,
+            "field": "northstar.app:metric.landed_cost_coverage",
+            "role": "value",
+            "priority": 5,
+            "sortable": false
+          }
+        ],
+        "defaultSort": [
+          {
+            "columnId": "northstar.app:list_column.inventory_value_list_item",
+            "direction": "ascending"
+          }
+        ],
+        "views": [
+          {
+            "viewId": "northstar.app:list_view.inventory_value_list_all",
+            "label": "All items",
+            "orderKey": 10,
+            "filters": []
+          }
+        ],
+        "filters": [],
+        "export": { "format": "csv" }
+      }
     },
     {
       "archetype": "list",

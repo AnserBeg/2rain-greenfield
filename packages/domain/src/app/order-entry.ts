@@ -554,6 +554,7 @@ export function orderEntrySurfaces(
             ? editor ||
               worklist ||
               local === 'posted_stock_balance' ||
+              local === 'inventory_value' ||
               local === 'customer_invoice' ||
               local === 'vendor_bill'
               ? 'operational'
@@ -568,11 +569,18 @@ export function orderEntrySurfaces(
         owner ||
         worklist ||
         local === 'posted_stock_balance' ||
+        local === 'inventory_value' ||
+        (local === 'item' && role === 'record') ||
         (role === 'list' && companyScoped.has(listQueryId))
           ? {
               entry: {
                 ...company,
-                authorizationQueryId: id('query', `${owner ?? local}_list`),
+                authorizationQueryId: id(
+                  'query',
+                  local === 'item'
+                    ? 'inventory_value_list'
+                    : `${owner ?? local}_list`,
+                ),
               },
             }
           : {}),

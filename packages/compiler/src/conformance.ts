@@ -3679,7 +3679,10 @@ function validateMonetaryBoundary(
       'compileFailure',
     ],
     [['monetaryBoundary', 'receiptCostOwner'], 'G4'],
-    [['monetaryBoundary', 'valuationCapability'], 'unsupported'],
+    [
+      ['monetaryBoundary', 'valuationCapability'],
+      'registeredSourceCostReadModel',
+    ],
   ];
   for (const [path, value] of expectations) {
     expectInventoryLiteral(diagnostics, definition, path, value);
@@ -4507,7 +4510,7 @@ const INVENTORY_DIAGNOSTIC_RULES: Readonly<
   INVENTORY_MOVEMENT_MONEY_FORBIDDEN:
     'an inventory movement is a quantity-only fact and carries no monetary field',
   INVENTORY_MOVEMENT_VALUE_DERIVATION_FORBIDDEN:
-    'no compiled artifact derives a monetary value from inventory movement facts',
+    'no movement-only artifact derives money; registered valuation combines quantity lineage with source costs',
   INVENTORY_POSTING_DEPENDENCY_UNDECLARED:
     'inventory posting reads and writes only through its published authoritative dependency set',
   INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED:

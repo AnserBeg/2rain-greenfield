@@ -1,4 +1,11 @@
 import {
+  itemCostWorkspace,
+  valuationQueries,
+  valuationSurfaces,
+  VALUATION_CAPABILITY_ID,
+  withShipmentValuation,
+} from '../inventory/valuation.js';
+import {
   invoiceWorkspace,
   salesWorkspace,
   salesWorkspaceQueries,
@@ -85,6 +92,7 @@ const MODULE_REGISTRY = Object.freeze([
 const RECORD_COMPOSITIONS: Readonly<
   Record<string, (namespace: string) => Record<string, unknown>>
 > = Object.freeze({
+  item_detail: itemCostWorkspace,
   party_detail: partyWorkspace,
   sales_order_detail: salesWorkspace,
   purchase_order_detail: purchasingWorkspace,
@@ -111,6 +119,7 @@ const LINES_LEAD: ReadonlySet<string> = new Set([
 
 /** Workspaces that read their record through a read-model query. */
 const RECORD_DATA_SOURCES: Readonly<Record<string, string>> = Object.freeze({
+  item_detail: 'inventory_value_get',
   sales_order_detail: 'commercial_order_get',
   purchase_order_detail: 'commercial_purchase_order_get',
 });
@@ -190,9 +199,21 @@ export function composedApplicationDefinition(): Record<string, unknown> {
     collection(definition, 'capabilityRequirements').slice(1),
   );
 
-  return withDeclaredLists({
+  const application = withDeclaredLists({
     assertions: merged(definitions, 'assertions'),
-    capabilityRequirements: [sharedCapability, ...moduleCapabilities],
+    capabilityRequirements: [
+      sharedCapability,
+      ...moduleCapabilities,
+      {
+        capabilityId: VALUATION_CAPABILITY_ID,
+        capabilityVersion: 1,
+        declaredEffects: ['read'],
+        kind: 'capabilityRequirement',
+        requiredProjections: ['query', 'surface', 'agent', 'reporting'],
+        schemaVersion: version,
+        supportStatus: 'supported',
+      },
+    ],
     entities: merged(definitions, 'entities'),
     fields: merged(definitions, 'fields'),
     hashAlgorithm: 'sha256',
@@ -212,6 +233,10 @@ export function composedApplicationDefinition(): Record<string, unknown> {
     },
     permissions: merged(definitions, 'permissions'),
     queries: [
+      ...valuationQueries(
+        APPLICATION_NAMESPACE,
+        merged(definitions, 'queries') as Record<string, unknown>[],
+      ),
       ...salesWorkspaceQueries(
         APPLICATION_NAMESPACE,
         merged(definitions, 'queries') as Record<string, unknown>[],
@@ -287,15 +312,26 @@ export function composedApplicationDefinition(): Record<string, unknown> {
           ],
         };
       }),
-      merged(definitions, 'queries') as Record<string, unknown>[],
+      [
+        ...(merged(definitions, 'queries') as Record<string, unknown>[]),
+        ...valuationQueries(
+          APPLICATION_NAMESPACE,
+          merged(definitions, 'queries') as Record<string, unknown>[],
+        ),
+      ],
     ),
   });
+  return withShipmentValuation(APPLICATION_NAMESPACE, application);
 }
 
 /** A worklist's List surface joins the composed surfaces beside its source. */
 function withWorklistSurfaces(surfaces: unknown[]): unknown[] {
   return [
     ...surfaces,
+    ...valuationSurfaces(
+      APPLICATION_NAMESPACE,
+      surfaces as Record<string, unknown>[],
+    ),
     ...worklistSurfaces(
       APPLICATION_NAMESPACE,
       surfaces as Record<string, unknown>[],

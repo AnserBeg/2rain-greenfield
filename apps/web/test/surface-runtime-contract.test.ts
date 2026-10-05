@@ -1,3 +1,4 @@
+import { governedProjection } from '../../../test/helpers/governed-storage-target.js';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -2370,3 +2371,129 @@ async function close(server: Server): Promise<void> {
     server.close((error) => (error ? reject(error) : resolve()));
   });
 }
+
+test('inventory value is a declared List and item cost is a compiled record composition', () => {
+  const definition = composedApplicationDefinition();
+  const surfaces = definition.surfaces as Record<string, unknown>[];
+  const list = surfaces.find(
+    (surface) =>
+      surface.surfaceId === 'northstar.app:surface.inventory_value_list',
+  )!;
+  const declaration = SurfaceListSchema.parse(list.list);
+  assert.deepEqual(
+    declaration.columns.map((column) => column.label),
+    [
+      'Item',
+      'On hand',
+      'Average cost',
+      'Known value',
+      'Unvalued quantity',
+      'Landed cost coverage',
+    ],
+  );
+  assert.ok(declaration.columns.slice(1).every((column) => !column.sortable));
+  const item = surfaces.find(
+    (surface) => surface.surfaceId === 'northstar.app:surface.item_detail',
+  )!;
+  const composition = SurfaceCompositionSchema.parse(item.composition);
+  assert.ok(
+    composition.fields.some(
+      (field) => field.field === 'northstar.app:metric.average_cost',
+    ),
+  );
+  assert.ok(
+    composition.fields.some(
+      (field) => field.field === 'northstar.app:metric.inventory_value',
+    ),
+  );
+  assert.deepEqual(composition.actions, []);
+});
+
+test('inventory shipment cost is declared separately from packed facts and customer invoice print fields', async () => {
+  const app = composedApplicationDefinition();
+  const ns = 'northstar.app';
+  const surfaces = app.surfaces as Record<string, unknown>[];
+  const queries = app.queries as Record<string, unknown>[];
+  const shipment = SurfaceCompositionSchema.parse(
+    surfaces.find(
+      (surface) => surface.surfaceId === `${ns}:surface.shipment_detail`,
+    )!.composition,
+  );
+  const relief = shipment.children.find(
+    (child) => child.datasetId === `${ns}:dataset.shipment_relief`,
+  )!;
+  assert.equal(
+    relief.query.targetId,
+    `${ns}:query.valuation_shipment_line_list`,
+  );
+  assert.ok(
+    relief.columns.some(
+      (column) => column.field === `${ns}:metric.cost_of_goods`,
+    ),
+  );
+  const invoice = SurfaceCompositionSchema.parse(
+    surfaces.find(
+      (surface) =>
+        surface.surfaceId === `${ns}:surface.customer_invoice_detail`,
+    )!.composition,
+  );
+  const margin = invoice.fields.find(
+    (column) => column.field === `${ns}:metric.product_margin`,
+  )!;
+  const cost = invoice.fields.find(
+    (column) => column.field === `${ns}:metric.cost_of_goods`,
+  )!;
+  const printed = [
+    ...invoice.presentation!.header!.facts,
+    ...invoice.presentation!.print!.totals!,
+  ];
+  assert.ok(
+    !printed.includes(margin.columnId) && !printed.includes(cost.columnId),
+  );
+  const compiled = await governedProjection<{
+    queries: {
+      queryId: string;
+      sourceEntityId: string;
+      queryType: string;
+      readModel?: unknown;
+    }[];
+  }>('northstar.compiler:projection-family.query-catalog');
+  for (const local of ['shipment_get', 'customer_invoice_get']) {
+    assert.ok(
+      compiled.payload.queries.some(
+        (query) =>
+          query.sourceEntityId ===
+            `${ns}:entity.${local.replace('_get', '')}` &&
+          query.queryType === 'get' &&
+          query.readModel === undefined,
+      ),
+      'the serving compiled artifact retains a plain get for admission',
+    );
+    const stored = queries.find(
+      (query) => query.queryId === `${ns}:query.${local}`,
+    )!;
+    assert.ok(
+      stored,
+      'release admission retains a plain get for each costed entity',
+    );
+    assert.equal(stored.readModel, undefined);
+    assert.equal(stored.queryType, 'get');
+    const model = queries.find(
+      (query) => query.queryId === `${ns}:query.valuation_${local}`,
+    )!.readModel as {
+      capability: { targetId: string };
+      queries: Record<string, { targetId: string }>;
+    };
+    assert.equal(
+      model.capability.targetId,
+      'northstar.inventory:capability.valuation',
+    );
+    assert.ok(
+      Object.values(model.queries).every(
+        (dependency) =>
+          !queries.find((query) => query.queryId === dependency.targetId)!
+            .readModel,
+      ),
+    );
+  }
+});
