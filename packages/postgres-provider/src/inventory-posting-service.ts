@@ -10438,7 +10438,7 @@ async function validateReceiptReplay(
   idempotencyKey: string,
   client: PoolClient,
 ): Promise<InventoryPostingResultV1> {
-  // Versions 5, 7 and 8 include authorization evidence in their immutable
+  // Versions 4, 5, 7 and 8 include authorization evidence in their immutable
   // preimage. Reconstruct that historical evidence, not today's policy
   // revision. The gateway still authorizes every retry against current
   // grants before here. No business input is replaced, and no recorded
@@ -10528,16 +10528,25 @@ async function persistAdditionalReceipt(
 
 /**
  * Whether a receipt digest of this version covers the caller's authorization
- * evidence: versions 5 (a receipt), 7 (a customer return) and 8 (a vendor
- * return). A receipt of such a version is digested with the evidence of the
- * invocation it records, whether it is replayed (`validateReceiptReplay`) or
- * stored for another key (`persistAdditionalReceipt`).
+ * evidence: versions 4 (a stock count), 5 (a receipt), 7 (a customer return)
+ * and 8 (a vendor return). A receipt of such a version is digested with the
+ * evidence of the invocation it records, whether it is replayed
+ * (`validateReceiptReplay`) or stored for another key
+ * (`persistAdditionalReceipt`).
  */
 function digestCoversAuthorization(
   version: number,
   posting: ParsedPosting,
 ): boolean {
   return (
+    // STOCK-COUNTS, review round 1: version 4 is the caller's command less
+    // its key and the derived identities (`callerStockCountInput`), so its
+    // authorization is in the preimage, and the count route rebuilds a
+    // retried Post with the policy version current at the retry. The
+    // preimage is unchanged; only the evidence it is computed with is the
+    // recorded invocation's.
+    (version === companionDerivedInventoryPostingInputDigestVersion &&
+      isStockCountPosting(posting)) ||
     (version === 5 && posting.postingRole === 'receipt') ||
     // RETURNS: a return's digest carries its authorization evidence too.
     (version === 7 && posting.postingRole === 'customerReturn') ||

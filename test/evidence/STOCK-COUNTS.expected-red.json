@@ -199,6 +199,24 @@
           "expected": "Return to counting is declared for a reviewed count that is not a reversal \\(SC-6\\)"
         }
       ]
+    },
+    {
+      "name": "count-replay-digest-uses-current-policy",
+      "claim": "C7 (defect 3, round 1). A version-4 stock-count receipt is digested with the authorization evidence of the invocation it records, so an unchanged Post retried under its key after the policy version changed replays instead of conflicting.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    (version === companionDerivedInventoryPostingInputDigestVersion &&\n      isStockCountPosting(posting)) ||\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "retried after a policy-version change"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count replay: an unchanged Post retried after a policy-version change replays its version-4 receipt",
+          "expected": "INVENTORY_POSTING_IDEMPOTENCY_CONFLICT: idempotency key \\S+ already names another posting"
+        }
+      ]
     }
   ]
 }
