@@ -421,7 +421,11 @@ async function journey(
     await expect(page.getByRole('status')).toContainText(
       'Do not submit this operation again',
     );
-    await expect(page.locator('form')).toHaveCount(0);
+    // The LOCAL_DEMO identity switch is a shell form, not a retry of the
+    // committed effect. The business page must still expose no form at all.
+    const businessPage = page.getByRole('main');
+    await expect(businessPage).toBeVisible();
+    await expect(businessPage.locator('form')).toHaveCount(0);
     await expect(
       page.getByRole('button', { name: /Post|Retry|Submit/u }),
     ).toHaveCount(0);
