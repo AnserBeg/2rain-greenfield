@@ -155,8 +155,8 @@
       "name": "return-replay-hashes-current-policy",
       "claim": "B7. A customer-return retry is digested with the recorded invocation's own policy evidence, so a retry under a later policy revision replays instead of conflicting.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
-      "original": "receipt.input_digest_version === 7 &&",
-      "replacement": "receipt.input_digest_version === -7 &&",
+      "original": "    (version === 7 && posting.postingRole === 'customerReturn') ||\n",
+      "replacement": "    (version === -7 && posting.postingRole === 'customerReturn') ||\n",
       "test": {
         "files": ["test/postgres/customer-return.test.ts"]
       },
@@ -336,8 +336,8 @@
       "name": "vendor-return-replay-hashes-current-policy",
       "claim": "V7. A vendor-return retry is digested with the recorded invocation's own policy evidence, so a retry under a later policy revision replays instead of conflicting.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
-      "original": "receipt.input_digest_version === 8 &&",
-      "replacement": "receipt.input_digest_version === -8 &&",
+      "original": "    (version === 8 && posting.postingRole === 'vendorReturn')\n",
+      "replacement": "    (version === -8 && posting.postingRole === 'vendorReturn')\n",
       "test": {
         "files": ["test/postgres/vendor-return.test.ts"]
       },
@@ -346,6 +346,49 @@
           "file": "test/postgres/vendor-return.test.ts",
           "name": "V7 the same key with a changed vendor return conflicts; a duplicate delivery posts once",
           "expected": "INVENTORY_POSTING_IDEMPOTENCY_CONFLICT"
+        }
+      ]
+    },
+    {
+      "name": "additional-receipt-hashes-current-policy",
+      "claim": "B7, V7 (review round 1). A receipt stored for a new key whose posting replays a posted document by its natural effect is digested with the authorization evidence of the invocation it records, keeping the caller's business fields, so a duplicate of that key replays after the policy evidence changed instead of conflicting.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  const storedDigest = digestCoversAuthorization(inputDigest.version, posting)\n",
+      "replacement": "  const storedDigest = digestCoversAuthorization(-inputDigest.version, posting)\n",
+      "test": {
+        "files": [
+          "test/postgres/customer-return.test.ts",
+          "test/postgres/vendor-return.test.ts"
+        ]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customer-return.test.ts",
+          "name": "B7 the same key with a changed return conflicts; a duplicate delivery posts once",
+          "expected": "INVENTORY_POSTING_IDEMPOTENCY_CONFLICT: idempotency key \\S+ already names another posting"
+        },
+        {
+          "file": "test/postgres/vendor-return.test.ts",
+          "name": "V7 the same key with a changed vendor return conflicts; a duplicate delivery posts once",
+          "expected": "INVENTORY_POSTING_IDEMPOTENCY_CONFLICT: idempotency key \\S+ already names another posting"
+        }
+      ]
+    },
+    {
+      "name": "additional-receipt-hashes-current-policy-for-receipts",
+      "claim": "The same rule for a goods receipt's digest version 5, on the shared additional-receipt path: A receipt stored for a new key whose posting replays a posted document by its natural effect is digested with the authorization evidence of the invocation it records, keeping the caller's business fields, so a duplicate of that key replays after the policy evidence changed instead of conflicting.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  const storedDigest = digestCoversAuthorization(inputDigest.version, posting)\n",
+      "replacement": "  const storedDigest = digestCoversAuthorization(-inputDigest.version, posting)\n",
+      "test": {
+        "files": ["test/postgres/inventory-posting.test.ts"],
+        "namePattern": "RECEIPT posts"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-posting.test.ts",
+          "name": "RECEIPT posts atomically, refuses over-receipt across locations, and preserves correction history",
+          "expected": "INVENTORY_POSTING_IDEMPOTENCY_CONFLICT: idempotency key \\S+ already names another posting"
         }
       ]
     }
