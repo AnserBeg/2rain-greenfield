@@ -76,6 +76,7 @@ import {
   type RequestRuntimeView,
   type RuntimeProjection,
 } from '../../packages/runtime/src/request-runtime-view.js';
+import { assertComposedInventoryCollection } from '../helpers/assert-composed-inventory.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 const migrations = resolve('db/migrations');
@@ -343,7 +344,6 @@ test('draft transaction and terminal stock-count evidence is enforced by the rea
             recordId: admittedTransactionId,
             relations: {},
             values: requiredOperationValues(transaction, {
-              [fieldId('inventory_transaction_number')]: 'DRAFT-CANDIDATE',
               [fieldId('inventory_transaction_state')]: optionId(
                 'inventory_transaction_state_draft',
               ),
@@ -368,8 +368,6 @@ test('draft transaction and terminal stock-count evidence is enforced by the rea
                 recordId: randomUUID(),
                 relations: {},
                 values: requiredOperationValues(transaction, {
-                  [fieldId('inventory_transaction_number')]:
-                    `FORGED-${terminalState.toUpperCase()}`,
                   [fieldId('inventory_transaction_state')]: optionId(
                     `inventory_transaction_state_${terminalState}`,
                   ),
@@ -389,8 +387,11 @@ test('draft transaction and terminal stock-count evidence is enforced by the rea
           'inventory_transaction_update',
           {
             expectedRevision: 1,
+            // The number is the server's (INVENTORY-PARITY), so the ordinary
+            // edit is the narrative.
             patch: {
-              [fieldId('inventory_transaction_number')]: 'DRAFT-REWRITE',
+              [fieldId('inventory_transaction_reason_narrative')]:
+                'DRAFT-REWRITE',
             },
             recordId: transactionId,
           },
@@ -933,7 +934,10 @@ async function invokeOperation(
 
 function inventoryApplicationDefinition(): Record<string, unknown> {
   const application = composedApplicationDefinition();
-  const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE);
+  // As the product mounts it: with stock documents (INVENTORY-PARITY).
+  const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE, {
+    documentEntry: true,
+  });
   for (const collection of [
     'assertions',
     'entities',
@@ -947,15 +951,12 @@ function inventoryApplicationDefinition(): Record<string, unknown> {
     'surfaces',
   ] as const) {
     const composed = application[collection] as unknown[];
-    for (const entry of inventory[collection] as unknown[]) {
-      assert.equal(
-        composed.filter(
-          (candidate) => JSON.stringify(candidate) === JSON.stringify(entry),
-        ).length,
-        1,
-        `composed application must contain each inventory ${collection} entry exactly once`,
-      );
-    }
+    assertComposedInventoryCollection(
+      collection,
+      composed,
+      inventory[collection] as unknown[],
+      APPLICATION_NAMESPACE,
+    );
   }
   const inventoryModule = (
     inventory.modules as Array<Record<string, unknown>>
@@ -1038,7 +1039,13 @@ function requiredOperationValues(
 ): Record<string, ImmutableJsonValue> {
   return Object.fromEntries(
     entity.columns
-      .filter((column) => column.fieldContract.required)
+      .filter(
+        (column) =>
+          column.fieldContract.required &&
+          // The server assigns a transaction's number (INVENTORY-PARITY); no
+          // request supplies it.
+          column.canonicalFieldId !== fieldId('inventory_transaction_number'),
+      )
       .map((column) => [
         column.canonicalFieldId,
         Object.hasOwn(overrides, column.canonicalFieldId)

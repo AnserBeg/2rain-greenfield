@@ -165,7 +165,9 @@ This decision does not authorize:
 - valuation, receipt cost, currency, price, monetary amount, or any other
   monetary artifact;
 - purchasing, mutable balances, or a second posting implementation;
-- an HTTP route, UI binding, top-level agent tool, or import path;
+- an HTTP route, UI binding, top-level agent tool, or import path (amended
+  2026-09-30: now "a top-level agent tool or import path" -- see *Amendment
+  2026-09-30* below);
 - a change to the stock identity, its lock derivation, or
   `stock-serializer.ts`; or
 - release-persisted capability admission or the still-deferred policy kernel.
@@ -222,3 +224,27 @@ unversioned receipt and monetary-scan findings. The orchestrator adjudicated
 both findings as correct. The uncommitted round-4 changes address those two
 findings and the approval observation gap, but have not yet been frozen,
 PostgreSQL-gated, matrix-gated, or re-reviewed.
+
+## Amendment 2026-09-30 — INVENTORY-PARITY: transfers reach the posting route (owner ruling R4, 2026-09-30)
+
+The Boundaries bullet "an HTTP route, UI binding, top-level agent tool, or
+import path" now reads "a top-level agent tool or import path". Transfer is
+admitted through exactly one route: the registered capability operation
+`inventory_transaction_post` (tier o1, `confirmation: humanRequired`,
+precondition state = draft), run by the sole Inventory adapter
+`INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY`.
+
+That adapter reads the stored draft and dispatches on its stored type:
+`adjustment` to `postAdjustment`, `transfer` to `postTransfer`. It refuses every
+other type with its declared verification refusal, "only adjustment and
+transfer drafts are admitted by this route". The UI binding is the inventory
+transaction draft editor (draft state only) and that operation's command on the
+saved record.
+
+The route decides no transfer rule of its own. Validation, the two legs, the
+stock-identity lock order, the negative-stock and reservation refusals, the
+reason/approval/backdate/period decisions and the v2 receipt digest all remain
+the kernel's, unchanged. Stock-count posting stays unauthorized.
+
+The Consequences sentence "It is not externally wired" is withdrawn for this
+route only. Admission still rests on the current upstream ALLOW decision.

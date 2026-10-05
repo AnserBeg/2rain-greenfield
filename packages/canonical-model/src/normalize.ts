@@ -1,3 +1,10 @@
+import {
+  validateSurfaceCompositions,
+  normalizeSurfaceComposition,
+} from './surface-composition.js';
+import { validateSurfaceLists } from './surface-list.js';
+import { validateFieldNumbering } from './field-numbering.js';
+import { validateSurfaceWorkspaces } from './surface-workspace.js';
 import { ZodError } from 'zod';
 
 import { canonicalize } from './canonicalize.js';
@@ -35,6 +42,7 @@ import {
   type V3NormalizedApplicationPackage,
   type V4AuthoredApplicationPackage,
   type V5AuthoredApplicationPackage,
+  type V6AuthoredApplicationPackage,
   type V4NormalizedApplicationPackage,
   type VersionedAuthoredApplicationPackage,
   type VersionedNormalizedApplicationPackage,
@@ -64,7 +72,8 @@ function authoredHasV3Families(
 ): authored is
   | V3AuthoredApplicationPackage
   | V4AuthoredApplicationPackage
-  | V5AuthoredApplicationPackage {
+  | V5AuthoredApplicationPackage
+  | V6AuthoredApplicationPackage {
   return languageHasV3Features(authored.languageVersion);
 }
 
@@ -143,6 +152,10 @@ export function parseNormalizedApplicationPackageJson(
   }
   enforceFamilyBounds(normalized);
   validateSemantics(normalized);
+  validateSurfaceCompositions(normalized);
+  validateSurfaceWorkspaces(normalized);
+  validateSurfaceLists(normalized);
+  validateFieldNumbering(normalized);
   enforceValueBounds(normalized);
   validateNormalizedDerivation(normalized);
   return deepFreeze(normalized);
@@ -367,6 +380,9 @@ export function normalizeApplicationPackage(
     })),
     surfaces: authored.surfaces.map((entry) => ({
       ...entry,
+      ...('composition' in entry && entry.composition
+        ? { composition: normalizeSurfaceComposition(entry.composition) }
+        : {}),
       lifecycle: entry.lifecycle ?? IMMUTABLE_DEFAULTS_V0.lifecycle,
       slots: sortByOrderAndId(entry.slots, 'slotId'),
       statusRoles: sortedStrings(entry.statusRoles),
@@ -452,6 +468,10 @@ export function normalizeApplicationPackage(
     throw error;
   }
   validateSemantics(normalized);
+  validateSurfaceCompositions(normalized);
+  validateSurfaceWorkspaces(normalized);
+  validateSurfaceLists(normalized);
+  validateFieldNumbering(normalized);
   enforceValueBounds(normalized);
   const normalizedBytes = new TextEncoder().encode(canonicalize(normalized));
   if (
@@ -2236,7 +2256,8 @@ function languageHasV2Features(
     featureLevel === 'v2' ||
     featureLevel === 'v3' ||
     featureLevel === 'v4' ||
-    featureLevel === 'v5'
+    featureLevel === 'v5' ||
+    featureLevel === 'v6'
   );
 }
 

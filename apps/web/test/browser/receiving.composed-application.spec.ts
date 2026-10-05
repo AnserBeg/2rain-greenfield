@@ -10,6 +10,7 @@ import { governedStorageTarget } from '../../../../test/helpers/governed-storage
 import {
   receiptBinding,
   receiptColumn,
+  receiptRelation,
   receiptTable,
   quoteReceiptIdentifier as q,
 } from '../../../../packages/postgres-provider/src/goods-receipt.js';
@@ -69,14 +70,22 @@ async function journey(
       queryId: string;
       legalEntityScope?: { operand: { parameterId: string } };
     }[];
+    surfaces: { surfaceId: string; dataSource?: { targetId: string } }[];
   };
   function url(
     local: string,
     role: 'form' | 'detail',
     recordId?: string,
   ): string {
+    // A page scopes by the query it reads: a purchase order page reads its
+    // totals query (PURCHASING-PARITY), other records their own get.
+    const source =
+      definition.surfaces.find(
+        (candidate) =>
+          candidate.surfaceId === `northstar.app:surface.${local}_${role}`,
+      )?.dataSource?.targetId ?? `northstar.app:query.${local}_get`;
     const query = definition.queries.find(
-      (candidate) => candidate.queryId === `northstar.app:query.${local}_get`,
+      (candidate) => candidate.queryId === source,
     );
     if (!query?.legalEntityScope)
       throw new Error(`Missing scoped query: ${local}`);
@@ -95,7 +104,6 @@ async function journey(
       'Line number': 'line_number',
       'Item id': 'item_id',
       'Ordered quantity': 'ordered_quantity',
-      'Receipt number': 'number',
       'Received at': 'effective_at',
       'Receiving location': 'location_id',
       'Reason code': 'reason_code',
@@ -133,6 +141,18 @@ async function journey(
     await expect(page.getByRole('status')).toContainText('Create complete');
     return id;
   }
+  // The vendor picker offers only parties with an active supplier role.
+  await page.goto(
+    `${baseUrl}/?${new URLSearchParams({ surface: 'northstar.app:surface.party_role_form' })}`,
+  );
+  await page
+    .locator('select[name="value:northstar.app:field.party_role_kind"]')
+    .selectOption('northstar.app:option.supplier');
+  await page
+    .locator('select[name="value:northstar.app:field.party_role_status"]')
+    .selectOption('northstar.app:option.active');
+  await relation('party_role_party', '71000000-0000-4000-8000-000000000001');
+  await save();
   const suffix = randomUUID().slice(0, 8);
   await page.goto(url('purchase_order', 'form'));
   await expect(
@@ -140,27 +160,57 @@ async function journey(
       '[name="value:northstar.app:derived_state_field.machine.purchase_order_lifecycle"]',
     ),
   ).toHaveCount(0);
-  await fill('Number', `RECEIPT-PO-${suffix}`);
-  await fill('Supplier party', 'local-receiving-supplier');
-  await fill('Order date', new Date().toISOString());
-  await fill('Currency', 'CAD');
-  const orderId = await save();
-  await page.goto(url('purchase_order_line', 'form'));
-  await fill('Line number', '1');
-  await fill('Item id', itemId);
-  await fill('Ordered quantity', '5');
-  await relation('purchase_order_line_order', orderId);
-  const orderLineId = await save();
+  // Draft-editor pickers: type into the field's combobox and choose an offered
+  // result -- in place with the owned script, as ordinary submits without it --
+  // then wait for the field to show the selection before the next step.
+  const pick = async (name: string, term: string, option: string) => {
+    const box = page.getByRole('combobox', { name, exact: true });
+    await box.fill(term);
+    if (!(await page.locator('body[data-reference-enhanced]').count()))
+      await page
+        .locator('[data-reference-control]')
+        .filter({ has: box })
+        .getByRole('button', { name: 'Search', exact: true })
+        .click();
+    await page
+      .getByRole('option')
+      .filter({ has: page.locator('strong', { hasText: option }) })
+      .first()
+      .click();
+    await expect(
+      page.getByRole('combobox', { name, exact: true }),
+    ).toHaveAttribute('data-selected-label', option);
+  };
+  // The order number is assigned by the server on first save.
+  await page
+    .getByLabel('Order date (UTC) *')
+    .fill(new Date().toISOString().slice(0, 16));
+  await pick('Vendor', 'Alpine', 'Alpine Office Supply');
+  await expect(page.getByLabel('Currency *')).toHaveValue('CAD');
+  await pick('Line 1 product', 'OFF-100', 'Field notebook');
+  await page.getByLabel('Line 1 quantity', { exact: true }).fill('5');
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(page).toHaveURL(/purchase_order_detail/u);
+  const orderNumber = (
+    await page.locator('.composition-header h1').innerText()
+  ).trim();
+  expect(orderNumber).toMatch(/^PO-\d{6}$/u);
+  const orderId = new URL(page.url()).searchParams.get('record')!;
+  const orderLine = page
+    .locator('[data-composition-dataset$="dataset.purchasing_lines"] tbody tr')
+    .filter({ hasText: 'Field notebook' });
+  const orderLineId = (await orderLine.getAttribute('data-record-id'))!;
+  expect(orderLineId).toBeTruthy();
   const orderUrl = url('purchase_order', 'detail', orderId);
-  await page.goto(orderUrl);
+  await page.locator('.composition-record-actions > summary').click();
   await page.getByRole('button', { name: 'Release', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Release complete');
-  const progress = page.locator(`[data-order-line="${orderLineId}"]`);
-  await expect(progress.locator('td')).toHaveText([itemId, '5', '0', '5']);
-  await page
-    .getByRole('link', { name: 'Create goods receipt', exact: true })
-    .click();
-  await fill('Receipt number', `RECEIPT-GR-${suffix}`);
+  await expectOrderProgress('5', '0', '5');
+  // The receipt number is assigned by the server on first save.
+  await page.goto(url('goods_receipt', 'form'));
+  await expect(page.getByLabel('Receipt number', { exact: false })).toHaveCount(
+    0,
+  );
   await page
     .getByRole('combobox', { name: 'State', exact: true })
     .selectOption({ label: 'draft' });
@@ -174,6 +224,8 @@ async function journey(
   await relation('goods_receipt_order', orderId);
   const receiptId = await save();
   await page.goto(url('goods_receipt', 'detail', receiptId));
+  const receiptNumber = (await page.locator('h1').first().innerText()).trim();
+  expect(receiptNumber).toMatch(/^RCV-\d{6}$/u);
   await page
     .getByRole('link', { name: 'Add receipt line', exact: true })
     .click();
@@ -237,7 +289,10 @@ async function journey(
     ).toHaveCount(1);
     expect(await deniedPosts()).toBe(deniedBefore + 1);
     await page.goto(orderUrl);
-    await expect(progress.locator('td')).toHaveText([itemId, '5', '0', '5']);
+    await expectOrderProgress('5', '0', '5');
+    await expect(
+      page.locator('[data-composition-dataset$="dataset.purchasing_receipts"]'),
+    ).toContainText(receiptNumber);
   } finally {
     await pool.query(
       `UPDATE platform.current_policy_permission_grants SET revoked_at=NULL WHERE ${grantWhere}`,
@@ -254,11 +309,11 @@ async function journey(
     .click();
   await page
     .getByRole('link', {
-      name: `Open Purchase order RECEIPT-PO-${suffix}`,
+      name: `Open Purchase orders ${orderNumber}`,
       exact: true,
     })
     .click();
-  await expect(progress.locator('td')).toHaveText([itemId, '5', '3', '2']);
+  await expectOrderProgress('5', '3', '2');
   console.log(
     `RECEIVING_AUTHORIZED_WALKTHROUGH ${JSON.stringify({ orderUrl, receiptUrl: url('goods_receipt', 'detail', receiptId), ordered: '5', received: '3', remaining: '2', revokedPostDenied: true })}`,
   );
@@ -282,7 +337,7 @@ async function journey(
   await command('Amend');
   await expect(page.getByRole('status')).toContainText('Amend complete');
   await page.goto(orderUrl);
-  await expect(progress.locator('td')).toHaveText([itemId, '3', '3', '0']);
+  await expectOrderProgress('3', '3', '0');
 
   const originalMovements = await movementsFor(receiptId);
   expect(originalMovements).toHaveLength(1);
@@ -295,11 +350,9 @@ async function journey(
   await page.goto(orderUrl);
   await command('Close');
   await expect(page.getByRole('status')).toContainText('Close complete');
-  await expect(
-    page.locator(
-      '[data-field-id="northstar.app:derived_state_field.machine.purchase_order_lifecycle"]',
-    ),
-  ).toContainText('purchase_order_closed');
+  await expect(page.locator('.composition-business-status')).toHaveText(
+    'Closed',
+  );
   // A staged correction cannot execute while its order is closed.
   await page.goto(url('goods_receipt', 'detail', correctionId));
   await command('Post');
@@ -314,7 +367,7 @@ async function journey(
   await command('Post');
   await expect(page.getByRole('status')).toContainText('Post complete');
   await page.goto(orderUrl);
-  await expect(progress.locator('td')).toHaveText([itemId, '3', '2', '1']);
+  await expectOrderProgress('3', '2', '1');
   expect(await movementsFor(receiptId)).toEqual(originalMovements);
 
   const reversalId = await compensatingReceipt(
@@ -378,17 +431,44 @@ async function journey(
     );
   }
   await page.goto(orderUrl);
-  await expect(progress.locator('td')).toHaveText([itemId, '3', '0', '3']);
+  await expectOrderProgress('3', '0', '3');
   expect(await movementsFor(receiptId)).toEqual(originalMovements);
   console.log(
     `RECEIVING_LIFECYCLE_WALKTHROUGH ${JSON.stringify({ orderUrl, correctionUrl: url('goods_receipt', 'detail', correctionId), reversalUrl: url('goods_receipt', 'detail', reversalId), ordered: '3', received: '0', remaining: '3', committedReadBackWithheld: true })}`,
   );
 
   async function command(label: string) {
+    const secondary = page.locator(
+      '.composition-record-actions:not([open]) > summary',
+    );
+    if (await secondary.count()) await secondary.click();
     await page.getByRole('button', { name: label, exact: true }).click();
     await page
       .getByRole('button', { name: `Confirm ${label}`, exact: true })
       .click();
+  }
+  async function expectOrderProgress(
+    ordered: string,
+    received: string,
+    remaining: string,
+  ) {
+    const presentedLine = page.locator(
+      `[data-composition-dataset$="dataset.purchasing_lines"] tbody tr[data-record-id="${orderLineId}"]`,
+    );
+    await expect(
+      presentedLine.locator('td[data-column-label="Ordered"]'),
+    ).toHaveText(new RegExp(`^${ordered}(?:\\.0+)?$`, 'u'));
+    const binding = receiptBinding(await governedStorageTarget())!;
+    const result = await pool.query<{ quantity: string }>(
+      `SELECT ${q(receiptColumn(binding.received, 'purchase_order_received_received_quantity'))}::text AS quantity FROM ${receiptTable(binding.received)} WHERE ${q(receiptRelation(binding, binding.received, 'purchase_order_received_order_line'))}=$1 AND archived_at IS NULL`,
+      [orderLineId],
+    );
+    const observedReceived = result.rows[0]?.quantity ?? '0';
+    expect([ordered, observedReceived, remaining].map(Number)).toEqual([
+      Number(ordered),
+      Number(received),
+      Number(ordered) - Number(received),
+    ]);
   }
   async function compensatingReceipt(
     kind: 'correction' | 'reversal',
@@ -396,7 +476,6 @@ async function journey(
     movement: string,
   ) {
     await page.goto(url('goods_receipt', 'form'));
-    await fill('Receipt number', `RECEIPT-${kind}-${suffix}`);
     await page
       .getByRole('combobox', { name: 'State', exact: true })
       .selectOption({ label: 'draft' });

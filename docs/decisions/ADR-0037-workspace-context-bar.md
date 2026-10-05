@@ -1,5 +1,17 @@
 # ADR-0037: The workspace context bar
 
+**Owner-approved amendment, 2026-09-15 — RAIN-ORDER-ENTRY.** A declared browser
+workspace-entry policy evaluates current authorized active companies over trusted
+identity. One company enters automatically; several reuse a currently valid
+principal/tenant/environment preference or offer a choice; none show access/setup
+guidance. Preference is advisory and never authority. Entry materializes explicit
+scope in the URL before reads/forms/navigation. Explicit invalid scope refuses.
+Existing document URLs, draft buffers, prepared tasks and retries stay pinned;
+switching company opens the owning List and cannot retarget another tab's work.
+The never-remember/never-select passages below describe the former policy and
+continue only as the fallback for surfaces without a declared entry policy.
+Raw unscoped semantic calls and jobs/agents still require explicit operands.
+
 Date: 2026-07-31
 Status: accepted — ruled by the orchestrator on a bridge request from
 `G3-P6b-1`, which stopped before authoring rather than inventing vocabulary.

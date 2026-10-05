@@ -36,8 +36,10 @@ const LEGAL_ENTITY_FAMILY_RULES = Object.freeze([
   { classification: 'tenantShared', familyId: 'legal_entity' },
   { classification: 'tenantShared', familyId: 'party' },
   { classification: 'tenantShared', familyId: 'party_role' },
+  { classification: 'tenantShared', familyId: 'party_address' },
   { classification: 'tenantShared', familyId: 'item' },
   { classification: 'tenantShared', familyId: 'location' },
+  { classification: 'tenantShared', familyId: 'tax_code' },
   { classification: 'entityOwned', familyId: 'inventory_movement' },
   { classification: 'entityOwned', familyId: 'inventory_transaction' },
   { classification: 'entityOwned', familyId: 'inventory_transaction_line' },
@@ -56,6 +58,14 @@ const LEGAL_ENTITY_FAMILY_RULES = Object.freeze([
   { classification: 'entityOwned', familyId: 'shipment' },
   { classification: 'entityOwned', familyId: 'shipment_line' },
   { classification: 'entityOwned', familyId: 'sales_order_shipped' },
+  { classification: 'entityOwned', familyId: 'customer_invoice' },
+  { classification: 'entityOwned', familyId: 'customer_invoice_line' },
+  { classification: 'entityOwned', familyId: 'customer_payment' },
+  { classification: 'entityOwned', familyId: 'customer_credit' },
+  { classification: 'entityOwned', familyId: 'vendor_bill' },
+  { classification: 'entityOwned', familyId: 'vendor_bill_line' },
+  { classification: 'entityOwned', familyId: 'vendor_payment' },
+  { classification: 'entityOwned', familyId: 'vendor_credit' },
   { classification: 'entityOwned', familyId: 'stock_count' },
   { classification: 'entityOwned', familyId: 'stock_count_line' },
 ] as const);
@@ -200,6 +210,11 @@ const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
     targetFamilyId: 'party',
   },
   {
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'party_address',
+    targetFamilyId: 'party',
+  },
+  {
     semantics: 'sameEntity',
     sourceFamilyId: 'purchase_order_line',
     targetFamilyId: 'purchase_order',
@@ -281,6 +296,56 @@ const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
   },
   {
     semantics: 'sameEntity',
+    sourceFamilyId: 'customer_invoice',
+    targetFamilyId: 'sales_order',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'customer_invoice_line',
+    targetFamilyId: 'customer_invoice',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'customer_invoice_line',
+    targetFamilyId: 'sales_order_line',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'customer_payment',
+    targetFamilyId: 'customer_invoice',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'customer_credit',
+    targetFamilyId: 'customer_invoice',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_bill',
+    targetFamilyId: 'purchase_order',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_bill_line',
+    targetFamilyId: 'vendor_bill',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_bill_line',
+    targetFamilyId: 'purchase_order_line',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_payment',
+    targetFamilyId: 'vendor_bill',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_credit',
+    targetFamilyId: 'vendor_bill',
+  },
+  {
+    semantics: 'sameEntity',
     sourceFamilyId: 'inventory_transaction_line',
     targetFamilyId: 'inventory_transaction',
   },
@@ -303,6 +368,13 @@ const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
     semantics: 'sameEntity',
     sourceFamilyId: 'stock_count_line',
     targetFamilyId: 'inventory_transaction_line',
+  },
+  // LOCATIONS: a location inside another, such as a bin in its warehouse;
+  // both are shared by every company.
+  {
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'location',
+    targetFamilyId: 'location',
   },
 ] as const);
 const LEGAL_ENTITY_GOVERNED_PACKAGES = Object.freeze([

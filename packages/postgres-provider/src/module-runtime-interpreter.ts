@@ -4,6 +4,7 @@ import {
   PARAMETERIZED_PREDICATE_LOWERING_PLAN_VERSION,
   PREDICATE_LOWERING_PLAN_VERSION,
   PREDICATE_POSITION_PROFILE_VERSION,
+  VERIFICATION_SENTINEL_PREFIX,
   canonicalize,
   unicodeCaseFold,
   type CanonicalScalar,
@@ -59,9 +60,19 @@ import {
   encodeSharedListCursor,
   SHARED_LIST_RESULT_VERSION,
   SharedListContractError,
+  sharedListFigureKinds,
+  type AuthorizedSharedListProgress,
   type AuthorizedSharedListRelationLabel,
+  type AuthorizedSharedListReferenceLabel,
   type AuthorizedSharedListRequest,
+  type SharedListBeforeFilter,
   type SharedListCoverage,
+  type SharedListFigureOperand,
+  type SharedListFigureRelated,
+  type SharedListFigureSum,
+  type SharedListFigureThreshold,
+  type SharedListFigureWithin,
+  type SharedListSupply,
 } from '../../runtime/src/list-behavior/index.js';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 
@@ -105,6 +116,8 @@ interface MutationPreparation {
 interface RawRecord {
   archivedAt: Date | string | null;
   recordId: string;
+  /** The target record ids of the relations a get was asked to state. */
+  relationTargets?: Readonly<Record<string, string | null>>;
   revision: number;
   values: Readonly<Record<string, ImmutableJsonValue>>;
 }
@@ -185,6 +198,7 @@ export class PostgresModuleRuntimeInterpreter
   readonly #pinnedStorageTargets: ValidatedPinnedStorageTargetCache;
   readonly #providerErrorMappings: readonly ModuleProviderErrorMapping[];
   readonly #trust: PostgresTrustService;
+  readonly #documentNumbers: DocumentNumberMode;
 
   constructor(
     private readonly pool: Pool,
@@ -196,7 +210,9 @@ export class PostgresModuleRuntimeInterpreter
     observePinnedStorageTargetCache:
       | ((observation: PinnedStorageTargetCacheObservation) => void)
       | undefined = undefined,
+    options: { readonly documentNumbers?: DocumentNumberMode } = {},
   ) {
+    this.#documentNumbers = options.documentNumbers ?? 'sequence';
     this.#pinnedStorageTargets = new ValidatedPinnedStorageTargetCache(
       observePinnedStorageTargetCache,
     );
@@ -308,7 +324,7 @@ export class PostgresModuleRuntimeInterpreter
   async #executeOperation(
     request: SemanticOperationExecutionRequest,
   ): Promise<SemanticOperationResultEnvelope> {
-    const input = parseMutationInput(request.definition, request.input);
+    const parsedInput = parseMutationInput(request.definition, request.input);
     const actor = await this.actorIssuer.issue(request.context);
     const receipt = await this.#trust.executeIdempotentAcceptedMutation(
       request.context,
@@ -332,7 +348,7 @@ export class PostgresModuleRuntimeInterpreter
         assertOperationSystemInputStorageContract(
           request.definition,
           currentEntity,
-          input,
+          parsedInput,
         );
         return withModuleRuntimeRole(client, async () => {
           try {
@@ -341,7 +357,16 @@ export class PostgresModuleRuntimeInterpreter
               currentStorage,
               currentEntity,
               request.definition,
-              input,
+              parsedInput,
+            );
+            // Assigned before the change is prepared, so the change document
+            // records the number the record is created with.
+            const input = await assignDocumentNumbers(
+              client,
+              currentEntity,
+              request.definition,
+              parsedInput,
+              this.#documentNumbers,
             );
             const preparation = await prepareMutation(
               client,
@@ -743,6 +768,123 @@ async function executeMutationOnClient(
   return toDto(entity, record, readBackSelections);
 }
 
+/**
+ * `sequence` assigns real document numbers; `verificationSentinel` is used only
+ * by release verification, whose arranged records must not consume them.
+ */
+export type DocumentNumberMode = 'sequence' | 'verificationSentinel';
+
+/**
+ * The number a numbered field takes in `verificationSentinel` mode: the
+ * sentinel prefix, a hyphen and the hexadecimal SHA-256 of the record id and
+ * the field, cut to the column's length. It depends on nothing the create
+ * decides, so release verification knows the number of a record it arranged
+ * even when no read of that record selects the field.
+ */
+export function verificationSentinelNumber(
+  recordId: string,
+  fieldId: string,
+  maximumLength: number | null,
+): string {
+  const sentinel = `${VERIFICATION_SENTINEL_PREFIX}-${createHash('sha256')
+    .update(recordId, 'utf8')
+    .update(Uint8Array.of(0))
+    .update(fieldId, 'utf8')
+    .digest('hex')}`;
+  return maximumLength === null ? sentinel : sentinel.slice(0, maximumLength);
+}
+
+/**
+ * A create's server-assigned document numbers (canonical field `numbering`):
+ * the next value of each named sequence per tenant and environment. One
+ * allocator runs at a time per sequence -- the transaction-scoped lock is held
+ * to commit, so concurrent creates serialize and a rolled-back create gives
+ * its number back. The next value follows the highest existing number of that
+ * prefix among ALL of the tenant's records, archived and in every company,
+ * whatever its digit count (leading zeros included), so a number is never
+ * reused. Stored values are read through the business key's own fold -- its
+ * stored folded companion, the column its unique index covers -- so a value
+ * the key equates with the next number (`ſO-000016` and `SO-000016`) is
+ * counted without folding every row again; the key's unique index, over live
+ * records of its scope, remains the backstop. A next number that no longer fits
+ * its field refuses by name. A replay of the same idempotency key never reaches
+ * this, so a retry keeps its number.
+ */
+async function assignDocumentNumbers(
+  client: PoolClient,
+  entity: StorageEntity,
+  definition: SemanticOperationExecutionRequest['definition'],
+  input: MutationInput,
+  mode: DocumentNumberMode,
+): Promise<MutationInput> {
+  const assigned =
+    definition.effect.kind === 'createRecordEffect'
+      ? (definition.inputContract?.assignedFields ?? [])
+      : [];
+  if (assigned.length === 0) return input;
+  const patch: Record<string, ImmutableJsonValue> = { ...input.patch };
+  for (const field of assigned) {
+    if (Object.hasOwn(patch, field.fieldId))
+      throw failure(
+        'MODULE_FIELD_UNSUPPORTED',
+        'an assigned document number is not an operation input',
+        field.fieldId,
+      );
+    const column = entity.columns.find(
+      (candidate) => candidate.canonicalFieldId === field.fieldId,
+    );
+    if (!column || column.fieldContract.fieldKind !== 'textFieldType')
+      throw failure(
+        'MODULE_FIELD_UNSUPPORTED',
+        'an assigned document number has no compiled text column',
+        field.fieldId,
+      );
+    if (mode === 'verificationSentinel') {
+      // Release verification arranges records to exercise a release; it asks
+      // no business question and must not consume a tenant's document numbers.
+      // Its number is a `V-` sentinel hashed from the record id and field, at
+      // least 64 bits of it (the numbering contract's width floor), so
+      // arranged records collide only with negligible probability. No sequence
+      // may use the prefix (the contract reserves it), so a sentinel is never a
+      // business number.
+      patch[field.fieldId] = verificationSentinelNumber(
+        input.recordId,
+        field.fieldId,
+        column.fieldContract.bounds.maximumLength,
+      );
+      continue;
+    }
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended(
+         north_star_internal.trusted_tenant_id()::text || ':' ||
+         north_star_internal.trusted_environment_id()::text || ':' || $1, 0))`,
+      [field.sequenceId],
+    );
+    const highest = await client.query<{ highest: string | null }>(
+      `SELECT max(((regexp_match(${foldedColumnSql(entity, column)}, $1))[1])::numeric)::text AS highest
+         FROM north_star_module.${quoted(entity.physicalTableName)}
+        WHERE tenant_id = north_star_internal.trusted_tenant_id()
+          AND environment_id = north_star_internal.trusted_environment_id()`,
+      [`^${unicodeCaseFold(field.prefix)}-([0-9]+)$`],
+    );
+    const observed = highest.rows[0]?.highest ?? null;
+    const next =
+      observed === null || BigInt(observed) < BigInt(field.start)
+        ? BigInt(field.start)
+        : BigInt(observed) + 1n;
+    const number = `${field.prefix}-${next.toString().padStart(field.minimumDigits, '0')}`;
+    const maximumLength = column.fieldContract.bounds.maximumLength;
+    if (maximumLength !== null && number.length > maximumLength)
+      throw failure(
+        'MODULE_DOCUMENT_SEQUENCE_EXHAUSTED',
+        'the next document number no longer fits its field',
+        field.fieldId,
+      );
+    patch[field.fieldId] = number;
+  }
+  return Object.freeze({ ...input, patch: Object.freeze(patch) });
+}
+
 async function insertRecord(
   client: PoolClient,
   storage: StorageTargetPayloadV1,
@@ -1130,15 +1272,39 @@ async function executeQueryOnClient(
   const entity = requiredEntity(storage, definition.sourceEntityId);
   const relationPlans =
     definition.queryType === 'list' && list
-      ? list.relationLabels.map((authorization, index) =>
-          listRelationPlan(storage, entity, authorization, index),
-        )
+      ? [
+          ...list.relationLabels.map((authorization, index) =>
+            listRelationPlan(storage, entity, authorization, index),
+          ),
+          ...(list.referenceLabels ?? []).map((reference, index) =>
+            listReferencePlan(
+              storage,
+              entity,
+              reference,
+              list.relationLabels.length + index,
+            ),
+          ),
+        ]
       : [];
+  const progressPlan =
+    definition.queryType === 'list' && list
+      ? listProgressPlan(storage, entity, list)
+      : null;
+  const figuresPlan =
+    definition.queryType === 'list' && list
+      ? listFiguresPlan(storage, entity, list)
+      : null;
   const readScope = await verifyLegalEntityReadScope(
     client,
     storage,
     request.legalEntityReadScope,
-    [entity, ...relationPlans.map((plan) => plan.target)],
+    [
+      entity,
+      ...relationPlans.map((plan) => plan.target),
+      ...(progressPlan ? [progressPlan.lines, progressPlan.done] : []),
+      ...(progressPlan?.supply?.entities ?? []),
+      ...(figuresPlan?.entities ?? []),
+    ],
   );
   if (definition.queryType === 'aggregate') {
     return executeAggregateQuery(
@@ -1163,6 +1329,11 @@ async function executeQueryOnClient(
   switch (definition.queryType) {
     case 'get': {
       const recordId = requiredUuid(args.recordId, 'recordId');
+      const targets = relationTargetPlans(
+        storage,
+        entity,
+        args.relationTargets,
+      );
       const record = await loadScopedRawRecord(
         client,
         entity,
@@ -1170,12 +1341,19 @@ async function executeQueryOnClient(
         includeArchived,
         filterPlans,
         readScope,
+        targets,
       );
       records = record ? [record] : [];
       return queryResult(
         definition.queryId,
         records.length === 1 ? 'exact' : 'not-found',
-        records.map((entry) => toDto(entity, entry, definition.selections)),
+        records.map((entry) =>
+          withRelationTargets(
+            toDto(entity, entry, definition.selections),
+            entry,
+            targets,
+          ),
+        ),
         null,
       );
     }
@@ -1190,6 +1368,9 @@ async function executeQueryOnClient(
           relationPlans,
           readScope,
           parentScopePlan(storage, entity, list),
+          relatedFilterPlan(storage, entity, list),
+          progressPlan,
+          figuresPlan,
         );
       }
       const limit = boundedLimit(args.limit, definition.maximumResultCount);
@@ -2027,11 +2208,19 @@ async function listRecords(
 }
 
 interface ListRelationPlan {
-  readonly authorization: AuthorizedSharedListRelationLabel;
   readonly labelColumn: StorageEntity['columns'][number];
   readonly labelAlias: string;
+  /** The relation id or reference id the label is reported and sorted under. */
+  readonly labelId: string;
   readonly recordAlias: string;
-  readonly relation: StorageTargetPayloadV1['relations'][number];
+  /**
+   * The source column joined to the target's record id: a compiled relation
+   * column (uuid), or -- for a reference label -- a text field that stores a
+   * record id, compared as text so a malformed value finds no label rather
+   * than failing the whole list.
+   */
+  readonly sourceColumn: string;
+  readonly sourceIsText: boolean;
   readonly tableAlias: string;
   readonly target: StorageEntity;
 }
@@ -2039,6 +2228,1152 @@ interface ListRelationPlan {
 interface ListParentScopePlan {
   readonly column: string;
   readonly recordId: string;
+}
+
+interface ListRelatedFilterPlan {
+  readonly related: StorageEntity;
+  readonly relationColumn: string;
+  readonly filters: readonly {
+    readonly column: StorageEntity['columns'][number];
+    readonly value: string;
+  }[];
+}
+
+interface ListProgressPlan {
+  readonly done: StorageEntity;
+  /** The done rows' column that holds a line's record id. */
+  readonly doneLineColumn: string;
+  readonly doneQuantityColumn: string;
+  readonly lines: StorageEntity;
+  /** The lines' column that holds the listed record's id. */
+  readonly linesParentColumn: string;
+  readonly linesQuantityColumn: string;
+  readonly openIn: {
+    readonly column: StorageEntity['columns'][number];
+    readonly values: readonly string[];
+  } | null;
+  readonly openOnly: boolean;
+  readonly outputs: {
+    readonly done: string;
+    readonly open: string;
+    readonly ordered: string;
+  };
+  /** What covers the lines and what they are short of (SUPPLY-WARNINGS). */
+  readonly supply: ListSupplyPlan | null;
+}
+
+interface ListSupplyPlan {
+  readonly coverage: {
+    readonly entity: StorageEntity;
+    /** The covering rows' column that holds a line's record id. */
+    readonly lineColumn: string;
+    /** What the related rows pointing at each covering row still hold. */
+    readonly related: FigureRelatedPlan;
+  };
+  /** The lines' text column holding the id of the item a line asks for. */
+  readonly itemColumn: string;
+  readonly free: {
+    readonly plus: readonly FigureSumPlan[];
+    readonly minus: readonly FigureSumPlan[];
+  };
+  readonly shortIn: {
+    readonly column: StorageEntity['columns'][number];
+    readonly values: readonly string[];
+  } | null;
+  readonly keep: 'covered' | 'short' | null;
+  readonly outputs: { readonly covered: string; readonly short: string };
+  /** Every entity the supply reads, for the read-scope verification. */
+  readonly entities: readonly StorageEntity[];
+}
+
+/**
+ * Resolves list progress against the PINNED COMPILED storage, never against
+ * caller input: the lines must be the queried entity's `parentScopedChild`
+ * children, the done rows must point at those lines, both quantities must be
+ * compiled exact decimal columns, and the open states a compiled column of the
+ * queried entity. Anything else fails closed rather than summing a column a
+ * request happened to name.
+ */
+function listProgressPlan(
+  storage: StorageTargetPayloadV1,
+  entity: StorageEntity,
+  list: AuthorizedSharedListRequest,
+): ListProgressPlan | null {
+  const requested = list.progress;
+  if (!list.query.progress) return null;
+  if (!requested)
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      'list progress reached the executor without authorization',
+      list.query.progress.lines.queryId,
+    );
+  const lines = requiredEntity(storage, requested.linesEntityId);
+  const done = requiredEntity(storage, requested.doneEntityId);
+  const toLines = storage.relations.find(
+    (candidate) =>
+      candidate.relationId === requested.lines.relationId &&
+      candidate.sourceEntityId === lines.entityId &&
+      candidate.targetEntityId === entity.entityId &&
+      candidate.ownership === 'parentScopedChild',
+  );
+  const toDone = storage.relations.find(
+    (candidate) =>
+      candidate.relationId === requested.done.relationId &&
+      candidate.sourceEntityId === done.entityId &&
+      candidate.targetEntityId === lines.entityId,
+  );
+  if (!toLines || !toDone)
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      'list progress does not match the compiled storage relations',
+      (toLines ? requested.done : requested.lines).relationId,
+    );
+  const quantity = (target: StorageEntity, fieldId: string) => {
+    const column = target.columns.find(
+      (candidate) => candidate.canonicalFieldId === fieldId,
+    );
+    if (!column || column.fieldContract.fieldKind !== 'exactDecimalFieldType')
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        'list progress sums a compiled exact decimal column',
+        fieldId,
+      );
+    return column.physicalName;
+  };
+  const states = requested.openIn;
+  const stateColumn = states
+    ? entity.columns.find(
+        (candidate) => candidate.canonicalFieldId === states.fieldId,
+      )
+    : undefined;
+  if (states && !stateColumn)
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      'list progress states name a compiled column of the queried entity',
+      states.fieldId,
+    );
+  return Object.freeze({
+    done,
+    doneLineColumn: toDone.relationColumn.physicalName,
+    doneQuantityColumn: quantity(done, requested.done.fieldId),
+    lines,
+    linesParentColumn: toLines.relationColumn.physicalName,
+    linesQuantityColumn: quantity(lines, requested.lines.fieldId),
+    openIn:
+      states && stateColumn
+        ? Object.freeze({ column: stateColumn, values: states.values })
+        : null,
+    openOnly: requested.openOnly === true,
+    outputs: requested.outputs,
+    supply: listSupplyPlan(storage, entity, lines, requested),
+  });
+}
+
+/**
+ * Resolves a progress supply (SUPPLY-WARNINGS) against the PINNED COMPILED
+ * storage, never against caller input: every query it reads was authorized
+ * by the gateway on this request; the covering rows point at the progress
+ * lines through a compiled relation and hold what their related rows still
+ * hold; the item is a compiled text column of the lines; each part of the
+ * free stock is a figure sum over rows holding the item's id; the short
+ * states are a compiled column of the listed entity. Anything else fails
+ * closed rather than adding up a column a request happened to name.
+ */
+function listSupplyPlan(
+  storage: StorageTargetPayloadV1,
+  entity: StorageEntity,
+  lines: StorageEntity,
+  progress: AuthorizedSharedListProgress,
+): ListSupplyPlan | null {
+  const supply: SharedListSupply | undefined = progress.supply;
+  if (!supply) return null;
+  const refuse = (subject: string, message: string): never => {
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      message,
+      subject,
+    );
+  };
+  if (!progress.supplyEntityIds)
+    return refuse(
+      supply.coverage.queryId,
+      'list supply reached the executor without authorization',
+    );
+  const { entities, entityOf, column, relatedPlan, sumPlan } =
+    figurePartsPlanner(storage, progress.supplyEntityIds, refuse);
+  const covering = entityOf(supply.coverage.queryId);
+  const toLine = storage.relations.find(
+    (candidate) =>
+      candidate.relationId === supply.coverage.relationId &&
+      candidate.sourceEntityId === covering.entityId &&
+      candidate.targetEntityId === lines.entityId,
+  );
+  if (!toLine)
+    return refuse(
+      supply.coverage.relationId,
+      'list supply coverage does not match the compiled storage relations',
+    );
+  const related = relatedPlan(supply.coverage.related, {
+    entity: covering,
+    matchColumn: toLine.relationColumn.physicalName,
+    quantityColumn: null,
+  });
+  const item = column(
+    lines,
+    supply.itemFieldId,
+    ['textFieldType'],
+    "list supply names a line's item by a compiled text column",
+  );
+  const part = (sum: (typeof supply.free.plus)[number]) =>
+    sumPlan(
+      sum,
+      "a supply sum matches a line's item by a compiled text column",
+    );
+  const states = supply.shortIn;
+  const stateColumn = states
+    ? entity.columns.find(
+        (candidate) => candidate.canonicalFieldId === states.fieldId,
+      )
+    : undefined;
+  if (states && !stateColumn)
+    return refuse(
+      states.fieldId,
+      'list supply short states name a compiled column of the queried entity',
+    );
+  const free = Object.freeze({
+    plus: Object.freeze(supply.free.plus.map(part)),
+    minus: Object.freeze(supply.free.minus.map(part)),
+  });
+  return Object.freeze({
+    coverage: Object.freeze({
+      entity: covering,
+      lineColumn: toLine.relationColumn.physicalName,
+      related,
+    }),
+    itemColumn: item.physicalName,
+    free,
+    shortIn:
+      states && stateColumn
+        ? Object.freeze({ column: stateColumn, values: states.values })
+        : null,
+    keep: supply.keep ?? null,
+    outputs: supply.outputs,
+    entities: Object.freeze([...entities.values()]),
+  });
+}
+
+const PROGRESS_ALIAS = 'table_progress';
+
+/**
+ * Per listed row, one lateral answer: the sum of its active lines' quantity,
+ * the sum of the active done rows of those same lines, and the open remainder
+ * between them -- zero outside the declared open states. It sits in FROM, so
+ * the count and the page read the same figures and `openOnly` filters before
+ * both. Every joined row is pinned to the listed row's tenant, environment and
+ * company, and conjoined with the issued read scope, as a relation label is.
+ */
+function listProgressFromSql(
+  entity: StorageEntity,
+  sourceAlias: string,
+  plan: ListProgressPlan,
+  readScope: VerifiedLegalEntityReadScope | null,
+  values: unknown[],
+): string {
+  const line = 'table_progress_line';
+  const done = 'table_progress_done';
+  const sameCompany = (
+    alias: string,
+    target: StorageEntity,
+    anchorAlias: string,
+    anchor: StorageEntity,
+  ) => {
+    const joined = legalEntityReadScopeRequirement(target);
+    const owner = legalEntityReadScopeRequirement(anchor);
+    return joined && owner
+      ? `
+          AND ${qualified(alias, joined.column)} = ${qualified(anchorAlias, owner.column)}`
+      : '';
+  };
+  const activeLines = () =>
+    `${qualified(line, 'tenant_id')} = ${qualified(sourceAlias, 'tenant_id')}
+          AND ${qualified(line, 'environment_id')} = ${qualified(sourceAlias, 'environment_id')}
+          AND ${qualified(line, plan.linesParentColumn)} = ${qualified(sourceAlias, entity.recordIdentity.column)}
+          AND ${qualified(line, plan.lines.archive.archivedAtColumn)} IS NULL${sameCompany(line, plan.lines, sourceAlias, entity)}${legalEntityReadScopeJoinConjunction(plan.lines, readScope, values, line)}`;
+  const ordered = `(SELECT coalesce(sum(${qualified(line, plan.linesQuantityColumn)}), 0)
+         FROM north_star_module.${quoted(plan.lines.physicalTableName)} AS ${quoted(line)}
+        WHERE ${activeLines()})`;
+  const recorded = `(SELECT coalesce(sum(${qualified(done, plan.doneQuantityColumn)}), 0)
+         FROM north_star_module.${quoted(plan.lines.physicalTableName)} AS ${quoted(line)}
+         JOIN north_star_module.${quoted(plan.done.physicalTableName)} AS ${quoted(done)}
+           ON ${qualified(done, 'tenant_id')} = ${qualified(line, 'tenant_id')}
+          AND ${qualified(done, 'environment_id')} = ${qualified(line, 'environment_id')}
+          AND ${qualified(done, plan.doneLineColumn)} = ${qualified(line, plan.lines.recordIdentity.column)}
+          AND ${qualified(done, plan.done.archive.archivedAtColumn)} IS NULL${sameCompany(done, plan.done, line, plan.lines)}${legalEntityReadScopeJoinConjunction(plan.done, readScope, values, done)}
+        WHERE ${activeLines()})`;
+  const totals = 'table_progress_totals';
+  const remainder = `${qualified(totals, 'ordered_total')} - ${qualified(totals, 'done_total')}`;
+  const open = plan.openIn
+    ? `CASE WHEN ${qualified(sourceAlias, plan.openIn.column.physicalName)}::text = ANY(${parameter(values, [...plan.openIn.values])}::text[]) THEN ${remainder} ELSE 0 END`
+    : remainder;
+  return `CROSS JOIN LATERAL (
+    SELECT ${qualified(totals, 'ordered_total')} AS ${quoted('ordered_total')},
+           ${qualified(totals, 'done_total')} AS ${quoted('done_total')},
+           ${open} AS ${quoted('open_total')}
+      FROM (SELECT ${ordered} AS ${quoted('ordered_total')},
+                   ${recorded} AS ${quoted('done_total')}) AS ${quoted(totals)}
+  ) AS ${quoted(PROGRESS_ALIAS)}`;
+}
+
+const SUPPLY_ALIAS = 'table_supply';
+
+/**
+ * Per listed row, one more lateral answer beside its progress (SUPPLY-
+ * WARNINGS, owner ruling R1): `covered`, what the covering rows of its active
+ * lines still hold through their related rows, each line counted at most for
+ * what it has open; and `short`, in the declared states, what the lines leave
+ * uncovered beyond their item's free stock now. A line's uncovered quantity
+ * is its quantity less its active done rows' less its coverage, never below
+ * zero; per item the free stock -- the plus sums less the minus sums over
+ * rows holding the item's id, never below zero -- is allocated to the row's
+ * uncovered quantity, and what is left is short. Allocated in line order,
+ * the lines of one item share the stock exactly so: their total short is
+ * what their total uncovered quantity exceeds it by. It sits in FROM, so the
+ * count, the page and the export read the same figures and a kept `covered`
+ * or `short` filters before all three. Every joined row is pinned to the
+ * listed row's tenant, environment and company and to the issued read scope.
+ */
+function listSupplyFromSql(
+  entity: StorageEntity,
+  sourceAlias: string,
+  progress: ListProgressPlan,
+  supply: ListSupplyPlan,
+  readScope: VerifiedLegalEntityReadScope | null,
+  values: unknown[],
+): string {
+  const line = 'table_supply_line';
+  const done = 'table_supply_done';
+  const cover = 'table_supply_cover';
+  const held = 'table_supply_held';
+  const lines = 'table_supply_lines';
+  const items = 'table_supply_items';
+  // The listed row's active lines -- exactly the ones its progress sums --
+  // each with its item, what it has open and what covers it.
+  const lineRows =
+    () => `SELECT ${qualified(line, supply.itemColumn)}::text AS ${quoted('item')},
+               ${qualified(line, progress.linesQuantityColumn)} - (SELECT coalesce(sum(${qualified(done, progress.doneQuantityColumn)}), 0)
+                  FROM north_star_module.${quoted(progress.done.physicalTableName)} AS ${quoted(done)}
+                 WHERE ${qualified(done, 'tenant_id')} = ${qualified(line, 'tenant_id')}
+                   AND ${qualified(done, 'environment_id')} = ${qualified(line, 'environment_id')}
+                   AND ${qualified(done, progress.doneLineColumn)} = ${qualified(line, progress.lines.recordIdentity.column)}
+                   AND ${qualified(done, progress.done.archive.archivedAtColumn)} IS NULL${sameCompanySql(done, progress.done, line, progress.lines)}${legalEntityReadScopeJoinConjunction(progress.done, readScope, values, done)}) AS ${quoted('open')},
+               (SELECT coalesce(sum(${figureRelatedTotalSql(
+                 supply.coverage.related,
+                 {
+                   entity: supply.coverage.entity,
+                   matchColumn: supply.coverage.lineColumn,
+                   quantityColumn: null,
+                 },
+                 cover,
+                 held,
+                 readScope,
+                 values,
+               )}), 0)
+                  FROM north_star_module.${quoted(supply.coverage.entity.physicalTableName)} AS ${quoted(cover)}
+                 WHERE ${qualified(cover, 'tenant_id')} = ${qualified(line, 'tenant_id')}
+                   AND ${qualified(cover, 'environment_id')} = ${qualified(line, 'environment_id')}
+                   AND ${qualified(cover, supply.coverage.lineColumn)} = ${qualified(line, progress.lines.recordIdentity.column)}
+                   AND ${qualified(cover, supply.coverage.entity.archive.archivedAtColumn)} IS NULL${sameCompanySql(cover, supply.coverage.entity, line, progress.lines)}${legalEntityReadScopeJoinConjunction(supply.coverage.entity, readScope, values, cover)}) AS ${quoted('covered')}
+          FROM north_star_module.${quoted(progress.lines.physicalTableName)} AS ${quoted(line)}
+         WHERE ${qualified(line, 'tenant_id')} = ${qualified(sourceAlias, 'tenant_id')}
+           AND ${qualified(line, 'environment_id')} = ${qualified(sourceAlias, 'environment_id')}
+           AND ${qualified(line, progress.linesParentColumn)} = ${qualified(sourceAlias, entity.recordIdentity.column)}
+           AND ${qualified(line, progress.lines.archive.archivedAtColumn)} IS NULL${sameCompanySql(line, progress.lines, sourceAlias, entity)}${legalEntityReadScopeJoinConjunction(progress.lines, readScope, values, line)}`;
+  // Free stock of one item now, in the listed row's company: each part a
+  // figure sum over the rows holding the item's id.
+  const item = qualified(items, 'item');
+  const part = (sum: FigureSumPlan, name: string) =>
+    figureSumSql(
+      sum,
+      {
+        rows: `table_supply_${name}_rows`,
+        parent: `table_supply_${name}_parent`,
+        related: `table_supply_${name}_related`,
+      },
+      (alias) =>
+        `${qualified(alias, 'tenant_id')} = ${qualified(sourceAlias, 'tenant_id')}
+          AND ${qualified(alias, 'environment_id')} = ${qualified(sourceAlias, 'environment_id')}
+          AND ${qualified(alias, sum.rows.matchColumn)}::text = ${item}
+          AND ${qualified(alias, sum.rows.entity.archive.archivedAtColumn)} IS NULL${sameCompanySql(alias, sum.rows.entity, sourceAlias, entity)}${legalEntityReadScopeJoinConjunction(sum.rows.entity, readScope, values, alias)}`,
+      readScope,
+      values,
+    );
+  const free = () =>
+    [
+      '0',
+      ...supply.free.plus.map(
+        (sum, index) => `+ ${part(sum, `plus_${String(index)}`)}`,
+      ),
+      ...supply.free.minus.map(
+        (sum, index) => `- ${part(sum, `minus_${String(index)}`)}`,
+      ),
+    ].join(' ');
+  const uncovered = qualified(items, 'uncovered');
+  const shortTotal = `(SELECT coalesce(sum(CASE WHEN ${uncovered} > 0 THEN greatest(${uncovered} - greatest((${free()}), 0), 0) ELSE 0 END), 0)
+          FROM (SELECT ${qualified(lines, 'item')} AS ${quoted('item')},
+                       sum(greatest(${qualified(lines, 'open')} - ${qualified(lines, 'covered')}, 0)) AS ${quoted('uncovered')}
+                  FROM (${lineRows()}) AS ${quoted(lines)}
+                 GROUP BY ${qualified(lines, 'item')}) AS ${quoted(items)})`;
+  const short = supply.shortIn
+    ? `CASE WHEN ${qualified(sourceAlias, supply.shortIn.column.physicalName)}::text = ANY(${parameter(values, [...supply.shortIn.values])}::text[]) THEN ${shortTotal} ELSE 0 END`
+    : shortTotal;
+  return `CROSS JOIN LATERAL (
+    SELECT (SELECT coalesce(sum(least(${qualified(lines, 'covered')}, greatest(${qualified(lines, 'open')}, 0))), 0)
+              FROM (${lineRows()}) AS ${quoted(lines)}) AS ${quoted('covered_total')},
+           ${short} AS ${quoted('short_total')}
+  ) AS ${quoted(SUPPLY_ALIAS)}`;
+}
+
+/**
+ * Before-today filters resolve against the queried entity's selected columns:
+ * a calendar date is compared with the instant's UTC date, a UTC instant with
+ * the instant itself. A text-stored offset time is refused, never compared.
+ */
+function appendListBeforePredicates(
+  selectedColumns: readonly StorageEntity['columns'][number][],
+  sourceAlias: string,
+  filters: readonly SharedListBeforeFilter[],
+  values: unknown[],
+  predicates: string[],
+): void {
+  for (const filter of filters) {
+    const column = selectedColumns.find(
+      (candidate) => candidate.canonicalFieldId === filter.fieldId,
+    );
+    const contract = column?.fieldContract;
+    const instant =
+      contract?.fieldKind === 'dateTimeFieldType' &&
+      contract.temporal.timezoneSemantics === 'utcInstant';
+    if (!column || !(instant || contract?.fieldKind === 'dateFieldType'))
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        'a before filter compares a selected date or UTC instant column',
+        filter.fieldId,
+      );
+    const bound = parameter(values, filter.before);
+    predicates.push(
+      instant
+        ? `${qualified(sourceAlias, column.physicalName)} < ${bound}::timestamptz`
+        : `${qualified(sourceAlias, column.physicalName)} < (${bound}::timestamptz AT TIME ZONE 'UTC')::date`,
+    );
+  }
+}
+
+/** A summed exact decimal as its canonical string: no trailing zeros. */
+function canonicalProgressDecimal(value: unknown): string {
+  const text = typeof value === 'string' ? value : String(value);
+  const match = /^(-?)(\d+)(?:\.(\d+))?$/u.exec(text);
+  if (!match)
+    throw failure(
+      'MODULE_LIST_RESULT_INVALID',
+      'list progress is not an exact decimal',
+    );
+  const [, sign, whole, fraction = ''] = match;
+  const kept = fraction.replace(/0+$/u, '');
+  const digits = `${BigInt(whole!).toString()}${kept ? `.${kept}` : ''}`;
+  return sign && digits !== '0' ? `-${digits}` : digits;
+}
+
+type StorageColumn = StorageEntity['columns'][number];
+
+interface FigureRowsPlan {
+  readonly entity: StorageEntity;
+  /** The rows' text column that holds the listed record's id. */
+  readonly matchColumn: string;
+  readonly quantityColumn: string | null;
+}
+
+interface FigureWithinPlan {
+  readonly parent: StorageEntity;
+  /** The rows' column that holds their parent's record id. */
+  readonly relationColumn: string;
+  /**
+   * `relation`: a compiled relation column, compared as the parent's record
+   * identity; `reference`: a compiled text column holding the parent's record
+   * id, compared as text, as the rows' match column is (LOCATIONS).
+   */
+  readonly through: 'reference' | 'relation';
+  readonly stateColumn: StorageColumn;
+  readonly values: readonly string[];
+}
+
+interface FigureRelatedPlan {
+  readonly entity: StorageEntity;
+  /** The related rows' column that holds a figure row's record id. */
+  readonly relationColumn: string;
+  readonly quantityColumn: string;
+}
+
+/** One sum's parts: rows, their parent, related rows and what it adds. */
+interface FigureSumPlan {
+  readonly rows: FigureRowsPlan;
+  readonly within: FigureWithinPlan | null;
+  readonly related: FigureRelatedPlan | null;
+  readonly sum: 'related' | 'remaining' | 'rows';
+}
+
+type FigureOperandPlan =
+  { readonly figureId: string } | { readonly column: string };
+
+type FigureThresholdPlan =
+  { readonly column: string } | { readonly value: string };
+
+interface ListFiguresPlan {
+  readonly sums: readonly (FigureSumPlan & { readonly figureId: string })[];
+  readonly totals: readonly {
+    readonly figureId: string;
+    readonly plus: readonly FigureOperandPlan[];
+    readonly minus: readonly FigureOperandPlan[];
+    readonly floor: boolean;
+  }[];
+  readonly bands: readonly {
+    readonly figureId: string;
+    readonly of: string;
+    readonly cases: readonly {
+      readonly value: string;
+      readonly comparison: 'atMost' | 'below';
+      readonly threshold: FigureThresholdPlan;
+    }[];
+    readonly otherwise: string;
+  }[];
+  readonly latest: readonly {
+    readonly figureId: string;
+    readonly rows: FigureRowsPlan;
+    readonly within: FigureWithinPlan;
+    readonly byColumn: string;
+    readonly valueColumn: string;
+    readonly label: {
+      readonly entity: StorageEntity;
+      readonly column: StorageColumn;
+    };
+  }[];
+  readonly keep: {
+    readonly figureId: string;
+    readonly values: readonly string[];
+  } | null;
+  /** Every figure id, in the order the statement computes and projects them. */
+  readonly order: readonly {
+    readonly figureId: string;
+    readonly kind: 'band' | 'latest' | 'number';
+  }[];
+  /** Every entity the figures read, for the read-scope verification. */
+  readonly entities: readonly StorageEntity[];
+}
+
+/**
+ * Resolves the parts of a figure-like sum -- its rows, their parent and the
+ * related rows pointing at them -- against the PINNED COMPILED storage, for
+ * the queries the gateway authorized on this request, by query id. Shared by
+ * the List figures and the progress supply (SUPPLY-WARNINGS): each query names
+ * its entity; match, quantity and state columns must be compiled columns of
+ * the kind a sum needs; a parent is reached through the rows' compiled
+ * relation to it or through a compiled text column holding its record id, and
+ * related rows through theirs to the rows. Anything else fails closed.
+ */
+function figurePartsPlanner(
+  storage: StorageTargetPayloadV1,
+  authorizedEntityIds: Readonly<Record<string, string>>,
+  refuse: (subject: string, message: string) => never,
+) {
+  const entities = new Map<string, StorageEntity>();
+  const entityOf = (queryId: string) => {
+    const entityId = authorizedEntityIds[queryId];
+    if (!entityId)
+      return refuse(
+        queryId,
+        'a figure query reached the executor unauthorized',
+      );
+    const target = requiredEntity(storage, entityId);
+    entities.set(target.entityId, target);
+    return target;
+  };
+  const column = (
+    target: StorageEntity,
+    fieldId: string,
+    kinds: readonly string[],
+    message: string,
+  ) => {
+    const found = target.columns.find(
+      (candidate) => candidate.canonicalFieldId === fieldId,
+    );
+    if (!found || !kinds.includes(found.fieldContract.fieldKind))
+      return refuse(fieldId, message);
+    return found;
+  };
+  const rowsPlan = (
+    queryId: string,
+    matchFieldId: string,
+    quantityFieldId?: string,
+    matchMessage = 'a figure matches the listed record by a compiled text column',
+  ): FigureRowsPlan => {
+    const target = entityOf(queryId);
+    return Object.freeze({
+      entity: target,
+      matchColumn: column(target, matchFieldId, ['textFieldType'], matchMessage)
+        .physicalName,
+      quantityColumn:
+        quantityFieldId === undefined
+          ? null
+          : column(
+              target,
+              quantityFieldId,
+              ['exactDecimalFieldType'],
+              'a figure sums a compiled exact decimal column',
+            ).physicalName,
+    });
+  };
+  const withinPlan = (
+    rows: FigureRowsPlan,
+    within: SharedListFigureWithin,
+  ): FigureWithinPlan => {
+    const parent = entityOf(within.queryId);
+    const through = (): Pick<
+      FigureWithinPlan,
+      'relationColumn' | 'through'
+    > => {
+      if (within.referenceFieldId !== undefined)
+        return {
+          relationColumn: column(
+            rows.entity,
+            within.referenceFieldId,
+            ['textFieldType'],
+            "a figure's parent is held by a compiled text column of its rows",
+          ).physicalName,
+          through: 'reference',
+        };
+      const relation = storage.relations.find(
+        (candidate) =>
+          candidate.relationId === within.relationId &&
+          candidate.sourceEntityId === rows.entity.entityId &&
+          candidate.targetEntityId === parent.entityId,
+      );
+      if (!relation)
+        return refuse(
+          within.relationId,
+          "a figure's parent does not match the compiled storage relations",
+        );
+      return {
+        relationColumn: relation.relationColumn.physicalName,
+        through: 'relation',
+      };
+    };
+    const reached = through();
+    const stateColumn = parent.columns.find(
+      (candidate) => candidate.canonicalFieldId === within.fieldId,
+    );
+    if (!stateColumn)
+      return refuse(
+        within.fieldId,
+        "a figure's parent values name a compiled column of the parent",
+      );
+    return Object.freeze({
+      parent,
+      ...reached,
+      stateColumn,
+      values: within.values,
+    });
+  };
+  const relatedPlan = (
+    related: SharedListFigureRelated,
+    rows: FigureRowsPlan,
+  ): FigureRelatedPlan => {
+    const pointing = entityOf(related.queryId);
+    const relation = storage.relations.find(
+      (candidate) =>
+        candidate.relationId === related.relationId &&
+        candidate.sourceEntityId === pointing.entityId &&
+        candidate.targetEntityId === rows.entity.entityId,
+    );
+    if (!relation)
+      return refuse(
+        related.relationId,
+        "a figure's related rows do not match the compiled storage relations",
+      );
+    return Object.freeze({
+      entity: pointing,
+      relationColumn: relation.relationColumn.physicalName,
+      quantityColumn: column(
+        pointing,
+        related.fieldId,
+        ['exactDecimalFieldType'],
+        'a figure sums a compiled exact decimal column',
+      ).physicalName,
+    });
+  };
+  const sumPlan = (
+    sum: Omit<SharedListFigureSum, 'figureId'>,
+    matchMessage?: string,
+  ): FigureSumPlan => {
+    const rows = rowsPlan(
+      sum.rows.queryId,
+      sum.rows.matchFieldId,
+      sum.rows.quantityFieldId,
+      matchMessage,
+    );
+    // Related rows resolve before the parent, as the figures always have.
+    const related = sum.related ? relatedPlan(sum.related, rows) : null;
+    return Object.freeze({
+      rows,
+      within: sum.within ? withinPlan(rows, sum.within) : null,
+      related,
+      sum: sum.sum,
+    });
+  };
+  return {
+    entities,
+    entityOf,
+    column,
+    rowsPlan,
+    withinPlan,
+    relatedPlan,
+    sumPlan,
+  };
+}
+
+/**
+ * Resolves list figures against the PINNED COMPILED storage, never against
+ * caller input: each query the gateway authorized names its entity; the
+ * match, quantity, state, date and value columns must be compiled columns of
+ * the kind the figure needs; a parent is reached through the rows' compiled
+ * relation to it, or through a compiled text column of the rows holding its
+ * record id, and related rows through theirs to the rows; a listed row's
+ * operand is a compiled exact decimal of the queried entity. Anything else
+ * fails closed rather than summing a column a request happened to name.
+ */
+function listFiguresPlan(
+  storage: StorageTargetPayloadV1,
+  entity: StorageEntity,
+  list: AuthorizedSharedListRequest,
+): ListFiguresPlan | null {
+  const requested = list.query.figures;
+  if (!requested) return null;
+  const authorized = list.figures;
+  const refuse = (subject: string, message: string): never => {
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      message,
+      subject,
+    );
+  };
+  if (!authorized)
+    return refuse(
+      requested.sums[0]!.rows.queryId,
+      'list figures reached the executor without authorization',
+    );
+  const { entities, entityOf, column, rowsPlan, withinPlan, sumPlan } =
+    figurePartsPlanner(storage, authorized.entityIds, refuse);
+  const listedDecimal = (fieldId: string) =>
+    column(
+      entity,
+      fieldId,
+      ['exactDecimalFieldType'],
+      'a figure adds or compares a compiled exact decimal of the listed entity',
+    ).physicalName;
+  const operand = (value: SharedListFigureOperand): FigureOperandPlan =>
+    'figureId' in value
+      ? Object.freeze({ figureId: value.figureId })
+      : Object.freeze({ column: listedDecimal(value.fieldId) });
+  const threshold = (value: SharedListFigureThreshold): FigureThresholdPlan =>
+    'fieldId' in value
+      ? Object.freeze({ column: listedDecimal(value.fieldId) })
+      : Object.freeze({ value: value.value });
+  const sums = requested.sums.map((sum) =>
+    Object.freeze({ figureId: sum.figureId, ...sumPlan(sum) }),
+  );
+  const totals = (requested.totals ?? []).map((total) =>
+    Object.freeze({
+      figureId: total.figureId,
+      plus: total.plus.map(operand),
+      minus: total.minus.map(operand),
+      floor: total.floor === 'zero',
+    }),
+  );
+  const bands = (requested.bands ?? []).map((band) =>
+    Object.freeze({
+      figureId: band.figureId,
+      of: band.of,
+      cases: band.cases.map((entry) =>
+        Object.freeze({
+          value: entry.value,
+          comparison: entry.below ? ('below' as const) : ('atMost' as const),
+          threshold: threshold((entry.below ?? entry.atMost)!),
+        }),
+      ),
+      otherwise: band.otherwise,
+    }),
+  );
+  const latest = (requested.latest ?? []).map((figure) => {
+    const rows = rowsPlan(figure.rows.queryId, figure.rows.matchFieldId);
+    const within = withinPlan(rows, figure.within);
+    const by = column(
+      within.parent,
+      figure.byFieldId,
+      ['dateFieldType', 'dateTimeFieldType'],
+      'a latest figure orders by a compiled date or UTC instant column',
+    );
+    if (
+      by.fieldContract.fieldKind === 'dateTimeFieldType' &&
+      by.fieldContract.temporal.timezoneSemantics !== 'utcInstant'
+    )
+      refuse(
+        figure.byFieldId,
+        'a latest figure orders by a compiled date or UTC instant column',
+      );
+    const labelEntity = entityOf(figure.label.queryId);
+    const labelColumn = labelEntity.columns.find(
+      (candidate) => candidate.canonicalFieldId === figure.label.fieldId,
+    );
+    if (!labelColumn)
+      return refuse(
+        figure.label.fieldId,
+        'a latest label reads a compiled column of its entity',
+      );
+    return Object.freeze({
+      figureId: figure.figureId,
+      rows,
+      within,
+      byColumn: by.physicalName,
+      valueColumn: column(
+        within.parent,
+        figure.valueFieldId,
+        ['textFieldType'],
+        'a latest figure reads a compiled text column',
+      ).physicalName,
+      label: Object.freeze({ entity: labelEntity, column: labelColumn }),
+    });
+  });
+  return Object.freeze({
+    sums,
+    totals,
+    bands,
+    latest,
+    keep: requested.keep ?? null,
+    order: Object.freeze(
+      [...sharedListFigureKinds(requested)].map(([figureId, kind]) =>
+        Object.freeze({ figureId, kind }),
+      ),
+    ),
+    entities: Object.freeze([...entities.values()]),
+  });
+}
+
+const FIGURE_SUMS_ALIAS = 'table_figure_sums';
+const FIGURES_ALIAS = 'table_figures';
+
+/** A joined row keeps its anchor row's company, where both have one. */
+function sameCompanySql(
+  alias: string,
+  target: StorageEntity,
+  anchorAlias: string,
+  anchor: StorageEntity,
+): string {
+  const joined = legalEntityReadScopeRequirement(target);
+  const owner = legalEntityReadScopeRequirement(anchor);
+  return joined && owner
+    ? `
+          AND ${qualified(alias, joined.column)} = ${qualified(anchorAlias, owner.column)}`
+    : '';
+}
+
+/**
+ * A figure's parent joined to its rows -- through their relation, or as the
+ * record whose id they hold as text -- pinned to tenant, environment, the
+ * rows' company and the issued read scope, and holding a kept value.
+ */
+function figureParentJoinSql(
+  within: FigureWithinPlan,
+  rows: FigureRowsPlan,
+  rowsAlias: string,
+  alias: string,
+  readScope: VerifiedLegalEntityReadScope | null,
+  values: unknown[],
+): string {
+  return `
+         JOIN north_star_module.${quoted(within.parent.physicalTableName)} AS ${quoted(alias)}
+           ON ${qualified(alias, 'tenant_id')} = ${qualified(rowsAlias, 'tenant_id')}
+          AND ${qualified(alias, 'environment_id')} = ${qualified(rowsAlias, 'environment_id')}
+          AND ${
+            within.through === 'reference'
+              ? `${qualified(alias, within.parent.recordIdentity.column)}::text = ${qualified(rowsAlias, within.relationColumn)}::text`
+              : `${qualified(alias, within.parent.recordIdentity.column)} = ${qualified(rowsAlias, within.relationColumn)}`
+          }
+          AND ${qualified(alias, within.parent.archive.archivedAtColumn)} IS NULL${sameCompanySql(alias, within.parent, rowsAlias, rows.entity)}${legalEntityReadScopeJoinConjunction(within.parent, readScope, values, alias)}
+          AND ${qualified(alias, within.stateColumn.physicalName)}::text = ANY(${parameter(values, [...within.values])}::text[])`;
+}
+
+/** What the active related rows pointing at one figure row add up. */
+function figureRelatedTotalSql(
+  related: FigureRelatedPlan,
+  rows: FigureRowsPlan,
+  rowsAlias: string,
+  alias: string,
+  readScope: VerifiedLegalEntityReadScope | null,
+  values: unknown[],
+): string {
+  return `(SELECT coalesce(sum(${qualified(alias, related.quantityColumn)}), 0)
+           FROM north_star_module.${quoted(related.entity.physicalTableName)} AS ${quoted(alias)}
+          WHERE ${qualified(alias, 'tenant_id')} = ${qualified(rowsAlias, 'tenant_id')}
+            AND ${qualified(alias, 'environment_id')} = ${qualified(rowsAlias, 'environment_id')}
+            AND ${qualified(alias, related.relationColumn)} = ${qualified(rowsAlias, rows.entity.recordIdentity.column)}
+            AND ${qualified(alias, related.entity.archive.archivedAtColumn)} IS NULL${sameCompanySql(alias, related.entity, rowsAlias, rows.entity)}${legalEntityReadScopeJoinConjunction(related.entity, readScope, values, alias)})`;
+}
+
+/**
+ * One figure-like sum as a scalar subquery over the rows `match` keeps: their
+ * quantity, what their related rows add up, or what remains of each -- never
+ * below zero per row, so an over-recorded row cannot cancel what another row
+ * still has open -- only where their parent holds a kept value.
+ */
+function figureSumSql(
+  sum: FigureSumPlan,
+  aliases: {
+    readonly rows: string;
+    readonly parent: string;
+    readonly related: string;
+  },
+  match: (rowsAlias: string) => string,
+  readScope: VerifiedLegalEntityReadScope | null,
+  values: unknown[],
+): string {
+  const quantity = sum.rows.quantityColumn
+    ? qualified(aliases.rows, sum.rows.quantityColumn)
+    : null;
+  const related = sum.related
+    ? figureRelatedTotalSql(
+        sum.related,
+        sum.rows,
+        aliases.rows,
+        aliases.related,
+        readScope,
+        values,
+      )
+    : null;
+  const term =
+    sum.sum === 'rows'
+      ? quantity!
+      : sum.sum === 'related'
+        ? related!
+        : `greatest(${quantity!} - ${related!}, 0)`;
+  return `(SELECT coalesce(sum(${term}), 0)
+         FROM north_star_module.${quoted(sum.rows.entity.physicalTableName)} AS ${quoted(aliases.rows)}${sum.within ? figureParentJoinSql(sum.within, sum.rows, aliases.rows, aliases.parent, readScope, values) : ''}
+        WHERE ${match(aliases.rows)})`;
+}
+
+/**
+ * Per listed row, two lateral answers in FROM: every sum and latest value in
+ * one, then every total, band and label over them, so the count and the page
+ * read the same figures and a kept band filters before both. Every joined row
+ * is pinned to the listed row's tenant and environment, to the issued read
+ * scope, and -- parent and related rows -- to its own row's company; the rows
+ * that hold the listed record's id compare that id as text, as a parent
+ * reached through a reference field compares its own.
+ */
+function listFiguresFromSql(
+  entity: StorageEntity,
+  sourceAlias: string,
+  plan: ListFiguresPlan,
+  readScope: VerifiedLegalEntityReadScope | null,
+  values: unknown[],
+): string {
+  const matching = (rows: FigureRowsPlan, alias: string) =>
+    `${qualified(alias, 'tenant_id')} = ${qualified(sourceAlias, 'tenant_id')}
+          AND ${qualified(alias, 'environment_id')} = ${qualified(sourceAlias, 'environment_id')}
+          AND ${qualified(alias, rows.matchColumn)}::text = ${qualified(sourceAlias, entity.recordIdentity.column)}::text
+          AND ${qualified(alias, rows.entity.archive.archivedAtColumn)} IS NULL${legalEntityReadScopeJoinConjunction(rows.entity, readScope, values, alias)}`;
+  const parentJoin = (
+    within: FigureWithinPlan,
+    rows: FigureRowsPlan,
+    rowsAlias: string,
+    alias: string,
+  ) => figureParentJoinSql(within, rows, rowsAlias, alias, readScope, values);
+  const sumColumns = plan.sums.map(
+    (sum, index) =>
+      `${figureSumSql(
+        sum,
+        {
+          rows: `table_figure_${String(index)}_rows`,
+          parent: `table_figure_${String(index)}_parent`,
+          related: `table_figure_${String(index)}_related`,
+        },
+        (alias) => matching(sum.rows, alias),
+        readScope,
+        values,
+      )} AS ${quoted(`sum_${String(index)}`)}`,
+  );
+  const latestColumns = plan.latest.map((figure, index) => {
+    const rowsAlias = `table_latest_${String(index)}_rows`;
+    const parentAlias = `table_latest_${String(index)}_parent`;
+    return `(SELECT ${qualified(parentAlias, figure.valueColumn)}::text
+         FROM north_star_module.${quoted(figure.rows.entity.physicalTableName)} AS ${quoted(rowsAlias)}${parentJoin(figure.within, figure.rows, rowsAlias, parentAlias)}
+        WHERE ${matching(figure.rows, rowsAlias)}
+        ORDER BY ${qualified(parentAlias, figure.byColumn)} DESC NULLS LAST,
+                 ${qualified(parentAlias, figure.within.parent.recordIdentity.column)} DESC
+        LIMIT 1) AS ${quoted(`latest_${String(index)}`)}`;
+  });
+  // Totals, bands and labels read the sums by id; a total names only figures
+  // declared before it, so each expression is built from finished ones.
+  const expressions = new Map<string, string>();
+  plan.sums.forEach((sum, index) =>
+    expressions.set(
+      sum.figureId,
+      qualified(FIGURE_SUMS_ALIAS, `sum_${String(index)}`),
+    ),
+  );
+  const operandSql = (value: FigureOperandPlan) => {
+    if ('column' in value) return qualified(sourceAlias, value.column);
+    const expression = expressions.get(value.figureId);
+    if (!expression)
+      throw failure(
+        'MODULE_LIST_RESULT_INVALID',
+        'a list figure names a figure not computed before it',
+        value.figureId,
+      );
+    return expression;
+  };
+  const figureColumns: string[] = [];
+  plan.totals.forEach((total, index) => {
+    const signed = [
+      ...total.plus.map((value) => `+ ${operandSql(value)}`),
+      ...total.minus.map((value) => `- ${operandSql(value)}`),
+    ].join(' ');
+    const sum = `(0 ${signed})`;
+    // A total over an unstated field stays unstated: never floored to zero.
+    const expression = total.floor
+      ? `(CASE WHEN ${sum} < 0 THEN 0 ELSE ${sum} END)`
+      : sum;
+    expressions.set(total.figureId, expression);
+    figureColumns.push(`${expression} AS ${quoted(`total_${String(index)}`)}`);
+  });
+  plan.bands.forEach((band, index) => {
+    const of = operandSql({ figureId: band.of });
+    const cases = band.cases
+      .map((entry) => {
+        const threshold =
+          'column' in entry.threshold
+            ? qualified(sourceAlias, entry.threshold.column)
+            : `${parameter(values, entry.threshold.value)}::numeric`;
+        return `WHEN ${of} ${entry.comparison === 'below' ? '<' : '<='} ${threshold} THEN ${parameter(values, entry.value)}::text`;
+      })
+      .join(' ');
+    figureColumns.push(
+      `(CASE ${cases} ELSE ${parameter(values, band.otherwise)}::text END) AS ${quoted(`band_${String(index)}`)}`,
+    );
+  });
+  plan.latest.forEach((figure, index) => {
+    const alias = `table_latest_${String(index)}_label`;
+    figureColumns.push(
+      `(SELECT ${visibleFieldExpression(figure.label.column, alias)}
+          FROM north_star_module.${quoted(figure.label.entity.physicalTableName)} AS ${quoted(alias)}
+         WHERE ${qualified(alias, 'tenant_id')} = ${qualified(sourceAlias, 'tenant_id')}
+           AND ${qualified(alias, 'environment_id')} = ${qualified(sourceAlias, 'environment_id')}
+           AND ${qualified(alias, figure.label.entity.recordIdentity.column)}::text = ${qualified(FIGURE_SUMS_ALIAS, `latest_${String(index)}`)}${legalEntityReadScopeJoinConjunction(figure.label.entity, readScope, values, alias)}) AS ${quoted(`label_${String(index)}`)}`,
+    );
+  });
+  return `CROSS JOIN LATERAL (
+    SELECT ${[...sumColumns, ...latestColumns].join(',\n           ')}
+  ) AS ${quoted(FIGURE_SUMS_ALIAS)}
+  CROSS JOIN LATERAL (
+    SELECT ${['1 AS "figures"', ...figureColumns].join(',\n           ')}
+  ) AS ${quoted(FIGURES_ALIAS)}`;
+}
+
+/** Where each figure's value -- and a latest one's label -- is projected. */
+function listFigureColumns(plan: ListFiguresPlan): readonly {
+  readonly figureId: string;
+  readonly kind: 'band' | 'latest' | 'number';
+  readonly value: string;
+  readonly label: string | null;
+}[] {
+  const sums = new Map(plan.sums.map((sum, index) => [sum.figureId, index]));
+  const totals = new Map(
+    plan.totals.map((total, index) => [total.figureId, index]),
+  );
+  const bands = new Map(
+    plan.bands.map((band, index) => [band.figureId, index]),
+  );
+  const latest = new Map(
+    plan.latest.map((figure, index) => [figure.figureId, index]),
+  );
+  return plan.order.map(({ figureId, kind }) => {
+    const sum = sums.get(figureId);
+    const total = totals.get(figureId);
+    const band = bands.get(figureId);
+    const last = latest.get(figureId);
+    return Object.freeze({
+      figureId,
+      kind,
+      value:
+        sum !== undefined
+          ? qualified(FIGURE_SUMS_ALIAS, `sum_${String(sum)}`)
+          : total !== undefined
+            ? qualified(FIGURES_ALIAS, `total_${String(total)}`)
+            : band !== undefined
+              ? qualified(FIGURES_ALIAS, `band_${String(band)}`)
+              : qualified(FIGURE_SUMS_ALIAS, `latest_${String(last!)}`),
+      label:
+        last !== undefined
+          ? qualified(FIGURES_ALIAS, `label_${String(last)}`)
+          : null,
+    });
+  });
+}
+
+/**
+ * Resolves a related-record existence filter against the PINNED COMPILED
+ * relation: the related entity must be the relation's source and the queried
+ * entity its target, and every filter field must be a compiled column of the
+ * related entity. Anything else fails closed rather than degrading to an
+ * unfiltered list.
+ */
+function relatedFilterPlan(
+  storage: StorageTargetPayloadV1,
+  entity: StorageEntity,
+  list: AuthorizedSharedListRequest,
+): ListRelatedFilterPlan | null {
+  const requested = list.relatedFilter;
+  if (!list.query.relatedFilter) return null;
+  const relation = requested
+    ? storage.relations.find(
+        (candidate) =>
+          candidate.relationId === requested.relationId &&
+          candidate.sourceEntityId === requested.relatedEntityId &&
+          candidate.targetEntityId === entity.entityId,
+      )
+    : undefined;
+  if (!requested || !relation)
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      'related filter does not match the compiled storage relation',
+      list.query.relatedFilter.relationId,
+    );
+  const related = requiredEntity(storage, requested.relatedEntityId);
+  return Object.freeze({
+    related,
+    relationColumn: relation.relationColumn.physicalName,
+    filters: Object.freeze(
+      requested.fieldFilters.map((filter) => {
+        const column = related.columns.find(
+          (candidate) => candidate.canonicalFieldId === filter.fieldId,
+        );
+        if (!column)
+          throw new SharedListContractError(
+            'LIST_FIELD_NOT_AUTHORIZED',
+            'related filter field has no compiled column',
+            filter.fieldId,
+          );
+        return Object.freeze({ column, value: filter.value });
+      }),
+    ),
+  });
 }
 
 /**
@@ -2055,7 +3390,7 @@ function parentScopePlan(
   entity: StorageEntity,
   list: AuthorizedSharedListRequest,
 ): ListParentScopePlan | null {
-  const requested = list.query.parentScope;
+  const requested = list.query.parentScope ?? list.query.referenceScope;
   if (!requested) return null;
   const relation = storage.relations.find(
     (candidate) => candidate.relationId === requested.relationId,
@@ -2063,7 +3398,8 @@ function parentScopePlan(
   if (
     !relation ||
     relation.sourceEntityId !== entity.entityId ||
-    relation.ownership !== 'parentScopedChild'
+    relation.ownership !==
+      (list.query.referenceScope ? 'reference' : 'parentScopedChild')
   ) {
     throw failure(
       'MODULE_LIST_PARENT_SCOPE_INVALID',
@@ -2086,6 +3422,9 @@ async function listSharedRecords(
   relationPlans: readonly ListRelationPlan[],
   readScope: VerifiedLegalEntityReadScope | null,
   parentScope: ListParentScopePlan | null,
+  relatedFilter: ListRelatedFilterPlan | null = null,
+  progress: ListProgressPlan | null = null,
+  figures: ListFiguresPlan | null = null,
 ): Promise<SemanticQueryResultEnvelope> {
   const sourceAlias = 'table_source';
   const selectedColumns = definition.selections.map((selection) => {
@@ -2102,13 +3441,28 @@ async function listSharedRecords(
     return column;
   });
   const values: unknown[] = [];
-  const fromSql = listFromSql(
-    entity,
-    sourceAlias,
-    relationPlans,
-    readScope,
-    values,
-  );
+  const fromSql = [
+    listFromSql(entity, sourceAlias, relationPlans, readScope, values),
+    ...(progress
+      ? [listProgressFromSql(entity, sourceAlias, progress, readScope, values)]
+      : []),
+    ...(progress?.supply
+      ? [
+          listSupplyFromSql(
+            entity,
+            sourceAlias,
+            progress,
+            progress.supply,
+            readScope,
+            values,
+          ),
+        ]
+      : []),
+    ...(figures
+      ? [listFiguresFromSql(entity, sourceAlias, figures, readScope, values)]
+      : []),
+  ].join('\n');
+  const figureColumns = figures ? listFigureColumns(figures) : [];
   const predicates = listArchivePredicates(
     entity,
     sourceAlias,
@@ -2160,6 +3514,72 @@ async function listSharedRecords(
       )}::uuid`,
     );
   }
+  if (relatedFilter) {
+    // Ahead of the count and the page window, like the parent scope: a page of
+    // customers is a page of the eligible set, never a filtered broader page.
+    const alias = 'table_related_filter';
+    predicates.push(
+      `EXISTS (SELECT 1 FROM north_star_module.${quoted(relatedFilter.related.physicalTableName)} AS ${quoted(alias)}
+        WHERE ${qualified(alias, 'tenant_id')} = ${qualified(sourceAlias, 'tenant_id')}
+          AND ${qualified(alias, 'environment_id')} = ${qualified(sourceAlias, 'environment_id')}
+          AND ${qualified(alias, relatedFilter.relationColumn)} = ${qualified(sourceAlias, entity.recordIdentity.column)}
+          AND ${qualified(alias, relatedFilter.related.archive.archivedAtColumn)} IS NULL${relatedFilter.filters
+            .map(
+              (filter) =>
+                `\n          AND ${qualified(alias, filter.column.physicalName)}::text = ${parameter(values, filter.value)}`,
+            )
+            .join('')})`,
+    );
+  }
+  for (const filter of list.query.fieldFilters ?? []) {
+    const column = selectedColumns.find(
+      (column) => column.canonicalFieldId === filter.fieldId,
+    );
+    if (!column)
+      throw failure(
+        'MODULE_LIST_FIELD_INVALID',
+        'Exact filters must name a selected field',
+        filter.fieldId,
+      );
+    predicates.push(
+      `${qualified(sourceAlias, column.physicalName)}::text = ${parameter(values, filter.value)}`,
+    );
+  }
+  // Ahead of the count and the page window, like every filter above: a tab of
+  // orders with something still to arrive, or arriving late, counts and pages
+  // exactly that set.
+  if (progress?.openOnly)
+    predicates.push(`${qualified(PROGRESS_ALIAS, 'open_total')} > 0`);
+  // A kept supply, like an open view: a "Blocked by supply" or "Reserved" tab
+  // counts, pages and exports exactly the rows the statement judged.
+  if (progress?.supply?.keep)
+    predicates.push(
+      `${qualified(SUPPLY_ALIAS, progress.supply.keep === 'covered' ? 'covered_total' : 'short_total')} > 0`,
+    );
+  // A kept band, like an open view: the tab counts and pages exactly the rows
+  // whose band the statement itself judged.
+  if (figures?.keep) {
+    const kept = figures.keep;
+    const band = figureColumns.find(
+      (column) => column.figureId === kept.figureId && column.kind === 'band',
+    );
+    if (!band)
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        'a kept figure is a band the statement computes',
+        kept.figureId,
+      );
+    predicates.push(
+      `${band.value} = ANY(${parameter(values, [...kept.values])}::text[])`,
+    );
+  }
+  appendListBeforePredicates(
+    selectedColumns,
+    sourceAlias,
+    list.query.beforeFilters ?? [],
+    values,
+    predicates,
+  );
   const whereSql = predicates.length > 0 ? predicates.join(' AND ') : 'true';
   const count = await client.query<{ total_count: string }>(
     `SELECT count(*)::text AS total_count ${fromSql} WHERE ${whereSql}`,
@@ -2176,7 +3596,7 @@ async function listSharedRecords(
   const limitSql = parameter(pageValues, list.query.effectivePageSize + 1);
   const offsetSql = parameter(pageValues, list.query.pageOffset);
   const rows = await client.query<QueryResultRow>(
-    `SELECT ${listSelectList(entity, sourceAlias, selectedColumns, relationPlans)}
+    `SELECT ${listSelectList(entity, sourceAlias, selectedColumns, relationPlans, progress !== null, figureColumns, Boolean(progress?.supply))}
        ${fromSql}
       WHERE ${whereSql}
       ORDER BY ${listOrderBy(
@@ -2192,7 +3612,14 @@ async function listSharedRecords(
   const hasMore = rows.rows.length > list.query.effectivePageSize;
   const pageRows = rows.rows.slice(0, list.query.effectivePageSize);
   const records = pageRows.map((row) =>
-    toListDto(entity, row, selectedColumns, relationPlans),
+    toListDto(
+      entity,
+      row,
+      selectedColumns,
+      relationPlans,
+      progress,
+      figureColumns,
+    ),
   );
   const nextOffset = list.query.pageOffset + records.length;
   const listCoverage: SharedListCoverage = Object.freeze({
@@ -2205,6 +3632,24 @@ async function listSharedRecords(
       : null,
     pageOffset: list.query.pageOffset,
     parentScope: list.query.parentScope,
+    ...(list.query.referenceScope
+      ? { referenceScope: list.query.referenceScope }
+      : {}),
+    ...(list.query.fieldFilters
+      ? { fieldFilters: list.query.fieldFilters }
+      : {}),
+    ...(relatedFilter && list.query.relatedFilter
+      ? { relatedFilter: list.query.relatedFilter }
+      : {}),
+    // Echoed only when applied: the gateway requires both back unchanged.
+    ...(progress && list.query.progress
+      ? { progress: list.query.progress }
+      : {}),
+    ...(figures && list.query.figures ? { figures: list.query.figures } : {}),
+    ...(list.query.beforeFilters
+      ? { beforeFilters: list.query.beforeFilters }
+      : {}),
+    ...(list.query.outputMode ? { outputMode: list.query.outputMode } : {}),
     projectedSearchValueCount:
       list.query.search.trim() === '' ? 0 : searchExpressions.length,
     requestedPageSize: list.query.requestedPageSize,
@@ -2257,11 +3702,60 @@ function listRelationPlan(
     );
   }
   return Object.freeze({
-    authorization,
     labelAlias: `nsm_table_relation_${String(index)}_label`,
     labelColumn,
+    labelId: authorization.relationId,
     recordAlias: `nsm_table_relation_${String(index)}_record`,
-    relation,
+    sourceColumn: relation.relationColumn.physicalName,
+    sourceIsText: false,
+    tableAlias: `table_relation_${String(index)}`,
+    target,
+  });
+}
+
+/**
+ * A reference label resolves against the PINNED COMPILED storage: the source
+ * field must be a text column of the queried entity and the label a column of
+ * the authorized target entity. A request can therefore name only compiled
+ * identities; neither a column nor a table comes from caller input.
+ */
+function listReferencePlan(
+  storage: StorageTargetPayloadV1,
+  source: StorageEntity,
+  reference: AuthorizedSharedListReferenceLabel,
+  index: number,
+): ListRelationPlan {
+  const sourceColumn = source.columns.find(
+    (candidate) => candidate.canonicalFieldId === reference.sourceFieldId,
+  );
+  if (
+    !sourceColumn ||
+    sourceColumn.fieldContract.fieldKind !== 'textFieldType'
+  ) {
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      'a reference label reads a compiled text column of the queried entity',
+      reference.sourceFieldId,
+    );
+  }
+  const target = requiredEntity(storage, reference.targetEntityId);
+  const labelColumn = target.columns.find(
+    (candidate) => candidate.canonicalFieldId === reference.fieldId,
+  );
+  if (!labelColumn) {
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      'authorized reference label field has no compiled target column',
+      reference.fieldId,
+    );
+  }
+  return Object.freeze({
+    labelAlias: `nsm_table_relation_${String(index)}_label`,
+    labelColumn,
+    labelId: reference.referenceId,
+    recordAlias: `nsm_table_relation_${String(index)}_record`,
+    sourceColumn: sourceColumn.physicalName,
+    sourceIsText: true,
     tableAlias: `table_relation_${String(index)}`,
     target,
   });
@@ -2281,7 +3775,7 @@ function listFromSql(
         `LEFT JOIN north_star_module.${quoted(plan.target.physicalTableName)} AS ${quoted(plan.tableAlias)}
            ON ${qualified(plan.tableAlias, 'tenant_id')} = ${qualified(sourceAlias, 'tenant_id')}
           AND ${qualified(plan.tableAlias, 'environment_id')} = ${qualified(sourceAlias, 'environment_id')}
-          AND ${qualified(plan.tableAlias, plan.target.recordIdentity.column)} = ${qualified(sourceAlias, plan.relation.relationColumn.physicalName)}${legalEntityReadScopeJoinConjunction(
+          AND ${qualified(plan.tableAlias, plan.target.recordIdentity.column)}${plan.sourceIsText ? '::text' : ''} = ${qualified(sourceAlias, plan.sourceColumn)}${legalEntityReadScopeJoinConjunction(
             plan.target,
             readScope,
             values,
@@ -2306,6 +3800,9 @@ function listSelectList(
   sourceAlias: string,
   selectedColumns: readonly StorageEntity['columns'][number][],
   relations: readonly ListRelationPlan[],
+  progress = false,
+  figures: ReturnType<typeof listFigureColumns> = [],
+  supply = false,
 ): string {
   const rawColumns = [
     entity.recordIdentity.column,
@@ -2321,7 +3818,34 @@ function listSelectList(
     `${qualified(plan.tableAlias, plan.target.recordIdentity.column)} AS ${quoted(plan.recordAlias)}`,
     `${visibleFieldExpression(plan.labelColumn, plan.tableAlias)} AS ${quoted(plan.labelAlias)}`,
   ]);
-  return [...rawColumns, ...displays, ...relationValues].join(', ');
+  const progressValues = progress
+    ? (['ordered', 'done', 'open'] as const).map(
+        (figure) =>
+          `${qualified(PROGRESS_ALIAS, `${figure}_total`)}::text AS ${quoted(`nsm_table_progress_${figure}`)}`,
+      )
+    : [];
+  const supplyValues = supply
+    ? (['covered', 'short'] as const).map(
+        (figure) =>
+          `${qualified(SUPPLY_ALIAS, `${figure}_total`)}::text AS ${quoted(`nsm_table_supply_${figure}`)}`,
+      )
+    : [];
+  const figureValues = figures.flatMap((figure, index) => [
+    `${figure.value}::text AS ${quoted(`nsm_table_figure_${String(index)}`)}`,
+    ...(figure.label
+      ? [
+          `${figure.label} AS ${quoted(`nsm_table_figure_label_${String(index)}`)}`,
+        ]
+      : []),
+  ]);
+  return [
+    ...rawColumns,
+    ...displays,
+    ...relationValues,
+    ...progressValues,
+    ...supplyValues,
+    ...figureValues,
+  ].join(', ');
 }
 
 function listOrderBy(
@@ -2335,7 +3859,7 @@ function listOrderBy(
     selectedColumns.map((column) => [column.canonicalFieldId, column] as const),
   );
   const relationsById = new Map(
-    relations.map((plan) => [plan.authorization.relationId, plan] as const),
+    relations.map((plan) => [plan.labelId, plan] as const),
   );
   const order = list.query.sort.map((sort) => {
     const column = selectedById.get(sort.fieldId);
@@ -2377,24 +3901,95 @@ function toListDto(
   row: QueryResultRow,
   selectedColumns: readonly StorageEntity['columns'][number][],
   relations: readonly ListRelationPlan[],
+  progress: ListProgressPlan | null = null,
+  figures: ReturnType<typeof listFigureColumns> = [],
 ): SemanticRecordDto {
-  const base = toDto(
+  const projected = toDto(
     entity,
     rawRecord(entity, row),
     selectedColumns.map((column) => ({ fieldId: column.canonicalFieldId })),
   );
+  // The summed figures ride the row's values under their declared ids, as
+  // canonical exact decimals the List shows and exports unchanged.
+  const base = progress
+    ? Object.freeze({
+        ...projected,
+        values: Object.freeze({
+          ...projected.values,
+          [progress.outputs.ordered]: canonicalProgressDecimal(
+            row.nsm_table_progress_ordered,
+          ),
+          [progress.outputs.done]: canonicalProgressDecimal(
+            row.nsm_table_progress_done,
+          ),
+          [progress.outputs.open]: canonicalProgressDecimal(
+            row.nsm_table_progress_open,
+          ),
+          // The supply rides beside the progress (SUPPLY-WARNINGS).
+          ...(progress.supply
+            ? {
+                [progress.supply.outputs.covered]: canonicalProgressDecimal(
+                  row.nsm_table_supply_covered,
+                ),
+                [progress.supply.outputs.short]: canonicalProgressDecimal(
+                  row.nsm_table_supply_short,
+                ),
+              }
+            : {}),
+        }),
+      })
+    : projected;
+  // Each figure rides the row's values under its id: a sum or a total as a
+  // canonical exact decimal (unstated reads null), a band as its value, a
+  // latest record id as it is -- with that record's label beside it.
+  const figured =
+    figures.length > 0
+      ? Object.freeze({
+          ...base,
+          values: Object.freeze({
+            ...base.values,
+            ...Object.fromEntries(
+              figures.map((figure, index) => {
+                const value = row[
+                  `nsm_table_figure_${String(index)}`
+                ] as unknown;
+                return [
+                  figure.figureId,
+                  value === null || value === undefined
+                    ? null
+                    : figure.kind === 'number'
+                      ? canonicalProgressDecimal(value)
+                      : nullableDisplayValue(value),
+                ];
+              }),
+            ),
+          }),
+        })
+      : base;
   const displayValues = Object.freeze(
-    Object.fromEntries(
-      selectedColumns.map((column, index) => [
+    Object.fromEntries([
+      ...selectedColumns.map((column, index) => [
         column.canonicalFieldId,
         nullableDisplayValue(row[`nsm_table_display_${String(index)}`]),
       ]),
-    ),
+      ...figures.flatMap((figure, index) =>
+        figure.label
+          ? [
+              [
+                figure.figureId,
+                nullableDisplayValue(
+                  row[`nsm_table_figure_label_${String(index)}`],
+                ),
+              ],
+            ]
+          : [],
+      ),
+    ]),
   );
   const relationLabels = Object.freeze(
     Object.fromEntries(
       relations.map((plan) => [
-        plan.authorization.relationId,
+        plan.labelId,
         Object.freeze({
           label: nullableDisplayValue(row[plan.labelAlias]),
           recordId: nullableUuid(row[plan.recordAlias]),
@@ -2402,7 +3997,7 @@ function toListDto(
       ]),
     ),
   );
-  return Object.freeze({ ...base, displayValues, relationLabels });
+  return Object.freeze({ ...figured, displayValues, relationLabels });
 }
 
 function visibleFieldExpression(
@@ -3074,6 +4669,7 @@ async function loadScopedRawRecord(
   includeArchived: boolean,
   filterPlans: readonly QueryFilterLoweringPlan[],
   readScope: VerifiedLegalEntityReadScope | null,
+  relationTargets: readonly RelationTargetPlan[] = [],
 ): Promise<RawRecord | null> {
   const values: unknown[] = [];
   const predicates = archivePredicate(entity, includeArchived);
@@ -3083,16 +4679,105 @@ async function loadScopedRawRecord(
   );
   appendQueryFilterPredicates(entity, filterPlans, values, predicates);
   const result = await client.query<QueryResultRow>(
-    selectSql(entity, predicates, 'LIMIT 1'),
+    selectSql(
+      entity,
+      predicates,
+      'LIMIT 1',
+      relationTargets.map((target) => target.column),
+    ),
     values,
   );
-  return result.rows[0] ? rawRecord(entity, result.rows[0]) : null;
+  const row = result.rows[0];
+  if (!row) return null;
+  const record = rawRecord(entity, row);
+  // The stated targets are read in the same statement as the record itself.
+  return relationTargets.length
+    ? Object.freeze({
+        ...record,
+        relationTargets: Object.freeze(
+          Object.fromEntries(
+            relationTargets.map((target) => [
+              target.relationId,
+              nullableUuid(row[target.column]),
+            ]),
+          ),
+        ),
+      })
+    : record;
+}
+
+interface RelationTargetPlan {
+  readonly column: string;
+  readonly relationId: string;
+}
+
+/**
+ * The relations a get is asked to state (`relationTargets`), resolved against
+ * the PINNED COMPILED storage, never against caller input: each must be a
+ * relation whose source is the queried entity, and it reads that relation's
+ * own compiled column. Anything else is refused by name rather than read, as
+ * list progress fails closed. The gateway has already ruled the shape.
+ */
+export function relationTargetPlans(
+  storage: StorageTargetPayloadV1,
+  entity: StorageEntity,
+  requested: ImmutableJsonValue | undefined,
+): readonly RelationTargetPlan[] {
+  if (requested === undefined) return [];
+  if (!Array.isArray(requested) || requested.length === 0)
+    throw failure(
+      'MODULE_RELATION_TARGET_INVALID',
+      'relation targets must name at least one relation',
+    );
+  return Object.freeze(
+    requested.map((relationId) => {
+      const relation = storage.relations.find(
+        (candidate) =>
+          candidate.relationId === relationId &&
+          candidate.sourceEntityId === entity.entityId,
+      );
+      if (!relation)
+        throw failure(
+          'MODULE_RELATION_TARGET_INVALID',
+          'a relation target must be a compiled relation of the queried entity',
+          typeof relationId === 'string' ? relationId : null,
+        );
+      return Object.freeze({
+        column: relation.relationColumn.physicalName,
+        relationId: relation.relationId,
+      });
+    }),
+  );
+}
+
+/** A get's stated relation targets: the stored target id, never a label. */
+function withRelationTargets(
+  dto: SemanticRecordDto,
+  record: RawRecord,
+  targets: readonly RelationTargetPlan[],
+): SemanticRecordDto {
+  if (!targets.length) return dto;
+  return Object.freeze({
+    ...dto,
+    relationLabels: Object.freeze(
+      Object.fromEntries(
+        targets.map((target) => [
+          target.relationId,
+          Object.freeze({
+            label: null,
+            recordId: record.relationTargets?.[target.relationId] ?? null,
+          }),
+        ]),
+      ),
+    ),
+  });
 }
 
 function selectSql(
   entity: StorageEntity,
   predicates: readonly string[],
   suffix: string,
+  extraColumns: readonly string[] = [],
 ): string {
   const columns = [
     entity.recordIdentity.column,
@@ -3100,6 +4785,8 @@ function selectSql(
     entity.archive.archivedAtColumn,
     ...entity.columns.map((column) => column.physicalName),
   ];
+  for (const column of extraColumns)
+    if (!columns.includes(column)) columns.push(column);
   return `SELECT ${columns.map(quoted).join(', ')}
             FROM north_star_module.${quoted(entity.physicalTableName)}
            WHERE ${predicates.length > 0 ? predicates.join(' AND ') : 'true'}
@@ -4051,9 +5738,11 @@ function fieldClassification(
   contract: RegisteredOperationInputContract | undefined,
   fieldId: string,
 ): 'INTERNAL' | 'PUBLIC' {
-  const field = contract?.fields.find(
-    (candidate) => candidate.fieldId === fieldId,
-  );
+  const field =
+    contract?.fields.find((candidate) => candidate.fieldId === fieldId) ??
+    contract?.assignedFields?.find(
+      (candidate) => candidate.fieldId === fieldId,
+    );
   if (!field) {
     throw failure(
       'MODULE_SEMANTIC_CONTRACT_UNSUPPORTED',

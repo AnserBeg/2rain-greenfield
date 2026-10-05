@@ -10,6 +10,7 @@ import {
   APPLICATION_NAMESPACE,
   composedApplicationDefinition,
 } from '../../packages/domain/src/app/builder.js';
+import { catalogModuleDefinition } from '../../packages/domain/src/catalog/definition.js';
 import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/definition.js';
 import { purchasingModuleDefinition } from '../../packages/domain/src/purchasing/definition.js';
 import { salesModuleDefinition } from '../../packages/domain/src/sales/definition.js';
@@ -78,6 +79,7 @@ import {
   ordinaryModuleV1,
   ordinaryModuleV2,
 } from '../fixtures/g2/module-conformance/definitions.js';
+import { assertComposedInventoryCollection } from '../helpers/assert-composed-inventory.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 const migrations = resolve('db/migrations');
@@ -5598,7 +5600,10 @@ function emptyModuleDefinition(): Record<string, unknown> {
 
 function inventoryOwnedModuleDefinition(): Record<string, unknown> {
   const application = composedApplicationDefinition();
-  const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE);
+  // As the product mounts it: with stock documents (INVENTORY-PARITY).
+  const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE, {
+    documentEntry: true,
+  });
   for (const collection of [
     'assertions',
     'entities',
@@ -5615,15 +5620,12 @@ function inventoryOwnedModuleDefinition(): Record<string, unknown> {
     const source = inventory[collection];
     assert.ok(Array.isArray(target));
     assert.ok(Array.isArray(source));
-    for (const sourceEntry of source) {
-      assert.equal(
-        target.filter(
-          (candidate) => canonicalize(candidate) === canonicalize(sourceEntry),
-        ).length,
-        1,
-        `composed application must contain each inventory ${collection} entry exactly once`,
-      );
-    }
+    assertComposedInventoryCollection(
+      collection,
+      target,
+      source,
+      APPLICATION_NAMESPACE,
+    );
   }
   const modules = application.modules;
   const inventoryModules = inventory.modules;
@@ -5672,17 +5674,32 @@ function withoutModuleForTransition(
     const source = module[collection];
     assert.ok(Array.isArray(target));
     assert.ok(Array.isArray(source));
+    const idKey = {
+      assertions: 'assertionId',
+      entities: 'entityId',
+      fields: 'fieldId',
+      operations: 'operationId',
+      permissions: 'permissionId',
+      queries: 'queryId',
+      relations: 'relationId',
+      stateMachines: 'machineId',
+      storageMappings: 'storageMappingId',
+      surfaces: 'surfaceId',
+    }[collection];
+    const ids = new Set(source.map((entry) => entry[idKey]));
+    for (const id of ids)
+      assert.equal(
+        target.filter((candidate) => candidate[idKey] === id).length,
+        1,
+        `transition fixture must identify each ${label} ${collection} entry exactly once`,
+      );
+    // Composition may change presentation/query bodies and add module-owned dependencies.
+    // Remove by canonical identity and declared module ownership, never byte equality.
     application[collection] = target.filter(
       (candidate) =>
-        !source.some(
-          (sourceEntry) =>
-            canonicalize(candidate) === canonicalize(sourceEntry),
-        ),
-    );
-    assert.equal(
-      target.length - (application[collection] as unknown[]).length,
-      source.length,
-      `transition fixture must remove every ${label} ${collection} entry exactly once`,
+        !ids.has(candidate[idKey]) &&
+        candidate.module?.targetId !==
+          `${APPLICATION_NAMESPACE}:module.${label}`,
     );
   }
   const modules = application.modules;
@@ -5726,62 +5743,56 @@ function composedApplicationWithoutInventoryForTransition(): Record<
   const application = withoutModuleForTransition(
     withoutModuleForTransition(
       structuredClone(inventoryOwnedModuleDefinition()),
-      purchasingModuleDefinition(APPLICATION_NAMESPACE),
+      // As the product application composes it, commercial terms and
+      // payables included, so none of its purchase order fields or bill
+      // documents outlives the removal.
+      purchasingModuleDefinition(APPLICATION_NAMESPACE, {
+        commercialTerms: true,
+        payables: true,
+      }),
       'purchasing',
     ),
     salesModuleDefinition(APPLICATION_NAMESPACE),
     'sales',
   );
-  const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE);
-  for (const collection of [
-    'assertions',
-    'entities',
-    'fields',
-    'operations',
-    'permissions',
-    'queries',
-    'relations',
-    'stateMachines',
-    'storageMappings',
-    'surfaces',
-  ] as const) {
-    const target = application[collection];
-    const source = inventory[collection];
-    assert.ok(Array.isArray(target));
-    assert.ok(Array.isArray(source));
-    application[collection] = target.filter(
-      (candidate) =>
-        !source.some(
-          (sourceEntry) =>
-            canonicalize(candidate) === canonicalize(sourceEntry),
-        ),
-    );
-    assert.equal(
-      target.length - (application[collection] as unknown[]).length,
-      source.length,
-      `transition fixture must remove every inventory ${collection} entry exactly once`,
-    );
-  }
-  const modules = application.modules;
-  const inventoryModules = inventory.modules;
-  assert.ok(Array.isArray(modules));
-  assert.ok(Array.isArray(inventoryModules));
-  const inventoryModule = inventoryModules[0];
-  assert.ok(inventoryModule && typeof inventoryModule === 'object');
-  assert.ok('moduleId' in inventoryModule);
-  application.modules = modules.filter(
-    (candidate) =>
-      candidate === null ||
-      typeof candidate !== 'object' ||
-      !('moduleId' in candidate) ||
-      candidate.moduleId !== inventoryModule.moduleId,
+  const withoutInventory = withoutModuleForTransition(
+    application,
+    inventoryModuleDefinition(APPLICATION_NAMESPACE, { documentEntry: true }),
+    'inventory',
   );
-  assert.equal(
-    modules.length - (application.modules as unknown[]).length,
-    1,
-    'transition fixture must remove the inventory module exactly once',
+  // INVENTORY-PARITY: the item page shows Inventory's stock and movements;
+  // without Inventory it is Catalog's plain record page, as it was before.
+  const itemPage = `${APPLICATION_NAMESPACE}:surface.item_detail`;
+  const plainItemPage = (
+    catalogModuleDefinition(APPLICATION_NAMESPACE, { sellingPrices: true })
+      .surfaces as Array<Record<string, unknown>>
+  ).find((surface) => surface.surfaceId === itemPage);
+  assert.ok(plainItemPage);
+  withoutInventory.surfaces = (
+    withoutInventory.surfaces as Array<Record<string, unknown>>
+  ).map((surface) =>
+    surface.surfaceId === itemPage
+      ? { ...plainItemPage, workspace: { membership: 'contextual' } }
+      : surface,
   );
-  return application;
+  // REPLENISHMENT: Stock by item and the Buying worklist are Catalog's Lists
+  // that add up Inventory, Sales and Purchasing rows; without them they go,
+  // with their queries, as the builder cuts a List whose figures' queries are
+  // not composed.
+  const itemLists = new Set(
+    ['item_stock_list', 'item_buying_list'].map(
+      (local) => `${APPLICATION_NAMESPACE}:${local}`,
+    ),
+  );
+  const named = (value: unknown) =>
+    String(value).replace(/:(?:surface|query)\./u, ':');
+  withoutInventory.surfaces = (
+    withoutInventory.surfaces as Array<Record<string, unknown>>
+  ).filter((surface) => !itemLists.has(named(surface.surfaceId)));
+  withoutInventory.queries = (
+    withoutInventory.queries as Array<Record<string, unknown>>
+  ).filter((query) => !itemLists.has(named(query.queryId)));
+  return withoutInventory;
 }
 
 function collectPlanRelationNames(value: unknown): string[] {

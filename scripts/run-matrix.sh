@@ -179,10 +179,11 @@ echo "PERFORMANCE_GATE_PASS_SHA=$SHA" | tee -a "$LOG"
 # produced above under the same run id, so the final reachability aggregation
 # proves both the exclusive gate and the load-tolerant matrix executed.
 #
-# Everything through test:browser stays under the exclusive lease. check:schema,
-# test:architecture, test:postgres, test:locale and test:browser all stand up
-# ephemeral PostgreSQL containers, and two container-bearing runs on this
-# machine starve each other's readiness deadline rather than colliding visibly.
+# Everything through the browser suites stays under the exclusive lease.
+# check:schema, test:architecture, test:postgres, test:locale and all three
+# browser suites stand up ephemeral PostgreSQL containers, and two
+# container-bearing runs on this machine starve each other's readiness deadline
+# rather than colliding visibly.
 {
   set -x
   corepack pnpm format &&
@@ -202,8 +203,12 @@ echo "PERFORMANCE_GATE_PASS_SHA=$SHA" | tee -a "$LOG"
   corepack pnpm test:architecture &&
   corepack pnpm test:contracts &&
   corepack pnpm test:postgres &&
+  corepack pnpm test:postgres:composed &&
+  corepack pnpm test:postgres:commercial &&
   corepack pnpm test:locale &&
-  corepack pnpm test:browser
+  corepack pnpm test:browser &&
+  corepack pnpm test:browser:operations &&
+  corepack pnpm test:browser:composed
 } 2>&1 | tee -a "$LOG"
 RC="${PIPESTATUS[0]}"
 if [ "$RC" -ne 0 ]; then

@@ -1,5 +1,15 @@
 # ADR-0030: Compiler-derived navigation grouping
 
+**Owner-approved amendment, 2026-09-15 — RAIN-ORDER-ENTRY.** Optional canonical
+workspace membership declares operational, setup or contextual destinations.
+Only operational/setup members enter compiled navigation; contextual surfaces
+declare an owning workspace and retain document/task/deep-link reachability.
+Membership never grants or removes semantic authorization. An owning workspace
+remains active while working on its child documents/tasks. Saved views remain
+internal to Lists. The all-active-List rule below is the compatibility fallback
+for declarations without workspace membership, not the rule for the operational
+application. Existing five-entry grouping and single shell grammar are retained.
+
 Date: 2026-07-30
 Status: **ratified** 2026-08-21 — G3-P6c is accepted (ledger; reviewed and matrix-green
 `d9ef917d`, integrated `8385e13`), completing the condition this ADR set for itself.

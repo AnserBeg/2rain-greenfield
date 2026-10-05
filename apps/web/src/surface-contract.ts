@@ -1,7 +1,23 @@
+import {
+  canonicalize,
+  SurfaceCompositionSchema,
+  type SurfaceComposition,
+} from '../../../packages/canonical-model/src/index.js';
+import {
+  SurfaceWorkspaceSchema,
+  SurfaceDocumentEditorSchema,
+  SurfaceFormSchema,
+  SurfaceListSchema,
+  type SurfaceForm,
+  type SurfaceList,
+  type SurfaceWorkspace,
+  type SurfaceDocumentEditor,
+} from '../../../packages/canonical-model/src/schemas.js';
 import { assertRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
 import {
   FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
+  COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   SUPPORTED_SURFACE_MANIFEST_PAYLOAD_VERSIONS,
 } from '../../../packages/compiler/src/protocol.js';
@@ -225,7 +241,9 @@ export type SurfaceOperationIntent =
  * something other than the operation -- `create` and `update` by the form
  * role's one Save button, `archive` and `restore` by whether the record is
  * archived. A second operation on any of those has nowhere to render, so it
- * stays refused BY NAME rather than binding invisibly.
+ * stays refused BY NAME rather than binding invisibly. A family with no form
+ * renders no `create` or `update` at all; there a surplus of either is left
+ * unbound rather than refusing the family's read surfaces.
  *
  * `command` is the exception because each command renders its own named
  * button, which is the whole reason this limit lifted.
@@ -258,7 +276,30 @@ export interface CompiledSurfaceSlot {
   readonly slotId: string;
 }
 
+/**
+ * The fields a Record form shows and sends: its query's fields less those it
+ * declares omitted, which a declared Task of the record's page sets
+ * (`surface.form.omit`, LOCATIONS). One rule for the render and the reader.
+ */
+export function formFieldIds(
+  surface: CompiledSurfaceDefinition,
+): readonly string[] {
+  const omitted = new Set<string>(surface.form?.omit ?? []);
+  return omitted.size === 0
+    ? surface.fieldIds
+    : surface.fieldIds.filter((fieldId) => !omitted.has(fieldId));
+}
+
 export interface CompiledSurfaceDefinition {
+  readonly list?: SurfaceList;
+  /**
+   * A Record form's references -- fields chosen from another List's
+   * records -- and the fields it leaves to a Task of the record's page.
+   */
+  readonly form?: SurfaceForm;
+  readonly workspace?: SurfaceWorkspace;
+  readonly documentEditor?: SurfaceDocumentEditor;
+  readonly composition?: SurfaceComposition;
   readonly archetype: CompiledSurfaceArchetype;
   readonly dataSourceQueryId: string;
   readonly fieldIds: readonly string[];
@@ -320,6 +361,12 @@ export interface CompiledSurfaceOperationBinding {
 }
 
 export interface CompiledSurfaceInputField {
+  readonly temporal?: RegisteredOperationInputContract['fields'][number]['temporal'];
+  /**
+   * The pinned contract's value bounds, so an editor can refuse an out-of-range
+   * decimal before any step commits. The provider still enforces them.
+   */
+  readonly bounds?: RegisteredOperationInputContract['fields'][number]['bounds'];
   readonly fieldId: string;
   readonly kind: RegisteredOperationInputContract['fields'][number]['fieldKind'];
   readonly required: boolean;
@@ -470,6 +517,7 @@ export function readCompiledSurfaceDataBinding(
 
   const byOperationId = new Map<string, CompiledSurfaceOperationBinding>();
   const intentCount = new Map<SurfaceOperationIntent, number>();
+  const surplus = new Map<SurfaceOperationIntent, string>();
   let relationInputs: readonly CompiledSurfaceRelationInput[] | null = null;
   let authorityUnavailable = false;
   for (const value of operationCatalog) {
@@ -505,11 +553,14 @@ export function readCompiledSurfaceDataBinding(
     // this packet answered. `command` now admits many; the other four still
     // refuse, and INTENT_RENDERED_ARITY carries the reason.
     const bound = (intentCount.get(operation.intent) ?? 0) + 1;
-    if (bound > INTENT_RENDERED_ARITY[operation.intent]) {
-      throw invalidBinding(
+    if (
+      bound > INTENT_RENDERED_ARITY[operation.intent] &&
+      !surplus.has(operation.intent)
+    )
+      surplus.set(
+        operation.intent,
         `surface entity has more than one active ${operation.tier} ${operation.intent} operation`,
       );
-    }
     intentCount.set(operation.intent, bound);
     byOperationId.set(
       operation.operationId,
@@ -518,12 +569,27 @@ export function readCompiledSurfaceDataBinding(
         confirmation: operation.confirmation,
         inputFields: operation.inputFields,
         intent: operation.intent,
-        label: operationLabel(operation.operationId),
+        label: operation.label ?? operationLabel(operation.operationId),
         operationId: operation.operationId,
         precondition: operation.precondition,
         systemInputArgumentKey: operation.systemInputArgumentKey,
       }),
     );
+  }
+
+  // A surplus is refused by name wherever it could render. `create` and
+  // `update` render only through the family's form; a family that declares no
+  // active form has nowhere to render either, so its surplus is left unbound
+  // (the operations stay governed through their own gateways) instead of making
+  // its read-only List and Record unreadable.
+  for (const [intent, message] of surplus) {
+    if (
+      (intent !== 'create' && intent !== 'update') ||
+      familyDeclaresForm(view, query.sourceEntityId)
+    )
+      throw invalidBinding(message);
+    for (const [operationId, operation] of byOperationId)
+      if (operation.intent === intent) byOperationId.delete(operationId);
   }
 
   return Object.freeze({
@@ -546,6 +612,73 @@ export function readCompiledSurfaceDataBinding(
         ? Object.freeze({ status: 'unavailable' as const })
         : Object.freeze({ relationInputs, status: 'known' as const }),
   });
+}
+
+/** Whether any active form surface in the pinned release edits this entity. */
+function familyDeclaresForm(
+  view: RuntimeViewContract.RequestRuntimeView,
+  entityId: string,
+): boolean {
+  return readCompiledSurfaceManifest(view).surfaces.some(
+    (surface) =>
+      surface.lifecycle === 'active' &&
+      surface.surfaceRole === 'form' &&
+      registeredSemanticQueryFromPinnedView(view, surface.dataSourceQueryId)
+        ?.sourceEntityId === entityId,
+  );
+}
+
+/**
+ * The query a record picker enumerates a List's records through. A picker
+ * needs labels only, so when the List's query computes a read model -- figures
+ * per row, such as each order's total, each costing further reads -- the
+ * options are read through a plain list query that presents the same records
+ * instead: active, over the same entity, with the same selections, filter,
+ * permission, tier and company-scope cardinality, and no read model. The
+ * List's own entry authorization query is preferred (its company authority is
+ * proven through that query), otherwise the first such query by id; with none
+ * the List's own query is read, as before. Which List stands for the entity is
+ * decided elsewhere and unchanged.
+ */
+export function pickerEnumerationQuery(
+  view: RuntimeViewContract.RequestRuntimeView,
+  surface: CompiledSurfaceDefinition,
+  bound: RegisteredQueryDefinition,
+): RegisteredQueryDefinition {
+  if (!bound.readModel) return bound;
+  const payload = view.projections.query.payload;
+  if (!isRecord(payload) || !Array.isArray(payload.queries)) return bound;
+  const fieldIds = (query: RegisteredQueryDefinition) =>
+    query.selections.map((selection) => selection.fieldId);
+  const plain = payload.queries.flatMap((entry) => {
+    const queryId = isRecord(entry) ? entry.queryId : undefined;
+    // Re-read through the validated catalog: only a checked definition counts.
+    const candidate =
+      typeof queryId === 'string'
+        ? registeredSemanticQueryFromPinnedView(view, queryId)
+        : undefined;
+    return candidate &&
+      candidate.queryType === 'list' &&
+      candidate.lifecycle === 'active' &&
+      !candidate.readModel &&
+      candidate.sourceEntityId === bound.sourceEntityId &&
+      candidate.tier === bound.tier &&
+      candidate.permissionId === bound.permissionId &&
+      candidate.legalEntityScope?.cardinality ===
+        bound.legalEntityScope?.cardinality &&
+      canonicalize(fieldIds(candidate)) === canonicalize(fieldIds(bound)) &&
+      canonicalize(candidate.filter) === canonicalize(bound.filter)
+      ? [candidate]
+      : [];
+  });
+  const preferred = surface.workspace?.entry?.authorizationQueryId;
+  return (
+    plain.find((candidate) => candidate.queryId === preferred) ??
+    plain.toSorted((left, right) =>
+      left.queryId.localeCompare(right.queryId),
+    )[0] ??
+    bound
+  );
 }
 
 function displayFieldIdFromPinnedQueries(
@@ -669,9 +802,17 @@ export function readCompiledSurfaceManifest(
     );
   }
   const navigation =
-    payloadSchemaVersion === GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION
+    payload.navigation !== undefined
       ? parseNavigationTree(payload.navigation, surfaces)
       : null;
+  if (
+    payloadSchemaVersion !== COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION &&
+    surfaces.some((surface) => surface.composition)
+  )
+    throw new SurfaceProjectionError(
+      'UNSUPPORTED_SURFACE_VERSION',
+      'composition requires the v2 surface envelope',
+    );
   validateNavigationReachability(navigation, surfaces);
 
   return Object.freeze({
@@ -804,13 +945,13 @@ function navigationSurfaceIds(entry: CompiledNavigationEntry): string[] {
 }
 
 function isNavigationSurface(surface: CompiledSurfaceDefinition): boolean {
-  return (
-    surface.surfaceRole === 'list' ||
-    (surface.surfaceRole === null &&
-      (surface.archetype === 'list' ||
-        surface.archetype === 'home' ||
-        surface.archetype === 'task'))
-  );
+  return surface.workspace
+    ? surface.workspace.membership !== 'contextual'
+    : surface.surfaceRole === 'list' ||
+        (surface.surfaceRole === null &&
+          (surface.archetype === 'list' ||
+            surface.archetype === 'home' ||
+            surface.archetype === 'task'));
 }
 
 function invalidNavigation(message: string): SurfaceProjectionError {
@@ -863,6 +1004,25 @@ function parseSurface(
   const fields = parseSurfaceFields(value, index);
 
   return Object.freeze({
+    ...(value.composition === undefined
+      ? {}
+      : { composition: SurfaceCompositionSchema.parse(value.composition) }),
+    ...(value.workspace === undefined
+      ? {}
+      : { workspace: SurfaceWorkspaceSchema.parse(value.workspace) }),
+    ...(value.list === undefined
+      ? {}
+      : { list: SurfaceListSchema.parse(value.list) }),
+    ...(value.form === undefined
+      ? {}
+      : { form: SurfaceFormSchema.parse(value.form) }),
+    ...(value.documentEditor === undefined
+      ? {}
+      : {
+          documentEditor: SurfaceDocumentEditorSchema.parse(
+            value.documentEditor,
+          ),
+        }),
     archetype,
     dataSourceQueryId: value.dataSourceQueryId,
     fieldIds: Object.freeze([...value.fieldIds]),
@@ -1067,6 +1227,7 @@ function parseOperationBinding(value: RegisteredOperationDefinition): {
   readonly entityId: string | null;
   readonly inputFields: readonly CompiledSurfaceInputField[] | null;
   readonly intent: SurfaceOperationIntent;
+  readonly label: string | null;
   readonly lifecycle: RegisteredOperationDefinition['lifecycle'];
   readonly operationId: string;
   readonly precondition: Readonly<
@@ -1093,6 +1254,7 @@ function parseOperationBinding(value: RegisteredOperationDefinition): {
     capabilityId: capabilityEffect ? effect.capability.targetId : null,
     confirmation: value.confirmation,
     entityId: capabilityEffect ? null : effect.entity.targetId,
+    label: value.label ?? null,
     inputFields:
       value.inputContract === undefined
         ? null
@@ -1107,6 +1269,8 @@ function parseOperationBinding(value: RegisteredOperationDefinition): {
                 Object.freeze({
                   fieldId: field.fieldId,
                   kind: field.fieldKind,
+                  temporal: field.temporal,
+                  bounds: field.bounds,
                   required: field.required,
                 }),
               ),

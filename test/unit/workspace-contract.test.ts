@@ -1,9 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { platformContract } from '../../packages/canonical-model/src/index.js';
+import {
+  CanonicalModelError,
+  platformContract,
+} from '../../packages/canonical-model/src/index.js';
+import { normalizeApplicationPackage } from '../../packages/canonical-model/src/index.js';
+import { composedApplicationDefinition } from '../../packages/domain/src/app/builder.js';
+import {
+  SurfaceDocumentEditorSchema,
+  SurfaceWorkspaceSchema,
+} from '../../packages/canonical-model/src/index.js';
 import type { StorageTargetPayloadV1 } from '../../packages/compiler/src/index.js';
 import { legalEntityReadScopeRequirement } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import { moneyText } from '../../apps/web/src/list-declaration.js';
+import { declaredDefault } from '../../apps/web/src/control-semantics.js';
+import { FULFILLMENT_READ_MODEL_BINDINGS } from '../../packages/domain/src/sales/workspace.js';
 
 test('the scaffold exposes a canonical workspace contract', () => {
   assert.deepEqual(platformContract, {
@@ -34,4 +46,2111 @@ test('legal-entity read scope dispatches only from compiler-owned storage metada
     kind: 'legalEntity',
   });
   assert.equal(legalEntityReadScopeRequirement(syntheticTenantShared), null);
+});
+
+test('workspace declarations preserve contextual surfaces and support an unrelated document editor', () => {
+  const authored = JSON.parse(
+    JSON.stringify(composedApplicationDefinition())
+      .replaceAll('northstar.app', 'northstar.servicefixture')
+      .replaceAll('sales_order', 'service_request'),
+  );
+  const model = normalizeApplicationPackage(authored);
+  const workspace = model.surfaces.find(
+    (value) =>
+      value.surfaceId ===
+      'northstar.servicefixture:surface.service_request_list',
+  )!;
+  assert.equal(
+    SurfaceWorkspaceSchema.parse(
+      'workspace' in workspace && workspace.workspace,
+    ).membership,
+    'operational',
+  );
+  const line = model.surfaces.find(
+    (value) =>
+      value.surfaceId ===
+      'northstar.servicefixture:surface.service_request_line_list',
+  )!;
+  assert.equal(
+    SurfaceWorkspaceSchema.parse('workspace' in line && line.workspace)
+      .membership,
+    'contextual',
+  );
+  const form = model.surfaces.find(
+    (value) =>
+      value.surfaceId ===
+      'northstar.servicefixture:surface.service_request_form',
+  )!;
+  const editor = SurfaceDocumentEditorSchema.parse(
+    'documentEditor' in form && form.documentEditor,
+  );
+  assert.equal(
+    editor.recordSurfaceId,
+    'northstar.servicefixture:surface.service_request_detail',
+  );
+  assert.equal(editor.saveMode, 'sequential');
+});
+
+test('canonical workspace/editor declarations refuse wrong ownership, undeclared references and atomic claims', () => {
+  const source = composedApplicationDefinition();
+  const mutate = (change: (surface: Record<string, unknown>) => void) => {
+    const candidate = structuredClone(source);
+    const surface = (candidate.surfaces as Record<string, unknown>[]).find(
+      (value) => String(value.surfaceId).endsWith(':surface.sales_order_form'),
+    )!;
+    change(surface);
+    assert.throws(() => normalizeApplicationPackage(candidate));
+  };
+  mutate((surface) => {
+    (surface.documentEditor as Record<string, unknown>).parentRelationId =
+      'northstar.app:relation.shipment_order';
+  });
+  mutate((surface) => {
+    (surface.documentEditor as Record<string, unknown>).lineQueryId =
+      'northstar.app:query.missing';
+  });
+  mutate((surface) => {
+    (surface.documentEditor as Record<string, unknown>).saveMode = 'atomic';
+  });
+  mutate((surface) => {
+    (surface.workspace as Record<string, unknown>).ownerSurfaceId =
+      'northstar.app:surface.sales_order_line_list';
+  });
+});
+
+test('editor controls are closed, typed declarations checked against the entity model', () => {
+  const source = composedApplicationDefinition();
+  type Field = Record<string, unknown> & {
+    fieldId: string;
+    presentation?: Record<string, unknown>;
+    reference?: Record<string, unknown> & {
+      create?: Record<string, unknown> & {
+        steps: (Record<string, unknown> & {
+          fixed?: Record<string, unknown>[];
+        })[];
+        fields: Record<string, unknown>[];
+      };
+    };
+  };
+  const refuse = (
+    change: (editor: { headerFields: Field[]; lineFields: Field[] }) => void,
+    expected: RegExp,
+  ) => {
+    const candidate = structuredClone(source);
+    const surface = (candidate.surfaces as Record<string, unknown>[]).find(
+      (value) => String(value.surfaceId).endsWith(':surface.sales_order_form'),
+    )!;
+    change(
+      surface.documentEditor as { headerFields: Field[]; lineFields: Field[] },
+    );
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+  const header = (editor: { headerFields: Field[] }, suffix: string) =>
+    editor.headerFields.find((field) => field.fieldId.endsWith(suffix))!;
+  const line = (editor: { lineFields: Field[] }, suffix: string) =>
+    editor.lineFields.find((field) => field.fieldId.endsWith(suffix))!;
+
+  // The shipped declarations are admitted.
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  // Closed schema: an undeclared control property is refused, not ignored.
+  refuse((editor) => {
+    header(editor, '_currency').presentation!.placeholder = 'Pick one';
+  }, /CANON_SCHEMA_INVALID.*headerFields\[\d+\]\.presentation"/);
+  // A choice default must be one of its offered values.
+  refuse((editor) => {
+    header(editor, '_currency').presentation!.defaultValue = 'JPY';
+  }, /choice presentation requires/);
+  // A choice cannot be declared over a non-text field.
+  refuse((editor) => {
+    header(editor, '_order_date').presentation = {
+      kind: 'choice',
+      options: [{ value: 'today', label: 'Today' }],
+    };
+  }, /choice presentation requires/);
+  // A derived value must name a sibling reference whose get reads the source.
+  refuse((editor) => {
+    line(editor, '_unit_id').presentation!.sourceFieldId =
+      'northstar.app:field.item_description_missing';
+  }, /derived presentation requires/);
+  // A picker with create needs an exact get of the same entity.
+  refuse((editor) => {
+    delete header(editor, '_customer_party_id').reference!.getQueryId;
+  }, /searchable picker requires an exact get/);
+  refuse((editor) => {
+    header(editor, '_customer_party_id').reference!.getQueryId =
+      'northstar.app:query.item_get';
+  }, /a supplied exact get must be a get of the picker entity/);
+  // Create steps must be governed creates, select the picker's entity, and
+  // carry only admissible fixed values and earlier-step relations.
+  refuse((editor) => {
+    header(
+      editor,
+      '_customer_party_id',
+    ).reference!.create!.steps[0]!.operationId =
+      'northstar.app:operation.party_update';
+  }, /create flow steps must be governed create operations/);
+  refuse((editor) => {
+    header(editor, '_customer_party_id').reference!.create!.selectStep = 1;
+  }, /create flow must select a record of the picker entity/);
+  refuse((editor) => {
+    header(
+      editor,
+      '_customer_party_id',
+    ).reference!.create!.steps[1]!.fixed![0]!.value =
+      'northstar.app:option.not_a_role';
+  }, /fixed create values must be admissible/);
+  refuse((editor) => {
+    header(editor, '_customer_party_id').reference!.create!.fields.push({
+      fieldId: 'northstar.app:field.item_sku',
+      label: 'SKU',
+    });
+  }, /each collected create field must belong to exactly one step/);
+  // A reference is presented by its picker, never by a presentation too.
+  refuse((editor) => {
+    header(editor, '_customer_party_id').presentation = { kind: 'multiline' };
+  }, /a reference field is presented by its picker/);
+});
+
+test('FORM-4: every supplied exact get is validated, whether or not the picker creates or shows details', () => {
+  const source = composedApplicationDefinition();
+  type Reference = Record<string, unknown> & {
+    create?: unknown;
+    detailFieldIds?: unknown;
+    getQueryId?: string;
+    labelFieldIds: string[];
+  };
+  const variant = (change: (reference: Reference) => void) => {
+    const candidate = structuredClone(source);
+    const surface = (candidate.surfaces as Record<string, unknown>[]).find(
+      (value) => String(value.surfaceId).endsWith(':surface.sales_order_form'),
+    )!;
+    const customer = (
+      surface.documentEditor as {
+        headerFields: { fieldId: string; reference?: Reference }[];
+      }
+    ).headerFields.find((field) =>
+      field.fieldId.endsWith('_customer_party_id'),
+    )!.reference!;
+    // A plain picker: a list and an exact get, no quick create, no details.
+    delete customer.create;
+    delete customer.detailFieldIds;
+    change(customer);
+    return candidate;
+  };
+  // Literal expectations, written here rather than read from the validator.
+  const suppliedGetRefused =
+    'a supplied exact get must be a get of the picker entity reading its labels and details';
+  const refusedWith = (candidate: unknown, rule: string) =>
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => value.rule === rule),
+    );
+
+  assert.doesNotThrow(() => normalizeApplicationPackage(variant(() => {})));
+  // Mismatched entity: an item get on a party picker.
+  refusedWith(
+    variant((reference) => {
+      reference.getQueryId = 'northstar.app:query.item_get';
+    }),
+    suppliedGetRefused,
+  );
+  // Wrong kind: the list itself named as the exact get.
+  refusedWith(
+    variant((reference) => {
+      reference.getQueryId = 'northstar.app:query.party_list';
+    }),
+    suppliedGetRefused,
+  );
+  // Missing binding.
+  refusedWith(
+    variant((reference) => {
+      reference.getQueryId = 'northstar.app:query.party_missing_get';
+    }),
+    suppliedGetRefused,
+  );
+  // A same-entity get that does not select the picker's label. It is a second
+  // get added only for this picker, so no other surface's reads change.
+  const addedGet = (candidate: Record<string, unknown>, label: boolean) => {
+    const queries = candidate.queries as {
+      queryId: string;
+      selections: { selectionId: string; field: { targetId: string } }[];
+    }[];
+    const partyGet = queries.find(
+      (query) => query.queryId === 'northstar.app:query.party_get',
+    )!;
+    queries.push({
+      ...structuredClone(partyGet),
+      queryId: 'northstar.app:query.party_number_get',
+      selections: structuredClone(partyGet.selections)
+        .filter(
+          (selection) =>
+            label || !selection.field.targetId.endsWith(':field.party_name'),
+        )
+        .map((selection) => ({
+          ...selection,
+          selectionId: selection.selectionId.replace(
+            'party_get',
+            'party_number_get',
+          ),
+        })),
+    });
+    return candidate;
+  };
+  const numberGet = (reference: Reference) => {
+    reference.getQueryId = 'northstar.app:query.party_number_get';
+  };
+  refusedWith(addedGet(variant(numberGet), false), suppliedGetRefused);
+  // The same added get reading the label is admitted: the refusal is the label.
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(addedGet(variant(numberGet), true)),
+  );
+  // A legacy picker with no exact get keeps its admitted behaviour, in a
+  // legacy header where nothing is defaulted or scoped through it.
+  const legacy = variant((reference) => {
+    delete reference.getQueryId;
+  });
+  for (const field of (
+    (legacy.surfaces as Record<string, unknown>[]).find((value) =>
+      String(value.surfaceId).endsWith(':surface.sales_order_form'),
+    )!.documentEditor as {
+      headerFields: {
+        defaultFrom?: unknown;
+        reference?: { within?: unknown };
+      }[];
+    }
+  ).headerFields) {
+    delete field.defaultFrom;
+    delete field.reference?.within;
+  }
+  assert.doesNotThrow(() => normalizeApplicationPackage(legacy));
+  // Once a default reads through it, the picker needs its exact get.
+  refusedWith(
+    variant((reference) => {
+      delete reference.getQueryId;
+    }),
+    'an editor default requires a sibling reference whose record holds a compatible selected source',
+  );
+});
+
+test('picker eligibility and Task input presentation are closed, typed declarations', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type Eligibility = {
+    queryId: string;
+    filters: { fieldId: string; value: string }[];
+    [key: string]: unknown;
+  };
+  type Input = {
+    inputId: string;
+    presentation?: {
+      kind: string;
+      defaultValue?: string;
+      defaultFrom?: { field: string };
+      column?: { columnId: string };
+    };
+  };
+  const surface = (candidate: Loose, suffix: string) =>
+    (candidate.surfaces as Loose[]).find((value) =>
+      String(value.surfaceId).endsWith(suffix),
+    )!;
+  const eligibility = (candidate: Loose) =>
+    (
+      surface(candidate, ':surface.sales_order_form').documentEditor as {
+        headerFields: {
+          fieldId: string;
+          reference: { eligibility: Eligibility };
+        }[];
+      }
+    ).headerFields.find((field) =>
+      field.fieldId.endsWith('_customer_party_id'),
+    )!.reference.eligibility;
+  const receiveInput = (candidate: Loose, name: string) =>
+    (
+      surface(candidate, ':surface.purchase_order_detail').composition as {
+        actions: { actionId: string; inputs: Input[] }[];
+      }
+    ).actions
+      .find((action) => action.actionId.endsWith(':action.receive_known'))!
+      .inputs.find((input) =>
+        input.inputId.endsWith(`:input.receive_${name}`),
+      )!;
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  // Eligibility: an unscoped list of an entity whose owned relation points at
+  // the picker's entity, filtered by its own selected fields and admissible values.
+  refuse((candidate) => {
+    eligibility(candidate).queryId = 'northstar.app:query.item_list';
+  }, /picker eligibility requires/);
+  refuse((candidate) => {
+    eligibility(candidate).queryId = 'northstar.app:query.sales_order_list';
+  }, /picker eligibility requires/);
+  refuse((candidate) => {
+    eligibility(candidate).filters[0]!.value =
+      'northstar.app:option.not_a_role';
+  }, /picker eligibility filters require/);
+  refuse((candidate) => {
+    eligibility(candidate).filters[0]!.fieldId =
+      'northstar.app:field.party_name';
+  }, /picker eligibility filters require/);
+  refuse((candidate) => {
+    eligibility(candidate).includeInactive = true;
+  }, /CANON_SCHEMA_INVALID/);
+  // Task inputs: presentation only on text inputs; a listed default; a
+  // record default the surface actually reads; a derived column of the
+  // selected dataset.
+  refuse((candidate) => {
+    receiveInput(candidate, 'quantity').presentation = { kind: 'multiline' };
+  }, /input presentation applies to text inputs/);
+  refuse((candidate) => {
+    receiveInput(candidate, 'currency').presentation!.defaultValue = 'JPY';
+  }, /choice inputs require/);
+  refuse((candidate) => {
+    receiveInput(candidate, 'currency').presentation!.defaultFrom!.field =
+      'northstar.app:field.item_name';
+  }, /choice inputs require/);
+  refuse((candidate) => {
+    receiveInput(candidate, 'unit').presentation!.column!.columnId =
+      'northstar.app:column.purchasing_receipt';
+  }, /derived inputs require/);
+});
+
+test('a reference Task input may start from a field its record query selects', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type Input = Loose & {
+    inputId: string;
+    defaultFrom?: { source: string; field: string };
+  };
+  const receiveInput = (candidate: Loose, name: string) =>
+    (
+      (candidate.surfaces as Loose[]).find((value) =>
+        String(value.surfaceId).endsWith(':surface.purchase_order_detail'),
+      )!.composition as { actions: { actionId: string; inputs: Input[] }[] }
+    ).actions
+      .find((action) => action.actionId.endsWith(':action.receive_known'))!
+      .inputs.find((input) =>
+        input.inputId.endsWith(`:input.receive_${name}`),
+      )!;
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+  const receivingLocation = {
+    source: 'record',
+    field: 'northstar.app:field.purchase_order_receiving_location_id',
+  };
+  // Admitted and kept: the order's receiving location, which the workspace's
+  // record query selects, on the receiving location picker.
+  assert.deepEqual(
+    receiveInput(
+      normalizeApplicationPackage(structuredClone(source)) as unknown as Loose,
+      'location',
+    ).defaultFrom,
+    receivingLocation,
+  );
+  // Refused on a text input, and from a field the record query does not select.
+  refuse((candidate) => {
+    receiveInput(candidate, 'cost').defaultFrom = receivingLocation;
+  }, /only reference inputs default from a declared record field/);
+  refuse((candidate) => {
+    receiveInput(candidate, 'location').defaultFrom!.field =
+      'northstar.app:field.location_name';
+  }, /only reference inputs default from a declared record field/);
+  // A closed declaration: the record is its only source.
+  refuse((candidate) => {
+    receiveInput(candidate, 'location').defaultFrom!.source = 'selected';
+  }, /CANON_SCHEMA_INVALID/);
+});
+
+test('editor defaults, scoped pickers, Task input eligibility and print blocks are closed, typed declarations', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type EditorField = {
+    fieldId: string;
+    presentation?: Loose;
+    defaultFrom?: { referenceFieldId: string; sourceFieldId: string };
+    reference?: Loose & {
+      within?: { referenceFieldId: string; relationId: string };
+      create?: unknown;
+    };
+    [key: string]: unknown;
+  };
+  const surface = (candidate: Loose, suffix: string) =>
+    (candidate.surfaces as Loose[]).find((value) =>
+      String(value.surfaceId).endsWith(suffix),
+    )!;
+  const editor = (candidate: Loose) =>
+    surface(candidate, ':surface.sales_order_form').documentEditor as {
+      headerFields: EditorField[];
+      lineFields: EditorField[];
+    };
+  const header = (candidate: Loose, name: string) =>
+    editor(candidate).headerFields.find((field) =>
+      field.fieldId.endsWith(`:field.sales_order_${name}`),
+    )!;
+  const customerWorkspace = (candidate: Loose) =>
+    surface(candidate, ':surface.party_detail').composition as {
+      actions: { actionId: string; inputs: Loose[] }[];
+      presentation: { print?: Loose };
+    };
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  // A default reads a selected field of a sibling picker's record.
+  refuse((candidate) => {
+    header(candidate, 'currency').defaultFrom!.referenceFieldId =
+      'northstar.app:field.sales_order_order_date';
+  }, /an editor default requires a sibling reference/);
+  refuse((candidate) => {
+    header(candidate, 'currency').defaultFrom!.sourceFieldId =
+      'northstar.app:field.party_role_kind';
+  }, /an editor default requires a sibling reference/);
+  // ...into a field that can hold it: text no shorter than the source.
+  refuse((candidate) => {
+    header(candidate, 'currency').defaultFrom!.sourceFieldId =
+      'northstar.app:field.party_name';
+  }, /an editor default requires a sibling reference/);
+  // ...or an enumeration whose every label fits the text (a currency code).
+  refuse((candidate) => {
+    header(candidate, 'currency').defaultFrom!.sourceFieldId =
+      'northstar.app:field.party_payment_terms';
+  }, /an editor default requires a sibling reference/);
+  // ...an enumeration offering each source label exactly once.
+  refuse((candidate) => {
+    const terms = (candidate.fields as Loose[]).find(
+      (field) =>
+        field.fieldId === 'northstar.app:field.sales_order_payment_terms',
+    )!.fieldType as { options: { label: string }[] };
+    terms.options[2]!.label = 'Thirty days';
+  }, /an editor default requires a sibling reference/);
+  // ...never a read-only derived field.
+  refuse((candidate) => {
+    editor(candidate).lineFields.find((field) =>
+      field.fieldId.endsWith(':field.sales_order_line_unit_id'),
+    )!.defaultFrom = {
+      referenceFieldId: 'northstar.app:field.sales_order_line_item_id',
+      sourceFieldId: 'northstar.app:field.item_base_unit',
+    };
+  }, /an editor default requires a sibling reference/);
+  // Defaults cascade, so they must settle.
+  refuse((candidate) => {
+    header(candidate, 'customer_party_id').defaultFrom = {
+      referenceFieldId: 'northstar.app:field.sales_order_ship_to_address_id',
+      sourceFieldId: 'northstar.app:field.party_address_label',
+    };
+  }, /editor defaults must not form a cycle/);
+  refuse((candidate) => {
+    (header(candidate, 'currency').defaultFrom as Loose).fallback = 'CAD';
+  }, /CANON_SCHEMA_INVALID/);
+  // A scoped picker lists the records an owned relation ties to its sibling.
+  refuse((candidate) => {
+    header(candidate, 'ship_to_address_id').reference!.within!.relationId =
+      'northstar.app:relation.party_role_party';
+  }, /a scoped picker requires/);
+  refuse((candidate) => {
+    header(
+      candidate,
+      'ship_to_address_id',
+    ).reference!.within!.referenceFieldId =
+      'northstar.app:field.sales_order_order_date';
+  }, /a scoped picker requires/);
+  refuse((candidate) => {
+    header(candidate, 'ship_to_address_id').reference!.create = structuredClone(
+      header(candidate, 'customer_party_id').reference!.create,
+    );
+  }, /a scoped picker requires/);
+  // Task input eligibility: a reference input's, with the picker's rules.
+  refuse((candidate) => {
+    const inputs = customerWorkspace(candidate).actions.find((action) =>
+      action.actionId.endsWith(':action.party_set_salesperson'),
+    )!.inputs;
+    (
+      inputs[0]!.eligibility as { filters: { value: string }[] }
+    ).filters[0]!.value = 'northstar.app:option.not_a_role';
+  }, /picker eligibility filters require/);
+  refuse((candidate) => {
+    const action = customerWorkspace(candidate).actions.find((value) =>
+      value.actionId.endsWith(':action.party_set_salesperson'),
+    )!;
+    const eligibility = action.inputs[0]!.eligibility;
+    customerWorkspace(candidate).actions.find((value) =>
+      value.actionId.endsWith(':action.party_add_address'),
+    )!.inputs[0]!.eligibility = eligibility;
+  }, /only reference inputs declare lookup queries/);
+  // A block names declared columns the header does not already show.
+  refuse((candidate) => {
+    (
+      surface(candidate, ':surface.sales_order_detail').composition as {
+        presentation: { blocks: { columns: string[] }[] };
+      }
+    ).presentation.blocks[0]!.columns.push('northstar.app:column.not_declared');
+  }, /a block lists declared columns the header does not show/);
+  refuse((candidate) => {
+    (
+      surface(candidate, ':surface.sales_order_detail').composition as {
+        presentation: { blocks: { columns: string[] }[] };
+      }
+    ).presentation.blocks[0]!.columns.push('northstar.app:column.currency');
+  }, /a block lists declared columns the header does not show/);
+});
+
+test('ruling B declarations: prices chosen by the order currency, a line tax code from the order, frozen rates and printed totals', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type EditorField = {
+    fieldId: string;
+    presentation?: Loose & {
+      sourceByHeader?: {
+        headerFieldId: string;
+        cases: { value: string; sourceFieldId: string }[];
+      };
+    };
+    defaultFrom?: Loose & {
+      headerFieldId?: string;
+      sourceByHeader?: {
+        headerFieldId: string;
+        cases: { value: string; sourceFieldId: string }[];
+      };
+    };
+    [key: string]: unknown;
+  };
+  const editor = (candidate: Loose) =>
+    (candidate.surfaces as Loose[]).find((value) =>
+      String(value.surfaceId).endsWith(':surface.sales_order_form'),
+    )!.documentEditor as { lineFields: EditorField[] };
+  const line = (candidate: Loose, name: string) =>
+    editor(candidate).lineFields.find((field) =>
+      field.fieldId.endsWith(`:field.sales_order_line_${name}`),
+    )!;
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  // The chooser is a declared header field, and each value is one it holds.
+  refuse((candidate) => {
+    line(candidate, 'unit_price').defaultFrom!.sourceByHeader!.headerFieldId =
+      'northstar.app:field.sales_order_line_line_number';
+  }, /an editor default requires a sibling reference/);
+  refuse((candidate) => {
+    line(candidate, 'unit_price').defaultFrom!.sourceByHeader!.cases[0]!.value =
+      'CADX';
+  }, /an editor default requires a sibling reference/);
+  refuse((candidate) => {
+    const cases = line(candidate, 'unit_price').defaultFrom!.sourceByHeader!
+      .cases;
+    cases[1]!.value = cases[0]!.value;
+  }, /an editor default requires a sibling reference/);
+  // A price chosen by currency is a decimal the line can hold.
+  refuse((candidate) => {
+    line(
+      candidate,
+      'unit_price',
+    ).defaultFrom!.sourceByHeader!.cases[0]!.sourceFieldId =
+      'northstar.app:field.item_name';
+  }, /an editor default requires a sibling reference/);
+  // A derived decimal (the list price) reads a decimal.
+  refuse((candidate) => {
+    line(candidate, 'list_price').presentation!.sourceFieldId =
+      'northstar.app:field.item_sku';
+  }, /derived presentation requires a text or decimal field/);
+  // A line copying a header value copies one it can hold.
+  refuse((candidate) => {
+    line(candidate, 'tax_code_id').defaultFrom!.headerFieldId =
+      'northstar.app:field.sales_order_freight_amount';
+  }, /an editor default requires a sibling reference/);
+  // A header copy names no record source as well.
+  refuse((candidate) => {
+    line(candidate, 'tax_code_id').defaultFrom!.sourceFieldId =
+      'northstar.app:field.item_name';
+  }, /an editor default requires a sibling reference/);
+  // Printed totals are declared columns.
+  refuse((candidate) => {
+    (
+      (candidate.surfaces as Loose[]).find((value) =>
+        String(value.surfaceId).endsWith(':surface.sales_order_detail'),
+      )!.composition as {
+        presentation: { print: { totals: string[] } };
+      }
+    ).presentation.print.totals.push('northstar.app:column.not_declared');
+  }, /printed totals are declared columns/);
+});
+
+test('money columns read exact decimals and show grouped digits with two decimals, never rounded', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type Column = Loose & { columnId: string; format?: string; role?: string };
+  const surface = (candidate: Loose, local: string) =>
+    (candidate.surfaces as Loose[]).find((value) =>
+      String(value.surfaceId).endsWith(`:surface.${local}`),
+    ) as Loose & {
+      composition?: { fields: Column[] };
+      list?: { columns: Column[] };
+    };
+  const invoiceColumn = (candidate: Loose, local: string) =>
+    surface(candidate, 'customer_invoice_detail').composition!.fields.find(
+      (value) => value.columnId.endsWith(`:column.invoice_${local}`),
+    )!;
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  // The shipped declarations: an invoice's figures and the Invoices List.
+  assert.equal(invoiceColumn(source, 'balance').format, 'money');
+  assert.deepEqual(
+    surface(source, 'customer_invoice_list')
+      .list!.columns.filter((value) => value.format === 'money')
+      .map((value) => value.columnId.split('.').pop()),
+    ['customer_invoice_list_total', 'customer_invoice_list_balance'],
+  );
+  // A money column reads an exact decimal: not text, not a referenced label.
+  refuse((candidate) => {
+    invoiceColumn(candidate, 'number').format = 'money';
+  }, /a money column reads an exact decimal/);
+  refuse((candidate) => {
+    invoiceColumn(candidate, 'customer').format = 'money';
+  }, /a money column reads an exact decimal/);
+  refuse((candidate) => {
+    surface(candidate, 'customer_invoice_list').list!.columns.find(
+      (value) => value.role === 'title',
+    )!.format = 'money';
+  }, /a money column reads an exact decimal field/);
+  // Shown with grouped digits and at least two decimals; never rounded.
+  for (const [stored, shown] of [
+    ['1234.5', '1,234.50'],
+    ['25', '25.00'],
+    ['0.1', '0.10'],
+    ['12.345', '12.345'],
+    ['12.500', '12.50'],
+    ['-1000000', '-1,000,000.00'],
+    ['not a number', 'not a number'],
+  ] as const)
+    assert.equal(moneyText(stored), shown, stored);
+});
+
+test('a new order starts its requested date three weeks out, a default counted from today', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type EditorField = Loose & {
+    fieldId: string;
+    defaultDaysFromToday?: number;
+    defaultFrom?: Loose;
+  };
+  const header = (candidate: Loose) =>
+    (
+      (candidate.surfaces as Loose[]).find((value) =>
+        String(value.surfaceId).endsWith(':surface.sales_order_form'),
+      )!.documentEditor as { headerFields: EditorField[] }
+    ).headerFields;
+  const headerField = (candidate: Loose, name: string) =>
+    header(candidate).find((field) =>
+      field.fieldId.endsWith(`:field.sales_order_${name}`),
+    )!;
+  const refuse = (change: (candidate: Loose) => void) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) =>
+          /a default counted from today is a UTC date-time field with no other default/.test(
+            JSON.stringify(value),
+          ),
+        ),
+    );
+  };
+  assert.equal(headerField(source, 'requested_date').defaultDaysFromToday, 21);
+  // Only a UTC date-time field, and never beside another default.
+  refuse((candidate) => {
+    headerField(candidate, 'freight_amount').defaultDaysFromToday = 21;
+  });
+  refuse((candidate) => {
+    headerField(candidate, 'ship_to_city').defaultDaysFromToday = 21;
+  });
+  // Midnight UTC of the day 21 days after the draft opens.
+  assert.equal(
+    declaredDefault(
+      { defaultDaysFromToday: 21 },
+      new Date('2026-09-29T23:30:00.000Z'),
+    ),
+    '2026-10-20T00:00:00.000Z',
+  );
+  assert.equal(
+    declaredDefault(
+      { defaultDaysFromToday: 0 },
+      new Date('2026-12-31T05:00:00Z'),
+    ),
+    '2026-12-31T00:00:00.000Z',
+  );
+});
+
+test('PAYABLES: the purchase order lists its bills and offers billing only when a post would bill something; a bill offers each command only in its states; the Invoices List reads as before', () => {
+  const ns = 'northstar.app';
+  type Loose = Record<string, unknown>;
+  type Condition = { value: Loose; operator: string; compare: unknown };
+  type Action = Loose & {
+    actionId: string;
+    conditions: Condition[];
+    inputs: Loose[];
+    steps: { operation: { targetId: string } }[];
+    navigate?: { surface: { targetId: string }; query: { targetId: string } };
+  };
+  type Composition = {
+    children: (Loose & {
+      datasetId: string;
+      label: string;
+      query: { targetId: string };
+      parent: { relationId: string };
+    })[];
+    actions: Action[];
+  };
+  const source = composedApplicationDefinition() as Loose;
+  const composition = (local: string) =>
+    (
+      (source.surfaces as Loose[]).find(
+        (value) => value.surfaceId === `${ns}:surface.${local}`,
+      ) as Loose & { composition: Composition }
+    ).composition;
+  const order = composition('purchase_order_detail');
+  const bills = order.children.find((child) => child.label === 'Bills')!;
+  assert.equal(bills.query.targetId, `${ns}:query.vendor_bill_list`);
+  assert.equal(bills.parent.relationId, `${ns}:relation.vendor_bill_order`);
+  const action = (value: Composition, local: string) =>
+    value.actions.find((entry) => entry.actionId === `${ns}:action.${local}`)!;
+  const billing = action(order, 'bill_received');
+  assert.equal(billing.label, 'Bill received quantities');
+  // Offered while the order states received quantity not yet billed and a
+  // total -- the read model counts each line's own positive part, as the
+  // post bills.
+  assert.deepEqual(
+    billing.conditions.map((condition) => [
+      condition.value.field,
+      condition.operator,
+    ]),
+    [
+      [`${ns}:metric.order_to_bill`, 'positive'],
+      [`${ns}:metric.order_total`, 'positive'],
+    ],
+  );
+  assert.deepEqual(
+    billing.inputs.map((input) => [input.label, input.type, input.required]),
+    [['Supplier invoice number', 'text', false]],
+  );
+  assert.deepEqual(
+    billing.steps.map((step) => step.operation.targetId),
+    [`${ns}:operation.vendor_bill_create`, `${ns}:operation.vendor_bill_post`],
+  );
+  assert.equal(
+    action(order, 'open_bill').navigate?.surface.targetId,
+    `${ns}:surface.vendor_bill_detail`,
+  );
+  // The order's read model states what is to bill, from its lines, their
+  // receipts and its live bills.
+  const readModel = (
+    (source.queries as Loose[]).find(
+      (query) => query.queryId === `${ns}:query.commercial_purchase_order_get`,
+    ) as Loose & {
+      readModel: {
+        queries: Record<string, { targetId: string }>;
+        resultFields: Record<string, string>;
+      };
+    }
+  ).readModel;
+  assert.equal(
+    readModel.resultFields.order_to_bill,
+    `${ns}:metric.order_to_bill`,
+  );
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.entries(readModel.queries).map(([key, value]) => [
+        key,
+        value.targetId,
+      ]),
+    ),
+    {
+      lines: `${ns}:query.commercial_purchase_lines`,
+      received: `${ns}:query.purchase_order_received_get`,
+      bills: `${ns}:query.vendor_bill_list`,
+      billLines: `${ns}:query.vendor_bill_line_list`,
+    },
+  );
+
+  // The bill: each command where its state admits it, and nowhere else (the
+  // way back to its order is a link, not a command, and is always there).
+  const bill = composition('vendor_bill_detail');
+  assert.deepEqual(
+    bill.children.map((child) => child.label),
+    ['Bill lines', 'Payments', 'Vendor credits'],
+  );
+  const offered = (state: string) =>
+    bill.actions
+      .filter((entry) => !entry.navigate)
+      .filter((entry) =>
+        entry.conditions.every((condition) => {
+          const stateOption = `${ns}:option.vendor_bill_state_${state}`;
+          assert.equal(condition.value.field, `${ns}:field.vendor_bill_state`);
+          return condition.operator === 'equals'
+            ? condition.compare === stateOption
+            : condition.compare !== stateOption;
+        }),
+      )
+      .map((entry) => entry.label);
+  assert.deepEqual(offered('draft'), []);
+  assert.deepEqual(offered('open'), [
+    'Record payment',
+    'Record vendor credit',
+    'Void bill',
+  ]);
+  assert.deepEqual(offered('partially_paid'), [
+    'Record payment',
+    'Record vendor credit',
+  ]);
+  assert.deepEqual(offered('paid'), []);
+  assert.deepEqual(offered('void'), []);
+
+  // The Invoices List, now one settlement List among two, lowers exactly as
+  // it did before the Bills List joined it.
+  const list = (local: string) =>
+    (
+      (source.surfaces as Loose[]).find(
+        (value) => value.surfaceId === `${ns}:surface.${local}`,
+      ) as Loose & {
+        list: {
+          columns: (Loose & { columnId: string; label: string })[];
+          views: { viewId: string; label: string }[];
+          defaultSort: { columnId: string; direction: string }[];
+        };
+      }
+    ).list;
+  const invoices = list('customer_invoice_list');
+  assert.deepEqual(
+    invoices.columns.map((column) => [
+      column.columnId.split('customer_invoice_list_')[1],
+      column.label,
+      column.field,
+      column.format ?? null,
+    ]),
+    [
+      ['number', 'Number', `${ns}:field.customer_invoice_number`, null],
+      [
+        'customer',
+        'Customer',
+        `${ns}:field.customer_invoice_customer_party_id`,
+        null,
+      ],
+      [
+        'invoice_date',
+        'Invoice date',
+        `${ns}:field.customer_invoice_invoice_date`,
+        'date',
+      ],
+      ['due_date', 'Due', `${ns}:field.customer_invoice_due_date`, 'date'],
+      ['status', 'Status', `${ns}:field.customer_invoice_state`, null],
+      ['total', 'Total', `${ns}:field.customer_invoice_total`, 'money'],
+      ['balance', 'Balance', `${ns}:field.customer_invoice_balance`, 'money'],
+      ['currency', 'Currency', `${ns}:field.customer_invoice_currency`, null],
+    ],
+  );
+  assert.deepEqual(invoices.defaultSort, [
+    {
+      columnId: `${ns}:list_column.customer_invoice_list_invoice_date`,
+      direction: 'descending',
+    },
+  ]);
+  // The Bills List: the same shape with the supplier's own invoice number.
+  const billList = list('vendor_bill_list');
+  assert.deepEqual(
+    billList.columns.map((column) => column.label),
+    [
+      'Number',
+      'Vendor',
+      'Supplier invoice',
+      'Bill date',
+      'Due',
+      'Status',
+      'Total',
+      'Balance',
+      'Currency',
+    ],
+  );
+  assert.deepEqual(
+    billList.views.map((view) => view.label),
+    ['All', 'Open', 'Partially paid', 'Paid', 'Void'],
+  );
+});
+
+test('PAYABLES (PY-G): each order line shows its three-way match from the purchase-line read model, and a bill names and opens its order', () => {
+  const ns = 'northstar.app';
+  type Loose = Record<string, unknown>;
+  const source = composedApplicationDefinition() as Loose;
+  const composition = (local: string) =>
+    (
+      (source.surfaces as Loose[]).find(
+        (value) => value.surfaceId === `${ns}:surface.${local}`,
+      ) as Loose & {
+        composition: {
+          presentation: { header: { facts: string[] } };
+          fields: (Loose & { columnId: string; field: string })[];
+          children: (Loose & {
+            label: string;
+            query: { targetId: string };
+            columns: (Loose & {
+              columnId: string;
+              label: string;
+              field: string;
+              presentation?: { role: string };
+            })[];
+          })[];
+          actions: (Loose & {
+            actionId: string;
+            conditions: unknown[];
+            navigate?: {
+              surface: { targetId: string };
+              query: { targetId: string };
+              record: { source: string; field: string };
+            };
+          })[];
+        };
+      }
+    ).composition;
+  // The Order lines section: ordered and received, then billed, left to
+  // bill and the match, read from the purchase-line read model.
+  const lines = composition('purchase_order_detail').children.find(
+    (child) => child.label === 'Order lines',
+  )!;
+  assert.equal(
+    lines.query.targetId,
+    `${ns}:query.commercial_purchase_order_lines`,
+  );
+  assert.deepEqual(
+    lines.columns
+      .filter((column) =>
+        ['billed', 'to_bill', 'match'].some((local) =>
+          column.columnId.endsWith(`:column.purchasing_${local}`),
+        ),
+      )
+      .map((column) => [column.label, column.field, column.presentation?.role]),
+    [
+      ['Billed', `${ns}:metric.billed`, 'quantity'],
+      ['To bill', `${ns}:metric.to_bill`, 'quantity'],
+      ['Match', `${ns}:metric.match_status`, 'secondary'],
+    ],
+  );
+  // Shown, never enforced: no action is conditioned on the match.
+  assert.doesNotMatch(
+    JSON.stringify(
+      composition('purchase_order_detail').actions.map(
+        (action) => action.conditions,
+      ),
+    ),
+    /metric\.(?:billed|to_bill|match_status)/u,
+  );
+  const readModel = (
+    (source.queries as Loose[]).find(
+      (query) =>
+        query.queryId === `${ns}:query.commercial_purchase_order_lines`,
+    ) as Loose & {
+      readModel: {
+        queries: Record<string, { targetId: string }>;
+        resultFields: Record<string, string>;
+      };
+    }
+  ).readModel;
+  assert.deepEqual(Object.keys(readModel.resultFields), [
+    'line_amount',
+    'line_tax',
+    'received',
+    'open_to_receive',
+    'billed',
+    'to_bill',
+    'match_status',
+  ]);
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.entries(readModel.queries).map(([key, value]) => [
+        key,
+        value.targetId,
+      ]),
+    ),
+    {
+      received: `${ns}:query.purchase_order_received_get`,
+      billLines: `${ns}:query.vendor_bill_line_list`,
+      bills: `${ns}:query.vendor_bill_list`,
+      bill: `${ns}:query.vendor_bill_get`,
+    },
+  );
+
+  // The bill names its order through the stored relation, labelled by the
+  // order's own get, and opens it -- from wherever the bill was opened.
+  const bill = composition('vendor_bill_detail');
+  const order = bill.fields.find((column) =>
+    column.columnId.endsWith(':column.bill_order'),
+  )!;
+  assert.equal(order.field, `${ns}:relation.vendor_bill_order`);
+  assert.deepEqual(order.reference, {
+    query: {
+      kind: 'queryReference',
+      schemaVersion: 'v6',
+      targetId: `${ns}:query.purchase_order_get`,
+    },
+    labelField: {
+      kind: 'fieldReference',
+      schemaVersion: 'v6',
+      targetId: `${ns}:field.purchase_order_number`,
+    },
+  });
+  assert.equal(bill.presentation.header.facts[0], `${ns}:column.bill_order`);
+  assert.ok(bill.presentation.header.facts.length <= 6);
+  const open = bill.actions.find(
+    (action) => action.actionId === `${ns}:action.bill_open_order`,
+  )!;
+  assert.deepEqual(open.conditions, []);
+  assert.deepEqual(open.navigate, {
+    surface: {
+      kind: 'surfaceReference',
+      schemaVersion: 'v6',
+      targetId: `${ns}:surface.purchase_order_detail`,
+    },
+    query: {
+      kind: 'queryReference',
+      schemaVersion: 'v6',
+      targetId: `${ns}:query.commercial_purchase_order_get`,
+    },
+    record: { source: 'record', field: `${ns}:relation.vendor_bill_order` },
+  });
+  // The page still validates as a whole.
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+});
+
+test('INVENTORY-PARITY: the item page lists its stock and movements by a field of their own entity, in the company its entry names', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type Dataset = Loose & {
+    datasetId: string;
+    query: { targetId: string };
+    parent?: Loose;
+    fieldScope?: { fieldId: string; value: Loose };
+  };
+  const ns = 'northstar.app';
+  const surface = (candidate: Loose, local: string) =>
+    (candidate.surfaces as Loose[]).find(
+      (value) => value.surfaceId === `${ns}:surface.${local}`,
+    ) as Loose & {
+      composition?: { children: Dataset[]; actions: unknown[] };
+      workspace?: { entry?: Loose; membership: string };
+    };
+  const dataset = (candidate: Loose, local: string) =>
+    surface(candidate, 'item_detail').composition!.children.find(
+      (value) => value.datasetId === `${ns}:dataset.item_${local}`,
+    )!;
+  const query = (candidate: Loose, local: string) =>
+    (candidate.queries as Loose[]).find(
+      (value) => value.queryId === `${ns}:query.${local}`,
+    ) as Loose & {
+      readModel?: {
+        binding: string;
+        queries: Record<string, { targetId: string }>;
+        resultFields: Record<string, string>;
+      };
+      selections: { field: { targetId: string } }[];
+    };
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  // The shipped declaration: the item's own page, read-only, entered like the
+  // Posted stock List, each dataset scoped by the item field of its entity.
+  const page = surface(source, 'item_detail');
+  assert.deepEqual(page.composition!.actions, []);
+  assert.equal(page.workspace!.membership, 'contextual');
+  assert.equal(
+    page.workspace!.entry!.authorizationQueryId,
+    `${ns}:query.posted_stock_balance_list`,
+  );
+  assert.deepEqual(
+    page.composition!.children.map((value) => [
+      value.query.targetId,
+      value.fieldScope?.fieldId,
+      value.parent,
+    ]),
+    [
+      [
+        `${ns}:query.item_stock_positions`,
+        `${ns}:field.posted_stock_balance_item_id`,
+        undefined,
+      ],
+      [
+        `${ns}:query.inventory_movement_list`,
+        `${ns}:field.inventory_movement_item_id`,
+        undefined,
+      ],
+    ],
+  );
+  // Stock by location reads its own copy of the posted stock list with the
+  // fulfillment read model's stock figures; the list itself is untouched.
+  const positions = query(source, 'item_stock_positions');
+  const posted = query(source, 'posted_stock_balance_list');
+  assert.equal(posted.readModel, undefined);
+  assert.equal(
+    positions.readModel!.binding,
+    FULFILLMENT_READ_MODEL_BINDINGS.stock,
+  );
+  assert.deepEqual(positions.readModel!.resultFields, {
+    reserved: `${ns}:metric.reserved`,
+    available: `${ns}:metric.available`,
+  });
+  // LOCATIONS: each location's status, through its get, so nothing is
+  // available at a location that is not usable.
+  assert.deepEqual(
+    Object.values(positions.readModel!.queries).map((value) => value.targetId),
+    [
+      `${ns}:query.workspace_stock_reservations`,
+      `${ns}:query.reservation_balance_get`,
+      `${ns}:query.location_get`,
+    ],
+  );
+  const { readModel: _readModel, ...copy } = positions;
+  void _readModel;
+  assert.deepEqual(
+    JSON.parse(
+      JSON.stringify(copy).replaceAll(
+        'item_stock_positions',
+        'posted_stock_balance_list',
+      ),
+    ),
+    posted,
+  );
+
+  // Exactly one scope: a parent relation or a field, never both or neither.
+  refuse((candidate) => {
+    dataset(candidate, 'stock').parent = {
+      relationId: `${ns}:relation.reservation_order_line`,
+      value: { source: 'record', field: 'recordId' },
+      ownership: 'reference',
+    };
+  }, /a dataset is scoped by its parent relation or by a field, not both/);
+  refuse((candidate) => {
+    delete dataset(candidate, 'movements').fieldScope;
+  }, /child datasets require a scoped list/);
+  // The field holds the record's id: a selected text field of the dataset's
+  // own entity long enough for one.
+  const scopedBy = (fieldId: string) => (candidate: Loose) => {
+    dataset(candidate, 'stock').fieldScope!.fieldId = fieldId;
+  };
+  const fieldScopeRefusal =
+    /a field scope reads a selected text field of the dataset's own entity that can hold a record id/;
+  // Not text: the posted quantity.
+  refuse(
+    scopedBy(`${ns}:field.posted_stock_balance_posted_quantity`),
+    fieldScopeRefusal,
+  );
+  // Too short to hold a record id: the unit.
+  refuse(
+    scopedBy(`${ns}:field.posted_stock_balance_unit_id`),
+    fieldScopeRefusal,
+  );
+  // A read-model figure is not a stored field.
+  refuse(scopedBy(`${ns}:metric.reserved`), fieldScopeRefusal);
+  // Another entity's field.
+  refuse(scopedBy(`${ns}:field.reservation_item_id`), fieldScopeRefusal);
+  // A field the dataset's list does not select.
+  refuse((candidate) => {
+    const copy = query(candidate, 'item_stock_positions');
+    copy.selections = copy.selections.filter(
+      (selection) =>
+        selection.field.targetId !== `${ns}:field.posted_stock_balance_item_id`,
+    );
+  }, fieldScopeRefusal);
+  // A closed declaration: the record's own id is the only value, and a
+  // record identity is not a field.
+  refuse(scopedBy('recordId'), /CANON_SCHEMA_INVALID/);
+  refuse((candidate) => {
+    dataset(candidate, 'stock').fieldScope!.value = {
+      source: 'record',
+      field: `${ns}:field.item_sku`,
+    };
+  }, /CANON_SCHEMA_INVALID/);
+  refuse((candidate) => {
+    dataset(candidate, 'stock').fieldScope!.value = {
+      source: 'selected',
+      field: 'recordId',
+    };
+  }, /CANON_SCHEMA_INVALID/);
+  // One company's rows on a record every company shares need the company its
+  // entry names.
+  refuse((candidate) => {
+    delete surface(candidate, 'item_detail').workspace!.entry;
+  }, /a company's dataset on a record every company shares requires a workspace entry/);
+});
+
+test('INVENTORY-PARITY: a stock document is entered like an order, with a choice over its type and values its first create writes', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type Editor = Loose & {
+    headerFields: (Loose & {
+      fieldId: string;
+      presentation?: { options: { value: string }[]; defaultValue?: string };
+    })[];
+    createValues: (Loose & { fieldId: string; value: Loose })[];
+  };
+  const ns = 'northstar.app';
+  const surface = (candidate: Loose, local: string) =>
+    (candidate.surfaces as Loose[]).find(
+      (value) => value.surfaceId === `${ns}:surface.${local}`,
+    ) as Loose & {
+      documentEditor?: Editor;
+      label: string;
+      workspace: Loose & { membership: string; entry?: Loose };
+    };
+  const editor = (candidate: Loose) =>
+    surface(candidate, 'inventory_transaction_form').documentEditor!;
+  const header = (candidate: Loose, name: string) =>
+    editor(candidate).headerFields.find(
+      (value) => value.fieldId === `${ns}:field.inventory_transaction_${name}`,
+    )!;
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  // The shipped declaration: the form and the record page carry the editor,
+  // the List is an operational destination of its own, named for documents.
+  assert.deepEqual(
+    surface(source, 'inventory_transaction_detail').documentEditor,
+    editor(source),
+  );
+  assert.equal(
+    surface(source, 'inventory_transaction_list').label,
+    'Inventory transactions',
+  );
+  assert.equal(
+    surface(source, 'inventory_transaction_list').workspace.membership,
+    'operational',
+  );
+  assert.equal(
+    surface(source, 'inventory_transaction_list').workspace.entry
+      ?.authorizationQueryId,
+    `${ns}:query.inventory_transaction_list`,
+  );
+  // G1: the Type choice offers two options of its enumeration.
+  assert.deepEqual(
+    header(source, 'type').presentation!.options.map((option) => option.value),
+    [
+      `${ns}:option.inventory_transaction_type_adjustment`,
+      `${ns}:option.inventory_transaction_type_transfer`,
+    ],
+  );
+  // G2: the draft state, the document itself as its source, and when and by
+  // whom it was recorded -- first create only.
+  assert.deepEqual(editor(source).createValues, [
+    {
+      fieldId: `${ns}:field.inventory_transaction_state`,
+      value: {
+        source: 'literal',
+        value: `${ns}:option.inventory_transaction_state_draft`,
+      },
+    },
+    {
+      fieldId: `${ns}:field.inventory_transaction_source_type`,
+      value: { source: 'literal', value: 'inventoryTransaction' },
+    },
+    {
+      fieldId: `${ns}:field.inventory_transaction_source_id`,
+      value: { source: 'record', field: 'recordId' },
+    },
+    {
+      fieldId: `${ns}:field.inventory_transaction_recorded_at`,
+      value: { source: 'generated', value: 'instant' },
+    },
+    {
+      fieldId: `${ns}:field.inventory_transaction_actor_id`,
+      value: { source: 'actor', field: 'principalId' },
+    },
+  ]);
+
+  // A choice over an enumeration offers only its options.
+  refuse((candidate) => {
+    header(candidate, 'type').presentation!.options[1]!.value =
+      `${ns}:option.inventory_transaction_type_not_a_type`;
+  }, /choice presentation requires a text or enumeration field/);
+  refuse((candidate) => {
+    header(candidate, 'type').presentation!.defaultValue =
+      `${ns}:option.inventory_transaction_type_shipment`;
+  }, /choice presentation requires a text or enumeration field/);
+  // A create value is a header field no editor field offers, with a value it
+  // admits: text that fits, an option of its enumeration, the record id or
+  // the principal into text long enough to hold one, the save's instant into
+  // a UTC instant.
+  const createValueRefusal =
+    /a create value is a header field no editor field offers, holding a value it admits/;
+  refuse((candidate) => {
+    editor(candidate).createValues[0]!.fieldId =
+      `${ns}:field.inventory_transaction_line_unit_id`;
+  }, createValueRefusal);
+  refuse((candidate) => {
+    editor(candidate).createValues[1]!.fieldId =
+      `${ns}:field.inventory_transaction_reason_code`;
+  }, createValueRefusal);
+  refuse((candidate) => {
+    editor(candidate).createValues[1]!.value = {
+      source: 'literal',
+      value: 'x'.repeat(81),
+    };
+  }, createValueRefusal);
+  refuse((candidate) => {
+    editor(candidate).createValues[0]!.value = {
+      source: 'literal',
+      value: `${ns}:option.inventory_transaction_state_not_a_state`,
+    };
+  }, createValueRefusal);
+  refuse((candidate) => {
+    (
+      (candidate.fields as Loose[]).find(
+        (value) =>
+          value.fieldId === `${ns}:field.inventory_transaction_source_id`,
+      )!.fieldType as { maximumLength: number }
+    ).maximumLength = 35;
+  }, createValueRefusal);
+  refuse((candidate) => {
+    editor(candidate).createValues[1]!.value = {
+      source: 'generated',
+      value: 'instant',
+    };
+  }, createValueRefusal);
+  refuse((candidate) => {
+    (
+      (candidate.fields as Loose[]).find(
+        (value) =>
+          value.fieldId === `${ns}:field.inventory_transaction_actor_id`,
+      )!.fieldType as { maximumLength: number }
+    ).maximumLength = 35;
+  }, createValueRefusal);
+  refuse((candidate) => {
+    editor(candidate).createValues.push(
+      structuredClone(editor(candidate).createValues[0]!),
+    );
+  }, /a create value names each field once/);
+  // A closed declaration: a literal, the record's own id, the save's instant
+  // or the saving principal -- nothing else.
+  refuse((candidate) => {
+    editor(candidate).createValues[2]!.value = {
+      source: 'selected',
+      field: 'recordId',
+    };
+  }, /CANON_SCHEMA_INVALID/);
+  refuse((candidate) => {
+    editor(candidate).createValues[2]!.fallback = 'none';
+  }, /CANON_SCHEMA_INVALID/);
+  refuse((candidate) => {
+    editor(candidate).createValues[3]!.value = {
+      source: 'generated',
+      value: 'uuid',
+    };
+  }, /CANON_SCHEMA_INVALID/);
+});
+
+test('INVENTORY-PARITY: a new stock document is dated now, not midnight, a default of now (ruling INV-A)', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type EditorField = Loose & {
+    fieldId: string;
+    defaultNow?: unknown;
+    defaultDaysFromToday?: number;
+  };
+  const ns = 'northstar.app';
+  const headerField = (candidate: Loose, document: string, name: string) =>
+    (
+      (candidate.surfaces as Loose[]).find(
+        (value) => value.surfaceId === `${ns}:surface.${document}_form`,
+      )!.documentEditor as { headerFields: EditorField[] }
+    ).headerFields.find(
+      (field) => field.fieldId === `${ns}:field.${document}_${name}`,
+    )!;
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+  const effective = headerField(
+    source,
+    'inventory_transaction',
+    'effective_at',
+  );
+  assert.equal(effective.defaultNow, true);
+  assert.equal(effective.defaultDaysFromToday, undefined);
+  // Only a UTC date-time field, never beside another default, and only ever
+  // declared as true.
+  const refusal =
+    /a default of now is a UTC date-time field with no other default/;
+  refuse((candidate) => {
+    headerField(candidate, 'sales_order', 'ship_to_city').defaultNow = true;
+  }, refusal);
+  refuse((candidate) => {
+    headerField(
+      candidate,
+      'inventory_transaction',
+      'reason_narrative',
+    ).defaultNow = true;
+  }, refusal);
+  refuse((candidate) => {
+    headerField(
+      candidate,
+      'inventory_transaction',
+      'effective_at',
+    ).defaultDaysFromToday = 0;
+  }, refusal);
+  refuse((candidate) => {
+    headerField(candidate, 'inventory_transaction', 'effective_at').defaultNow =
+      false;
+  }, /CANON_SCHEMA_INVALID/);
+  // The instant the draft opens, to the second its control shows -- where a
+  // default counted from today is that day's midnight.
+  const opened = new Date('2026-09-30T14:03:27.456Z');
+  assert.equal(
+    declaredDefault({ defaultNow: true }, opened),
+    '2026-09-30T14:03:27.000Z',
+  );
+  assert.equal(
+    declaredDefault({ defaultDaysFromToday: 0 }, opened),
+    '2026-09-30T00:00:00.000Z',
+  );
+});
+
+test('REPLENISHMENT: an item keeps its reorder levels, preferred location and standard costs; two item Lists sit in Inventory; a purchase line starts from the standard cost', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  const ns = 'northstar.app';
+  const surface = (candidate: Loose, local: string) =>
+    (candidate.surfaces as Loose[]).find(
+      (value) => value.surfaceId === `${ns}:surface.${local}`,
+    ) as Loose & {
+      composition?: {
+        fields: Array<{
+          field: string;
+          format?: string;
+          reference?: { query: { targetId: string } };
+        }>;
+      };
+      form?: {
+        references: Array<{
+          field: string;
+          query: { targetId: string };
+          labelField: { targetId: string };
+        }>;
+      };
+      workspace?: Loose & {
+        membership: string;
+        ownerSurfaceId?: string;
+        navigationModuleId?: string;
+      };
+      documentEditor?: {
+        lineFields: Array<
+          Loose & {
+            fieldId: string;
+            label: string;
+            defaultFrom?: {
+              referenceFieldId: string;
+              sourceByHeader?: {
+                headerFieldId: string;
+                cases: Array<{ value: string; sourceFieldId: string }>;
+              };
+            };
+          }
+        >;
+      };
+    };
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  const replenishment = [
+    'item_reorder_point',
+    'item_reorder_up_to',
+    'item_preferred_location_id',
+    'item_standard_cost_cad',
+    'item_standard_cost_usd',
+    'item_standard_cost_eur',
+  ].map((name) => `${ns}:field.${name}`);
+  // Optional fields every item read selects; the location is a record id.
+  const fields = new Map(
+    (source.fields as Array<Loose & { fieldId: string }>).map((value) => [
+      value.fieldId,
+      value,
+    ]),
+  );
+  for (const fieldId of replenishment) {
+    const declared = fields.get(fieldId) as unknown as Loose & {
+      presence: string;
+      fieldType: { kind: string; maximumLength?: number };
+    };
+    assert.equal(declared.presence, 'optional', fieldId);
+    assert.equal(
+      declared.fieldType.kind,
+      fieldId.endsWith('_location_id')
+        ? 'textFieldType'
+        : 'exactDecimalFieldType',
+    );
+  }
+  for (const local of ['item_get', 'item_list']) {
+    const query = (source.queries as Loose[]).find(
+      (value) => value.queryId === `${ns}:query.${local}`,
+    ) as Loose & { selections: Array<{ field: { targetId: string } }> };
+    const selected = query.selections.map((value) => value.field.targetId);
+    assert.ok(
+      replenishment.every((fieldId) => selected.includes(fieldId)),
+      local,
+    );
+  }
+  // The item page shows them: costs as money, the location by name.
+  const page = surface(source, 'item_detail');
+  const shown = new Map(
+    page.composition!.fields.map((value) => [value.field, value]),
+  );
+  for (const fieldId of replenishment) assert.ok(shown.has(fieldId), fieldId);
+  assert.equal(
+    shown.get(`${ns}:field.item_standard_cost_usd`)!.format,
+    'money',
+  );
+  assert.equal(
+    shown.get(`${ns}:field.item_preferred_location_id`)!.reference!.query
+      .targetId,
+    `${ns}:query.location_get`,
+  );
+  // The item form chooses the location from the location list by name.
+  assert.deepEqual(surface(source, 'item_form').form!.references, [
+    {
+      field: `${ns}:field.item_preferred_location_id`,
+      query: {
+        kind: 'queryReference',
+        schemaVersion: 'v6',
+        targetId: `${ns}:query.location_list`,
+      },
+      labelField: {
+        kind: 'fieldReference',
+        schemaVersion: 'v6',
+        targetId: `${ns}:field.location_name`,
+      },
+    },
+  ]);
+  // Three Lists read items; the Items List keeps the page and the form.
+  for (const local of ['item_detail', 'item_form'])
+    assert.equal(
+      surface(source, local).workspace!.ownerSurfaceId,
+      `${ns}:surface.item_list`,
+    );
+  for (const local of ['item_stock_list', 'item_buying_list']) {
+    assert.equal(surface(source, local).workspace!.membership, 'operational');
+    assert.equal(
+      surface(source, local).workspace!.navigationModuleId,
+      `${ns}:module.inventory`,
+    );
+  }
+  // Ruling PC: a purchase line's unit cost starts from the item's standard
+  // cost in the order currency, as a sales line's price does from its price.
+  const unitCost = surface(
+    source,
+    'purchase_order_form',
+  ).documentEditor!.lineFields.find(
+    (value) => value.fieldId === `${ns}:field.purchase_order_line_unit_price`,
+  )!;
+  assert.equal(unitCost.label, 'Unit cost');
+  assert.deepEqual(unitCost.defaultFrom, {
+    referenceFieldId: `${ns}:field.purchase_order_line_item_id`,
+    sourceByHeader: {
+      headerFieldId: `${ns}:field.purchase_order_currency`,
+      cases: ['cad', 'usd', 'eur'].map((code) => ({
+        value: code.toUpperCase(),
+        sourceFieldId: `${ns}:field.item_standard_cost_${code}`,
+      })),
+    },
+  });
+  refuse((candidate) => {
+    surface(candidate, 'purchase_order_form').documentEditor!.lineFields.find(
+      (value) => value.fieldId === `${ns}:field.purchase_order_line_unit_price`,
+    )!.defaultFrom!.sourceByHeader!.cases[0]!.sourceFieldId =
+      `${ns}:field.item_preferred_location_id`;
+  }, /an editor default requires a sibling reference/);
+
+  // A navigation module is another declared module of a navigation List.
+  const navigation =
+    /a navigation module names another declared module of a navigation List/;
+  refuse((candidate) => {
+    surface(candidate, 'item_stock_list').workspace!.navigationModuleId =
+      `${ns}:module.catalog`;
+  }, navigation);
+  refuse((candidate) => {
+    surface(candidate, 'item_stock_list').workspace!.navigationModuleId =
+      `${ns}:module.warehouse`;
+  }, navigation);
+  refuse((candidate) => {
+    surface(candidate, 'item_detail').workspace!.navigationModuleId =
+      `${ns}:module.inventory`;
+  }, navigation);
+
+  // A form reference chooses a long-enough text field the form reads, from
+  // an active unscoped q0 list query that selects its label, once per field.
+  const reference = (candidate: Loose) =>
+    surface(candidate, 'item_form').form!.references[0]!;
+  const chooses =
+    /a form reference chooses a text field the form reads, long enough for a record id/;
+  refuse((candidate) => {
+    reference(candidate).field = `${ns}:field.item_reorder_point`;
+  }, chooses);
+  refuse((candidate) => {
+    // A unit code could never hold a location's id.
+    reference(candidate).field = `${ns}:field.item_base_unit`;
+  }, chooses);
+  refuse((candidate) => {
+    reference(candidate).field = `${ns}:field.party_name`;
+  }, chooses);
+  const chosen =
+    /a form reference is chosen from an active unscoped q0 list query that selects its label/;
+  refuse((candidate) => {
+    reference(candidate).query.targetId =
+      `${ns}:query.posted_stock_balance_list`;
+  }, chosen);
+  refuse((candidate) => {
+    reference(candidate).query.targetId = `${ns}:query.location_get`;
+  }, chosen);
+  refuse((candidate) => {
+    reference(candidate).labelField.targetId = `${ns}:field.party_name`;
+  }, chosen);
+  refuse((candidate) => {
+    const form = surface(candidate, 'item_form').form!;
+    form.references.push(structuredClone(form.references[0]!));
+  }, /a form field is chosen by one reference/);
+  refuse((candidate) => {
+    surface(candidate, 'item_detail').form = structuredClone(
+      surface(candidate, 'item_form').form!,
+    );
+  }, /form references belong to a Record form/);
+  refuse((candidate) => {
+    (reference(candidate) as unknown as Loose).create = true;
+  }, /CANON_SCHEMA_INVALID/);
+});
+
+test('LOCATIONS: a location keeps an inventory status its page changes with a reason, the form leaves it out, and the stock figures read it', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  const ns = 'northstar.app';
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const surface = (candidate: Loose, local: string) =>
+    (candidate.surfaces as Loose[]).find(
+      (value) => value.surfaceId === id('surface', local),
+    ) as Loose & {
+      composition?: {
+        presentation: { header: { status?: string; facts: string[] } };
+        fields: Array<{ columnId: string; field: string }>;
+        children: Array<{
+          datasetId: string;
+          columns: Array<{
+            columnId: string;
+            field: string;
+            reference?: {
+              query: { targetId: string };
+              labelField: { targetId: string };
+            };
+          }>;
+        }>;
+        actions: Array<
+          Loose & {
+            label: string;
+            conditions: unknown[];
+            inputs: Array<
+              Loose & {
+                inputId: string;
+                required: boolean;
+                presentation?: Loose & {
+                  kind: string;
+                  options?: Array<{ value: string }>;
+                  defaultFrom?: Loose;
+                };
+              }
+            >;
+            steps: Array<{
+              operation: { targetId: string };
+              bindings: Array<{ path: string[]; value: Loose }>;
+            }>;
+          }
+        >;
+      };
+      form?: Loose & { omit?: string[]; references?: unknown[] };
+    };
+  const field = (candidate: Loose, local: string) =>
+    (candidate.fields as Loose[]).find(
+      (value) => value.fieldId === id('field', local),
+    ) as Loose & {
+      presence: string;
+      defaultSemantics?: string;
+      defaultValue?: Loose;
+      fieldType: { kind: string; options?: Array<{ optionId: string }> };
+    };
+  const query = (candidate: Loose, local: string) =>
+    (candidate.queries as Loose[]).find(
+      (value) => value.queryId === id('query', local),
+    ) as Loose & {
+      selections: { field: { targetId: string } }[];
+      readModel?: { queries: Record<string, { targetId: string }> };
+    };
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+
+  // Every location is usable until a status change says otherwise: a status
+  // with a declared default, so a released location reads usable and a
+  // create need not state it (an input contract requires every required
+  // field of a create).
+  const status = field(source, 'location_status');
+  assert.equal(status.presence, 'optional');
+  assert.equal(status.defaultSemantics, 'declaredDefault');
+  assert.deepEqual(status.defaultValue, {
+    kind: 'textValue',
+    schemaVersion: 'v6',
+    value: id('option', 'location_status_usable'),
+  });
+  assert.deepEqual(
+    status.fieldType.options?.map((option) => option.optionId),
+    ['usable', 'quarantine', 'damaged', 'in_transit', 'return_pending'].map(
+      (local) => id('option', `location_status_${local}`),
+    ),
+  );
+  // The type widens by appending (owner ruling L-B): a warehouse and a store
+  // keep their ids and order.
+  assert.deepEqual(
+    field(source, 'location_type')
+      .fieldType.options?.map((option) => option.optionId)
+      .slice(0, 3),
+    [
+      id('option', 'warehouse'),
+      id('option', 'store'),
+      id('option', 'location_type_storage'),
+    ],
+  );
+  for (const local of ['location_get', 'location_list'])
+    assert.deepEqual(
+      query(source, local).selections.map(
+        (selection) => selection.field.targetId,
+      ),
+      [
+        'location_code',
+        'location_name',
+        'location_type',
+        'location_status',
+        'location_status_reason',
+        'location_status_changed_at',
+      ].map((local) => id('field', local)),
+    );
+
+  // The page shows the status in its header and changes it through one Task
+  // that requires a reason and writes the status, the reason and the instant
+  // in one governed update.
+  const page = surface(source, 'location_detail');
+  assert.equal(
+    page.composition!.presentation.header.status,
+    id('column', 'location_status'),
+  );
+  const [change] = page.composition!.actions;
+  assert.equal(change!.label, 'Change status');
+  assert.deepEqual(change!.conditions, []);
+  assert.deepEqual(
+    change!.inputs.map((input) => [
+      input.inputId,
+      input.required,
+      input.presentation?.kind,
+    ]),
+    [
+      [id('input', 'location_status'), true, 'choice'],
+      [id('input', 'location_status_reason'), true, 'multiline'],
+    ],
+  );
+  assert.deepEqual(change!.inputs[0]!.presentation?.defaultFrom, {
+    source: 'record',
+    field: id('field', 'location_status'),
+  });
+  assert.deepEqual(
+    change!.inputs[0]!.presentation?.options?.map((option) => option.value),
+    status.fieldType.options?.map((option) => option.optionId),
+  );
+  assert.equal(change!.steps.length, 1);
+  assert.equal(
+    change!.steps[0]!.operation.targetId,
+    id('operation', 'location_update'),
+  );
+  assert.deepEqual(
+    change!.steps[0]!.bindings.map((binding) => [
+      binding.path.join(' '),
+      binding.value,
+    ]),
+    [
+      ['recordId', { source: 'record', field: 'recordId' }],
+      ['expectedRevision', { source: 'record', field: 'revision' }],
+      [
+        `patch ${id('field', 'location_status')}`,
+        { source: 'input', inputId: id('input', 'location_status') },
+      ],
+      [
+        `patch ${id('field', 'location_status_reason')}`,
+        { source: 'input', inputId: id('input', 'location_status_reason') },
+      ],
+      [
+        `patch ${id('field', 'location_status_changed_at')}`,
+        { source: 'generated', value: 'instant' },
+      ],
+    ],
+  );
+  // The generic form edits the code, name and type and leaves the status to
+  // the page.
+  assert.deepEqual(surface(source, 'location_form').form, {
+    kind: 'surfaceForm',
+    schemaVersion: 'v6',
+    omit: [
+      id('field', 'location_status'),
+      id('field', 'location_status_reason'),
+      id('field', 'location_status_changed_at'),
+    ],
+  });
+
+  // The item page names each location's status beside its stock, and the
+  // stock figures that state what is available read each location's status.
+  const statusColumn = surface(source, 'item_detail')
+    .composition!.children.find(
+      (value) => value.datasetId === id('dataset', 'item_stock'),
+    )!
+    .columns.find(
+      (value) => value.columnId === id('column', 'item_stock_status'),
+    )!;
+  assert.equal(
+    statusColumn.field,
+    id('field', 'posted_stock_balance_location_id'),
+  );
+  assert.equal(
+    statusColumn.reference?.labelField.targetId,
+    id('field', 'location_status'),
+  );
+  for (const [local, reads] of [
+    ['reservation_list', true],
+    ['fulfillment_order_lines', true],
+    ['item_stock_positions', true],
+    // The plain line figures state nothing about stock.
+    ['sales_order_line_list', false],
+  ] as const)
+    assert.equal(
+      Object.values(query(source, local).readModel!.queries).some(
+        (value) => value.targetId === id('query', 'location_get'),
+      ),
+      reads,
+      local,
+    );
+
+  // A form leaves out only a field it reads, a create may leave unstated and
+  // a Task of its record's page sets; once, and never one it also chooses.
+  refuse((candidate) => {
+    surface(candidate, 'location_form').form!.omit = [
+      id('field', 'location_code'),
+    ];
+  }, /a form omits a field it reads that a create may leave unstated/);
+  refuse((candidate) => {
+    surface(candidate, 'location_form').form!.omit = [
+      id('field', 'item_description'),
+    ];
+  }, /a form omits a field it reads that a create may leave unstated/);
+  refuse((candidate) => {
+    surface(candidate, 'item_form').form!.omit = [
+      id('field', 'item_description'),
+    ];
+  }, /a form omits only fields a Task of its record's page sets/);
+  refuse((candidate) => {
+    surface(candidate, 'location_form').form!.omit = [
+      id('field', 'location_status'),
+      id('field', 'location_status'),
+    ];
+  }, /a form field is omitted once and never chosen/);
+  refuse((candidate) => {
+    surface(candidate, 'item_form').form!.omit = [
+      id('field', 'item_preferred_location_id'),
+    ];
+  }, /a form field is omitted once and never chosen/);
+  refuse((candidate) => {
+    surface(candidate, 'location_form').form = {
+      kind: 'surfaceForm',
+      schemaVersion: 'v6',
+    };
+  }, /a form declares references, fields it omits, or both/);
+  // The page's Task no longer setting the reason leaves it to no editor.
+  refuse((candidate) => {
+    const [task] = surface(candidate, 'location_detail').composition!.actions;
+    task!.steps[0]!.bindings = task!.steps[0]!.bindings.filter(
+      (binding) => binding.path[1] !== id('field', 'location_status_reason'),
+    );
+    task!.inputs = task!.inputs.filter(
+      (input) => input.inputId !== id('input', 'location_status_reason'),
+    );
+  }, /a form omits only fields a Task of its record's page sets/);
+});
+
+test('LOCATIONS slice 2: a location page names the location it is inside and lists the locations inside it', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  const ns = 'northstar.app';
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const page = (source.surfaces as Loose[]).find(
+    (value) => value.surfaceId === id('surface', 'location_detail'),
+  ) as Loose & {
+    composition: {
+      presentation: { header: { facts: string[] } };
+      fields: Array<{
+        columnId: string;
+        field: string;
+        reference?: {
+          query: { targetId: string };
+          labelField: { targetId: string };
+        };
+      }>;
+      children: Array<{
+        datasetId: string;
+        label: string;
+        query: { targetId: string };
+        parent?: { relationId: string; value: Loose; ownership: string };
+        columns: Array<{ field: string }>;
+      }>;
+    };
+  };
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  const inside = page.composition.fields.find(
+    (value) => value.columnId === id('column', 'location_parent'),
+  )!;
+  assert.equal(inside.field, id('relation', 'location_parent'));
+  assert.equal(inside.reference?.query.targetId, id('query', 'location_get'));
+  assert.equal(
+    inside.reference?.labelField.targetId,
+    id('field', 'location_name'),
+  );
+  assert.ok(
+    page.composition.presentation.header.facts.includes(
+      id('column', 'location_parent'),
+    ),
+  );
+  const [children] = page.composition.children;
+  assert.equal(children!.label, 'Locations inside');
+  assert.equal(children!.query.targetId, id('query', 'location_list'));
+  assert.deepEqual(children!.parent, {
+    relationId: id('relation', 'location_parent'),
+    value: { source: 'record', field: 'recordId' },
+    ownership: 'reference',
+  });
+  assert.deepEqual(
+    children!.columns.map((value) => value.field),
+    ['location_code', 'location_name', 'location_type', 'location_status'].map(
+      (local) => id('field', local),
+    ),
+  );
+  // Both copies of the pinned relation semantics name the pair, shared by
+  // every company on both sides.
+  const relation = (source.relations as Loose[]).find(
+    (value) => value.relationId === id('relation', 'location_parent'),
+  ) as Loose & { required: boolean };
+  assert.equal(relation.required, false);
 });

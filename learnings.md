@@ -717,3 +717,13 @@ How to apply: scope derived-section refresh to the receiving commands that need 
 Date: 2026-09-05
 Why: the real receiving gateway's unchanged retry conflicted after grant restoration because the version-5 digest includes the policy revision.
 How to apply: authorize every retry against current policy, but reconstruct a historical digest using its immutable recorded authorization evidence; never rewrite its business input or persisted digest. Exercise revocation, restoration and same-key retry together. See `docs/execution/packets/RECEIPT.md`.
+
+## Refresh protected task displays independently of retry state
+Date: 2026-09-15
+Why: RAIN-META-SALES P1 reproduced cached root/child disclosure after read revocation, including a committed-withheld response.
+How to apply: reload actual display dependencies through governed reads; redact the complete response on failure while preserving committed status, receipts and frozen execution state. See [P1/P2 correction](docs/execution/packets/RAIN-META-SALES.md).
+
+## Bind confirmation to the exact prepared generation
+Date: 2026-09-15
+Why: RAIN-META-SALES P2 reproduced an old review form dispatching replacement inputs from the same task session.
+How to apply: bind an immutable normalized preparation to a server-issued identity, reject stale confirmation before dispatch, and use deterministic barriers to prove delayed validation cannot overwrite newer or confirmed state. See [P1/P2 correction](docs/execution/packets/RAIN-META-SALES.md).

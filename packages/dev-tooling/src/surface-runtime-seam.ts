@@ -34,10 +34,15 @@ const paths = Object.freeze({
   appServer: 'apps/web/src/app-server.ts',
   canonicalConstants: 'packages/canonical-model/src/constants.ts',
   componentRegistry: 'apps/web/src/component-registry.ts',
+  controlSemantics: 'apps/web/src/control-semantics.ts',
+  documentEditor: 'apps/web/src/document-editor.ts',
+  editorControls: 'apps/web/src/editor-controls.ts',
   plan: 'docs/greenfield-north-star-erp-platform-plan.md',
   skill: '.agents/skills/ux-grammar/SKILL.md',
   surfaceContract: 'apps/web/src/surface-contract.ts',
+  surfaceComposition: 'apps/web/src/surface-composition.ts',
   surfaceRuntime: 'apps/web/src/surface-runtime.ts',
+  workspaceEntry: 'apps/web/src/workspace-entry.ts',
 });
 
 const expectedPinIdentity = Object.freeze({
@@ -611,15 +616,33 @@ function scanForBypass(
     return;
   }
   const allowedMarkup = new Set<string>([
+    // Generic v6 interpreter delegated only by SurfaceRuntime and its registry.
+    paths.surfaceComposition,
     paths.componentRegistry,
+    paths.documentEditor,
+    // The editor's own typed controls, consumed only by the generic editor.
+    paths.editorControls,
+    // Choice, default and decimal semantics shared by the editor's controls
+    // and the composition interpreter's Task inputs, so neither re-implements them.
+    paths.controlSemantics,
     paths.surfaceRuntime,
     // Owner-ratified RECEIPT §5.11 exception: this focused renderer is consumed
     // only by the closed registry; it is not an alternate surface authority.
     'apps/web/src/receiving-section.ts',
   ]);
   const allowedSurfaceConsumers = new Set<string>([
+    paths.controlSemantics,
+    paths.surfaceComposition,
     paths.componentRegistry,
+    paths.documentEditor,
+    paths.editorControls,
     paths.surfaceRuntime,
+    paths.workspaceEntry,
+  ]);
+  const allowedRuntimeTypeImports = new Set<string>([
+    // The generic editor imports only SurfaceRuntime's gateway/submission
+    // types; SurfaceRuntime remains its sole production caller.
+    paths.documentEditor,
   ]);
   const structuralMarkup =
     /<\s*(?:html|body|head|header|footer|main|nav|aside|section|article|form|fieldset|legend|input|select|textarea|button|table|h[1-6])(?:\s|>)|createElement\(\s*['"](?:html|body|head|header|footer|main|nav|aside|section|article|form|fieldset|legend|input|select|textarea|button|table|h[1-6])['"]|(?:jsx|jsxs|jsxDEV)\(\s*['"](?:html|body|head|header|footer|main|nav|aside|section|article|form|fieldset|legend|input|select|textarea|button|table|h[1-6])['"]|data-surface-archetype\s*=|data-component\s*=/i;
@@ -637,6 +660,41 @@ function scanForBypass(
   for (const file of sourceFiles(sourceRoot)) {
     const repoPath = normalize(relative(root, file));
     const source = readFileSync(file, 'utf8');
+    if (
+      repoPath !== paths.surfaceRuntime &&
+      repoPath !== paths.componentRegistry &&
+      /from ['"][^'"]*surface-composition\.js['"]/.test(source)
+    )
+      add(
+        violations,
+        repoPath,
+        'SURF001_RUNTIME_BYPASS',
+        'only SurfaceRuntime and its closed registry may delegate to the composition interpreter',
+      );
+    // The editor's controls are part of the generic editor delegate, not a
+    // second surface authority: nothing but that editor may render them.
+    if (
+      repoPath !== paths.documentEditor &&
+      /from ['"][^'"]*editor-controls\.js['"]/.test(source)
+    )
+      add(
+        violations,
+        repoPath,
+        'SURF001_RUNTIME_BYPASS',
+        'only the generic document editor may delegate to its controls',
+      );
+    if (
+      repoPath !== paths.editorControls &&
+      repoPath !== paths.documentEditor &&
+      repoPath !== paths.surfaceComposition &&
+      /from ['"][^'"]*control-semantics\.js['"]/.test(source)
+    )
+      add(
+        violations,
+        repoPath,
+        'SURF001_RUNTIME_BYPASS',
+        'only the generic editor and the composition interpreter share control semantics',
+      );
     if (!allowedMarkup.has(repoPath) && structuralMarkup.test(source)) {
       add(
         violations,
@@ -658,9 +716,18 @@ function scanForBypass(
         'only SurfaceRuntime may consume the surface contract or component registry',
       );
     }
+    const runtimeImports = [
+      ...source.matchAll(
+        /import\s+(type\s+)?[^;]*?from\s+['"][^'"]*surface-runtime\.js['"]/gu,
+      ),
+    ];
     if (
       repoPath !== paths.appServer &&
-      /from ['"][^'"]*surface-runtime\.js['"]/.test(source)
+      runtimeImports.length > 0 &&
+      !(
+        allowedRuntimeTypeImports.has(repoPath) &&
+        runtimeImports.every((entry) => entry[1] === 'type ')
+      )
     ) {
       add(
         violations,

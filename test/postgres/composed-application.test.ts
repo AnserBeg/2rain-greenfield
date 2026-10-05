@@ -163,6 +163,11 @@ const fullReplaySchemaSnapshotPath = resolve(
 );
 const execFileAsync = promisify(execFile);
 const rollbackFieldId = 'northstar.app:field.party_rollback_note';
+// The optional field `appendCompanyColumnSuccessor` adds to a company-scoped
+// entity (ADR-0066 synthetic storage history).
+const companyColumnEntityId = 'northstar.app:entity.purchase_order';
+const companyColumnFieldId =
+  'northstar.app:field.purchase_order_rebaseline_note';
 
 test('composed product does not invent a verification evidence identity', async () => {
   const source = await readFile(
@@ -713,6 +718,530 @@ test(
   },
 );
 
+// ADR-0066 pre-tenant re-baseline. The recorded lineage now has ONE entry, so
+// the fresh install above crosses a single edge -- the bootstrap to the head --
+// and creates every table whole. The storage history the old many-entry lineage
+// replayed is constructed here instead of being retained: the recorded head,
+// then a successor that adds one optional field to a company-scoped entity
+// (`appendCompanyColumnSuccessor`). That restores three facts the recorded
+// history used to carry:
+//   - a first tenant's fresh install crosses more than one edge, and every
+//     non-serving release -- the recorded head included -- refuses serving and
+//     is bound to its exact edge;
+//   - that install applies an `addColumn` to a company-scoped table, whose
+//     UPDATE grant is per column (SALES-PARITY `added-company-column-...`);
+//   - a second tenant replays the recorded head's create beneath the column the
+//     first tenant's serving release added, and that column keeps its grant
+//     (SALES-PARITY `replayed-create-keeps-later-column-grants`).
+test(
+  'a fresh install replays a synthetic storage history: every intermediate refuses serving, an added company column is granted, and a second tenant replaying the earlier create keeps that grant',
+  { timeout: 300_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'rebaseline-storage-history',
+      async ({ connection, pool }) => {
+        const compiledApplication = JSON.parse(
+          await readFile(compiledArtifactPath, 'utf8'),
+        ) as unknown;
+        const recorded = parseCompiledApplication(compiledApplication);
+        const lineage = appendCompanyColumnSuccessor(compiledApplication);
+        const parsed = parseCompiledApplication(lineage);
+        // The construction is the control: the recorded head is retained as
+        // an intermediate, and the only storage change after it is the column.
+        assert.equal(
+          parsed.applications.length,
+          recorded.applications.length + 1,
+        );
+        assert.equal(
+          parsed.applications.at(-2)!.compiled.releaseRoot,
+          recorded.application.compiled.releaseRoot,
+        );
+        assert.deepEqual(
+          projectionPayload<{ elements: { kind: string }[] }>(
+            parsed.application.compiled,
+            PROJECTION_FAMILY_IDS.storageTransition,
+          ).elements.map((element) => element.kind),
+          ['addColumn'],
+        );
+        const added = companyColumnTarget(lineage);
+        const databaseUrl = connectionUrl(connection);
+
+        const refusedIntermediateRoots: string[] = [];
+        const first = await createRuntime(
+          lineage,
+          databaseUrl,
+          'storage-history-first',
+          undefined,
+          async (observation) => {
+            await assert.rejects(
+              observation.loadActiveRuntimeDefinition,
+              (error: unknown) => {
+                assert.ok(error instanceof RequestRuntimeViewLoadError);
+                assert.equal(error.code, 'ACTIVE_RELEASE_NOT_ADMITTED');
+                return true;
+              },
+            );
+            refusedIntermediateRoots.push(observation.releaseRoot);
+          },
+        );
+        try {
+          assert.equal(
+            first.releaseRoot,
+            parsed.application.compiled.releaseRoot,
+          );
+          assert.deepEqual(
+            refusedIntermediateRoots,
+            [parsed.bootstrap, ...parsed.applications]
+              .slice(0, -1)
+              .map((release) => release.compiled.releaseRoot),
+            'every intermediate, the recorded head included, refuses request serving until semantic admission',
+          );
+          await assertFreshInstallLineageEvidence(
+            pool,
+            first,
+            lineage,
+            connection,
+          );
+          await assertColumnUpdateGranted(
+            pool,
+            added,
+            'the addColumn edge grants the column UPDATE, as the table creation grants its other mutable columns',
+          );
+          await assertSyntheticReplayConvergesOnRecordedHeadSchema(
+            pool,
+            added.column,
+          );
+
+          const second = await createRuntime(
+            lineage,
+            databaseUrl,
+            'storage-history-second',
+          );
+          try {
+            assert.equal(
+              second.releaseRoot,
+              parsed.application.compiled.releaseRoot,
+            );
+          } finally {
+            await second.close();
+          }
+          await assertColumnUpdateGranted(
+            pool,
+            added,
+            "replaying the recorded head's create for a second tenant keeps the grant the first tenant's serving release added",
+          );
+        } finally {
+          await first.close();
+        }
+      },
+    );
+  },
+);
+
+test(
+  'relation install advances a released company table with nullable storage, scoped FK and index, exact grants and governed writes',
+  { timeout: 300_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'relation-install',
+      async ({ connection, pool }) => {
+        const base = relationInstallBase(
+          JSON.parse(await readFile(compiledArtifactPath, 'utf8')) as unknown,
+        );
+        const head = appendRelationSuccessor(base);
+        const storage = storageTarget(
+          parseCompiledApplication(head).application.compiled,
+        );
+        const relation = storage.relations.find(
+          (candidate) => candidate.relationId === installedRelationId,
+        )!;
+        assert.ok(relation);
+        const source = storage.entities.find(
+          (candidate) => candidate.entityId === relation.sourceEntityId,
+        )!;
+        const target = storage.entities.find(
+          (candidate) => candidate.entityId === relation.targetEntityId,
+        )!;
+        assert.ok(source.legalEntity);
+        const column = relation.relationColumn.physicalName;
+        const index = source.indexes.find(
+          (candidate) =>
+            candidate.indexKind === 'relation' &&
+            candidate.columnNames.includes(column),
+        )!;
+        assert.ok(index);
+        const transition = projectionPayload<{ elements: { kind: string }[] }>(
+          parseCompiledApplication(head).application.compiled,
+          PROJECTION_FAMILY_IDS.storageTransition,
+        );
+        assert.deepEqual(
+          transition.elements.map((element) => element.kind).toSorted(),
+          ['addColumn', 'addForeignKey', 'createIndex'].toSorted(),
+        );
+        const databaseUrl = connectionUrl(connection);
+        let runtime = await createRuntime(
+          base,
+          databaseUrl,
+          'relation-install',
+        );
+        const invoke = (local: string, input: ImmutableJsonValue) =>
+          runtime.entry.run({ headers: {} }, (view) =>
+            runtime.operationGateway.invoke(
+              view,
+              {
+                schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+                operationId: `northstar.app:operation.${local}`,
+                input,
+                idempotencyKey: randomUUID(),
+                confirmationGrant: null,
+              },
+              runtime.operationMediation.issueInvocation(view, 'UI'),
+            ),
+          );
+        const company = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
+        const orderId = randomUUID();
+        const oldLineId = randomUUID();
+        const createLine = (
+          recordId: string,
+          number: string,
+          extra: Record<string, string> = {},
+        ) =>
+          invoke('purchase_order_line_create', {
+            recordId,
+            legalEntityId: company,
+            values: {
+              'northstar.app:field.purchase_order_line_line_number': number,
+              'northstar.app:field.purchase_order_line_item_id':
+                'RELATION-ITEM',
+              'northstar.app:field.purchase_order_line_ordered_quantity': '5',
+              'northstar.app:field.purchase_order_line_unit_price': '7',
+            },
+            relations: {
+              [APPLICATION_IDS.purchasing.lineRelationId]: orderId,
+              ...extra,
+            },
+          });
+        const readLink = async (recordId: string) =>
+          (
+            await pool.query<{ link: string | null }>(
+              `SELECT ${quoteSqlIdentifier(column)}::text AS link FROM north_star_module.${quoteSqlIdentifier(source.physicalTableName)}
+          WHERE tenant_id = $1 AND environment_id = $2 AND record_id = $3`,
+              [
+                runtime.identity.tenantId,
+                runtime.identity.environmentId,
+                recordId,
+              ],
+            )
+          ).rows[0]?.link;
+        try {
+          await invoke('purchase_order_create', {
+            recordId: orderId,
+            legalEntityId: company,
+            relations: {},
+            values: {
+              'northstar.app:field.purchase_order_supplier_party_id':
+                'RELATION-SUPPLIER',
+              'northstar.app:field.purchase_order_currency': 'CAD',
+              'northstar.app:field.purchase_order_order_date':
+                '2026-10-04T00:00:00.000Z',
+              'northstar.app:field.purchase_order_expected_date':
+                '2026-10-05T00:00:00.000Z',
+              'northstar.app:field.purchase_order_notes':
+                'relation install fixture',
+            },
+          });
+          await createLine(oldLineId, '1');
+          const before = await pool.query<{ present: boolean }>(
+            `SELECT EXISTS (
+          SELECT 1 FROM information_schema.columns WHERE table_schema = 'north_star_module' AND table_name = $1 AND column_name = $2
+        ) AS present`,
+            [source.physicalTableName, column],
+          );
+          assert.equal(
+            before.rows[0]?.present,
+            false,
+            'the released base must not already contain the new relation column',
+          );
+          await runtime.close();
+          try {
+            runtime = await createRuntime(
+              head,
+              databaseUrl,
+              'relation-install',
+            );
+          } catch (error) {
+            const code = (error as { code?: unknown } | null)?.code;
+            if (error instanceof Error && typeof code === 'string')
+              throw new Error(`${code}: ${error.message}`, { cause: error });
+            throw error;
+          }
+          const columns = await pool.query<{
+            data_type: string;
+            is_nullable: string;
+            column_default: string | null;
+          }>(
+            `SELECT data_type, is_nullable, column_default FROM information_schema.columns
+            WHERE table_schema = 'north_star_module' AND table_name = $1 AND column_name = $2`,
+            [source.physicalTableName, column],
+          );
+          assert.deepEqual(columns.rows, [
+            { data_type: 'uuid', is_nullable: 'YES', column_default: null },
+          ]);
+          assert.equal(
+            await readLink(oldLineId),
+            null,
+            'install leaves pre-existing business rows unlinked',
+          );
+          const fk = await pool.query<{ definition: string; target: string }>(
+            `SELECT pg_get_constraintdef(oid) AS definition, confrelid::regclass::text AS target
+             FROM pg_constraint WHERE conrelid = $1::regclass AND conname = $2`,
+            [
+              `north_star_module.${quoteSqlIdentifier(source.physicalTableName)}`,
+              relation.foreignKey.physicalName,
+            ],
+          );
+          assert.equal(fk.rows.length, 1);
+          assert.equal(
+            fk.rows[0]!.target,
+            `north_star_module.${target.physicalTableName}`,
+          );
+          assert.match(
+            fk.rows[0]!.definition,
+            /FOREIGN KEY \(tenant_id, environment_id, legal_entity_id,/u,
+            'the added FK retains company scope',
+          );
+          assert.match(
+            fk.rows[0]!.definition,
+            /REFERENCES .*\(tenant_id, environment_id, legal_entity_id, record_id\) ON UPDATE RESTRICT ON DELETE RESTRICT/u,
+          );
+          const installedIndex = await pool.query<{
+            definition: string;
+            indisvalid: boolean;
+          }>(
+            `SELECT pg_get_indexdef(i.indexrelid) AS definition, i.indisvalid FROM pg_index i
+           JOIN pg_class c ON c.oid = i.indexrelid WHERE i.indrelid = $1::regclass AND c.relname = $2`,
+            [
+              `north_star_module.${quoteSqlIdentifier(source.physicalTableName)}`,
+              index.physicalName,
+            ],
+          );
+          assert.equal(installedIndex.rows.length, 1);
+          assert.equal(installedIndex.rows[0]!.indisvalid, true);
+          assert.ok(
+            installedIndex.rows[0]!.definition.includes(
+              `(tenant_id, environment_id, legal_entity_id, ${column})`,
+            ),
+          );
+          await assertColumnUpdateGranted(
+            pool,
+            { table: source.physicalTableName, column },
+            'the added relation gets column UPDATE, never table UPDATE',
+          );
+          const originalRelation = storage.relations.find(
+            (candidate) =>
+              candidate.relationId ===
+              APPLICATION_IDS.purchasing.lineRelationId,
+          )!;
+          const grants = await pool.query<{
+            column_name: string;
+            privilege_type: string;
+            is_grantable: string;
+          }>(
+            `SELECT column_name, privilege_type, is_grantable FROM information_schema.column_privileges
+           WHERE table_schema = 'north_star_module' AND table_name = $1 AND grantee = 'north_star_module_runtime'
+             AND column_name = ANY($2::text[]) ORDER BY column_name, privilege_type`,
+            [
+              source.physicalTableName,
+              [column, originalRelation.relationColumn.physicalName],
+            ],
+          );
+          const privileges = (name: string) =>
+            grants.rows
+              .filter((row) => row.column_name === name)
+              .map(({ privilege_type, is_grantable }) => ({
+                privilege_type,
+                is_grantable,
+              }));
+          assert.deepEqual(
+            privileges(column),
+            privileges(originalRelation.relationColumn.physicalName),
+            'added and creation-time relation columns have identical privileges',
+          );
+          const linkedLineId = randomUUID();
+          const result = await createLine(linkedLineId, '2', {
+            [installedRelationId]: orderId,
+          });
+          assert.equal(result.outcome, 'succeeded');
+          assert.equal(
+            await readLink(linkedLineId),
+            orderId,
+            'a governed gateway write persists the installed relation',
+          );
+
+          const foreignCompany = randomUUID();
+          const foreignOrder = randomUUID();
+          const master = storage.entities.find(
+            (candidate) => candidate.legalEntityMaster !== undefined,
+          )!;
+          const code = master.legalEntityMaster!.fieldColumns.code;
+          await copyRelationFixtureRow(
+            pool,
+            master.physicalTableName,
+            company,
+            {
+              record_id: foreignCompany,
+              [code]: 'REL-FOREIGN',
+              [master.legalEntityMaster!.fieldColumns.isDefault]: false,
+            },
+          );
+          const number = target.columns.find(
+            (candidate) =>
+              candidate.canonicalFieldId ===
+              'northstar.app:field.purchase_order_number',
+          )!.physicalName;
+          await copyRelationFixtureRow(
+            pool,
+            target.physicalTableName,
+            orderId,
+            {
+              record_id: foreignOrder,
+              legal_entity_id: foreignCompany,
+              [number]: 'REL-FOREIGN-PO',
+            },
+          );
+          const refusedLineId = randomUUID();
+          await assert.rejects(
+            createLine(refusedLineId, '3', {
+              [installedRelationId]: foreignOrder,
+            }),
+            (error: unknown) => {
+              assert.ok(error instanceof ModuleRuntimeInterpreterError);
+              assert.equal(error.code, 'MODULE_RELATION_VIOLATION');
+              return true;
+            },
+          );
+          assert.equal(
+            await readLink(refusedLineId),
+            undefined,
+            'foreign-company gateway refusal writes no line',
+          );
+          await assert.rejects(
+            pool.query(
+              `UPDATE north_star_module.${quoteSqlIdentifier(source.physicalTableName)} SET ${quoteSqlIdentifier(column)} = $1 WHERE record_id = $2`,
+              [foreignOrder, linkedLineId],
+            ),
+            (error: unknown) => (error as { code?: string }).code === '23503',
+            'the persisted FK refuses a foreign-company target independently of the gateway',
+          );
+          assert.equal(
+            await readLink(linkedLineId),
+            orderId,
+            'the rejected FK write leaves the valid link unchanged',
+          );
+        } finally {
+          await runtime.close();
+        }
+      },
+    );
+  },
+);
+
+const installedRelationId =
+  'northstar.app:relation.purchase_order_line_installed_reference';
+
+function relationInstallBase(compiledApplication: unknown): unknown {
+  const previous = parseCompiledApplication(compiledApplication);
+  const bytes = previous.application.normalizedDefinitionBytes;
+  // Isolate this transition from unrelated historical installs. The fixture
+  // still releases the base, persists rows, then upgrades the same tenant.
+  // No checked-in application release or lineage is changed.
+  const initial = compileApplication({
+    dependencies: [],
+    expectedActiveRelease: expectedActiveReleaseFrom(
+      previous.bootstrap.compiled,
+    ),
+    kind: 'compilerInput',
+    limits: { ...DEFAULT_COMPILER_LIMITS },
+    normalizedDefinitionBytes: bytes,
+    profile: profileForNormalizedBytes(bytes),
+  });
+  assert.equal(initial.status, 'compiled');
+  return {
+    applications: [serializedRelease(bytes, initial as CompileSuccess)],
+    bootstrap: serializedRelease(
+      previous.bootstrap.normalizedDefinitionBytes,
+      previous.bootstrap.compiled,
+    ),
+    schemaVersion: 'northstar.web:compiled-application-release/v2',
+  };
+}
+
+function appendRelationSuccessor(compiledApplication: unknown): unknown {
+  const previous = parseCompiledApplication(compiledApplication);
+  const definition = structuredClone(composedApplicationDefinition()) as {
+    relations: Record<string, unknown>[];
+    package: { version: string };
+  };
+  assert.equal(
+    canonicalize(normalizeApplicationPackage(definition)),
+    new TextDecoder().decode(previous.application.normalizedDefinitionBytes),
+    'the synthetic relation successor starts from the exact recorded head definition',
+  );
+  const original = definition.relations.find(
+    (relation) =>
+      relation.relationId === APPLICATION_IDS.purchasing.lineRelationId,
+  );
+  assert.ok(original);
+  definition.relations.push({
+    ...structuredClone(original),
+    relationId: installedRelationId,
+    required: false,
+    ownership: 'reference',
+    orderKey: 999,
+  });
+  definition.package.version = '1.0.99';
+  const bytes = new TextEncoder().encode(
+    canonicalize(normalizeApplicationPackage(definition)),
+  );
+  const successor = compileSuccessor(previous.application.compiled, bytes);
+  return {
+    applications: [
+      ...previous.applications.map((release) =>
+        serializedRelease(release.normalizedDefinitionBytes, release.compiled),
+      ),
+      serializedRelease(bytes, successor),
+    ],
+    bootstrap: serializedRelease(
+      previous.bootstrap.normalizedDefinitionBytes,
+      previous.bootstrap.compiled,
+    ),
+    schemaVersion: 'northstar.web:compiled-application-release/v2',
+  };
+}
+
+async function copyRelationFixtureRow(
+  pool: pg.Pool,
+  table: string,
+  recordId: string,
+  overrides: Record<string, ImmutableJsonValue>,
+): Promise<void> {
+  const columns = await pool.query<{ attname: string }>(
+    `SELECT attname FROM pg_attribute WHERE attrelid = $1::regclass AND attnum > 0 AND NOT attisdropped AND attgenerated = '' ORDER BY attnum`,
+    [`north_star_module.${quoteSqlIdentifier(table)}`],
+  );
+  const names = columns.rows
+    .map((column) => quoteSqlIdentifier(column.attname))
+    .join(', ');
+  await pool.query(
+    `INSERT INTO north_star_module.${quoteSqlIdentifier(table)} (${names})
+    SELECT ${columns.rows.map((column) => `copied.${quoteSqlIdentifier(column.attname)}`).join(', ')}
+    FROM north_star_module.${quoteSqlIdentifier(table)} original,
+      LATERAL jsonb_populate_record(NULL::north_star_module.${quoteSqlIdentifier(table)}, to_jsonb(original) || $1::jsonb) copied
+    WHERE original.record_id = $2`,
+    [JSON.stringify(overrides), recordId],
+  );
+}
+
 // Same harness limit: this parent performs one bounded fresh install and then
 // verifies and activates compiled successors through the normal upgrade path.
 test(
@@ -964,6 +1493,10 @@ test(
           await runtime.close();
         }
       },
+      // The whole lineage, then its successor or reverse edge: eight entries
+      // overflow the default 256 MB data tmpfs, as nineteen did for the
+      // full-replay generator (SALES-PARITY 28461658). Room, not a bound.
+      { dataSizeMegabytes: 1024 },
     );
   },
 );
@@ -1051,7 +1584,15 @@ async function assertRealProductDefinition(
     ).surfaces.map((surface) => surface.surfaceId);
     // Prior 51 + Sales order entry and the fulfillment document/read-model
     // surfaces. Projection carriers deliberately omit editable forms.
-    assert.equal(surfaces.length, 70);
+    // SALES-PARITY adds Party's ship-to address book and Catalog's tax codes,
+    // then the invoice, its lines, payments and credits (list, detail, form
+    // each). PURCHASING-PARITY adds the Expected receipts List; PAYABLES the
+    // vendor bill, its lines, payments and credits (list, detail, form each);
+    // REPLENISHMENT Stock by item and the Buying worklist.
+    assert.equal(surfaces.length, 103);
+    assert.ok(surfaces.includes('northstar.app:surface.expected_receipt_list'));
+    assert.ok(surfaces.includes('northstar.app:surface.item_stock_list'));
+    assert.ok(surfaces.includes('northstar.app:surface.item_buying_list'));
     for (const local of [
       'goods_receipt',
       'goods_receipt_line',
@@ -2618,7 +3159,6 @@ function invokeInventoryTransactionCreate(
             'northstar.app:field.inventory_transaction_actor_id': 'auth-test',
             'northstar.app:field.inventory_transaction_effective_at':
               '2026-09-04T12:00:00.000Z',
-            'northstar.app:field.inventory_transaction_number': `AUTH-SCOPE-${recordId.slice(0, 8)}`,
             'northstar.app:field.inventory_transaction_recorded_at':
               '2026-09-04T12:00:00.000Z',
             'northstar.app:field.inventory_transaction_source_id': 'auth-test',
@@ -3353,20 +3893,12 @@ async function assertBoundedFreshTenantInstallEvidence(
   compiledApplication: unknown,
   connection: pg.PoolConfig,
 ): Promise<void> {
-  const compiled = parseCompiledApplication(compiledApplication);
-  const lineage = [compiled.bootstrap, ...compiled.applications];
-  const unverifiedRoots = lineage
-    .slice(0, -1)
-    .map((release) => release.compiled.releaseRoot);
-  const transitionPairs = lineage.slice(1).map((release, index) => ({
-    sourceReleaseRoot: lineage[index]!.compiled.releaseRoot,
-    targetReleaseRoot: release.compiled.releaseRoot,
-  }));
   const servingScenarioCount = releaseVerificationBinding(
-    compiled.application.compiled,
+    parseCompiledApplication(compiledApplication).application.compiled,
   ).plan.scenarios.length;
   assertReceivingVerificationCoverage(compiledApplication);
   assertSalesVerificationCoverage(compiledApplication);
+  assertPayablesVerificationCoverage(compiledApplication);
   // 174 -> 198. PUR-1 adds exactly 24, MEASURED by enumerating the compiled
   // plan rather than derived from this arithmetic: 12 declaredEvidence (six per
   // purchasing entity), 6 searchableExclusion (the two dates, notes, and the
@@ -3386,11 +3918,68 @@ async function assertBoundedFreshTenantInstallEvidence(
   // shipment (19), shipment line (14), and shipped quantity (10).
   // `assertSalesVerificationCoverage` pins every entity contribution and the
   // server-owned lifecycle-field exclusion independently of this total.
+  // SALES-PARITY adds 40 through its optional fields: shipment carrier and
+  // reference (4), order master data (10), shipment ship-to (6), Party's
+  // customer defaults (6) and its address book (14); then 25 for ruling B:
+  // the order's tax code and charges (7), line pricing (4), a customer
+  // default tax code (1), item prices (3) and the tax code master (10); then
+  // 72 for ruling C: invoice (23), invoice line (17), payment (17) and
+  // credit (15). PURCHASING-PARITY adds 12 through the purchase order's
+  // optional commercial fields: the order's terms, tax code and charges (9:
+  // eight search exclusions and the terms' enum check) and the line's
+  // discount and tax (3). Its slices 2-3 add 4 search exclusions: the order's
+  // receive-into location, the receipt's packing slip and notes, and the
+  // amendment request's close flag. PAYABLES adds 72, measured from the
+  // compiled plan: vendor bill (23), bill line (17), vendor payment (17) and
+  // vendor credit (15) -- the receivables documents' shapes; the supplier's
+  // invoice number is searchable, so it adds no search exclusion.
+  // REPLENISHMENT adds 6, measured: one search exclusion for each of the
+  // item's six non-searchable fields (reorder point and up-to level, preferred
+  // location, standard cost in three currencies). Its two Lists' queries add
+  // none: a List over items adds no entity. LOCATIONS adds 5, measured: one
+  // search exclusion for each of the location's three non-searchable status
+  // fields (status, reason, time), the status's enum rejection, and the
+  // archive restriction of a location inside another (slice 2).
   assert.equal(
     servingScenarioCount,
-    348,
-    'the release includes the prior 198 scenarios, 59 for receiving, and 91 for Sales and fulfillment',
+    584,
+    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, 6 for replenishment and 5 for locations',
   );
+  await assertFreshInstallLineageEvidence(
+    pool,
+    runtime,
+    compiledApplication,
+    connection,
+  );
+}
+
+/**
+ * What a bounded fresh install records about the lineage it replayed, derived
+ * from that lineage alone: every non-serving release admitted for transition
+ * only, bound to its exact edge and ordinal in one install, and only the serving
+ * release semantically verified. Split out of
+ * `assertBoundedFreshTenantInstallEvidence` by the ADR-0066 re-baseline so a
+ * synthetic multi-entry lineage can be held to the same facts without the
+ * recorded head's scenario pins.
+ */
+async function assertFreshInstallLineageEvidence(
+  pool: pg.Pool,
+  runtime: ComposedApplicationRuntime,
+  compiledApplication: unknown,
+  connection: pg.PoolConfig,
+): Promise<void> {
+  const compiled = parseCompiledApplication(compiledApplication);
+  const lineage = [compiled.bootstrap, ...compiled.applications];
+  const unverifiedRoots = lineage
+    .slice(0, -1)
+    .map((release) => release.compiled.releaseRoot);
+  const transitionPairs = lineage.slice(1).map((release, index) => ({
+    sourceReleaseRoot: lineage[index]!.compiled.releaseRoot,
+    targetReleaseRoot: release.compiled.releaseRoot,
+  }));
+  const servingScenarioCount = releaseVerificationBinding(
+    compiled.application.compiled,
+  ).plan.scenarios.length;
 
   const intermediate = await pool.query<{
     install_id: MintedUuid;
@@ -3633,6 +4222,105 @@ async function assertBoundedInstallMatchesFullReplaySchema(
   }
 }
 
+/** The company-scoped table and column `appendCompanyColumnSuccessor` adds. */
+function companyColumnTarget(compiledApplication: unknown): {
+  readonly column: string;
+  readonly table: string;
+} {
+  const entity = requiredStorageEntity(
+    storageTarget(
+      parseCompiledApplication(compiledApplication).application.compiled,
+    ),
+    companyColumnEntityId.split(':entity.')[1]!,
+  );
+  // Company-scoped, and neither a fact nor a period lock: the one table class
+  // whose runtime UPDATE is granted per column rather than per table.
+  assert.ok(entity.legalEntity);
+  assert.equal(entity.factStorage, undefined);
+  assert.equal(entity.periodLock, undefined);
+  return {
+    column: requiredStorageColumn(
+      entity,
+      companyColumnFieldId.split(':field.')[1]!,
+    ),
+    table: entity.physicalTableName,
+  };
+}
+
+async function assertColumnUpdateGranted(
+  pool: pg.Pool,
+  target: Readonly<{ column: string; table: string }>,
+  message: string,
+): Promise<void> {
+  const result = await pool.query<{
+    column_update: boolean;
+    table_update: boolean;
+  }>(
+    `SELECT has_column_privilege('north_star_module_runtime', $1, $2, 'UPDATE')
+              AS column_update,
+            has_table_privilege('north_star_module_runtime', $1, 'UPDATE')
+              AS table_update`,
+    [`north_star_module.${quoteSqlIdentifier(target.table)}`, target.column],
+  );
+  // Granted on the column, and never at table level: a company-scoped table's
+  // runtime UPDATE is per column by construction.
+  assert.deepEqual(
+    result.rows[0],
+    { column_update: true, table_update: false },
+    message,
+  );
+}
+
+/**
+ * The synthetic replay converges on the head catalog the checked-in full
+ * replay records: removing every catalog row that names the added column leaves
+ * that snapshot exactly, and the column itself is present once and granted.
+ * Anything else would be drift the extra edge introduced.
+ */
+async function assertSyntheticReplayConvergesOnRecordedHeadSchema(
+  pool: pg.Pool,
+  addedColumn: string,
+): Promise<void> {
+  const expected = JSON.parse(
+    await readFile(fullReplaySchemaSnapshotPath, 'utf8'),
+  ) as unknown;
+  const client = await pool.connect();
+  let actual: Awaited<ReturnType<typeof captureSchemaSnapshot>>;
+  try {
+    actual = await captureSchemaSnapshot(client, ['north_star_module']);
+  } finally {
+    client.release();
+  }
+  const namesAddedColumn = (row: unknown) =>
+    JSON.stringify(row).includes(addedColumn);
+  assert.deepEqual(
+    Object.fromEntries(
+      Object.entries(actual).map(([key, value]) => [
+        key,
+        Array.isArray(value)
+          ? value.filter((row) => !namesAddedColumn(row))
+          : value,
+      ]),
+    ),
+    expected,
+    'a replay across the added-column edge converges on the recorded head catalog',
+  );
+  assert.deepEqual(
+    actual.columns
+      .filter(namesAddedColumn)
+      .map((row) => row.column_name as string),
+    [addedColumn],
+  );
+  assert.ok(
+    actual.columnPrivileges.some(
+      (row) =>
+        namesAddedColumn(row) &&
+        row.grantee === 'north_star_module_runtime' &&
+        row.privilege_type === 'UPDATE',
+    ),
+  );
+}
+
 /**
  * Reopen the tenant's runtime on the recorded lineage.
  *
@@ -3789,6 +4477,10 @@ test(
           await reversed.close();
         }
       },
+      // The whole lineage, then its successor or reverse edge: eight entries
+      // overflow the default 256 MB data tmpfs, as nineteen did for the
+      // full-replay generator (SALES-PARITY 28461658). Room, not a bound.
+      { dataSizeMegabytes: 1024 },
     );
   },
 );
@@ -4179,7 +4871,6 @@ async function assertPurchaseOrderParentGuard(
       [purchasing.fieldIds.currency]: 'CAD',
       [purchasing.fieldIds.expectedDate]: '2026-09-01T00:00:00.000Z',
       [purchasing.fieldIds.notes]: 'parent guard vertical',
-      [purchasing.fieldIds.number]: 'PO-GUARD-001',
       [purchasing.fieldIds.orderDate]: '2026-08-22T00:00:00.000Z',
       [purchasing.fieldIds.supplierPartyId]: 'SUP-GUARD-001',
     },
@@ -4370,7 +5061,6 @@ async function assertEntityOwnedCreateInput(
     'northstar.app:field.inventory_transaction_actor_id': 'write-scope-control',
     'northstar.app:field.inventory_transaction_effective_at':
       '2026-08-01T12:00:00.000Z',
-    'northstar.app:field.inventory_transaction_number': 'DRAFT-SCOPE-001',
     'northstar.app:field.inventory_transaction_recorded_at':
       '2026-08-01T12:00:00.000Z',
     'northstar.app:field.inventory_transaction_source_id':
@@ -4520,10 +5210,8 @@ async function assertEntityOwnedCreateInput(
   assert.ok(inactiveStatus);
   const inactiveRecordId = randomUUID();
   const inactiveIdempotencyKey = randomUUID();
-  const inactiveValues = {
-    ...values,
-    'northstar.app:field.inventory_transaction_number': 'DRAFT-SCOPE-INACTIVE',
-  } as const;
+  // The server numbers each draft, so the twin needs no number of its own.
+  const inactiveValues = values;
   await pool.query(
     `UPDATE north_star_module.${master.physicalTableName}
         SET "${master.legalEntityMaster.fieldColumns.status}" = $1
@@ -4670,11 +5358,7 @@ async function assertEntityOwnedCreateInput(
       archiveFirstRecordId,
       { legalEntityId: archiveFirstLegalEntityId },
       archiveFirstIdempotencyKey,
-      {
-        ...values,
-        'northstar.app:field.inventory_transaction_number':
-          'DRAFT-SCOPE-ARCHIVE-FIRST',
-      },
+      values,
     );
     void archiveFirstCreate.catch(() => undefined);
     await waitForLegalEntityMasterLockWaiters(
@@ -4757,11 +5441,7 @@ async function assertEntityOwnedCreateInput(
       randomUUID(),
       { legalEntityId: createFirstLegalEntityId },
       randomUUID(),
-      {
-        ...values,
-        'northstar.app:field.inventory_transaction_number':
-          'DRAFT-SCOPE-CREATE-FIRST',
-      },
+      values,
     );
     void createFirstAttempt.catch(() => undefined);
     await waitForLegalEntityMasterLockWaiters(
@@ -4804,11 +5484,7 @@ async function assertEntityOwnedCreateInput(
       postArchiveRecordId,
       { legalEntityId: createFirstLegalEntityId },
       postArchiveIdempotencyKey,
-      {
-        ...values,
-        'northstar.app:field.inventory_transaction_number':
-          'DRAFT-SCOPE-POST-ARCHIVE',
-      },
+      values,
     ),
     (error: unknown) => {
       assert.ok(error instanceof ModuleRuntimeInterpreterError);
@@ -4919,7 +5595,8 @@ async function assertInventoryPostingCapabilityRoute(
   const lineId = randomUUID();
   const suffix = transactionId.slice(0, 8);
   const effectiveAt = new Date().toISOString();
-  const sourceId = `postroute-${suffix}`;
+  // A stock document posts as its own source (INVENTORY-PARITY).
+  const sourceId = transactionId;
 
   const create = (
     operationId: string,
@@ -4980,13 +5657,13 @@ async function assertInventoryPostingCapabilityRoute(
     {
       'northstar.app:field.inventory_transaction_actor_id': 'postroute-control',
       'northstar.app:field.inventory_transaction_effective_at': effectiveAt,
-      'northstar.app:field.inventory_transaction_number': `ADJ-${suffix}`,
       'northstar.app:field.inventory_transaction_reason_code': 'adjustment',
       'northstar.app:field.inventory_transaction_reason_narrative':
         'Registered capability route control',
       'northstar.app:field.inventory_transaction_recorded_at': effectiveAt,
       'northstar.app:field.inventory_transaction_source_id': sourceId,
-      'northstar.app:field.inventory_transaction_source_type': 'test',
+      'northstar.app:field.inventory_transaction_source_type':
+        'inventoryTransaction',
       'northstar.app:field.inventory_transaction_state':
         'northstar.app:option.inventory_transaction_state_draft',
       'northstar.app:field.inventory_transaction_type':
@@ -5192,7 +5869,8 @@ async function assertInventoryPostingAuthorizationBoundaries(
   const seedDraft = async (legalEntityId: string, label: string) => {
     const recordId = randomUUID();
     const lineId = randomUUID();
-    const sourceId = `auth-review-${label.toLowerCase()}-${recordId.slice(0, 8)}`;
+    // A stock document posts as its own source (INVENTORY-PARITY).
+    const sourceId = recordId;
     const effectiveAt = new Date().toISOString();
     await create(
       'northstar.app:operation.inventory_transaction_create',
@@ -5200,13 +5878,12 @@ async function assertInventoryPostingAuthorizationBoundaries(
       {
         'northstar.app:field.inventory_transaction_actor_id': 'auth-review',
         'northstar.app:field.inventory_transaction_effective_at': effectiveAt,
-        'northstar.app:field.inventory_transaction_number': `AUTH-${label}-${recordId.slice(0, 8)}`,
         'northstar.app:field.inventory_transaction_reason_code': 'adjustment',
-        'northstar.app:field.inventory_transaction_reason_narrative':
-          'Focused authorization review regression',
+        'northstar.app:field.inventory_transaction_reason_narrative': `Focused authorization review regression (${label})`,
         'northstar.app:field.inventory_transaction_recorded_at': effectiveAt,
         'northstar.app:field.inventory_transaction_source_id': sourceId,
-        'northstar.app:field.inventory_transaction_source_type': 'test',
+        'northstar.app:field.inventory_transaction_source_type':
+          'inventoryTransaction',
         'northstar.app:field.inventory_transaction_state':
           'northstar.app:option.inventory_transaction_state_draft',
         'northstar.app:field.inventory_transaction_type':
@@ -5585,10 +6262,20 @@ async function assertExactPartitionEvidence(
   // operationless projection carriers derive. The partition assertion below
   // still forces executed + derived to equal the emitted plan, and the
   // independent constructibility oracle still verifies every member.
+  // SALES-PARITY's 137 scenarios all execute: every entity it adds has a
+  // generic create, and a server-assigned document number is written by that
+  // create, so no numbered entity derives for want of an input. 348 + 137 =
+  // 485 emitted, of which the prior 77 derive. PURCHASING-PARITY's 16 execute
+  // on the purchase order, its line, the goods receipt and the amendment
+  // request, each with a generic create: 501, 424. PAYABLES' 72 execute too
+  // (each vendor document has a generic create, replayed by this oracle over
+  // the compiled head): 573, 496. REPLENISHMENT's 6 item search exclusions
+  // execute through the item's generic create: 579, 502. LOCATIONS' 5 execute
+  // through the location's: 584, 507.
   assert.equal(
     evidence.results.length,
-    271,
-    'fulfillment adds 47 executed scenarios to the prior 224',
+    507,
+    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72, replenishment 6 and locations 5',
   );
   assert.equal(
     derivations.length,
@@ -5628,7 +6315,8 @@ async function assertExactPartitionEvidence(
   const salesScenarioIds = binding.plan.scenarios
     .filter((scenario) => salesEntityIds.has(scenario.entityId))
     .map((scenario) => scenario.scenarioId);
-  assert.equal(salesScenarioIds.length, 24);
+  // 29 + 16, as `assertSalesVerificationCoverage` pins them per entity.
+  assert.equal(salesScenarioIds.length, 45);
   assert.equal(
     salesScenarioIds.every((scenarioId) =>
       executedScenarioIdSet.has(scenarioId),
@@ -5802,10 +6490,18 @@ function assertReceivingVerificationCoverage(
     parseCompiledApplication(compiledApplication).application.compiled,
   );
   for (const [local, count] of Object.entries({
-    goods_receipt: 19,
+    // PURCHASING-PARITY slices 2-3: the receipt's packing slip and notes, and
+    // the amendment request's close flag, each a search exclusion.
+    goods_receipt: 21,
     goods_receipt_line: 17,
-    purchase_order_amendment: 13,
+    purchase_order_amendment: 14,
     purchase_order_received: 10,
+    // PUR-1's 12 each, then PURCHASING-PARITY: terms (an enum check and an
+    // exclusion), tax code, freight and fee with codes and frozen rates;
+    // the line's discount, tax code and frozen rate; then its receive-into
+    // location.
+    purchase_order: 22,
+    purchase_order_line: 15,
   })) {
     assert.equal(
       plan.scenarios.filter(
@@ -5833,11 +6529,20 @@ function assertSalesVerificationCoverage(compiledApplication: unknown): void {
   for (const [local, count] of Object.entries({
     reservation: 14,
     reservation_balance: 10,
-    sales_order: 12,
-    sales_order_line: 12,
+    // SALES-PARITY: salesperson, terms, ship-to address and six ship-to lines,
+    // then the tax code and two charges with codes and frozen rates.
+    sales_order: 29,
+    // SALES-PARITY: list price, discount, tax code and frozen rate.
+    sales_order_line: 16,
     sales_order_shipped: 10,
-    shipment: 19,
+    // SALES-PARITY: carrier, reference type and reference, then six ship-to lines.
+    shipment: 29,
     shipment_line: 14,
+    // SALES-PARITY (ruling C): the receivables documents.
+    customer_invoice: 23,
+    customer_invoice_line: 17,
+    customer_payment: 17,
+    customer_credit: 15,
   })) {
     assert.equal(
       plan.scenarios.filter(
@@ -5854,6 +6559,29 @@ function assertSalesVerificationCoverage(compiledApplication: unknown): void {
     false,
     'the Sales server-owned lifecycle field is not probed through generic writes',
   );
+}
+
+function assertPayablesVerificationCoverage(
+  compiledApplication: unknown,
+): void {
+  const { plan } = releaseVerificationBinding(
+    parseCompiledApplication(compiledApplication).application.compiled,
+  );
+  for (const [local, count] of Object.entries({
+    // PAYABLES: the vendor bill documents, shaped as the receivables ones.
+    vendor_bill: 23,
+    vendor_bill_line: 17,
+    vendor_payment: 17,
+    vendor_credit: 15,
+  })) {
+    assert.equal(
+      plan.scenarios.filter(
+        (scenario) => scenario.entityId === `northstar.app:entity.${local}`,
+      ).length,
+      count,
+      `the payables entity ${local} contributes its measured verifier scenarios`,
+    );
+  }
 }
 
 type IndependentUnconstructibleReason =
@@ -5882,6 +6610,7 @@ function assertIndependentConstructibilityPartition(
         readonly kind: string;
       };
       readonly inputContract: {
+        readonly assignedFields?: readonly { readonly fieldId: string }[];
         readonly fields: readonly { readonly fieldId: string }[];
         readonly relationInputs: readonly {
           readonly relationId: string;
@@ -5931,6 +6660,13 @@ function assertIndependentConstructibilityPartition(
       if (relation) {
         constructibleColumns.add(relation.relationColumn.physicalName);
       }
+    }
+    // SALES-PARITY: a document number is assigned by the create itself.
+    for (const assigned of createOperation.inputContract.assignedFields ?? []) {
+      const column = entity.columns.find(
+        (candidate) => candidate.canonicalFieldId === assigned.fieldId,
+      );
+      if (column) constructibleColumns.add(column.physicalName);
     }
     const systemInput = createOperation.inputContract.systemInput;
     if (systemInput) {
@@ -6183,6 +6919,68 @@ function appendSameProfileSuccessor(compiledApplication: unknown): unknown {
         serializedRelease(release.normalizedDefinitionBytes, release.compiled),
       ),
       serializedRelease(headBytes, successor),
+    ],
+    bootstrap: serializedRelease(
+      previous.bootstrap.normalizedDefinitionBytes,
+      previous.bootstrap.compiled,
+    ),
+    schemaVersion: 'northstar.web:compiled-application-release/v2',
+  };
+}
+
+/**
+ * ADR-0066: the recorded lineage followed by a successor that adds one optional
+ * field (`companyColumnFieldId`) to a company-scoped entity. A pre-tenant
+ * re-baseline leaves one recorded entry whose install creates every table
+ * whole, so this is how a fresh install still crosses an `addColumn` on a
+ * company-scoped table after an intermediate, and how a second tenant still
+ * replays an earlier create beneath a column a later release added. Nothing is
+ * spliced into the recorded entries; the successor is compiled over the head.
+ */
+function appendCompanyColumnSuccessor(compiledApplication: unknown): unknown {
+  const previous = parseCompiledApplication(compiledApplication);
+  const definition = structuredClone(composedApplicationDefinition()) as {
+    fields: Record<string, unknown>[];
+    languageVersion: string;
+    package: { version: string };
+  };
+  definition.package.version = '1.0.3';
+  // Version-from-artifact: the spliced node declares the candidate's own
+  // language version, not a literal.
+  const nodeVersion = definition.languageVersion;
+  definition.fields.push({
+    classification: 'internal',
+    collation: 'unicodeCaseInsensitive',
+    defaultSemantics: 'nullable',
+    entity: {
+      kind: 'entityReference',
+      schemaVersion: nodeVersion,
+      targetId: companyColumnEntityId,
+    },
+    fieldId: companyColumnFieldId,
+    fieldType: {
+      kind: 'textFieldType',
+      maximumLength: 160,
+      schemaVersion: nodeVersion,
+    },
+    kind: 'fieldDefinition',
+    label: 'Re-baseline note',
+    orderKey: 990,
+    presence: 'optional',
+    reportable: true,
+    schemaVersion: nodeVersion,
+    searchable: false,
+  });
+  const bytes = new TextEncoder().encode(
+    canonicalize(normalizeApplicationPackage(definition)),
+  );
+  const successor = compileSuccessor(previous.application.compiled, bytes);
+  return {
+    applications: [
+      ...previous.applications.map((release) =>
+        serializedRelease(release.normalizedDefinitionBytes, release.compiled),
+      ),
+      serializedRelease(bytes, successor),
     ],
     bootstrap: serializedRelease(
       previous.bootstrap.normalizedDefinitionBytes,

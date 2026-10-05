@@ -121,11 +121,19 @@
       },
       {
         "classification": "tenantShared",
+        "familyId": "party_address"
+      },
+      {
+        "classification": "tenantShared",
         "familyId": "item"
       },
       {
         "classification": "tenantShared",
         "familyId": "location"
+      },
+      {
+        "classification": "tenantShared",
+        "familyId": "tax_code"
       },
       {
         "classification": "entityOwned",
@@ -201,6 +209,38 @@
       },
       {
         "classification": "entityOwned",
+        "familyId": "customer_invoice"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "customer_invoice_line"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "customer_payment"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "customer_credit"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "vendor_bill"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "vendor_bill_line"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "vendor_payment"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "vendor_credit"
+      },
+      {
+        "classification": "entityOwned",
         "familyId": "stock_count"
       },
       {
@@ -232,6 +272,11 @@
       {
         "semantics": "crossEntityAllowed",
         "sourceFamilyId": "party_role",
+        "targetFamilyId": "party"
+      },
+      {
+        "semantics": "crossEntityAllowed",
+        "sourceFamilyId": "party_address",
         "targetFamilyId": "party"
       },
       {
@@ -316,6 +361,56 @@
       },
       {
         "semantics": "sameEntity",
+        "sourceFamilyId": "customer_invoice",
+        "targetFamilyId": "sales_order"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "customer_invoice_line",
+        "targetFamilyId": "customer_invoice"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "customer_invoice_line",
+        "targetFamilyId": "sales_order_line"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "customer_payment",
+        "targetFamilyId": "customer_invoice"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "customer_credit",
+        "targetFamilyId": "customer_invoice"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "vendor_bill",
+        "targetFamilyId": "purchase_order"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "vendor_bill_line",
+        "targetFamilyId": "vendor_bill"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "vendor_bill_line",
+        "targetFamilyId": "purchase_order_line"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "vendor_payment",
+        "targetFamilyId": "vendor_bill"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "vendor_credit",
+        "targetFamilyId": "vendor_bill"
+      },
+      {
+        "semantics": "sameEntity",
         "sourceFamilyId": "inventory_transaction_line",
         "targetFamilyId": "inventory_transaction"
       },
@@ -338,6 +433,11 @@
         "semantics": "sameEntity",
         "sourceFamilyId": "stock_count_line",
         "targetFamilyId": "inventory_transaction_line"
+      },
+      {
+        "semantics": "crossEntityAllowed",
+        "sourceFamilyId": "location",
+        "targetFamilyId": "location"
       }
     ],
     "undeclaredFamily": {
@@ -420,7 +520,7 @@
     ],
     "kind": "quantityOnlyMovement"
   },
-  "releaseRoot": "566a4a3df7e6469af4a66fae766a5bc688af1ca7be3391a0609ead68b86fd981",
+  "releaseRoot": "2a888b66e5f5e142a2f05a28ac62f30e6437445261d9ac2f8f90b7e6bb2e1122",
   "storageTargetPayloadVersions": {
     "entityOwned": "northstar.storage-target-payload/v3",
     "tenantShared": "northstar.storage-target-payload/v1"

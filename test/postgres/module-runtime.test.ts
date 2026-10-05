@@ -120,6 +120,7 @@ import {
   ordinaryModuleV2,
   ordinaryModuleV2ForNamespace,
 } from '../fixtures/g2/module-conformance/definitions.js';
+import { assertComposedInventoryCollection } from '../helpers/assert-composed-inventory.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 const migrations = resolve('db/migrations');
@@ -3504,8 +3505,10 @@ class RecordingForwardingOperationExecutor implements SemanticOperationExecutor 
 function inventoryTransactionCreateInput(
   legalEntityId: string,
   recordId: string,
-  number: string,
+  label: string,
 ): Readonly<Record<string, ImmutableJsonValue>> {
+  // The server assigns the number (INVENTORY-PARITY); the label names the
+  // source instead.
   return Object.freeze({
     legalEntityId,
     recordId,
@@ -3515,12 +3518,10 @@ function inventoryTransactionCreateInput(
         'direct-operand-control',
       [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.effectiveAt)]:
         '2026-08-18T12:00:00.000Z',
-      [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.number)]:
-        number,
       [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.recordedAt)]:
         '2026-08-18T12:00:00.000Z',
       [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.sourceId)]:
-        number.toLowerCase(),
+        label.toLowerCase(),
       [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.sourceType)]:
         'test',
       [applicationInventoryId(INVENTORY_IDS.fieldIds.transaction.state)]:
@@ -4802,7 +4803,10 @@ function emptyDefinition(
 
 function inventoryApplicationDefinition(): Record<string, unknown> {
   const application = composedApplicationDefinition();
-  const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE);
+  // As the product mounts it: with stock documents (INVENTORY-PARITY).
+  const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE, {
+    documentEntry: true,
+  });
   for (const collection of [
     'assertions',
     'entities',
@@ -4816,15 +4820,12 @@ function inventoryApplicationDefinition(): Record<string, unknown> {
     'surfaces',
   ] as const) {
     const composed = application[collection] as unknown[];
-    for (const entry of inventory[collection] as unknown[]) {
-      assert.equal(
-        composed.filter(
-          (candidate) => JSON.stringify(candidate) === JSON.stringify(entry),
-        ).length,
-        1,
-        `composed application must contain each inventory ${collection} entry exactly once`,
-      );
-    }
+    assertComposedInventoryCollection(
+      collection,
+      composed,
+      inventory[collection] as unknown[],
+      APPLICATION_NAMESPACE,
+    );
   }
   (application.queries as Array<Record<string, unknown>>).push({
     aggregate: {

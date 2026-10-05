@@ -1,5 +1,5 @@
-const version = 'v5' as const;
-const normalizationProfileVersion = 'northstar.normalization/v5' as const;
+const version = 'v6' as const;
+const normalizationProfileVersion = 'northstar.normalization/v6' as const;
 
 export const CATALOG_NAMESPACE = 'northstar.catalog' as const;
 
@@ -14,12 +14,30 @@ function ids(namespace: string) {
     contentCapabilityId: `${namespace}:capability.standard_surface_content`,
     entityIds: {
       item: `${namespace}:entity.item`,
+      taxCode: `${namespace}:entity.tax_code`,
     },
     fieldIds: {
       baseUnit: `${namespace}:field.item_base_unit`,
       description: `${namespace}:field.item_description`,
       name: `${namespace}:field.item_name`,
+      // Where to keep it and how much (REPLENISHMENT): the reorder point the
+      // worklists judge projected stock against, the level a suggestion
+      // restores, the location it is usually received into and its standard
+      // cost per order currency, which a purchase line starts from.
+      preferredLocationId: `${namespace}:field.item_preferred_location_id`,
+      // Selling prices in each order currency (owner ruling B).
+      priceCad: `${namespace}:field.item_price_cad`,
+      priceEur: `${namespace}:field.item_price_eur`,
+      priceUsd: `${namespace}:field.item_price_usd`,
+      reorderPoint: `${namespace}:field.item_reorder_point`,
+      reorderUpTo: `${namespace}:field.item_reorder_up_to`,
       sku: `${namespace}:field.item_sku`,
+      standardCostCad: `${namespace}:field.item_standard_cost_cad`,
+      standardCostEur: `${namespace}:field.item_standard_cost_eur`,
+      standardCostUsd: `${namespace}:field.item_standard_cost_usd`,
+      taxCode: `${namespace}:field.tax_code_code`,
+      taxName: `${namespace}:field.tax_code_name`,
+      taxRatePercent: `${namespace}:field.tax_code_rate_percent`,
     },
     moduleId: `${namespace}:module.catalog`,
     namespace,
@@ -39,15 +57,63 @@ const { contentCapabilityId, entityIds, fieldIds, moduleId } =
  */
 export function catalogModuleDefinition(
   namespace: string = CATALOG_NAMESPACE,
+  options: {
+    /**
+     * Selling prices per order currency and the fixed-rate tax codes lines
+     * are sold under (owner ruling B). The product application mounts
+     * Catalog with them; the standalone reference harness keeps the Catalog
+     * it has always compiled.
+     */
+    readonly sellingPrices?: boolean;
+    /**
+     * An item's reorder point and reorder-up-to level, its preferred
+     * location and its standard cost per order currency (REPLENISHMENT).
+     * Only the product application mounts them.
+     */
+    readonly replenishment?: boolean;
+  } = {},
 ): Record<string, unknown> {
   const definitionIds = ids(namespace);
   const { contentCapabilityId, entityIds, fieldIds, moduleId, packageId } =
     definitionIds;
+  const prices = options.sellingPrices === true;
+  const replenishment = options.replenishment === true;
+  const priceFields = [
+    [fieldIds.priceCad, 'Price (CAD)', 50],
+    [fieldIds.priceUsd, 'Price (USD)', 60],
+    [fieldIds.priceEur, 'Price (EUR)', 70],
+  ] as const;
+  // Quantities in the item's base unit, and a cost in each order currency.
+  const replenishmentDecimals = [
+    [fieldIds.reorderPoint, 'Reorder point', 80],
+    [fieldIds.reorderUpTo, 'Reorder up to', 90],
+    [fieldIds.standardCostCad, 'Standard cost (CAD)', 110],
+    [fieldIds.standardCostUsd, 'Standard cost (USD)', 120],
+    [fieldIds.standardCostEur, 'Standard cost (EUR)', 130],
+  ] as const;
   const itemFields = [
     fieldIds.sku,
     fieldIds.name,
     fieldIds.description,
     fieldIds.baseUnit,
+    ...(prices ? priceFields.map(([fieldId]) => fieldId) : []),
+    ...(replenishment
+      ? [
+          fieldIds.reorderPoint,
+          fieldIds.reorderUpTo,
+          fieldIds.preferredLocationId,
+          fieldIds.standardCostCad,
+          fieldIds.standardCostUsd,
+          fieldIds.standardCostEur,
+        ]
+      : []),
+  ];
+  const when = <T>(values: readonly T[]): readonly T[] =>
+    prices ? values : [];
+  const taxCodeFields = [
+    fieldIds.taxCode,
+    fieldIds.taxName,
+    fieldIds.taxRatePercent,
   ];
   return {
     assertions: [
@@ -56,6 +122,13 @@ export function catalogModuleDefinition(
         'item',
         `${namespace}:query.item_get`,
       ),
+      ...when([
+        conformanceAssertion(
+          definitionIds,
+          'tax_code',
+          `${namespace}:query.tax_code_get`,
+        ),
+      ]),
     ],
     capabilityRequirements: [
       {
@@ -77,7 +150,12 @@ export function catalogModuleDefinition(
         supportStatus: 'supported',
       },
     ],
-    entities: [entity(definitionIds, 'item', 'Item', entityIds.item, 10)],
+    entities: [
+      entity(definitionIds, 'item', 'Item', entityIds.item, 10),
+      ...when([
+        entity(definitionIds, 'tax_code', 'Tax code', entityIds.taxCode, 20),
+      ]),
+    ],
     fields: [
       textField({
         businessKey: 'tenantEnvironmentCaseInsensitiveUnique',
@@ -117,6 +195,61 @@ export function catalogModuleDefinition(
         presence: 'required',
         searchable: false,
       }),
+      ...(prices
+        ? priceFields.map(([fieldId, label, orderKey]) =>
+            decimalField(entityIds.item, fieldId, label, orderKey),
+          )
+        : []),
+      ...(replenishment
+        ? [
+            ...replenishmentDecimals.map(([fieldId, label, orderKey]) =>
+              decimalField(entityIds.item, fieldId, label, orderKey),
+            ),
+            // A location's record id, chosen on the item form from the
+            // location list and shown by its name on the item page.
+            textField({
+              entityId: entityIds.item,
+              fieldId: fieldIds.preferredLocationId,
+              label: 'Preferred location',
+              maximumLength: 80,
+              orderKey: 100,
+              presence: 'optional',
+              searchable: false,
+            }),
+          ]
+        : []),
+      // A tax code's rate; a line or charge freezes it when choosing the code.
+      ...when([
+        textField({
+          businessKey: 'tenantEnvironmentCaseInsensitiveUnique',
+          entityId: entityIds.taxCode,
+          fieldId: fieldIds.taxCode,
+          label: 'Tax code',
+          maximumLength: 20,
+          orderKey: 10,
+          presence: 'required',
+          searchable: true,
+        }),
+        textField({
+          entityId: entityIds.taxCode,
+          fieldId: fieldIds.taxName,
+          label: 'Name',
+          maximumLength: 120,
+          orderKey: 20,
+          presence: 'required',
+          searchable: true,
+        }),
+        {
+          ...decimalField(
+            entityIds.taxCode,
+            fieldIds.taxRatePercent,
+            'Rate %',
+            30,
+          ),
+          defaultSemantics: 'none',
+          presence: 'required',
+        },
+      ]),
     ],
     hashAlgorithm: 'sha256',
     impactAnalyses: [],
@@ -138,7 +271,10 @@ export function catalogModuleDefinition(
       },
     ],
     normalizationProfileVersion,
-    operations: entityOperations(definitionIds, 'item', entityIds.item),
+    operations: [
+      ...entityOperations(definitionIds, 'item', entityIds.item),
+      ...when(entityOperations(definitionIds, 'tax_code', entityIds.taxCode)),
+    ],
     package: {
       kind: 'packageDefinition',
       namespace,
@@ -147,7 +283,10 @@ export function catalogModuleDefinition(
       schemaVersion: version,
       version: '1.0.0',
     },
-    permissions: entityPermissions(definitionIds, 'item', entityIds.item),
+    permissions: [
+      ...entityPermissions(definitionIds, 'item', entityIds.item),
+      ...when(entityPermissions(definitionIds, 'tax_code', entityIds.taxCode)),
+    ],
     queries: [
       ...entityQueries(definitionIds, 'item', entityIds.item, itemFields, [
         {
@@ -157,12 +296,33 @@ export function catalogModuleDefinition(
         },
         { authority: 'advisory', fieldId: fieldIds.name, localId: 'name' },
       ]),
+      ...when(
+        entityQueries(
+          definitionIds,
+          'tax_code',
+          entityIds.taxCode,
+          taxCodeFields,
+          [
+            {
+              authority: 'identifier',
+              fieldId: fieldIds.taxCode,
+              localId: 'code',
+            },
+          ],
+        ),
+      ),
     ],
     relations: [],
     schemaVersion: version,
     stateMachines: [],
-    storageMappings: [storageMapping(definitionIds, 'item', entityIds.item)],
-    surfaces: entitySurfaces(definitionIds, 'item', 'Item'),
+    storageMappings: [
+      storageMapping(definitionIds, 'item', entityIds.item),
+      ...when([storageMapping(definitionIds, 'tax_code', entityIds.taxCode)]),
+    ],
+    surfaces: [
+      ...entitySurfaces(definitionIds, 'item', 'Item'),
+      ...when(entitySurfaces(definitionIds, 'tax_code', 'Tax code')),
+    ],
   };
 }
 
@@ -192,6 +352,36 @@ function entity(
       'storageMappingReference',
       `${ids.namespace}:storage.${local}`,
     ),
+  };
+}
+
+/** An optional exact decimal, such as a price. */
+function decimalField(
+  entityId: string,
+  fieldId: string,
+  label: string,
+  orderKey: number,
+): Record<string, unknown> {
+  return {
+    classification: 'internal',
+    collation: 'binary',
+    defaultSemantics: 'nullable',
+    entity: reference('entityReference', entityId),
+    fieldId,
+    fieldType: {
+      kind: 'exactDecimalFieldType',
+      precision: 38,
+      representation: 'canonicalString',
+      scale: 18,
+      schemaVersion: version,
+    },
+    kind: 'fieldDefinition',
+    label,
+    orderKey,
+    presence: 'optional',
+    reportable: true,
+    schemaVersion: version,
+    searchable: false,
   };
 }
 

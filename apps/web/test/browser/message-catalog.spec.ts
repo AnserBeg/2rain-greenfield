@@ -1,5 +1,7 @@
 import type { Server } from 'node:http';
 import { createServer } from 'node:http';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -409,8 +411,15 @@ let shellUrl: string;
 let censusUrl: string;
 let methodProbeUrl: string;
 const realPathUrls = new Map<string, string>();
+let catalogFixture: ReturnType<typeof spawn>;
+let catalogFixtureExit: Promise<unknown[]>;
+let requestCatalogMeasurement: (
+  phase: string,
+  orderId?: string,
+) => Promise<Record<string, unknown>>;
 
 test.beforeAll(async () => {
+  test.setTimeout(120_000);
   shellUrl = await listen(createSurfaceRuntimeServer(demoEntry()));
   censusUrl = await censusServerUrl();
   methodProbeUrl = await listen(
@@ -511,9 +520,95 @@ test.beforeAll(async () => {
       },
     ),
   );
+  catalogFixture = spawn(
+    process.execPath,
+    [
+      '--import',
+      'tsx',
+      'test/helpers/order-entry-fixture.ts',
+      '--serve',
+      '--verify',
+    ],
+    { cwd: process.cwd(), stdio: ['pipe', 'pipe', 'pipe'] },
+  );
+  catalogFixtureExit = once(catalogFixture, 'exit');
+  let output = '';
+  let consumed = '';
+  let resolveReady!: (url: string) => void;
+  let rejectReady!: (error: Error) => void;
+  let resolveMeasurement:
+    ((value: Record<string, unknown>) => void) | undefined;
+  let rejectMeasurement: ((error: Error) => void) | undefined;
+  const ready = new Promise<string>((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+  catalogFixture.stdout!.on('data', (chunk: Buffer) => {
+    const text = chunk.toString();
+    output += text;
+    consumed += text;
+    const match = /ORDER_ENTRY_URL=(.*)/.exec(output);
+    if (match) resolveReady(match[1]!);
+    const lines = consumed.split('\n');
+    consumed = lines.pop()!;
+    for (const line of lines)
+      if (line.startsWith('ORDER_ENTRY_MEASURED=')) {
+        resolveMeasurement?.(
+          JSON.parse(line.slice('ORDER_ENTRY_MEASURED='.length)) as Record<
+            string,
+            unknown
+          >,
+        );
+        resolveMeasurement = undefined;
+        rejectMeasurement = undefined;
+      }
+  });
+  catalogFixture.stderr!.on('data', (chunk: Buffer) => {
+    output += chunk.toString();
+  });
+  catalogFixture.once('error', rejectReady);
+  catalogFixture.once('exit', () => {
+    const error = new Error(`catalog fixture exited early\n${output}`);
+    rejectReady(error);
+    rejectMeasurement?.(error);
+  });
+  requestCatalogMeasurement = (phase, orderId) =>
+    new Promise<Record<string, unknown>>((resolve, reject) => {
+      if (resolveMeasurement)
+        return reject(new Error('catalog measurement already pending'));
+      resolveMeasurement = resolve;
+      rejectMeasurement = reject;
+      catalogFixture.stdin!.write(JSON.stringify({ phase, orderId }) + '\n');
+    });
+  const entryUrl = new URL(await ready);
+  const setup = await requestCatalogMeasurement('catalog_setup');
+  const form = (recordId: unknown) => {
+    const parameters = new URLSearchParams({
+      surface: 'northstar.app:surface.sales_order_form',
+      record: String(recordId),
+      'northstar.app:parameter.sales_order_get_legal_entity_scope': String(
+        setup.scope,
+      ),
+    });
+    return `${entryUrl.origin}/?${parameters}`;
+  };
+  realPathUrls.set('DRAFT_EDITOR_CONFLICT', form(setup.conflictId));
+  realPathUrls.set('DRAFT_EDITOR_LOCKED', form(setup.lockedId));
+  const unavailable = new URL(entryUrl.origin);
+  unavailable.searchParams.set(
+    'surface',
+    'northstar.app:surface.sales_order_list',
+  );
+  unavailable.searchParams.set(
+    'northstar.app:parameter.sales_order_list_legal_entity_scope',
+    '74000000-0000-4000-8000-000000000099',
+  );
+  realPathUrls.set('WORKSPACE_COMPANY_UNAVAILABLE', unavailable.href);
 });
 
 test.afterAll(async () => {
+  catalogFixture.kill('SIGTERM');
+  await catalogFixtureExit;
   for (const server of servers) {
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
@@ -542,6 +637,16 @@ const REAL_PATH_DRIVERS: Readonly<
     page.goto(`${shellUrl}/?surface=${encodeURIComponent(rendererErrorId())}`),
   DUPLICATE_SURFACE_ID: (page) =>
     page.goto(realPathUrls.get('DUPLICATE_SURFACE_ID')!),
+  DRAFT_EDITOR_CONFLICT: async (page) => {
+    await page.goto(realPathUrls.get('DRAFT_EDITOR_CONFLICT')!);
+    await requestCatalogMeasurement(
+      'catalog_advance',
+      new URL(page.url()).searchParams.get('record')!,
+    );
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  },
+  DRAFT_EDITOR_LOCKED: (page) =>
+    page.goto(realPathUrls.get('DRAFT_EDITOR_LOCKED')!),
   INVALID_SURFACE_FIELD: (page) =>
     page.goto(realPathUrls.get('INVALID_SURFACE_FIELD')!),
   INVALID_SURFACE_MANIFEST: (page) =>
@@ -572,6 +677,8 @@ const REAL_PATH_DRIVERS: Readonly<
     await page.goto(shellUrl);
     await page.setExtraHTTPHeaders({});
   },
+  WORKSPACE_COMPANY_UNAVAILABLE: (page) =>
+    page.goto(realPathUrls.get('WORKSPACE_COMPANY_UNAVAILABLE')!),
 };
 
 /**
@@ -598,6 +705,28 @@ const REAL_PATH_DRIVERS: Readonly<
 const DECLARED_NO_REAL_PATH_DRIVER: Readonly<
   Partial<Record<SurfaceMessageCode, string>>
 > = {
+  COMPOSITION_BUSY:
+    'Requires two concurrent confirmations of one process-local task. The generic census observes text; this file does not own that concurrency fixture.',
+  COMPOSITION_CHILD_EMPTY:
+    'The initially empty reservation and shipment datasets are exercised by meta-sales.spec.ts against real PostgreSQL; this census observes catalog text.',
+  COMPOSITION_CHILD_FAILED:
+    'A missing exact-scope receipt is driven in test/integration/surface-data-binding.test.ts; the catalog census is not a second query fixture.',
+  COMPOSITION_COMMITTED_WITHHELD:
+    'The generic gateway task integration test observes a committed withheld readback and no later step. This census observes its catalog treatment.',
+  COMPOSITION_COMPLETE:
+    'The real reserve, ship and release paths render this in meta-sales.spec.ts; the independent census checks its registered message text.',
+  LIST_EXPORT_OVER_LIMIT:
+    'A declared List refuses an export larger than its query limit; test/postgres/declared-list.test.ts drives it through a compiled variant whose limit is 5 against real PostgreSQL. A real-path driver here would need 5,001 records.',
+  COMPOSITION_INPUT_INVALID:
+    'Negative quantity retention is driven through the browser task in meta-sales.spec.ts. This census checks the catalog treatment independently.',
+  COMPOSITION_SELECTION_REQUIRED:
+    'Requires a composed child action before any selected row. The census observes text; a separate real-path browser driver is not claimed here.',
+  COMPOSITION_TASK_UNAVAILABLE:
+    'Requires an expired, foreign or lost process-local task token. The census observes text; no expiration browser driver is claimed here.',
+  COMPOSITION_UNCERTAIN:
+    'The task integration test injects a gateway transport failure and observes stable inputs and idempotency keys on retry. This census observes text.',
+  DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD:
+    'The shared editor integration test drives acknowledged mutation success followed by authorization and provider read failures through the actual SurfaceRuntime submission path. This census observes the registered message text.',
   OPERATION_COMMITTED_READBACK_WITHHELD:
     'Driven through the real receiving gateway and evaluator in ' +
     'receiving.composed-application.spec.ts: a commit-time read-grant revocation ' +
@@ -816,6 +945,7 @@ test('the slot renderer resolves the same catalog as the page renderer', async (
 test('real request paths render the sentence the catalog registers', async ({
   page,
 }) => {
+  test.setTimeout(120_000);
   const violations: string[] = [];
   for (const [code, drive] of Object.entries(REAL_PATH_DRIVERS)) {
     await drive(page);

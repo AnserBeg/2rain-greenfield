@@ -49,10 +49,18 @@ const waitingContainerStates = new Set([
   'running',
 ]);
 
+export interface EphemeralPostgresOptions {
+  /** The data directory's tmpfs size; the default suits every test database. */
+  dataSizeMegabytes?: number;
+}
+
 export async function withEphemeralPostgres<T>(
   label: string,
   run: (database: EphemeralPostgres) => Promise<T>,
+  { dataSizeMegabytes = 256 }: EphemeralPostgresOptions = {},
 ): Promise<T> {
+  if (!Number.isSafeInteger(dataSizeMegabytes) || dataSizeMegabytes < 1)
+    throw new RangeError('dataSizeMegabytes must be a positive integer');
   const safeLabel = label
     .toLowerCase()
     .replaceAll(/[^a-z0-9]+/g, '-')
@@ -82,7 +90,7 @@ export async function withEphemeralPostgres<T>(
       '--publish',
       '127.0.0.1::5432',
       '--tmpfs',
-      '/var/lib/postgresql/data:rw,noexec,nosuid,size=256m',
+      `/var/lib/postgresql/data:rw,noexec,nosuid,size=${String(dataSizeMegabytes)}m`,
       '--env',
       'POSTGRES_HOST_AUTH_METHOD=trust',
       '--env',

@@ -1,4 +1,8 @@
 import {
+  QueryReadModelSchema,
+  type QueryReadModel,
+} from '../../canonical-model/src/index.js';
+import {
   FieldTypeSchema,
   PARAMETERIZED_PREDICATE_LOWERING_PLAN_VERSION,
   PREDICATE_LOWERING_PLAN_VERSION,
@@ -39,8 +43,14 @@ import type { RequestRuntimeView as IssuedRequestRuntimeView } from './request-r
 import {
   authorizeSharedListFields,
   parseSharedListArguments,
+  requireSharedListEcho,
   requireSharedListResult,
   SharedListContractError,
+  sharedListSupplyReads,
+  type AuthorizedSharedListFigures,
+  type AuthorizedSharedListProgress,
+  type AuthorizedSharedListRelatedFilter,
+  type AuthorizedSharedListReferenceLabel,
   type AuthorizedSharedListRequest,
   type SharedListCoverage,
 } from './list-behavior/index.js';
@@ -156,6 +166,9 @@ interface RegisteredQueryDefinitionBase {
 }
 
 export interface RegisteredQueryDefinition extends RegisteredQueryDefinitionBase {
+  /** The most rows one declared export statement returns; absent = no export. */
+  readonly exportMaximumResultCount?: number;
+  readonly readModel?: QueryReadModel;
   readonly parameters?: readonly RegisteredQueryParameterDefinition[];
   readonly infrastructure?: {
     readonly archive: 'nullableArchivedAt';
@@ -326,6 +339,14 @@ export class UnsupportedSemanticAggregateQueryError extends Error {
 }
 
 /** Sole application read ingress for the request-pinned semantic contract. */
+export type SemanticQueryReadModelExecutor = (request: {
+  readonly view: IssuedRequestRuntimeView;
+  readonly definition: RegisteredQueryDefinition;
+  readonly arguments: ImmutableJsonValue;
+  readonly result: SemanticQueryResultEnvelope;
+  readonly gateway: SemanticQueryGateway;
+}) => Promise<SemanticQueryResultEnvelope>;
+
 export class SemanticQueryGateway {
   constructor(
     private readonly currentPolicy: CurrentPolicyGateway,
@@ -338,6 +359,9 @@ export class SemanticQueryGateway {
       RegisteredQueryLatencyInstrumentation | undefined = undefined,
     private readonly denialRecorder:
       SemanticQueryDenialRecorder | undefined = undefined,
+    private readonly readModels: Readonly<
+      Record<string, SemanticQueryReadModelExecutor>
+    > = {},
   ) {}
 
   async invoke(
@@ -500,6 +524,7 @@ export class SemanticQueryGateway {
           request.arguments,
         )
       : null;
+    assertRelationTargetsArgument(definition, request.arguments);
     if (definition.lifecycle !== 'active') {
       if (definition.queryType === 'aggregate') {
         throw new UnsupportedSemanticAggregateQueryError(
@@ -543,6 +568,10 @@ export class SemanticQueryGateway {
     const listQuery = parseSharedListArguments(request.arguments, {
       declaredParameterIds:
         definition.parameters?.map((parameter) => parameter.parameterId) ?? [],
+      ...('exportMaximumResultCount' in definition &&
+      definition.exportMaximumResultCount !== undefined
+        ? { exportMaximumResultCount: definition.exportMaximumResultCount }
+        : {}),
       maximumResultCount: definition.maximumResultCount,
       queryId: definition.queryId,
     });
@@ -563,6 +592,12 @@ export class SemanticQueryGateway {
             this.observePredicateReceipt,
             (queryId, policyVersion) =>
               this.#recordDenied(view, queryId, policyVersion),
+            declaredScope && scopeSelection
+              ? {
+                  members: scopeSelection,
+                  parameterId: declaredScope.operand.parameterId,
+                }
+              : null,
           )
         : null;
     if (listQuery && !list) {
@@ -629,6 +664,21 @@ export class SemanticQueryGateway {
         }),
       );
     }
+    if (
+      definition.queryType !== 'aggregate' &&
+      definition.readModel &&
+      result.kind === 'semanticQueryResult'
+    ) {
+      const execute = this.readModels[definition.readModel.capability.targetId];
+      if (!execute) throw new NoSuchRegisteredQueryError(request.queryId, view);
+      result = await execute({
+        view,
+        definition,
+        arguments: request.arguments,
+        result,
+        gateway: this,
+      });
+    }
     if (list) {
       if (result.kind !== 'semanticQueryResult') {
         throw new SharedListContractError(
@@ -637,7 +687,10 @@ export class SemanticQueryGateway {
           definition.queryId,
         );
       }
-      requireSharedListResult(result);
+      requireSharedListEcho(
+        list.query,
+        requireSharedListResult(result).listCoverage,
+      );
     }
     if (
       result.kind === 'semanticAggregateResult' &&
@@ -673,6 +726,45 @@ export class SemanticQueryGateway {
       }),
     );
   }
+}
+
+/** At most this many relations a single get may be asked to state. */
+export const MAXIMUM_RELATION_TARGETS = 4;
+
+/**
+ * `relationTargets` asks a get to state, for each named relation of the read
+ * record, the stored target record id -- an invoice's sales order -- as
+ * `relationLabels[relationId] = { recordId, label: null }`. It is a column of
+ * a record the caller may already read, so it needs no permission of its own:
+ * the label and any link re-enter the target's own query under current
+ * policy. The executor resolves each id against the pinned compiled relations
+ * and refuses one the queried entity does not own; here only its shape is
+ * ruled, on the one query type that takes it.
+ */
+function assertRelationTargetsArgument(
+  definition: RegisteredSemanticQueryDefinition,
+  argumentsValue: ImmutableJsonValue,
+): void {
+  if (!isRecord(argumentsValue) || !('relationTargets' in argumentsValue))
+    return;
+  const targets = argumentsValue.relationTargets;
+  if (definition.queryType !== 'get')
+    throw new MalformedSemanticQueryRequestError(
+      'relation targets belong only to a registered get query',
+    );
+  if (
+    !Array.isArray(targets) ||
+    targets.length === 0 ||
+    targets.length > MAXIMUM_RELATION_TARGETS ||
+    targets.some(
+      (target) =>
+        typeof target !== 'string' || !canonicalIdPattern.test(target),
+    ) ||
+    new Set(targets).size !== targets.length
+  )
+    throw new MalformedSemanticQueryRequestError(
+      `relation targets are one to ${String(MAXIMUM_RELATION_TARGETS)} distinct relation ids`,
+    );
 }
 
 /**
@@ -754,12 +846,264 @@ async function authorizeSharedListProjection(
   observePredicateReceipt:
     ((receipt: PredicateKernelReceipt) => void) | undefined,
   recordDenied: (queryId: string, policyVersion: string) => Promise<void>,
+  /** The companies the listed query reads, as its own declared operand. */
+  scope: {
+    readonly members: readonly string[];
+    readonly parameterId: string;
+  } | null = null,
 ): Promise<AuthorizedSharedListRequest | null> {
   authorizeSharedListFields(query, {
     selectedFieldIds: new Set(
       sourceDefinition.selections.map((selection) => selection.fieldId),
     ),
   });
+  let progress: AuthorizedSharedListProgress | undefined;
+  if (query.progress) {
+    const entityIds: Record<'done' | 'lines', string> = {
+      done: '',
+      lines: '',
+    };
+    for (const role of ['lines', 'done'] as const) {
+      const summedRows = query.progress[role];
+      const summed = registeredQueryFromPinnedView(view, summedRows.queryId);
+      // Progress sums company rows inside the listed row's own company, so
+      // unlike a label it may read a company-scoped list; what it may not read
+      // is anything narrower than the whole entity, as its filter would drop.
+      if (
+        !summed ||
+        summed.lifecycle !== 'active' ||
+        summed.tier !== 'q0' ||
+        summed.queryType !== 'list' ||
+        !summed.selections.some(
+          (selection) => selection.fieldId === summedRows.fieldId,
+        )
+      ) {
+        throw new SharedListContractError(
+          'LIST_FIELD_NOT_AUTHORIZED',
+          'list progress must sum a selected field of an active pinned list query',
+          summedRows.queryId,
+        );
+      }
+      // Decided for the companies the list reads, so a company-scoped grant
+      // answers for exactly the rows the statement will add up.
+      const decision = await authorizeCurrentPolicy(
+        currentPolicy,
+        view,
+        summed.permissionId,
+        Object.freeze({
+          arguments: Object.freeze({
+            fieldId: summedRows.fieldId,
+            relationId: summedRows.relationId,
+            ...(scope
+              ? { [scope.parameterId]: Object.freeze([...scope.members]) }
+              : {}),
+          }),
+          kind: 'registeredSemanticListProgressPolicyInput',
+          queryId: summed.queryId,
+          requestId: view.requestId,
+          schemaVersion: QUERY_POLICY_INPUT_VERSION,
+        }),
+      );
+      if (decision.decision === 'DENY') {
+        await recordDenied(summed.queryId, decision.policyVersion);
+        throw new SemanticQueryPolicyDeniedError(summed.queryId, view);
+      }
+      const predicateReceipt = inspectPredicateForExecution(summed.filter);
+      observePredicateReceiptSafely(observePredicateReceipt, predicateReceipt);
+      if (predicateReceipt.outcome !== 'accepted') return null;
+      entityIds[role] = summed.sourceEntityId;
+    }
+    // The supply (SUPPLY-WARNINGS): every query it reads, with the fields and
+    // relations it names there -- one current-policy decision per query and
+    // request, for the companies the List reads, as the figures are. A denial
+    // refuses by that query's name; the web runtime may read the List again
+    // without the supply where it is declared supplementary.
+    const supply = query.progress.supply;
+    let supplyEntityIds: Record<string, string> | undefined;
+    if (supply) {
+      const lines = registeredQueryFromPinnedView(
+        view,
+        query.progress.lines.queryId,
+      );
+      if (
+        !lines?.selections.some(
+          (selection) => selection.fieldId === supply.itemFieldId,
+        )
+      )
+        throw new SharedListContractError(
+          'LIST_FIELD_NOT_AUTHORIZED',
+          "list supply names a line's item by a field its lines' query selects",
+          supply.itemFieldId,
+        );
+      supplyEntityIds = {};
+      for (const [queryId, read] of sharedListSupplyReads(supply)) {
+        const supplied = registeredQueryFromPinnedView(view, queryId);
+        if (
+          !supplied ||
+          supplied.lifecycle !== 'active' ||
+          supplied.tier !== 'q0' ||
+          supplied.queryType !== 'list' ||
+          supplied.readModel !== undefined ||
+          ![...read.fieldIds].every((fieldId) =>
+            supplied.selections.some(
+              (selection) => selection.fieldId === fieldId,
+            ),
+          )
+        )
+          throw new SharedListContractError(
+            'LIST_FIELD_NOT_AUTHORIZED',
+            'list supply must read selected fields of active pinned list queries',
+            queryId,
+          );
+        const decision = await authorizeCurrentPolicy(
+          currentPolicy,
+          view,
+          supplied.permissionId,
+          Object.freeze({
+            arguments: Object.freeze({
+              fieldIds: Object.freeze([...read.fieldIds].sort()),
+              relationIds: Object.freeze([...read.relationIds].sort()),
+              ...(scope && supplied.legalEntityScope !== undefined
+                ? { [scope.parameterId]: Object.freeze([...scope.members]) }
+                : {}),
+            }),
+            kind: 'registeredSemanticListSupplyPolicyInput',
+            queryId: supplied.queryId,
+            requestId: view.requestId,
+            schemaVersion: QUERY_POLICY_INPUT_VERSION,
+          }),
+        );
+        if (decision.decision === 'DENY') {
+          await recordDenied(supplied.queryId, decision.policyVersion);
+          throw new SemanticQueryPolicyDeniedError(supplied.queryId, view);
+        }
+        const predicateReceipt = inspectPredicateForExecution(supplied.filter);
+        observePredicateReceiptSafely(
+          observePredicateReceipt,
+          predicateReceipt,
+        );
+        if (predicateReceipt.outcome !== 'accepted') return null;
+        supplyEntityIds[supplied.queryId] = supplied.sourceEntityId;
+      }
+    }
+    progress = Object.freeze({
+      ...query.progress,
+      doneEntityId: entityIds.done,
+      linesEntityId: entityIds.lines,
+      ...(supplyEntityIds
+        ? { supplyEntityIds: Object.freeze(supplyEntityIds) }
+        : {}),
+    });
+  }
+  let figures: AuthorizedSharedListFigures | undefined;
+  if (query.figures) {
+    // Every query the figures read, with the fields and relations they name:
+    // one current-policy decision per query and request, decided for the
+    // companies the List reads, as progress is. A label query is read without
+    // a company, so it must be one that shows the whole entity.
+    const reads = new Map<
+      string,
+      {
+        fieldIds: Set<string>;
+        relationIds: Set<string>;
+        label: boolean;
+      }
+    >();
+    const use = (
+      queryId: string,
+      fieldIds: readonly string[],
+      relationId?: string,
+      label = false,
+    ) => {
+      const entry = reads.get(queryId) ?? {
+        fieldIds: new Set<string>(),
+        relationIds: new Set<string>(),
+        label: false,
+      };
+      for (const fieldId of fieldIds) entry.fieldIds.add(fieldId);
+      if (relationId) entry.relationIds.add(relationId);
+      entry.label ||= label;
+      reads.set(queryId, entry);
+    };
+    // A parent reached through a reference field is joined on the record id
+    // the rows hold: the rows' query must select the field that holds it.
+    const referenced = (within: { readonly referenceFieldId?: string }) =>
+      within.referenceFieldId === undefined ? [] : [within.referenceFieldId];
+    for (const sum of query.figures.sums) {
+      use(sum.rows.queryId, [
+        sum.rows.matchFieldId,
+        ...(sum.rows.quantityFieldId ? [sum.rows.quantityFieldId] : []),
+        ...(sum.within ? referenced(sum.within) : []),
+      ]);
+      if (sum.within)
+        use(sum.within.queryId, [sum.within.fieldId], sum.within.relationId);
+      if (sum.related)
+        use(sum.related.queryId, [sum.related.fieldId], sum.related.relationId);
+    }
+    for (const latest of query.figures.latest ?? []) {
+      use(latest.rows.queryId, [
+        latest.rows.matchFieldId,
+        ...referenced(latest.within),
+      ]);
+      use(
+        latest.within.queryId,
+        [latest.within.fieldId, latest.byFieldId, latest.valueFieldId],
+        latest.within.relationId,
+      );
+      use(latest.label.queryId, [latest.label.fieldId], undefined, true);
+    }
+    const entityIds: Record<string, string> = {};
+    for (const [queryId, read] of reads) {
+      const figured = registeredQueryFromPinnedView(view, queryId);
+      if (
+        !figured ||
+        figured.lifecycle !== 'active' ||
+        figured.tier !== 'q0' ||
+        figured.queryType !== 'list' ||
+        figured.readModel !== undefined ||
+        (read.label && figured.legalEntityScope !== undefined) ||
+        ![...read.fieldIds].every((fieldId) =>
+          figured.selections.some((selection) => selection.fieldId === fieldId),
+        )
+      ) {
+        throw new SharedListContractError(
+          'LIST_FIELD_NOT_AUTHORIZED',
+          'list figures must read selected fields of active pinned list queries',
+          queryId,
+        );
+      }
+      const decision = await authorizeCurrentPolicy(
+        currentPolicy,
+        view,
+        figured.permissionId,
+        Object.freeze({
+          arguments: Object.freeze({
+            fieldIds: Object.freeze([...read.fieldIds].sort()),
+            relationIds: Object.freeze([...read.relationIds].sort()),
+            ...(scope && figured.legalEntityScope !== undefined
+              ? { [scope.parameterId]: Object.freeze([...scope.members]) }
+              : {}),
+          }),
+          kind: 'registeredSemanticListFiguresPolicyInput',
+          queryId: figured.queryId,
+          requestId: view.requestId,
+          schemaVersion: QUERY_POLICY_INPUT_VERSION,
+        }),
+      );
+      if (decision.decision === 'DENY') {
+        await recordDenied(figured.queryId, decision.policyVersion);
+        throw new SemanticQueryPolicyDeniedError(figured.queryId, view);
+      }
+      const predicateReceipt = inspectPredicateForExecution(figured.filter);
+      observePredicateReceiptSafely(observePredicateReceipt, predicateReceipt);
+      if (predicateReceipt.outcome !== 'accepted') return null;
+      entityIds[figured.queryId] = figured.sourceEntityId;
+    }
+    figures = Object.freeze({
+      entityIds: Object.freeze(entityIds),
+      figures: query.figures,
+    });
+  }
   const relationLabels = [];
   for (const relation of query.relationLabels) {
     const targetDefinition = registeredQueryFromPinnedView(
@@ -812,9 +1156,130 @@ async function authorizeSharedListProjection(
       }),
     );
   }
+  const referenceLabels: AuthorizedSharedListReferenceLabel[] = [];
+  for (const reference of query.referenceLabels ?? []) {
+    const targetDefinition = registeredQueryFromPinnedView(
+      view,
+      reference.queryId,
+    );
+    // A label is joined on the target's record id without the target's own
+    // company scope, so only a list that shows the whole entity may supply it.
+    if (
+      !targetDefinition ||
+      targetDefinition.lifecycle !== 'active' ||
+      targetDefinition.tier !== 'q0' ||
+      targetDefinition.queryType !== 'list' ||
+      targetDefinition.legalEntityScope !== undefined ||
+      !targetDefinition.selections.some(
+        (selection) => selection.fieldId === reference.fieldId,
+      )
+    ) {
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        'reference label must use a selected field of an active, unscoped pinned list query',
+        reference.fieldId,
+      );
+    }
+    const decision = await authorizeCurrentPolicy(
+      currentPolicy,
+      view,
+      targetDefinition.permissionId,
+      Object.freeze({
+        arguments: Object.freeze({
+          fieldId: reference.fieldId,
+          referenceId: reference.referenceId,
+          sourceFieldId: reference.sourceFieldId,
+        }),
+        kind: 'registeredSemanticListReferencePolicyInput',
+        queryId: targetDefinition.queryId,
+        requestId: view.requestId,
+        schemaVersion: QUERY_POLICY_INPUT_VERSION,
+      }),
+    );
+    if (decision.decision === 'DENY') {
+      await recordDenied(targetDefinition.queryId, decision.policyVersion);
+      throw new SemanticQueryPolicyDeniedError(targetDefinition.queryId, view);
+    }
+    const predicateReceipt = inspectPredicateForExecution(
+      targetDefinition.filter,
+    );
+    observePredicateReceiptSafely(observePredicateReceipt, predicateReceipt);
+    if (predicateReceipt.outcome !== 'accepted') return null;
+    referenceLabels.push(
+      Object.freeze({
+        ...reference,
+        targetEntityId: targetDefinition.sourceEntityId,
+      }),
+    );
+  }
+  let relatedFilter: AuthorizedSharedListRelatedFilter | undefined;
+  if (query.relatedFilter) {
+    const related = query.relatedFilter;
+    const relatedDefinition = registeredQueryFromPinnedView(
+      view,
+      related.queryId,
+    );
+    // The existence check reads the related entity as a whole, so its list
+    // must be one that shows the whole entity: an admitted Q0 predicate and no
+    // company scope. Anything narrower is refused rather than approximated.
+    if (
+      !relatedDefinition ||
+      relatedDefinition.lifecycle !== 'active' ||
+      relatedDefinition.tier !== 'q0' ||
+      relatedDefinition.queryType !== 'list' ||
+      relatedDefinition.legalEntityScope !== undefined ||
+      !related.fieldFilters.every((filter) =>
+        relatedDefinition.selections.some(
+          (selection) => selection.fieldId === filter.fieldId,
+        ),
+      )
+    ) {
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        'related filter must use selected fields of an active, unfiltered, unscoped pinned list query',
+        related.queryId,
+      );
+    }
+    const decision = await authorizeCurrentPolicy(
+      currentPolicy,
+      view,
+      relatedDefinition.permissionId,
+      Object.freeze({
+        arguments: Object.freeze({
+          fieldIds: Object.freeze(
+            related.fieldFilters.map((filter) => filter.fieldId),
+          ),
+          relationId: related.relationId,
+        }),
+        kind: 'registeredSemanticListRelatedFilterPolicyInput',
+        queryId: relatedDefinition.queryId,
+        requestId: view.requestId,
+        schemaVersion: QUERY_POLICY_INPUT_VERSION,
+      }),
+    );
+    if (decision.decision === 'DENY') {
+      await recordDenied(relatedDefinition.queryId, decision.policyVersion);
+      throw new SemanticQueryPolicyDeniedError(relatedDefinition.queryId, view);
+    }
+    const predicateReceipt = inspectPredicateForExecution(
+      relatedDefinition.filter,
+    );
+    observePredicateReceiptSafely(observePredicateReceipt, predicateReceipt);
+    if (predicateReceipt.outcome !== 'accepted') return null;
+    relatedFilter = Object.freeze({
+      ...related,
+      relatedEntityId: relatedDefinition.sourceEntityId,
+    });
+  }
   return Object.freeze({
     query,
     relationLabels: Object.freeze(relationLabels),
+    ...(query.referenceLabels
+      ? { referenceLabels: Object.freeze(referenceLabels) }
+      : {}),
+    ...(relatedFilter ? { relatedFilter } : {}),
+    ...(progress ? { progress } : {}),
+    ...(figures ? { figures } : {}),
   });
 }
 
@@ -909,10 +1374,29 @@ export function registeredQueryFromPinnedView(
   return definition?.queryType === 'aggregate' ? undefined : definition;
 }
 
+// A request view is issued with deeply immutable projections. Cache only the
+// validated catalog, never policy decisions, legal scopes, query results or DTOs.
+const pinnedQueryCatalogs = new WeakMap<
+  IssuedRequestRuntimeView,
+  ReadonlyMap<string, RegisteredSemanticQueryDefinition>
+>();
+
 export function registeredSemanticQueryFromPinnedView(
   view: IssuedRequestRuntimeView,
   queryId: string,
 ): RegisteredSemanticQueryDefinition | undefined {
+  // Projection consumers also use this pure catalog reader with projection-only
+  // fixtures. Preserve that uncached validation path; only issued views promise
+  // deep immutability. Execution still requires an issued view at the gateway.
+  let cacheable = false;
+  try {
+    assertRequestRuntimeView(view);
+    cacheable = true;
+  } catch {
+    cacheable = false;
+  }
+  const cached = cacheable ? pinnedQueryCatalogs.get(view) : undefined;
+  if (cached) return cached.get(queryId);
   const projection = view.projections.query;
   if (
     projection.familyId !== REQUEST_RUNTIME_PROJECTION_FAMILIES.query ||
@@ -943,7 +1427,7 @@ export function registeredSemanticQueryFromPinnedView(
     );
   }
   const queryIds = new Set<string>();
-  let selected: RegisteredSemanticQueryDefinition | undefined;
+  const catalog = new Map<string, RegisteredSemanticQueryDefinition>();
   for (const query of payload.queries) {
     const definition = parseQueryDefinition(query);
     if (queryIds.has(definition.queryId)) {
@@ -952,9 +1436,12 @@ export function registeredSemanticQueryFromPinnedView(
       );
     }
     queryIds.add(definition.queryId);
-    if (definition.queryId === queryId) selected = definition;
+    catalog.set(definition.queryId, definition);
   }
-  return selected;
+  // Publish only after every entry and duplicate check passed. A failed first
+  // lookup must not make a later lookup see a partially validated catalog.
+  if (cacheable) pinnedQueryCatalogs.set(view, catalog);
+  return catalog.get(queryId);
 }
 
 function parseQueryDefinition(
@@ -966,6 +1453,10 @@ function parseQueryDefinition(
     throw invalid('pinned query definition must be an object');
   }
   const aggregate = value.queryType === 'aggregate';
+  if (Object.hasOwn(value, 'readModel')) {
+    if (aggregate) throw invalid('aggregate read models are unsupported');
+    QueryReadModelSchema.parse(value.readModel);
+  }
   const expectedKeys = [
     ...(aggregate
       ? ['aggregate', 'aggregatePlan', 'parameters', 'resultContract']
@@ -984,10 +1475,14 @@ function parseQueryDefinition(
   const hasFilterPlan = Object.hasOwn(value, 'filterPlan');
   const hasInfrastructure = Object.hasOwn(value, 'infrastructure');
   const hasResolveMatchKeys = Object.hasOwn(value, 'resolveMatchKeys');
+  const hasExportMaximum =
+    !aggregate && Object.hasOwn(value, 'exportMaximumResultCount');
   assertExactKeys(
     value,
     [
       ...expectedKeys,
+      ...(hasExportMaximum ? ['exportMaximumResultCount'] : []),
+      ...(Object.hasOwn(value, 'readModel') ? ['readModel'] : []),
       ...(hasLegalEntityScope ? ['legalEntityScope'] : []),
       ...(hasParameters ? ['parameters'] : []),
       ...(hasFilterPlan ? ['filterPlan'] : []),
@@ -1011,7 +1506,12 @@ function parseQueryDefinition(
     Number(value.maximumResultCount) < 1 ||
     !isRecord(value.filter) ||
     (!aggregate && !Array.isArray(value.selections)) ||
-    (hasResolveMatchKeys && !Array.isArray(value.resolveMatchKeys))
+    (hasResolveMatchKeys && !Array.isArray(value.resolveMatchKeys)) ||
+    (hasExportMaximum &&
+      (value.queryType !== 'list' ||
+        !Number.isSafeInteger(value.exportMaximumResultCount) ||
+        Number(value.exportMaximumResultCount) < 1 ||
+        Number(value.exportMaximumResultCount) > 10_000))
   ) {
     throw invalid('pinned query definition has an invalid shape');
   }

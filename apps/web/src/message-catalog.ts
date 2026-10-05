@@ -90,6 +90,115 @@ export interface SurfaceMessage {
 }
 
 export const SURFACE_MESSAGE_CATALOG = Object.freeze({
+  DRAFT_EDITOR_CONFLICT: {
+    sentence: 'Draft changed',
+    detail:
+      'This draft or document changed after the editor was opened. Your inputs remain in this session.',
+    nextAction:
+      'Reopen the document to review its current values before editing.',
+    consequence: 'blocking',
+    placements: ['slot'],
+    subject: null,
+  },
+  DRAFT_EDITOR_LOCKED: {
+    sentence: 'Draft editing unavailable',
+    detail: 'This document is outside its declared editable states.',
+    nextAction: 'Use the document’s available lifecycle or correction actions.',
+    consequence: 'blocking',
+    placements: ['slot'],
+    subject: null,
+  },
+  DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD: {
+    sentence: 'Some draft changes committed',
+    detail:
+      'At least one save operation committed. The complete draft save was not confirmed, and the current document cannot be displayed.',
+    nextAction:
+      'Do not submit this save again until the document can be read and its current state checked.',
+    consequence: 'blocking',
+    placements: ['page'],
+    subject: null,
+  },
+  COMPOSITION_CHILD_FAILED: {
+    sentence: 'Section unavailable',
+    detail:
+      'This declared child query could not be completed. Other sections remain available.',
+    nextAction: 'Refresh to retry.',
+    consequence: 'blocking',
+    placements: ['slot'],
+    subject: null,
+  },
+  COMPOSITION_CHILD_EMPTY: {
+    sentence: 'No child records',
+    detail:
+      'There are no matching records, or the required parent selection is empty.',
+    nextAction:
+      'Select a parent record when this section depends on a selection.',
+    consequence: 'advisory',
+    placements: ['slot'],
+    subject: null,
+  },
+  COMPOSITION_SELECTION_REQUIRED: {
+    sentence: 'Select a record',
+    detail: 'Actions depend on the selected record and its current state.',
+    nextAction: 'Select an applicable row.',
+    consequence: 'advisory',
+    placements: ['slot'],
+    subject: null,
+  },
+  COMPOSITION_TASK_UNAVAILABLE: {
+    sentence: 'Task unavailable',
+    detail:
+      'This task is expired, unavailable, or no longer applies to this record.',
+    nextAction:
+      'Reopen the record and check its current state before starting again.',
+    consequence: 'blocking',
+    placements: ['slot'],
+    subject: null,
+  },
+  COMPOSITION_BUSY: {
+    sentence: 'Task is running',
+    detail: 'The same task is already executing.',
+    nextAction: 'Return to the record and check its state before retrying.',
+    consequence: 'blocking',
+    placements: ['slot'],
+    subject: null,
+  },
+  COMPOSITION_INPUT_INVALID: {
+    sentence: 'Check the task inputs',
+    detail:
+      'Complete required inputs, use a positive exact quantity and choose an available reference.',
+    nextAction: 'Correct the inputs and review the task again.',
+    consequence: 'advisory',
+    placements: ['slot'],
+    subject: null,
+  },
+  COMPOSITION_COMMITTED_WITHHELD: {
+    sentence: 'Operation committed',
+    detail: 'Read-back is withheld. Further steps were not run.',
+    nextAction: 'Check the record before starting further work.',
+    consequence: 'blocking',
+    placements: ['slot'],
+    subject: null,
+  },
+  COMPOSITION_UNCERTAIN: {
+    sentence: 'Task stopped',
+    detail:
+      'Earlier steps may have committed. The latest operation could not be verified.',
+    nextAction:
+      'Retry uses the same inputs and request keys. Check the record before starting a new task.',
+    consequence: 'blocking',
+    placements: ['slot'],
+    subject: null,
+  },
+  COMPOSITION_COMPLETE: {
+    sentence: 'Task complete',
+    detail: 'The registered operations committed successfully.',
+    nextAction: 'Return to the record to read its current state.',
+    consequence: 'advisory',
+    placements: ['slot'],
+    subject: null,
+  },
+
   AUTHENTICATION_REQUIRED: {
     consequence: 'blocking',
     detail:
@@ -276,6 +385,26 @@ export const SURFACE_MESSAGE_CATALOG = Object.freeze({
     sentence: 'Legal entity required',
     subject: null,
   },
+  LIST_EXPORT_OVER_LIMIT: {
+    consequence: 'blocking',
+    detail:
+      'This view holds more records than one export may contain, so no file was produced. An export is never cut short.',
+    nextAction:
+      'Go back, narrow the view with a tab, filter or search, and export again.',
+    placements: ['page'],
+    sentence: 'Export limit exceeded',
+    subject: null,
+  },
+  WORKSPACE_COMPANY_UNAVAILABLE: {
+    consequence: 'blocking',
+    detail:
+      'The requested company is unavailable, inactive, or not currently authorized for this workspace.',
+    nextAction:
+      'Open the workspace and choose an authorized active company, or ask an administrator for access and setup.',
+    placements: ['slot', 'page'],
+    sentence: 'Company access required',
+    subject: null,
+  },
   QUERY_NOT_FOUND: {
     consequence: 'blocking',
     detail: 'No visible record matched this request in the pinned release.',
@@ -409,6 +538,7 @@ export const SURFACE_MESSAGE_CODES: readonly SurfaceMessageCode[] =
  * the contract test asserts rather than trusting this comment.
  */
 export const QUERY_DIAGNOSTIC_CODES = Object.freeze([
+  'WORKSPACE_COMPANY_UNAVAILABLE',
   'QUERY_AMBIGUOUS',
   'QUERY_LEGAL_ENTITY_SCOPE_REQUIRED',
   'QUERY_NOT_FOUND',

@@ -1,3 +1,13 @@
+import {
+  renderCompositionAlerts,
+  renderCompositionFields,
+  renderCompositionActions,
+  renderCompositionChildren,
+  renderCompositionHeader,
+  renderCompositionProgression,
+  displayFieldValue,
+  type CompositionData,
+} from './surface-composition.js';
 import { randomUUID } from 'node:crypto';
 
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
@@ -25,13 +35,34 @@ import type {
   ShipmentPackingDocument,
 } from './sales-section.js';
 import { sharedListView } from './list-runtime.js';
+import {
+  declaredCellText,
+  declaredListParameters,
+  declaredRowAction,
+  figureBandLabel,
+  orderedColumns,
+  orderedFilters,
+  orderedViews,
+  overdueDays,
+  shortMarked,
+  startOfTodayUtc,
+  type DeclaredListColumn,
+  type DeclaredListRowAction,
+  type DeclaredListState,
+  type FieldPresenter,
+} from './list-declaration.js';
+import type { SurfaceList } from '../../../packages/canonical-model/src/index.js';
+import type { SharedListCoverage } from '../../../packages/runtime/src/list-behavior/index.js';
 import type { QueryDiagnosticCode } from './message-catalog.js';
 import {
   messageAttributes,
   messageBody,
   type SurfaceMessageRef,
 } from './message-render.js';
-import { readCompiledSurfaceDataBinding } from './surface-contract.js';
+import {
+  formFieldIds,
+  readCompiledSurfaceDataBinding,
+} from './surface-contract.js';
 import type {
   CompiledFieldOption,
   CompiledSurfaceDefinition,
@@ -63,9 +94,25 @@ export type SurfaceRelationPickerState =
   | { readonly relationId: string; readonly status: 'refused' }
   | { readonly status: 'unavailable' };
 
+/**
+ * The records a Record form's reference field may hold, read through the
+ * declared list query for this request; `unavailable` when that read failed,
+ * so the field keeps its plain control and the stored id is never lost.
+ */
+export type SurfaceFormReferenceChoices =
+  | {
+      readonly options: readonly SurfaceRelationPickerOption[];
+      readonly status: 'ready';
+    }
+  | { readonly status: 'unavailable' };
+
 export interface SurfaceComponentContext {
   readonly data?: SurfaceDataRenderState;
   readonly feedback?: SurfaceOperationFeedback | null;
+  /** A Record form's reference choices, by the field they choose. */
+  readonly formReferences?: Readonly<
+    Record<string, SurfaceFormReferenceChoices>
+  >;
   readonly legalEntitySelection?: readonly string[];
   readonly operations?: readonly CompiledSurfaceOperationBinding[];
   readonly queryParameterValues?: Readonly<Record<string, string>>;
@@ -93,6 +140,27 @@ export interface SurfaceComponentRenderResult {
   readonly state: SurfaceSlotResolutionState;
 }
 
+/**
+ * Server counts per saved view, the request's declared List state, and the
+ * instant the request's "before today" views were counted at.
+ */
+export interface DeclaredListRenderData {
+  readonly counts: Readonly<Record<string, number>>;
+  readonly now: Date;
+  /**
+   * The progress query current policy withheld from a List whose figures are
+   * supplementary: they read "—", and a view that keeps open rows refuses.
+   */
+  readonly progressWithheld?: string;
+  /**
+   * The supply query current policy withheld from a List whose supply is
+   * supplementary (SUPPLY-WARNINGS): its figures read "—", and a view that
+   * keeps covered or short rows refuses.
+   */
+  readonly supplyWithheld?: string;
+  readonly state: DeclaredListState;
+}
+
 export type SurfaceDataRenderState =
   | { readonly status: 'UNBOUND' }
   | {
@@ -101,11 +169,15 @@ export type SurfaceDataRenderState =
     }
   | {
       readonly records: readonly SemanticRecordDto[];
+      readonly documentEditorSlots?: Readonly<Record<string, string>>;
       readonly receiving?: ReceivingSection;
       readonly receivingNavigation?: ReceivingNavigation;
+      readonly composition?: CompositionData;
+      readonly compositionTask?: string;
       readonly salesOrder?: SalesOrderSection;
       readonly packingDocument?: ShipmentPackingDocument;
       readonly result?: SemanticQueryResultEnvelope;
+      readonly declaredList?: DeclaredListRenderData;
       readonly status: 'READY';
     }
   | { readonly status: 'EMPTY' }
@@ -114,6 +186,8 @@ export type SurfaceDataRenderState =
       // catalog, so the render state cannot admit a code the catalog does not
       // register, and the gateway-error mapping targets the same set.
       readonly code: QueryDiagnosticCode;
+      /** A refused List view: the List's other views still serve. */
+      readonly declaredList?: DeclaredListRenderData;
       readonly status: 'DIAGNOSTIC';
     };
 
@@ -187,6 +261,10 @@ const surfaceSlotRegistry: Readonly<Record<string, SurfaceSlotRegistration>> =
       ownsDataResolution: true,
       renderer: renderDataGrid,
     },
+    'list:savedViews': {
+      className: 'saved-views-slot',
+      renderer: renderSavedViews,
+    },
     'list:title': {
       className: 'surface-title-slot',
       renderer: renderListTitle,
@@ -205,6 +283,22 @@ const surfaceSlotRegistry: Readonly<Record<string, SurfaceSlotRegistration>> =
       mutationIntents: { record: ['archive', 'restore'] },
       ownsDataResolution: true,
       renderer: renderKeyFacts,
+    },
+    'record:childTables': {
+      className: 'child-tables-slot',
+      ownsDataResolution: true,
+      renderer: (context) =>
+        context.data?.status === 'READY' && context.data.composition
+          ? context.data.compositionTask &&
+            !context.surface.composition?.presentation?.task
+            ? context.data.compositionTask
+            : (context.data.compositionTask ?? '') +
+              renderCompositionChildren(
+                context.data.composition,
+                context.surface,
+                context.view,
+              )
+          : '',
     },
     'record:sections': {
       className: 'sections-slot',
@@ -278,6 +372,21 @@ export function surfaceSupportsRuntimeIntent(
 export function renderRegisteredSurfaceComponent(
   context: SurfaceComponentContext,
 ): SurfaceComponentRenderResult {
+  if (
+    context.surface.documentEditor &&
+    context.data?.status === 'READY' &&
+    context.data.documentEditorSlots &&
+    context.slot.slot !== 'breadcrumb'
+  ) {
+    return {
+      state: 'ready',
+      html: resolvedSlot(
+        context,
+        context.data.documentEditorSlots[context.slot.slot] ?? '',
+        'ready',
+      ),
+    };
+  }
   const renderer = surfaceComponentRenderer(context.surface, context.slot);
   if (!renderer) {
     return Object.freeze({
@@ -303,6 +412,14 @@ function surfaceComponentRenderer(
   surface: CompiledSurfaceDefinition,
   slot: CompiledSurfaceSlot,
 ): SurfaceComponentRenderer | undefined {
+  if (
+    surface.archetype === 'record' &&
+    slot.slot === 'childTables' &&
+    !surface.composition
+  )
+    return Object.hasOwn(componentRegistry, slot.contentReferenceId)
+      ? componentRegistry[slot.contentReferenceId]
+      : undefined;
   const slotKey = `${surface.archetype}:${slot.slot}`;
   if (Object.hasOwn(surfaceSlotRegistry, slotKey)) {
     return surfaceSlotRegistry[slotKey]?.renderer;
@@ -387,15 +504,109 @@ function renderListTitle(context: SurfaceComponentContext): string {
   );
 }
 
+function declaredListBase(context: SurfaceComponentContext): URLSearchParams {
+  const parameters = new URLSearchParams({
+    surface: context.surface.surfaceId,
+  });
+  appendLegalEntitySelection(parameters, context.surface, context);
+  return parameters;
+}
+
+function renderSavedViews(context: SurfaceComponentContext): string {
+  const list = context.surface.list;
+  // A refused view keeps its tabs: the List's other views still serve.
+  const declared =
+    context.data?.status === 'READY' || context.data?.status === 'DIAGNOSTIC'
+      ? context.data.declaredList
+      : undefined;
+  return slotPanel(
+    context,
+    list && declared
+      ? renderDeclaredListViews(
+          list,
+          declared.state,
+          declaredListBase(context),
+          declared.counts,
+        )
+      : '',
+    'saved-views-slot',
+  );
+}
+
 function renderDataGrid(context: SurfaceComponentContext): string {
   const data = context.data ?? { status: 'UNBOUND' as const };
   if (data.status === 'UNBOUND') {
     return slotPanel(context, '', 'data-grid-slot');
   }
-  if (data.status === 'DIAGNOSTIC') {
+  if (
+    data.status === 'READY' &&
+    context.surface.list &&
+    data.declaredList &&
+    data.result?.listCoverage
+  ) {
+    const detail = relatedSurface(context, 'record');
+    const recordLabel = entityLabel(context.surface);
+    const formId = bulkSelectionFormId(context.surface);
+    const binding = readCompiledSurfaceDataBinding(
+      context.view,
+      context.surface,
+    );
+    const detailHref = (record: SemanticRecordDto) =>
+      detail
+        ? surfaceHref(detail, record.recordId, record.archived, context)
+        : null;
     return slotPanel(
       context,
-      `${feedbackHtml(context.feedback)}${dataDiagnostic(data.code)}`,
+      `${feedbackHtml(context.feedback)}${renderDeclaredList({
+        base: declaredListBase(context),
+        coverage: data.result.listCoverage,
+        detailHref,
+        exportLimit:
+          'exportMaximumResultCount' in binding.query
+            ? (binding.query.exportMaximumResultCount ?? null)
+            : null,
+        list: context.surface.list,
+        now: data.declaredList.now,
+        // A band figure reads as the label its List declares for the value.
+        present: (record, fieldId, value) =>
+          figureBandLabel(context.surface.list!, fieldId, value) ??
+          displayFieldValue(context.view, record, fieldId, value),
+        progressWithheld: data.declaredList.progressWithheld ?? null,
+        supplyWithheld: data.declaredList.supplyWithheld ?? null,
+        recordLabel,
+        records: data.records,
+        // The row's record page, at the section its action names -- only a
+        // section the page's composition declares (the validator refuses any
+        // other), so a link never promises a place the page does not have.
+        rowActionHref: (record, action) => {
+          const href = detailHref(record);
+          if (href === null || action.section === undefined) return href;
+          return detail?.composition?.children.some(
+            (child) => child.datasetId === action.section,
+          )
+            ? `${href}#${action.section}`
+            : null;
+        },
+        selectionCell: hasNamedSlot(context.surface, 'bulkActions')
+          ? (record, title) => selectionCell(formId, record, recordLabel, title)
+          : null,
+        state: data.declaredList.state,
+      })}`,
+      'data-grid-slot',
+    );
+  }
+  if (data.status === 'DIAGNOSTIC') {
+    // A view refused for its withheld figures says which figures it needs.
+    const withheld = context.surface.list
+      ? withheldFiguresNote(
+          context.surface.list,
+          data.declaredList?.progressWithheld ?? null,
+          data.declaredList?.supplyWithheld ?? null,
+        )
+      : '';
+    return slotPanel(
+      context,
+      `${feedbackHtml(context.feedback)}${withheld}${dataDiagnostic(data.code)}`,
       'data-grid-slot',
     );
   }
@@ -559,6 +770,47 @@ function renderBreadcrumb(context: SurfaceComponentContext): string {
 }
 
 function renderTitleStatus(context: SurfaceComponentContext): string {
+  if (
+    context.data?.status === 'READY' &&
+    context.data.composition &&
+    context.surface.composition?.presentation
+  ) {
+    const composition = context.data.composition;
+    const record = composition.record;
+    // The progression's next operation is a command this page offers now,
+    // rendered as the command bar renders it, under its own name.
+    const operationControl = (operationId: string, prefix: string) => {
+      const operation = (context.operations ?? []).find(
+        (candidate) =>
+          candidate.operationId === operationId &&
+          candidate.intent === 'command' &&
+          evaluateRegisteredOperationPrecondition(
+            candidate.precondition,
+            record.values,
+          ).outcome === 'holds',
+      );
+      return operation
+        ? renderCapabilityCommand(context, record, operation, {
+            name: `${prefix}: ${operation.label}`,
+          })
+        : null;
+    };
+    return slotPanel(
+      context,
+      renderCompositionHeader(context.surface, composition) +
+        feedbackHtml(context.feedback) +
+        renderCompositionAlerts(context.surface, composition) +
+        renderCompositionProgression(
+          context.surface,
+          composition,
+          context.view,
+          operationControl,
+          // Nothing else is started while a Task is open.
+          !context.data.compositionTask,
+        ),
+      'title-status-slot',
+    );
+  }
   const record = recordFrom(context.data);
   const form = context.surface.surfaceRole === 'form';
   const title = form
@@ -587,6 +839,12 @@ function renderArchiveToggle(context: SurfaceComponentContext): string {
       ? context.data.result?.listCoverage
       : undefined;
   const includeArchived = coverage?.includeArchived ?? false;
+  const declared =
+    context.data?.status === 'READY' ? context.data.declaredList : undefined;
+  if (declared) {
+    const href = `/?${declaredListParameters(declared.state, declaredListBase(context), { includeArchived: !includeArchived, page: 1 }).toString()}`;
+    return `<a class="secondary-action" data-archive-view="${includeArchived ? 'shown' : 'hidden'}" href="${escapeHtml(href)}">${includeArchived ? 'Hide archived' : 'Show archived'}</a>`;
+  }
   const parameters = new URLSearchParams({
     surface: context.surface.surfaceId,
   });
@@ -624,6 +882,16 @@ function listRecordTitle(
 }
 
 function renderCommandBar(context: SurfaceComponentContext): string {
+  if (context.data?.status === 'READY' && context.data.compositionTask)
+    return slotPanel(context, '', 'command-bar-slot');
+  const compositionActions =
+    context.data?.status === 'READY' && context.data.composition
+      ? renderCompositionActions(
+          context.surface,
+          context.data.composition,
+          context.view,
+        )
+      : '';
   const record = recordFrom(context.data);
   if (context.surface.surfaceRole === 'form') {
     const admission = resolveFormAdmission(context, record);
@@ -653,8 +921,19 @@ function renderCommandBar(context: SurfaceComponentContext): string {
       )
     : [];
   const orderedCommands = [...commands].sort(commandPresentationOrder);
+  const editor = context.surface.documentEditor;
+  const documentEditable =
+    !editor ||
+    (record &&
+      editor.editableStateIds.some(
+        (state) => record.values[editor.stateFieldId] === state,
+      ));
   const actions = [
-    record && form && update && operationAvailableForRecord(update, record)
+    record &&
+    form &&
+    update &&
+    documentEditable &&
+    operationAvailableForRecord(update, record)
       ? `<a class="primary-action" href="${escapeHtml(surfaceHref(form, record.recordId, false, context))}">Edit</a>`
       : '',
     form
@@ -669,7 +948,7 @@ function renderCommandBar(context: SurfaceComponentContext): string {
   ].join('');
   return slotPanel(
     context,
-    `<div class="command-bar" aria-label="Record commands">${actions}</div>`,
+    `${compositionActions}${context.surface.composition?.presentation?.recordActions === 'progressive' ? `<details class="composition-record-actions"><summary>Record actions</summary><div class="command-bar" aria-label="Record commands">${actions}</div></details>` : `<div class="command-bar" aria-label="Record commands">${actions}</div>`}`,
     'command-bar-slot',
   );
 }
@@ -710,6 +989,12 @@ function renderCapabilityCommand(
   context: SurfaceComponentContext,
   record: SemanticRecordDto,
   operation: CompiledSurfaceOperationBinding,
+  /**
+   * A record progression's next step renders the same command under its own
+   * accessible name (its label kept within it), without the standing
+   * explanation, so it never doubles the command bar's control.
+   */
+  next?: { readonly name: string },
 ): string {
   // Both sides of the merge are load-bearing and they compose exactly.
   // `5g3-sm` distinguishes the standing explanation by effect kind; this
@@ -718,13 +1003,29 @@ function renderCapabilityCommand(
   // would have been two identical forms differing only in their button label
   // and posting the same `intent` -- the collision this packet fixes, arriving
   // for the first time on a tree where transitions actually bind.
-  const explanation = operation.capabilityId
-    ? '<span><strong>Draft staged.</strong> Posting is a separate confirmed step.</span>'
-    : '<span><strong>Ready.</strong> This moves the record to its next state.</span>';
-  return `<form class="capability-command" method="post" action="${escapeHtml(surfaceHref(context.surface, record.recordId, record.archived, context))}" data-capability-id="${escapeHtml(operation.capabilityId ?? '')}" data-operation-id="${escapeHtml(operation.operationId)}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}">${explanation}<button type="submit">${escapeHtml(operation.label)}</button></form>`;
+  const explanation = next
+    ? ''
+    : operation.capabilityId
+      ? '<span><strong>Draft staged.</strong> Posting is a separate confirmed step.</span>'
+      : '<span><strong>Ready.</strong> This moves the record to its next state.</span>';
+  return `<form class="capability-command" method="post" action="${escapeHtml(surfaceHref(context.surface, record.recordId, record.archived, context))}" data-capability-id="${escapeHtml(operation.capabilityId ?? '')}" data-operation-id="${escapeHtml(operation.operationId)}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}">${explanation}<button type="submit"${next ? ` aria-label="${escapeHtml(next.name)}"` : ''}>${escapeHtml(operation.label)}</button></form>`;
 }
 
 function renderKeyFacts(context: SurfaceComponentContext): string {
+  if (
+    context.surface.composition?.presentation?.technicalDetails ===
+    'progressive'
+  ) {
+    const record = recordFrom(context.data);
+    return slotPanel(
+      context,
+      record
+        ? `<details class="panel composition-technical"><summary>Technical details · record identity, activity and revision</summary><dl class="record-fields"><div><dt>Record</dt><dd>${escapeHtml(record.recordId)}</dd></div><div><dt>Activity</dt><dd>${record.archived ? 'Archived' : 'Active'}</dd></div><div><dt>Revision</dt><dd>${record.revision}</dd></div></dl></details>`
+        : '',
+      'key-facts-slot',
+    );
+  }
+
   const data = context.data ?? { status: 'UNBOUND' as const };
   if (data.status === 'UNBOUND') {
     return slotPanel(context, '', 'key-facts-slot');
@@ -736,7 +1037,7 @@ function renderKeyFacts(context: SurfaceComponentContext): string {
   if (!record && context.surface.surfaceRole === 'form') {
     return slotPanel(
       context,
-      `<section class="panel key-facts-panel" data-data-state="empty"><div class="panel__heading"><div><h2>New ${escapeHtml(entityLabel(context.surface))}</h2></div></div><dl class="key-fact-grid"><div><dt>Mode</dt><dd>New record</dd></div><div><dt>Fields</dt><dd>${String(context.surface.fieldIds.length)} ready</dd></div><div><dt>State</dt><dd><span class="status-pill" data-status-role="inProgress">Draft</span></dd></div></dl></section>`,
+      `<section class="panel key-facts-panel" data-data-state="empty"><div class="panel__heading"><div><h2>New ${escapeHtml(entityLabel(context.surface))}</h2></div></div><dl class="key-fact-grid"><div><dt>Mode</dt><dd>New record</dd></div><div><dt>Fields</dt><dd>${String(formFieldIds(context.surface).length)} ready</dd></div><div><dt>State</dt><dd><span class="status-pill" data-status-role="inProgress">Draft</span></dd></div></dl></section>`,
       'key-facts-slot',
     );
   }
@@ -761,6 +1062,8 @@ function renderKeyFacts(context: SurfaceComponentContext): string {
 }
 
 function renderSections(context: SurfaceComponentContext): string {
+  if (context.data?.status === 'READY' && context.data.composition)
+    return renderCompositionFields(context.surface, context.data.composition);
   const data = context.data ?? { status: 'UNBOUND' as const };
   if (data.status === 'UNBOUND') {
     return slotPanel(context, '', 'sections-slot');
@@ -1359,7 +1662,7 @@ function findRelatedSurface(
   try {
     const entityId = readCompiledSurfaceDataBinding(view, surface).query
       .sourceEntityId;
-    return surfaces.find((candidate) => {
+    const matches = (candidate: CompiledSurfaceDefinition) => {
       if (candidate.lifecycle !== 'active' || candidate.surfaceRole !== role) {
         return false;
       }
@@ -1371,10 +1674,53 @@ function findRelatedSurface(
       } catch {
         return false;
       }
-    });
+    };
+    if (role !== 'list') return surfaces.find(matches);
+    // A worklist may list the same records beside the entity's own List; the
+    // way back to "the list" is the one that owns the entity's Record.
+    const candidates = surfaces.filter(matches);
+    if (candidates.length > 1) {
+      const owners = recordWorkspaceOwners(view, surfaces, entityId);
+      return (
+        candidates.find((candidate) => owners.has(candidate.surfaceId)) ??
+        candidates[0]
+      );
+    }
+    return candidates[0];
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The workspaces that own an entity's active Record surfaces. When more than
+ * one List reads an entity -- a worklist beside the entity's own List -- the
+ * List named here is the one that stands for the entity: the picker authority,
+ * the breadcrumb and the navigation destination of its records.
+ */
+export function recordWorkspaceOwners(
+  view: RuntimeViewContract.RequestRuntimeView,
+  surfaces: readonly CompiledSurfaceDefinition[],
+  entityId: string,
+): ReadonlySet<string> {
+  return new Set(
+    surfaces.flatMap((candidate) => {
+      if (
+        candidate.lifecycle !== 'active' ||
+        candidate.surfaceRole !== 'record' ||
+        !candidate.workspace?.ownerSurfaceId
+      )
+        return [];
+      try {
+        return readCompiledSurfaceDataBinding(view, candidate).query
+          .sourceEntityId === entityId
+          ? [candidate.workspace.ownerSurfaceId]
+          : [];
+      } catch {
+        return [];
+      }
+    }),
+  );
 }
 
 function slotRegistrationSupportsIntent(
@@ -1527,7 +1873,7 @@ function renderFormFields(
   const inputFieldsById = new Map(
     (operation.inputFields ?? []).map((field) => [field.fieldId, field]),
   );
-  return surface.fieldIds
+  return formFieldIds(surface)
     .filter(
       (fieldId) =>
         operation.inputFields === null || inputFieldsById.has(fieldId),
@@ -1537,13 +1883,23 @@ function renderFormFields(
       const value = record ? record.values[fieldId] : undefined;
       const field = fieldsById.get(fieldId);
       const inputField = inputFieldsById.get(fieldId);
-      const control = renderFormControl(
-        field,
-        inputField,
-        fieldId,
-        index,
-        value,
-      );
+      // A stored decimal is shown in canonical spelling -- `12.5`, not
+      // `12.500000000000000000` -- as the draft editor shows it: the same
+      // exact value, in the one spelling the write path admits, so a form
+      // saved without touching it is not refused (REPLENISHMENT: an item's
+      // prices beside its new levels).
+      const kind = field?.kind ?? inputField?.kind;
+      const shown =
+        kind !== undefined &&
+        STORED_DECIMAL_KINDS.has(kind) &&
+        typeof value === 'string'
+          ? canonicalStoredDecimal(value)
+          : value;
+      const choices = context.formReferences?.[fieldId];
+      const control =
+        choices?.status === 'ready'
+          ? renderFormReferenceControl(choices.options, fieldId, value)
+          : renderFormControl(field, inputField, fieldId, index, shown);
       const emptyIntent = renderEmptyIntentControl(
         inputField,
         fieldId,
@@ -1558,6 +1914,39 @@ function renderFormFields(
       return `<div class="form-field"><label><span>${escapeHtml(label)}</span>${control.html}</label>${unavailableValue}${emptyIntent}</div>`;
     })
     .join('');
+}
+
+/**
+ * A reference field as a choice of the records its declared list returned,
+ * shown by label and submitted as the record id the field already admits. A
+ * stored id the list did not return stays selectable, so an update that does
+ * not touch it never drops it.
+ */
+function renderFormReferenceControl(
+  options: readonly SurfaceRelationPickerOption[],
+  fieldId: string,
+  value: unknown,
+): RenderedFormControl {
+  const current = typeof value === 'string' ? value : '';
+  const offered =
+    current !== '' && !options.some((option) => option.recordId === current)
+      ? [
+          ...options,
+          {
+            label: `Unavailable (${shortIdentity(current)})`,
+            recordId: current,
+          },
+        ]
+      : options;
+  return {
+    html: `<select name="value:${escapeHtml(fieldId)}" data-field-kind="textFieldType" data-form-reference="${escapeHtml(fieldId)}" autocomplete="off"><option value=""${current === '' ? ' selected' : ''}>None</option>${offered
+      .map(
+        (option) =>
+          `<option value="${escapeHtml(option.recordId)}"${option.recordId === current ? ' selected' : ''}>${escapeHtml(option.label)}</option>`,
+      )
+      .join('')}</select>`,
+    storedValueUnavailable: false,
+  };
 }
 
 /**
@@ -1627,20 +2016,31 @@ function renderEmptyIntentControl(
   return select(options);
 }
 
-interface RenderedFormControl {
+export interface RenderedFormControl {
   readonly html: string;
   /** The browser will sanitize or de-select this stored value to blank. */
   readonly storedValueUnavailable: boolean;
 }
 
-function renderFormControl(
+/**
+ * The typed control for one field. `control.name` and `control.attributes` let a
+ * caller with its own submission naming -- the draft document editor -- reuse
+ * the same typed rendering and stored-value preservation instead of keeping a
+ * separate text-only renderer. Both default to the record form's own shape.
+ */
+export function renderFormControl(
   field: CompiledSurfaceField | undefined,
   inputField: CompiledSurfaceInputField | undefined,
   fieldId: string,
   index: number,
   value: unknown,
+  control: { readonly name?: string; readonly attributes?: string } = {},
 ): RenderedFormControl {
-  const name = `value:${escapeHtml(fieldId)}`;
+  const name =
+    control.name === undefined
+      ? `value:${escapeHtml(fieldId)}`
+      : escapeHtml(control.name);
+  const extra = control.attributes ?? '';
   const storedValueUnavailable =
     value !== null &&
     value !== undefined &&
@@ -1657,12 +2057,12 @@ function renderFormControl(
     : '';
   if (!field) {
     return {
-      html: `<input${describedBy} name="${name}" value="${renderInputValue(renderedValue)}" autocomplete="off">`,
+      html: `<input${describedBy}${extra} name="${name}" value="${renderInputValue(renderedValue)}" autocomplete="off">`,
       storedValueUnavailable,
     };
   }
   const current = renderInputValue(renderedValue);
-  const kind = ` data-field-kind="${field.kind}"${describedBy}`;
+  const kind = ` data-field-kind="${field.kind}"${describedBy}${extra}`;
   const html = (() => {
     switch (field.kind) {
       case 'enumFieldType':
@@ -1904,6 +2304,29 @@ function renderEnumControl(
   return `<input${kind} name="${name}" value="${renderInputValue(value)}" list="${listId}" autocomplete="off"><datalist id="${listId}">${suggestions.join('')}</datalist>`;
 }
 
+/** The kinds a generic form reads as an exact decimal. */
+const STORED_DECIMAL_KINDS: ReadonlySet<string> = new Set([
+  'exactDecimalFieldType',
+  'moneyFieldType',
+  'quantityFieldType',
+]);
+
+/**
+ * A stored exact decimal in the one spelling the write path admits -- no
+ * leading or trailing zeros, no `-0`. PostgreSQL states a numeric at its
+ * column's scale (`12.500000000000000000`); this is the same exact value as
+ * `12.5`, found by text work alone. Anything that is not a plain decimal is
+ * returned as it is, and refused by name if it is ever submitted.
+ */
+function canonicalStoredDecimal(value: string): string {
+  const match = /^(-?)(\d+)(?:\.(\d+))?$/u.exec(value);
+  if (!match) return value;
+  const integer = match[2]!.replace(/^0+(?=\d)/u, '');
+  const fraction = (match[3] ?? '').replace(/0+$/u, '');
+  const negative = match[1] === '-' && (integer !== '0' || fraction !== '');
+  return `${negative ? '-' : ''}${integer}${fraction ? `.${fraction}` : ''}`;
+}
+
 function renderInputValue(value: unknown): string {
   return value === null || value === undefined
     ? ''
@@ -1930,4 +2353,296 @@ function diagnostic(ref: SurfaceMessageRef): string {
     <div class="diagnostic__mark" aria-hidden="true">!</div>
     <div>${messageBody(ref, 'Release diagnostic', 'h2')}</div>
   </section>`;
+}
+
+// Declared List markup (canonical `surface.list`), rendered only from the
+// closed registry; list-declaration.ts holds the markup-free request state.
+function declaredStatusRole(
+  column: DeclaredListColumn,
+  record: SemanticRecordDto,
+): string | null {
+  const raw = record.values[column.field];
+  return column.statusRoles?.find((entry) => entry.value === raw)?.role ?? null;
+}
+
+interface DeclaredListRenderInput {
+  readonly base: URLSearchParams;
+  readonly coverage: SharedListCoverage;
+  readonly detailHref: (record: SemanticRecordDto) => string | null;
+  readonly exportLimit: number | null;
+  readonly list: SurfaceList;
+  /** The request's instant: overdue dates are judged against its day. */
+  readonly now: Date;
+  readonly present: FieldPresenter;
+  /** The progress query current policy withheld; its figures read "—". */
+  readonly progressWithheld: string | null;
+  /** The supply query current policy withheld; its figures read "—". */
+  readonly supplyWithheld: string | null;
+  readonly recordLabel: string;
+  readonly records: readonly SemanticRecordDto[];
+  /** Where a row's action leads, or `null` when it cannot be linked. */
+  readonly rowActionHref: (
+    record: SemanticRecordDto,
+    action: DeclaredListRowAction,
+  ) => string | null;
+  readonly selectionCell:
+    ((record: SemanticRecordDto, title: string) => string) | null;
+  readonly state: DeclaredListState;
+}
+
+/**
+ * Says which figures a List reads without, and which views they would have
+ * served: the progress columns -- with the supply's, which extend them -- or
+ * the supply's alone (SUPPLY-WARNINGS), withheld by current policy, and the
+ * views that keep open, covered or short rows, refused while they are.
+ */
+function withheldNote(
+  list: SurfaceList,
+  withheld: string,
+  attribute: 'data-list-progress-withheld' | 'data-list-supply-withheld',
+  outputs: ReadonlySet<string>,
+  needs: (view: SurfaceList['views'][number]) => boolean,
+  fallback: string,
+): string {
+  const series = (labels: readonly string[]) =>
+    labels.length > 1
+      ? `${labels.slice(0, -1).join(', ')} and ${labels.at(-1)!}`
+      : (labels[0] ?? '');
+  const figures = orderedColumns(list)
+    .filter((column) => outputs.has(column.field))
+    .map((column) => column.label);
+  const views = orderedViews(list)
+    .filter(needs)
+    .map((view) => view.label);
+  const text = `${figures.length > 0 ? series(figures) : fallback} ${figures.length === 1 ? 'is' : 'are'} withheld by current policy${
+    views.length > 0
+      ? `; ${series(views)} ${views.length === 1 ? `needs ${figures.length === 1 ? 'it' : 'them'} and is` : `need ${figures.length === 1 ? 'it' : 'them'} and are`} unavailable`
+      : ''
+  }.`;
+  return `<p class="muted" ${attribute}="${escapeHtml(withheld)}">${escapeHtml(text)}</p>`;
+}
+
+/** The note for what current policy withheld, if anything. */
+function withheldFiguresNote(
+  list: SurfaceList,
+  progressWithheld: string | null,
+  supplyWithheld: string | null,
+): string {
+  const progress = list.progress;
+  if (!progress) return '';
+  const supplyOutputs = Object.values(progress.supply?.outputs ?? {});
+  if (progressWithheld !== null)
+    return withheldNote(
+      list,
+      progressWithheld,
+      'data-list-progress-withheld',
+      new Set([...Object.values(progress.outputs), ...supplyOutputs]),
+      (view) => view.open === true || view.supply !== undefined,
+      'Progress figures',
+    );
+  if (supplyWithheld !== null && progress.supply)
+    return withheldNote(
+      list,
+      supplyWithheld,
+      'data-list-supply-withheld',
+      new Set(supplyOutputs),
+      (view) => view.supply !== undefined,
+      'Supply figures',
+    );
+  return '';
+}
+
+/** Saved-view tabs; counts are server counts of each view under the current search and filters. */
+function renderDeclaredListViews(
+  list: SurfaceList,
+  state: DeclaredListState,
+  base: URLSearchParams,
+  counts: Readonly<Record<string, number>>,
+): string {
+  const views = orderedViews(list);
+  if (views.length === 0) return '';
+  return `<nav class="list-views" aria-label="Views"><ul>${views
+    .map((view) => {
+      const current = view.viewId === state.viewId;
+      const count = counts[view.viewId];
+      const href = `/?${declaredListParameters(state, base, { page: 1, viewId: view.viewId }).toString()}`;
+      return `<li><a class="list-view" href="${escapeHtml(href)}" data-view-id="${escapeHtml(view.viewId)}"${current ? ' aria-current="page"' : ''}><span>${escapeHtml(view.label)}</span>${count === undefined ? '' : `<span class="list-view__count" data-view-count="${String(count)}">${escapeHtml(String(count))}</span>`}</a></li>`;
+    })
+    .join('')}</ul></nav>`;
+}
+
+function renderDeclaredList(input: DeclaredListRenderInput): string {
+  const { list, state, coverage, base } = input;
+  const columns = orderedColumns(input.list);
+  const pageCount = Math.max(
+    1,
+    Math.ceil(coverage.totalCount / Math.max(1, coverage.effectivePageSize)),
+  );
+  const page =
+    Math.floor(coverage.pageOffset / Math.max(1, coverage.effectivePageSize)) +
+    1;
+  const firstVisible =
+    coverage.returnedCount === 0 ? 0 : coverage.pageOffset + 1;
+  const lastVisible = coverage.pageOffset + coverage.returnedCount;
+  const narrowed =
+    state.search.length > 0 || Object.keys(state.filterValues).length > 0;
+  const formHidden = [
+    ...declaredListParameters(state, base, { page: 1 }).entries(),
+  ]
+    .filter(
+      ([name]) =>
+        name !== 'q' &&
+        name !== 'page' &&
+        name !== 'sort' &&
+        name !== 'dir' &&
+        !list.filters.some((filter) => filter.filterId === name),
+    )
+    .map(
+      ([name, value]) =>
+        `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`,
+    )
+    .join('');
+  // A control's accessible name is its label alone: a select nested in its
+  // label would be announced with its current option ("Currency All").
+  const controlId = (suffix: string) =>
+    `list-${String(input.list.columns[0]?.columnId ?? 'list').replaceAll(/[^A-Za-z0-9_-]/gu, '-')}-${suffix}`;
+  const filterControls = orderedFilters(list)
+    .map(
+      (filter, index) =>
+        `<div class="form-field"><label for="${controlId(`filter-${String(index)}`)}">${escapeHtml(filter.label)}</label><select id="${controlId(`filter-${String(index)}`)}" name="${escapeHtml(filter.filterId)}"><option value="">All</option>${filter.options
+          .map(
+            (option) =>
+              `<option value="${escapeHtml(option.value)}"${state.filterValues[filter.filterId] === option.value ? ' selected' : ''}>${escapeHtml(option.label)}</option>`,
+          )
+          .join('')}</select></div>`,
+    )
+    .join('');
+  const sortable = orderedColumns(list).filter((column) => column.sortable);
+  const current = state.sort[0];
+  const sortControls =
+    sortable.length > 0
+      ? `<div class="form-field"><label for="${controlId('sort')}">Sort by</label><select id="${controlId('sort')}" name="sort">${sortable
+          .map(
+            (column) =>
+              `<option value="${escapeHtml(column.columnId)}"${current?.columnId === column.columnId ? ' selected' : ''}>${escapeHtml(column.label)}</option>`,
+          )
+          .join(
+            '',
+          )}</select></div><div class="form-field"><label for="${controlId('dir')}">Order</label><select id="${controlId('dir')}" name="dir"><option value="asc"${current?.direction === 'descending' ? '' : ' selected'}>Ascending</option><option value="desc"${current?.direction === 'descending' ? ' selected' : ''}>Descending</option></select></div>`
+      : '';
+  const clearHref = `/?${declaredListParameters(state, base, { filterValues: {}, page: 1, search: '' }).toString()}`;
+  const controls = `<form class="list-controls" data-list-search method="get" action="/">${formHidden}<div class="form-field list-controls__search"><label><span>Search ${escapeHtml(input.recordLabel.toLowerCase())}</span><input type="search" name="q" value="${escapeHtml(state.search)}" maxlength="240" autocomplete="off"></label></div>${filterControls}${sortControls}<div class="list-controls__actions"><button type="submit">Apply</button>${narrowed ? `<a class="secondary-action" href="${escapeHtml(clearHref)}">Clear</a>` : ''}</div></form>`;
+  const sortState = new Map(
+    state.sort.map((sort) => [sort.columnId, sort.direction]),
+  );
+  const header = columns
+    .map((column) => {
+      const direction = sortState.get(column.columnId);
+      if (!column.sortable)
+        return `<th scope="col">${escapeHtml(column.label)}</th>`;
+      const nextDirection =
+        direction === 'ascending' ? 'descending' : 'ascending';
+      const href = `/?${declaredListParameters(state, base, {
+        page: 1,
+        sort: [{ columnId: column.columnId, direction: nextDirection }],
+        sortIsExplicit: true,
+      }).toString()}`;
+      const mark =
+        direction === 'ascending'
+          ? '↑'
+          : direction === 'descending'
+            ? '↓'
+            : '↕';
+      return `<th scope="col" aria-sort="${direction ?? 'none'}"><a class="list-sort" href="${escapeHtml(href)}" data-sort-column="${escapeHtml(column.columnId)}">${escapeHtml(column.label)} <span aria-hidden="true">${mark}</span><span class="sr-only">${direction ? `, sorted ${direction}; activate to sort ${nextDirection}` : ', activate to sort ascending'}</span></a></th>`;
+    })
+    .join('');
+  const rowActions = (list.rowActions ?? []).length > 0;
+  // The row's one action -- the first whose condition holds -- as a link to
+  // its record page at the named section, named with the row it opens.
+  const actionCell = (record: SemanticRecordDto, title: string) => {
+    if (!rowActions) return '';
+    const action = declaredRowAction(list, record);
+    const href = action ? input.rowActionHref(record, action) : null;
+    return `<td data-column-label="Actions" data-cell-role="actions">${
+      action && href
+        ? `<a class="secondary-action" href="${escapeHtml(href)}" data-row-action="${escapeHtml(action.actionId)}" aria-label="${escapeHtml(`${action.label} ${title}`)}">${escapeHtml(action.label)}</a>`
+        : '<span class="muted">—</span>'
+    }</td>`;
+  };
+  const body = input.records
+    .map((record) => {
+      const cells = columns
+        .map((column) => {
+          const text = declaredCellText(column, record, input.present);
+          const label = `data-column-label="${escapeHtml(column.label)}" data-column-priority="${String(column.priority)}" data-column-id="${escapeHtml(column.columnId)}"`;
+          if (column.role === 'title') {
+            const title = text ?? record.recordId.slice(0, 8);
+            const href = input.detailHref(record);
+            return `<td ${label}>${href ? `<a class="record-link" href="${escapeHtml(href)}" aria-label="Open ${escapeHtml(input.recordLabel)} ${escapeHtml(title)}">${escapeHtml(title)}</a>` : escapeHtml(title)}${record.archived ? ' <span class="status-pill" data-status-role="attention">Archived</span>' : ''}</td>`;
+          }
+          if (column.role === 'status') {
+            const role = declaredStatusRole(column, record);
+            return `<td ${label}>${text === null ? '<span class="muted">—</span>' : `<span class="status-pill"${role ? ` data-status-role="${escapeHtml(role)}"` : ''}>${escapeHtml(text)}</span>`}</td>`;
+          }
+          // A declared overdue date reads "N days late" when the row meets its
+          // view's conditions -- the same ones its tab was counted by.
+          const late = overdueDays(list, column, record, input.now);
+          // What the row is short of now is marked, as the reference marks
+          // an exception "!" (SUPPLY-WARNINGS).
+          const short = shortMarked(list, column, record);
+          return `<td ${label}>${text === null ? '<span class="muted">—</span>' : escapeHtml(text)}${late === null ? '' : ` <span class="status-pill" data-status-role="attention" data-overdue-days="${String(late)}">${escapeHtml(`${String(late)} ${late === 1 ? 'day' : 'days'} late`)}</span>`}${short ? ' <span class="status-pill" data-status-role="blocked" data-short-mark="true"><span aria-hidden="true">!</span><span class="sr-only">Short of stock</span></span>' : ''}</td>`;
+        })
+        .join('');
+      const title =
+        declaredCellText(
+          columns.find((column) => column.role === 'title')!,
+          record,
+          input.present,
+        ) ?? record.recordId.slice(0, 8);
+      return `<tr data-compact-card="true" data-record-id="${escapeHtml(record.recordId)}">${input.selectionCell ? input.selectionCell(record, title) : ''}${cells}${actionCell(record, title)}</tr>`;
+    })
+    .join('');
+  const empty =
+    coverage.totalCount === 0
+      ? `<div class="data-empty" data-data-state="empty" data-list-empty="${narrowed ? 'narrowed' : 'view'}"><h3>${narrowed ? `No ${escapeHtml(input.recordLabel.toLowerCase())} match` : `No ${escapeHtml(input.recordLabel.toLowerCase())} here yet`}</h3><p>${narrowed ? `Nothing in this view matches the search or filters. <a href="${escapeHtml(clearHref)}">Clear them</a> to see every record in the view.` : 'Records appear here as soon as they are saved.'}</p></div>`
+      : '';
+  const pageLink = (target: number, text: string, rel?: string) =>
+    `<a class="list-page-link" href="${escapeHtml(`/?${declaredListParameters(state, base, { page: target }).toString()}`)}"${rel ? ` rel="${rel}"` : ''}>${text}</a>`;
+  const paging =
+    pageCount > 1
+      ? `<nav class="list-pagination" aria-label="List pages">${page > 1 ? `${pageLink(1, 'First')}${pageLink(page - 1, 'Previous', 'prev')}` : ''}<span class="list-page-status" data-list-page="${String(page)}" data-list-page-count="${String(pageCount)}">Page ${String(page)} of ${String(pageCount)}</span>${page < pageCount ? `${pageLink(page + 1, 'Next', 'next')}${pageLink(pageCount, 'Last')}` : ''}<form class="list-page-jump" method="get" action="/">${[
+          ...declaredListParameters(state, base, { page: 1 }).entries(),
+        ]
+          .map(
+            ([name, value]) =>
+              `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`,
+          )
+          .join(
+            '',
+          )}<label><span class="sr-only">Go to page</span><input type="number" name="page" min="1" max="${String(pageCount)}" value="${String(page)}" inputmode="numeric"></label><button class="secondary-action" type="submit">Go</button></form></nav>`
+      : '';
+  const exportControl =
+    list.export && input.exportLimit !== null
+      ? coverage.totalCount > input.exportLimit
+        ? `<p class="list-export list-export--refused" data-list-export="over-limit">Export is limited to ${escapeHtml(String(input.exportLimit))} records; narrow the view to export.</p>`
+        : coverage.totalCount > 0
+          ? `<a class="secondary-action list-export" data-list-export="csv" href="${escapeHtml(`/?${declaredListParameters(state, base, { page: 1 }).toString()}&export=csv`)}" download>Export CSV (${escapeHtml(String(coverage.totalCount))})</a>`
+          : ''
+      : '';
+  const count = `${String(coverage.totalCount)} matching ${coverage.totalCount === 1 ? 'record' : 'records'}`;
+  const range =
+    coverage.totalCount > 0
+      ? `Showing ${String(firstVisible)}–${String(lastVisible)}`
+      : '';
+  // A List that compares dates with today names the day it was counted on.
+  const anchor = list.views.some((view) => view.before)
+    ? ` data-list-anchor="${escapeHtml(startOfTodayUtc(input.now).toISOString())}"`
+    : '';
+  // Figures withheld by current policy are said once, above the rows.
+  const withheld = withheldFiguresNote(
+    list,
+    input.progressWithheld,
+    input.supplyWithheld,
+  );
+  return `<section class="panel data-panel" data-data-state="exact" data-list-result="${escapeHtml(coverage.schemaVersion)}" data-declared-list="true"${anchor}><div class="panel__heading"><div><h2>${escapeHtml(input.recordLabel)}</h2></div><div class="list-summary"><span class="status-pill" data-status-role="success" data-list-total="${String(coverage.totalCount)}">${escapeHtml(count)}</span>${range ? `<span class="muted">${escapeHtml(range)}</span>` : ''}${exportControl}</div></div>${withheld}${controls}${empty}${input.records.length > 0 ? `<div class="data-table-wrap" data-list-rendering="responsive-single"><table><thead><tr>${input.selectionCell ? '<th scope="col">Select</th>' : ''}${header}${rowActions ? '<th scope="col">Actions</th>' : ''}</tr></thead><tbody>${body}</tbody></table></div>` : ''}${paging}</section>`;
 }

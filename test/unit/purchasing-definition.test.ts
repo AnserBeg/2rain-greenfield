@@ -28,6 +28,7 @@ import {
   LEGAL_ENTITY_RELATION_SEMANTICS_V1,
 } from '../../packages/domain/src/inventory/contracts.js';
 import {
+  PAYABLES_CAPABILITY_ID,
   PURCHASING_IDS,
   purchasingModuleDefinition,
 } from '../../packages/domain/src/purchasing/index.js';
@@ -63,13 +64,14 @@ const LIFECYCLE = {
 } as const;
 
 /**
- * The transitions `PUR-1` binds an operation to. `close` and `reopen` are
- * DECLARED EDGES ONLY -- plan section 7.17 says what closes an order is `PUR-2`'s to
- * decide, so emitting an operation for either would let a caller persist an
- * arbitrary manual close today with no receipt rule behind it.
+ * The transitions a generic transition operation drives. `close`, `reopen` and
+ * the committed `cancel` are DECLARED EDGES ONLY for the press -- plan section
+ * 7.17 says what closes an order is `PUR-2`'s to decide, and PURCHASING-PARITY
+ * refuses a cancel after any net receipt -- so each is moved by a guarded
+ * receiving operation that reads the order's receipts under its lock.
  */
-const DRIVEN = ['release', 'draft_cancel', 'cancel'] as const;
-const DECLARED_ONLY = ['close', 'reopen'] as const;
+const DRIVEN = ['release', 'draft_cancel'] as const;
+const DECLARED_ONLY = ['close', 'reopen', 'cancel'] as const;
 
 /**
  * Five transitions, four permissions: both cancels authorize on one
@@ -299,13 +301,30 @@ test('the state field is machine-owned: no caller-writable contract admits it', 
     );
   }
 
-  // The two creates write their authored fields and only those.
+  // The two creates write their authored fields and only those -- except the
+  // order number, which the server assigns (SALES-PARITY numbering) and the
+  // create contract names as an assignment instead of an input.
+  const numberFieldId = PURCHASING_IDS.fieldIds.purchaseOrder.number;
   assert.deepEqual(
     writableFieldIds(
       operations,
       `${namespace}:operation.purchase_order_create`,
     ),
-    Object.values(PURCHASING_IDS.fieldIds.purchaseOrder).toSorted(),
+    Object.values(PURCHASING_IDS.fieldIds.purchaseOrder)
+      .filter((fieldId) => fieldId !== numberFieldId)
+      .toSorted(),
+  );
+  const createContract = operations.find(
+    (operation) =>
+      operation.operationId === `${namespace}:operation.purchase_order_create`,
+  )?.inputContract as
+    { assignedFields?: Array<{ fieldId: string; prefix: string }> } | undefined;
+  assert.deepEqual(
+    createContract?.assignedFields?.map((field) => [
+      field.fieldId,
+      field.prefix,
+    ]),
+    [[numberFieldId, 'PO']],
   );
   assert.deepEqual(
     writableFieldIds(
@@ -798,10 +817,12 @@ test('each transition is offered only where it can move the record', () => {
   const operations = operationCatalog(compile());
   const expected: Record<string, readonly string[]> = {
     cancel: ['released'],
+    close: ['released'],
     draft_cancel: ['draft'],
     release: ['draft'],
+    reopen: ['closed'],
   };
-  for (const action of DRIVEN) {
+  for (const action of [...DRIVEN, ...DECLARED_ONLY]) {
     const guard = precondition(
       operations,
       `${namespace}:operation.purchase_order_${action}`,
@@ -824,7 +845,7 @@ test('each transition is offered only where it can move the record', () => {
   }
 });
 
-test('close and reopen use the guarded receiving capability, never generic state transitions', () => {
+test('close, reopen and the committed cancel use the guarded receiving capability, never generic state transitions', () => {
   // THE FINDING THIS EXISTS FOR. An earlier version of this module emitted an
   // operation for every transition in the table, which made `released -> closed`
   // and `closed -> released` executable through the semantic operation gateway
@@ -863,16 +884,17 @@ test('close and reopen use the guarded receiving capability, never generic state
       `${action} is invocable, so a caller can persist that move today`,
     );
     assert.equal(
-      operations.some(
+      operations.find(
         (operation) =>
           operation.operationId ===
           `${namespace}:operation.purchase_order_${action}`,
-      ),
-      true,
+      )?.effect.kind,
+      'registeredCapabilityEffect',
+      `${action} must run through receiving, which reads the order's receipts`,
     );
   }
 
-  // The check is not passing over an empty catalog: the three driven
+  // The check is not passing over an empty catalog: the two driven
   // transitions ARE invocable, by the same reader.
   assert.deepEqual(
     operations
@@ -1086,17 +1108,17 @@ test('the composed application derives its modules from an ordered registry', ()
   // rather than any separately maintained literal.
   const composed = composedApplicationDefinition() as unknown as AuthoredShape;
   assert.deepEqual(COMPOSED_MODULE_NAMES, [
+    'sales',
+    'purchasing',
+    'inventory',
     'party',
     'catalog',
     'location',
-    'inventory',
-    'purchasing',
-    'sales',
   ]);
   assert.equal(composed.modules.length, COMPOSED_MODULE_NAMES.length);
   assert.deepEqual(
     composed.modules.map((module) => module.label),
-    ['Party', 'Catalog', 'Location', 'Inventory', 'Purchasing', 'Sales'],
+    ['Sales', 'Purchasing', 'Inventory', 'Party', 'Catalog', 'Location'],
   );
   // `orderKey` is derived from registry POSITION, which is what makes order the
   // only thing the registry has to declare.
@@ -1112,19 +1134,19 @@ test('the composed application derives its modules from an ordered registry', ()
   );
 });
 
-test('Purchasing remains fifth when Sales mounts sixth', () => {
+test('Purchasing and Sales lead the business navigation within budget', () => {
   const composed = composedApplicationDefinition() as unknown as AuthoredShape;
   assert.deepEqual(
     composed.modules.map((module) => module.label),
-    ['Party', 'Catalog', 'Location', 'Inventory', 'Purchasing', 'Sales'],
+    ['Sales', 'Purchasing', 'Inventory', 'Party', 'Catalog', 'Location'],
   );
 
   const navigation = surfaceManifest(compile(composed)).navigation;
   assert.ok(navigation, 'the composed application emits no navigation tree');
   assert.deepEqual(
     navigation.entries.map((entry) => entry.label),
-    ['Party', 'Catalog', 'Location', 'Inventory', 'More'],
-    'the sixth module belongs under the compiled overflow group',
+    ['Sales', 'Purchasing', 'Inventory', 'Party', 'More'],
+    'supporting masters belong under the compiled overflow group',
   );
 });
 
@@ -1169,6 +1191,7 @@ test('commercial order intent stays separate from received facts; no sales or ha
       PURCHASING_IDS.fieldIds.purchaseOrder.expectedDate,
       PURCHASING_IDS.fieldIds.purchaseOrder.currency,
       PURCHASING_IDS.fieldIds.purchaseOrder.notes,
+      PURCHASING_IDS.fieldIds.purchaseOrder.receivingLocationId,
     ],
   );
   assert.deepEqual(
@@ -1355,17 +1378,17 @@ test('RECEIPT received projection refuses authored o0, o1 and transition write p
       operationId: `${namespace}:operation.received_illegal_${tier}`,
       readBack: {
         kind: 'queryReference',
-        schemaVersion: 'v5',
+        schemaVersion: ADOPTED_LANGUAGE_VERSION,
         targetId: `${namespace}:query.purchase_order_received_get`,
       },
       ...(tier === 'o0'
         ? {
             effect: {
               kind: 'updateRecordEffect',
-              schemaVersion: 'v5',
+              schemaVersion: ADOPTED_LANGUAGE_VERSION,
               entity: {
                 kind: 'entityReference',
-                schemaVersion: 'v5',
+                schemaVersion: ADOPTED_LANGUAGE_VERSION,
                 targetId: entityId,
               },
             },
@@ -1384,7 +1407,7 @@ test('RECEIPT received projection refuses authored o0, o1 and transition write p
       ) as Record<string, unknown>;
       machine.entity = {
         kind: 'entityReference',
-        schemaVersion: 'v5',
+        schemaVersion: ADOPTED_LANGUAGE_VERSION,
         targetId: entityId,
       };
       machines.push(machine);
@@ -1392,16 +1415,16 @@ test('RECEIPT received projection refuses authored o0, o1 and transition write p
       operation.tier = 'o0';
       operation.effect = {
         kind: 'transitionStateEffect',
-        schemaVersion: 'v5',
+        schemaVersion: ADOPTED_LANGUAGE_VERSION,
         transition: {
           kind: 'transitionReference',
-          schemaVersion: 'v5',
+          schemaVersion: ADOPTED_LANGUAGE_VERSION,
           targetId: `${namespace}:transition.received_illegal_release`,
         },
       };
       operation.permission = {
         kind: 'permissionReference',
-        schemaVersion: 'v5',
+        schemaVersion: ADOPTED_LANGUAGE_VERSION,
         targetId: `${namespace}:permission.purchase_order_release`,
       };
       for (const transition of machine.transitions as Array<
@@ -1409,7 +1432,7 @@ test('RECEIPT received projection refuses authored o0, o1 and transition write p
       >)
         transition.permission = {
           kind: 'permissionReference',
-          schemaVersion: 'v5',
+          schemaVersion: ADOPTED_LANGUAGE_VERSION,
           targetId: `${namespace}:permission.purchase_order_release`,
         };
     }
@@ -1601,6 +1624,490 @@ function mutated(vary: (definition: AuthoredShape) => void): AuthoredShape {
  * platform and kernel only. There is no purchasing migration because the
  * projection below is the authority for physical shape.
  */
+test('PURCHASING-PARITY: the product application prices a purchase order like a sales order', () => {
+  type Loose = Record<string, unknown>;
+  const app = composedApplicationDefinition() as unknown as {
+    fields: Array<Loose & { fieldId: string; fieldType: Loose }>;
+    queries: Array<Loose & { queryId: string; readModel?: Loose }>;
+    surfaces: Array<Loose & { surfaceId: string }>;
+  };
+  const local = (value: string) => value.split('.').pop()!;
+  const commercial = [
+    'purchase_order_payment_terms',
+    'purchase_order_tax_code_id',
+    'purchase_order_freight_amount',
+    'purchase_order_freight_tax_code_id',
+    'purchase_order_other_fee_amount',
+    'purchase_order_other_fee_tax_code_id',
+    'purchase_order_freight_tax_rate_percent',
+    'purchase_order_other_fee_tax_rate_percent',
+    'purchase_order_line_discount_percent',
+    'purchase_order_line_tax_code_id',
+    'purchase_order_line_tax_rate_percent',
+  ];
+  const declared = new Set(app.fields.map((value) => local(value.fieldId)));
+  assert.deepEqual(
+    commercial.filter((name) => !declared.has(name)),
+    [],
+    'every commercial field is declared in the product application',
+  );
+  // A purchasing-only compile carries none of them: they read Catalog tax
+  // codes, which it does not compose.
+  const standalone = new Set(
+    (
+      purchasingModuleDefinition() as unknown as {
+        fields: Array<{ fieldId: string }>;
+      }
+    ).fields.map((value) => local(value.fieldId)),
+  );
+  assert.deepEqual(
+    commercial.filter((name) => standalone.has(name)),
+    [],
+  );
+  // A goods receipt is numbered by the server, like the order: RCV-000001.
+  assert.deepEqual(
+    app.fields.find((value) => local(value.fieldId) === 'goods_receipt_number')!
+      .numbering,
+    {
+      kind: 'documentSequence',
+      sequenceId: 'northstar.app:document_sequence.goods_receipt',
+      prefix: 'RCV',
+      minimumDigits: 6,
+      start: 1,
+    },
+  );
+  // Terms are labelled as a Party's, so the supplier's default fills them.
+  const terms = app.fields.find(
+    (value) => local(value.fieldId) === 'purchase_order_payment_terms',
+  )!.fieldType as { options: Array<{ label: string }> };
+  assert.deepEqual(
+    terms.options.map((option) => option.label),
+    ['Due on receipt', 'Net 15', 'Net 30', 'Net 45', 'Net 60'],
+  );
+  // The editor: supplier defaults, two weeks out, a line tax code from the
+  // order, rates frozen from the codes.
+  const editor = app.surfaces.find(
+    (value) => local(value.surfaceId) === 'purchase_order_form',
+  )!.documentEditor as {
+    headerFields: Array<Loose & { fieldId: string }>;
+    lineFields: Array<Loose & { fieldId: string }>;
+  };
+  const header = (name: string) =>
+    editor.headerFields.find(
+      (value) => local(value.fieldId) === `purchase_order_${name}`,
+    )!;
+  const line = (name: string) =>
+    editor.lineFields.find(
+      (value) => local(value.fieldId) === `purchase_order_line_${name}`,
+    )!;
+  assert.equal(header('expected_date').defaultDaysFromToday, 14);
+  for (const [name, source] of [
+    ['currency', 'party_default_currency'],
+    ['payment_terms', 'party_payment_terms'],
+    ['tax_code_id', 'party_default_tax_code_id'],
+  ] as const)
+    assert.deepEqual(
+      header(name).defaultFrom,
+      {
+        referenceFieldId:
+          'northstar.app:field.purchase_order_supplier_party_id',
+        sourceFieldId: `northstar.app:field.${source}`,
+      },
+      name,
+    );
+  assert.equal(
+    (line('tax_code_id').defaultFrom as Loose).headerFieldId,
+    'northstar.app:field.purchase_order_tax_code_id',
+  );
+  assert.deepEqual(
+    ['freight_tax_rate_percent', 'other_fee_tax_rate_percent'].map(
+      (name) => (header(name).presentation as Loose).kind,
+    ),
+    ['derived', 'derived'],
+  );
+  assert.equal(
+    (line('tax_rate_percent').presentation as Loose).kind,
+    'derived',
+  );
+  // Priced lines and totals are read through the commercial read model.
+  const bindings = Object.fromEntries(
+    app.queries
+      .filter((value) => value.readModel)
+      .map((value) => [
+        local(value.queryId),
+        (value.readModel as { binding: string }).binding,
+      ]),
+  );
+  assert.equal(
+    bindings.commercial_purchase_order_lines,
+    'northstar.sales:read_model.commercial_purchase_line',
+  );
+  assert.equal(
+    bindings.commercial_purchase_order_get,
+    'northstar.sales:read_model.commercial_purchase_order',
+  );
+  const detail = app.surfaces.find(
+    (value) => local(value.surfaceId) === 'purchase_order_detail',
+  )! as unknown as {
+    dataSource: { targetId: string };
+    composition: {
+      fields: Array<{ columnId: string; format?: string }>;
+      presentation: { print: { totals: string[] } };
+    };
+  };
+  assert.equal(
+    local(detail.dataSource.targetId),
+    'commercial_purchase_order_get',
+  );
+  assert.deepEqual(detail.composition.presentation.print.totals.map(local), [
+    'purchasing_subtotal',
+    'purchasing_freight',
+    'purchasing_other_fee',
+    'purchasing_tax',
+    'purchasing_total',
+  ]);
+  assert.deepEqual(
+    detail.composition.fields
+      .filter((value) => value.format === 'money')
+      .map((value) => local(value.columnId)),
+    [
+      'purchasing_freight',
+      'purchasing_other_fee',
+      'purchasing_subtotal',
+      'purchasing_charges',
+      'purchasing_tax',
+      'purchasing_total',
+    ],
+  );
+});
+
+test('PURCHASING-PARITY: an order line shows what is still to arrive, and its open remainder closes with a reason', () => {
+  type Loose = Record<string, unknown>;
+  const app = composedApplicationDefinition() as unknown as {
+    queries: Array<Loose & { queryId: string; readModel?: Loose }>;
+    surfaces: Array<Loose & { surfaceId: string }>;
+  };
+  const local = (value: string) => value.split('.').pop()!;
+  // The purchase line read model states received and open-to-receive from the
+  // receiving projection, read through its own get under current policy.
+  const lines = app.queries.find(
+    (value) => local(value.queryId) === 'commercial_purchase_order_lines',
+  )!.readModel as {
+    queries: Record<string, { targetId: string }>;
+    resultFields: Record<string, string>;
+  };
+  // PAYABLES adds what is billed, what is still to bill and the match status.
+  assert.deepEqual(Object.keys(lines.resultFields).toSorted(), [
+    'billed',
+    'line_amount',
+    'line_tax',
+    'match_status',
+    'open_to_receive',
+    'received',
+    'to_bill',
+  ]);
+  assert.equal(
+    lines.queries.received?.targetId,
+    'northstar.app:query.purchase_order_received_get',
+  );
+  const composition = (
+    app.surfaces.find(
+      (value) => local(value.surfaceId) === 'purchase_order_detail',
+    )! as unknown as {
+      composition: {
+        children: Array<{
+          datasetId: string;
+          query: { targetId: string };
+          columns: Array<{ columnId: string; field: string }>;
+        }>;
+        actions: Array<
+          Loose & {
+            actionId: string;
+            conditions: Loose[];
+            inputs: Array<Loose & { inputId: string }>;
+            steps: Array<{
+              operation: { targetId: string };
+              bindings: Array<{ path: string[]; value: Loose }>;
+            }>;
+          }
+        >;
+      };
+    }
+  ).composition;
+  const orderLines = composition.children.find(
+    (value) => local(value.datasetId) === 'purchasing_lines',
+  )!;
+  assert.equal(
+    local(orderLines.query.targetId),
+    'commercial_purchase_order_lines',
+  );
+  assert.deepEqual(
+    orderLines.columns
+      .filter((value) => value.field.includes(':metric.'))
+      .map((value) => [local(value.columnId), local(value.field)]),
+    [
+      ['purchasing_received', 'received'],
+      ['purchasing_open', 'open_to_receive'],
+      ['purchasing_billed', 'billed'],
+      ['purchasing_to_bill', 'to_bill'],
+      ['purchasing_match', 'match_status'],
+    ],
+  );
+  // Offered on a released order's line with something still open; the new
+  // ordered quantity is the line's received quantity, staged with the reason
+  // and applied by the receiving amend, which refuses less than received.
+  const close = composition.actions.find(
+    (value) => local(value.actionId) === 'close_remainder',
+  )!;
+  assert.equal(local(String(close.datasetId)), 'purchasing_lines');
+  assert.deepEqual(close.conditions, [
+    {
+      value: {
+        source: 'record',
+        field:
+          'northstar.app:derived_state_field.machine.purchase_order_lifecycle',
+      },
+      operator: 'equals',
+      compare: 'northstar.app:state.purchase_order_released',
+    },
+    {
+      value: {
+        source: 'selected',
+        field: 'northstar.app:metric.open_to_receive',
+      },
+      operator: 'positive',
+      compare: null,
+    },
+  ]);
+  assert.deepEqual(
+    close.inputs.map((value) => [
+      local(value.inputId),
+      value.required,
+      (value.presentation as Loose | undefined)?.kind,
+    ]),
+    [['close_remainder_reason', true, 'multiline']],
+  );
+  assert.deepEqual(
+    close.steps.map((value) => local(value.operation.targetId)),
+    ['purchase_order_amendment_create', 'purchase_order_line_amend'],
+  );
+  const staged = Object.fromEntries(
+    close.steps[0]!.bindings.map((value) => [
+      local(value.path.at(-1)!),
+      value.value,
+    ]),
+  );
+  assert.deepEqual(staged.purchase_order_amendment_quantity, {
+    source: 'selected',
+    field: 'northstar.app:metric.received',
+  });
+  assert.deepEqual(staged.purchase_order_amendment_line_revision, {
+    source: 'selected',
+    field: 'revision',
+  });
+  // A close request: the amend closes to what is received when it runs.
+  assert.deepEqual(staged.purchase_order_amendment_close_remainder, {
+    source: 'literal',
+    value: true,
+  });
+  assert.deepEqual(staged.purchase_order_amendment_reason, {
+    source: 'input',
+    inputId: 'northstar.app:input.close_remainder_reason',
+  });
+  assert.deepEqual(staged.purchase_order_amendment_order_line, {
+    source: 'selected',
+    field: 'recordId',
+  });
+  assert.deepEqual(
+    close.steps[1]!.bindings.map((value) => [value.path, value.value]),
+    [
+      [['recordId'], { source: 'selected', field: 'recordId' }],
+      [['expectedRevision'], { source: 'selected', field: 'revision' }],
+    ],
+  );
+});
+
+test('PURCHASING-PARITY: a receipt keeps its paperwork, and receiving starts where the order is received', () => {
+  type Loose = Record<string, unknown>;
+  type Field = Loose & {
+    fieldId: string;
+    entity: { targetId: string };
+    fieldType: Loose;
+    orderKey: number;
+  };
+  type Column = Loose & {
+    columnId: string;
+    field: string;
+    reference?: {
+      query: { targetId: string };
+      labelField: { targetId: string };
+    };
+  };
+  const local = (value: string) => value.split('.').pop()!;
+  // Base fields, so the purchasing-only compile declares them too.
+  const standalone = (
+    purchasingModuleDefinition() as unknown as { fields: Field[] }
+  ).fields;
+  for (const [name, entity, label, maximumLength] of [
+    [
+      'goods_receipt_packing_slip',
+      'goods_receipt',
+      'Packing slip / delivery note',
+      80,
+    ],
+    ['goods_receipt_notes', 'goods_receipt', 'Notes', 1000],
+    [
+      'purchase_order_receiving_location_id',
+      'purchase_order',
+      'Receive into',
+      80,
+    ],
+  ] as const) {
+    const declared = standalone.find((value) => local(value.fieldId) === name);
+    assert.ok(declared, `${name} is declared`);
+    assert.deepEqual(
+      [
+        local(declared.entity.targetId),
+        declared.label,
+        declared.fieldType.kind,
+        declared.fieldType.maximumLength,
+      ],
+      [entity, label, 'textFieldType', maximumLength],
+      name,
+    );
+    // Optional and never searched: nothing has to be typed to save.
+    assert.deepEqual(
+      [declared.presence, declared.defaultSemantics, declared.searchable],
+      ['optional', 'nullable', false],
+      name,
+    );
+  }
+  const app = composedApplicationDefinition() as unknown as {
+    fields: Field[];
+    surfaces: Array<Loose & { surfaceId: string }>;
+  };
+  // Beside the commercial terms, each order field keeps its own orderKey.
+  const orderKeys = app.fields
+    .filter((value) => local(value.entity.targetId) === 'purchase_order')
+    .map((value) => value.orderKey);
+  assert.equal(new Set(orderKeys).size, orderKeys.length);
+  // The draft editor picks the location from the Location list.
+  const editor = app.surfaces.find(
+    (value) => local(value.surfaceId) === 'purchase_order_form',
+  )!.documentEditor as { headerFields: Array<Loose & { fieldId: string }> };
+  const receiveInto = editor.headerFields.find(
+    (value) => local(value.fieldId) === 'purchase_order_receiving_location_id',
+  );
+  assert.ok(receiveInto, 'the draft editor offers Receive into');
+  assert.equal(receiveInto.label, 'Receive into');
+  assert.deepEqual(receiveInto.reference, {
+    queryId: 'northstar.app:query.location_list',
+    getQueryId: 'northstar.app:query.location_get',
+    labelFieldIds: ['northstar.app:field.location_name'],
+    detailFieldIds: ['northstar.app:field.location_code'],
+  });
+  const composition = app.surfaces.find(
+    (value) => local(value.surfaceId) === 'purchase_order_detail',
+  )!.composition as {
+    presentation: { header: { facts: string[] } };
+    fields: Column[];
+    children: Array<{ datasetId: string; columns: Column[] }>;
+    actions: Array<{
+      actionId: string;
+      inputs: Array<Loose & { inputId: string }>;
+      steps: Array<{
+        operation: { targetId: string };
+        bindings: Array<{ path: string[]; value: Loose }>;
+      }>;
+    }>;
+  };
+  // The order's page reads the location's name in its details, not the header.
+  const shown = composition.fields.find(
+    (value) => local(value.columnId) === 'purchasing_receive_into',
+  );
+  assert.ok(shown, 'the order page shows Receive into');
+  assert.deepEqual(
+    [
+      shown.label,
+      local(shown.field),
+      shown.reference?.query.targetId,
+      shown.reference?.labelField.targetId,
+    ],
+    [
+      'Receive into',
+      'purchase_order_receiving_location_id',
+      'northstar.app:query.location_get',
+      'northstar.app:field.location_name',
+    ],
+  );
+  assert.equal(
+    composition.presentation.header.facts.includes(shown.columnId),
+    false,
+  );
+  // Each connected receipt shows its packing slip.
+  assert.deepEqual(
+    composition.children
+      .find((value) => local(value.datasetId) === 'purchasing_receipts')!
+      .columns.filter(
+        (value) => local(value.field) === 'goods_receipt_packing_slip',
+      )
+      .map((value) => [local(value.columnId), value.label]),
+    [['purchasing_packing_slip', 'Packing slip']],
+  );
+  for (const suffix of ['known', 'absent']) {
+    const action = composition.actions.find(
+      (value) => local(value.actionId) === `receive_${suffix}`,
+    )!;
+    const input = (name: string) =>
+      action.inputs.find((value) => local(value.inputId) === `receive_${name}`);
+    // Both paperwork inputs may stay empty; notes take several lines.
+    assert.deepEqual(
+      ['packing_slip', 'notes'].map((name) => {
+        const value = input(name);
+        return [
+          value?.label,
+          value?.type,
+          value?.required,
+          (value?.presentation as Loose | undefined)?.kind,
+        ];
+      }),
+      [
+        ['Packing slip / delivery note', 'text', false, undefined],
+        ['Notes', 'text', false, 'multiline'],
+      ],
+      suffix,
+    );
+    // They are kept on the receipt the first step creates.
+    const create = action.steps[0]!;
+    assert.equal(local(create.operation.targetId), 'goods_receipt_create');
+    const bound = Object.fromEntries(
+      create.bindings.map((value) => [local(value.path.at(-1)!), value.value]),
+    );
+    assert.deepEqual(
+      [bound.goods_receipt_packing_slip, bound.goods_receipt_notes],
+      [
+        {
+          source: 'input',
+          inputId: 'northstar.app:input.receive_packing_slip',
+        },
+        { source: 'input', inputId: 'northstar.app:input.receive_notes' },
+      ],
+      suffix,
+    );
+    // The receiving location starts from the order's own.
+    assert.deepEqual(
+      input('location')?.defaultFrom,
+      {
+        source: 'record',
+        field: 'northstar.app:field.purchase_order_receiving_location_id',
+      },
+      suffix,
+    );
+  }
+  // The whole declaration is admitted, the default included.
+  assert.doesNotThrow(() => normalizeApplicationPackage(structuredClone(app)));
+});
+
 function compile(
   definition: unknown = purchasingModuleDefinition(),
 ): CompileSuccess {
@@ -1900,3 +2407,303 @@ function projectionPayload<T>(compiled: CompileSuccess, familyId: string): T {
   if (!chunk) throw new Error(`no first chunk for ${familyId}`);
   return JSON.parse(new TextDecoder().decode(chunk.canonicalBytes)) as T;
 }
+
+// ===========================================================================
+// PAYABLES: vendor bills, vendor payments and vendor credits (owner rulings
+// PY-A to PY-I), declared behind the product application's `payables` option.
+// ===========================================================================
+
+type PayablesShape = {
+  entities: Array<{ entityId: string }>;
+  fields: Array<{
+    fieldId: string;
+    presence: string;
+    searchable: boolean;
+    numbering?: { prefix: string; sequenceId: string; minimumDigits: number };
+  }>;
+  operations: Array<{
+    operationId: string;
+    effect: { kind: string; capability?: { targetId: string } };
+    permission: { targetId: string };
+    precondition?: unknown;
+    readBack: { targetId: string };
+    tier: string;
+  }>;
+  permissions: Array<{ permissionId: string; action: string }>;
+  queries: Array<{
+    queryId: string;
+    queryType: string;
+    legalEntityScope?: { cardinality: string };
+    exportMaximumResultCount?: number;
+    resolveMatchKeys?: Array<{ field: { targetId: string } }>;
+  }>;
+  relations: Array<{
+    relationId: string;
+    ownership: string;
+    sourceEntity: { targetId: string };
+    targetEntity: { targetId: string };
+  }>;
+  surfaces: Array<{ surfaceId: string }>;
+  capabilityRequirements: Array<{
+    capabilityId: string;
+    declaredEffects: string[];
+  }>;
+};
+
+function payables(): PayablesShape {
+  return purchasingModuleDefinition(namespace, {
+    commercialTerms: true,
+    payables: true,
+  }) as unknown as PayablesShape;
+}
+
+const PAYABLES_LOCALS = [
+  'vendor_bill',
+  'vendor_bill_line',
+  'vendor_payment',
+  'vendor_credit',
+] as const;
+
+test('PAYABLES: a compile without the payables option declares none of it, and payables require commercial terms', () => {
+  for (const definition of [
+    purchasingModuleDefinition(),
+    purchasingModuleDefinition(namespace, { commercialTerms: true }),
+  ])
+    assert.doesNotMatch(JSON.stringify(definition), /vendor_|payables/u);
+  assert.throws(
+    () => purchasingModuleDefinition(namespace, { payables: true }),
+    /payables require the commercial terms/u,
+  );
+  const declared = payables();
+  assert.deepEqual(
+    declared.entities
+      .map((entity) => entity.entityId)
+      .filter((id) => id.includes(':entity.vendor_')),
+    PAYABLES_LOCALS.map((local) => `${namespace}:entity.${local}`),
+  );
+  assert.deepEqual(
+    declared.capabilityRequirements
+      .filter(
+        (requirement) => requirement.capabilityId === PAYABLES_CAPABILITY_ID,
+      )
+      .map((requirement) => requirement.declaredEffects),
+    [['recordMutation']],
+  );
+  // The product application composes it.
+  const composed = composedApplicationDefinition() as unknown as PayablesShape;
+  assert.ok(
+    composed.entities.some(
+      (entity) => entity.entityId === 'northstar.app:entity.vendor_bill',
+    ),
+  );
+});
+
+test('PAYABLES: documents change only as drafts, post once through the payables capability, and are numbered BILL, VPAY and VCM', () => {
+  const declared = payables();
+  for (const [local, prefix] of [
+    ['vendor_bill', 'BILL'],
+    ['vendor_payment', 'VPAY'],
+    ['vendor_credit', 'VCM'],
+  ] as const) {
+    const number = declared.fields.find(
+      (field) => field.fieldId === `${namespace}:field.${local}_number`,
+    );
+    assert.equal(number?.numbering?.prefix, prefix);
+    assert.equal(number?.numbering?.minimumDigits, 6);
+    assert.equal(
+      number?.numbering?.sequenceId,
+      `${namespace}:document_sequence.${local}`,
+    );
+    const state = `${namespace}:field.${local}_state`;
+    for (const action of GENERIC_ACTIONS) {
+      const operation = declared.operations.find(
+        (candidate) =>
+          candidate.operationId === `${namespace}:operation.${local}_${action}`,
+      )!;
+      const evaluate = (value: string) =>
+        evaluateRegisteredOperationPrecondition(
+          operation.precondition as Parameters<
+            typeof evaluateRegisteredOperationPrecondition
+          >[0],
+          { [state]: value } as Parameters<
+            typeof evaluateRegisteredOperationPrecondition
+          >[1],
+        ).outcome;
+      assert.equal(
+        evaluate(`${namespace}:option.${local}_state_draft`),
+        'holds',
+      );
+      assert.equal(
+        evaluate(
+          `${namespace}:option.${local}_state_${local === 'vendor_bill' ? 'open' : 'posted'}`,
+        ),
+        'refused',
+        `${local}_${action} must refuse a posted document`,
+      );
+    }
+  }
+  // A bill's lines declare no guard of their own: the parent-scoped relation
+  // carries the bill's draft guard down to them.
+  assert.ok(
+    declared.operations
+      .filter((operation) =>
+        operation.operationId.startsWith(
+          `${namespace}:operation.vendor_bill_line_`,
+        ),
+      )
+      .every((operation) => operation.precondition === undefined),
+  );
+  assert.deepEqual(
+    declared.relations
+      .filter((relation) => relation.relationId.includes(':relation.vendor_'))
+      .map((relation) => [
+        relation.relationId.split(':relation.')[1],
+        relation.sourceEntity.targetId.split(':entity.')[1],
+        relation.targetEntity.targetId.split(':entity.')[1],
+        relation.ownership,
+      ]),
+    [
+      ['vendor_bill_order', 'vendor_bill', 'purchase_order', 'reference'],
+      [
+        'vendor_bill_line_bill',
+        'vendor_bill_line',
+        'vendor_bill',
+        'parentScopedChild',
+      ],
+      [
+        'vendor_bill_line_order_line',
+        'vendor_bill_line',
+        'purchase_order_line',
+        'reference',
+      ],
+      ['vendor_payment_bill', 'vendor_payment', 'vendor_bill', 'reference'],
+      ['vendor_credit_bill', 'vendor_credit', 'vendor_bill', 'reference'],
+    ],
+  );
+  // Each command runs on the payables capability, confirmed by a person, and
+  // is offered only in the state it applies to.
+  const commands = declared.operations.filter(
+    (operation) =>
+      operation.effect.capability?.targetId === PAYABLES_CAPABILITY_ID,
+  );
+  assert.deepEqual(
+    commands.map((operation) => operation.operationId),
+    [
+      `${namespace}:operation.vendor_bill_post`,
+      `${namespace}:operation.vendor_bill_void`,
+      `${namespace}:operation.vendor_payment_post`,
+      `${namespace}:operation.vendor_credit_post`,
+    ],
+  );
+  for (const [operation, local, holds, refuses] of [
+    [commands[0]!, 'vendor_bill', 'draft', 'open'],
+    [commands[1]!, 'vendor_bill', 'open', 'partially_paid'],
+    [commands[2]!, 'vendor_payment', 'draft', 'posted'],
+    [commands[3]!, 'vendor_credit', 'draft', 'posted'],
+  ] as const) {
+    assert.equal(operation.tier, 'o1');
+    assert.equal(
+      operation.readBack.targetId,
+      `${namespace}:query.${local}_get`,
+    );
+    const evaluate = (state: string) =>
+      evaluateRegisteredOperationPrecondition(
+        operation.precondition as Parameters<
+          typeof evaluateRegisteredOperationPrecondition
+        >[0],
+        {
+          [`${namespace}:field.${local}_state`]: `${namespace}:option.${local}_state_${state}`,
+        } as Parameters<typeof evaluateRegisteredOperationPrecondition>[1],
+      ).outcome;
+    assert.equal(evaluate(holds), 'holds');
+    assert.equal(evaluate(refuses), 'refused');
+  }
+});
+
+test('PAYABLES: twenty-four permissions, entity-owned queries, a bill List export bound and a vendor invoice number that is optional and searchable', () => {
+  const declared = payables();
+  const permissions = declared.permissions.filter((permission) =>
+    permission.permissionId.includes(':permission.vendor_'),
+  );
+  assert.equal(permissions.length, 24);
+  assert.deepEqual(
+    permissions
+      .filter((permission) => permission.action === 'transition')
+      .map((permission) => permission.permissionId.split(':permission.')[1]),
+    [
+      'vendor_bill_post',
+      'vendor_bill_void',
+      'vendor_payment_post',
+      'vendor_credit_post',
+    ],
+  );
+  const queries = declared.queries.filter((query) =>
+    query.queryId.includes(':query.vendor_'),
+  );
+  assert.equal(queries.length, 16);
+  assert.ok(
+    queries.every(
+      (query) => query.legalEntityScope?.cardinality === 'exactlyOne',
+    ),
+    'every payables query is scoped to exactly one company',
+  );
+  assert.deepEqual(
+    queries
+      .filter((query) => query.exportMaximumResultCount !== undefined)
+      .map((query) => [query.queryId, query.exportMaximumResultCount]),
+    [[`${namespace}:query.vendor_bill_list`, 5_000]],
+  );
+  assert.deepEqual(
+    PAYABLES_LOCALS.map((local) =>
+      queries
+        .find(
+          (query) => query.queryId === `${namespace}:query.${local}_resolve`,
+        )
+        ?.resolveMatchKeys?.map((key) => key.field.targetId),
+    ),
+    [
+      [`${namespace}:field.vendor_bill_number`],
+      [`${namespace}:field.vendor_bill_line_item_id`],
+      [`${namespace}:field.vendor_payment_number`],
+      [`${namespace}:field.vendor_credit_number`],
+    ],
+  );
+  const reference = declared.fields.find(
+    (field) =>
+      field.fieldId ===
+      `${namespace}:field.vendor_bill_supplier_invoice_number`,
+  );
+  assert.equal(reference?.presence, 'optional');
+  assert.equal(reference?.searchable, true);
+  // Every family is classified in both registries (entity-owned, same
+  // company as what it names).
+  for (const local of PAYABLES_LOCALS)
+    assert.equal(
+      LEGAL_ENTITY_FAMILY_MAP_V1.find((family) => family.familyId === local)
+        ?.classification,
+      'entityOwned',
+    );
+  for (const [source, target] of [
+    ['vendor_bill', 'purchase_order'],
+    ['vendor_bill_line', 'vendor_bill'],
+    ['vendor_bill_line', 'purchase_order_line'],
+    ['vendor_payment', 'vendor_bill'],
+    ['vendor_credit', 'vendor_bill'],
+  ] as const)
+    assert.ok(
+      LEGAL_ENTITY_RELATION_SEMANTICS_V1.some(
+        (rule) =>
+          rule.sourceFamilyId === source &&
+          rule.targetFamilyId === target &&
+          rule.semantics === 'sameEntity',
+      ),
+      `${source} -> ${target} is a same-company relation`,
+    );
+  // Twelve standard surfaces: a list, a detail and a form for each.
+  assert.equal(
+    declared.surfaces.filter((surface) =>
+      surface.surfaceId.includes(':surface.vendor_'),
+    ).length,
+    12,
+  );
+});

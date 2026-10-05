@@ -1,12 +1,33 @@
+import {
+  invoiceWorkspace,
+  salesWorkspace,
+  salesWorkspaceQueries,
+  packingWorkspace,
+} from '../sales/workspace.js';
 import { catalogModuleDefinition } from '../catalog/definition.js';
 import { inventoryModuleDefinition } from '../inventory/definition.js';
 import { locationModuleDefinition } from '../location/definition.js';
 import { partyModuleDefinition } from '../party/definition.js';
+import { partyWorkspace } from '../party/workspace.js';
 import { purchasingModuleDefinition } from '../purchasing/definition.js';
 import { salesModuleDefinition } from '../sales/definition.js';
+import { orderEntrySurfaces } from './order-entry.js';
+import {
+  declareLists,
+  worklistQueries,
+  worklistSurfaces,
+} from './list-declarations.js';
+import {
+  billWorkspace,
+  purchasingWorkspace,
+  receivingWorkspaceQueries,
+} from '../purchasing/workspace.js';
+import { inventoryDocumentWorkspace } from '../inventory/workspace.js';
+import { itemStockWorkspace } from '../inventory/item-stock-workspace.js';
+import { locationWorkspace } from '../location/workspace.js';
 
-const version = 'v5' as const;
-const normalizationProfileVersion = 'northstar.normalization/v5' as const;
+const version = 'v6' as const;
+const normalizationProfileVersion = 'northstar.normalization/v6' as const;
 
 export const APPLICATION_NAMESPACE = 'northstar.app' as const;
 
@@ -39,16 +60,93 @@ type CollectionName =
  * tree groups by module in that order.
  */
 const MODULE_REGISTRY = Object.freeze([
-  Object.freeze({ create: partyModuleDefinition, moduleName: 'party' }),
-  Object.freeze({ create: catalogModuleDefinition, moduleName: 'catalog' }),
-  Object.freeze({ create: locationModuleDefinition, moduleName: 'location' }),
-  Object.freeze({ create: inventoryModuleDefinition, moduleName: 'inventory' }),
+  Object.freeze({ create: salesModuleDefinition, moduleName: 'sales' }),
   Object.freeze({
-    create: purchasingModuleDefinition,
+    create: (namespace: string) =>
+      purchasingModuleDefinition(namespace, {
+        commercialTerms: true,
+        payables: true,
+      }),
     moduleName: 'purchasing',
   }),
-  Object.freeze({ create: salesModuleDefinition, moduleName: 'sales' }),
+  Object.freeze({
+    // Stock documents recorded like the other documents (INVENTORY-PARITY).
+    create: (namespace: string) =>
+      inventoryModuleDefinition(namespace, { documentEntry: true }),
+    moduleName: 'inventory',
+  }),
+  Object.freeze({
+    create: (namespace: string) =>
+      partyModuleDefinition(namespace, { salesMasterData: true }),
+    moduleName: 'party',
+  }),
+  Object.freeze({
+    // Reorder points, a preferred location and standard costs (REPLENISHMENT).
+    create: (namespace: string) =>
+      catalogModuleDefinition(namespace, {
+        replenishment: true,
+        sellingPrices: true,
+      }),
+    moduleName: 'catalog',
+  }),
+  Object.freeze({
+    // An inventory status with its reason, and the widened types (LOCATIONS).
+    create: (namespace: string) =>
+      locationModuleDefinition(namespace, {
+        hierarchy: true,
+        inventoryStatus: true,
+      }),
+    moduleName: 'location',
+  }),
 ] as const);
+
+/** Record surfaces presented as documents with their own lines and actions. */
+const RECORD_COMPOSITIONS: Readonly<
+  Record<string, (namespace: string) => Record<string, unknown>>
+> = Object.freeze({
+  party_detail: partyWorkspace,
+  sales_order_detail: salesWorkspace,
+  purchase_order_detail: purchasingWorkspace,
+  shipment_detail: packingWorkspace,
+  customer_invoice_detail: invoiceWorkspace,
+  vendor_bill_detail: billWorkspace,
+  inventory_transaction_detail: (namespace: string) =>
+    inventoryDocumentWorkspace(namespace, 'inventory_transaction'),
+  stock_count_detail: (namespace: string) =>
+    inventoryDocumentWorkspace(namespace, 'stock_count'),
+  // An item's stock by location and its movements (INVENTORY-PARITY).
+  item_detail: itemStockWorkspace,
+  // A location's type and inventory status, changed with a reason
+  // (LOCATIONS).
+  location_detail: locationWorkspace,
+});
+
+/**
+ * Commercial documents whose lines lead the page (ruling B): their details --
+ * ship-to, terms, charges, carrier -- follow the line tables, so the lines are
+ * on the first screen however many details a document carries.
+ */
+const LINES_LEAD: ReadonlySet<string> = new Set([
+  'sales_order_detail',
+  'purchase_order_detail',
+  'customer_invoice_detail',
+  'vendor_bill_detail',
+]);
+
+/** Workspaces that read their record through a read-model query. */
+const RECORD_DATA_SOURCES: Readonly<Record<string, string>> = Object.freeze({
+  sales_order_detail: 'commercial_order_get',
+  purchase_order_detail: 'commercial_purchase_order_get',
+});
+
+/**
+ * Lists that read their rows through a read-model clone of their query, such
+ * as purchase orders with their totals (ORDER-PARITY). Swapped after the
+ * worklists are cut from their source Lists, which keep reading plain clones.
+ */
+const LIST_DATA_SOURCES: Readonly<Record<string, string>> = Object.freeze({
+  purchase_order_list: 'commercial_purchase_order_list',
+});
 
 /** The mounted module names, in composition order, for callers that assert on the set. */
 export const COMPOSED_MODULE_NAMES = Object.freeze(
@@ -116,7 +214,22 @@ export function composedApplicationDefinition(): Record<string, unknown> {
     collection(definition, 'capabilityRequirements').slice(1),
   );
 
-  return {
+  const moduleQueries = salesWorkspaceQueries(
+    APPLICATION_NAMESPACE,
+    merged(definitions, 'queries') as Record<string, unknown>[],
+  );
+  const queries = [
+    ...moduleQueries,
+    // A worklist reads its own clone of its source List's query.
+    ...worklistQueries(APPLICATION_NAMESPACE, moduleQueries),
+    // A receipt's lines with what each can still reverse (ORDER-PARITY).
+    ...receivingWorkspaceQueries(
+      APPLICATION_NAMESPACE,
+      merged(definitions, 'queries') as Record<string, unknown>[],
+    ),
+  ];
+
+  return withDeclaredLists({
     assertions: merged(definitions, 'assertions'),
     capabilityRequirements: [sharedCapability, ...moduleCapabilities],
     entities: merged(definitions, 'entities'),
@@ -137,12 +250,123 @@ export function composedApplicationDefinition(): Record<string, unknown> {
       version: '1.0.0',
     },
     permissions: merged(definitions, 'permissions'),
-    queries: merged(definitions, 'queries'),
+    queries,
     relations: merged(definitions, 'relations'),
     schemaVersion: version,
     stateMachines: merged(definitions, 'stateMachines'),
     storageMappings: merged(definitions, 'storageMappings'),
-    surfaces: merged(definitions, 'surfaces'),
+    surfaces: orderEntrySurfaces(
+      APPLICATION_NAMESPACE,
+      // Worklists join the workspace pass as Lists of their own.
+      withWorklistSurfaces(merged(definitions, 'surfaces'), queries).map(
+        (surface) => {
+          if (!isRecord(surface))
+            throw new TypeError('surface must be an object');
+          const local = String(surface.surfaceId).split(':surface.')[1] ?? '';
+          const composition = RECORD_COMPOSITIONS[local]?.(
+            APPLICATION_NAMESPACE,
+          );
+          if (!composition) return surface;
+          // A workspace may read its record with a read model's figures, such as
+          // a sales order's totals; the record query stays the plain get.
+          const dataSource = RECORD_DATA_SOURCES[local];
+          const slots = surface.slots as Record<string, unknown>[];
+          const slot = (name: string, suffix: string, orderKey: number) => ({
+            kind: 'surfaceSlot',
+            schemaVersion: version,
+            slot: name,
+            slotId: `${String(surface.surfaceId).replace(':surface.', ':slot.')}_${suffix}`,
+            orderKey,
+            content: {
+              kind: 'opaqueSurfaceContentReference',
+              schemaVersion: version,
+              targetId: `${APPLICATION_NAMESPACE}:capability.standard_surface_content`,
+            },
+          });
+          return {
+            ...surface,
+            ...(dataSource
+              ? {
+                  dataSource: {
+                    kind: 'queryReference',
+                    schemaVersion: version,
+                    targetId: `${APPLICATION_NAMESPACE}:query.${dataSource}`,
+                  },
+                }
+              : {}),
+            composition,
+            slots: [
+              ...slots.map((slot) => ({
+                ...slot,
+                ...(slot.slot === 'keyFacts' ? { orderKey: 90 } : {}),
+                ...(slot.slot === 'sections' && LINES_LEAD.has(local)
+                  ? { orderKey: 70 }
+                  : {}),
+              })),
+              // A composition renders its fields in `sections`; a read-only
+              // document that never declared one gains it here.
+              ...(slots.some((value) => value.slot === 'sections')
+                ? []
+                : [
+                    slot(
+                      'sections',
+                      'sections',
+                      LINES_LEAD.has(local) ? 70 : 50,
+                    ),
+                  ]),
+              slot('childTables', 'children', 60),
+            ],
+          };
+        },
+      ),
+      merged(definitions, 'queries') as Record<string, unknown>[],
+    ),
+  });
+}
+
+/** A worklist's List surface joins the composed surfaces beside its source. */
+function withWorklistSurfaces(
+  surfaces: unknown[],
+  queries: readonly Record<string, unknown>[],
+): unknown[] {
+  return [
+    ...surfaces,
+    ...worklistSurfaces(
+      APPLICATION_NAMESPACE,
+      surfaces as Record<string, unknown>[],
+      queries,
+    ),
+  ];
+}
+
+/** Declared Lists apply after the workspace pass, over the final surfaces. */
+function withDeclaredLists<
+  T extends {
+    queries: Record<string, unknown>[];
+    surfaces: Record<string, unknown>[];
+  },
+>(application: T): T {
+  return {
+    ...application,
+    surfaces: declareLists(
+      APPLICATION_NAMESPACE,
+      application.surfaces.map((surface) => {
+        const local = String(surface.surfaceId).split(':surface.')[1] ?? '';
+        const queryId = `${APPLICATION_NAMESPACE}:query.${LIST_DATA_SOURCES[local] ?? ''}`;
+        // Only when the application composes the read-model query.
+        return Object.hasOwn(LIST_DATA_SOURCES, local) &&
+          application.queries.some((query) => query.queryId === queryId)
+          ? {
+              ...surface,
+              dataSource: {
+                kind: 'queryReference',
+                schemaVersion: version,
+                targetId: queryId,
+              },
+            }
+          : surface;
+      }),
+    ),
   };
 }
 
@@ -153,6 +377,9 @@ export const APPLICATION_IDS = Object.freeze({
       baseUnit: `${APPLICATION_NAMESPACE}:field.item_base_unit`,
       description: `${APPLICATION_NAMESPACE}:field.item_description`,
       name: `${APPLICATION_NAMESPACE}:field.item_name`,
+      priceCad: `${APPLICATION_NAMESPACE}:field.item_price_cad`,
+      priceEur: `${APPLICATION_NAMESPACE}:field.item_price_eur`,
+      priceUsd: `${APPLICATION_NAMESPACE}:field.item_price_usd`,
       sku: `${APPLICATION_NAMESPACE}:field.item_sku`,
     }),
     formSurfaceId: `${APPLICATION_NAMESPACE}:surface.item_form`,
@@ -165,6 +392,16 @@ export const APPLICATION_IDS = Object.freeze({
       code: `${APPLICATION_NAMESPACE}:field.location_code`,
       locationType: `${APPLICATION_NAMESPACE}:field.location_type`,
       name: `${APPLICATION_NAMESPACE}:field.location_name`,
+      status: `${APPLICATION_NAMESPACE}:field.location_status`,
+      statusChangedAt: `${APPLICATION_NAMESPACE}:field.location_status_changed_at`,
+      statusReason: `${APPLICATION_NAMESPACE}:field.location_status_reason`,
+    }),
+    statusOptionIds: Object.freeze({
+      damaged: `${APPLICATION_NAMESPACE}:option.location_status_damaged`,
+      inTransit: `${APPLICATION_NAMESPACE}:option.location_status_in_transit`,
+      quarantine: `${APPLICATION_NAMESPACE}:option.location_status_quarantine`,
+      returnPending: `${APPLICATION_NAMESPACE}:option.location_status_return_pending`,
+      usable: `${APPLICATION_NAMESPACE}:option.location_status_usable`,
     }),
     formSurfaceId: `${APPLICATION_NAMESPACE}:surface.location_form`,
     listQueryId: `${APPLICATION_NAMESPACE}:query.location_list`,
@@ -172,16 +409,68 @@ export const APPLICATION_IDS = Object.freeze({
   }),
   namespace: APPLICATION_NAMESPACE,
   packageId,
+  taxCode: Object.freeze({
+    createOperationId: `${APPLICATION_NAMESPACE}:operation.tax_code_create`,
+    fieldIds: Object.freeze({
+      code: `${APPLICATION_NAMESPACE}:field.tax_code_code`,
+      name: `${APPLICATION_NAMESPACE}:field.tax_code_name`,
+      ratePercent: `${APPLICATION_NAMESPACE}:field.tax_code_rate_percent`,
+    }),
+  }),
   party: Object.freeze({
+    address: Object.freeze({
+      createOperationId: `${APPLICATION_NAMESPACE}:operation.party_address_create`,
+      fieldIds: Object.freeze({
+        city: `${APPLICATION_NAMESPACE}:field.party_address_city`,
+        country: `${APPLICATION_NAMESPACE}:field.party_address_country`,
+        label: `${APPLICATION_NAMESPACE}:field.party_address_label`,
+        postalCode: `${APPLICATION_NAMESPACE}:field.party_address_postal_code`,
+        recipient: `${APPLICATION_NAMESPACE}:field.party_address_recipient`,
+        region: `${APPLICATION_NAMESPACE}:field.party_address_region`,
+        street: `${APPLICATION_NAMESPACE}:field.party_address_street`,
+      }),
+      partyRelationId: `${APPLICATION_NAMESPACE}:relation.party_address_party`,
+    }),
     createOperationId: `${APPLICATION_NAMESPACE}:operation.party_create`,
     fieldIds: Object.freeze({
       contactSummary: `${APPLICATION_NAMESPACE}:field.party_contact_summary`,
+      defaultCurrency: `${APPLICATION_NAMESPACE}:field.party_default_currency`,
+      defaultSalespersonPartyId: `${APPLICATION_NAMESPACE}:field.party_default_salesperson_party_id`,
+      defaultShipToAddressId: `${APPLICATION_NAMESPACE}:field.party_default_ship_to_address_id`,
+      defaultTaxCodeId: `${APPLICATION_NAMESPACE}:field.party_default_tax_code_id`,
       name: `${APPLICATION_NAMESPACE}:field.party_name`,
       number: `${APPLICATION_NAMESPACE}:field.party_number`,
+      paymentTerms: `${APPLICATION_NAMESPACE}:field.party_payment_terms`,
+    }),
+    currencyOptionIds: Object.freeze({
+      cad: `${APPLICATION_NAMESPACE}:option.party_default_currency_cad`,
+      eur: `${APPLICATION_NAMESPACE}:option.party_default_currency_eur`,
+      usd: `${APPLICATION_NAMESPACE}:option.party_default_currency_usd`,
+    }),
+    paymentTermOptionIds: Object.freeze({
+      dueOnReceipt: `${APPLICATION_NAMESPACE}:option.party_payment_terms_due_on_receipt`,
+      net15: `${APPLICATION_NAMESPACE}:option.party_payment_terms_net_15`,
+      net30: `${APPLICATION_NAMESPACE}:option.party_payment_terms_net_30`,
+      net45: `${APPLICATION_NAMESPACE}:option.party_payment_terms_net_45`,
+      net60: `${APPLICATION_NAMESPACE}:option.party_payment_terms_net_60`,
     }),
     formSurfaceId: `${APPLICATION_NAMESPACE}:surface.party_form`,
     listQueryId: `${APPLICATION_NAMESPACE}:query.party_list`,
     listSurfaceId: `${APPLICATION_NAMESPACE}:surface.party_list`,
+    role: Object.freeze({
+      createOperationId: `${APPLICATION_NAMESPACE}:operation.party_role_create`,
+      fieldIds: Object.freeze({
+        kind: `${APPLICATION_NAMESPACE}:field.party_role_kind`,
+        status: `${APPLICATION_NAMESPACE}:field.party_role_status`,
+      }),
+      optionIds: Object.freeze({
+        active: `${APPLICATION_NAMESPACE}:option.active`,
+        customer: `${APPLICATION_NAMESPACE}:option.customer`,
+        salesperson: `${APPLICATION_NAMESPACE}:option.salesperson`,
+        supplier: `${APPLICATION_NAMESPACE}:option.supplier`,
+      }),
+      partyRelationId: `${APPLICATION_NAMESPACE}:relation.party_role_party`,
+    }),
   }),
   purchasing: Object.freeze({
     cancelOperationId: `${APPLICATION_NAMESPACE}:operation.purchase_order_cancel`,

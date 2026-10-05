@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import {
+  SurfaceCompositionSchema,
+  SURFACE_ARCHETYPES,
+} from '@north-star/canonical-model';
+import { composedApplicationDefinition } from '../../packages/domain/src/index.js';
 
 import { checkUxGrammarPin } from '../../packages/dev-tooling/src/surface-runtime-seam.js';
 import {
@@ -19,6 +24,28 @@ const requiredPaths = [
 ] as const;
 
 test('ux-grammar skill is loadable and pinned to plan, canonical, and runtime vocabulary', () => {
+  assert.deepEqual(checkUxGrammarPin(process.cwd()).violations, []);
+});
+
+test('Task dialog presentation retains the Record archetype and explicit page fallback', () => {
+  const definition = composedApplicationDefinition();
+  const surface = (definition.surfaces as Array<Record<string, unknown>>).find(
+    (surface) =>
+      String(surface.surfaceId).endsWith('surface.sales_order_detail'),
+  )!;
+  const composition = SurfaceCompositionSchema.parse(surface.composition);
+  assert.equal(surface.archetype, 'record');
+  assert.deepEqual(composition.presentation?.task, {
+    mode: 'nativeDialog',
+    fallback: 'page',
+  });
+  assert.deepEqual([...SURFACE_ARCHETYPES].sort(), [
+    'builder',
+    'home',
+    'list',
+    'record',
+    'task',
+  ]);
   assert.deepEqual(checkUxGrammarPin(process.cwd()).violations, []);
 });
 

@@ -277,3 +277,136 @@ function dto(recordId: string, name: string): SemanticRecordDto {
     values: { [LOCATION_IDS.fieldIds.name]: name },
   };
 }
+
+test('LOCATIONS: the product mounts Location with an inventory status, the reason and time it changed and the widened types; the harness keeps its Location', () => {
+  type Definition = {
+    fields: Array<{
+      fieldId: string;
+      presence: string;
+      defaultSemantics: string;
+      defaultValue?: { value: string };
+      fieldType: { kind: string; options?: Array<{ optionId: string }> };
+    }>;
+    queries: Array<{
+      queryId: string;
+      selections: Array<{ field: { targetId: string } }>;
+    }>;
+  };
+  const ns = LOCATION_IDS.namespace;
+  const plain = locationModuleDefinition() as unknown as Definition;
+  const product = locationModuleDefinition(ns, {
+    inventoryStatus: true,
+  }) as unknown as Definition;
+  const type = (definition: Definition) =>
+    definition.fields
+      .find((value) => value.fieldId === LOCATION_IDS.fieldIds.locationType)!
+      .fieldType.options!.map((option) => option.optionId);
+  // The harness compiles the Location it always has.
+  assert.deepEqual(
+    plain.fields.map((value) => value.fieldId),
+    [
+      LOCATION_IDS.fieldIds.code,
+      LOCATION_IDS.fieldIds.name,
+      LOCATION_IDS.fieldIds.locationType,
+    ],
+  );
+  assert.deepEqual(type(plain), [
+    `${ns}:option.warehouse`,
+    `${ns}:option.store`,
+  ]);
+  // The product adds three fields and appends seven types.
+  assert.deepEqual(
+    product.fields.map((value) => value.fieldId),
+    [
+      LOCATION_IDS.fieldIds.code,
+      LOCATION_IDS.fieldIds.name,
+      LOCATION_IDS.fieldIds.locationType,
+      LOCATION_IDS.fieldIds.status,
+      LOCATION_IDS.fieldIds.statusReason,
+      LOCATION_IDS.fieldIds.statusChangedAt,
+    ],
+  );
+  assert.deepEqual(
+    type(product),
+    [
+      'warehouse',
+      'store',
+      'location_type_storage',
+      'location_type_receiving',
+      'location_type_shipping',
+      'location_type_quarantine',
+      'location_type_in_transit',
+      'location_type_scrap',
+      'location_type_yard',
+    ].map((local) => `${ns}:option.${local}`),
+  );
+  const status = product.fields.find(
+    (value) => value.fieldId === LOCATION_IDS.fieldIds.status,
+  )!;
+  assert.equal(status.presence, 'optional');
+  assert.equal(status.defaultSemantics, 'declaredDefault');
+  assert.equal(status.defaultValue?.value, LOCATION_IDS.statusOptionIds.usable);
+  assert.deepEqual(
+    status.fieldType.options!.map((option) => option.optionId),
+    Object.values({
+      usable: LOCATION_IDS.statusOptionIds.usable,
+      quarantine: LOCATION_IDS.statusOptionIds.quarantine,
+      damaged: LOCATION_IDS.statusOptionIds.damaged,
+      inTransit: LOCATION_IDS.statusOptionIds.inTransit,
+      returnPending: LOCATION_IDS.statusOptionIds.returnPending,
+    }),
+  );
+  // Every query reads them; all three are optional, so a create need not
+  // state them.
+  for (const query of product.queries)
+    assert.equal(query.selections.length, 6, query.queryId);
+  for (const fieldId of [
+    LOCATION_IDS.fieldIds.status,
+    LOCATION_IDS.fieldIds.statusReason,
+    LOCATION_IDS.fieldIds.statusChangedAt,
+  ])
+    assert.equal(
+      product.fields.find((value) => value.fieldId === fieldId)!.presence,
+      'optional',
+    );
+});
+
+test('LOCATIONS slice 2: the product mounts Location with an optional parent location, chosen at creation; the harness has no relation', () => {
+  type Relation = {
+    relationId: string;
+    required: boolean;
+    ownership: string;
+    archiveBehavior: string;
+    sourceEntity: { targetId: string };
+    targetEntity: { targetId: string };
+  };
+  const ns = LOCATION_IDS.namespace;
+  const plain = locationModuleDefinition() as { relations: Relation[] };
+  const product = locationModuleDefinition(ns, {
+    hierarchy: true,
+    inventoryStatus: true,
+  }) as { relations: Relation[] };
+  assert.deepEqual(plain.relations, []);
+  assert.deepEqual(
+    product.relations.map((relation) => [
+      relation.relationId,
+      relation.sourceEntity.targetId,
+      relation.targetEntity.targetId,
+      relation.required,
+      relation.ownership,
+      relation.archiveBehavior,
+    ]),
+    [
+      [
+        `${ns}:relation.location_parent`,
+        LOCATION_IDS.entityIds.location,
+        LOCATION_IDS.entityIds.location,
+        // A top-level warehouse names none.
+        false,
+        'reference',
+        // A location holding others cannot be archived first.
+        'restrict',
+      ],
+    ],
+  );
+});

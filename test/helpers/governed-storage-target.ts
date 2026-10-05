@@ -12,6 +12,7 @@ interface ReleaseArtifacts {
     contentHash: string;
     canonicalBytesBase64: string;
   }[];
+  readonly releaseRoot: string;
 }
 
 /** Read the actual checked-in governed head; never compile an isolated fixture. */
@@ -24,18 +25,26 @@ export async function governedStorageTargetArtifact(): Promise<{
   readonly contentHash: string;
   readonly payload: StorageTargetPayloadV1;
 }> {
-  const release = JSON.parse(
-    await readFile(
-      resolve(__dirname, '../../apps/web/release/app.compiled.json'),
-      'utf8',
-    ),
-  ) as { application?: ReleaseArtifacts; applications?: ReleaseArtifacts[] };
-  const head = release.applications?.at(-1) ?? release.application;
-  assert.ok(head);
+  const projection = await governedProjection<StorageTargetPayloadV1>(
+    'northstar.compiler:projection-family.storage-target',
+  );
+  assert.equal(projection.payload.kind, 'storageTargetPayload');
+  return projection;
+}
+
+/** The governed head's release root, as the activated release records it. */
+export async function governedReleaseRoot(): Promise<string> {
+  return (await governedHead()).releaseRoot;
+}
+
+/** One projection family's payload from the governed head. */
+export async function governedProjection<T>(familyId: string): Promise<{
+  readonly contentHash: string;
+  readonly payload: T;
+}> {
+  const head = await governedHead();
   const reference = head.releaseManifest.projections.find(
-    (projection) =>
-      projection.familyId ===
-      'northstar.compiler:projection-family.storage-target',
+    (projection) => projection.familyId === familyId,
   );
   assert.ok(reference);
   const artifact = head.artifacts.find(
@@ -54,9 +63,22 @@ export async function governedStorageTargetArtifact(): Promise<{
       candidate.contentHash === manifest.chunks[0]!.contentHash,
   );
   assert.ok(chunk);
-  const target = JSON.parse(
-    Buffer.from(chunk.canonicalBytesBase64, 'base64').toString('utf8'),
-  ) as StorageTargetPayloadV1;
-  assert.equal(target.kind, 'storageTargetPayload');
-  return { contentHash: chunk.contentHash, payload: target };
+  return {
+    contentHash: chunk.contentHash,
+    payload: JSON.parse(
+      Buffer.from(chunk.canonicalBytesBase64, 'base64').toString('utf8'),
+    ) as T,
+  };
+}
+
+async function governedHead(): Promise<ReleaseArtifacts> {
+  const release = JSON.parse(
+    await readFile(
+      resolve(__dirname, '../../apps/web/release/app.compiled.json'),
+      'utf8',
+    ),
+  ) as { application?: ReleaseArtifacts; applications?: ReleaseArtifacts[] };
+  const head = release.applications?.at(-1) ?? release.application;
+  assert.ok(head);
+  return head;
 }
