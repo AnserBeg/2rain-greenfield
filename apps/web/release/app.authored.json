@@ -42186,7 +42186,7 @@
       "joinEligibility": "query",
       "kind": "relationDefinition",
       "orderKey": 40,
-      "ownership": "parentScopedChild",
+      "ownership": "reference",
       "relationId": "northstar.app:relation.returnable_event_custody",
       "required": true,
       "schemaVersion": "v6",
@@ -61142,7 +61142,7 @@
             "parent": {
               "relationId": "northstar.app:relation.returnable_event_custody",
               "value": { "source": "record", "field": "recordId" },
-              "ownership": "parentScopedChild"
+              "ownership": "reference"
             },
             "columns": [
               {

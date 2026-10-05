@@ -854,7 +854,7 @@ export function returnableCustodyWorkspace(
         parent: {
           relationId: id('relation', 'returnable_event_custody'),
           value: record('recordId'),
-          ownership: 'parentScopedChild',
+          ownership: 'reference',
         },
         columns: [
           column('event_date', 'Date', 10, event('event_date')),

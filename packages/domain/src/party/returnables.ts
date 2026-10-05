@@ -539,11 +539,14 @@ export function returnablesDeclarations(
         'reference',
         30,
       ),
+      // A reference, not an owned child: an owned child is written only
+      // while its parent's own writes are admitted, and a custody record
+      // takes events long after it stops admitting generic writes.
       relation(
         'returnable_event_custody',
         'returnable_event',
         'returnable_custody',
-        'parentScopedChild',
+        'reference',
         40,
       ),
     ],
