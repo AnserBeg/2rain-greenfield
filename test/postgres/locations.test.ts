@@ -347,11 +347,18 @@ test(
             }),
           )
         ).html;
+        // The order lists the line again among its priced lines: read the
+        // Fulfillment section's row alone.
+        const section =
+          new RegExp(
+            `<section id="${ns}:dataset\\.fulfillment_lines"[\\s\\S]*?</section>`,
+            'u',
+          ).exec(html)?.[0] ?? '';
         const row =
           new RegExp(
             `<tr data-compact-card="true" data-presented-row="true" data-record-id="${scenario.line}"[^>]*>([\\s\\S]*?)</tr>`,
             'u',
-          ).exec(html)?.[1] ?? '';
+          ).exec(section)?.[1] ?? '';
         return [
           rows(html, 'fulfillment_lines').get(scenario.line)?.Short,
           /<span class="composition-cell-label">Free stock now<\/span> ([^<]*)<\/span>/u.exec(

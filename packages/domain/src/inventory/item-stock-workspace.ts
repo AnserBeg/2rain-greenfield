@@ -119,7 +119,7 @@ export function itemStockWorkspace(namespace: string): Record<string, unknown> {
         presentation: {
           selection: 'none',
           description:
-            'On hand is the stock posted at the location in this company and Reserved what reservations still hold there. Available is on hand less reserved at a usable location, and none elsewhere. Missing data is not zero stock.',
+            'On hand is the stock posted at the location in this company and Reserved what reservations still hold there. Available is on hand less reserved at a usable location, and none elsewhere. Missing or unavailable data is not zero stock.',
         },
         label: 'Stock by location',
         orderKey: 10,

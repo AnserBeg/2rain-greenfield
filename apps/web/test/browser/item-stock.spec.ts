@@ -67,9 +67,11 @@ test('the item page shows stock by location and the recent movements, in the com
     await expect(
       stock.getByRole('heading', { name: 'Stock by location' }),
     ).toBeVisible();
+    // Each location names its inventory status (LOCATIONS): both usable.
     expect(await rows(stock)).toEqual([
       {
         Location: 'CAL-WH',
+        Status: 'Usable',
         'On hand': '13',
         Reserved: '1',
         Available: '12',
@@ -77,6 +79,7 @@ test('the item page shows stock by location and the recent movements, in the com
       },
       {
         Location: 'VAN-WH',
+        Status: 'Usable',
         'On hand': '6',
         Reserved: '0',
         Available: '6',
