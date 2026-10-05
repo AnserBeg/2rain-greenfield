@@ -1,4 +1,4 @@
-import { isWorklist } from './list-declarations.js';
+import { isWorklist, worklistPlacement } from './list-declarations.js';
 
 /** Each document List's own name; any other editor's List keeps its label. */
 const DOCUMENT_LIST_LABELS: Readonly<Record<string, string>> = {
@@ -14,6 +14,15 @@ export function orderEntrySurfaces(
   queries: readonly Record<string, unknown>[] = [],
 ) {
   const id = (type: string, local: string) => `${namespace}:${type}.${local}`;
+  // Whether the item's get reads a field: the replenishment fields exist only
+  // where the application mounts Catalog with them (REPLENISHMENT).
+  const itemGet = queries.find(
+    (query) => query.queryId === id('query', 'item_get'),
+  );
+  const itemReads = (name: string) =>
+    ((itemGet?.selections ?? []) as { field?: { targetId?: unknown } }[]).some(
+      (selection) => selection.field?.targetId === id('field', name),
+    );
   const company = {
     companyQueryId: id('query', 'legal_entity_list'),
     companyNameFieldId: id('field', 'legal_entity_name'),
@@ -239,6 +248,19 @@ export function orderEntrySurfaces(
         sourceFieldId: id('field', `item_price_${code}`),
       })),
     };
+    // A purchase line's unit cost starts from the item's standard cost in
+    // the order currency (ruling PC), as a sales line's price does from its
+    // price; a cost that differs from it is the buyer's to keep.
+    const costInCurrency = {
+      headerFieldId: id('field', `${local}_currency`),
+      cases: (['cad', 'usd', 'eur'] as const).map((code) => ({
+        value: code.toUpperCase(),
+        sourceFieldId: id('field', `item_standard_cost_${code}`),
+      })),
+    };
+    const standardCosts = (['cad', 'usd', 'eur'] as const).every((code) =>
+      itemReads(`item_standard_cost_${code}`),
+    );
     const shipTo = {
       reference: {
         queryId: id('query', 'party_address_list'),
@@ -461,7 +483,18 @@ export function orderEntrySurfaces(
               ),
             ]
           : [
-              field(`${local}_line_unit_price`, 'Unit cost'),
+              field(
+                `${local}_line_unit_price`,
+                'Unit cost',
+                standardCosts
+                  ? {
+                      defaultFrom: {
+                        referenceFieldId: id('field', `${local}_line_item_id`),
+                        sourceByHeader: costInCurrency,
+                      },
+                    }
+                  : {},
+              ),
               field(`${local}_line_discount_percent`, 'Discount %'),
               field(`${local}_line_tax_code_id`, 'Tax code', {
                 ...taxCode,
@@ -696,6 +729,13 @@ export function orderEntrySurfaces(
     // and movements, entered like the Posted stock List and authorized by
     // that List's query (INVENTORY-PARITY).
     const stockPage = role === 'record' && local === 'item';
+    // A List over shared items read in one company (REPLENISHMENT): listed
+    // in another module's group and entered like the Posted stock List.
+    const placement = role === 'list' ? worklistPlacement(name) : null;
+    // Three Lists read items now; the Items List keeps the item's page and
+    // form as their workspace -- the picker, breadcrumb and navigation
+    // authority for an item (REPLENISHMENT).
+    const itemOwned = role !== 'list' && local === 'item';
     const listQueryId = String(
       (surface.dataSource as { targetId?: unknown } | undefined)?.targetId,
     );
@@ -723,9 +763,14 @@ export function orderEntrySurfaces(
                 ? 'contextual'
                 : 'setup'
             : 'contextual',
+        ...(placement
+          ? { navigationModuleId: id('module', placement.navigationModule) }
+          : {}),
         ...(owner || master
           ? { ownerSurfaceId: id('surface', `${owner ?? master}_list`) }
-          : {}),
+          : itemOwned
+            ? { ownerSurfaceId: id('surface', 'item_list') }
+            : {}),
         ...(editor ||
         owner ||
         worklist ||
@@ -739,12 +784,39 @@ export function orderEntrySurfaces(
                   'query',
                   stockPage
                     ? 'posted_stock_balance_list'
-                    : `${owner ?? local}_list`,
+                    : (placement?.authorization ?? `${owner ?? local}_list`),
                 ),
               },
             }
           : {}),
       },
+      // The item's preferred location is chosen from the locations by name;
+      // the field keeps the location's id (REPLENISHMENT).
+      ...(role === 'form' &&
+      local === 'item' &&
+      itemReads('item_preferred_location_id')
+        ? {
+            form: {
+              kind: 'surfaceForm',
+              schemaVersion: 'v6',
+              references: [
+                {
+                  field: id('field', 'item_preferred_location_id'),
+                  query: {
+                    kind: 'queryReference',
+                    schemaVersion: 'v6',
+                    targetId: id('query', 'location_list'),
+                  },
+                  labelField: {
+                    kind: 'fieldReference',
+                    schemaVersion: 'v6',
+                    targetId: id('field', 'location_name'),
+                  },
+                },
+              ],
+            },
+          }
+        : {}),
       ...(editor && role === 'list' && DOCUMENT_LIST_LABELS[local]
         ? { label: DOCUMENT_LIST_LABELS[local] }
         : {}),

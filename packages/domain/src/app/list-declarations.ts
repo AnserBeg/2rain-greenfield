@@ -44,6 +44,11 @@ export interface ListSpec {
     readonly open?: true;
     /** Only rows whose date in this field is before today (UTC). */
     readonly before?: string;
+    /** Only rows whose band figure holds one of these values. */
+    readonly band?: {
+      readonly figure: string;
+      readonly values: readonly string[];
+    };
   }[];
   readonly filters: readonly {
     readonly local: string;
@@ -89,6 +94,72 @@ export interface ListSpec {
     };
     /** A dataset of the record page's composition. */
     readonly section?: string;
+  }[];
+  /**
+   * Per row, figures the list statement computes before the count and the
+   * page, in the canonical `surface.list.figures` shape with query ids as
+   * strings (REPLENISHMENT).
+   */
+  readonly figures?: ListFiguresSpec;
+}
+
+/** Rows of a list query that hold the listed record's id as text. */
+interface ListFigureRowsSpec {
+  readonly query: string;
+  readonly match: string;
+  readonly quantity?: string;
+}
+
+/** Only rows whose parent holds one of these values in a field. */
+interface ListFigureWithinSpec {
+  readonly relation: string;
+  readonly query: string;
+  readonly field: string;
+  readonly values: readonly string[];
+}
+
+type ListFigureOperandSpec =
+  { readonly figure: string } | { readonly field: string };
+
+type ListFigureThresholdSpec =
+  { readonly field: string } | { readonly value: string };
+
+interface ListFiguresSpec {
+  readonly sums: readonly {
+    readonly figureId: string;
+    readonly rows: ListFigureRowsSpec;
+    readonly within?: ListFigureWithinSpec;
+    readonly related?: {
+      readonly query: string;
+      readonly relation: string;
+      readonly quantity: string;
+    };
+    readonly sum: 'rows' | 'related' | 'remaining';
+  }[];
+  readonly totals?: readonly {
+    readonly figureId: string;
+    readonly plus: readonly ListFigureOperandSpec[];
+    readonly minus: readonly ListFigureOperandSpec[];
+    readonly floor?: 'zero';
+  }[];
+  readonly bands?: readonly {
+    readonly figureId: string;
+    readonly of: string;
+    readonly cases: readonly {
+      readonly value: string;
+      readonly label: string;
+      readonly below?: ListFigureThresholdSpec;
+      readonly atMost?: ListFigureThresholdSpec;
+    }[];
+    readonly otherwise: { readonly value: string; readonly label: string };
+  }[];
+  readonly latest?: readonly {
+    readonly figureId: string;
+    readonly rows: { readonly query: string; readonly match: string };
+    readonly within: ListFigureWithinSpec;
+    readonly by: string;
+    readonly value: string;
+    readonly label: { readonly query: string; readonly field: string };
   }[];
 }
 
@@ -633,6 +704,256 @@ function expectedReceiptList(namespace: string): ListSpec {
 /** The Expected receipts List surface and the query it reads, by local id. */
 export const EXPECTED_RECEIPT_LIST = 'expected_receipt_list';
 
+/** Stock by item and the Buying worklist (REPLENISHMENT), by local id. */
+export const ITEM_STOCK_LIST = 'item_stock_list';
+export const ITEM_BUYING_LIST = 'item_buying_list';
+
+/**
+ * Stock by item and the Buying worklist (REPLENISHMENT): one row per catalog
+ * item, with figures the list statement adds up in the one company the List
+ * is entered with. On hand is the item's posted stock; Reserved what its live
+ * reservations still hold; Incoming what released purchase orders still have
+ * to receive, line by line; Open demand what confirmed sales orders still
+ * have to ship, line by line. Projected is on hand plus incoming less open
+ * demand -- not available stock, since open demand already holds the units
+ * reservations set aside. An item is due at or below its reorder point; one
+ * without a reorder point never is, and without a reorder-up-to level its
+ * suggestion is unstated. Figures are shown, never sorted.
+ */
+function itemFigureList(
+  namespace: string,
+  local: typeof ITEM_STOCK_LIST | typeof ITEM_BUYING_LIST,
+): ListSpec {
+  const field = (name: string) => `${namespace}:field.${name}`;
+  const query = (name: string) => `${namespace}:query.${name}`;
+  const relation = (name: string) => `${namespace}:relation.${name}`;
+  const figure = (name: string) => `${namespace}:list_figure.${local}_${name}`;
+  const band = (name: string) => `${namespace}:list_band.${local}_${name}`;
+  const buying = local === ITEM_BUYING_LIST;
+  const lines = (
+    document: 'purchase_order' | 'sales_order',
+    states: string[],
+  ) =>
+    ({
+      relation: relation(`${document}_line_order`),
+      query: query(`${document}_list`),
+      field: `${namespace}:derived_state_field.machine.${document}_lifecycle`,
+      values: states.map((state) => `${namespace}:state.${document}_${state}`),
+    }) as const;
+  const sums: ListFiguresSpec['sums'] = [
+    {
+      figureId: figure('on_hand'),
+      rows: {
+        query: query('posted_stock_balance_list'),
+        match: field('posted_stock_balance_item_id'),
+        quantity: field('posted_stock_balance_posted_quantity'),
+      },
+      sum: 'rows',
+    },
+    // What each reservation still holds: nothing once released or consumed,
+    // and a draft has no balance yet.
+    {
+      figureId: figure('reserved'),
+      rows: {
+        query: query('workspace_stock_reservations'),
+        match: field('reservation_item_id'),
+      },
+      related: {
+        query: query('reservation_balance_list'),
+        relation: relation('reservation_balance_reservation'),
+        quantity: field('reservation_balance_remaining_quantity'),
+      },
+      sum: 'related',
+    },
+    {
+      figureId: figure('incoming'),
+      rows: {
+        query: query('purchase_order_line_list'),
+        match: field('purchase_order_line_item_id'),
+        quantity: field('purchase_order_line_ordered_quantity'),
+      },
+      within: lines('purchase_order', ['released']),
+      related: {
+        query: query('purchase_order_received_list'),
+        relation: relation('purchase_order_received_order_line'),
+        quantity: field('purchase_order_received_received_quantity'),
+      },
+      sum: 'remaining',
+    },
+    // The plain clone of the line list: the line list carries the
+    // fulfillment read model, which the statement never runs.
+    {
+      figureId: figure('open_demand'),
+      rows: {
+        query: query('commercial_lines'),
+        match: field('sales_order_line_item_id'),
+        quantity: field('sales_order_line_ordered_quantity'),
+      },
+      within: lines('sales_order', ['released']),
+      related: {
+        query: query('sales_order_shipped_list'),
+        relation: relation('sales_order_shipped_order_line'),
+        quantity: field('sales_order_shipped_shipped_quantity'),
+      },
+      sum: 'remaining',
+    },
+  ];
+  const reorderPoint = { field: field('item_reorder_point') };
+  const figures: ListFiguresSpec = {
+    sums,
+    totals: [
+      {
+        figureId: figure('available'),
+        plus: [{ figure: figure('on_hand') }],
+        minus: [{ figure: figure('reserved') }],
+      },
+      {
+        figureId: figure('projected'),
+        plus: [{ figure: figure('on_hand') }, { figure: figure('incoming') }],
+        minus: [{ figure: figure('open_demand') }],
+      },
+      // Back up to the item's level; unstated without one.
+      ...(buying
+        ? [
+            {
+              figureId: figure('suggested'),
+              plus: [{ field: field('item_reorder_up_to') }],
+              minus: [{ figure: figure('projected') }],
+              floor: 'zero' as const,
+            },
+          ]
+        : []),
+    ],
+    bands: [
+      buying
+        ? {
+            figureId: figure('due'),
+            of: figure('projected'),
+            cases: [
+              { value: band('due'), label: 'To buy', atMost: reorderPoint },
+            ],
+            otherwise: { value: band('covered'), label: 'Covered' },
+          }
+        : {
+            figureId: figure('status'),
+            of: figure('projected'),
+            cases: [
+              {
+                value: band('shortage'),
+                label: 'Shortage',
+                below: { value: '0' },
+              },
+              {
+                value: band('reorder'),
+                label: 'Reorder',
+                atMost: reorderPoint,
+              },
+            ],
+            otherwise: { value: band('healthy'), label: 'Healthy' },
+          },
+    ],
+    // The supplier of the newest released or closed purchase order with a
+    // line for the item, named through the party list.
+    ...(buying
+      ? {
+          latest: [
+            {
+              figureId: figure('last_supplier'),
+              rows: {
+                query: query('purchase_order_line_list'),
+                match: field('purchase_order_line_item_id'),
+              },
+              within: lines('purchase_order', ['released', 'closed']),
+              by: field('purchase_order_order_date'),
+              value: field('purchase_order_supplier_party_id'),
+              label: { query: query('party_list'), field: field('party_name') },
+            },
+          ],
+        }
+      : {}),
+  };
+  const shown = (name: string, label: string): ListColumnSpec => ({
+    local: name,
+    label,
+    field: figure(name),
+    sortable: false,
+  });
+  return {
+    pageSize: 50,
+    columns: [
+      { local: 'sku', label: 'SKU', field: field('item_sku'), role: 'title' },
+      { local: 'item', label: 'Item', field: field('item_name') },
+      {
+        local: 'unit',
+        label: 'Unit',
+        field: field('item_base_unit'),
+        sortable: false,
+      },
+      ...(buying
+        ? []
+        : [shown('on_hand', 'On hand'), shown('reserved', 'Reserved')]),
+      shown('available', 'Available'),
+      shown('incoming', 'Incoming'),
+      shown('open_demand', 'Open demand'),
+      shown('projected', 'Projected'),
+      {
+        local: 'reorder_point',
+        label: 'Reorder point',
+        field: field('item_reorder_point'),
+      },
+      ...(buying
+        ? [
+            {
+              local: 'reorder_up_to',
+              label: 'Reorder up to',
+              field: field('item_reorder_up_to'),
+            },
+            shown('suggested', 'Suggested'),
+            shown('last_supplier', 'Last supplier'),
+          ]
+        : [
+            {
+              ...shown('status', 'Status'),
+              role: 'status' as const,
+              statusRoles: {
+                [band('shortage')]: 'blocked' as const,
+                [band('reorder')]: 'attention' as const,
+                [band('healthy')]: 'success' as const,
+              },
+            },
+          ]),
+    ],
+    defaultSort: [{ column: 'sku', direction: 'ascending' }],
+    views: buying
+      ? [
+          {
+            local: 'to_buy',
+            label: 'To buy',
+            filters: {},
+            band: { figure: figure('due'), values: [band('due')] },
+          },
+        ]
+      : [
+          { local: 'all', label: 'All', filters: {} },
+          {
+            local: 'shortage',
+            label: 'Shortage',
+            filters: {},
+            band: { figure: figure('status'), values: [band('shortage')] },
+          },
+          {
+            local: 'reorder',
+            label: 'Reorder',
+            filters: {},
+            band: { figure: figure('status'), values: [band('reorder')] },
+          },
+        ],
+    filters: [],
+    export: true,
+    figures,
+  };
+}
+
 /**
  * A worklist is a second List over a document's records beside the
  * document's own List, read through its own clone of that List's query so its
@@ -640,14 +961,107 @@ export const EXPECTED_RECEIPT_LIST = 'expected_receipt_list';
  * the source's selections, scope, permission and export limit; nothing about
  * the source List or the source query changes.
  */
-const WORKLISTS: Readonly<
-  Record<string, { readonly source: string; readonly label: string }>
-> = Object.freeze({
+interface Worklist {
+  readonly source: string;
+  readonly label: string;
+  /**
+   * A List over records every company shares, read in one company
+   * (REPLENISHMENT: Catalog's items with their stock). Its clone gains the
+   * exactly-one company operand its source does not declare, and an export
+   * limit, so its figures add up that company's rows; it is cut only where
+   * every query its figures read is composed and its source selects every
+   * field it names. Read-only: no bulk action.
+   */
+  readonly inCompany?: {
+    /** The module whose navigation group lists it. */
+    readonly navigationModule: string;
+    /** The List query whose company read authorizes its entry. */
+    readonly authorization: string;
+  };
+}
+
+const WORKLISTS: Readonly<Record<string, Worklist>> = Object.freeze({
   [EXPECTED_RECEIPT_LIST]: {
     source: 'purchase_order_list',
     label: 'Expected receipts',
   },
+  [ITEM_STOCK_LIST]: {
+    source: 'item_list',
+    label: 'Stock by item',
+    inCompany: {
+      navigationModule: 'inventory',
+      authorization: 'posted_stock_balance_list',
+    },
+  },
+  [ITEM_BUYING_LIST]: {
+    source: 'item_list',
+    label: 'Buying worklist',
+    inCompany: {
+      navigationModule: 'inventory',
+      authorization: 'posted_stock_balance_list',
+    },
+  },
 });
+
+/**
+ * Whether a worklist read in one company can be cut: every query its figures
+ * read is composed, and its source selects every field its columns, totals
+ * and bands name.
+ */
+function figuresComposed(
+  namespace: string,
+  local: string,
+  source: Record<string, unknown>,
+  queries: readonly Record<string, unknown>[],
+): boolean {
+  const spec = composedListSpecs(namespace)[local];
+  if (!spec?.figures) return true;
+  const figures = spec.figures;
+  const composed = new Set(queries.map((query) => String(query.queryId)));
+  const read = [
+    ...figures.sums.flatMap((sum) => [
+      sum.rows.query,
+      ...(sum.within ? [sum.within.query] : []),
+      ...(sum.related ? [sum.related.query] : []),
+    ]),
+    ...(figures.latest ?? []).flatMap((latest) => [
+      latest.rows.query,
+      latest.within.query,
+      latest.label.query,
+    ]),
+  ];
+  const selected = new Set(
+    (source.selections as { field: { targetId: string } }[]).map(
+      (selection) => selection.field.targetId,
+    ),
+  );
+  const figureIds = new Set([
+    ...figures.sums.map((sum) => sum.figureId),
+    ...(figures.totals ?? []).map((total) => total.figureId),
+    ...(figures.bands ?? []).map((band) => band.figureId),
+    ...(figures.latest ?? []).map((latest) => latest.figureId),
+  ]);
+  const operand = (value: { figure: string } | { field: string }) =>
+    'field' in value ? [value.field] : [];
+  const named = [
+    ...spec.columns
+      .map((column) => column.field)
+      .filter((field) => !figureIds.has(field)),
+    ...(figures.totals ?? []).flatMap((total) =>
+      [...total.plus, ...total.minus].flatMap(operand),
+    ),
+    ...(figures.bands ?? []).flatMap((band) =>
+      band.cases.flatMap((entry) => {
+        const threshold = entry.below ?? entry.atMost;
+        return threshold && 'field' in threshold ? [threshold.field] : [];
+      }),
+    ),
+  ];
+  return (
+    read.every((queryId) => composed.has(queryId)) &&
+    named.every((fieldId) => selected.has(fieldId))
+  );
+}
 
 /** Clones of the worklists' source queries, when their source is composed. */
 export function worklistQueries(
@@ -658,46 +1072,96 @@ export function worklistQueries(
     const source = queries.find(
       (query) => query.queryId === `${namespace}:query.${worklist.source}`,
     );
-    return source
-      ? [
-          renamed(source, [
-            [`:query.${worklist.source}`, `:query.${local}`],
-            [`:selection.${worklist.source}_`, `:selection.${local}_`],
-            [`:parameter.${worklist.source}_`, `:parameter.${local}_`],
-          ]),
-        ]
-      : [];
+    if (!source) return [];
+    const clone = renamed(source, [
+      [`:query.${worklist.source}`, `:query.${local}`],
+      [`:selection.${worklist.source}_`, `:selection.${local}_`],
+      [`:parameter.${worklist.source}_`, `:parameter.${local}_`],
+    ]);
+    if (!worklist.inCompany) return [clone];
+    if (!figuresComposed(namespace, local, source, queries)) return [];
+    const parameterId = `${namespace}:parameter.${local}_legal_entity_scope`;
+    return [
+      {
+        ...clone,
+        legalEntityScope: {
+          cardinality: 'exactlyOne',
+          kind: 'queryLegalEntityScope',
+          operand: {
+            kind: 'queryParameterReference',
+            parameterId,
+            schemaVersion: version,
+          },
+          schemaVersion: version,
+        },
+        parameters: [
+          {
+            kind: 'queryParameterDefinition',
+            orderKey: 10,
+            parameterId,
+            schemaVersion: version,
+          },
+        ],
+        // The declared List exports its whole filtered set in one statement.
+        exportMaximumResultCount: 5_000,
+      },
+    ];
   });
 }
 
-/** The worklists' List surfaces, cut from their source List's surface. */
+/**
+ * The worklists' List surfaces, cut from their source List's surface where
+ * their query is composed.
+ */
 export function worklistSurfaces(
   namespace: string,
   surfaces: readonly Record<string, unknown>[],
+  queries: readonly Record<string, unknown>[],
 ): Record<string, unknown>[] {
   return Object.entries(WORKLISTS).flatMap(([local, worklist]) => {
     const source = surfaces.find(
       (surface) =>
         surface.surfaceId === `${namespace}:surface.${worklist.source}`,
     );
-    return source
-      ? [
-          {
-            ...renamed(source, [
-              [`:surface.${worklist.source}`, `:surface.${local}`],
-              [`:slot.${worklist.source}_`, `:slot.${local}_`],
-              [`:query.${worklist.source}`, `:query.${local}`],
-            ]),
-            label: worklist.label,
-          },
-        ]
-      : [];
+    if (
+      !source ||
+      !queries.some((query) => query.queryId === `${namespace}:query.${local}`)
+    )
+      return [];
+    const surface = renamed(source, [
+      [`:surface.${worklist.source}`, `:surface.${local}`],
+      [`:slot.${worklist.source}_`, `:slot.${local}_`],
+      [`:query.${worklist.source}`, `:query.${local}`],
+    ]);
+    return [
+      {
+        ...surface,
+        label: worklist.label,
+        ...(worklist.inCompany
+          ? {
+              slots: (surface.slots as Record<string, unknown>[]).filter(
+                (slot) => slot.slot !== 'bulkActions',
+              ),
+            }
+          : {}),
+      },
+    ];
   });
 }
 
 /** The worklists by local id, for the workspace pass (navigation, entry). */
 export function isWorklist(local: string): boolean {
   return Object.hasOwn(WORKLISTS, local);
+}
+
+/**
+ * Where a worklist read in one company is listed and what authorizes its
+ * entry; `null` for every other List.
+ */
+export function worklistPlacement(local: string): Worklist['inCompany'] | null {
+  return (
+    (Object.hasOwn(WORKLISTS, local) && WORKLISTS[local]?.inCompany) || null
+  );
 }
 
 function renamed(
@@ -790,6 +1254,9 @@ export function composedListSpecs(
     vendor_bill_list: settlementList(namespace, BILL_LIST),
     // Stock documents, recorded in the draft editor (INVENTORY-PARITY).
     inventory_transaction_list: inventoryTransactionList(namespace),
+    // Stock by item and the Buying worklist (REPLENISHMENT).
+    [ITEM_STOCK_LIST]: itemFigureList(namespace, ITEM_STOCK_LIST),
+    [ITEM_BUYING_LIST]: itemFigureList(namespace, ITEM_BUYING_LIST),
     // A balance, not a document: no lifecycle, so no saved views; item and
     // location are named through their own lists rather than shown as ids.
     posted_stock_balance_list: {
@@ -896,6 +1363,9 @@ function lowerList(namespace: string, listLocal: string, spec: ListSpec) {
       ...(view.before
         ? { before: { field: view.before, anchor: 'startOfTodayUtc' } }
         : {}),
+      ...(view.band
+        ? { band: { figure: view.band.figure, values: [...view.band.values] } }
+        : {}),
     })),
     filters: spec.filters.map((filter, index) => ({
       filterId: id('list_filter', filter.local),
@@ -925,6 +1395,7 @@ function lowerList(namespace: string, listLocal: string, spec: ListSpec) {
           },
         }
       : {}),
+    ...(spec.figures ? { figures: lowerFigures(spec.figures) } : {}),
     ...(spec.rowActions
       ? {
           rowActions: spec.rowActions.map((action, index) => ({
@@ -946,6 +1417,85 @@ function lowerList(namespace: string, listLocal: string, spec: ListSpec) {
                 }
               : {}),
             ...(action.section ? { section: action.section } : {}),
+          })),
+        }
+      : {}),
+  };
+}
+
+/** A List's figures in the canonical shape: each query as its reference. */
+function lowerFigures(figures: ListFiguresSpec) {
+  const queryReference = (targetId: string) => ({
+    kind: 'queryReference',
+    schemaVersion: version,
+    targetId,
+  });
+  const within = (value: ListFigureWithinSpec) => ({
+    relation: value.relation,
+    query: queryReference(value.query),
+    field: value.field,
+    values: [...value.values],
+  });
+  return {
+    sums: figures.sums.map((sum) => ({
+      figureId: sum.figureId,
+      rows: {
+        query: queryReference(sum.rows.query),
+        match: sum.rows.match,
+        ...(sum.rows.quantity ? { quantity: sum.rows.quantity } : {}),
+      },
+      ...(sum.within ? { within: within(sum.within) } : {}),
+      ...(sum.related
+        ? {
+            related: {
+              query: queryReference(sum.related.query),
+              relation: sum.related.relation,
+              quantity: sum.related.quantity,
+            },
+          }
+        : {}),
+      sum: sum.sum,
+    })),
+    ...(figures.totals
+      ? {
+          totals: figures.totals.map((total) => ({
+            figureId: total.figureId,
+            plus: total.plus.map((operand) => ({ ...operand })),
+            minus: total.minus.map((operand) => ({ ...operand })),
+            ...(total.floor ? { floor: total.floor } : {}),
+          })),
+        }
+      : {}),
+    ...(figures.bands
+      ? {
+          bands: figures.bands.map((band) => ({
+            figureId: band.figureId,
+            of: band.of,
+            cases: band.cases.map((entry) => ({
+              value: entry.value,
+              label: entry.label,
+              ...(entry.below ? { below: { ...entry.below } } : {}),
+              ...(entry.atMost ? { atMost: { ...entry.atMost } } : {}),
+            })),
+            otherwise: { ...band.otherwise },
+          })),
+        }
+      : {}),
+    ...(figures.latest
+      ? {
+          latest: figures.latest.map((latest) => ({
+            figureId: latest.figureId,
+            rows: {
+              query: queryReference(latest.rows.query),
+              match: latest.rows.match,
+            },
+            within: within(latest.within),
+            by: latest.by,
+            value: latest.value,
+            label: {
+              query: queryReference(latest.label.query),
+              field: latest.label.field,
+            },
           })),
         }
       : {}),
