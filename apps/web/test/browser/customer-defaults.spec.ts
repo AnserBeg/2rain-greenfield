@@ -49,6 +49,8 @@ test('a customer workspace sets order defaults and an address book that a new sa
         // Ruling B: new lines start from the customer's tax code.
         'Set default tax code',
         'Add ship-to address',
+        // RETURNABLE-ASSETS: a custody record and its first Issue.
+        'Issue returnables',
       ],
     );
 
