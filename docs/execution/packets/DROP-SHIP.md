@@ -1,6 +1,6 @@
 # DROP-SHIP — supplier delivery directly to the customer
 
-Status: unfinished BUILD on `packet/DROP-SHIP`, PAYABLES `96ac2341` and RELATION-INSTALL `d3d1812b` merged. Bridge draft [PR #20](https://github.com/AnserBeg/2rain-greenfield/pull/20) awaits refreshed controls/CI and owner review. DROP-SHIP draft [PR #19](https://github.com/AnserBeg/2rain-greenfield/pull/19) awaits post-bridge validation. No main merge or deployment; own Critical set unchanged.
+Status: unfinished BUILD on `packet/DROP-SHIP`, PAYABLES `96ac2341` and RELATION-INSTALL checkpoint `f3330e98` merged. Bridge draft [PR #20](https://github.com/AnserBeg/2rain-greenfield/pull/20) has three hosted red/green controls and full CI at `540023a4`; owner review remains owed. DROP-SHIP draft [PR #19](https://github.com/AnserBeg/2rain-greenfield/pull/19) awaits refreshed full CI. No main merge or deployment; own Critical set unchanged.
 
 ## Design (written before implementation)
 
@@ -26,12 +26,13 @@ Status: unfinished BUILD on `packet/DROP-SHIP`, PAYABLES `96ac2341` and RELATION
 - Exact-base release rebuild/check passes: five inherited entries plus one; 104 surfaces, 16 navigation leaves, 604 scenarios, 527 constructible candidates / 77 without a create operation. PostgreSQL has NOT observed those execution pins yet. Both numbering pin lists include DSD: 11 fields, 11 uniqueness probes, measured from compiled assigned fields.
 - Coverage declaration inventory re-derived: 2658 obligations / 824 observed declarations. Local coverage gate refused missing reachability receipts; no execution receipts were invented.
 - Prior full-replay generation failed with `ELEMENT_TARGET_MISSING`; its container was cleaned and snapshot untouched. With RELATION-INSTALL merged, [hosted regeneration](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37279897119) at `5d2d9027` PASS. The generated full-replay snapshot is committed at `88ce5ce6`; release bytes are unchanged since generation.
-- New commercial PostgreSQL journey is registered in package scripts, reachability and hygiene; the first local attempt never started (lock busy), and the current exclusive run is pending. New `purchase-drop-ship.spec.ts` is operations-browser reachable; local browser not run. Full DROP-SHIP CI acceptance remains unmet.
+- New commercial PostgreSQL journey is registered in package scripts, reachability and hygiene; two local exclusive runs failed at the governed revision boundary and then at order-List Delivered counts. Both containers were removed. New `purchase-drop-ship.spec.ts` is operations-browser reachable; local browser not run. Full DROP-SHIP CI acceptance remains unmet.
 - Post-bridge correction: two existing unit files now account for DSD numbering, the exact sales-line/order relation and the fourth registered sales-order operation. Focused 14/14 PASS; formatting, typecheck and release `--check` PASS. Coverage re-derived again from unchanged declarations.
 - Hosted run `37271614092` is red: compiler input/fixture pins, browser backend-loader failure and opaque generic guard refusal. Corrected at `e9751adc`: Sales command module, retained references, typed refusal, scoped browser loader and fixture closure. Four changed compiler/unit files PASS 93/93; lint/format/typecheck PASS. Full new CI remains pending.
 - [Hosted run `37274390870`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37274390870) is red: padded stored quantities rejected by governed PO creation, undeclared navigation placement, stale progress/CSV/fixture pins, stale schema snapshot and repeated-install WAL capacity. `14116111` canonicalizes copied quantity/date inputs, declares contextual actions, fixes browser selection and affected fixtures/pins, and checkpoints the composed test. Snapshot regeneration and fresh full CI remain pending.
 - After those fixes: typecheck, focused lint/format, exact-base compile/check and coverage re-derivation PASS; commercial decimal unit tests 6/6 PASS; the two affected surface-binding cases 2/2 PASS. Static expected-red validates 165 entries / 14 manifests after upstream merge; no empty filtered test is counted.
 - Local exclusive PostgreSQL run at `5d2d9027` reached Create drop-ship PO but failed with an opaque operation error; its container was removed. The stored revision is SQL `bigint`, the actual driver returns a string, and trust requires a number. `d9f40670` normalizes and validates this boundary outside trust; focused unit tests 7/7, lint/format and typecheck PASS. Fresh PostgreSQL/browser/full CI remain owed; schema/release bytes are unchanged.
+- [Hosted run `37282097610`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37282097610) is red. `ee982127` binds canonical delivery-state values rather than formatted labels, derives guard fields from storage metadata, registers its unit file, closes the removed-module fixture, defers test CHECKPOINT connections, pins measured Sales scenarios at 48, and reads browser dialog diagnostics before confirmation closes it. Focused guard unit 3/3 and architecture 3/3, lint/format/typecheck PASS; persisted/browser outcomes remain owed.
 - Local container work checks Windows free memory before locking, uses one container at a time; no timeout, readiness or budget change. Static expected-red validation and record fidelity run on the frozen tree before push.
 
 ## Test it yourself
@@ -51,7 +52,7 @@ Review: no separate DROP-SHIP arm; inherited Critical bridge owner-run review is
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "DROP-SHIP",
   "base": "96ac234122322b2cbe18349299664f56c8f5190a",
-  "head": "d9f40670693c1592383aef0eb3d5016d9ee9752e",
+  "head": "4e3e44d84985c8a5d29cf4a69f0fd9375ad85b0c",
   "changedPaths": [
     "apps/api/src/composition-root.ts",
     "apps/web/release/app.authored.json",
@@ -91,6 +92,7 @@ Review: no separate DROP-SHIP arm; inherited Critical bridge owner-run review is
     "packages/runtime/src/list-behavior/index.ts",
     "packages/runtime/src/request-runtime-view.ts",
     "packages/runtime/src/semantic-query-gateway.ts",
+    "test/architecture/module-press-law.test.ts",
     "test/architecture/repository-hygiene.test.ts",
     "test/architecture/surface-grammar-conformance.test.ts",
     "test/compiler/inventory-contract.release.golden.json",
