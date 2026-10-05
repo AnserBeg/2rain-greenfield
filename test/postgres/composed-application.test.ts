@@ -8,6 +8,7 @@ import test, { type TestContext } from 'node:test';
 import { promisify } from 'node:util';
 
 import pg from 'pg';
+import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
 
 import {
   COMPOSED_APPLICATION_INVENTORY_SCOPE,
@@ -1667,8 +1668,9 @@ async function assertRealProductDefinition(
     // vendor bill, its lines, payments and credits (list, detail, form each);
     // REPLENISHMENT Stock by item and the Buying worklist; CATALOG-EXTRAS an
     // item's aliases (list, detail, form); WAREHOUSE-MODE the Warehouse
-    // launcher; VALUATION the Inventory value List.
-    assert.equal(surfaces.length, 108);
+    // launcher; VALUATION the Inventory value List; APPROVALS five
+    // (approval requests and settings).
+    assert.equal(surfaces.length, 113);
     assert.ok(surfaces.includes('northstar.app:surface.item_alias_list'));
     assert.ok(surfaces.includes('northstar.app:surface.inventory_warehouse'));
     assert.ok(surfaces.includes('northstar.app:surface.inventory_value_list'));
@@ -3201,6 +3203,7 @@ async function assertFailClosedIdentitySeam(
     capabilityOperationExecutorFactories: [
       INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
       RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+      PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY,
     ],
     compiledApplication,
     databaseUrl,
@@ -4030,8 +4033,8 @@ async function assertBoundedFreshTenantInstallEvidence(
   // exclusion).
   assert.equal(
     servingScenarioCount,
-    601,
-    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, 6 for replenishment, 5 for locations and 17 for catalog extras',
+    633,
+    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, 6 for replenishment, 5 for locations, 17 for catalog extras and 32 for approvals (21 request, 10 settings, one supplier-reference exclusion)',
   );
   await assertFreshInstallLineageEvidence(
     pool,
@@ -4554,12 +4557,8 @@ test(
         // fresh-install intermediate, so the index check at the FIRST refusal site
         // fires and control never reaches the authorization this direction is about.
         //
-        // `tenantSlug` already serves it. Until `LANG-ADOPT-v5` the artifact's head
-        // WAS a profile sibling, so this direction had to install a second tenant on
-        // a truncated lineage to find a source-changing edge; now the head is itself
-        // source-changing and the caller's tenant is already the right one. That
-        // matters beyond tidiness -- direction 1 needs a fresh install of its own now,
-        // and two fresh installs in one test exceed the 300 s budget.
+        // This fixture serves only the source-changing tenant; the profile-only
+        // discriminator above has its own database and the same unchanged bound.
         const sourceEdgeSlug = `${tenantSlug}-source-edge`;
         const sourceEdgeRuntime = await createRuntime(
           sourceChangingLineage,
@@ -4945,7 +4944,7 @@ async function assertPurchaseOrderParentGuard(
   assert.ok(legalEntityId);
 
   const purchasing = APPLICATION_IDS.purchasing;
-  // `confirmed` matters for `archive`, which declares `humanRequired`: the
+  // `confirmed` matters for Place order and `archive`, which declare `humanRequired`: the
   // gateway checks the confirmation grant BEFORE the interpreter evaluates any
   // precondition, so without a grant the archive arm would observe
   // `SemanticOperationConfirmationRequiredError` and prove nothing about the
@@ -5068,10 +5067,15 @@ async function assertPurchaseOrderParentGuard(
   assert.equal(admitted.revision, '2', 'the admission twin must have written');
   assert.equal(admitted.archived, false);
 
-  await invoke(purchasing.releaseOperationId, {
-    expectedRevision: 1,
-    recordId: orderId,
-  });
+  await invoke(
+    purchasing.releaseOperationId,
+    {
+      arguments: { supplierReference: null },
+      expectedRevision: 1,
+      recordId: orderId,
+    },
+    true,
+  );
 
   const refused = async (
     label: string,
@@ -6388,13 +6392,13 @@ async function assertExactPartitionEvidence(
   // alias, the item and the legal entity each have a generic create: 601, 524.
   assert.equal(
     evidence.results.length,
-    524,
-    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72, replenishment 6, locations 5 and catalog extras 17',
+    535,
+    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72, replenishment 6, locations 5, catalog extras 17 and approvals 11 (ten settings scenarios and one supplier-reference exclusion)',
   );
   assert.equal(
     derivations.length,
-    77,
-    'the 20 operationless reserved-coverage and shipped-quantity scenarios join the prior 57 derivations',
+    98,
+    'the capability-owned approval request adds 21 derivations to the prior 77',
   );
   assert.equal(
     binding.plan.scenarios.some(
@@ -6419,7 +6423,7 @@ async function assertExactPartitionEvidence(
       (derivation) =>
         derivation.reason.code === 'VERIFICATION_NO_GENERIC_CREATE_OPERATION',
     ).length,
-    77,
+    98,
   );
   const executedScenarioIdSet = new Set(executedScenarioIds);
   const salesEntityIds = new Set<string>([
@@ -6614,7 +6618,8 @@ function assertReceivingVerificationCoverage(
     // exclusion), tax code, freight and fee with codes and frozen rates;
     // the line's discount, tax code and frozen rate; then its receive-into
     // location.
-    purchase_order: 22,
+    // APPROVALS: the optional supplier reference adds one search exclusion.
+    purchase_order: 23,
     purchase_order_line: 15,
   })) {
     assert.equal(
@@ -6944,6 +6949,7 @@ function createRuntime(
     capabilityOperationExecutorFactories: [
       INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
       RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+      PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY,
     ],
     databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,

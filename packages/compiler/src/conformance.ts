@@ -52,6 +52,8 @@ const LEGAL_ENTITY_FAMILY_RULES = Object.freeze([
   { classification: 'entityOwned', familyId: 'goods_receipt_line' },
   { classification: 'entityOwned', familyId: 'purchase_order_received' },
   { classification: 'entityOwned', familyId: 'purchase_order_amendment' },
+  { classification: 'entityOwned', familyId: 'purchase_order_approval' },
+  { classification: 'tenantShared', familyId: 'purchasing_settings' },
   { classification: 'entityOwned', familyId: 'sales_order' },
   { classification: 'entityOwned', familyId: 'sales_order_line' },
   { classification: 'entityOwned', familyId: 'reservation' },
@@ -185,6 +187,11 @@ const LEGAL_ENTITY_MASTER_FIELD_ROLES = Object.freeze({
   status: 'legal_entity_status',
 } as const);
 const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'purchase_order_approval',
+    targetFamilyId: 'purchase_order',
+  },
   {
     semantics: 'sameEntity',
     sourceFamilyId: 'inventory_movement',
@@ -2408,6 +2415,28 @@ export function validateModuleConformance(
     const operationEffects = new Set(
       entityOperations.map((operation) => operation.effect.kind),
     );
+    // A declared record-mutation capability may own an entity's complete
+    // write path. Its commands identify the entity through their declared
+    // read-back; granting generic CRUD as well would allow callers to forge
+    // capability-produced records. Partly generic entities still owe all CRUD.
+    const capabilityOwned =
+      entityOperations.length === 0 &&
+      packageRevision.operations.some((operation) => {
+        if (
+          operation.lifecycle !== 'active' ||
+          operation.effect.kind !== 'registeredCapabilityEffect' ||
+          queryById.get(operation.readBack.targetId)?.sourceEntity.targetId !==
+            entity.entityId
+        )
+          return false;
+        const capabilityId = operation.effect.capability.targetId;
+        return packageRevision.capabilityRequirements.some(
+          (requirement) =>
+            requirement.capabilityId === capabilityId &&
+            requirement.supportStatus === 'supported' &&
+            requirement.declaredEffects.includes('recordMutation'),
+        );
+      });
     const authoredEntityOperations = providerWrittenReadModelRule
       ? packageRevision.operations.filter((operation) =>
           operationTargetsEntity(packageRevision, operation, entity.entityId),
@@ -2438,6 +2467,7 @@ export function validateModuleConformance(
         factStorage?.mutability !== 'appendOnly' &&
         !periodLockStorage &&
         !providerWrittenReadModel &&
+        !capabilityOwned &&
         !operationEffects.has(effect)
       ) {
         missing(
@@ -2511,6 +2541,7 @@ export function validateModuleConformance(
         !(
           (factStorage?.mutability === 'appendOnly' ||
             periodLockStorage ||
+            capabilityOwned ||
             providerWrittenReadModel) &&
           role === 'form'
         ) &&

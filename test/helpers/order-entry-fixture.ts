@@ -49,6 +49,7 @@ export async function withOrderEntryFixture(
   orderVolume = 0,
   /** A compiled release to serve instead of the checked-in one. */
   compiledApplication?: unknown,
+  purchaseOrdersRequireApproval = false,
 ) {
   await withEphemeralPostgres('order-entry', async ({ connection, pool }) => {
     const app = await startComposedApplication({
@@ -57,6 +58,9 @@ export async function withOrderEntryFixture(
       port: 0,
       seedProfile,
       tenantSlug: 'order-entry',
+      ...(purchaseOrdersRequireApproval
+        ? { purchaseOrdersRequireApproval: true as const }
+        : {}),
     });
     try {
       await run(await seed(app, pool, lookupVolume, orderVolume));
@@ -80,31 +84,35 @@ async function seed(
     local: string,
     input: ImmutableJsonValue,
     key = randomUUID(),
+    actor: 'buyer' | 'manager' = 'buyer',
   ) =>
-    app.runtime.entry.run({ headers: {} }, (view) => {
-      const operationId = `${ns}:operation.${local}`;
-      const operation = parsePinnedOperationCatalog(
-        view.projections.operation.payload,
-      ).find((value) => value.operationId === operationId)!;
-      return app.runtime.operationGateway.invoke(
-        view,
-        {
-          schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
-          operationId,
-          input,
-          idempotencyKey: key,
-          confirmationGrant:
-            operation.confirmation === 'humanRequired'
-              ? app.runtime.operationMediation.issueConfirmationGrant(
-                  view,
-                  operationId,
-                  input,
-                )
-              : null,
-        },
-        app.runtime.operationMediation.issueInvocation(view, 'UI'),
-      );
-    });
+    app.runtime.entry.run(
+      { headers: { cookie: `northstar-demo-actor=${actor}` } },
+      (view) => {
+        const operationId = `${ns}:operation.${local}`;
+        const operation = parsePinnedOperationCatalog(
+          view.projections.operation.payload,
+        ).find((value) => value.operationId === operationId)!;
+        return app.runtime.operationGateway.invoke(
+          view,
+          {
+            schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+            operationId,
+            input,
+            idempotencyKey: key,
+            confirmationGrant:
+              operation.confirmation === 'humanRequired'
+                ? app.runtime.operationMediation.issueConfirmationGrant(
+                    view,
+                    operationId,
+                    input,
+                  )
+                : null,
+          },
+          app.runtime.operationMediation.issueInvocation(view, 'UI'),
+        );
+      },
+    );
   const create = async (
     local: string,
     values: Record<string, ImmutableJsonValue>,
@@ -578,6 +586,31 @@ async function seed(
         })),
         observed: true,
       };
+    if (phase === 'approval_order') {
+      const header = await create('purchase_order', {
+        supplier_party_id: customer,
+        order_date: new Date().toISOString(),
+        expected_date: null,
+        currency: 'CAD',
+        notes: null,
+      });
+      const line = await create(
+        'purchase_order_line',
+        {
+          line_number: '1',
+          item_id: item,
+          ordered_quantity: '5',
+          unit_price: '12.5',
+        },
+        { order: header.recordId },
+      );
+      return {
+        phase,
+        recordId: header.recordId,
+        number: String(header.values[`${ns}:field.purchase_order_number`]),
+        lineId: line.recordId,
+      };
+    }
     if (phase === 'payables') {
       // PAYABLES: a released, priced purchase order at Net 30 with freight
       // and a fee, two of its three units received, for a browser proof to
@@ -2100,5 +2133,7 @@ if (process.argv.includes('--serve')) {
         .find((value) => value.startsWith('--order-volume='))
         ?.slice('--order-volume='.length) ?? 0,
     ),
+    undefined,
+    process.argv.includes('--approvals'),
   );
 }

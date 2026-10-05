@@ -14,6 +14,7 @@ import {
 import { catalogModuleDefinition } from '../../packages/domain/src/catalog/definition.js';
 import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/definition.js';
 import { purchasingModuleDefinition } from '../../packages/domain/src/purchasing/definition.js';
+import { withPurchaseOrderApprovals } from '../../packages/domain/src/purchasing/approvals.js';
 import { salesModuleDefinition } from '../../packages/domain/src/sales/definition.js';
 
 import {
@@ -5749,10 +5750,13 @@ function composedApplicationWithoutInventoryForTransition(): Record<
       // As the product application composes it, commercial terms and
       // payables included, so none of its purchase order fields or bill
       // documents outlives the removal.
-      purchasingModuleDefinition(APPLICATION_NAMESPACE, {
-        commercialTerms: true,
-        payables: true,
-      }),
+      withPurchaseOrderApprovals(
+        purchasingModuleDefinition(APPLICATION_NAMESPACE, {
+          commercialTerms: true,
+          payables: true,
+        }),
+        APPLICATION_NAMESPACE,
+      ),
       'purchasing',
     ),
     salesModuleDefinition(APPLICATION_NAMESPACE),

@@ -104,6 +104,7 @@ import {
   reconcileReceivedQuantities,
 } from '../../packages/postgres-provider/src/received-quantity-projection.js';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
+import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
 import type { RegisteredCapabilityOperationExecutionRequest } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import { SemanticQueryGateway } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { PostgresInventoryReconciliationService } from '../../packages/postgres-provider/src/inventory-reconciliation-service.js';
@@ -2738,6 +2739,24 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
         };
       },
     });
+    const approvalExecutor = PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY.create({
+      actorIssuer: issuer,
+      currentInstant: () => recordedAt,
+      pool: database.runtimePool,
+      queryGateway,
+      releaseId: database.registration.releaseId,
+      releaseContentHash: database.registration.releaseContentHash,
+      projection: (familyId) => {
+        const projection = projectionPayload<unknown>(
+          fixture.inventory,
+          familyId,
+        );
+        return {
+          payload: projection.payload,
+          contentHash: projection.contentHash,
+        };
+      },
+    });
     const mediation = new SemanticOperationMediationAuthority();
     let tamperReceivingExecution:
       | ((
@@ -2750,6 +2769,7 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
       mediation,
       undefined,
       [
+        approvalExecutor,
         {
           capabilityId: executor.capabilityId,
           prepareAuthorization: (request) =>

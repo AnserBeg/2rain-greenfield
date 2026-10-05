@@ -1641,6 +1641,56 @@ export function composedListSpecs(
       filters: [],
       export: true,
     },
+    purchase_order_approval_list: {
+      pageSize: 50,
+      export: false,
+      columns: [
+        {
+          local: 'number',
+          label: 'Request',
+          field: `${namespace}:field.purchase_order_approval_number`,
+          role: 'title',
+        },
+        {
+          local: 'order',
+          label: 'Purchase order',
+          field: `${namespace}:field.purchase_order_approval_order_number`,
+        },
+        {
+          local: 'kind',
+          label: 'Kind',
+          field: `${namespace}:field.purchase_order_approval_kind`,
+        },
+        {
+          local: 'state',
+          label: 'Decision',
+          field: `${namespace}:field.purchase_order_approval_state`,
+          role: 'status',
+          statusRoles: {
+            [`${namespace}:option.purchase_order_approval_state_pending`]:
+              'attention',
+            [`${namespace}:option.purchase_order_approval_state_approved`]:
+              'success',
+            [`${namespace}:option.purchase_order_approval_state_rejected`]:
+              'blocked',
+            [`${namespace}:option.purchase_order_approval_state_consumed`]:
+              'success',
+          },
+        },
+      ],
+      defaultSort: [{ column: 'number', direction: 'ascending' }],
+      views: [
+        {
+          local: 'pending',
+          label: 'Pending',
+          filters: {
+            [`${namespace}:field.purchase_order_approval_state`]: `${namespace}:option.purchase_order_approval_state_pending`,
+          },
+        },
+        { local: 'all', label: 'All', filters: {} },
+      ],
+      filters: [],
+    },
     sales_order_list: documentList(
       namespace,
       'sales_order',

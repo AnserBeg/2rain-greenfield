@@ -928,6 +928,8 @@ test('PAYABLES: the purchase order lists its bills and offers billing only when 
       received: `${ns}:query.purchase_order_received_get`,
       bills: `${ns}:query.vendor_bill_list`,
       billLines: `${ns}:query.vendor_bill_line_list`,
+      settings: `${ns}:query.purchasing_settings_list`,
+      approvals: `${ns}:query.purchase_order_approval_list`,
     },
   );
 

@@ -87,6 +87,18 @@ import {
   type SurfaceOperationIntent,
 } from './surface-contract.js';
 
+/** Fixture-only shell furniture, never installed by the production composition. */
+export function withLocalDemoIdentity(
+  response: SurfaceRuntimeResponse,
+  actors:
+    readonly { key: 'buyer' | 'manager'; label: string }[] | null | undefined,
+  selected: 'buyer' | 'manager',
+): SurfaceRuntimeResponse {
+  if (!actors) return response;
+  const bar = `<aside aria-label="Local demo identity"><form method="post"><label>Acting as <select name="localDemoActAs" aria-label="Acting as">${actors.map((actor) => `<option value="${actor.key}"${actor.key === selected ? ' selected' : ''}>${escapeHtml(actor.label)}</option>`).join('')}</select></label><button type="submit">Switch person</button><span>Local demo</span></form></aside>`;
+  return { ...response, html: response.html.replace('<body>', `<body>${bar}`) };
+}
+
 export interface SurfaceRuntimeResponse {
   readonly html: string;
   readonly statusCode: number;

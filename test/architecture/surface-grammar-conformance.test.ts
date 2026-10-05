@@ -48,6 +48,7 @@ import {
 } from '../../packages/domain/src/index.js';
 import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/index.js';
 import { purchasingModuleDefinition } from '../../packages/domain/src/purchasing/index.js';
+import { withPurchaseOrderApprovals } from '../../packages/domain/src/purchasing/approvals.js';
 import { salesModuleDefinition } from '../../packages/domain/src/sales/index.js';
 import { PRODUCT_SURFACE_GRAMMAR_BASELINE } from './surface-grammar-conformance.baseline.js';
 import {
@@ -282,8 +283,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // + PURCHASING-PARITY's Expected receipts List, + PAYABLES' vendor bill,
   // its lines, payments and credits (twelve), + REPLENISHMENT's Stock by item
   // and Buying worklist, + CATALOG-EXTRAS' item aliases (three), +
-  // WAREHOUSE-MODE's Warehouse, + VALUATION's Inventory value List.
-  assert.equal(groupedManifest.surfaces.length, 108);
+  // WAREHOUSE-MODE's Warehouse, + VALUATION's Inventory value List, +
+  // APPROVALS' approval requests and settings (five).
+  assert.equal(groupedManifest.surfaces.length, 113);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -326,8 +328,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // the Bills list. REPLENISHMENT: Stock by item and the Buying worklist,
   // Catalog's Lists, join Inventory's group. WAREHOUSE-MODE: the Warehouse
   // launcher joins Inventory, the one Task navigation names. VALUATION: the
-  // Inventory value List.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 20);
+  // Inventory value List. APPROVALS: approvals and settings join Purchasing.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 22);
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
@@ -973,10 +975,13 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
     composed,
     // As the product composes it: with its commercial terms (PURCHASING-PARITY)
     // and its payables (PAYABLES).
-    purchasingModuleDefinition('northstar.app', {
-      commercialTerms: true,
-      payables: true,
-    }),
+    withPurchaseOrderApprovals(
+      purchasingModuleDefinition('northstar.app', {
+        commercialTerms: true,
+        payables: true,
+      }),
+      'northstar.app',
+    ),
     'purchasing',
   );
   composed = withoutModule(

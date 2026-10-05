@@ -72,6 +72,7 @@ test('the composed application declares its Lists and they normalize unchanged',
     // LOCATIONS: each location's type and inventory status.
     `${ns}:surface.location_list`,
     `${ns}:surface.posted_stock_balance_list`,
+    `${ns}:surface.purchase_order_approval_list`,
     `${ns}:surface.purchase_order_list`,
     salesList,
     // PAYABLES: the Bills List, by bill state.

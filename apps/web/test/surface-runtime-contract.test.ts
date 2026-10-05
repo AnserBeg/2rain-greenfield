@@ -1389,6 +1389,83 @@ test('a declared List sends its figures with every request, keeps each tab band 
  * figures while a supplier invoice number a spreadsheet would run as a
  * formula leaves inert.
  */
+test('APPROVAL-PO: the declared inbox filters Pending exactly and exposes All without a state filter', () => {
+  const ns = 'northstar.app';
+  const surface = (
+    composedApplicationDefinition().surfaces as Array<Record<string, unknown>>
+  ).find(
+    (value) => value.surfaceId === `${ns}:surface.purchase_order_approval_list`,
+  )!;
+  const list = SurfaceListSchema.parse(surface.list);
+  const args = (local: string) =>
+    declaredListArguments(
+      list,
+      readDeclaredListState(
+        list,
+        new URL(
+          `http://list.local/?view=${encodeURIComponent(`${ns}:list_view.purchase_order_approval_list_${local}`)}`,
+        ),
+      ),
+      {
+        mode: 'page',
+        now: new Date('2026-09-30T12:00:00Z'),
+        queryId: `${ns}:query.purchase_order_approval_list`,
+        scopeArguments: {},
+      },
+    ) as { list: { fieldFilters?: unknown } };
+  assert.deepEqual(args('pending').list.fieldFilters, [
+    {
+      fieldId: `${ns}:field.purchase_order_approval_state`,
+      value: `${ns}:option.purchase_order_approval_state_pending`,
+    },
+  ]);
+  assert.equal(args('all').list.fieldFilters, undefined);
+});
+
+test('APPROVAL-PO: acting-as is absent without demo composition and a demo POST validates actor and same origin', async () => {
+  const production = createSurfaceRuntimeServer(demoEntry());
+  const productionUrl = await listen(production);
+  try {
+    assert.doesNotMatch(
+      await (await fetch(productionUrl)).text(),
+      /localDemoActAs|Switch person/u,
+    );
+  } finally {
+    await close(production);
+  }
+  const demo = createSurfaceRuntimeServer(
+    demoEntry(),
+    {} as Parameters<typeof createSurfaceRuntimeServer>[1],
+    [
+      { key: 'buyer', label: 'Buyer' },
+      { key: 'manager', label: 'Manager' },
+    ],
+  );
+  const url = await listen(demo);
+  try {
+    const send = (actor: string, origin: string) =>
+      fetch(url, {
+        method: 'POST',
+        redirect: 'manual',
+        headers: {
+          origin,
+          'content-type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({ localDemoActAs: actor }),
+      });
+    assert.equal((await send('manager', 'http://other.example')).status, 403);
+    assert.equal((await send('admin', url)).status, 400);
+    const switched = await send('manager', url);
+    assert.equal(switched.status, 303);
+    assert.equal(
+      switched.headers.get('set-cookie'),
+      'northstar-demo-actor=manager; Path=/; HttpOnly; SameSite=Strict',
+    );
+  } finally {
+    await close(demo);
+  }
+});
+
 test('the declared Bills List filters each state tab exactly, orders the newest bill first and exports a supplier invoice number inert', () => {
   const ns = 'northstar.app';
   const surface = (
@@ -2223,6 +2300,9 @@ test('a record names its short rows and its progress, and offers only the first 
       selectedDatasetId: null,
       url: '/?surface=order&record=00000000-0000-4000-8000-000000000001',
       scope: null,
+      offeredActionIds: new Set(
+        composition.actions.map((action) => action.actionId),
+      ),
     };
   };
   const draft = { [state]: id('state', 'order_draft') };
@@ -3162,6 +3242,10 @@ test('a field-scoped section renders its rows, asks for a company it lacks and r
     selectedDatasetId: null,
     url: '/?surface=thing',
     scope: null,
+    // APPROVALS: a record offers the actions its current policy admits.
+    offeredActionIds: new Set(
+      composition.actions.map((action) => action.actionId),
+    ),
   });
   const view = {} as IssuedRequestRuntimeView;
   const row = {
