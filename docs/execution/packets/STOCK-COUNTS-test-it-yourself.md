@@ -11,13 +11,13 @@ then open the printed URL. Ctrl-C stops it and removes its container. The demo s
    "October cycle count". **Count type** reads Cycle count and **Counting mode** Open; there is no number, state or
    date to type. Click **Remove line 1** (a new count opens with one blank line, filed) → **Save draft**: the page
    opens **CNT-000001**, Draft.
-2. **Start counting**: **Counted lines** lists Field notebook, **Expected 10**, Physical count and Variance empty.
+2. **Start counting**: **Counted lines** lists Field notebook, **Expected 10**, Physical count and Variance —.
 3. **Edit** → line 1 **Physical count** 9; **Add line** → Product **Task lamp**, Physical count **2** (found on a
    shelf, not on the books) → **Save draft**. The page reads Field notebook Variance **-1**; Task lamp Expected **0**,
    Variance **2**.
 4. **Review**: **Counted at** is now the review's time, the figures are the ones that will post, and Edit is gone.
    A count with a line not yet counted is refused at Review.
-5. **Post** → **Confirm Post**: **Posted movements** list Field notebook -1 and Task lamp 2, role Count. Catalog →
+5. **Post** → **Confirm Post**: **Posted movements** list Field notebook -1 and Task lamp 2, role `count`. Catalog →
    Item list → Field notebook reads Calgary warehouse 9; Task lamp reads 2.
 
 ## §2 A count that went stale is refused
