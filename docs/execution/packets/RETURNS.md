@@ -1,8 +1,8 @@
 # RETURNS — goods back from customers and back to suppliers, through the posting kernel
 
-Status: slices 1 (customer returns) and 2 (vendor returns) executable on draft PR #15 (base `packet/PAYABLES`); no merge, no deployment. Sole LOCAL BUILD under the owner's standing instruction (2026-09-30); four pauses taken on the coordinator's word (network, owner, shutdown, battery).
+Status: slices 1 (customer returns) and 2 (vendor returns) executable on draft PR #15 (base `packet/PAYABLES`); no merge, no deployment. Sole LOCAL BUILD under the owner's standing instruction (2026-09-30); five pauses taken on the coordinator's word (network, owner, shutdown, battery, restart).
 Tier: **Critical** — the posting kernel (`inventory-posting-service.ts`) and `db/migrations/0029_returns_posting.sql`; context it calls: `goods-receipt.ts`, `received-quantity-projection.ts` (the received rebuild the materializer runs), `fulfillment.ts`. One ONLINE arm is owed: `RETURNS-review-prompt.md`.
-Base: `packet/PAYABLES` at `b91c5284` (merged at `0aa4f9a1`; `681f4675` before it, at `d1488446`); design `RETURNS-design.md` (`8780e8e9`).
+Base: `packet/PAYABLES` at `96ac2341` (merged at `91d23216`; earlier `0e448d93` at `4b77995e`, `b91c5284` at `0aa4f9a1`, `681f4675` at `d1488446`); design `RETURNS-design.md` (`8780e8e9`).
 
 ## Owner rulings (2026-09-30, the recommended choice taken)
 
@@ -45,36 +45,51 @@ Outside the Critical set:
 - Both new PostgreSQL files take order-pages' 600 s bound: seven claims each over one composed application.
 - The two slices went out as one first increment with one lineage entry (6, rebuilt from the PAYABLES envelope): slice 1 was not yet pushed when its first run found the notes defect, whose fix moved its release.
 - POSTING-FORWARD-DATE (PR #9, not in this base) refuses postings dated after the tenant's today for every family; once both land, returns must fall under it. Until then a return is refused after today exactly as a shipment is.
-- Composed-application's advancement and ADR-0047 rollback-edge parents run on a 1 GB data volume, as the full-replay generator does (`28461658`): with lineage entry 6 both filled the default 256 MB (sqlstate 53100, CI run 37258323455). No assertion, timeout or readiness bound changed; every other test keeps 256 MB.
+- Test provisioning, not a bound (`e63f17dd`): composed-application's advancement parent and its ADR-0047 rollback-edge parent ask `withEphemeralPostgres` for a 1 GB data directory (`{ dataSizeMegabytes: 1024 }`, the option `28461658` added for the full-replay generator) instead of the default 256 MB tmpfs, which both filled at lineage entry 6 (sqlstate 53100, CI 37258323455). No timeout, assertion or readiness bound changed; every other test keeps 256 MB.
+- The advancement parent is split at its reversal journey (`72beb936`), as the rollback-edge directions were: it keeps the install, the mismatched and trigger-disabled refusals, approval revocation and the advance to B; a new parent installs and advances its own deployment, then refuses the forward-only reversal and the non-exact reverse pairs, rolls back to A and replays forward. At `0aa4f9a1` the unsplit parent reached its 300 s bound in both CI attempts (37261615364), while every other composed parent ran 1.19-1.28x its time in PAYABLES `b91c5284`'s run; at `e63f17dd` it passed in 178 s. Local, in a scratch copy with measurement-only bounds (committed bounds unchanged): advancement 378 s, reversal 467 s, both passing; reversal phases: install A 153 s, compile B 20 s, advance to B 154 s, non-exact reverse pairs 140 s, the rest 17 s. CI 37269446224 (`72beb936`): advancement 190 s, reversal 183 s, rollback-edge 221 s.
+- The ADR-0047 rollback-edge parent is split per direction (`45d0bfaf`), each test on its own database under the same 300 s bound and 1 GB volume, statements unchanged: at `4b77995e` it reached the 300 s bound in-matrix (CI 37273179606; advancement 253 s and reversal 243 s on that runner), having passed at 295 s and 291 s in 37261615364. Not run locally; CI 37278851536 (`45d0bfaf`): profile-only 145 s, source-changing 142 s, advancement 244 s, reversal 233 s.
 
 ## Slices
 
 1. Customer returns: `a1c7a702` (kernel family, migration 0029, Sales entities and surfaces). Test it yourself §1-§3.
-2. Vendor returns and the slice-1 fixes: `4e2efed2`; controls `f67610a3`, `16b6730c`; B5's last step `e918a78c`; snapshot `fc13a15f`; CI pins `e63f17dd`; PAYABLES `b91c5284` merged `0aa4f9a1`. Test it yourself §4.
+2. Vendor returns and the slice-1 fixes: `4e2efed2`; controls `f67610a3`, `16b6730c`; B5's last step `e918a78c`; snapshot `fc13a15f`; CI pins and data volumes `e63f17dd`; PAYABLES `b91c5284` merged `0aa4f9a1`; composed split `72beb936`; PAYABLES `0e448d93` merged `4b77995e` and `96ac2341` merged `91d23216`; rollback-edge split `45d0bfaf`; the V5 lock-drop control's declared reason `9c310635`. Test it yourself §4.
 
 ## Controls
 
-`test/evidence/RETURNS.expected-red.json`, one or two per claim, each `--run` under the lock on AC power with at least 2 GB free:
-- `return-bound-removed` B1 (kills B1, B4): reproduced at `e63f17dd`: restored 8 passing, 2 killed.
-- `returns-counted-as-unshipped` B2 (kills B2): reproduced at `0aa4f9a1`: restored 8 passing, 1 killed.
-- `shipment-guard-removed` B3 (kills B3): reproduced at `0aa4f9a1`: restored 8 passing, 1 killed.
-- `return-order-lock-dropped` B4 (kills B4): owed: not run.
-- `return-correction-accepts-foreign-movement` B5 (kills B5): owed: not run.
-- `return-verifier-call-deleted` B6 (kills B2, B3, B4, B5, B6, B7): owed: not run.
-- `return-digest-drops-quantities` B7 (kills B7): owed: not run.
-- `return-replay-hashes-current-policy` B7 (kills B7): owed: not run.
-- `vendor-return-bound-removed` V1 (kills V1, V5): owed: not run.
-- `received-ledger-ignores-vendor-returns` V2 (kills V2, V3, V5): owed: not run.
-- `received-sweep-ignores-vendor-returns` V3 (kills V3, V4): owed: not run.
-- `received-rebuild-ignores-vendor-returns` V4 (kills V4): owed: not run.
-- `vendor-return-order-lock-dropped` V5 (kills V5): owed: not run.
-- `vendor-return-verifier-call-deleted` V6 (kills V2, V3, V4, V5, V6, V7): owed: not run.
-- `vendor-return-digest-drops-quantities` V7 (kills V7): owed: not run.
-- `vendor-return-replay-hashes-current-policy` V7 (kills V7): owed: not run.
+`test/evidence/RETURNS.expected-red.json`, one or two per claim: `return-bound-removed` B1; `returns-counted-as-unshipped`
+B2; `shipment-guard-removed` B3; `return-order-lock-dropped` B4; `return-correction-accepts-foreign-movement` B5;
+`return-verifier-call-deleted` B6; `return-digest-drops-quantities` and `return-replay-hashes-current-policy` B7;
+`vendor-return-bound-removed` V1; `received-ledger-ignores-vendor-returns` V2; `received-sweep-ignores-vendor-returns` V3;
+`received-rebuild-ignores-vendor-returns` V4; `vendor-return-order-lock-dropped` V5; `vendor-return-verifier-call-deleted`
+V6; `vendor-return-digest-drops-quantities` and `vendor-return-replay-hashes-current-policy` V7. Outcomes: Gates.
 
 ## Gates
 
-(paused for a restart; filled at freeze)
+- CI 37281958440 at `9c310635`, the frozen executable head: every job green (quality, performance budget, the three browser runners, PostgreSQL schema and isolation, composed, commercial, observability, executed-file reachability, scans). https://github.com/AnserBeg/2rain-greenfield/actions/runs/37281958440
+- CI 37278851536 at `45d0bfaf` (the executable tree of `9c310635` but for one manifest entry's declared reason): every job green.
+- Earlier CI: 37258323455 (`fc13a15f`) red in schema (`inventory-storage` pinned 28 verified migrations; 0029 makes 29) and composed (sqlstate 53100), both fixed in `e63f17dd`; 37260222812 (`e63f17dd`) cancelled by the next push after composed, schema, quality and both browser runners passed; 37261615364 (`0aa4f9a1`, two attempts) green but composed, where the unsplit advancement parent reached its 300 s bound both times; 37269446224 (`72beb936`) every job green; 37273179606 (`4b77995e`) green but composed, where the rollback-edge parent reached its 300 s bound.
+- Expected-red controls on CI: https://github.com/AnserBeg/2rain-greenfield/actions/runs/37278905226 (evidence.yml, head 45d0bfaf0d214307b028a2ef99cbadcac53917b3)
+  - `received-ledger-ignores-vendor-returns` at 45d0bfaf0d21: killed with the declared reason (3 declared kill(s) failed as declared) and restored green (8 passing).
+  - `received-rebuild-ignores-vendor-returns` at 45d0bfaf0d21: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (8 passing).
+  - `received-sweep-ignores-vendor-returns` at 45d0bfaf0d21: killed with the declared reason (2 declared kill(s) failed as declared) and restored green (8 passing).
+  - `return-bound-removed` at 45d0bfaf0d21: killed with the declared reason (2 declared kill(s) failed as declared) and restored green (8 passing).
+  - `return-correction-accepts-foreign-movement` at 45d0bfaf0d21: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (8 passing).
+  - `return-digest-drops-quantities` at 45d0bfaf0d21: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (8 passing).
+  - `return-order-lock-dropped` at 45d0bfaf0d21: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (8 passing).
+  - `return-replay-hashes-current-policy` at 45d0bfaf0d21: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (8 passing).
+  - `return-verifier-call-deleted` at 45d0bfaf0d21: killed with the declared reason (6 declared kill(s) failed as declared) and restored green (8 passing).
+  - `returns-counted-as-unshipped` at 45d0bfaf0d21: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (8 passing).
+  - `shipment-guard-removed` at 45d0bfaf0d21: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (8 passing).
+  - `vendor-return-bound-removed` at 45d0bfaf0d21: killed with the declared reason (2 declared kill(s) failed as declared) and restored green (8 passing).
+  - `vendor-return-digest-drops-quantities` at 45d0bfaf0d21: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (8 passing).
+  - `vendor-return-order-lock-dropped` at 45d0bfaf0d21: FAILED (exit 1) — vendor-return-order-lock-dropped: V5 two concurrent vendor returns of one line from two locations serialize on the order: exactly one commits failed for a different reason than the one declared for it
+  - `vendor-return-replay-hashes-current-policy` at 45d0bfaf0d21: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (8 passing).
+  - `vendor-return-verifier-call-deleted` at 45d0bfaf0d21: killed with the declared reason (6 declared kill(s) failed as declared) and restored green (8 passing).
+- Expected-red controls on CI: https://github.com/AnserBeg/2rain-greenfield/actions/runs/37281958328 (evidence.yml, head 9c310635082a; the entry's declared reason corrected to the one measured above, then `return-bound-removed` again at this head)
+  - `return-bound-removed` at 9c310635082a: killed with the declared reason (2 declared kill(s) failed as declared) and restored green (8 passing).
+  - `vendor-return-order-lock-dropped` at 9c310635082a: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (8 passing).
+- Local `--run` under the lock, AC power and at least 2 GB free checked before taking it, each killed as declared and restored green: `return-bound-removed` at `e63f17dd`; `returns-counted-as-unshipped` and `shipment-guard-removed` at `0aa4f9a1`; `return-order-lock-dropped`, `return-correction-accepts-foreign-movement` and `return-verifier-call-deleted` at `72beb936`; `return-digest-drops-quantities` at `4b77995e`. `return-replay-hashes-current-policy` at `4b77995e` was stopped by the lane (SIGINT; load average 14.7, 1.1 GB free) before its mutated run executed a test: no measurement.
+- Local: `customer-return.test.ts` 8/8 in 226 s and `vendor-return.test.ts` 8/8 in 221 s (`e918a78c`'s tree); the split composed parents as in Decisions; `check-records` and static `check-expected-red` (178 entries in 14 manifests) at `9c310635`. Pins from a compile: 113 surfaces, 17 navigation, 631 scenarios (554 executed, 77 derived); customer_return 18 and its line 13, vendor_return 15 and its line 12. Full-replay snapshot (`fc13a15f`): the four return tables (61 columns, 21 indexes, 16 policies and their privileges) and ten widened posting-role and transaction-type checks, nothing else. Release entry 6 `--check` PASS; language coverage 2654 obligations, 811 observed, unchanged.
 
 ## Test it yourself
 
@@ -92,8 +107,8 @@ Review: owed — `RETURNS-review-prompt.md` (round 1, ONLINE, user-run).
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RETURNS",
-  "base": "b91c5284e163d19a834802479dd2dc1e3a1201d1",
-  "head": "0aa4f9a14ae50745184f1592d612c17e28a7cd87",
+  "base": "96ac234122322b2cbe18349299664f56c8f5190a",
+  "head": "9c310635082a0e55cd48d20b220c927b853eb2ee",
   "changedPaths": [
     "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/release/current-policy-bindings.json", "apps/web/test/browser/composed-application.spec.ts",
     "apps/web/test/browser/returns-receiving.spec.ts", "db/migrations/0029_returns_posting.sql", "db/schema.snapshot.json", "package.json",

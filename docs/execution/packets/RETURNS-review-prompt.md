@@ -1,8 +1,8 @@
 # RETURNS — review round 1 prompt (ONLINE arm, user-run)
 
-Repository `AnserBeg/2rain-greenfield`, branch `packet/RETURNS`, frozen executable SHA `HEAD_SHA`, base
-`packet/PAYABLES` at `b91c5284`. Read `docs/architecture/posting-kernel-guarantees.md`, then the diff
-`b91c5284..HEAD_SHA` of `packages/postgres-provider/src/inventory-posting-service.ts` and
+Repository `AnserBeg/2rain-greenfield`, branch `packet/RETURNS`, frozen executable SHA `9c310635`, base
+`packet/PAYABLES` at `96ac2341`. Read `docs/architecture/posting-kernel-guarantees.md`, then the diff
+`96ac2341..9c310635` of `packages/postgres-provider/src/inventory-posting-service.ts` and
 `db/migrations/0029_returns_posting.sql`, and any other code you need. Not the packet records. Tests:
 `test/postgres/customer-return.test.ts`, `test/postgres/vendor-return.test.ts`; controls: `test/evidence/RETURNS.expected-red.json`.
 Question: is there a defect in production code under the claims below? For each, give the code path and the
