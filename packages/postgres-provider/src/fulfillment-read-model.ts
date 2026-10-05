@@ -74,6 +74,7 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
         await invoke(key, {
           includeArchived: false,
           list: {
+            relationLabels: [],
             ...extra,
             schemaVersion: SHARED_LIST_QUERY_VERSION,
             cursor,
@@ -81,7 +82,6 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
             pageSize: 100,
             search: '',
             sort: [],
-            relationLabels: [],
             ...(referenceScope ? { referenceScope } : {}),
             ...(parentScope ? { parentScope } : {}),
           },
@@ -322,6 +322,158 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
         throw error;
       }
     })());
+  /**
+   * RETURNS (ruling D). What an order line has had returned: the posted
+   * customer-return movements of its return lines, initial returns positive
+   * and corrections negative, as the posting kernel counts them. A read
+   * current policy withholds states nothing -- one denial answers for every
+   * line of the call -- never a guessed zero. The offer, not the rule: the
+   * kernel bounds every return by what was shipped under the order's lock.
+   */
+  let returnsWithheld = false;
+  const returnedOf = async (
+    line: SemanticRecordDto,
+  ): Promise<bigint | null> => {
+    if (returnsWithheld) return null;
+    try {
+      let returned = 0n;
+      for (const returnLine of await list(
+        'returnLines',
+        {},
+        {
+          relationId: `${ns}:relation.customer_return_line_order_line`,
+          recordId: line.recordId,
+        },
+      ))
+        for (const movement of await list('movements', {
+          fieldFilters: [
+            {
+              fieldId: `${ns}:field.inventory_movement_source_type`,
+              value: 'customerReturn',
+            },
+            {
+              fieldId: `${ns}:field.inventory_movement_source_line`,
+              value: returnLine.recordId,
+            },
+          ],
+        }))
+          returned += fulfillmentQuantity(
+            String(
+              movement.values[`${ns}:field.inventory_movement_quantity_delta`],
+            ),
+          );
+      return returned;
+    } catch (error) {
+      if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
+      returnsWithheld = true;
+      return null;
+    }
+  };
+  /**
+   * What each line of one posted return still adds to stock, the quantity
+   * that takes exactly that back, and the line's order line -- so "Reverse
+   * return" names what the posting kernel's compensation check admits.
+   * Stated only for the lines of one return (the echoed parent scope).
+   */
+  const returnScope = result.listCoverage?.parentScope;
+  const returnId =
+    returnScope &&
+    returnScope.relationId === `${ns}:relation.customer_return_line_return`
+      ? returnScope.recordId
+      : null;
+  const orderLineOf = async (): Promise<ReadonlyMap<
+    string,
+    string | null
+  > | null> => {
+    if (!returnId || !result.records.length) return null;
+    const relation = `${ns}:relation.customer_return_line_order_line`;
+    try {
+      return new Map(
+        (
+          await list(
+            'returnLines',
+            {
+              relationLabels: [
+                {
+                  relationId: relation,
+                  queryId: `${ns}:query.sales_order_line_list`,
+                  fieldId: `${ns}:field.sales_order_line_line_number`,
+                },
+              ],
+            },
+            undefined,
+            {
+              relationId: `${ns}:relation.customer_return_line_return`,
+              recordId: returnId,
+            },
+          )
+        ).map((line) => [
+          line.recordId,
+          line.relationLabels?.[relation]?.recordId ?? null,
+        ]),
+      );
+    } catch (error) {
+      if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
+      return null;
+    }
+  };
+  const reversibleOf = async (
+    line: SemanticRecordDto,
+  ): Promise<{ movement: string; reversible: bigint } | null> => {
+    if (!returnId || returnsWithheld) return null;
+    try {
+      const movements = await list('movements', {
+        fieldFilters: [
+          {
+            fieldId: `${ns}:field.inventory_movement_source_type`,
+            value: 'customerReturn',
+          },
+          {
+            fieldId: `${ns}:field.inventory_movement_source_id`,
+            value: returnId,
+          },
+          {
+            fieldId: `${ns}:field.inventory_movement_source_line`,
+            value: line.recordId,
+          },
+        ],
+      });
+      // A draft return has posted nothing; nothing can be taken back.
+      if (!movements.length) return null;
+      if (movements.length !== 1)
+        throw new Error('Return line movements require reconciliation');
+      const [movement] = movements;
+      let reversible = fulfillmentQuantity(
+        String(
+          movement!.values[`${ns}:field.inventory_movement_quantity_delta`],
+        ),
+      );
+      for (const compensation of await list('movements', {
+        fieldFilters: [
+          {
+            fieldId: `${ns}:field.inventory_movement_reversal_of_movement_id`,
+            value: movement!.recordId,
+          },
+        ],
+      }))
+        reversible += fulfillmentQuantity(
+          String(
+            compensation.values[
+              `${ns}:field.inventory_movement_quantity_delta`
+            ],
+          ),
+        );
+      return { movement: movement!.recordId, reversible };
+    } catch (error) {
+      if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
+      returnsWithheld = true;
+      return null;
+    }
+  };
+  const returnOrderLines =
+    model.binding === FULFILLMENT_READ_MODEL_BINDINGS.returnLine
+      ? await orderLineOf()
+      : null;
   const rows: SemanticRecordDto[] = [];
   for (const row of result.records) {
     const values: Record<string, ImmutableJsonValue> = { ...row.values };
@@ -341,6 +493,23 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
         emit('available_now', own ? own.available : null);
         emit('short', own ? own.short : null);
       }
+      // Declared only where a page offers returns (ruling D).
+      if (model.resultFields.returned) {
+        const returned = await returnedOf(row);
+        emit('returned', returned);
+        emit('returnable', returned === null ? null : shipped - returned);
+      }
+    } else if (model.binding === FULFILLMENT_READ_MODEL_BINDINGS.returnLine) {
+      const figures = await reversibleOf(row);
+      const text = (key: string, value: string | null) => {
+        const field = model.resultFields[key];
+        if (!field) throw new Error('Read-model output is undeclared');
+        values[field] = value;
+      };
+      text('return_movement', figures?.movement ?? null);
+      emit('return_reversible', figures ? figures.reversible : null);
+      emit('return_reversal_quantity', figures ? -figures.reversible : null);
+      text('return_order_line', returnOrderLines?.get(row.recordId) ?? null);
     } else if (model.binding === FULFILLMENT_READ_MODEL_BINDINGS.reservation) {
       const item = row.values[`${ns}:field.reservation_item_id`]!;
       const location = row.values[`${ns}:field.reservation_location_id`]!;

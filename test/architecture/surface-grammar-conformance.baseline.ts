@@ -104,6 +104,10 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     // three contextual documents' list (2), detail (4) and form (4) each. The
     // invoice List declares saved views, so it adds none: 59 + 36 = 95. No new
     // violation kind.
-    violationCount: 95,
+    // RETURNS (ruling D) adds the customer return and its lines the same
+    // way: the return's detail (2) and form (4) -- its List declares saved
+    // views -- and its lines' list (2), detail (4) and form (4): 95 + 16 =
+    // 111. No new violation kind.
+    violationCount: 111,
   }),
 ] as const satisfies readonly ProductSurfaceGrammarBaselineEntry[]);

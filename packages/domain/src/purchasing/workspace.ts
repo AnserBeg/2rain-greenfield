@@ -156,6 +156,8 @@ export function purchasingWorkspace(
   const receipts = id('dataset', 'purchasing_receipts');
   // PAYABLES: the order's vendor bills and their balances.
   const bills = id('dataset', 'purchasing_bills');
+  // RETURNS: what went back to the supplier from this order.
+  const vendorReturns = id('dataset', 'purchasing_vendor_returns');
   const receive = (known: boolean) => {
     const suffix = known ? 'known' : 'absent';
     const header = `receipt_${suffix}`;
@@ -1150,6 +1152,46 @@ export function purchasingWorkspace(
           ),
         ],
       },
+      {
+        // RETURNS (ruling R-A): what was sent back; each return lowered what
+        // its lines had received and reopened them to receive.
+        datasetId: vendorReturns,
+        label: 'Vendor returns',
+        orderKey: 50,
+        query: q('vendor_return_list'),
+        presentation: { selection: 'none', compact: 'scrollTable' },
+        parent: {
+          relationId: id('relation', 'vendor_return_order'),
+          value: record('recordId'),
+          ownership: 'reference',
+        },
+        sort: [
+          { fieldId: f('vendor_return_effective_at'), direction: 'ascending' },
+        ],
+        columns: [
+          column('vendor_return', 'Return', 10, f('vendor_return_number')),
+          column('vendor_return_state', 'State', 20, f('vendor_return_state')),
+          column(
+            'vendor_returned_at',
+            'Returned at',
+            30,
+            f('vendor_return_effective_at'),
+          ),
+          column(
+            'vendor_return_location',
+            'Returned from',
+            40,
+            f('vendor_return_location_id'),
+            ['location_get', 'location_name'],
+          ),
+          column(
+            'vendor_return_reason',
+            'Reason',
+            50,
+            f('vendor_return_reason_code'),
+          ),
+        ],
+      },
     ],
     actions: [
       receiveLines(true),
@@ -1157,6 +1199,141 @@ export function purchasingWorkspace(
       reverseReceipt,
       receive(true),
       receive(false),
+      {
+        // RETURNS (ruling R-A): received goods sent back to the supplier from
+        // any active location (ruling R-C). What the line has received falls
+        // by the quantity and the line reopens to receive, so a replacement
+        // arrives as an ordinary receipt; a refund is this return followed by
+        // "Close open remainder". The receiving kernel refuses more than was
+        // received, and stock that is not on hand or is reserved.
+        actionId: id('action', 'return_to_vendor'),
+        label: 'Return to vendor',
+        description:
+          'Sends received goods back to the supplier from the location you choose. The line can then be received again, or its remainder closed for a refund.',
+        orderKey: 27,
+        datasetId: lines,
+        presentation: { placement: 'selection' },
+        conditions: [
+          released,
+          {
+            value: selected(metric('received')),
+            operator: 'positive',
+            compare: null,
+          },
+        ],
+        inputs: [
+          {
+            inputId: id('input', 'vendor_return_quantity'),
+            label: 'Quantity to return',
+            orderKey: 10,
+            type: 'quantity',
+            required: true,
+          },
+          {
+            inputId: id('input', 'vendor_return_unit'),
+            label: 'Base unit',
+            orderKey: 20,
+            type: 'text',
+            required: true,
+            presentation: {
+              kind: 'derived',
+              column: {
+                datasetId: lines,
+                columnId: id('column', 'purchasing_base_unit'),
+              },
+            },
+          },
+          {
+            inputId: id('input', 'vendor_return_location'),
+            label: 'Return from location',
+            orderKey: 30,
+            type: 'reference',
+            required: true,
+            query: q('location_list'),
+            labelField: ref('fieldReference', f('location_name')),
+            defaultFrom: record(f('purchase_order_receiving_location_id')),
+          },
+          {
+            inputId: id('input', 'vendor_return_reason'),
+            label: 'Reason',
+            orderKey: 40,
+            type: 'text',
+            required: true,
+            presentation: {
+              kind: 'choice',
+              options: [
+                { value: 'DEFECTIVE', label: 'Defective' },
+                { value: 'DAMAGED', label: 'Damaged in transit' },
+                { value: 'WRONG_ITEM', label: 'Wrong item' },
+                { value: 'OVER_SHIPPED', label: 'Over-shipped' },
+                { value: 'OTHER', label: 'Other' },
+              ],
+              defaultValue: 'DEFECTIVE',
+            },
+          },
+          {
+            // Posted as the return's narrative, which a posting
+            // configuration requiring code and narrative demands.
+            inputId: id('input', 'vendor_return_notes'),
+            label: 'What goes back',
+            orderKey: 50,
+            type: 'text',
+            required: true,
+            presentation: { kind: 'multiline' },
+          },
+        ],
+        steps: [
+          create(
+            'vendor_return_draft',
+            'vendor_return',
+            {
+              // The return number is assigned on create (VRT-000001).
+              state: literal(id('option', 'vendor_return_state_draft')),
+              effective_at: generated('instant'),
+              location_id: {
+                source: 'input',
+                inputId: id('input', 'vendor_return_location'),
+              },
+              reason_code: {
+                source: 'input',
+                inputId: id('input', 'vendor_return_reason'),
+              },
+              reason_narrative: {
+                source: 'input',
+                inputId: id('input', 'vendor_return_notes'),
+              },
+            },
+            { order: record('recordId') },
+          ),
+          create(
+            'vendor_return_line',
+            'vendor_return_line',
+            {
+              line_number: selected(f('purchase_order_line_line_number')),
+              item_id: selected(f('purchase_order_line_item_id')),
+              quantity: {
+                source: 'input',
+                inputId: id('input', 'vendor_return_quantity'),
+              },
+              unit_id: {
+                source: 'input',
+                inputId: id('input', 'vendor_return_unit'),
+              },
+            },
+            {
+              return: stepValue('vendor_return_draft', 'recordId'),
+              order_line: selected('recordId'),
+            },
+          ),
+          step('vendor_return_post', 'vendor_return_post', [
+            bind(['recordId'], stepValue('vendor_return_draft', 'recordId')),
+            bind(
+              ['expectedRevision'],
+              stepValue('vendor_return_draft', 'revision'),
+            ),
+          ]),
+        ],
+      },
       {
         // PURCHASING-PARITY: what will not arrive stops being expected. The
         // line's ordered quantity becomes what was received, through the

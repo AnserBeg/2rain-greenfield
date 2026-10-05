@@ -192,10 +192,14 @@ export const LEGAL_ENTITY_FAMILY_MAP_V1 = Object.freeze([
   { classification: 'entityOwned', familyId: 'customer_invoice_line' },
   { classification: 'entityOwned', familyId: 'customer_payment' },
   { classification: 'entityOwned', familyId: 'customer_credit' },
+  { classification: 'entityOwned', familyId: 'customer_return' },
+  { classification: 'entityOwned', familyId: 'customer_return_line' },
   { classification: 'entityOwned', familyId: 'vendor_bill' },
   { classification: 'entityOwned', familyId: 'vendor_bill_line' },
   { classification: 'entityOwned', familyId: 'vendor_payment' },
   { classification: 'entityOwned', familyId: 'vendor_credit' },
+  { classification: 'entityOwned', familyId: 'vendor_return' },
+  { classification: 'entityOwned', familyId: 'vendor_return_line' },
   { classification: 'entityOwned', familyId: 'stock_count' },
   { classification: 'entityOwned', familyId: 'stock_count_line' },
 ] as const satisfies readonly LegalEntityFamilyRuleV1[]);
@@ -310,6 +314,41 @@ export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
     semantics: 'sameEntity',
     sourceFamilyId: 'sales_order_shipped',
     targetFamilyId: 'sales_order_line',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'customer_return',
+    targetFamilyId: 'sales_order',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'customer_return',
+    targetFamilyId: 'customer_return',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'customer_return_line',
+    targetFamilyId: 'customer_return',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'customer_return_line',
+    targetFamilyId: 'sales_order_line',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_return',
+    targetFamilyId: 'purchase_order',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_return_line',
+    targetFamilyId: 'vendor_return',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_return_line',
+    targetFamilyId: 'purchase_order_line',
   },
   {
     semantics: 'sameEntity',

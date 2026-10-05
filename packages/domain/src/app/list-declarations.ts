@@ -434,6 +434,79 @@ function settlementList(
   };
 }
 
+/** The customer returns List (RETURNS, ruling D). */
+function returnList(namespace: string): ListSpec {
+  const field = (local: string) =>
+    `${namespace}:field.customer_return_${local}`;
+  const option = (name: string, value: string) =>
+    `${namespace}:option.customer_return_${name}_${value}`;
+  return {
+    pageSize: 50,
+    columns: [
+      {
+        local: 'number',
+        label: 'Number',
+        field: field('number'),
+        role: 'title',
+      },
+      {
+        local: 'returned_at',
+        label: 'Returned at',
+        field: field('effective_at'),
+        format: 'date',
+      },
+      {
+        local: 'location',
+        label: 'Returned into',
+        field: field('location_id'),
+        reference: {
+          query: `${namespace}:query.location_list`,
+          labelField: `${namespace}:field.location_name`,
+        },
+      },
+      { local: 'reason', label: 'Reason', field: field('reason_code') },
+      { local: 'kind', label: 'Kind', field: field('kind') },
+      {
+        local: 'status',
+        label: 'Status',
+        field: field('state'),
+        role: 'status',
+        statusRoles: {
+          [option('state', 'draft')]: 'attention',
+          [option('state', 'posted')]: 'success',
+        },
+      },
+    ],
+    defaultSort: [{ column: 'returned_at', direction: 'descending' }],
+    views: [
+      { local: 'all', label: 'All', filters: {} },
+      {
+        local: 'posted',
+        label: 'Posted',
+        filters: { [field('state')]: option('state', 'posted') },
+      },
+      {
+        local: 'draft',
+        label: 'Draft',
+        filters: { [field('state')]: option('state', 'draft') },
+      },
+    ],
+    filters: [
+      {
+        local: 'kind',
+        label: 'Kind',
+        field: field('kind'),
+        options: [
+          [option('kind', 'initial'), 'Return'],
+          [option('kind', 'correction'), 'Correction'],
+          [option('kind', 'reversal'), 'Reversal'],
+        ],
+      },
+    ],
+    export: true,
+  };
+}
+
 /** Receivables' Invoices List (owner ruling C). */
 export const INVOICE_LIST: SettlementListSpec = Object.freeze({
   document: 'customer_invoice',
@@ -723,6 +796,9 @@ export function composedListSpecs(
     // Payables (PAYABLES): each vendor bill the same way, with the supplier's
     // own invoice number.
     vendor_bill_list: settlementList(namespace, BILL_LIST),
+    // RETURNS (ruling D): every customer return, newest first; the tabs are
+    // its states, a kind filter separates returns from their reversals.
+    customer_return_list: returnList(namespace),
     // A balance, not a document: no lifecycle, so no saved views; item and
     // location are named through their own lists rather than shown as ids.
     posted_stock_balance_list: {

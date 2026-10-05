@@ -61,6 +61,12 @@ test('Sales, Purchase and shipment numbers are declared server-assigned sequence
         'PAY',
         `${ns}:document_sequence.customer_payment`,
       ],
+      // RETURNS (ruling D): a customer return's RMA number.
+      [
+        `${ns}:field.customer_return_number`,
+        'RMA',
+        `${ns}:document_sequence.customer_return`,
+      ],
       // PURCHASING-PARITY: a goods receipt's number, RCV-000001.
       [
         `${ns}:field.goods_receipt_number`,
@@ -98,6 +104,12 @@ test('Sales, Purchase and shipment numbers are declared server-assigned sequence
         `${ns}:field.vendor_payment_number`,
         'VPAY',
         `${ns}:document_sequence.vendor_payment`,
+      ],
+      // RETURNS (ruling R-A): a vendor return's VRT number.
+      [
+        `${ns}:field.vendor_return_number`,
+        'VRT',
+        `${ns}:document_sequence.vendor_return`,
       ],
     ],
   );

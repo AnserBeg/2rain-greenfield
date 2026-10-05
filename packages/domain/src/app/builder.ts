@@ -1,5 +1,6 @@
 import {
   invoiceWorkspace,
+  returnWorkspace,
   salesWorkspace,
   salesWorkspaceQueries,
   packingWorkspace,
@@ -64,6 +65,7 @@ const MODULE_REGISTRY = Object.freeze([
       purchasingModuleDefinition(namespace, {
         commercialTerms: true,
         payables: true,
+        vendorReturns: true,
       }),
     moduleName: 'purchasing',
   }),
@@ -89,6 +91,7 @@ const RECORD_COMPOSITIONS: Readonly<
   sales_order_detail: salesWorkspace,
   purchase_order_detail: purchasingWorkspace,
   shipment_detail: packingWorkspace,
+  customer_return_detail: returnWorkspace,
   customer_invoice_detail: invoiceWorkspace,
   vendor_bill_detail: billWorkspace,
   inventory_transaction_detail: (namespace: string) =>

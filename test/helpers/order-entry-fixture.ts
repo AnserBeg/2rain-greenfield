@@ -590,6 +590,156 @@ async function seed(
         observed: true,
       };
     }
+    if (phase === 'returns') {
+      // RETURNS: a confirmed sales order whose one line shipped all three of
+      // its units, and a released purchase order whose one line received all
+      // four of its units -- for a browser proof to take goods back from the
+      // customer, reverse that return, and send goods back to the supplier.
+      // Everything goes through the governed operations.
+      const now = new Date().toISOString();
+      const number = (
+        record: { values: Readonly<Record<string, unknown>> },
+        local: string,
+      ) => String(record.values[`${ns}:field.${local}_number`]);
+      const sale = await create('sales_order', {
+        customer_party_id: customer,
+        order_date: now,
+        requested_date: now,
+        currency: 'CAD',
+        notes: null,
+        ...shipTo,
+      });
+      const saleLine = await create(
+        'sales_order_line',
+        {
+          item_id: item,
+          line_number: '1',
+          ordered_quantity: '3',
+          unit_id: 'EA',
+          unit_price: null,
+        },
+        { order: sale.recordId },
+      );
+      const confirmed = await invoke('sales_order_release', {
+        recordId: sale.recordId,
+        expectedRevision: sale.revision,
+      });
+      assert.equal(confirmed.outcome, 'succeeded');
+      const reservation = await create(
+        'reservation',
+        {
+          item_id: item,
+          location_id: location,
+          number: `RSV-${randomUUID()}`,
+          quantity: '3',
+          reason: 'Returns fixture',
+          state: `${ns}:option.reservation_state_draft`,
+          unit_id: 'EA',
+        },
+        { order_line: saleLine.recordId },
+      );
+      const reserved = await invoke('reservation_reserve', {
+        recordId: reservation.recordId,
+        expectedRevision: reservation.revision,
+      });
+      assert.equal(reserved.outcome, 'succeeded');
+      const shipment = await create(
+        'shipment',
+        {
+          carrier: 'Northline Freight',
+          shipping_reference_kind: `${ns}:option.shipment_shipping_reference_kind_tracking`,
+          shipping_reference: 'TRK-RETURNS',
+          state: `${ns}:option.shipment_state_draft`,
+          kind: `${ns}:option.shipment_kind_initial`,
+          effective_at: now,
+          location_id: location,
+          external_reference: null,
+          reason_code: 'SHIP',
+          reason_narrative: 'Returns fixture',
+          ...shipTo,
+        },
+        { order: sale.recordId },
+      );
+      await create(
+        'shipment_line',
+        {
+          line_number: '1',
+          item_id: item,
+          quantity: '3',
+          unit_id: 'EA',
+          reversal_of_movement_id: null,
+        },
+        {
+          shipment: shipment.recordId,
+          order_line: saleLine.recordId,
+          reservation: reservation.recordId,
+        },
+      );
+      const shipped = await invoke('shipment_post', {
+        recordId: shipment.recordId,
+        expectedRevision: shipment.revision,
+      });
+      assert.equal(shipped.outcome, 'succeeded');
+      const purchase = await create('purchase_order', {
+        supplier_party_id: customer,
+        order_date: now,
+        expected_date: null,
+        currency: 'CAD',
+        notes: null,
+      });
+      const purchaseLine = await create(
+        'purchase_order_line',
+        {
+          line_number: '1',
+          item_id: item,
+          ordered_quantity: '4',
+          unit_price: '2.45',
+        },
+        { order: purchase.recordId },
+      );
+      const released = await invoke('purchase_order_release', {
+        recordId: purchase.recordId,
+        expectedRevision: purchase.revision,
+      });
+      assert.equal(released.outcome, 'succeeded');
+      const receipt = await create(
+        'goods_receipt',
+        {
+          state: `${ns}:option.goods_receipt_state_draft`,
+          kind: `${ns}:option.goods_receipt_kind_initial`,
+          effective_at: now,
+          location_id: location,
+          reason_code: 'RECEIVE',
+          reason_narrative: 'Returns fixture',
+        },
+        { order: purchase.recordId },
+      );
+      await create(
+        'goods_receipt_line',
+        {
+          line_number: '1',
+          item_id: item,
+          quantity: '4',
+          unit_id: 'EA',
+          cost_status: `${ns}:option.goods_receipt_line_cost_status_absent`,
+          unit_cost: null,
+          currency: null,
+          reversal_of_movement_id: null,
+        },
+        { receipt: receipt.recordId, order_line: purchaseLine.recordId },
+      );
+      const received = await invoke('goods_receipt_post', {
+        recordId: receipt.recordId,
+        expectedRevision: receipt.revision,
+      });
+      assert.equal(received.outcome, 'succeeded');
+      return {
+        phase,
+        sale: number(sale, 'sales_order'),
+        purchase: number(purchase, 'purchase_order'),
+        observed: true,
+      };
+    }
     if (phase === 'order_lists') {
       // ORDER-PARITY: a confirmed sales order with part of one line shipped
       // and a draft beside it; a released purchase order with priced lines and

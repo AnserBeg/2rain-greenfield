@@ -28,6 +28,7 @@ import {
   fulfillmentRelation,
   fulfillmentTable,
   quoteFulfillmentIdentifier as q,
+  type CustomerReturnCommand,
   type FulfillmentBinding,
   type ShipmentCommand,
 } from './fulfillment.js';
@@ -90,10 +91,12 @@ class FulfillmentCapabilityExecutor implements RegisteredCapabilityOperationExec
         ? binding.reservation
         : operation.endsWith(':operation.shipment_post')
           ? binding.shipment
-          : operation.endsWith(':operation.sales_order_close') ||
-              operation.endsWith(':operation.sales_order_cancel')
-            ? binding.order
-            : null;
+          : operation.endsWith(':operation.customer_return_post')
+            ? binding.customerReturn
+            : operation.endsWith(':operation.sales_order_close') ||
+                operation.endsWith(':operation.sales_order_cancel')
+              ? binding.order
+              : null;
     const input = request.input;
     const scope = request.readBackDefinition.legalEntityScope;
     if (
@@ -154,6 +157,17 @@ class FulfillmentCapabilityExecutor implements RegisteredCapabilityOperationExec
     // commands remain exact in `assertCurrent`.
     if (
       operation.endsWith(':operation.shipment_post') &&
+      currentRevision !== expectedRevision &&
+      currentRevision !== expectedRevision + 1
+    )
+      throw fulfillmentError(
+        'INVENTORY_TRANSACTION_STATE_CONFLICT',
+        'Fulfillment target revision is no longer current',
+      );
+    // RETURNS: a return posts the same way -- its current revision, or the
+    // one after it for an exact replay.
+    if (
+      operation.endsWith(':operation.customer_return_post') &&
       currentRevision !== expectedRevision &&
       currentRevision !== expectedRevision + 1
     )
@@ -251,17 +265,23 @@ class FulfillmentCapabilityExecutor implements RegisteredCapabilityOperationExec
         prepared,
         'cancel',
       );
-    if (!operation.endsWith(':operation.shipment_post'))
+    const returning = operation.endsWith(':operation.customer_return_post');
+    if (!operation.endsWith(':operation.shipment_post') && !returning)
       throw fulfillmentError(
         'INVENTORY_POSTING_INPUT_INVALID',
         'Only named fulfillment operations are admitted by this route',
       );
-    const command = await this.#shipmentCommand(request, prepared);
-    const result = await this.#posting.postShipment(
-      request.context,
-      await this.context.actorIssuer.issue(request.context),
-      command,
-    );
+    const result = returning
+      ? await this.#posting.postCustomerReturn(
+          request.context,
+          await this.context.actorIssuer.issue(request.context),
+          await this.#customerReturnCommand(request, prepared),
+        )
+      : await this.#posting.postShipment(
+          request.context,
+          await this.context.actorIssuer.issue(request.context),
+          await this.#shipmentCommand(request, prepared),
+        );
     let record: SemanticOperationResultEnvelope['readBack'] = null;
     try {
       const readBack = await this.context.queryGateway.invoke(request.view, {
@@ -276,7 +296,9 @@ class FulfillmentCapabilityExecutor implements RegisteredCapabilityOperationExec
       if (readBack.outcome !== 'exact' || !record)
         throw fulfillmentError(
           'INVENTORY_POSTING_STORAGE_REJECTED',
-          'Posted shipment did not read back exactly',
+          returning
+            ? 'Posted customer return did not read back exactly'
+            : 'Posted shipment did not read back exactly',
         );
     } catch (error) {
       if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
@@ -290,6 +312,141 @@ class FulfillmentCapabilityExecutor implements RegisteredCapabilityOperationExec
       trust: result.trust,
       unsupportedReason: null,
     };
+  }
+
+  /**
+   * RETURNS (ruling D). The posting command is hydrated from the stored draft
+   * return as a proposal: the posting kernel re-reads and pins every field
+   * and line under the order's locks before deciding anything.
+   */
+  async #customerReturnCommand(
+    request: RegisteredCapabilityOperationExecutionRequest,
+    prepared: PreparedFulfillment,
+  ): Promise<CustomerReturnCommand> {
+    const binding = this.#binding;
+    const entity = binding.customerReturn;
+    const lineEntity = binding.customerReturnLine;
+    if (!entity || !lineEntity)
+      throw fulfillmentError(
+        'INVENTORY_POSTING_STORAGE_INVALID',
+        'Customer return storage is absent',
+      );
+    return withTrustedRequestTransaction(
+      this.context.pool,
+      request.context,
+      (client) =>
+        withModuleRuntimeRole(client, async () => {
+          const headerResult = await client.query<Record<string, unknown>>(
+            `SELECT * FROM ${fulfillmentTable(entity)}
+              WHERE tenant_id=$1 AND environment_id=$2 AND record_id=$3
+                AND archived_at IS NULL`,
+            [
+              request.context.tenantId,
+              request.context.environmentId,
+              prepared.recordId,
+            ],
+          );
+          const header = headerResult.rows[0];
+          if (!header || headerResult.rows.length !== 1)
+            throw fulfillmentError(
+              'FULFILLMENT_RETURN_INVALID',
+              'Customer return is missing or archived',
+            );
+          const field = (name: string) =>
+            header[fulfillmentColumn(entity, `customer_return_${name}`)];
+          const kind = (['initial', 'correction', 'reversal'] as const).find(
+            (candidate) =>
+              field('kind') ===
+              fulfillmentOption(entity, 'customer_return_kind', candidate),
+          );
+          if (!kind)
+            throw fulfillmentError(
+              'FULFILLMENT_RETURN_INVALID',
+              'Customer return kind is unsupported',
+            );
+          const legalEntityId = String(header[entity.legalEntity!.column]);
+          if (
+            legalEntityId !== prepared.legalEntityId ||
+            Number(header.revision) !== prepared.currentRevision
+          )
+            throw fulfillmentError(
+              'INVENTORY_TRANSACTION_STATE_CONFLICT',
+              'Customer return scope or revision changed after authorization',
+            );
+          const rows = await client.query<Record<string, unknown>>(
+            `SELECT * FROM ${fulfillmentTable(lineEntity)}
+              WHERE tenant_id=$1 AND environment_id=$2
+                AND ${q(lineEntity.legalEntity!.column)}=$3
+                AND ${q(fulfillmentRelation(binding, lineEntity, 'customer_return_line_return'))}=$4
+                AND archived_at IS NULL ORDER BY record_id`,
+            [
+              request.context.tenantId,
+              request.context.environmentId,
+              legalEntityId,
+              prepared.recordId,
+            ],
+          );
+          const effectiveAt = field('effective_at');
+          return {
+            authorization: {
+              decision: 'ALLOW',
+              evaluatorVersion: request.policyEvaluatorVersion,
+              policyVersion: request.policyVersion,
+            },
+            channel: request.channel,
+            idempotencyKey: request.idempotencyKey,
+            effectiveAt: (effectiveAt instanceof Date
+              ? effectiveAt
+              : new Date(String(effectiveAt))
+            ).toISOString(),
+            legalEntityId,
+            sourceId: prepared.recordId,
+            sourceRevision: prepared.expectedRevision,
+            sourceType: 'customerReturn',
+            stockDimensionSetVersion: 'v1',
+            kind,
+            returnNumber: String(field('number')),
+            locationId: String(field('location_id')),
+            orderId: String(
+              header[
+                fulfillmentRelation(binding, entity, 'customer_return_order')
+              ],
+            ),
+            supersedesReturnId: header[
+              fulfillmentRelation(binding, entity, 'customer_return_supersedes')
+            ] as string | null,
+            reason: {
+              code: String(field('reason_code')),
+              narrative: field('reason_narrative') as string | null,
+            },
+            lines: rows.rows.map((row) => {
+              const value = (name: string) =>
+                row[
+                  fulfillmentColumn(lineEntity, `customer_return_line_${name}`)
+                ];
+              return {
+                returnLineId: String(row.record_id),
+                orderLineId: String(
+                  row[
+                    fulfillmentRelation(
+                      binding,
+                      lineEntity,
+                      'customer_return_line_order_line',
+                    )
+                  ],
+                ),
+                sourceLine: String(value('line_number')),
+                itemId: String(value('item_id')),
+                unitId: String(value('unit_id')),
+                // The line keeps the signed quantity it posts.
+                quantityDelta: String(value('quantity')),
+                reversalOfMovementId: value('reversal_of_movement_id') as
+                  string | null,
+              };
+            }),
+          };
+        }),
+    );
   }
 
   async #shipmentCommand(
