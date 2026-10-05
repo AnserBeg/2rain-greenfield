@@ -1,7 +1,7 @@
 # RETURNS — goods back from customers and back to suppliers, through the posting kernel
 
 Status: slices 1 (customer returns) and 2 (vendor returns) executable on draft PR #15 (base `packet/PAYABLES`); no merge, no deployment. Sole LOCAL BUILD under the owner's standing instruction (2026-09-30); five pauses taken on the coordinator's word (network, owner, shutdown, battery, restart).
-Tier: **Critical** — the posting kernel (`inventory-posting-service.ts`) and `db/migrations/0029_returns_posting.sql`; context it calls: `goods-receipt.ts`, `received-quantity-projection.ts` (the received rebuild the materializer runs), `fulfillment.ts`. One ONLINE arm is owed: `RETURNS-review-prompt.md`.
+Tier: **Critical** — the posting kernel (`inventory-posting-service.ts`) and `db/migrations/0029_returns_posting.sql`; context it calls: `goods-receipt.ts`, `received-quantity-projection.ts` (the received rebuild the materializer runs), `fulfillment.ts`. Round 2 of its ONLINE arm is owed: `RETURNS-review-prompt.md`, frozen executable SHA `98a83d8e`.
 Base: `packet/PAYABLES` at `96ac2341` (merged at `91d23216`; earlier `0e448d93` at `4b77995e`, `b91c5284` at `0aa4f9a1`, `681f4675` at `d1488446`); design `RETURNS-design.md` (`8780e8e9`).
 
 ## Owner rulings (2026-09-30, the recommended choice taken)
@@ -48,11 +48,12 @@ Outside the Critical set:
 - Test provisioning, not a bound (`e63f17dd`): composed-application's advancement parent and its ADR-0047 rollback-edge parent ask `withEphemeralPostgres` for a 1 GB data directory (`{ dataSizeMegabytes: 1024 }`, the option `28461658` added for the full-replay generator) instead of the default 256 MB tmpfs, which both filled at lineage entry 6 (sqlstate 53100, CI 37258323455). No timeout, assertion or readiness bound changed; every other test keeps 256 MB.
 - The advancement parent is split at its reversal journey (`72beb936`), as the rollback-edge directions were: it keeps the install, the mismatched and trigger-disabled refusals, approval revocation and the advance to B; a new parent installs and advances its own deployment, then refuses the forward-only reversal and the non-exact reverse pairs, rolls back to A and replays forward. At `0aa4f9a1` the unsplit parent reached its 300 s bound in both CI attempts (37261615364), while every other composed parent ran 1.19-1.28x its time in PAYABLES `b91c5284`'s run; at `e63f17dd` it passed in 178 s. Local, in a scratch copy with measurement-only bounds (committed bounds unchanged): advancement 378 s, reversal 467 s, both passing; reversal phases: install A 153 s, compile B 20 s, advance to B 154 s, non-exact reverse pairs 140 s, the rest 17 s. CI 37269446224 (`72beb936`): advancement 190 s, reversal 183 s, rollback-edge 221 s.
 - The ADR-0047 rollback-edge parent is split per direction (`45d0bfaf`), each test on its own database under the same 300 s bound and 1 GB volume, statements unchanged: at `4b77995e` it reached the 300 s bound in-matrix (CI 37273179606; advancement 253 s and reversal 243 s on that runner), having passed at 295 s and 291 s in 37261615364. Not run locally; CI 37278851536 (`45d0bfaf`): profile-only 145 s, source-changing 142 s, advancement 244 s, reversal 233 s.
+- Round 2's prompt replaces round 1's in `RETURNS-review-prompt.md` (round 1's stays at `9c310635`): frozen at `98a83d8e`, the last executable commit, reviewed as `9c310635..98a83d8e`; CI ran `1420350b`, which adds only this record. It states facts and asks; it names no suspected defect.
 
 ## Slices
 
 1. Customer returns: `a1c7a702` (kernel family, migration 0029, Sales entities and surfaces). Test it yourself §1-§3.
-2. Vendor returns and the slice-1 fixes: `4e2efed2`; controls `f67610a3`, `16b6730c`; B5's last step `e918a78c`; snapshot `fc13a15f`; CI pins and data volumes `e63f17dd`; PAYABLES `b91c5284` merged `0aa4f9a1`; composed split `72beb936`; PAYABLES `0e448d93` merged `4b77995e` and `96ac2341` merged `91d23216`; rollback-edge split `45d0bfaf`; the V5 lock-drop control's declared reason `9c310635`. Test it yourself §4.
+2. Vendor returns and the slice-1 fixes: `4e2efed2`; controls `f67610a3`, `16b6730c`; B5's last step `e918a78c`; snapshot `fc13a15f`; CI pins and data volumes `e63f17dd`; PAYABLES `b91c5284` merged `0aa4f9a1`; composed split `72beb936`; PAYABLES `0e448d93` merged `4b77995e` and `96ac2341` merged `91d23216`; rollback-edge split `45d0bfaf`; the V5 lock-drop control's declared reason `9c310635`; review round 1's regressions `d34c32e4`, fix `76a15604`, naming `98a83d8e`. Test it yourself §4.
 
 ## Controls
 
@@ -61,11 +62,18 @@ B2; `shipment-guard-removed` B3; `return-order-lock-dropped` B4; `return-correct
 `return-verifier-call-deleted` B6; `return-digest-drops-quantities` and `return-replay-hashes-current-policy` B7;
 `vendor-return-bound-removed` V1; `received-ledger-ignores-vendor-returns` V2; `received-sweep-ignores-vendor-returns` V3;
 `received-rebuild-ignores-vendor-returns` V4; `vendor-return-order-lock-dropped` V5; `vendor-return-verifier-call-deleted`
-V6; `vendor-return-digest-drops-quantities` and `vendor-return-replay-hashes-current-policy` V7. Outcomes: Gates.
+V6; `vendor-return-digest-drops-quantities` and `vendor-return-replay-hashes-current-policy` V7; since round 1, `additional-receipt-hashes-current-policy` B7 and V7,
+`additional-receipt-hashes-current-policy-for-receipts` receipt digest 5. Outcomes: Gates.
 
 ## Gates
 
-- CI 37281958440 at `9c310635`, the frozen executable head: every job green (quality, performance budget, the three browser runners, PostgreSQL schema and isolation, composed, commercial, observability, executed-file reachability, scans). https://github.com/AnserBeg/2rain-greenfield/actions/runs/37281958440
+- CI 37342169158 at `1420350b` (the executable tree of `98a83d8e`, the frozen executable head after round 1): every job green on the first attempt; B7 and V7 (commercial) and `RECEIPT posts ...` (schema) pass with the new-key regressions. https://github.com/AnserBeg/2rain-greenfield/actions/runs/37342169158
+- Expected-red controls on CI: https://github.com/AnserBeg/2rain-greenfield/actions/runs/37345593823 (evidence.yml, head 1420350b0ca8670898fd50060a38d136d3328ab0; the round-1 fix's two new controls and the two it repointed)
+  - `additional-receipt-hashes-current-policy` at 1420350b0ca8: killed with the declared reason (2 declared kill(s) failed as declared) and restored green (16 passing).
+  - `additional-receipt-hashes-current-policy-for-receipts` at 1420350b0ca8: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (1 passing).
+  - `return-replay-hashes-current-policy` at 1420350b0ca8: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (8 passing).
+  - `vendor-return-replay-hashes-current-policy` at 1420350b0ca8: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (8 passing).
+- CI 37281958440 at `9c310635`, round 1's frozen executable head: every job green (quality, performance budget, the three browser runners, PostgreSQL schema and isolation, composed, commercial, observability, executed-file reachability, scans). https://github.com/AnserBeg/2rain-greenfield/actions/runs/37281958440
 - CI 37278851536 at `45d0bfaf` (the executable tree of `9c310635` but for one manifest entry's declared reason): every job green.
 - Earlier CI: 37258323455 (`fc13a15f`) red in schema (`inventory-storage` pinned 28 verified migrations; 0029 makes 29) and composed (sqlstate 53100), both fixed in `e63f17dd`; 37260222812 (`e63f17dd`) cancelled by the next push after composed, schema, quality and both browser runners passed; 37261615364 (`0aa4f9a1`, two attempts) green but composed, where the unsplit advancement parent reached its 300 s bound both times; 37269446224 (`72beb936`) every job green; 37273179606 (`4b77995e`) green but composed, where the rollback-edge parent reached its 300 s bound.
 - Expected-red controls on CI: https://github.com/AnserBeg/2rain-greenfield/actions/runs/37278905226 (evidence.yml, head 45d0bfaf0d214307b028a2ef99cbadcac53917b3)
@@ -101,14 +109,14 @@ V6; `vendor-return-digest-drops-quantities` and `vendor-return-replay-hashes-cur
 - Source-document reconciliation reports a return's companion transaction as an unrecognized type (unverifiable), as it does a shipment's.
 - Credits for returns stay separate steps (customer credit, vendor credit); a return does not propose one.
 
-Review: round 1 (owner-run on `9c310635`): one P2 under B7 and V7 (a new-key natural replay after a policy change stored a current-policy digest bound to the original invocation, so its duplicate conflicted; shared with receipt digest 5), wording and naming points; no other defect in B1-B6, V1-V6. Reproduced at `d34c32e4` (B7, V7 and the RECEIPT test red at the new key's duplicate), fixed at `76a15604`, naming at `98a83d8e`; claims reworded as the verdict asked. Not yet run green locally; controls `additional-receipt-hashes-current-policy` and `...-for-receipts` not yet run. Round 2 owed; its prompt is not yet written.
+Review: round 1 (owner-run on `9c310635`): one P2 under B7 and V7 (a new-key natural replay after a policy change stored a current-policy digest bound to the original invocation, so its duplicate conflicted; shared with receipt digest 5), wording and naming points; no other defect in B1-B6, V1-V6. Reproduced at `d34c32e4` (B7, V7 and the RECEIPT test red at the new key's duplicate), fixed at `76a15604`, naming at `98a83d8e`; claims reworded as the verdict asked. The fix's regressions pass on CI 37342169158 and its four controls killed as declared on 37345593823 (Gates); not run locally. Round 2 owed: `RETURNS-review-prompt.md`, frozen `98a83d8e` against `9c310635`, owner-run online.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RETURNS",
   "base": "96ac234122322b2cbe18349299664f56c8f5190a",
-  "head": "9c310635082a0e55cd48d20b220c927b853eb2ee",
+  "head": "98a83d8ed6ddb209c5f91b396e750d5bc49bced7",
   "changedPaths": [
     "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/release/current-policy-bindings.json", "apps/web/test/browser/composed-application.spec.ts",
     "apps/web/test/browser/returns-receiving.spec.ts", "db/migrations/0029_returns_posting.sql", "db/schema.snapshot.json", "package.json",
@@ -119,7 +127,7 @@ Review: round 1 (owner-run on `9c310635`): one P2 under B7 and V7 (a new-key nat
     "packages/postgres-provider/src/received-quantity-projection.ts", "packages/postgres-provider/src/receiving-capability-executor.ts", "test/architecture/release-persistence-boundary.test.ts", "test/architecture/repository-hygiene.test.ts",
     "test/architecture/surface-grammar-conformance.baseline.ts", "test/architecture/surface-grammar-conformance.test.ts", "test/compiler/inventory-contract.release.golden.json", "test/evidence/RETURNS.expected-red.json",
     "test/helpers/order-entry-fixture.ts", "test/helpers/reachability-producers.ts", "test/postgres/composed-application.test.ts", "test/postgres/customer-return.test.ts",
-    "test/postgres/document-numbering.test.ts", "test/postgres/fresh-tenant-full-replay-schema.snapshot.json", "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts",
+    "test/postgres/document-numbering.test.ts", "test/postgres/fresh-tenant-full-replay-schema.snapshot.json", "test/postgres/inventory-posting.test.ts", "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts",
     "test/postgres/module-storage-transition.test.ts", "test/postgres/trust-substrate.test.ts", "test/postgres/vendor-return.test.ts", "test/unit/canonical-model/field-numbering.test.ts",
     "test/unit/canonical-model/surface-list.test.ts", "test/unit/purchasing-definition.test.ts", "test/unit/sales-definition.test.ts"
   ],
@@ -133,7 +141,8 @@ Review: round 1 (owner-run on `9c310635`): one P2 under B7 and V7 (a new-key nat
     {"path": "packages/postgres-provider/src/goods-receipt.ts", "name": "VendorReturnCommand"}, {"path": "packages/postgres-provider/src/received-quantity-projection.ts", "name": "receivedFacts"},
     {"path": "packages/postgres-provider/src/received-quantity-projection.ts", "name": "reconstructedReceivedFacts"}, {"path": "packages/postgres-provider/src/fulfillment.ts", "name": "CustomerReturnCommand"},
     {"path": "packages/domain/src/sales/workspace.ts", "name": "returnWorkspace"}, {"path": "packages/domain/src/app/list-declarations.ts", "name": "returnList"},
-    {"path": "packages/domain/src/purchasing/definition.ts", "name": "vendorReturnOperations"}
+    {"path": "packages/domain/src/purchasing/definition.ts", "name": "vendorReturnOperations"}, {"path": "packages/postgres-provider/src/inventory-posting-service.ts", "name": "persistAdditionalReceipt"},
+    {"path": "packages/postgres-provider/src/inventory-posting-service.ts", "name": "digestCoversAuthorization"}, {"path": "packages/postgres-provider/src/inventory-posting-service.ts", "name": "withRecordedAuthorization"}
   ]
 }
 ```
