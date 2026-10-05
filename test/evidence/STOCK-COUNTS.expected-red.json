@@ -145,6 +145,60 @@
           "expected": "INVENTORY_COUNT_EVIDENCE_CONFLICT: stock-count line \\S+ was altered in a column its posting transition does not write"
         }
       ]
+    },
+    {
+      "name": "count-replay-gated-on-next-revision",
+      "claim": "Defect 1 (round 1). A count command that committed replays under its key after the count moved on: preparation refuses only a revision the count never had, so the receipt, not \"exactly one revision later\", decides a replay.",
+      "file": "packages/postgres-provider/src/inventory-posting-capability-executor.ts",
+      "original": "    if (input.expectedRevision > hydrated.currentRevision) {\n",
+      "replacement": "    if (\n      hydrated.currentRevision !== input.expectedRevision &&\n      hydrated.currentRevision !== input.expectedRevision + 1\n    ) {\n",
+      "test": {
+        "files": ["test/postgres/inventory-stock-counts.test.ts"],
+        "namePattern": "replays under its key after the count moved on"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-counts.test.ts",
+          "name": "STOCK-COUNTS: a committed count command replays under its key after the count moved on",
+          "expected": "INVENTORY_POSTING_INPUT_INVALID: the rendered command revision is no longer current"
+        }
+      ]
+    },
+    {
+      "name": "reversal-reopen-route-check-removed",
+      "claim": "Defect 2 (round 1, SC-6). The route refuses Return to counting on a reversal by name, ahead of the declared precondition: a reviewed reversal is posted or cancelled, never re-derived.",
+      "file": "packages/postgres-provider/src/stock-count-route.ts",
+      "original": "        if (command === 'reopen' && count.kind === 'reversal') {\n",
+      "replacement": "        if (command === 'reopen' && count.kind === 'reversal' && false) {\n",
+      "test": {
+        "files": ["test/postgres/inventory-stock-counts.test.ts"],
+        "namePattern": "starts from posted stock, takes what was found"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-counts.test.ts",
+          "name": "STOCK-COUNTS: a count of one location starts from posted stock, takes what was found, reviews against the ledger and posts the difference",
+          "expected": "Input:\\s+'INVENTORY_POSTING_INPUT_INVALID: the count precondition does not hold'"
+        }
+      ]
+    },
+    {
+      "name": "reversal-reopen-precondition-dropped",
+      "claim": "Defect 2 (round 1, SC-6). Return to counting is declared for a reviewed count that is not a reversal, so it is not offered on a reversal.",
+      "file": "packages/domain/src/inventory/definition.ts",
+      "original": "              terms: [inState(...states), notReversal],\n",
+      "replacement": "              terms: [inState(...states)],\n",
+      "test": {
+        "files": ["test/unit/inventory-definition.test.ts"],
+        "namePattern": "STOCK-COUNTS: the product mounts"
+      },
+      "kills": [
+        {
+          "file": "test/unit/inventory-definition.test.ts",
+          "name": "STOCK-COUNTS: the product mounts stock counts numbered CNT-000001 with Start counting, Review, Post, Return to counting and Cancel count on the posting route; a reviewed or cancelled count is frozen and the companion relations are retired",
+          "expected": "Return to counting is declared for a reviewed count that is not a reversal \\(SC-6\\)"
+        }
+      ]
     }
   ]
 }
