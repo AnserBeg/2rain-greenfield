@@ -1,6 +1,6 @@
 # DROP-SHIP — supplier delivery directly to the customer
 
-Status: unfinished BUILD on `packet/DROP-SHIP`, PAYABLES `b91c5284` merged. Blocked by [DROP-SHIP-RELATION-INSTALL](DROP-SHIP-RELATION-INSTALL-design.md), a proposed separate Critical packet. No merge or deployment; no own Critical-set change.
+Status: unfinished BUILD on `packet/DROP-SHIP`, PAYABLES `b91c5284` and RELATION-INSTALL `66cf178a` merged. Bridge draft [PR #20](https://github.com/AnserBeg/2rain-greenfield/pull/20) has full green CI; its controls and owner review remain owed. DROP-SHIP draft [PR #19](https://github.com/AnserBeg/2rain-greenfield/pull/19) awaits post-bridge validation. No main merge or deployment; own Critical set unchanged.
 
 ## Design (written before implementation)
 
@@ -22,28 +22,29 @@ Status: unfinished BUILD on `packet/DROP-SHIP`, PAYABLES `b91c5284` merged. Bloc
 - Combined hygiene/grammar run: 35/36; one lock-control test was refused by its live-container contamination guard during this packet's exclusive schema replay. Registration checks independently pass. Lint has no errors; formatting and diff whitespace checked.
 - Exact-base release rebuild/check passes: five inherited entries plus one; 104 surfaces, 16 navigation leaves, 606 scenarios, 529 constructible candidates / 77 without a create operation. PostgreSQL has NOT observed those execution pins yet. Both numbering pin lists include DSD: 11 fields, 11 uniqueness probes, measured from compiled assigned fields.
 - Coverage declaration inventory re-derived: 2658 obligations / 822 observed declarations. Local coverage gate refused missing reachability receipts; no execution receipts were invented.
-- Full-replay snapshot generator ran under exclusive lock and failed with `ELEMENT_TARGET_MISSING` while adding `purchase_order_line_sales_line`. It removed its container; the prior snapshot is unchanged, not falsely regenerated. The failure is a real install dependency, not a readiness timeout.
-- New commercial PostgreSQL journey is registered in package scripts, reachability and hygiene; its first attempt never started (lock busy). New `purchase-drop-ship.spec.ts` is operations-browser reachable; browser not run. Full CI acceptance remains unmet; install-dependent jobs are expected red until the Critical bridge lands.
-- Local container work checked Windows free memory before locking, used one container at a time; no timeout, readiness or budget change. No further container work after the install blocker. Static expected-red validation and record fidelity are run on the frozen tree before push.
+- Prior full-replay generation and CI failed with `ELEMENT_TARGET_MISSING` on `purchase_order_line_sales_line`; the failed generator cleaned its container and did not rewrite the snapshot. RELATION-INSTALL is now merged; post-bridge regeneration remains pending.
+- New commercial PostgreSQL journey is registered in package scripts, reachability and hygiene; its first local attempt never started (lock busy). New `purchase-drop-ship.spec.ts` is operations-browser reachable; browser not run. Full DROP-SHIP CI acceptance remains unmet.
+- Post-bridge correction: two existing unit files now account for DSD numbering, the exact sales-line/order relation and the fourth registered sales-order operation. Focused 14/14 PASS; formatting, typecheck and release `--check` PASS. Coverage re-derived again from unchanged declarations.
+- Local container work checks Windows free memory before locking, uses one container at a time; no timeout, readiness or budget change. Static expected-red validation and record fidelity run on the frozen tree before push.
 
 ## Test it yourself
 
-[DROP-SHIP-test-it-yourself.md](DROP-SHIP-test-it-yourself.md) states the install blocker up front; its workflow is an intended checkpoint, not a runnable/proven one yet.
+[DROP-SHIP-test-it-yourself.md](DROP-SHIP-test-it-yourself.md) gives the draft workflow; PostgreSQL/browser validation is still pending, not claimed as successful evidence.
 
 ## Filed
 
 - Dedicated `special_order` supply is the next increment, not a silently accepted route.
-- The Critical relation-column install/grant bridge is split into its own proposed packet; this packet does not authorize it. A normalized intermediary link-record alternative failed mandatory conformance and was removed; no gate or grant was weakened.
-- Program review: not run; this blocked, non-integrated tree meets the mid-packet anti-trigger, not a stable whole-app checkpoint.
+- Owner selected the separate Critical relation-column bridge; it is merged here under authorized step 6, with its materializer change, test and controls declared below. Owner review remains on PR #20. The rejected intermediary link-record experiment left no runtime artifacts.
+- Program review: not run; this unfinished, non-integrated tree meets the mid-packet anti-trigger, not a stable whole-app checkpoint.
 
-Review: not owed while outside the Critical set. The owner requires a draft PR against PAYABLES only; no integration or deployment.
+Review: no separate DROP-SHIP arm; inherited Critical bridge owner-run review is owed on PR #20. Draft PRs against PAYABLES only; no integration or deployment.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "DROP-SHIP",
   "base": "b91c5284e163d19a834802479dd2dc1e3a1201d1",
-  "head": "eaec0d5c0f2a22a3639c90cabe1af6d2053332d3",
+  "head": "374a69c245daa808393fdb0407b673c27496fd15",
   "changedPaths": [
     "apps/api/src/composition-root.ts",
     "apps/web/release/app.authored.json",
@@ -73,6 +74,7 @@ Review: not owed while outside the Critical set. The owner requires a draft PR a
     "packages/postgres-provider/src/fulfillment-read-model.ts",
     "packages/postgres-provider/src/list-progress-read-model.ts",
     "packages/postgres-provider/src/module-runtime-interpreter.ts",
+    "packages/postgres-provider/src/module-storage-materializer.ts",
     "packages/postgres-provider/src/payables-capability-executor.ts",
     "packages/postgres-provider/src/receivables-capability-executor.ts",
     "packages/postgres-provider/src/receiving-capability-executor.ts",
@@ -83,6 +85,7 @@ Review: not owed while outside the Critical set. The owner requires a draft PR a
     "test/architecture/repository-hygiene.test.ts",
     "test/architecture/surface-grammar-conformance.test.ts",
     "test/compiler/inventory-contract.release.golden.json",
+    "test/evidence/RELATION-INSTALL.expected-red.json",
     "test/fixtures/g2/language-conformance/coverage-decisions.json",
     "test/helpers/generate-fresh-tenant-full-replay-schema.ts",
     "test/helpers/reachability-producers.ts",
@@ -93,9 +96,11 @@ Review: not owed while outside the Critical set. The owner requires a draft PR a
     "test/postgres/drop-ship.test.ts",
     "test/postgres/request-runtime-view.test.ts",
     "test/unit/canonical-model/surface-composition.test.ts",
+    "test/unit/canonical-model/field-numbering.test.ts",
     "test/unit/canonical-model/surface-list.test.ts",
     "test/unit/commercial-amounts.test.ts",
     "test/unit/purchasing-definition.test.ts",
+    "test/unit/sales-definition.test.ts",
     "test/unit/workspace-contract.test.ts"
   ],
   "symbols": [

@@ -1,6 +1,6 @@
 # DROP-SHIP — Test it yourself
 
-Not runnable yet: the inherited release cannot install the new order-line reference columns. See [the Critical bridge design](DROP-SHIP-RELATION-INSTALL-design.md). The steps below are the intended checkpoint after that dependency and CI pass, not a claim of browser evidence.
+Draft checkpoint: the [Critical relation-install bridge](DROP-SHIP-RELATION-INSTALL-design.md) is merged. Post-bridge PostgreSQL/browser tests and full DROP-SHIP CI are still pending; the steps below are not a claim of successful browser evidence.
 
 From `/home/rvham/2rain-greenfield-drop-ship`, first check Windows free memory:
 `powershell.exe -NoProfile -Command "(Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory"`.
