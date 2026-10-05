@@ -30,10 +30,10 @@ Design: `DROP-SHIP-RELATION-INSTALL-design.md` at DROP-SHIP `4000c486` (owner se
 ## Gates
 
 - Typecheck PASS; focused Prettier PASS.
-- Full hosted [CI PASS](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37268185759) at `66cf178a`, including the real PostgreSQL transition. Its refusal expectation is the observed `MODULE_RELATION_VIOLATION`; revised bounded test at `f62caa52` awaits fresh PostgreSQL/CI evidence.
+- Full hosted [CI PASS](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37268185759) at `66cf178a`, including the real PostgreSQL transition. Revised test at `d59e1d4a` awaits fresh PostgreSQL/CI evidence; its first isolated run refused the absent bootstrap-to-base projection, now supplied by compilation.
 - Static expected-red validation PASS (161 entries / 14 manifests). Three valid mutation-control outcomes remain pending; first attempt failed restored-green, not accepted as evidence.
-- Check-records, typecheck, focused lint and formatting PASS. Record-claim names executable `f62caa52`; production code remains the same 17-line `locateColumn` addition.
-- Refreshed hosted CI and owner Critical review pending; draft PR https://github.com/AnserBeg/2rain-greenfield/pull/20. Controls check AC and >=2 GB Windows free memory outside the lock (latest about 2.4 GB).
+- Check-records, typecheck, focused lint and formatting PASS. Record-claim names executable `d59e1d4a`; production code remains the same 17-line `locateColumn` addition.
+- Refreshed hosted CI and owner Critical review pending; draft PR https://github.com/AnserBeg/2rain-greenfield/pull/20. Controls check AC and >=2 GB Windows free memory outside the lock (latest about 1.1 GB, below the minimum; no test started).
 
 ## Test it yourself
 
@@ -49,14 +49,14 @@ DROP-SHIP's user-facing delivery workflow is the next authorized checkpoint afte
 
 ## Review prompt
 
-`RELATION-INSTALL-review-prompt.md` names executable `f62caa52`; facts and questions only. Owner-run review pending; no self-review.
+`RELATION-INSTALL-review-prompt.md` names executable `d59e1d4a`; facts and questions only. Owner-run review pending; no self-review.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RELATION-INSTALL",
   "base": "b91c5284e163d19a834802479dd2dc1e3a1201d1",
-  "head": "f62caa5273271c7dcf41914cdc865addc1768767",
+  "head": "d59e1d4a1c2b5183067dd36d5eb5680f19fcb23d",
   "changedPaths": [
     "packages/postgres-provider/src/module-storage-materializer.ts",
     "test/postgres/composed-application.test.ts",
