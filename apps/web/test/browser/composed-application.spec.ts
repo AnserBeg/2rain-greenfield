@@ -663,6 +663,22 @@ async function readFocusRingCoverage(
       label: 'declared list with rows',
     },
     {
+      // The Warehouse (WAREHOUSE-MODE): its tiles carry a ring of their own,
+      // and its scan box and Open button the shared control ring, each on the
+      // ground it sits on.
+      go: async () => {
+        await page.goto(
+          scopedSurfaceUrl(
+            baseUrl,
+            'inventory_warehouse',
+            await loadSurfaceScopeParameterId('inventory_warehouse'),
+            browserLegalEntityId,
+          ),
+        );
+      },
+      label: 'launcher',
+    },
+    {
       // A plain record page. A party's page is its customer workspace now, so
       // the generic record sections are read on a location's.
       go: async () => {

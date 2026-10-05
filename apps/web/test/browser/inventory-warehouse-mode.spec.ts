@@ -20,6 +20,29 @@ interface ExpectedReceiptsScenario {
   readonly future: { readonly number: string };
 }
 
+// Both journeys share one served fixture, started once for this file, whose
+// tests run in order in one worker: the operations job runs under a 20-minute
+// bound, and a second ephemeral database and application would spend about a
+// minute of it starting what the two journeys can share. The Warehouse
+// journey runs first and leaves the period lock open; the period lock
+// journey needs nothing the Warehouse journey seeds, and after a failure a
+// fresh worker starts a fresh fixture.
+let fixture: ServedFixture | undefined;
+test.beforeAll(async () => {
+  test.setTimeout(300_000);
+  fixture = serveFixture();
+  await fixture.ready;
+});
+test.afterAll(async () => {
+  test.setTimeout(60_000);
+  await fixture?.stop();
+});
+
+async function served() {
+  if (!fixture) throw new Error('the order-entry fixture was not started');
+  return { url: await fixture.ready, seed: fixture.seed };
+}
+
 // WAREHOUSE-MODE: the floor staff's Warehouse. The fixture first moves stock
 // and documents through the governed operations -- a received purchase
 // order, a released sales order with 3 still to ship, a stock adjustment --
@@ -29,101 +52,100 @@ test('the Warehouse opens the floor work with its counts, and a scanned SKU or d
 }, testInfo) => {
   test.setTimeout(480_000);
   page.setDefaultTimeout(30_000);
-  await fixture(async (url, seed) => {
-    const stock = await seed<ItemStockScenario>('item_stock');
-    const expected = await seed<ExpectedReceiptsScenario>('expected_receipts');
-    await page.goto(url);
+  const { url, seed } = await served();
+  const stock = await seed<ItemStockScenario>('item_stock');
+  const expected = await seed<ExpectedReceiptsScenario>('expected_receipts');
+  await page.goto(url);
 
-    // Inventory -> Warehouse: three large tiles, each with its List view's
-    // count, and the scan box, which has the keyboard on arrival.
+  // Inventory -> Warehouse: three large tiles, each with its List view's
+  // count, and the scan box, which has the keyboard on arrival.
+  await openWarehouse(page);
+  expect(await tiles(page)).toEqual([
+    ['Receive', '2', 'To receive'],
+    ['Put away', '0', 'Transfers'],
+    ['Pick and ship', '1', 'To ship'],
+  ]);
+  await expect(page.getByLabel(SCAN_LABEL, { exact: true })).toBeFocused();
+  await page.screenshot({
+    path: testInfo.outputPath('warehouse.png'),
+    fullPage: true,
+  });
+
+  // Each tile opens its List at its view, whose own tab counts the same.
+  for (const [label, list, view, count] of [
+    ['Receive', 'Expected receipts', 'To receive', '2'],
+    ['Put away', 'Inventory transactions', 'Transfers', '0'],
+    ['Pick and ship', 'Sales orders', 'To ship', '1'],
+  ] as const) {
     await openWarehouse(page);
-    expect(await tiles(page)).toEqual([
-      ['Receive', '2', 'To receive'],
-      ['Put away', '0', 'Transfers'],
-      ['Pick and ship', '1', 'To ship'],
-    ]);
-    await expect(page.getByLabel(SCAN_LABEL, { exact: true })).toBeFocused();
-    await page.screenshot({
-      path: testInfo.outputPath('warehouse.png'),
-      fullPage: true,
-    });
-
-    // Each tile opens its List at its view, whose own tab counts the same.
-    for (const [label, list, view, count] of [
-      ['Receive', 'Expected receipts', 'To receive', '2'],
-      ['Put away', 'Inventory transactions', 'Transfers', '0'],
-      ['Pick and ship', 'Sales orders', 'To ship', '1'],
-    ] as const) {
-      await openWarehouse(page);
-      await page.locator('a.launcher-tile', { hasText: label }).click();
-      await expect(
-        page.getByRole('heading', { level: 1, name: list }),
-      ).toBeVisible();
-      const current = page.locator('.list-views a[aria-current="page"]');
-      await expect(current.locator('span').first()).toHaveText(view);
-      await expect(current.locator('[data-view-count]')).toHaveText(count);
-    }
-
-    // A SKU opens the item at its stock; each number opens its document.
-    await openWarehouse(page);
-    await scan(page, 'OFF-100');
+    await page.locator('a.launcher-tile', { hasText: label }).click();
     await expect(
-      page.getByRole('heading', { level: 1, name: 'Field notebook' }),
+      page.getByRole('heading', { level: 1, name: list }),
     ).toBeVisible();
-    await expect(
-      page.locator(`[data-composition-dataset="${ns}:dataset.item_stock"]`),
-    ).toBeVisible();
-    for (const [code, page_] of [
-      [expected.late.number, 'purchase_order_detail'],
-      [stock.numbers.order, 'sales_order_detail'],
-      [stock.numbers.receipt, 'goods_receipt_detail'],
-      [stock.numbers.shipment, 'shipment_detail'],
-      [stock.numbers.adjustment, 'inventory_transaction_detail'],
-    ] as const) {
-      await openWarehouse(page);
-      // Typed in lower case, as a hand might: a number is matched exactly,
-      // case aside.
-      await scan(page, code.toLowerCase());
-      await expect(page).toHaveURL(
-        new RegExp(`surface=${encodeURIComponent(`${ns}:surface.${page_}`)}`),
-      );
-      await expect(
-        page.getByRole('heading', { level: 1, name: code, exact: true }),
-      ).toBeVisible();
-    }
+    const current = page.locator('.list-views a[aria-current="page"]');
+    await expect(current.locator('span').first()).toHaveText(view);
+    await expect(current.locator('[data-view-count]')).toHaveText(count);
+  }
 
-    // A code that names nothing, or only a name, opens nothing: the code
-    // stays in the box beside the reason.
+  // A SKU opens the item at its stock; each number opens its document.
+  await openWarehouse(page);
+  await scan(page, 'OFF-100');
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Field notebook' }),
+  ).toBeVisible();
+  await expect(
+    page.locator(`[data-composition-dataset="${ns}:dataset.item_stock"]`),
+  ).toBeVisible();
+  for (const [code, page_] of [
+    [expected.late.number, 'purchase_order_detail'],
+    [stock.numbers.order, 'sales_order_detail'],
+    [stock.numbers.receipt, 'goods_receipt_detail'],
+    [stock.numbers.shipment, 'shipment_detail'],
+    [stock.numbers.adjustment, 'inventory_transaction_detail'],
+  ] as const) {
     await openWarehouse(page);
-    await scan(page, 'NOPE-404');
-    await expect(page.locator('[data-message="SCAN_NO_MATCH"]')).toBeVisible();
-    await expect(page.getByLabel(SCAN_LABEL, { exact: true })).toHaveValue(
-      'NOPE-404',
+    // Typed in lower case, as a hand might: a number is matched exactly,
+    // case aside.
+    await scan(page, code.toLowerCase());
+    await expect(page).toHaveURL(
+      new RegExp(`surface=${encodeURIComponent(`${ns}:surface.${page_}`)}`),
     );
-    await scan(page, 'Field notebook');
-    await expect(page.locator('[data-message="SCAN_NOT_EXACT"]')).toBeVisible();
-    await page.screenshot({
-      path: testInfo.outputPath('warehouse-scan-refused.png'),
-      fullPage: true,
-    });
+    await expect(
+      page.getByRole('heading', { level: 1, name: code, exact: true }),
+    ).toBeVisible();
+  }
 
-    // Phone width: one tile a row, the page scrolls down, never sideways.
-    await page.setViewportSize({ width: 390, height: 844 });
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= innerWidth,
-      ),
-    ).toBe(true);
-    const [first, second] = await page
-      .locator('a.launcher-tile')
-      .evaluateAll((links) =>
-        links.slice(0, 2).map((link) => link.getBoundingClientRect().top),
-      );
-    expect(second!).toBeGreaterThan(first!);
-    await page.screenshot({
-      path: testInfo.outputPath('warehouse-phone.png'),
-      fullPage: true,
-    });
+  // A code that names nothing, or only a name, opens nothing: the code
+  // stays in the box beside the reason.
+  await openWarehouse(page);
+  await scan(page, 'NOPE-404');
+  await expect(page.locator('[data-message="SCAN_NO_MATCH"]')).toBeVisible();
+  await expect(page.getByLabel(SCAN_LABEL, { exact: true })).toHaveValue(
+    'NOPE-404',
+  );
+  await scan(page, 'Field notebook');
+  await expect(page.locator('[data-message="SCAN_NOT_EXACT"]')).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath('warehouse-scan-refused.png'),
+    fullPage: true,
+  });
+
+  // Phone width: one tile a row, the page scrolls down, never sideways.
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  const [first, second] = await page
+    .locator('a.launcher-tile')
+    .evaluateAll((links) =>
+      links.slice(0, 2).map((link) => link.getBoundingClientRect().top),
+    );
+  expect(second!).toBeGreaterThan(first!);
+  await page.screenshot({
+    path: testInfo.outputPath('warehouse-phone.png'),
+    fullPage: true,
   });
 });
 
@@ -135,76 +157,75 @@ test('the period lock closes a period and reopens it, each reviewed and confirme
 }, testInfo) => {
   test.setTimeout(480_000);
   page.setDefaultTimeout(30_000);
-  await fixture(async (url) => {
-    await page.goto(url);
-    const today = new Date().toISOString().slice(0, 10);
-    const yesterday = new Date(Date.now() - 86_400_000)
-      .toISOString()
-      .slice(0, 10);
+  const { url } = await served();
+  await page.goto(url);
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 86_400_000)
+    .toISOString()
+    .slice(0, 10);
 
-    // Inventory -> Inventory period lock -> the company's lock: open, so
-    // there is only something to close.
-    await openPeriodLock(page);
-    await expect(
-      page.getByRole('heading', { level: 2, name: 'Posting period' }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole('button', { name: 'Reopen to', exact: true }),
-    ).toHaveCount(0);
+  // Inventory -> Inventory period lock -> the company's lock: open, so
+  // there is only something to close.
+  await openPeriodLock(page);
+  await expect(
+    page.getByRole('heading', { level: 2, name: 'Posting period' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Reopen to', exact: true }),
+  ).toHaveCount(0);
 
-    // Close through the end of today (UTC): reviewed, then confirmed.
-    await command(
-      page,
-      'Close period through',
-      'Close through',
-      `${today}T23:59:59`,
-    );
-    await page.screenshot({
-      path: testInfo.outputPath('period-lock-closed.png'),
-      fullPage: true,
-    });
-
-    // A stock document dated now falls in the closed period: its Post is
-    // refused inside the posting transaction and nothing moves.
-    await openNewStockDocument(page);
-    await page
-      .getByLabel('Reason', { exact: true })
-      .selectOption({ label: 'Found' });
-    await page
-      .getByLabel('Narrative', { exact: true })
-      .fill('Found while the period was closed');
-    await pick(page, 'Line 1 product', 'OFF-100', 'Field notebook');
-    await pick(page, 'Line 1 to location', 'Calgary', 'Calgary warehouse');
-    await page.getByLabel('Line 1 quantity', { exact: true }).fill('1');
-    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
-    await expect(page).toHaveURL(/inventory_transaction_detail/u);
-    const documentUrl = page.url();
-    await post(page);
-    await expect(page.locator('[data-message-subject]').first()).toHaveText(
-      'INVENTORY_PERIOD_CLOSED',
-    );
-    // The refusal is a page of its own; the document is opened again, still
-    // a draft.
-    await page.goto(documentUrl);
-    await expect(page.getByText(/Active · revision 1/u)).toBeVisible();
-
-    // Closing through an earlier time would reopen: refused by name.
-    await openPeriodLock(page);
-    await command(
-      page,
-      'Close period through',
-      'Close through',
-      `${yesterday}T00:00`,
-      'MODULE_PERIOD_LOCK_DIRECTION_INVALID',
-    );
-
-    // Reopen to yesterday, confirmed: the same document now posts.
-    await openPeriodLock(page);
-    await command(page, 'Reopen to', 'Reopen to', `${yesterday}T00:00`);
-    await page.goto(documentUrl);
-    await post(page);
-    await expect(page.getByRole('status')).toContainText('Post complete');
+  // Close through the end of today (UTC): reviewed, then confirmed.
+  await command(
+    page,
+    'Close period through',
+    'Close through',
+    `${today}T23:59:59`,
+  );
+  await page.screenshot({
+    path: testInfo.outputPath('period-lock-closed.png'),
+    fullPage: true,
   });
+
+  // A stock document dated now falls in the closed period: its Post is
+  // refused inside the posting transaction and nothing moves.
+  await openNewStockDocument(page);
+  await page
+    .getByLabel('Reason', { exact: true })
+    .selectOption({ label: 'Found' });
+  await page
+    .getByLabel('Narrative', { exact: true })
+    .fill('Found while the period was closed');
+  await pick(page, 'Line 1 product', 'OFF-100', 'Field notebook');
+  await pick(page, 'Line 1 to location', 'Calgary', 'Calgary warehouse');
+  await page.getByLabel('Line 1 quantity', { exact: true }).fill('1');
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(page).toHaveURL(/inventory_transaction_detail/u);
+  const documentUrl = page.url();
+  await post(page);
+  await expect(page.locator('[data-message-subject]').first()).toHaveText(
+    'INVENTORY_PERIOD_CLOSED',
+  );
+  // The refusal is a page of its own; the document is opened again, still
+  // a draft.
+  await page.goto(documentUrl);
+  await expect(page.getByText(/Active · revision 1/u)).toBeVisible();
+
+  // Closing through an earlier time would reopen: refused by name.
+  await openPeriodLock(page);
+  await command(
+    page,
+    'Close period through',
+    'Close through',
+    `${yesterday}T00:00`,
+    'MODULE_PERIOD_LOCK_DIRECTION_INVALID',
+  );
+
+  // Reopen to yesterday, confirmed: the same document now posts.
+  await openPeriodLock(page);
+  await command(page, 'Reopen to', 'Reopen to', `${yesterday}T00:00`);
+  await page.goto(documentUrl);
+  await post(page);
+  await expect(page.getByRole('status')).toContainText('Post complete');
 });
 
 /** Inventory -> Warehouse, from the menu. */
@@ -336,13 +357,21 @@ async function pick(page: Page, name: string, term: string, option: string) {
   ).toHaveAttribute('data-selected-label', option);
 }
 
+interface ServedFixture {
+  /** The served application's first page, once it is up. */
+  readonly ready: Promise<string>;
+  /** Seeds one scenario through its own governed operations. */
+  readonly seed: <T>(phase: string) => Promise<T>;
+  /** Stops the application and its database; the fixture exits cleanly. */
+  readonly stop: () => Promise<void>;
+}
+
 /**
  * The order-entry fixture, served with `--verify` so each scenario is seeded
- * through its own governed operations once the application is up.
+ * through its own governed operations once the application is up. It is
+ * spawned at once, so `stop` reaches it even when it never became ready.
  */
-async function fixture(
-  run: (url: string, seed: <T>(phase: string) => Promise<T>) => Promise<void>,
-) {
+function serveFixture(): ServedFixture {
   const child = spawn(
     process.execPath,
     [
@@ -386,12 +415,11 @@ async function fixture(
       child.once('exit', () => reject(new Error(output)));
       child.stdin.write(`${JSON.stringify({ phase })}\n`);
     });
-  try {
-    await run(await ready, seed);
-  } finally {
+  const stop = async () => {
     child.stdin.end();
     child.kill('SIGTERM');
     const [code] = await exited;
     expect(code, output).toBe(0);
-  }
+  };
+  return { ready, seed, stop };
 }
