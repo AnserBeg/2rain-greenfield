@@ -1,6 +1,6 @@
 # DROP-SHIP — supplier delivery directly to the customer
 
-Status: unfinished BUILD on `packet/DROP-SHIP`, PAYABLES `96ac2341` and RELATION-INSTALL checkpoint `f3330e98` merged. Bridge draft [PR #20](https://github.com/AnserBeg/2rain-greenfield/pull/20) has three hosted red/green controls and full CI at `540023a4`; owner review remains owed. DROP-SHIP draft [PR #19](https://github.com/AnserBeg/2rain-greenfield/pull/19) awaits refreshed full CI. No main merge or deployment; own Critical set unchanged.
+Status: unfinished BUILD on `packet/DROP-SHIP`, PAYABLES `96ac2341` and RELATION-INSTALL checkpoint `f3330e98` merged. Bridge draft [PR #20](https://github.com/AnserBeg/2rain-greenfield/pull/20) has three hosted red/green controls and [all 11 CI jobs green at `f3330e98`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37286524398); owner review remains owed. DROP-SHIP draft [PR #19](https://github.com/AnserBeg/2rain-greenfield/pull/19) awaits refreshed full CI. No main merge or deployment; own Critical set unchanged.
 
 ## Design (written before implementation)
 
@@ -16,14 +16,14 @@ Status: unfinished BUILD on `packet/DROP-SHIP`, PAYABLES `96ac2341` and RELATION
 - RETURNS reconciliation: when #15 lands, reconcile net shipped/returned eligibility in settlement and read models, reversal floors against live invoices/bills, and closure/Cancel routing. Do not change its shipped-quantity neighbours here.
 - Demand/supply line references use `retainReference` for historical document identity; confirmed-line and linked-purchase mutation guards retain edit control. Delivery-document links remain `restrict`; scoped FKs are unchanged.
 - Create drop-ship PO is a selected-line Task on confirmed drop-ship demand; it still creates/reuses links for all eligible lines of that order. Linked-order navigation uses declared selection actions.
-- The composed PostgreSQL test checkpoints between repeated installs to recycle WAL within its unchanged 256 MB fixture; every lineage install and verifier still runs. No capacity, timeout or readiness increase.
+- Composed PostgreSQL tests checkpoint within their unchanged 256 MB fixture. Full recorded-lineage replay remains; focused transition fixtures use the exact head source rather than unrelated history. No capacity, timeout or readiness increase.
 
 ## Gates
 
 - Implemented: route/supplier entry, linked PO creation/reuse and customer ship-to, bounded numbered delivery/reversal, physical-vs-delivered read models/settlement/closure, declared Lists, both order sections and delivery Record/Tasks. These are code/declaration claims, not successful PostgreSQL/browser execution claims.
 - Changed unit, integration and web-contract files: 119/119 pass. Canonical route/bounds checks 2/2 and full tsc pass again after removing the alternative link-record experiment. Focused inventory-contract golden 1/1 and test registration 2/2 pass; surface grammar 25/25 pass.
 - Combined hygiene/grammar run: 35/36; one lock-control test was refused by its live-container contamination guard during this packet's exclusive schema replay. Registration checks independently pass. Lint has no errors; formatting and diff whitespace checked.
-- Exact-base release rebuild/check passes: five inherited entries plus one; 104 surfaces, 16 navigation leaves, 604 scenarios, 527 constructible candidates / 77 without a create operation. PostgreSQL has NOT observed those execution pins yet. Both numbering pin lists include DSD: 11 fields, 11 uniqueness probes, measured from compiled assigned fields.
+- Exact-base release rebuild/check passes: five inherited entries plus one; 104 surfaces, 16 navigation leaves, 604 scenarios, 527 constructible candidates / 77 without a create operation. Hosted composed fresh-tenant replay observed these pins; its later successor test timed out. Both numbering pin lists include DSD: 11 fields, 11 uniqueness probes, measured from compiled assigned fields.
 - Coverage declaration inventory re-derived: 2658 obligations / 824 observed declarations. Local coverage gate refused missing reachability receipts; no execution receipts were invented.
 - Prior full-replay generation failed with `ELEMENT_TARGET_MISSING`; its container was cleaned and snapshot untouched. With RELATION-INSTALL merged, [hosted regeneration](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37279897119) at `5d2d9027` PASS. The generated full-replay snapshot is committed at `88ce5ce6`; release bytes are unchanged since generation.
 - New commercial PostgreSQL journey is registered in package scripts, reachability and hygiene; two local exclusive runs failed at the governed revision boundary and then at order-List Delivered counts. Both containers were removed. New `purchase-drop-ship.spec.ts` is operations-browser reachable; local browser not run. Full DROP-SHIP CI acceptance remains unmet.
@@ -33,6 +33,7 @@ Status: unfinished BUILD on `packet/DROP-SHIP`, PAYABLES `96ac2341` and RELATION
 - After those fixes: typecheck, focused lint/format, exact-base compile/check and coverage re-derivation PASS; commercial decimal unit tests 6/6 PASS; the two affected surface-binding cases 2/2 PASS. Static expected-red validates 165 entries / 14 manifests after upstream merge; no empty filtered test is counted.
 - Local exclusive PostgreSQL run at `5d2d9027` reached Create drop-ship PO but failed with an opaque operation error; its container was removed. The stored revision is SQL `bigint`, the actual driver returns a string, and trust requires a number. `d9f40670` normalizes and validates this boundary outside trust; focused unit tests 7/7, lint/format and typecheck PASS. Fresh PostgreSQL/browser/full CI remain owed; schema/release bytes are unchanged.
 - [Hosted run `37282097610`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37282097610) is red. `ee982127` binds canonical delivery-state values rather than formatted labels, derives guard fields from storage metadata, registers its unit file, closes the removed-module fixture, defers test CHECKPOINT connections, pins measured Sales scenarios at 48, and reads browser dialog diagnostics before confirmation closes it. Focused guard unit 3/3 and architecture 3/3, lint/format/typecheck PASS; persisted/browser outcomes remain owed.
+- [Hosted run `37287028810`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37287028810) attempt 1 is red: collapsed Release control, the Reserve rejection fixture's unused draft at final Close, successor-test timeout, and `COMPILE_BUDGET_INDETERMINATE`. `178d6946` opens Record actions, observes Released and archives that unused draft through the gateway; `6f4cbfd5` isolates only the successor fixture. Focused lint/format/typecheck and exact normalized-source check PASS. One whole-workflow retry started; its performance gate PASS. Fresh full CI remains owed.
 - Local container work checks Windows free memory before locking, uses one container at a time; no timeout, readiness or budget change. Static expected-red validation and record fidelity run on the frozen tree before push.
 
 ## Test it yourself
@@ -52,7 +53,7 @@ Review: no separate DROP-SHIP arm; inherited Critical bridge owner-run review is
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "DROP-SHIP",
   "base": "96ac234122322b2cbe18349299664f56c8f5190a",
-  "head": "4e3e44d84985c8a5d29cf4a69f0fd9375ad85b0c",
+  "head": "6f4cbfd5376b6197e3d7453fc70fcc85c195f91f",
   "changedPaths": [
     "apps/api/src/composition-root.ts",
     "apps/web/release/app.authored.json",
