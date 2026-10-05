@@ -1194,7 +1194,10 @@ test(
           'VERIFICATION_SEARCH_WITNESS_UNCONSTRUCTABLE',
           String(error),
         );
-        assert.match(String(error), /northstar\.party:query\.party_search \(/u);
+        assert.match(
+          String(error),
+          /northstar\.party:query\.party_search by northstar\.party:field\.party_name \(/u,
+        );
         assert.doesNotMatch(String(error), /party_z_search/u);
         return true;
       },
@@ -1331,6 +1334,174 @@ test(
         );
       },
       definition,
+    );
+  },
+);
+
+// Review round 8 (a): a literal-true search capped to one result returns the
+// first match by record id, so for a value other records share it can return
+// another record. Every arranged party takes the common bucket; R0 has the
+// smallest record id. `party_search` (Q0, literal `true`, one result, the
+// bucket only) sorts after `party_a_search` (Q1, `not(false)`, the original
+// selections), which can return the arranged record by its name.
+const bucketField = `${PARTY_IDS.namespace}:field.party_bucket`;
+const commonBucket = `${PARTY_IDS.namespace}:option.party_bucket_common`;
+const earliestPartyId = '00000000-0000-4000-8000-000000000001';
+
+test(
+  'release verification witnesses search through an earlier working search when a capped search returns another record',
+  { timeout: 300_000 },
+  async () => {
+    const definition = cappedBucketPartyDefinition('earlier');
+    assert.deepEqual(
+      compiledPartySearches(definition).map((search) => [
+        search[0],
+        search[1],
+        search[4],
+      ]),
+      [
+        [
+          `${PARTY_IDS.namespace}:query.party_a_search`,
+          'q1',
+          [
+            PARTY_IDS.fieldIds.number,
+            PARTY_IDS.fieldIds.name,
+            PARTY_IDS.fieldIds.contactSummary,
+          ],
+        ],
+        [q1Search, 'q0', [bucketField]],
+      ],
+    );
+
+    await withRealPartyRuntime(
+      'verification-capped-earlier',
+      async (runtime) => {
+        await assertFullVerification(runtime);
+        await reverifyWithEarliestBucketParty(runtime);
+      },
+      definition,
+    );
+  },
+);
+
+// The same capped search sorting first among searches with no restricting
+// filter: its bucket read returns R0, which is skipped, and the later
+// `party_z_search` (Q0, literal `true`, the original selections) returns the
+// arranged record by a text field.
+test(
+  'release verification skips a capped search that returns another record and witnesses through a later search',
+  { timeout: 300_000 },
+  async () => {
+    const definition = cappedBucketPartyDefinition('later');
+    assert.deepEqual(
+      compiledPartySearches(definition).map((search) => [
+        search[0],
+        search[1],
+        search[4],
+      ]),
+      [
+        [q1Search, 'q0', [bucketField]],
+        [
+          unexecutedSearch,
+          'q0',
+          [
+            PARTY_IDS.fieldIds.number,
+            PARTY_IDS.fieldIds.name,
+            PARTY_IDS.fieldIds.contactSummary,
+          ],
+        ],
+      ],
+    );
+
+    await withRealPartyRuntime(
+      'verification-capped-later',
+      async (runtime) => {
+        await assertFullVerification(runtime);
+        await reverifyWithEarliestBucketParty(runtime);
+      },
+      definition,
+    );
+  },
+);
+
+// Review round 8 (b): a filter that references no field and is true for every
+// row restricts nothing, whether or not it is the literal `true`. Party's
+// only plain get is Q1 filtered `not(false)`; its operations read back
+// through the Q0 read-model get.
+test(
+  'release verification archives through a Q1 get whose filter is a provably true composition',
+  { timeout: 300_000 },
+  async () => {
+    const definition = q1GetPartyDefinition(notFilter(literalFilter(false)));
+    await withRealPartyRuntime(
+      'verification-q1-get-not-false',
+      async (runtime) => {
+        await assertFullVerification(runtime);
+        const executedIn = await admittedEvidence(runtime);
+        for (const entityId of [
+          PARTY_IDS.entityIds.party,
+          PARTY_IDS.entityIds.role,
+        ]) {
+          const entity = storageEntity(runtime.storage, entityId);
+          const records = await storedRecords(
+            runtime,
+            entity,
+            executedIn.executed_tenant_id,
+            executedIn.executed_environment_id,
+            [
+              entityId === PARTY_IDS.entityIds.party
+                ? PARTY_IDS.fieldIds.name
+                : PARTY_IDS.fieldIds.roleKind,
+            ],
+          );
+          assert.ok(records.length > 0, `verification arranged ${entityId}`);
+          assert.deepEqual(
+            records
+              .filter((record) => !record.archived)
+              .map((record) => record.recordId),
+            [],
+            `verification left no ${entityId} record live`,
+          );
+        }
+      },
+      definition,
+    );
+  },
+);
+
+// A composition of constants that is false for every row still restricts:
+// Party's only plain get filtered `all(true, not(true))` can read no record,
+// so cleanup has no reader for Party and says so instead of taking an empty
+// answer as an archived record.
+test(
+  'release verification refuses cleanup through a Q1 get whose filter is a constant false composition',
+  { timeout: 300_000 },
+  async () => {
+    const definition = q1GetPartyDefinition(
+      allFilter(literalFilter(true), notFilter(literalFilter(true))),
+    );
+    await assert.rejects(
+      withRealPartyRuntime(
+        'verification-q1-get-constant-false',
+        async () => {
+          assert.fail(
+            'activation admitted a release whose probe records no get can read',
+          );
+        },
+        definition,
+      ),
+      (error: unknown) => {
+        assert.equal(
+          (error as { code?: unknown }).code,
+          'VERIFICATION_PROBE_RECORD_UNREADABLE',
+          String(error),
+        );
+        assert.match(
+          String(error),
+          /of northstar\.party:entity\.party, which has no get that returns any live record by id/u,
+        );
+        return true;
+      },
     );
   },
 );
@@ -1655,10 +1826,13 @@ function q1SearchPartyDefinition(): Record<string, unknown> {
 
 /**
  * Party's own definition with its plain get made Q1 (the literal `true`
- * filter, its id and selections kept) and Party's operations reading back
- * through a Q0 copy with a read model (see `q1Get` above).
+ * filter unless another is given, its id and selections kept) and Party's
+ * operations reading back through a Q0 copy with a read model (see `q1Get`
+ * above).
  */
-function q1GetPartyDefinition(): Record<string, unknown> {
+function q1GetPartyDefinition(
+  filter?: Record<string, unknown>,
+): Record<string, unknown> {
   type Json = Record<string, unknown>;
   type Query = Json & { queryId: string; selections: Json[] };
   type Operation = Json & { effect: Json & { entity?: { targetId: string } } };
@@ -1687,6 +1861,7 @@ function q1GetPartyDefinition(): Record<string, unknown> {
     resultFields: {},
   };
   get.tier = 'q1';
+  if (filter) get.filter = filter;
   definition.queries.push(readBack);
   for (const operation of definition.operations) {
     if (operation.effect.entity?.targetId !== PARTY_IDS.entityIds.party) {
@@ -1880,6 +2055,135 @@ async function searchParty(
     text,
   });
   return result.records.map((record) => record.recordId);
+}
+
+function notFilter(term: Record<string, unknown>): Record<string, unknown> {
+  return { kind: 'notPredicate', schemaVersion: 'v6', term };
+}
+
+function allFilter(
+  ...terms: Record<string, unknown>[]
+): Record<string, unknown> {
+  return { kind: 'allPredicate', schemaVersion: 'v6', terms };
+}
+
+/**
+ * Party's own definition with a required searchable enum, `party_bucket`,
+ * whose first option every arranged party takes, and `party_search` capped
+ * to one result and selecting only that enum. With `earlier`, a Q1 copy of
+ * the original search filtered `not(false)` sorts before it
+ * (`party_a_search`); otherwise a Q0 copy sorts after it (`party_z_search`).
+ */
+function cappedBucketPartyDefinition(
+  copy: 'earlier' | 'later',
+): Record<string, unknown> {
+  type Json = Record<string, unknown>;
+  type Query = Json & { queryId: string; selections: Json[] };
+  const ns = PARTY_IDS.namespace;
+  const definition = structuredClone(partyModuleDefinition()) as Json & {
+    fields: Json[];
+    queries: Query[];
+  };
+  definition.fields.push({
+    classification: 'internal',
+    collation: 'binary',
+    defaultSemantics: 'none',
+    entity: {
+      kind: 'entityReference',
+      schemaVersion: 'v6',
+      targetId: PARTY_IDS.entityIds.party,
+    },
+    fieldId: bucketField,
+    fieldType: {
+      kind: 'enumFieldType',
+      options: [
+        [commonBucket, 'Common'],
+        [`${ns}:option.party_bucket_rare`, 'Rare'],
+      ].map(([optionId, label], index) => ({
+        kind: 'enumOption',
+        label,
+        optionId,
+        orderKey: (index + 1) * 10,
+        schemaVersion: 'v6',
+      })),
+      schemaVersion: 'v6',
+    },
+    kind: 'fieldDefinition',
+    label: 'Bucket',
+    orderKey: 5,
+    presence: 'required',
+    reportable: true,
+    schemaVersion: 'v6',
+    searchable: true,
+  });
+  const search = definition.queries.find(
+    (entry) => entry.queryId === q1Search,
+  )!;
+  const local = copy === 'earlier' ? 'party_a_search' : 'party_z_search';
+  const other = structuredClone(search);
+  other.queryId = `${ns}:query.${local}`;
+  other.selections = other.selections.map((selection) => ({
+    ...selection,
+    selectionId: String(selection.selectionId).replace(
+      '.party_search_',
+      `.${local}_`,
+    ),
+  }));
+  if (copy === 'earlier') {
+    other.tier = 'q1';
+    other.filter = notFilter(literalFilter(false));
+  }
+  definition.queries.push(other);
+  search.maximumResultCount = 1;
+  search.selections = [
+    {
+      field: {
+        kind: 'fieldReference',
+        schemaVersion: 'v6',
+        targetId: bucketField,
+      },
+      kind: 'querySelection',
+      orderKey: 10,
+      schemaVersion: 'v6',
+      selectionId: `${ns}:selection.party_search_bucket`,
+    },
+  ];
+  return definition;
+}
+
+/**
+ * In tenant a, a live party R0 with the smallest record id and the common
+ * bucket, which the capped search returns for that value; then verification
+ * runs again there, with R0 in its way.
+ */
+async function reverifyWithEarliestBucketParty(runtime: RealPartyRuntime) {
+  const created = await invokePartyOperation(
+    runtime,
+    runtime.views.a,
+    'party_create',
+    {
+      recordId: earliestPartyId,
+      values: {
+        [bucketField]: commonBucket,
+        [PARTY_IDS.fieldIds.contactSummary]: 'r0@example.test',
+        [PARTY_IDS.fieldIds.name]: 'Earliest Party',
+        [PARTY_IDS.fieldIds.number]: 'P-R0',
+      },
+    },
+  );
+  assert.equal(created.outcome, 'succeeded');
+  assert.deepEqual(
+    await searchParty(runtime, 'party_search', commonBucket),
+    [earliestPartyId],
+    'the capped search returns R0 for the common bucket',
+  );
+  await new PostgresReleaseVerificationService(
+    runtime.runtimePool,
+  ).executeSemanticCandidateWithExecutor(
+    runtime.contexts.a,
+    await stagedInTenantA(runtime),
+    new UnsupportedGetExecutor(runtime),
+  );
 }
 
 function humanActorIssuer(): TrustedActorEnvelopeIssuer {
