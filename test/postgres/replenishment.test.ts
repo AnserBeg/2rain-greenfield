@@ -121,7 +121,13 @@ async function truth(fixture: Fixture, company: string) {
     return (
       await fixture.pool.query<Record<string, unknown>>(
         `SELECT record_id::text AS record_id, ${Object.entries(columns)
-          .map(([name, column]) => `"${column}"::text AS "${name}"`)
+          .map(([name, column]) =>
+            // An instant as epoch seconds: compared as a number, never as
+            // the session's text form.
+            name === 'ordered'
+              ? `extract(epoch FROM "${column}")::text AS "${name}"`
+              : `"${column}"::text AS "${name}"`,
+          )
           .join(', ')}
            FROM ${fulfillmentTable(definition)}
           WHERE tenant_id = $1 AND environment_id = $2
@@ -265,8 +271,7 @@ async function truth(fixture: Fixture, company: string) {
         )
         .sort(
           (left, right) =>
-            Date.parse(String(right.ordered)) -
-              Date.parse(String(left.ordered)) ||
+            Number(right.ordered) - Number(left.ordered) ||
             (String(right.record_id) < String(left.record_id) ? -1 : 1),
         )[0];
       const supplier = latest
