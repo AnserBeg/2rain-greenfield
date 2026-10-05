@@ -9632,10 +9632,13 @@ test('ORDER-PARITY: an invoice states its sales order through its own get, label
   const page = await renderSurfaceRuntimeWithData(f.view, path, gateways);
   assert.equal(page.statusCode, 200);
   assert.equal(fact(page.html), 'SO-000321');
-  // The invoice's own get stated its order, the one relation the page names.
+  // The invoice's compiled display get states its order, the relation the page names.
+  const invoiceQuery = readCompiledSurfaceManifest(f.view).surfaces.find(
+    (surface) => surface.surfaceId === id('surface', 'customer_invoice_detail'),
+  )!.dataSourceQueryId;
+  assert.ok(invoiceQuery);
   assert.deepEqual(
-    gets.find((read) => read.queryId === id('query', 'customer_invoice_get'))
-      ?.relationTargets,
+    gets.find((read) => read.queryId === invoiceQuery)?.relationTargets,
     [id('relation', 'customer_invoice_order')],
   );
   // Open sales order: the order's own page in this company, with no way

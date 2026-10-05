@@ -33,7 +33,9 @@ Costs never come from selling prices or purchase-order estimates.
 Replay by the kernel's frozen seven-key tuple: effectiveAt, recordedAt,
 sourceType, sourceId, sourceLine, postingRole, movementId. Aggregate locations
 within one item/company. A complete transfer's paired equal/opposite quantities
-have no company cost effect; an incomplete transfer is refused.
+have no company cost effect; group the kernel's `sourceLine:in` and
+`sourceLine:out` identities by their common source line and require both signed
+sides. An incomplete or malformed transfer is refused.
 
 Use exact BigInt rational arithmetic through the replay, including proportional
 relief, and round half up only at display (average to six decimals, values to

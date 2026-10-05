@@ -129,11 +129,14 @@ export function replayInventoryValue(
   const transfers = new Map<string, CostMovement[]>();
   for (const movement of movements)
     if (movement.role === 'transfer') {
+      const source = /^(.*):(in|out)$/u.exec(movement.sourceLine);
+      if (!source || !source[1])
+        throw new Error('Incomplete valuation transfer');
       const key = JSON.stringify([
         movement.item,
         movement.sourceType,
         movement.sourceId,
-        movement.sourceLine,
+        source[1],
       ]);
       transfers.set(key, [...(transfers.get(key) ?? []), movement]);
     }
@@ -141,7 +144,17 @@ export function replayInventoryValue(
     if (
       group.length !== 2 ||
       add(exact(group[0]!.quantity), exact(group[1]!.quantity)).n !== 0n ||
-      group[0]!.unit !== group[1]!.unit
+      group[0]!.unit !== group[1]!.unit ||
+      !group.some(
+        (movement) =>
+          movement.sourceLine.endsWith(':in') &&
+          exact(movement.quantity).n > 0n,
+      ) ||
+      !group.some(
+        (movement) =>
+          movement.sourceLine.endsWith(':out') &&
+          exact(movement.quantity).n < 0n,
+      )
     )
       throw new Error('Incomplete valuation transfer');
   for (const movement of [...movements].sort(compareCostMovements)) {

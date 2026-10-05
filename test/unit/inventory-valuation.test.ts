@@ -370,13 +370,13 @@ test('compensation restores original relief after the average changed; paired tr
       sourceType: 'transfer',
       role: 'transfer',
       sourceId: 'transfer',
-      sourceLine: 'line',
+      sourceLine: 'line:out',
     }),
     movement('6', '2', {
       sourceType: 'transfer',
       role: 'transfer',
       sourceId: 'transfer',
-      sourceLine: 'line',
+      sourceLine: 'line:in',
     }),
   ];
   const replay = replayInventoryValue(
@@ -400,6 +400,15 @@ test('compensation restores original relief after the average changed; paired tr
     () => replayInventoryValue(rows.slice(0, -1), new Map()),
     /Incomplete valuation transfer/u,
   );
+  for (const sourceLine of ['different:in', 'line:out', 'line'])
+    assert.throws(
+      () =>
+        replayInventoryValue(
+          rows.map((row) => (row.id === '6' ? { ...row, sourceLine } : row)),
+          new Map(),
+        ),
+      /Incomplete valuation transfer/u,
+    );
 });
 
 test('receipt compensation with residual value at zero quantity withholds money instead of dropping value', () => {
