@@ -728,8 +728,11 @@ test(
               );
               assert.equal(reversalMovement?.quantity, '-2.000000000000000000');
               assert.equal(reversalMovement?.location, locationB);
-              const again = await draftReturn(shipped, '-2', locationB, {
-                kind: 'reversal',
+              // One unit of the other return is still back, so taking one
+              // more out keeps the line's net returned at zero: only the
+              // compensation rule can refuse it.
+              const again = await draftReturn(shipped, '-1', locationB, {
+                kind: 'correction',
                 supersedes: original.recordId,
                 reversalOf: originalMovement.id,
               });
