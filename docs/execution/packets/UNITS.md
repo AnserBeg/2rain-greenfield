@@ -56,6 +56,7 @@ Local PostgreSQL units test deferred before taking the lock: Windows free memory
 Local browser was cancelled while queued behind other lanes; it never acquired the lock or started a container.
 Hosted [run 37264551758](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37264551758) found one test lint error; corrected with explicit contract assertions and a passing focused lint/contract check.
 Hosted [run 37264939890](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37264939890) found the existing stale-binding control's array-tail victim had moved; re-pointed at the same binding, preserving its mutation and kills. All 158 manifest entries validate; its local re-execution is deferred by the memory guard.
+Hosted [run 37265336413](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37265336413) found the inventory-contract golden omitted the added setup families/relation; re-derived from compilation (37 families, 38 relations, root `a624f034...16625c2`), and its focused deterministic case passes.
 Full hosted CI at the current draft tip is tracked in [PR checks](https://github.com/AnserBeg/2rain-greenfield/pull/17/checks), including the new PostgreSQL and operations browser tests; every job must pass before this checkpoint is evidence ready.
 Local container work requires at least 1.2 GB Windows free memory before taking the exclusive test lock; browser uses one worker.
 
@@ -76,7 +77,7 @@ Program review: no stabilized new correctness domain or stage boundary at this s
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "UNITS",
   "base": "e3da0a3918620c5ce3e494eba3fdf1b3f8c91c4a",
-  "head": "97703c289b70f5b9421be7d6c3fa450108575cf1",
+  "head": "3303be1614f0432ea1353e25a622344852b17ad0",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
@@ -97,6 +98,7 @@ Program review: no stabilized new correctness domain or stage boundary at this s
     "packages/runtime/src/unit-conversion.ts",
     "test/architecture/repository-hygiene.test.ts",
     "test/architecture/surface-grammar-conformance.test.ts",
+    "test/compiler/inventory-contract.release.golden.json",
     "test/evidence/policy-unbound-refusal.expected-red.json",
     "test/fixtures/g2/language-conformance/coverage-decisions.json",
     "test/integration/units.test.ts",
