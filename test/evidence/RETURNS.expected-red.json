@@ -258,7 +258,7 @@
     },
     {
       "name": "vendor-return-order-lock-dropped",
-      "claim": "V5. Vendor returns of one order serialize on the order row and its line rows, taken before the received ledger is read, so two returns from two locations cannot together send back more than was received.",
+      "claim": "V5. Vendor returns of one order serialize on the order row and its line rows, taken before the received ledger is read, so the later of two returns from two locations reads the earlier one and is refused by the bound.",
       "file": "packages/postgres-provider/src/inventory-posting-service.ts",
       "original": "  // serialize two returns from two different locations.\n  const serializeOrder = true;\n",
       "replacement": "  // serialize two returns from two different locations.\n  const serializeOrder = false;\n",
@@ -269,7 +269,7 @@
         {
           "file": "test/postgres/vendor-return.test.ts",
           "name": "V5 two concurrent vendor returns of one line from two locations serialize on the order: exactly one commits",
-          "expected": "exactly one of two concurrent vendor returns of three against five received may commit"
+          "expected": "the later return reads the earlier one and is refused by the bound"
         }
       ]
     },
