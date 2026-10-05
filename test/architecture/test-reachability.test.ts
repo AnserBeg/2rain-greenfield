@@ -503,6 +503,19 @@ test('the Playwright producers run every browser spec in exactly one job and rep
       `${relative(process.cwd(), spec)} would not run in the operations job`,
     );
   }
+  // The composed application's journeys run in a job of their own, beside the
+  // operations specs rather than after them.
+  const composed = specs.filter((spec) =>
+    spec.endsWith('composed-application.spec.ts'),
+  );
+  assert.ok(composed.length > 0, 'no composed-application journey was found');
+  for (const spec of composed) {
+    assert.deepEqual(
+      selectedBy.get(spec),
+      ['browser-composed'],
+      `${relative(process.cwd(), spec)} would not run in the composed job`,
+    );
+  }
   // A config that names no producer, or a non-Playwright one, is refused.
   assert.throws(
     () => getPlaywrightReachabilityProducer(undefined),
