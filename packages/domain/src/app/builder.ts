@@ -18,6 +18,7 @@ import {
   worklistSurfaces,
 } from './list-declarations.js';
 import {
+  billWorkspace,
   purchasingWorkspace,
   receivingWorkspaceQueries,
 } from '../purchasing/workspace.js';
@@ -60,7 +61,10 @@ const MODULE_REGISTRY = Object.freeze([
   Object.freeze({ create: salesModuleDefinition, moduleName: 'sales' }),
   Object.freeze({
     create: (namespace: string) =>
-      purchasingModuleDefinition(namespace, { commercialTerms: true }),
+      purchasingModuleDefinition(namespace, {
+        commercialTerms: true,
+        payables: true,
+      }),
     moduleName: 'purchasing',
   }),
   Object.freeze({ create: inventoryModuleDefinition, moduleName: 'inventory' }),
@@ -86,6 +90,7 @@ const RECORD_COMPOSITIONS: Readonly<
   purchase_order_detail: purchasingWorkspace,
   shipment_detail: packingWorkspace,
   customer_invoice_detail: invoiceWorkspace,
+  vendor_bill_detail: billWorkspace,
   inventory_transaction_detail: (namespace: string) =>
     inventoryDocumentWorkspace(namespace, 'inventory_transaction'),
   stock_count_detail: (namespace: string) =>
@@ -101,6 +106,7 @@ const LINES_LEAD: ReadonlySet<string> = new Set([
   'sales_order_detail',
   'purchase_order_detail',
   'customer_invoice_detail',
+  'vendor_bill_detail',
 ]);
 
 /** Workspaces that read their record through a read-model query. */

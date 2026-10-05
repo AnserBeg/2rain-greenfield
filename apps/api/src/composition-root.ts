@@ -11,6 +11,7 @@ import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postg
 import { FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/fulfillment-capability-executor';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/receiving-capability-executor';
 import { RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/receivables-capability-executor';
+import { PAYABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/payables-capability-executor';
 import { createSurfaceRuntimeServer } from '@north-star/web/app-server';
 import { COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/sales-section';
 
@@ -101,6 +102,7 @@ export async function startComposedApplication(
       RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
       FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY,
       RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY,
+      PAYABLES_CAPABILITY_EXECUTOR_FACTORY,
     ],
     compiledApplication,
     databaseUrl: options.databaseUrl,

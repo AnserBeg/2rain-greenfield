@@ -90,7 +90,9 @@ test('the composed pages declare alerts, progression, multi-row Tasks and a rela
     (purchase.presentation.progression.steps as Json[]).map(
       (step) => step.label,
     ),
-    ['Draft', 'Released', 'Receiving', 'Closed'],
+    // PAYABLES: billing follows receiving, needing attention while anything
+    // received is not yet billed.
+    ['Draft', 'Released', 'Receiving', 'Billing', 'Closed'],
   );
   assert.deepEqual(purchase.presentation.progression.next, [
     {
@@ -101,6 +103,7 @@ test('the composed pages declare alerts, progression, multi-row Tasks and a rela
       },
     },
     { action: id('action', 'receive_lines_known') },
+    { action: id('action', 'bill_received') },
     {
       operation: {
         kind: 'operationReference',

@@ -30,6 +30,14 @@ const version = 'v6' as const;
 const normalizationProfileVersion = 'northstar.normalization/v6' as const;
 
 export const PURCHASING_NAMESPACE = 'northstar.purchasing' as const;
+/**
+ * Vendor bills, vendor payments and vendor credits (PAYABLES, owner ruling
+ * PY-A): internal documents with a balance per bill, no ledger and no
+ * provider, the mirror of Sales' receivables.
+ */
+export const PAYABLES_CAPABILITY_ID =
+  'northstar.purchasing:capability.payables' as const;
+export const PAYABLES_CAPABILITY_VERSION = 1 as const;
 
 type FieldType = Record<string, unknown>;
 
@@ -154,7 +162,18 @@ const ENTITY_OWNED_QUERY_FAMILIES = new Set([
   'goods_receipt_line',
   'purchase_order_received',
   'purchase_order_amendment',
+  'vendor_bill',
+  'vendor_bill_line',
+  'vendor_payment',
+  'vendor_credit',
 ]);
+
+/** The payables documents: each is written as a draft and posted once. */
+const PAYABLES_DOCUMENTS = [
+  'vendor_bill',
+  'vendor_payment',
+  'vendor_credit',
+] as const;
 
 function ids(namespace: string) {
   const entity = (local: string) => `${namespace}:entity.${local}`;
@@ -272,10 +291,21 @@ export function purchasingModuleDefinition(
      * Catalog tax codes, which a purchasing-only harness does not compile.
      */
     readonly commercialTerms?: boolean;
+    /**
+     * Vendor bills, vendor payments and vendor credits (PAYABLES). Only the
+     * product application passes it, and only with the commercial terms: a
+     * bill takes each order line's frozen cost, discount and tax rate.
+     */
+    readonly payables?: boolean;
   } = {},
 ): Record<string, unknown> {
   const definitionIds = ids(namespace);
   const commercialTerms = options.commercialTerms === true;
+  const payables = options.payables === true;
+  if (payables && !commercialTerms)
+    throw new TypeError(
+      'payables require the commercial terms a bill is priced from',
+    );
   const { entityIds, fieldIds, moduleId, packageId, stateFieldId } =
     definitionIds;
   const standardEntities = [
@@ -298,11 +328,17 @@ export function purchasingModuleDefinition(
       `${namespace}:entity.purchase_order_received`,
     ],
   ] as const;
+  // PAYABLES (owner ruling PY-A): internal bills, payments and credits.
+  const payablesEntities = payables
+    ? PAYABLES_ENTITIES.map(
+        ([local, label]) =>
+          [local, label, `${namespace}:entity.${local}`] as const,
+      )
+    : [];
+  const entities = [...standardEntities, ...payablesEntities];
 
   return {
-    assertions: standardEntities.map(([local]) =>
-      assertion(definitionIds, local),
-    ),
+    assertions: entities.map(([local]) => assertion(definitionIds, local)),
     capabilityRequirements: [
       {
         capabilityId: definitionIds.contentCapabilityId,
@@ -340,8 +376,30 @@ export function purchasingModuleDefinition(
         schemaVersion: version,
         supportStatus: 'supported',
       },
+      ...(payables
+        ? [
+            {
+              capabilityId: PAYABLES_CAPABILITY_ID,
+              capabilityVersion: PAYABLES_CAPABILITY_VERSION,
+              declaredEffects: ['recordMutation'],
+              kind: 'capabilityRequirement',
+              requiredProjections: [
+                'storage',
+                'policy',
+                'query',
+                'operation',
+                'surface',
+                'agent',
+                'reporting',
+                'verification',
+              ],
+              schemaVersion: version,
+              supportStatus: 'supported',
+            },
+          ]
+        : []),
     ],
-    entities: standardEntities.map(([local, label, entityId], index) =>
+    entities: entities.map(([local, label, entityId], index) =>
       entity(definitionIds, local, label, entityId, (index + 1) * 10),
     ),
     fields: [
@@ -483,6 +541,7 @@ export function purchasingModuleDefinition(
         { optional: true },
       ),
       ...(commercialTerms ? commercialFields(definitionIds) : []),
+      ...(payables ? payablesFields(definitionIds) : []),
     ],
     hashAlgorithm: 'sha256',
     impactAnalyses: [],
@@ -567,6 +626,7 @@ export function purchasingModuleDefinition(
           inState(stateFieldId, definitionIds.stateIds[fromState]),
         ),
       ),
+      ...(payables ? payablesOperations(definitionIds) : []),
     ],
     package: {
       kind: 'packageDefinition',
@@ -614,17 +674,48 @@ export function purchasingModuleDefinition(
       ...TRANSITION_PERMISSIONS.map((local) =>
         transitionPermission(definitionIds, local),
       ),
-    ],
-    queries: standardEntities.flatMap(([local, , entityId]) =>
-      queries(
-        definitionIds,
-        local,
-        entityId,
-        selectedFieldsForEntity(definitionIds, local, commercialTerms),
-        resolveFieldForEntity(fieldIds, local) ||
-          `${namespace}:field.${local}_${local === 'goods_receipt' || local === 'purchase_order_amendment' ? 'number' : local === 'goods_receipt_line' ? 'item_id' : 'unit_id'}`,
+      // PAYABLES: the documents' own permissions, and one per command.
+      ...payablesEntities.flatMap(([local, , entityId]) =>
+        permissions(definitionIds, local, entityId),
       ),
-    ),
+      ...(payables
+        ? PAYABLES_COMMANDS.map(([local, action]) => ({
+            action: 'transition',
+            kind: 'permissionDefinition',
+            label: `${local} ${action}`,
+            permissionId: `${namespace}:permission.${local}_${action}`,
+            resource: reference(
+              'entityReference',
+              `${namespace}:entity.${local}`,
+            ),
+            schemaVersion: version,
+          }))
+        : []),
+    ],
+    queries: [
+      ...standardEntities.flatMap(([local, , entityId]) =>
+        queries(
+          definitionIds,
+          local,
+          entityId,
+          selectedFieldsForEntity(definitionIds, local, commercialTerms),
+          resolveFieldForEntity(fieldIds, local) ||
+            `${namespace}:field.${local}_${local === 'goods_receipt' || local === 'purchase_order_amendment' ? 'number' : local === 'goods_receipt_line' ? 'item_id' : 'unit_id'}`,
+        ),
+      ),
+      // A bill line is found by the item it bills; a document by its number.
+      ...payablesEntities.flatMap(([local, , entityId]) =>
+        queries(
+          definitionIds,
+          local,
+          entityId,
+          (PAYABLES_FIELDS[local] ?? []).map(
+            ([name]) => `${namespace}:field.${local}_${name}`,
+          ),
+          `${namespace}:field.${local}_${local === 'vendor_bill_line' ? 'item_id' : 'number'}`,
+        ),
+      ),
+    ],
     relations: [
       ...(
         [
@@ -687,13 +778,28 @@ export function purchasingModuleDefinition(
         entityIds.purchaseOrder,
         10,
       ),
+      // PAYABLES: a bill belongs to its order and owns its lines; each line
+      // names the order line it bills; a payment or credit names its bill.
+      ...(payables
+        ? PAYABLES_RELATIONS.map(
+            ([local, source, target, ownership], index) => ({
+              ...relation(
+                `${namespace}:relation.${local}`,
+                `${namespace}:entity.${source}`,
+                `${namespace}:entity.${target}`,
+                80 + index * 10,
+              ),
+              ownership,
+            }),
+          )
+        : []),
     ],
     schemaVersion: version,
     stateMachines: [stateMachine(definitionIds)],
-    storageMappings: standardEntities.map(([local, , entityId]) =>
+    storageMappings: entities.map(([local, , entityId]) =>
       storageMapping(definitionIds, local, entityId),
     ),
-    surfaces: standardEntities.flatMap(([local, label]) =>
+    surfaces: entities.flatMap(([local, label]) =>
       surfaces(definitionIds, local, label).filter(
         (surface) =>
           local !== 'purchase_order_received' || surface.surfaceRole !== 'form',
@@ -826,6 +932,276 @@ function commercialFields(ids: PurchasingIds): Array<Record<string, unknown>> {
       decimal(),
       optional,
     ),
+  ];
+}
+
+/** The payables entities, in declaration order (PAYABLES). */
+const PAYABLES_ENTITIES = [
+  ['vendor_bill', 'Vendor bill'],
+  ['vendor_bill_line', 'Bill line'],
+  ['vendor_payment', 'Vendor payment'],
+  ['vendor_credit', 'Vendor credit'],
+] as const;
+
+/**
+ * The payables relations: a bill belongs to its purchase order and owns its
+ * lines, whose drafts' guard it carries down; each line names the order line
+ * it bills; a payment or a credit names the one bill it settles (PY-I).
+ */
+const PAYABLES_RELATIONS = [
+  ['vendor_bill_order', 'vendor_bill', 'purchase_order', 'reference'],
+  [
+    'vendor_bill_line_bill',
+    'vendor_bill_line',
+    'vendor_bill',
+    'parentScopedChild',
+  ],
+  [
+    'vendor_bill_line_order_line',
+    'vendor_bill_line',
+    'purchase_order_line',
+    'reference',
+  ],
+  ['vendor_payment_bill', 'vendor_payment', 'vendor_bill', 'reference'],
+  ['vendor_credit_bill', 'vendor_credit', 'vendor_bill', 'reference'],
+] as const;
+
+/**
+ * The payables commands, each run by the payables capability and offered only
+ * in the state it applies to; the capability re-checks every rule under its
+ * locks.
+ */
+const PAYABLES_COMMANDS = [
+  ['vendor_bill', 'post', 'draft'],
+  ['vendor_bill', 'void', 'open'],
+  ['vendor_payment', 'post', 'draft'],
+  ['vendor_credit', 'post', 'draft'],
+] as const;
+
+type PayablesFieldSpec = readonly [
+  name: string,
+  label: string,
+  type: 'text' | 'integer' | 'decimal' | 'instant' | 'choice',
+  options: {
+    readonly length?: number;
+    readonly optional?: boolean;
+    readonly searchable?: boolean;
+    readonly numberedAs?: string;
+    readonly choices?: ReadonlyArray<readonly [string, string]>;
+  },
+];
+
+/**
+ * Payables fields (owner rulings PY-A to PY-F). A bill's vendor, currency,
+ * terms, due date and figures are written when it posts, from its purchase
+ * order; they are optional on the entity because a draft has none of them
+ * yet. The supplier's own invoice number is optional (PY-F); the bill date is
+ * the posting moment (PY-D).
+ */
+const PAYABLES_FIELDS: Readonly<
+  Record<string, ReadonlyArray<PayablesFieldSpec>>
+> = {
+  vendor_bill: [
+    ['number', 'Bill number', 'text', { length: 60, numberedAs: 'BILL' }],
+    [
+      'state',
+      'State',
+      'choice',
+      {
+        choices: [
+          ['draft', 'Draft'],
+          ['open', 'Open'],
+          ['partially_paid', 'Partially paid'],
+          ['paid', 'Paid'],
+          ['void', 'Void'],
+        ],
+      },
+    ],
+    ['bill_date', 'Bill date', 'instant', {}],
+    ['due_date', 'Due date', 'instant', { optional: true }],
+    [
+      'supplier_party_id',
+      'Vendor',
+      'text',
+      { length: 80, optional: true, searchable: true },
+    ],
+    [
+      'supplier_invoice_number',
+      'Supplier invoice number',
+      'text',
+      { length: 80, optional: true, searchable: true },
+    ],
+    [
+      'currency',
+      'Currency',
+      'text',
+      { length: 3, optional: true, searchable: true },
+    ],
+    [
+      'payment_terms',
+      'Payment terms',
+      'choice',
+      { optional: true, choices: PAYMENT_TERMS },
+    ],
+    ['subtotal', 'Subtotal', 'decimal', { optional: true }],
+    ['charges', 'Charges', 'decimal', { optional: true }],
+    ['tax', 'Tax', 'decimal', { optional: true }],
+    ['total', 'Total', 'decimal', { optional: true }],
+    ['paid_amount', 'Paid', 'decimal', { optional: true }],
+    ['credited_amount', 'Credited', 'decimal', { optional: true }],
+    ['balance', 'Balance', 'decimal', { optional: true }],
+  ],
+  vendor_bill_line: [
+    ['line_number', 'Line', 'integer', {}],
+    ['item_id', 'Item', 'text', { length: 80, searchable: true }],
+    ['unit_id', 'Unit', 'text', { length: 32, searchable: true }],
+    ['quantity', 'Quantity', 'decimal', {}],
+    // The purchase order line's own name for what it costs.
+    ['unit_price', 'Unit cost', 'decimal', { optional: true }],
+    ['discount_percent', 'Discount %', 'decimal', { optional: true }],
+    ['tax_rate_percent', 'Tax rate %', 'decimal', { optional: true }],
+    ['amount', 'Amount', 'decimal', {}],
+    ['tax', 'Tax', 'decimal', {}],
+  ],
+  vendor_payment: [
+    ['number', 'Payment number', 'text', { length: 60, numberedAs: 'VPAY' }],
+    [
+      'state',
+      'State',
+      'choice',
+      {
+        choices: [
+          ['draft', 'Draft'],
+          ['posted', 'Posted'],
+        ],
+      },
+    ],
+    ['payment_date', 'Payment date', 'instant', {}],
+    ['amount', 'Amount', 'decimal', {}],
+    [
+      'method',
+      'Method',
+      'choice',
+      {
+        choices: [
+          ['cash', 'Cash'],
+          ['cheque', 'Cheque'],
+          ['eft', 'EFT'],
+          ['card', 'Card'],
+          ['other', 'Other'],
+        ],
+      },
+    ],
+    ['reference', 'Reference', 'text', { length: 120, optional: true }],
+  ],
+  vendor_credit: [
+    ['number', 'Credit number', 'text', { length: 60, numberedAs: 'VCM' }],
+    [
+      'state',
+      'State',
+      'choice',
+      {
+        choices: [
+          ['draft', 'Draft'],
+          ['posted', 'Posted'],
+        ],
+      },
+    ],
+    ['credit_date', 'Credit date', 'instant', {}],
+    ['amount', 'Amount', 'decimal', {}],
+    ['reason', 'Reason', 'text', { length: 1000 }],
+  ],
+};
+
+function payablesFields(ids: PurchasingIds): Array<Record<string, unknown>> {
+  return Object.entries(PAYABLES_FIELDS).flatMap(([local, specs]) =>
+    specs.map(([name, label, type, options], index) =>
+      field(
+        ids,
+        `${ids.namespace}:entity.${local}`,
+        `${ids.namespace}:field.${local}_${name}`,
+        label,
+        (index + 1) * 10,
+        type === 'text'
+          ? text(options.length ?? 120)
+          : type === 'integer'
+            ? integer()
+            : type === 'decimal'
+              ? decimal()
+              : type === 'instant'
+                ? instant()
+                : {
+                    kind: 'enumFieldType',
+                    schemaVersion: version,
+                    options: (options.choices ?? []).map(
+                      ([value, choice], position) => ({
+                        kind: 'enumOption',
+                        schemaVersion: version,
+                        optionId: `${ids.namespace}:option.${local}_${name}_${value}`,
+                        label: choice,
+                        orderKey: (position + 1) * 10,
+                      }),
+                    ),
+                  },
+        {
+          optional: options.optional ?? false,
+          searchable: options.searchable ?? options.numberedAs !== undefined,
+          ...(options.numberedAs
+            ? { businessKey: true, numberedAs: options.numberedAs }
+            : {}),
+        },
+      ),
+    ),
+  );
+}
+
+/**
+ * The payables operations. Documents change only while drafts; a bill's lines
+ * carry its guard through their parent-scoped relation; each document posts
+ * once through the payables capability, which freezes its figures.
+ */
+function payablesOperations(
+  ids: PurchasingIds,
+): Array<Record<string, unknown>> {
+  const { namespace } = ids;
+  const inState = (local: string, state: string) =>
+    fieldComparison(
+      `${namespace}:field.${local}_state`,
+      `${namespace}:option.${local}_state_${state}`,
+    );
+  return [
+    ...PAYABLES_DOCUMENTS.flatMap((local) =>
+      operations(
+        ids,
+        local,
+        `${namespace}:entity.${local}`,
+        inState(local, 'draft'),
+      ),
+    ),
+    ...operations(
+      ids,
+      'vendor_bill_line',
+      `${namespace}:entity.vendor_bill_line`,
+    ),
+    ...PAYABLES_COMMANDS.map(([local, action, state]) => ({
+      confirmation: 'humanRequired',
+      effect: {
+        kind: 'registeredCapabilityEffect',
+        schemaVersion: version,
+        capability: reference('capabilityReference', PAYABLES_CAPABILITY_ID),
+      },
+      kind: 'operationDefinition',
+      module: reference('moduleReference', ids.moduleId),
+      operationId: `${namespace}:operation.${local}_${action}`,
+      permission: reference(
+        'permissionReference',
+        `${namespace}:permission.${local}_${action}`,
+      ),
+      precondition: inState(local, state),
+      readBack: reference('queryReference', `${namespace}:query.${local}_get`),
+      schemaVersion: version,
+      tier: 'o1',
+    })),
   ];
 }
 
@@ -1363,7 +1739,8 @@ function queries(
         : {}),
       maximumResultCount: queryType === 'get' ? 1 : 100,
       // The declared List exports this whole filtered set in one statement.
-      ...(queryType === 'list' && local === 'purchase_order'
+      ...(queryType === 'list' &&
+      (local === 'purchase_order' || local === 'vendor_bill')
         ? { exportMaximumResultCount: 5_000 }
         : {}),
       module: reference('moduleReference', ids.moduleId),
