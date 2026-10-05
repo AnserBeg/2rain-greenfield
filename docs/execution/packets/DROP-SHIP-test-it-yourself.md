@@ -1,6 +1,6 @@
 # DROP-SHIP — Test it yourself
 
-Draft checkpoint: the [Critical relation-install bridge](DROP-SHIP-RELATION-INSTALL-design.md) is merged. The supplier-delivery PostgreSQL journey and new operations-browser spec passed in hosted run `37290557084`. Full DROP-SHIP CI is still pending after a separate rollback-test fixture correction; owner review of the bridge remains owed.
+Validated checkpoint: the [Critical relation-install bridge](DROP-SHIP-RELATION-INSTALL-design.md) is merged. [Full DROP-SHIP CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37292271053) passed all 11 jobs at `39c721ae`, including the supplier-delivery PostgreSQL and operations-browser journeys. Both PRs remain drafts; owner review of the bridge is owed. Nothing is merged into main or deployed.
 
 From `/home/rvham/2rain-greenfield-drop-ship`, first check Windows free memory:
 `powershell.exe -NoProfile -Command "(Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory"`.
