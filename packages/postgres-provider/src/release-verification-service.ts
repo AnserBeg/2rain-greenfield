@@ -1625,13 +1625,6 @@ class SemanticVerificationExecutor {
       {},
       relationOverrides,
     );
-    // The probe reads through the search's own filter, so any search the
-    // gateway executes serves, a Q1 one included (`gatewayExecutes`).
-    const search = this.#queryForEntity(
-      scenario.entityId,
-      'search',
-      gatewayExecutes,
-    );
     const excludedValue = record.values[scenario.subjectId];
     if (excludedValue === undefined) {
       throw failure(
@@ -1639,8 +1632,15 @@ class SemanticVerificationExecutor {
         'search exclusion probe could not populate its subject field',
       );
     }
+    const witness = await this.#searchWitness(scenario.entityId, record);
+    if (!hasRecord(witness.included, record.recordId)) {
+      throw failure(
+        'VERIFICATION_SEARCH_POSITIVE_FAILED',
+        `searchable field ${witness.positiveFieldId} did not return record ${record.recordId} through ${witness.search.queryId}: ${canonicalize(witness.included)}`,
+      );
+    }
     const excluded = await this.#invokeQuery(
-      search,
+      witness.search,
       { text: String(excludedValue) },
       record,
     );
@@ -1650,57 +1650,106 @@ class SemanticVerificationExecutor {
         `excluded field value was searchable: ${scenario.subjectId}`,
       );
     }
-    const selectedFieldIds = new Set(
-      search.selections.map((selection) => selection.fieldId),
-    );
-    const excludedFieldIds = this.#excludedFieldsByEntity.get(
-      scenario.entityId,
-    );
-    const createOperation = this.#createOperation(scenario.entityId);
-    const positiveFieldId =
-      createOperation.inputContract.fields.find(
-        (field) =>
-          selectedFieldIds.has(field.fieldId) &&
-          (field.fieldKind === 'textFieldType' ||
-            field.fieldKind === 'enumFieldType') &&
-          !excludedFieldIds?.has(field.fieldId),
-      )?.fieldId ??
-      // A server-assigned number is text the create stored and read back.
-      createOperation.inputContract.assignedFields?.find(
-        (assigned) =>
-          selectedFieldIds.has(assigned.fieldId) &&
-          !excludedFieldIds?.has(assigned.fieldId),
-      )?.fieldId;
-    if (!positiveFieldId) {
-      throw failure(
-        'VERIFICATION_SEARCHABLE_FIELD_MISSING',
-        'search exclusion probe has no same-entity positive searchable field',
-      );
-    }
-    const included = await this.#invokeQuery(
-      search,
-      {
-        text: String(record.values[positiveFieldId]),
-      },
-      record,
-    );
-    if (!hasRecord(included, record.recordId)) {
-      throw failure(
-        'VERIFICATION_SEARCH_POSITIVE_FAILED',
-        `searchable field ${positiveFieldId} did not return record ${record.recordId}: ${canonicalize(included)}`,
-      );
-    }
     return {
       negativeProbe: excluded,
       positiveProbe: {
         constructibilityFindings: this.constructibilityFindings,
         searchWitness: {
           entityId: scenario.entityId,
-          fieldId: positiveFieldId,
+          fieldId: witness.positiveFieldId,
           recordObserved: true,
         },
       },
     };
+  }
+
+  /**
+   * The search a search-exclusion probe reads through, the arranged record's
+   * positive field for it, and the search's answer for that field's value.
+   * A candidate is a plain search of the entity that the gateway executes
+   * and that selects a positive field: a text or enum input, or an assigned
+   * number, that the plan does not exclude from search. The first candidate
+   * with the literal `true` filter is used, its answer returned whatever it
+   * is. Without one, the filtered candidates are read in catalog order and
+   * the first that returns the record is used; when none does, no search can
+   * witness the probe.
+   */
+  async #searchWitness(
+    entityId: string,
+    record: VerificationRecord,
+  ): Promise<{
+    readonly included:
+      SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope;
+    readonly positiveFieldId: string;
+    readonly search: VerificationQueryContract;
+  }> {
+    const executed = this.#queries.filter(
+      (candidate) =>
+        candidate.sourceEntityId === entityId &&
+        candidate.queryType === 'search' &&
+        candidate.readModel === undefined &&
+        gatewayExecutes(candidate),
+    );
+    if (executed.length === 0) {
+      throw failure(
+        'VERIFICATION_QUERY_MISSING',
+        `compiled search query of ${entityId} that gatewayExecutes admits is missing`,
+      );
+    }
+    const excludedFieldIds = this.#excludedFieldsByEntity.get(entityId);
+    const createOperation = this.#createOperation(entityId);
+    const candidates = executed.flatMap((search) => {
+      const selectedFieldIds = new Set(
+        search.selections.map((selection) => selection.fieldId),
+      );
+      const positiveFieldId =
+        createOperation.inputContract.fields.find(
+          (field) =>
+            selectedFieldIds.has(field.fieldId) &&
+            (field.fieldKind === 'textFieldType' ||
+              field.fieldKind === 'enumFieldType') &&
+            !excludedFieldIds?.has(field.fieldId),
+        )?.fieldId ??
+        // A server-assigned number is text the create stored and read back.
+        createOperation.inputContract.assignedFields?.find(
+          (assigned) =>
+            selectedFieldIds.has(assigned.fieldId) &&
+            !excludedFieldIds?.has(assigned.fieldId),
+        )?.fieldId;
+      return positiveFieldId ? [{ positiveFieldId, search }] : [];
+    });
+    if (candidates.length === 0) {
+      throw failure(
+        'VERIFICATION_SEARCHABLE_FIELD_MISSING',
+        'search exclusion probe has no same-entity positive searchable field',
+      );
+    }
+    const read = async (candidate: (typeof candidates)[number]) => ({
+      ...candidate,
+      included: await this.#invokeQuery(
+        candidate.search,
+        { text: String(record.values[candidate.positiveFieldId]) },
+        record,
+      ),
+    });
+    const unfiltered = candidates.find(
+      (candidate) =>
+        inspectPredicateForExecution(candidate.search.filter).outcome ===
+        'accepted',
+    );
+    if (unfiltered) return read(unfiltered);
+    const tried: string[] = [];
+    for (const candidate of candidates) {
+      const witness = await read(candidate);
+      if (hasRecord(witness.included, record.recordId)) return witness;
+      tried.push(
+        `${candidate.search.queryId} (${queryAnswer(witness.included)})`,
+      );
+    }
+    throw failure(
+      'VERIFICATION_SEARCH_WITNESS_UNCONSTRUCTABLE',
+      `no search of ${entityId} that the gateway executes returns the record verification arranged, ${record.recordId}, by its positive field; tried ${tried.join('; ')}`,
+    );
   }
 
   async #typedErrorSurface(scenario: VerificationScenario, token: string) {
