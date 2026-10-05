@@ -76,8 +76,9 @@ test('a counter sale confirms, ships, invoices and takes payment in one Task, an
     await expect(
       shipment.locator('td[data-column-label="Carrier"]'),
     ).toHaveText('Counter');
+    // The shipment's states are labelled by their values.
     await expect(shipment.locator('td[data-column-label="State"]')).toHaveText(
-      'Posted',
+      'posted',
     );
     const invoice = dataset('order_invoices').locator('tbody tr');
     await expect(invoice).toHaveCount(1);

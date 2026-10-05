@@ -2340,6 +2340,20 @@
     },
     {
       "schema": "north_star_module",
+      "relation": "nsm_t_bjmsyssx2gxgndlxt266yeeytiufxsb66hcjlkwcvk5hlscndyaa",
+      "ordinal_position": 33,
+      "column_name": "nsm_c_5c5h6ouhxyjhh3ukcw773jc6ohi7wwfrhvjkz362crl72d7too3a",
+      "data_type": "boolean",
+      "is_nullable": true,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "north_star_module",
       "relation": "nsm_t_brja23tvcv6uaekvm5i4fph4ymws7ookhmajyqb2dqeh5hrjrboa",
       "ordinal_position": 1,
       "column_name": "tenant_id",
@@ -11993,6 +12007,15 @@
       "schema": "north_star_module",
       "relation": "nsm_t_bjmsyssx2gxgndlxt266yeeytiufxsb66hcjlkwcvk5hlscndyaa",
       "column_name": "nsm_c_5bbdyjbl3eqx5cwclysqtovlu62mwysihhghwnj36cpinskxxxsa",
+      "grantor": "north_star_module_materializer",
+      "grantee": "north_star_module_runtime",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "north_star_module",
+      "relation": "nsm_t_bjmsyssx2gxgndlxt266yeeytiufxsb66hcjlkwcvk5hlscndyaa",
+      "column_name": "nsm_c_5c5h6ouhxyjhh3ukcw773jc6ohi7wwfrhvjkz362crl72d7too3a",
       "grantor": "north_star_module_materializer",
       "grantee": "north_star_module_runtime",
       "privilege_type": "UPDATE",
