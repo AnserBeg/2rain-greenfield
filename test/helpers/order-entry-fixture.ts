@@ -1214,6 +1214,203 @@ async function seed(
         observed: true,
       };
     }
+    if (phase === 'replenishment') {
+      // REPLENISHMENT: what Stock by item and the Buying worklist add up,
+      // each through its governed operation. Field notebook (its opening 10
+      // at CAL-WH): a released order from Alpine Office Supply for 8 with 3
+      // received, a later released order from Summit Industrial for 4, and a
+      // draft for 20 that adds nothing; a confirmed sale of 6 with 4 reserved
+      // and 1 shipped, and a draft sale of 50 that adds nothing. Task lamp: a
+      // confirmed sale of 3 and no stock. Task lamp and Shipping labels get
+      // their levels here; the notebook's are the caller's to set.
+      const at = (days = 0) =>
+        new Date(Date.now() + days * 86_400_000).toISOString();
+      const done = async (local: string, recordId: string, revision: number) =>
+        assert.equal(
+          (await invoke(local, { recordId, expectedRevision: revision }))
+            .outcome,
+          'succeeded',
+        );
+      const pens = '71000000-0000-4000-8000-000000000012';
+      const lamp = '71000000-0000-4000-8000-000000000013';
+      const labels = '71000000-0000-4000-8000-000000000014';
+      const summit = '71000000-0000-4000-8000-000000000004';
+      const revision = async (local: string, recordId: string) =>
+        Number(
+          (await stored(local)).find((row) => row.record_id === recordId)!
+            .revision,
+        );
+      for (const [recordId, reorderPoint, reorderUpTo] of [
+        [lamp, '5', null],
+        [labels, '0', '10'],
+      ] as const) {
+        const updated = await invoke('item_update', {
+          recordId,
+          expectedRevision: await revision('item', recordId),
+          patch: {
+            [`${ns}:field.item_reorder_point`]: reorderPoint,
+            [`${ns}:field.item_reorder_up_to`]: reorderUpTo,
+          },
+        });
+        assert.equal(updated.outcome, 'succeeded');
+      }
+      await create(
+        'party_role',
+        { kind: `${ns}:option.supplier`, status: `${ns}:option.active` },
+        { party: summit },
+        false,
+      );
+      const purchase = async (
+        supplier: string,
+        ordered: string,
+        quantity: string,
+        received: string,
+        release = true,
+      ) => {
+        const order = await create('purchase_order', {
+          supplier_party_id: supplier,
+          order_date: ordered,
+          expected_date: at(7),
+          currency: 'CAD',
+          notes: null,
+        });
+        const line = await create(
+          'purchase_order_line',
+          {
+            line_number: '1',
+            item_id: item,
+            ordered_quantity: quantity,
+            unit_price: null,
+          },
+          { order: order.recordId },
+        );
+        if (!release) return order.recordId;
+        await done('purchase_order_release', order.recordId, order.revision);
+        if (received === '0') return order.recordId;
+        const receipt = await create(
+          'goods_receipt',
+          {
+            state: `${ns}:option.goods_receipt_state_draft`,
+            kind: `${ns}:option.goods_receipt_kind_initial`,
+            effective_at: at(),
+            location_id: location,
+            reason_code: 'RECEIVE',
+            reason_narrative: 'Replenishment receipt',
+          },
+          { order: order.recordId },
+        );
+        await create(
+          'goods_receipt_line',
+          {
+            line_number: '1',
+            item_id: item,
+            quantity: received,
+            unit_id: 'EA',
+            cost_status: `${ns}:option.goods_receipt_line_cost_status_absent`,
+            unit_cost: null,
+            currency: null,
+            reversal_of_movement_id: null,
+          },
+          { receipt: receipt.recordId, order_line: line.recordId },
+        );
+        await done('goods_receipt_post', receipt.recordId, receipt.revision);
+        return order.recordId;
+      };
+      const first = await purchase(customer, at(-10), '8', '3');
+      const latest = await purchase(summit, at(-2), '4', '0');
+      const draftPurchase = await purchase(
+        '71000000-0000-4000-8000-000000000002',
+        at(),
+        '20',
+        '0',
+        false,
+      );
+      const sale = async (itemId: string, quantity: string, release = true) => {
+        const order = await create('sales_order', {
+          customer_party_id: customer,
+          order_date: at(),
+          requested_date: at(21),
+          currency: 'CAD',
+          notes: 'Replenishment order',
+          ...shipTo,
+        });
+        const line = await create(
+          'sales_order_line',
+          {
+            item_id: itemId,
+            line_number: '1',
+            ordered_quantity: quantity,
+            unit_id: 'EA',
+            unit_price: null,
+          },
+          { order: order.recordId },
+        );
+        if (release)
+          await done('sales_order_release', order.recordId, order.revision);
+        return { order, line };
+      };
+      const confirmed = await sale(item, '6');
+      const reservation = await create(
+        'reservation',
+        {
+          item_id: item,
+          location_id: location,
+          number: `RSV-${randomUUID()}`,
+          quantity: '4',
+          reason: 'Replenishment reservation',
+          state: `${ns}:option.reservation_state_draft`,
+          unit_id: 'EA',
+        },
+        { order_line: confirmed.line.recordId },
+      );
+      await done(
+        'reservation_reserve',
+        reservation.recordId,
+        reservation.revision,
+      );
+      const shipment = await create(
+        'shipment',
+        {
+          effective_at: at(),
+          external_reference: randomUUID(),
+          kind: `${ns}:option.shipment_kind_initial`,
+          location_id: location,
+          reason_code: 'SHIP',
+          reason_narrative: 'Replenishment shipment',
+          state: `${ns}:option.shipment_state_draft`,
+          ...shipTo,
+        },
+        { order: confirmed.order.recordId },
+      );
+      await create(
+        'shipment_line',
+        {
+          item_id: item,
+          line_number: '1',
+          quantity: '1',
+          reversal_of_movement_id: null,
+          unit_id: 'EA',
+        },
+        {
+          order_line: confirmed.line.recordId,
+          reservation: reservation.recordId,
+          shipment: shipment.recordId,
+        },
+      );
+      await done('shipment_post', shipment.recordId, shipment.revision);
+      await sale(item, '50', false);
+      await sale(lamp, '3');
+      return {
+        phase,
+        notebook: item,
+        pens,
+        lamp,
+        labels,
+        location,
+        purchases: { first, latest, draft: draftPurchase },
+        observed: true,
+      };
+    }
     if (phase === 'second_company') {
       const company = await create(
         'legal_entity',

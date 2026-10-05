@@ -169,6 +169,7 @@ const suiteDefinitions = [
       'test/postgres/release-activation.test.ts',
       'test/postgres/release-approval.test.ts',
       'test/postgres/releases.test.ts',
+      'test/postgres/replenishment.test.ts',
       'test/postgres/request-runtime-view.test.ts',
       'test/postgres/saved-filter.test.ts',
       'test/postgres/stock-serializer.test.ts',
