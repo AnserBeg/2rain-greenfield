@@ -247,10 +247,13 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // number is currently a declaration, not a gate. Filed, not fixed -- see
   // `current-plan.md`, `runtime-capability-floor-unenforced`. This flat
   // fixture keeps Party, whose customer workspace (SALES-PARITY) offers a
-  // salesperson Task input with declared eligibility, which requires 11, and
+  // salesperson Task input with declared eligibility, which requires 11,
   // Catalog, whose item form chooses the preferred location from the
-  // location list (a Record form reference, REPLENISHMENT), which requires 17.
-  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 17);
+  // location list (a Record form reference, REPLENISHMENT), which requires 17,
+  // and Location, whose form leaves the inventory status to its page's
+  // "Change status" (a Record form's omitted fields, LOCATIONS), which
+  // requires 19.
+  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 19);
   // SALES-PARITY: Catalog's tax codes are a fifth setup List, still flat.
   assert.equal(flatCompact.navigationEntryIds.length, 5);
   assert.deepEqual(
@@ -300,8 +303,10 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // a relation (ORDER-PARITY increment B) require 14; the item page's
   // field-scoped stock and movements (INVENTORY-PARITY) require 15; a stock
   // document's create values require 16; List figures, views keeping a band
-  // and the item form's location choice (REPLENISHMENT) require 17.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 17);
+  // and the item form's location choice (REPLENISHMENT) require 17; the
+  // location form's omitted status and the usable figures' parent reached
+  // through a reference field (LOCATIONS) require 19 (18 is WAREHOUSE-MODE's).
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 19);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.

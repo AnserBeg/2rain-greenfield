@@ -369,6 +369,13 @@ const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
     sourceFamilyId: 'stock_count_line',
     targetFamilyId: 'inventory_transaction_line',
   },
+  // LOCATIONS: a location inside another, such as a bin in its warehouse;
+  // both are shared by every company.
+  {
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'location',
+    targetFamilyId: 'location',
+  },
 ] as const);
 const LEGAL_ENTITY_GOVERNED_PACKAGES = Object.freeze([
   'catalog',

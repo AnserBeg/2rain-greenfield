@@ -67,6 +67,7 @@ import {
 } from './message-render.js';
 import {
   pickerEnumerationQuery,
+  formFieldIds,
   readCompiledSurfaceManifest,
   readCompiledSurfaceDataBinding,
   SurfaceProjectionError,
@@ -482,7 +483,7 @@ async function loadFormReferences(
   surface: CompiledSurfaceDefinition,
   queryGateway: SemanticQueryGateway,
 ): Promise<Readonly<Record<string, SurfaceFormReferenceChoices>> | null> {
-  if (surface.surfaceRole !== 'form' || !surface.form) return null;
+  if (surface.surfaceRole !== 'form' || !surface.form?.references) return null;
   const unavailable = Object.freeze({ status: 'unavailable' as const });
   const choices = await Promise.all(
     surface.form.references.map(async (reference) => {
@@ -1738,7 +1739,9 @@ function fieldInput(
   const entries: Array<
     readonly [string, RuntimeViewContract.ImmutableJsonValue]
   > = [];
-  for (const fieldId of surface.fieldIds) {
+  // An omitted field is never rendered and never read: a submission naming
+  // one changes nothing, as a key naming no form field never does.
+  for (const fieldId of formFieldIds(surface)) {
     const field = fields.get(fieldId);
     const mutation = formFieldMutation(
       field,

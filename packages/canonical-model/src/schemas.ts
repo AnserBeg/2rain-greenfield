@@ -1455,14 +1455,24 @@ const listFigureRows = z.strictObject({
 /**
  * Only rows whose parent -- through the rows' relation to it -- holds one of
  * these values in a field its own list query selects, such as order lines of
- * released orders.
+ * released orders. A parent may instead be the record whose id the rows hold
+ * in one of their own text fields (`reference`), as a stock balance holds its
+ * location: only stock at a usable location (LOCATIONS; optional v6 key).
  */
-const listFigureWithin = z.strictObject({
-  relation: CanonicalIdSchema,
-  query: compositionReference('queryReference'),
-  field: CanonicalIdSchema,
-  values: z.array(z.string().min(1).max(240)).min(1).max(8),
-});
+const listFigureWithin = z.union([
+  z.strictObject({
+    relation: CanonicalIdSchema,
+    query: compositionReference('queryReference'),
+    field: CanonicalIdSchema,
+    values: z.array(z.string().min(1).max(240)).min(1).max(8),
+  }),
+  z.strictObject({
+    reference: CanonicalIdSchema,
+    query: compositionReference('queryReference'),
+    field: CanonicalIdSchema,
+    values: z.array(z.string().min(1).max(240)).min(1).max(8),
+  }),
+]);
 /** Rows pointing at each figure row through a relation, and their quantity. */
 const listFigureRelated = z.strictObject({
   query: compositionReference('queryReference'),
@@ -1651,7 +1661,15 @@ export const SurfaceFormSchema = z.strictObject({
       }),
     )
     .min(1)
-    .max(8),
+    .max(8)
+    .optional(),
+  /**
+   * Fields the form leaves out because a declared Task of the record's page
+   * sets them, such as a location's inventory status with its reason: the
+   * form neither shows nor sends them, so neither a create nor an update from
+   * it states one. Optional v6 key (LOCATIONS, ADR-0047 §7).
+   */
+  omit: z.array(CanonicalIdSchema).min(1).max(8).optional(),
 });
 export type SurfaceForm = z.infer<typeof SurfaceFormSchema>;
 const normalizedV6SurfaceDefinition = normalizedSurfaceDefinition.extend({

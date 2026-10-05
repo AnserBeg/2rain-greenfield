@@ -948,10 +948,15 @@ async function authorizeSharedListProjection(
       entry.label ||= label;
       reads.set(queryId, entry);
     };
+    // A parent reached through a reference field is joined on the record id
+    // the rows hold: the rows' query must select the field that holds it.
+    const referenced = (within: { readonly referenceFieldId?: string }) =>
+      within.referenceFieldId === undefined ? [] : [within.referenceFieldId];
     for (const sum of query.figures.sums) {
       use(sum.rows.queryId, [
         sum.rows.matchFieldId,
         ...(sum.rows.quantityFieldId ? [sum.rows.quantityFieldId] : []),
+        ...(sum.within ? referenced(sum.within) : []),
       ]);
       if (sum.within)
         use(sum.within.queryId, [sum.within.fieldId], sum.within.relationId);
@@ -959,7 +964,10 @@ async function authorizeSharedListProjection(
         use(sum.related.queryId, [sum.related.fieldId], sum.related.relationId);
     }
     for (const latest of query.figures.latest ?? []) {
-      use(latest.rows.queryId, [latest.rows.matchFieldId]);
+      use(latest.rows.queryId, [
+        latest.rows.matchFieldId,
+        ...referenced(latest.within),
+      ]);
       use(
         latest.within.queryId,
         [latest.within.fieldId, latest.byFieldId, latest.valueFieldId],

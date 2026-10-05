@@ -149,6 +149,10 @@ async function truth(fixture: Fixture, company: string) {
   });
   const balances = await read('posted_stock_balance', {
     item: column('posted_stock_balance', 'posted_stock_balance_item_id'),
+    location: column(
+      'posted_stock_balance',
+      'posted_stock_balance_location_id',
+    ),
     quantity: column(
       'posted_stock_balance',
       'posted_stock_balance_posted_quantity',
@@ -156,7 +160,19 @@ async function truth(fixture: Fixture, company: string) {
   });
   const reservations = await read('reservation', {
     item: column('reservation', 'reservation_item_id'),
+    location: column('reservation', 'reservation_location_id'),
   });
+  // LOCATIONS: only a live location whose status is usable holds usable
+  // stock.
+  const usableLocations = new Set(
+    (
+      await read('location', {
+        status: column('location', 'location_status'),
+      })
+    )
+      .filter((row) => row.status === `${ns}:option.location_status_usable`)
+      .map((row) => String(row.record_id)),
+  );
   const remaining = await read('reservation_balance', {
     reservation: relation('reservation_balance_reservation'),
     quantity: column(
@@ -236,12 +252,16 @@ async function truth(fixture: Fixture, company: string) {
   return new Map(
     items.map((item) => {
       const id = String(item.record_id);
+      const usableAt = (row: Record<string, unknown>) =>
+        usableLocations.has(String(row.location));
       const onHand = balances
         .filter((row) => row.item === id)
         .reduce((total, row) => total + units(row.quantity), 0n);
-      const reserved = reservations
-        .filter((row) => row.item === id)
-        .reduce(
+      const usable = balances
+        .filter((row) => row.item === id && usableAt(row))
+        .reduce((total, row) => total + units(row.quantity), 0n);
+      const held = (rows: typeof reservations) =>
+        rows.reduce(
           (total, row) =>
             total +
             remaining
@@ -249,11 +269,14 @@ async function truth(fixture: Fixture, company: string) {
               .reduce((sum, entry) => sum + units(entry.quantity), 0n),
           0n,
         );
+      const mine = reservations.filter((row) => row.item === id);
+      const reserved = held(mine);
+      const reservedUsable = held(mine.filter(usableAt));
       const incoming = open(purchases, id, [
         state('purchase_order', 'released'),
       ]);
       const demand = open(sales, id, [state('sales_order', 'released')]);
-      const projected = onHand + incoming - demand;
+      const projected = usable + incoming - demand;
       const point =
         item.reorder_point === null ? null : units(item.reorder_point);
       const upTo =
@@ -282,8 +305,9 @@ async function truth(fixture: Fixture, company: string) {
         {
           sku: String(item.sku),
           onHand: decimal(onHand),
+          usable: decimal(usable),
           reserved: decimal(reserved),
-          available: decimal(onHand - reserved),
+          available: decimal(usable - reservedUsable),
           incoming: decimal(incoming),
           demand: decimal(demand),
           projected: decimal(projected),
@@ -361,6 +385,7 @@ test(
             row.recordId,
             [
               row.cells['On hand'],
+              row.cells.Usable,
               row.cells.Reserved,
               row.cells.Available,
               row.cells.Incoming,
@@ -376,6 +401,7 @@ test(
             id,
             [
               value.onHand,
+              value.usable,
               value.reserved,
               value.available,
               value.incoming,
@@ -491,7 +517,7 @@ test(
         .split('\r\n');
       assert.equal(
         lines[0],
-        'SKU,Item,Unit,On hand,Reserved,Available,Incoming,Open demand,Projected,Reorder point,Status',
+        'SKU,Item,Unit,On hand,Usable,Reserved,Available,Incoming,Open demand,Projected,Reorder point,Status',
       );
       assert.equal(lines.length - 1, expected.size);
       // Figures as the canonical decimals the statement states; a stored
@@ -501,14 +527,15 @@ test(
         .split(',');
       assert.deepEqual(
         [
-          ...notebookLine.slice(0, 9),
-          decimal(units(notebookLine[9])),
-          notebookLine[10],
+          ...notebookLine.slice(0, 10),
+          decimal(units(notebookLine[10])),
+          notebookLine[11],
         ],
         [
           'OFF-100',
           'Field notebook',
           'EA',
+          '12',
           '12',
           '3',
           '9',

@@ -1267,11 +1267,14 @@ test('INVENTORY-PARITY: the item page lists its stock and movements by a field o
     reserved: `${ns}:metric.reserved`,
     available: `${ns}:metric.available`,
   });
+  // LOCATIONS: each location's status, through its get, so nothing is
+  // available at a location that is not usable.
   assert.deepEqual(
     Object.values(positions.readModel!.queries).map((value) => value.targetId),
     [
       `${ns}:query.workspace_stock_reservations`,
       `${ns}:query.reservation_balance_get`,
+      `${ns}:query.location_get`,
     ],
   );
   const { readModel: _readModel, ...copy } = positions;
@@ -1815,4 +1818,339 @@ test('REPLENISHMENT: an item keeps its reorder levels, preferred location and st
   refuse((candidate) => {
     (reference(candidate) as unknown as Loose).create = true;
   }, /CANON_SCHEMA_INVALID/);
+});
+
+test('LOCATIONS: a location keeps an inventory status its page changes with a reason, the form leaves it out, and the stock figures read it', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  const ns = 'northstar.app';
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const surface = (candidate: Loose, local: string) =>
+    (candidate.surfaces as Loose[]).find(
+      (value) => value.surfaceId === id('surface', local),
+    ) as Loose & {
+      composition?: {
+        presentation: { header: { status?: string; facts: string[] } };
+        fields: Array<{ columnId: string; field: string }>;
+        children: Array<{
+          datasetId: string;
+          columns: Array<{
+            columnId: string;
+            field: string;
+            reference?: {
+              query: { targetId: string };
+              labelField: { targetId: string };
+            };
+          }>;
+        }>;
+        actions: Array<
+          Loose & {
+            label: string;
+            conditions: unknown[];
+            inputs: Array<
+              Loose & {
+                inputId: string;
+                required: boolean;
+                presentation?: Loose & {
+                  kind: string;
+                  options?: Array<{ value: string }>;
+                  defaultFrom?: Loose;
+                };
+              }
+            >;
+            steps: Array<{
+              operation: { targetId: string };
+              bindings: Array<{ path: string[]; value: Loose }>;
+            }>;
+          }
+        >;
+      };
+      form?: Loose & { omit?: string[]; references?: unknown[] };
+    };
+  const field = (candidate: Loose, local: string) =>
+    (candidate.fields as Loose[]).find(
+      (value) => value.fieldId === id('field', local),
+    ) as Loose & {
+      presence: string;
+      defaultSemantics?: string;
+      defaultValue?: Loose;
+      fieldType: { kind: string; options?: Array<{ optionId: string }> };
+    };
+  const query = (candidate: Loose, local: string) =>
+    (candidate.queries as Loose[]).find(
+      (value) => value.queryId === id('query', local),
+    ) as Loose & {
+      selections: { field: { targetId: string } }[];
+      readModel?: { queries: Record<string, { targetId: string }> };
+    };
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+
+  // Every location is usable until a status change says otherwise: a status
+  // with a declared default, so a released location reads usable and a
+  // create need not state it (an input contract requires every required
+  // field of a create).
+  const status = field(source, 'location_status');
+  assert.equal(status.presence, 'optional');
+  assert.equal(status.defaultSemantics, 'declaredDefault');
+  assert.deepEqual(status.defaultValue, {
+    kind: 'textValue',
+    schemaVersion: 'v6',
+    value: id('option', 'location_status_usable'),
+  });
+  assert.deepEqual(
+    status.fieldType.options?.map((option) => option.optionId),
+    ['usable', 'quarantine', 'damaged', 'in_transit', 'return_pending'].map(
+      (local) => id('option', `location_status_${local}`),
+    ),
+  );
+  // The type widens by appending (owner ruling L-B): a warehouse and a store
+  // keep their ids and order.
+  assert.deepEqual(
+    field(source, 'location_type')
+      .fieldType.options?.map((option) => option.optionId)
+      .slice(0, 3),
+    [
+      id('option', 'warehouse'),
+      id('option', 'store'),
+      id('option', 'location_type_storage'),
+    ],
+  );
+  for (const local of ['location_get', 'location_list'])
+    assert.deepEqual(
+      query(source, local).selections.map(
+        (selection) => selection.field.targetId,
+      ),
+      [
+        'location_code',
+        'location_name',
+        'location_type',
+        'location_status',
+        'location_status_reason',
+        'location_status_changed_at',
+      ].map((local) => id('field', local)),
+    );
+
+  // The page shows the status in its header and changes it through one Task
+  // that requires a reason and writes the status, the reason and the instant
+  // in one governed update.
+  const page = surface(source, 'location_detail');
+  assert.equal(
+    page.composition!.presentation.header.status,
+    id('column', 'location_status'),
+  );
+  const [change] = page.composition!.actions;
+  assert.equal(change!.label, 'Change status');
+  assert.deepEqual(change!.conditions, []);
+  assert.deepEqual(
+    change!.inputs.map((input) => [
+      input.inputId,
+      input.required,
+      input.presentation?.kind,
+    ]),
+    [
+      [id('input', 'location_status'), true, 'choice'],
+      [id('input', 'location_status_reason'), true, 'multiline'],
+    ],
+  );
+  assert.deepEqual(change!.inputs[0]!.presentation?.defaultFrom, {
+    source: 'record',
+    field: id('field', 'location_status'),
+  });
+  assert.deepEqual(
+    change!.inputs[0]!.presentation?.options?.map((option) => option.value),
+    status.fieldType.options?.map((option) => option.optionId),
+  );
+  assert.equal(change!.steps.length, 1);
+  assert.equal(
+    change!.steps[0]!.operation.targetId,
+    id('operation', 'location_update'),
+  );
+  assert.deepEqual(
+    change!.steps[0]!.bindings.map((binding) => [
+      binding.path.join(' '),
+      binding.value,
+    ]),
+    [
+      ['recordId', { source: 'record', field: 'recordId' }],
+      ['expectedRevision', { source: 'record', field: 'revision' }],
+      [
+        `patch ${id('field', 'location_status')}`,
+        { source: 'input', inputId: id('input', 'location_status') },
+      ],
+      [
+        `patch ${id('field', 'location_status_reason')}`,
+        { source: 'input', inputId: id('input', 'location_status_reason') },
+      ],
+      [
+        `patch ${id('field', 'location_status_changed_at')}`,
+        { source: 'generated', value: 'instant' },
+      ],
+    ],
+  );
+  // The generic form edits the code, name and type and leaves the status to
+  // the page.
+  assert.deepEqual(surface(source, 'location_form').form, {
+    kind: 'surfaceForm',
+    schemaVersion: 'v6',
+    omit: [
+      id('field', 'location_status'),
+      id('field', 'location_status_reason'),
+      id('field', 'location_status_changed_at'),
+    ],
+  });
+
+  // The item page names each location's status beside its stock, and the
+  // stock figures that state what is available read each location's status.
+  const statusColumn = surface(source, 'item_detail')
+    .composition!.children.find(
+      (value) => value.datasetId === id('dataset', 'item_stock'),
+    )!
+    .columns.find(
+      (value) => value.columnId === id('column', 'item_stock_status'),
+    )!;
+  assert.equal(
+    statusColumn.field,
+    id('field', 'posted_stock_balance_location_id'),
+  );
+  assert.equal(
+    statusColumn.reference?.labelField.targetId,
+    id('field', 'location_status'),
+  );
+  for (const [local, reads] of [
+    ['reservation_list', true],
+    ['fulfillment_order_lines', true],
+    ['item_stock_positions', true],
+    // The plain line figures state nothing about stock.
+    ['sales_order_line_list', false],
+  ] as const)
+    assert.equal(
+      Object.values(query(source, local).readModel!.queries).some(
+        (value) => value.targetId === id('query', 'location_get'),
+      ),
+      reads,
+      local,
+    );
+
+  // A form leaves out only a field it reads, a create may leave unstated and
+  // a Task of its record's page sets; once, and never one it also chooses.
+  refuse((candidate) => {
+    surface(candidate, 'location_form').form!.omit = [
+      id('field', 'location_code'),
+    ];
+  }, /a form omits a field it reads that a create may leave unstated/);
+  refuse((candidate) => {
+    surface(candidate, 'location_form').form!.omit = [
+      id('field', 'item_description'),
+    ];
+  }, /a form omits a field it reads that a create may leave unstated/);
+  refuse((candidate) => {
+    surface(candidate, 'item_form').form!.omit = [
+      id('field', 'item_description'),
+    ];
+  }, /a form omits only fields a Task of its record's page sets/);
+  refuse((candidate) => {
+    surface(candidate, 'location_form').form!.omit = [
+      id('field', 'location_status'),
+      id('field', 'location_status'),
+    ];
+  }, /a form field is omitted once and never chosen/);
+  refuse((candidate) => {
+    surface(candidate, 'item_form').form!.omit = [
+      id('field', 'item_preferred_location_id'),
+    ];
+  }, /a form field is omitted once and never chosen/);
+  refuse((candidate) => {
+    surface(candidate, 'location_form').form = {
+      kind: 'surfaceForm',
+      schemaVersion: 'v6',
+    };
+  }, /a form declares references, fields it omits, or both/);
+  // The page's Task no longer setting the reason leaves it to no editor.
+  refuse((candidate) => {
+    const [task] = surface(candidate, 'location_detail').composition!.actions;
+    task!.steps[0]!.bindings = task!.steps[0]!.bindings.filter(
+      (binding) => binding.path[1] !== id('field', 'location_status_reason'),
+    );
+    task!.inputs = task!.inputs.filter(
+      (input) => input.inputId !== id('input', 'location_status_reason'),
+    );
+  }, /a form omits only fields a Task of its record's page sets/);
+});
+
+test('LOCATIONS slice 2: a location page names the location it is inside and lists the locations inside it', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  const ns = 'northstar.app';
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const page = (source.surfaces as Loose[]).find(
+    (value) => value.surfaceId === id('surface', 'location_detail'),
+  ) as Loose & {
+    composition: {
+      presentation: { header: { facts: string[] } };
+      fields: Array<{
+        columnId: string;
+        field: string;
+        reference?: {
+          query: { targetId: string };
+          labelField: { targetId: string };
+        };
+      }>;
+      children: Array<{
+        datasetId: string;
+        label: string;
+        query: { targetId: string };
+        parent?: { relationId: string; value: Loose; ownership: string };
+        columns: Array<{ field: string }>;
+      }>;
+    };
+  };
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  const inside = page.composition.fields.find(
+    (value) => value.columnId === id('column', 'location_parent'),
+  )!;
+  assert.equal(inside.field, id('relation', 'location_parent'));
+  assert.equal(inside.reference?.query.targetId, id('query', 'location_get'));
+  assert.equal(
+    inside.reference?.labelField.targetId,
+    id('field', 'location_name'),
+  );
+  assert.ok(
+    page.composition.presentation.header.facts.includes(
+      id('column', 'location_parent'),
+    ),
+  );
+  const [children] = page.composition.children;
+  assert.equal(children!.label, 'Locations inside');
+  assert.equal(children!.query.targetId, id('query', 'location_list'));
+  assert.deepEqual(children!.parent, {
+    relationId: id('relation', 'location_parent'),
+    value: { source: 'record', field: 'recordId' },
+    ownership: 'reference',
+  });
+  assert.deepEqual(
+    children!.columns.map((value) => value.field),
+    ['location_code', 'location_name', 'location_type', 'location_status'].map(
+      (local) => id('field', local),
+    ),
+  );
+  // Both copies of the pinned relation semantics name the pair, shared by
+  // every company on both sides.
+  const relation = (source.relations as Loose[]).find(
+    (value) => value.relationId === id('relation', 'location_parent'),
+  ) as Loose & { required: boolean };
+  assert.equal(relation.required, false);
 });

@@ -192,13 +192,10 @@ const presentedFields = new WeakMap<
   RequestRuntimeView,
   Map<string, CompiledSurfaceField>
 >();
-/** Presents a stored value by its compiled field kind; shared with declared Lists. */
-export function displayFieldValue(
+function presentedField(
   view: RequestRuntimeView,
-  record: SemanticRecordDto,
   fieldId: string,
-  value: ImmutableJsonValue,
-): string {
+): CompiledSurfaceField | undefined {
   let fields = presentedFields.get(view);
   if (!fields) {
     fields = new Map(
@@ -208,7 +205,34 @@ export function displayFieldValue(
     );
     presentedFields.set(view, fields);
   }
-  const field = fields.get(fieldId);
+  return fields.get(fieldId);
+}
+
+/**
+ * A referenced record's label: an enumeration by its option's label -- a
+ * location's status reads "Quarantine", not its option id (LOCATIONS) --
+ * and any other field as the text it holds, as before.
+ */
+export function referenceLabel(
+  view: RequestRuntimeView,
+  fieldId: string,
+  value: ImmutableJsonValue,
+): string {
+  const field = presentedField(view, fieldId);
+  return field?.kind === 'enumFieldType'
+    ? (field.options.find((option) => option.optionId === value)?.label ??
+        text(value))
+    : text(value);
+}
+
+/** Presents a stored value by its compiled field kind; shared with declared Lists. */
+export function displayFieldValue(
+  view: RequestRuntimeView,
+  record: SemanticRecordDto,
+  fieldId: string,
+  value: ImmutableJsonValue,
+): string {
+  const field = presentedField(view, fieldId);
   if (field?.kind === 'enumFieldType')
     return (
       field.options.find((option) => option.optionId === value)?.label ??
@@ -304,7 +328,9 @@ async function present(
     }
     if (result.outcome !== 'exact' || result.records.length !== 1)
       throw new Error('A referenced record is unavailable.');
-    cells[column.columnId] = text(
+    cells[column.columnId] = referenceLabel(
+      view,
+      column.reference.labelField.targetId,
       recordValue(result.records[0]!, column.reference.labelField.targetId),
     );
   }

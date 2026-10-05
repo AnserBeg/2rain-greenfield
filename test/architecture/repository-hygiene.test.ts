@@ -157,6 +157,7 @@ const suiteDefinitions = [
       'test/postgres/inventory-terminal-state.test.ts',
       'test/postgres/item-stock.test.ts',
       'test/postgres/location-runtime.test.ts',
+      'test/postgres/locations.test.ts',
       'test/postgres/migrations.test.ts',
       'test/postgres/module-index-conformance.test.ts',
       'test/postgres/module-runtime.test.ts',

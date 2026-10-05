@@ -278,6 +278,8 @@ composedTest.describe('composed application journeys', () => {
  * all ten derived selectors have real elements.
  */
 const FOCUS_RING_MINIMUM_CONTRAST = 3;
+/** The tax code the focus-ring journey reads a plain record page on. */
+const focusRingTaxCodeId = '74000000-0000-4000-8000-0000000000f1';
 
 interface FocusRingMeasurement {
   readonly declaredRing: string;
@@ -663,15 +665,33 @@ async function readFocusRingCoverage(
       label: 'declared list with rows',
     },
     {
-      // A plain record page. A party's page is its customer workspace now, so
-      // the generic record sections are read on a location's.
+      // A plain record page with its field sections: a tax code's. A party's
+      // page is its customer workspace and a location's its own (LOCATIONS),
+      // and no other plain page with sections is seeded, so the state saves
+      // one tax code through its generic form -- one fixed record and request
+      // key, so every later visit replays the same create -- and reads it.
       go: async () => {
-        await page.goto(surfaceUrl(baseUrl, 'location_list'));
-        const href = await page
-          .locator('.record-link')
-          .first()
-          .getAttribute('href');
-        if (href) await page.goto(new URL(href, baseUrl).href);
+        const created = await page.request.post(
+          surfaceUrl(baseUrl, 'tax_code_form'),
+          {
+            form: {
+              idempotencyKey: '74000000-0000-4000-8000-0000000000f2',
+              operationId: 'northstar.app:operation.tax_code_create',
+              recordId: focusRingTaxCodeId,
+              'value:northstar.app:field.tax_code_code': 'FOCUS-RING',
+              'value:northstar.app:field.tax_code_name':
+                'Focus ring measurement',
+              'value:northstar.app:field.tax_code_rate_percent': '5',
+            },
+          },
+        );
+        expect(created.status()).toBe(200);
+        await page.goto(
+          `${surfaceUrl(baseUrl, 'tax_code_detail')}&record=${focusRingTaxCodeId}`,
+        );
+        await expect(
+          page.locator('details.record-section-group summary'),
+        ).toHaveCount(1);
       },
       label: 'plain record',
     },
@@ -2644,8 +2664,10 @@ async function partyLifecycleJourney(
   await expect(sectionsSlot).toContainText('browser-persisted@example.test');
   const partyUrl = page.url();
 
-  // The generic record page, read on a location's: its field sections with
-  // their compact disclosure, the sticky command bar and the action overflow.
+  // A location's page is its own workspace (LOCATIONS): its name, code and
+  // inventory status in the header, "Change status" beside its Record
+  // actions, which keep Edit and the archive overflow. The generic record
+  // page's own sections are read in the standalone Location journey.
   await page.goto(surfaceUrl(baseUrl, 'location_list'));
   const locationHref = await page
     .locator('.record-link')
@@ -2654,36 +2676,30 @@ async function partyLifecycleJourney(
   expect(locationHref).not.toBeNull();
   await page.goto(new URL(locationHref!, baseUrl).href);
   await expect(
-    page.locator('[data-platform-slot="record:sections"] [data-field-id]'),
-  ).toHaveCount(3);
+    page.getByRole('heading', { level: 1, name: 'Calgary warehouse' }),
+  ).toBeVisible();
   await expect(
-    page.locator('[data-platform-slot="record:keyFacts"]'),
-  ).toContainText('Revision');
-  await page.setViewportSize({ height: 844, width: 390 });
-  const compactSections = page.locator(
-    '[data-platform-slot="record:sections"] details.record-section-group',
-  );
-  await expect(compactSections).toHaveAttribute('open', '');
+    page.locator(
+      '[data-platform-slot="record:titleStatus"] .composition-subtitle',
+    ),
+  ).toHaveText('CAL-WH');
   await expect(
-    page.locator('[data-platform-slot="record:commandBar"] .command-bar'),
-  ).toHaveCSS('position', 'sticky');
-  const compactSectionSummary = compactSections.locator('summary');
-  await compactSectionSummary.focus();
-  await page.keyboard.press('Enter');
-  await expect(compactSections).not.toHaveAttribute('open', '');
-  await page.setViewportSize({ height: 720, width: 1280 });
-  await expect(compactSectionSummary).toBeVisible();
-  await compactSectionSummary.focus();
-  await page.keyboard.press('Enter');
-  await expect(compactSections).toHaveAttribute('open', '');
-  await expect(compactSections.getByText('Calgary warehouse')).toBeVisible();
-  const overflow = page.locator(
-    '[data-platform-slot="record:commandBar"] details.action-overflow',
+    page.locator(
+      '[data-platform-slot="record:titleStatus"] .composition-business-status',
+    ),
+  ).toHaveText('Usable');
+  await expect(keyFactsSlot).toContainText('Revision');
+  await expect(technical('Activity')).toHaveText('Active');
+  const locationActions = page.locator(
+    '[data-platform-slot="record:commandBar"] details.composition-record-actions',
   );
+  await locationActions.locator(':scope > summary').click();
+  await expect(
+    locationActions.getByRole('link', { name: 'Edit', exact: true }),
+  ).toBeVisible();
   const archive = page.getByRole('button', { name: 'Archive' });
-  await expect(overflow).toBeVisible();
   await expect(archive).toBeHidden();
-  await overflow.locator('summary').click();
+  await locationActions.locator('details.action-overflow > summary').click();
   await expect(archive).toBeVisible();
 
   // The party's own commands sit under its Record actions.

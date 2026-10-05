@@ -481,14 +481,33 @@ export function validateSurfaceLists(
         within: NonNullable<SurfaceListFigures['sums'][number]['within']>,
       ) => {
         const parent = read(within.query.targetId);
-        const relation = relations.get(within.relation);
-        if (
-          !relation ||
-          relation.lifecycle !== 'active' ||
-          relation.sourceEntity.targetId !== rows.sourceEntity.targetId ||
-          relation.targetEntity.targetId !== parent.sourceEntity.targetId
-        )
-          fail(id, "a figure's parent is its rows' parent through a relation");
+        if ('relation' in within) {
+          const relation = relations.get(within.relation);
+          if (
+            !relation ||
+            relation.lifecycle !== 'active' ||
+            relation.sourceEntity.targetId !== rows.sourceEntity.targetId ||
+            relation.targetEntity.targetId !== parent.sourceEntity.targetId
+          )
+            fail(
+              id,
+              "a figure's parent is its rows' parent through a relation",
+            );
+        } else {
+          // The record whose id the rows hold as text, as a stock balance
+          // holds its location: a record id is 36 characters.
+          const reference = fields.get(within.reference);
+          if (
+            !selects(rows, within.reference) ||
+            reference?.entity.targetId !== rows.sourceEntity.targetId ||
+            reference.fieldType.kind !== 'textFieldType' ||
+            reference.fieldType.maximumLength < 36
+          )
+            fail(
+              id,
+              "a figure's parent is the record whose id its rows hold in a text field their query selects",
+            );
+        }
         unique(within.values, id, 'figure parent values');
         const state = fields.get(within.field);
         if (

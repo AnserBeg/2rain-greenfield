@@ -4782,20 +4782,30 @@ class OrderEntryExecutor
               live(candidate, rows.queryId) &&
               candidate.values[rows.matchFieldId] === row.recordId,
           );
+        // A parent through a relation, or the record whose id the rows hold
+        // in a reference field: a location belongs to no company (LOCATIONS).
         const parentOf = (
           candidate: SemanticRecordDto,
           within: {
             fieldId: string;
             queryId: string;
-            relationId: string;
+            relationId?: string;
+            referenceFieldId?: string;
             values: readonly string[];
           },
         ) => {
           const parent = this.rows.get(
-            String(candidate.values[within.relationId]),
+            String(
+              candidate.values[
+                within.referenceFieldId ?? within.relationId ?? ''
+              ],
+            ),
           );
           return parent &&
-            live(parent, within.queryId) &&
+            (within.referenceFieldId === undefined
+              ? live(parent, within.queryId)
+              : parent.entityId === entityOf(within.queryId) &&
+                !parent.archived) &&
             within.values.includes(String(parent.values[within.fieldId]))
             ? parent
             : null;
@@ -10993,6 +11003,10 @@ test('INVENTORY-PARITY: the item page lists the stock and movements of one compa
       [field('location_code')]: code,
       [field('location_name')]: `${code} warehouse`,
       [field('location_type')]: id('option', 'warehouse'),
+      // LOCATIONS: usable, as a location saved before its status reads.
+      [field('location_status')]: id('option', 'location_status_usable'),
+      [field('location_status_reason')]: null,
+      [field('location_status_changed_at')]: null,
     });
   const main = location('CAL-WH');
   const overflow = location('VAN-WH');
@@ -11236,6 +11250,7 @@ test('INVENTORY-PARITY: the item page lists the stock and movements of one compa
       recordId: mainStock,
       cells: {
         Location: 'CAL-WH',
+        Status: 'Usable',
         'On hand': '13',
         Reserved: '1',
         Available: '12',
@@ -11246,6 +11261,7 @@ test('INVENTORY-PARITY: the item page lists the stock and movements of one compa
       recordId: overflowStock,
       cells: {
         Location: 'VAN-WH',
+        Status: 'Usable',
         'On hand': '6',
         Reserved: '0',
         Available: '6',
@@ -11828,12 +11844,22 @@ test('REPLENISHMENT: Stock by item and the Buying worklist add up each item in o
   const valve = item('VALVE-10', 'Valve', '10', '40');
   const bolt = item('BOLT-20', 'Bolt', '5', null);
   const nut = item('NUT-30', 'Nut', null, null);
+  // Every row here sits at a usable location (LOCATIONS): its stock is usable
+  // and what is left of it available.
+  const warehouse = f.executor.seed('location', {
+    [field('location_code')]: 'WH-1',
+    [field('location_name')]: 'Main warehouse',
+    [field('location_type')]: id('option', 'warehouse'),
+    [field('location_status')]: id('option', 'location_status_usable'),
+    [field('location_status_reason')]: null,
+    [field('location_status_changed_at')]: null,
+  });
   const balance = (itemId: string, quantity: string, company = scope) =>
     f.executor.seed(
       'posted_stock_balance',
       {
         [field('posted_stock_balance_item_id')]: itemId,
-        [field('posted_stock_balance_location_id')]: randomUUID(),
+        [field('posted_stock_balance_location_id')]: warehouse,
         [field('posted_stock_balance_posted_quantity')]: quantity,
         [field('posted_stock_balance_unit_id')]: 'EA',
       },
@@ -11860,7 +11886,7 @@ test('REPLENISHMENT: Stock by item and the Buying worklist add up each item in o
           `reservation_state_${state}`,
         ),
         [field('reservation_item_id')]: itemId,
-        [field('reservation_location_id')]: randomUUID(),
+        [field('reservation_location_id')]: warehouse,
         [field('reservation_quantity')]: '3',
         [field('reservation_unit_id')]: 'EA',
         [field('reservation_reason')]: null,
@@ -12047,12 +12073,14 @@ test('REPLENISHMENT: Stock by item and the Buying worklist add up each item in o
   });
   const stockCell = (recordId: string, local: string) =>
     cell(stock.html, recordId, 'item_stock_list', local);
-  // On hand 8 + 4 (the other company's 50 is not this company's), reserved
-  // what the active reservation still holds, incoming 6, open demand 10:
-  // projected 12 + 6 - 10 = 8, at or below its reorder point of 10.
+  // On hand 8 + 4 (the other company's 50 is not this company's), all of it
+  // usable, reserved what the active reservation still holds, incoming 6,
+  // open demand 10: projected 12 + 6 - 10 = 8, at or below its reorder
+  // point of 10.
   assert.deepEqual(
     [
       'on_hand',
+      'usable',
       'reserved',
       'available',
       'incoming',
@@ -12060,7 +12088,7 @@ test('REPLENISHMENT: Stock by item and the Buying worklist add up each item in o
       'projected',
       'reorder_point',
     ].map((local) => stockCell(valve, local)),
-    ['12', '3', '9', '6', '10', '8', '10'],
+    ['12', '12', '3', '9', '6', '10', '8', '10'],
   );
   assert.equal(
     stockCell(valve, 'status'),
@@ -12099,6 +12127,8 @@ test('REPLENISHMENT: Stock by item and the Buying worklist add up each item in o
     ].sort(),
     [
       'commercial_lines',
+      // LOCATIONS: each row's location, for its status.
+      'location_list',
       'posted_stock_balance_list',
       'purchase_order_line_list',
       'purchase_order_list',
@@ -12109,13 +12139,17 @@ test('REPLENISHMENT: Stock by item and the Buying worklist add up each item in o
       'workspace_stock_reservations',
     ].map((local) => id('query', local)),
   );
+  // A location belongs to no company: its List is read without one.
+  const shared = (call: (typeof stockCalls)[number]) =>
+    (call.decisionInput as { queryId: string }).queryId ===
+    id('query', 'location_list');
   assert.ok(
     stockCalls.every(
       (call) =>
         JSON.stringify(
           (call.decisionInput as { arguments: Record<string, unknown> })
             .arguments[parameter('item_stock_list')],
-        ) === JSON.stringify([scope]),
+        ) === (shared(call) ? undefined : JSON.stringify([scope])),
     ),
   );
 
@@ -12192,15 +12226,15 @@ test('REPLENISHMENT: Stock by item and the Buying worklist add up each item in o
     .split('\r\n');
   assert.equal(
     rows[0],
-    'SKU,Item,Unit,On hand,Reserved,Available,Incoming,Open demand,Projected,Reorder point,Status',
+    'SKU,Item,Unit,On hand,Usable,Reserved,Available,Incoming,Open demand,Projected,Reorder point,Status',
   );
   assert.equal(rows.length - 1, 4);
-  assert.ok(rows.includes('VALVE-10,Valve,EA,12,3,9,6,10,8,10,Reorder'));
+  assert.ok(rows.includes('VALVE-10,Valve,EA,12,12,3,9,6,10,8,10,Reorder'));
   // A negative figure is guarded like any cell a spreadsheet would read as a
   // formula.
-  assert.ok(rows.includes("BOLT-20,Bolt,EA,2,0,2,0,6,'-4,5,Shortage"));
+  assert.ok(rows.includes("BOLT-20,Bolt,EA,2,2,0,2,0,6,'-4,5,Shortage"));
   // An item with neither level reads empty, never 0.
-  assert.ok(rows.includes('NUT-30,Nut,EA,100,0,100,0,0,100,,Healthy'));
+  assert.ok(rows.includes('NUT-30,Nut,EA,100,100,0,100,0,0,100,,Healthy'));
 
   // The agent reads the same List through its published preset: the
   // figures argument the web sends, each view's band as `keep`.
@@ -12217,7 +12251,7 @@ test('REPLENISHMENT: Stock by item and the Buying worklist add up each item in o
       }>;
     }
   ).listPresets.find((value) => value.surfaceId === stockList)!;
-  assert.equal(preset.figures?.sums.length, 4);
+  assert.equal(preset.figures?.sums.length, 6);
   assert.deepEqual(
     preset.figureLabels?.[id('list_figure', 'item_stock_list_status')],
     {
@@ -12399,4 +12433,532 @@ test('REPLENISHMENT: the item form chooses its preferred location from the locat
     select((await form(valve)).html) ?? '',
     new RegExp(`<option value="${vancouver}" selected>Unavailable \\(`, 'u'),
   );
+});
+
+/**
+ * LOCATIONS: a location's inventory status says what its stock may be used
+ * for. Its page shows the status and changes it only through "Change status",
+ * which requires a reason and writes status, reason and instant in one
+ * governed update; the generic form leaves all three out. Stock by item, the
+ * Buying worklist and the item page count only a usable location's stock as
+ * usable or available, reached through the location id each row holds.
+ */
+test('LOCATIONS: a location changes its status with a reason in one update, its form leaves the status out, and only usable stock is usable or available', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const [scope] = f.scopes as [string, string];
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const field = (local: string) => id('field', local);
+  const relation = (local: string) => id('relation', local);
+  const status = (local: string) => id('option', `location_status_${local}`);
+  const escaped = (value: string) =>
+    value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  const location = (
+    code: string,
+    name: string,
+    state: string,
+    reason: string | null = null,
+  ) =>
+    f.executor.seed('location', {
+      [field('location_code')]: code,
+      [field('location_name')]: name,
+      [field('location_type')]: id('option', 'warehouse'),
+      [field('location_status')]: status(state),
+      [field('location_status_reason')]: reason,
+      [field('location_status_changed_at')]: reason
+        ? '2026-10-01T09:30:00.000Z'
+        : null,
+      // A get states every relation, null when unset (slice 2).
+      [id('relation', 'location_parent')]: null,
+    });
+  const main = location('WH-1', 'Main warehouse', 'usable');
+  const hold = location('QA-1', 'Quality hold', 'quarantine', 'Water damage');
+  const closed = location('OLD-1', 'Closed bay', 'usable');
+  f.executor.rows.set(closed, {
+    ...f.executor.rows.get(closed)!,
+    archived: true,
+  });
+  const valve = f.executor.seed('item', {
+    [field('item_sku')]: 'VALVE-10',
+    [field('item_name')]: 'Valve',
+    [field('item_description')]: null,
+    [field('item_base_unit')]: 'EA',
+    [field('item_price_cad')]: null,
+    [field('item_price_usd')]: null,
+    [field('item_price_eur')]: null,
+    [field('item_reorder_point')]: '10',
+    [field('item_reorder_up_to')]: '40',
+    [field('item_preferred_location_id')]: null,
+    [field('item_standard_cost_cad')]: null,
+    [field('item_standard_cost_usd')]: null,
+    [field('item_standard_cost_eur')]: null,
+  });
+  const balance = (locationId: string, quantity: string) =>
+    f.executor.seed(
+      'posted_stock_balance',
+      {
+        [field('posted_stock_balance_item_id')]: valve,
+        [field('posted_stock_balance_location_id')]: locationId,
+        [field('posted_stock_balance_posted_quantity')]: quantity,
+        [field('posted_stock_balance_unit_id')]: 'EA',
+      },
+      scope,
+    );
+  const mainStock = balance(main, '8');
+  const holdStock = balance(hold, '4');
+  const closedStock = balance(closed, '2');
+  const reservation = (locationId: string, remaining: string) => {
+    const reservationId = f.executor.seed(
+      'reservation',
+      {
+        [field('reservation_number')]: `RSV-${randomUUID()}`,
+        [field('reservation_state')]: id('option', 'reservation_state_active'),
+        [field('reservation_item_id')]: valve,
+        [field('reservation_location_id')]: locationId,
+        [field('reservation_quantity')]: remaining,
+        [field('reservation_unit_id')]: 'EA',
+        [field('reservation_reason')]: null,
+      },
+      scope,
+    );
+    // Stock by item reads balances by their relation; the item page's read
+    // model by the projection's own identity.
+    f.executor.seed(
+      'reservation_balance',
+      {
+        [field('reservation_balance_remaining_quantity')]: remaining,
+        [field('reservation_balance_unit_id')]: 'EA',
+        [relation('reservation_balance_reservation')]: reservationId,
+      },
+      scope,
+    );
+    const balanceId = fulfillmentProjectionIdentity(
+      f.view,
+      scope,
+      'reservation',
+      reservationId,
+    );
+    f.executor.rows.set(balanceId, {
+      archived: false,
+      entityId: id('entity', 'reservation_balance'),
+      recordId: balanceId,
+      revision: 1,
+      values: {
+        [field('reservation_balance_remaining_quantity')]: remaining,
+        [field('reservation_balance_unit_id')]: 'EA',
+      },
+    });
+    f.executor.owners.set(balanceId, scope);
+  };
+  reservation(main, '3');
+  reservation(hold, '1');
+
+  // Stock by item: on hand 14 everywhere; usable 8, the main warehouse's
+  // alone -- the quarantined 4 and the archived bay's 2 are not; reserved 4,
+  // of which 3 at a usable location: available 8 - 3 = 5; projected 8.
+  const listUrl = (list: string, parameters: Record<string, string> = {}) =>
+    `/?${new URLSearchParams({
+      surface: id('surface', list),
+      [id('parameter', `${list}_legal_entity_scope`)]: scope,
+      ...parameters,
+    }).toString()}`;
+  const cell = (html: string, list: string, local: string) =>
+    new RegExp(
+      `data-record-id="${valve}"[\\s\\S]*?data-column-id="${id('list_column', `${list}_${local}`)}">([\\s\\S]*?)</td>`,
+      'u',
+    ).exec(html)?.[1];
+  const stock = await renderSurfaceRuntimeWithData(
+    f.view,
+    listUrl('item_stock_list'),
+    f.gateways,
+  );
+  assert.equal(stock.statusCode, 200);
+  assert.deepEqual(
+    [
+      'on_hand',
+      'usable',
+      'reserved',
+      'available',
+      'incoming',
+      'open_demand',
+      'projected',
+    ].map((local) => cell(stock.html, 'item_stock_list', local)),
+    ['14', '8', '4', '5', '0', '0', '8'],
+  );
+  // At or below its reorder point of 10, so the worklist suggests 40 - 8.
+  const buying = await renderSurfaceRuntimeWithData(
+    f.view,
+    listUrl('item_buying_list'),
+    f.gateways,
+  );
+  assert.deepEqual(
+    ['usable', 'available', 'projected', 'suggested'].map((local) =>
+      cell(buying.html, 'item_buying_list', local),
+    ),
+    ['8', '5', '8', '32'],
+  );
+  // Every location's status read through the location List, under current
+  // policy, by field: no relation names it.
+  const locationReads = f.policy.calls.filter(
+    (call) =>
+      (call.decisionInput as { kind?: string; queryId?: string }).kind ===
+        'registeredSemanticListFiguresPolicyInput' &&
+      (call.decisionInput as { queryId?: string }).queryId ===
+        id('query', 'location_list'),
+  );
+  assert.ok(locationReads.length > 0);
+  for (const call of locationReads)
+    assert.deepEqual(
+      (call.decisionInput as { arguments: Record<string, unknown> }).arguments,
+      { fieldIds: [field('location_status')], relationIds: [] },
+    );
+  // The location List withheld refuses Stock by item by its name: a usable
+  // figure is never guessed.
+  f.deniedReads.add(id('permission', 'location_read'));
+  const withheld = await renderSurfaceRuntimeWithData(
+    f.view,
+    listUrl('item_stock_list'),
+    f.gateways,
+  );
+  assert.match(
+    withheld.html,
+    /data-diagnostic-code="QUERY_PERMISSION_DENIED"/u,
+  );
+  assert.doesNotMatch(withheld.html, /VALVE-10/u);
+  f.deniedReads.delete(id('permission', 'location_read'));
+
+  // The Location List: each location's type and status; the status filter
+  // keeps the quarantined location alone.
+  const locations = (parameters: Record<string, string> = {}) =>
+    renderSurfaceRuntimeWithData(
+      f.view,
+      `/?${new URLSearchParams({ surface: id('surface', 'location_list'), ...parameters }).toString()}`,
+      f.gateways,
+    );
+  const all = await locations();
+  assert.equal(all.statusCode, 200);
+  assert.match(all.html, /QA-1/u);
+  assert.match(all.html, /WH-1/u);
+  assert.match(
+    all.html,
+    /<span class="status-pill" data-status-role="attention">Quarantine<\/span>/u,
+  );
+  assert.match(
+    all.html,
+    /<span class="status-pill" data-status-role="success">Usable<\/span>/u,
+  );
+  const quarantined = await locations({
+    [id('list_filter', 'location_list_status')]: status('quarantine'),
+  });
+  assert.match(quarantined.html, /QA-1/u);
+  assert.doesNotMatch(quarantined.html, /WH-1/u);
+  assert.match(quarantined.html, /Water damage/u);
+
+  // The location page shows its status in its header, with the reason.
+  const pageUrl = (recordId: string) =>
+    `/?${new URLSearchParams({ surface: id('surface', 'location_detail'), record: recordId }).toString()}`;
+  const holdPage = await renderSurfaceRuntimeWithData(
+    f.view,
+    pageUrl(hold),
+    f.gateways,
+  );
+  assert.equal(holdPage.statusCode, 200);
+  assert.match(
+    holdPage.html,
+    /<span class="composition-business-status">Quarantine<\/span>/u,
+  );
+  assert.match(holdPage.html, /<dt>Status reason<\/dt><dd>Water damage<\/dd>/u);
+  assert.match(holdPage.html, /Change status/u);
+
+  // The item page names each location's status, and nothing is available at
+  // a location that is not usable. (Its Location column reads live locations
+  // only, so the archived bay's balance leaves first: filed.)
+  f.executor.rows.delete(closedStock);
+  const readModels = {
+    'northstar.sales:capability.fulfillment': fulfillmentReadModel,
+    'northstar.sales:capability.commercial': async ({
+      result,
+    }: {
+      result: SemanticQueryResultEnvelope;
+    }) => result,
+  };
+  const itemPage = await renderSurfaceRuntimeWithData(
+    f.view,
+    `/?${new URLSearchParams({
+      surface: id('surface', 'item_detail'),
+      record: valve,
+      [id('parameter', 'posted_stock_balance_list_legal_entity_scope')]: scope,
+    }).toString()}`,
+    {
+      ...f.gateways,
+      queryGateway: new SemanticQueryGateway(
+        f.policy,
+        f.executor,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        readModels,
+      ),
+    },
+  );
+  assert.equal(itemPage.statusCode, 200);
+  const stockRow = (recordId: string) =>
+    Object.fromEntries(
+      [
+        ...(
+          new RegExp(
+            `<tr data-compact-card="true" data-presented-row="true" data-record-id="${recordId}"[^>]*>([\\s\\S]*?)</tr>`,
+            'u',
+          ).exec(itemPage.html)?.[1] ?? ''
+        ).matchAll(/<td data-column-label="([^"]+)"[^>]*>([\s\S]*?)<\/td>/gu),
+      ].map((match) => [match[1]!, match[2]!.replace(/<[^>]+>/gu, '')]),
+    );
+  assert.deepEqual(stockRow(mainStock), {
+    Location: 'WH-1',
+    Status: 'Usable',
+    'On hand': '8',
+    Reserved: '3',
+    Available: '5',
+    Unit: 'EA',
+  });
+  assert.deepEqual(stockRow(holdStock), {
+    Location: 'QA-1',
+    Status: 'Quarantine',
+    'On hand': '4',
+    Reserved: '1',
+    Available: '0',
+    Unit: 'EA',
+  });
+
+  // "Change status": a reason is required, and the change is one update of
+  // the status, the reason and the instant.
+  const input = (local: string) => id('input', local);
+  const submit = (body: Record<string, string>) =>
+    submitSurfaceRuntimeIntent(
+      f.view,
+      pageUrl(main),
+      { compositionAction: id('action', 'location_change_status'), ...body },
+      f.gateways,
+    );
+  const entry = await submit({});
+  assert.equal(entry.statusCode, 200);
+  const taskToken = hiddenValue(entry.html, 'taskToken');
+  // The status starts from the location's own.
+  assert.match(
+    entry.html,
+    new RegExp(
+      `<option value="${escaped(status('usable'))}" selected>Usable</option>`,
+      'u',
+    ),
+  );
+  const unexplained = await submit({
+    taskToken,
+    taskStage: 'prepare',
+    [input('location_status')]: status('damaged'),
+    [input('location_status_reason')]: '',
+  });
+  assert.match(unexplained.html, /COMPOSITION_INPUT_INVALID/u);
+  const forged = await submit({
+    taskToken,
+    taskStage: 'prepare',
+    [input('location_status')]: id('option', 'location_type_scrap'),
+    [input('location_status_reason')]: 'Forged',
+  });
+  assert.match(forged.html, /COMPOSITION_INPUT_INVALID/u);
+  assert.equal(f.executor.calls.length, 0, 'nothing runs before admission');
+  const review = await submit({
+    taskToken,
+    taskStage: 'prepare',
+    [input('location_status')]: status('damaged'),
+    [input('location_status_reason')]: 'Forklift impact on rack 3',
+  });
+  assert.match(review.html, /<dd>Damaged<\/dd>/u);
+  assert.match(review.html, /Forklift impact on rack 3/u);
+  assert.equal(f.executor.calls.length, 0);
+  await submit({
+    taskToken,
+    taskStage: 'confirm',
+    preparedId: hiddenValue(review.html, 'preparedId'),
+  });
+  assert.equal(f.executor.calls.length, 1);
+  const [update] = f.executor.calls;
+  assert.equal(
+    update!.definition.operationId,
+    id('operation', 'location_update'),
+  );
+  const changed = asRecord(update!.input);
+  assert.equal(changed.recordId, main);
+  const patch = asRecord(changed.patch);
+  assert.deepEqual(Object.keys(patch).sort(), [
+    field('location_status'),
+    field('location_status_changed_at'),
+    field('location_status_reason'),
+  ]);
+  assert.equal(patch[field('location_status')], status('damaged'));
+  assert.equal(
+    patch[field('location_status_reason')],
+    'Forklift impact on rack 3',
+  );
+  assert.ok(
+    Number.isFinite(
+      Date.parse(String(patch[field('location_status_changed_at')])),
+    ),
+  );
+
+  // The generic form edits the code, name and type and leaves the status, its
+  // reason and its time to the page: never shown, and never sent.
+  const formUrl = (recordId?: string) =>
+    `/?${new URLSearchParams({
+      surface: id('surface', 'location_form'),
+      ...(recordId ? { record: recordId } : {}),
+    }).toString()}`;
+  const blank = await renderSurfaceRuntimeWithData(
+    f.view,
+    formUrl(),
+    f.gateways,
+  );
+  assert.match(blank.html, /<dt>Fields<\/dt><dd>3 ready<\/dd>/u);
+  const editing = await renderSurfaceRuntimeWithData(
+    f.view,
+    formUrl(hold),
+    f.gateways,
+  );
+  for (const local of ['location_code', 'location_name', 'location_type'])
+    assert.match(
+      editing.html,
+      new RegExp(`name="value:${escaped(field(local))}"`, 'u'),
+    );
+  for (const local of [
+    'location_status',
+    'location_status_reason',
+    'location_status_changed_at',
+  ])
+    assert.doesNotMatch(
+      editing.html,
+      new RegExp(`name="(?:value|empty):${escaped(field(local))}"`, 'u'),
+    );
+  const save = {
+    idempotencyKey: randomUUID(),
+    operationId: id('operation', 'location_update'),
+    recordId: hold,
+    expectedRevision: '1',
+    [`value:${field('location_code')}`]: 'QA-1',
+    [`empty:${field('location_code')}`]: 'nothing',
+    [`value:${field('location_name')}`]: 'Quality hold bay',
+    [`empty:${field('location_name')}`]: 'nothing',
+    [`value:${field('location_type')}`]: id(
+      'option',
+      'location_type_quarantine',
+    ),
+    // A forged status rides along and is never read.
+    [`value:${field('location_status')}`]: status('usable'),
+  };
+  const preview = await submitSurfaceRuntimeIntent(
+    f.view,
+    formUrl(hold),
+    save,
+    f.gateways,
+  );
+  const grant = /name="confirmationGrant" value="([^"]+)"/u.exec(
+    preview.html,
+  )?.[1];
+  if (grant)
+    await submitSurfaceRuntimeIntent(
+      f.view,
+      formUrl(hold),
+      { ...save, confirmationGrant: grant },
+      f.gateways,
+    );
+  assert.equal(f.executor.calls.length, 2);
+  const saved = asRecord(asRecord(f.executor.calls[1]!.input).patch);
+  assert.deepEqual(Object.keys(saved).sort(), [
+    field('location_code'),
+    field('location_name'),
+    field('location_type'),
+  ]);
+  assert.equal(
+    saved[field('location_type')],
+    id('option', 'location_type_quarantine'),
+  );
+});
+
+test('LOCATIONS slice 2: a location names the location it is inside, its container lists it, and the create form offers the parent', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const field = (local: string) => id('field', local);
+  const parent = id('relation', 'location_parent');
+  const location = (
+    code: string,
+    name: string,
+    type: string,
+    container: string | null,
+  ) =>
+    f.executor.seed('location', {
+      [field('location_code')]: code,
+      [field('location_name')]: name,
+      [field('location_type')]: id('option', type),
+      [field('location_status')]: id('option', 'location_status_usable'),
+      [field('location_status_reason')]: null,
+      [field('location_status_changed_at')]: null,
+      [parent]: container,
+    });
+  const warehouse = location('CAL-WH', 'Calgary warehouse', 'warehouse', null);
+  const bin = location('CAL-A1', 'Aisle 1', 'location_type_storage', warehouse);
+  location('VAN-WH', 'Vancouver warehouse', 'warehouse', null);
+  const page = (recordId: string) =>
+    renderSurfaceRuntimeWithData(
+      f.view,
+      `/?${new URLSearchParams({ surface: id('surface', 'location_detail'), record: recordId }).toString()}`,
+      f.gateways,
+    );
+  // The bin names its warehouse by name.
+  const binPage = await page(bin);
+  assert.equal(binPage.statusCode, 200);
+  assert.match(binPage.html, /<dt>Inside<\/dt><dd>Calgary warehouse<\/dd>/u);
+  // The warehouse names no container and lists its bin, never the other
+  // warehouse.
+  const warehousePage = await page(warehouse);
+  assert.match(warehousePage.html, /<dt>Inside<\/dt><dd>—<\/dd>/u);
+  const inside =
+    new RegExp(
+      `<section id="${id('dataset', 'location_children').replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}"[\\s\\S]*?</section>`,
+      'u',
+    ).exec(warehousePage.html)?.[0] ?? '';
+  assert.match(inside, /Locations inside/u);
+  assert.match(inside, new RegExp(`data-record-id="${bin}"`, 'u'));
+  assert.match(inside, /CAL-A1/u);
+  assert.doesNotMatch(inside, /VAN-WH/u);
+  // Read through the location list scoped by the parent relation, under
+  // current policy.
+  assert.ok(
+    f.policy.calls.some(
+      (call) =>
+        (call.decisionInput as { queryId?: string }).queryId ===
+        id('query', 'location_list'),
+    ),
+  );
+  // The create form offers every location as the parent, chosen once.
+  const form = await renderSurfaceRuntimeWithData(
+    f.view,
+    `/?${new URLSearchParams({ surface: id('surface', 'location_form') }).toString()}`,
+    f.gateways,
+  );
+  const picker =
+    new RegExp(
+      `<select name="relation:${parent.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}"[^>]*>([\\s\\S]*?)</select>`,
+      'u',
+    ).exec(form.html)?.[1] ?? '';
+  assert.match(picker, /<option value="">None<\/option>/u);
+  for (const recordId of [warehouse, bin])
+    assert.match(picker, new RegExp(`<option value="${recordId}">`, 'u'));
+  // An existing location's form states the parent is locked.
+  const editing = await renderSurfaceRuntimeWithData(
+    f.view,
+    `/?${new URLSearchParams({ surface: id('surface', 'location_form'), record: bin }).toString()}`,
+    f.gateways,
+  );
+  assert.match(editing.html, /Locked after creation/u);
+  assert.doesNotMatch(editing.html, /name="relation:/u);
 });

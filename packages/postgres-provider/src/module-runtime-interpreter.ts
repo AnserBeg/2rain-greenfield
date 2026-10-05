@@ -2462,6 +2462,12 @@ interface FigureWithinPlan {
   readonly parent: StorageEntity;
   /** The rows' column that holds their parent's record id. */
   readonly relationColumn: string;
+  /**
+   * `relation`: a compiled relation column, compared as the parent's record
+   * identity; `reference`: a compiled text column holding the parent's record
+   * id, compared as text, as the rows' match column is (LOCATIONS).
+   */
+  readonly through: 'reference' | 'relation';
   readonly stateColumn: StorageColumn;
   readonly values: readonly string[];
 }
@@ -2532,7 +2538,8 @@ interface ListFiguresPlan {
  * caller input: each query the gateway authorized names its entity; the
  * match, quantity, state, date and value columns must be compiled columns of
  * the kind the figure needs; a parent is reached through the rows' compiled
- * relation to it and related rows through theirs to the rows; a listed row's
+ * relation to it, or through a compiled text column of the rows holding its
+ * record id, and related rows through theirs to the rows; a listed row's
  * operand is a compiled exact decimal of the queried entity. Anything else
  * fails closed rather than summing a column a request happened to name.
  */
@@ -2611,17 +2618,37 @@ function listFiguresPlan(
     within: SharedListFigureWithin,
   ): FigureWithinPlan => {
     const parent = entityOf(within.queryId);
-    const relation = storage.relations.find(
-      (candidate) =>
-        candidate.relationId === within.relationId &&
-        candidate.sourceEntityId === rows.entity.entityId &&
-        candidate.targetEntityId === parent.entityId,
-    );
-    if (!relation)
-      return refuse(
-        within.relationId,
-        "a figure's parent does not match the compiled storage relations",
+    const through = (): Pick<
+      FigureWithinPlan,
+      'relationColumn' | 'through'
+    > => {
+      if (within.referenceFieldId !== undefined)
+        return {
+          relationColumn: column(
+            rows.entity,
+            within.referenceFieldId,
+            ['textFieldType'],
+            "a figure's parent is held by a compiled text column of its rows",
+          ).physicalName,
+          through: 'reference',
+        };
+      const relation = storage.relations.find(
+        (candidate) =>
+          candidate.relationId === within.relationId &&
+          candidate.sourceEntityId === rows.entity.entityId &&
+          candidate.targetEntityId === parent.entityId,
       );
+      if (!relation)
+        return refuse(
+          within.relationId,
+          "a figure's parent does not match the compiled storage relations",
+        );
+      return {
+        relationColumn: relation.relationColumn.physicalName,
+        through: 'relation',
+      };
+    };
+    const reached = through();
     const stateColumn = parent.columns.find(
       (candidate) => candidate.canonicalFieldId === within.fieldId,
     );
@@ -2632,7 +2659,7 @@ function listFiguresPlan(
       );
     return Object.freeze({
       parent,
-      relationColumn: relation.relationColumn.physicalName,
+      ...reached,
       stateColumn,
       values: within.values,
     });
@@ -2778,7 +2805,8 @@ const FIGURES_ALIAS = 'table_figures';
  * read the same figures and a kept band filters before both. Every joined row
  * is pinned to the listed row's tenant and environment, to the issued read
  * scope, and -- parent and related rows -- to its own row's company; the rows
- * that hold the listed record's id compare that id as text.
+ * that hold the listed record's id compare that id as text, as a parent
+ * reached through a reference field compares its own.
  */
 function listFiguresFromSql(
   entity: StorageEntity,
@@ -2814,7 +2842,11 @@ function listFiguresFromSql(
          JOIN north_star_module.${quoted(within.parent.physicalTableName)} AS ${quoted(alias)}
            ON ${qualified(alias, 'tenant_id')} = ${qualified(rowsAlias, 'tenant_id')}
           AND ${qualified(alias, 'environment_id')} = ${qualified(rowsAlias, 'environment_id')}
-          AND ${qualified(alias, within.parent.recordIdentity.column)} = ${qualified(rowsAlias, within.relationColumn)}
+          AND ${
+            within.through === 'reference'
+              ? `${qualified(alias, within.parent.recordIdentity.column)}::text = ${qualified(rowsAlias, within.relationColumn)}::text`
+              : `${qualified(alias, within.parent.recordIdentity.column)} = ${qualified(rowsAlias, within.relationColumn)}`
+          }
           AND ${qualified(alias, within.parent.archive.archivedAtColumn)} IS NULL${sameCompany(alias, within.parent, rowsAlias, rows.entity)}${legalEntityReadScopeJoinConjunction(within.parent, readScope, values, alias)}
           AND ${qualified(alias, within.stateColumn.physicalName)}::text = ANY(${parameter(values, [...within.values])}::text[])`;
   const relatedTotal = (

@@ -1192,7 +1192,11 @@ test('a declared List sends its figures with every request, keeps each tab band 
       cursor: string | null;
       figures?: {
         keep?: { figureId: string; values: string[] };
-        sums: Array<{ figureId: string; sum: string }>;
+        sums: Array<{
+          figureId: string;
+          sum: string;
+          within?: Record<string, unknown>;
+        }>;
         bands?: Array<{ figureId: string; otherwise: string }>;
       };
     };
@@ -1219,8 +1223,19 @@ test('a declared List sends its figures with every request, keeps each tab band 
   const all = sent(state(), { pageOffset: 50 });
   assert.deepEqual(
     all.list.figures?.sums.map((value) => value.sum),
-    ['rows', 'related', 'remaining', 'remaining'],
+    ['rows', 'rows', 'related', 'related', 'remaining', 'remaining'],
   );
+  // LOCATIONS: Usable and what reservations hold at usable locations reach
+  // their location through the id the rows hold, not a relation.
+  const usableSum = all.list.figures?.sums.find(
+    (value) => value.figureId === id('list_figure', 'item_stock_list_usable'),
+  );
+  assert.deepEqual(usableSum?.within, {
+    fieldId: id('field', 'location_status'),
+    queryId: id('query', 'location_list'),
+    referenceFieldId: id('field', 'posted_stock_balance_location_id'),
+    values: [id('option', 'location_status_usable')],
+  });
   assert.equal(all.list.figures?.keep, undefined);
   assert.equal(all.list.figures?.bands?.[0]?.otherwise, band('healthy'));
   assert.doesNotMatch(JSON.stringify(all.list.figures), /"label"/u);
@@ -1253,6 +1268,40 @@ test('a declared List sends its figures with every request, keeps each tab band 
     figureId: status,
     values: [band('shortage')],
   });
+  assert.deepEqual(
+    parse(all)?.figures?.sums.find(
+      (value) => value.figureId === usableSum?.figureId,
+    )?.within,
+    usableSum?.within,
+  );
+  // A parent through a relation and a reference field at once, or through
+  // neither, never reaches a statement.
+  for (const within of [
+    { ...usableSum!.within, relationId: id('relation', 'any') },
+    Object.fromEntries(
+      Object.entries(usableSum!.within!).filter(
+        ([key]) => key !== 'referenceFieldId',
+      ),
+    ),
+  ])
+    assert.throws(
+      () =>
+        parse({
+          list: {
+            ...all.list,
+            cursor: null,
+            figures: {
+              ...all.list.figures!,
+              sums: all.list.figures!.sums.map((value) =>
+                value === usableSum ? { ...value, within } : value,
+              ),
+            },
+          },
+        }),
+      (error: unknown) =>
+        error instanceof listBehavior.SharedListContractError &&
+        error.code === 'LIST_INPUT_MALFORMED',
+    );
   assert.equal(parse(shortage)?.pageOffset, 50);
   assert.throws(
     () => parse({ list: { ...all.list, cursor: shortage.list.cursor } }),
@@ -1297,9 +1346,14 @@ test('a declared List sends its figures with every request, keeps each tab band 
       [id('field', 'item_base_unit')]: 'EA',
       [id('field', 'item_reorder_point')]: null,
       ...Object.fromEntries(
-        ['on_hand', 'reserved', 'available', 'incoming', 'open_demand'].map(
-          (local) => [id('list_figure', `item_stock_list_${local}`), '1'],
-        ),
+        [
+          'on_hand',
+          'usable',
+          'reserved',
+          'available',
+          'incoming',
+          'open_demand',
+        ].map((local) => [id('list_figure', `item_stock_list_${local}`), '1']),
       ),
       [id('list_figure', 'item_stock_list_projected')]: '-4',
       [status]: band('shortage'),
@@ -1314,7 +1368,7 @@ test('a declared List sends its figures with every request, keeps each tab band 
   assert.equal(declaredCellText(statusColumn, row, present), 'Shortage');
   assert.equal(
     declaredListCsv(list, [row], present),
-    "\uFEFFSKU,Item,Unit,On hand,Reserved,Available,Incoming,Open demand,Projected,Reorder point,Status\r\nVALVE-10,Valve,EA,1,1,1,1,1,'-4,,Shortage\r\n",
+    "\uFEFFSKU,Item,Unit,On hand,Usable,Reserved,Available,Incoming,Open demand,Projected,Reorder point,Status\r\nVALVE-10,Valve,EA,1,1,1,1,1,1,'-4,,Shortage\r\n",
   );
 });
 
