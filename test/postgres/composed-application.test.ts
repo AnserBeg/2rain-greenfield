@@ -1089,6 +1089,10 @@ test(
           await runtime.close();
         }
       },
+      // The whole lineage, then its successor or reverse edge: six entries
+      // overflow the default 256 MB data tmpfs, as nineteen did for the
+      // full-replay generator (SALES-PARITY 28461658). Room, not a bound.
+      { dataSizeMegabytes: 1024 },
     );
   },
 );
@@ -4065,6 +4069,10 @@ test(
           await reversed.close();
         }
       },
+      // The whole lineage, then its successor or reverse edge: six entries
+      // overflow the default 256 MB data tmpfs, as nineteen did for the
+      // full-replay generator (SALES-PARITY 28461658). Room, not a bound.
+      { dataSizeMegabytes: 1024 },
     );
   },
 );
