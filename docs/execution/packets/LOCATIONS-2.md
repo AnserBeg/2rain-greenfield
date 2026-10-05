@@ -59,3 +59,45 @@ The transfer kernel was not found incapable of two ordinary transfers; its workf
 ## Review
 
 Not owed — LOCATIONS-2 changes stay outside the Critical set. No stage boundary or stabilized new correctness domain is claimed; no program review is run against this blocked working checkpoint.
+
+## Docker pause checkpoint — 2026-10-05
+
+Implementation saved at `574a93a95cb6e307b44d9a06386460ccf7d232e4`; branch is unpublished, no PR or CI run started. No lane-owned container, dev server or test process remains. No expected-red mutation needs restoration.
+Resume here only: finish record-claim and frozen-manifest checks, then push a draft against `packet/LOCATIONS` with `regen-snapshot`. The Critical verification prerequisite remains required; inter-warehouse Receive transfer is still pending. Do not rerun local PostgreSQL/browser work while Docker is paused.
+
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1",
+  "packet": "LOCATIONS-2",
+  "base": "be722966960ee3a4acde76b0474dc4ef9ac05755",
+  "head": "574a93a95cb6e307b44d9a06386460ccf7d232e4",
+  "changedPaths": [
+    "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json",
+    "apps/web/src/component-registry.ts", "apps/web/src/list-declaration.ts",
+    "apps/web/src/surface-composition.ts", "apps/web/src/surface-contract.ts",
+    "apps/web/src/surface-runtime.ts", "apps/web/test/browser/inventory-locations-2.spec.ts",
+    "apps/web/test/surface-runtime-contract.test.ts", "packages/canonical-model/src/normalize.ts",
+    "packages/canonical-model/src/operation-writes.ts", "packages/canonical-model/src/schemas.ts",
+    "packages/canonical-model/src/surface-composition.ts", "packages/canonical-model/src/surface-list.ts",
+    "packages/compiler/src/projections.ts", "packages/domain/src/app/builder.ts",
+    "packages/domain/src/app/list-declarations.ts", "packages/domain/src/location/definition.ts",
+    "packages/domain/src/location/workspace.ts", "packages/domain/src/purchasing/workspace.ts",
+    "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/runtime/src/list-behavior/cursor.ts",
+    "packages/runtime/src/list-behavior/hierarchy.ts", "packages/runtime/src/list-behavior/index.ts",
+    "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts",
+    "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/repository-hygiene.test.ts",
+    "test/architecture/surface-grammar-conformance.test.ts", "test/fixtures/g2/language-conformance/coverage-decisions.json",
+    "test/helpers/order-entry-fixture.ts", "test/integration/surface-data-binding.test.ts",
+    "test/postgres/locations-2.test.ts", "test/postgres/request-runtime-view.test.ts",
+    "test/unit/canonical-model/surface-list.test.ts", "test/unit/location-definition.test.ts",
+    "test/unit/workspace-contract.test.ts"
+  ],
+  "symbols": [
+    {"path": "packages/canonical-model/src/operation-writes.ts", "name": "validateOperationWrites"},
+    {"path": "packages/runtime/src/list-behavior/hierarchy.ts", "name": "parseSharedListHierarchy"},
+    {"path": "packages/postgres-provider/src/module-runtime-interpreter.ts", "name": "enforceRelationUpdateGraph"},
+    {"path": "packages/postgres-provider/src/module-runtime-interpreter.ts", "name": "listHierarchyPlan"},
+    {"path": "apps/web/src/surface-composition.ts", "name": "referenceDefault"}
+  ]
+}
+```
