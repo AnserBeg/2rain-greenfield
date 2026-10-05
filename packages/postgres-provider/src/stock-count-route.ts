@@ -317,9 +317,15 @@ export function stockCountPostingCommand(
  * lines are derived instead, each the exact inverse of a movement the count
  * it reverses posted.
  *
- * Return to counting (reviewed -> counting) keeps what was entered for Review
- * to read again; Cancel count (draft, counting or reviewed -> cancelled)
- * ends a count that is not posted. Neither touches a line.
+ * Return to counting (reviewed -> counting, never a reversal) keeps what was
+ * entered for Review to read again; Cancel count (draft, counting or
+ * reviewed -> cancelled) ends a count that is not posted. Neither touches a
+ * line.
+ *
+ * Each runs as an idempotent accepted mutation: a key with a receipt replays
+ * it whatever the count's revision is now, and only a new execution is held
+ * to the shown revision, the reversal rule and the declared precondition,
+ * under the count's row lock.
  */
 export async function executeStockCountChange(
   context: PostgresCapabilityOperationExecutorContext,
@@ -378,6 +384,16 @@ export async function executeStockCountChange(
             'the count changed since it was shown',
           );
         }
+        // A reversal's lines are derived from the count it reverses, never
+        // counted, so it is not returned to counting: a reviewed reversal is
+        // posted or cancelled (review round 1, ruling SC-6). The route says so
+        // itself, ahead of the declared precondition that says the same, so a
+        // release whose Return to counting lacks that term still refuses.
+        if (command === 'reopen' && count.kind === 'reversal') {
+          throw inputError(
+            'a reversal is not counted, so it is not returned to counting; post or cancel it',
+          );
+        }
         const precondition = evaluateRegisteredOperationPrecondition(
           request.definition.precondition,
           count.values,
@@ -387,14 +403,6 @@ export async function executeStockCountChange(
             precondition.outcome === 'unsupported'
               ? 'the count precondition is not executable'
               : 'the count precondition does not hold',
-          );
-        }
-        // A reversal's lines are derived from the count it reverses, never
-        // counted, so it is not returned to counting: a reviewed reversal is
-        // posted or cancelled (review round 1, ruling SC-6).
-        if (command === 'reopen' && count.kind === 'reversal') {
-          throw inputError(
-            'a reversal is not counted, so it is not returned to counting; post or cancel it',
           );
         }
         const [states, to] = TRANSITIONS[command];
@@ -709,8 +717,12 @@ async function reviewCountedLines(
 
 /**
  * A reversal's lines: one for each movement the count it reverses posted,
- * each its exact inverse at the same location, so the kernel's compensation
- * check admits exactly them.
+ * each its exact inverse at the same location, so each passes the kernel's
+ * per-line compensation check. That the set is complete -- every movement,
+ * once -- is this derivation's doing; the kernel checks each line against
+ * the movement it names, not the set against the reversed count. Runs only
+ * on a reversal with no lines yet: a reviewed reversal is never returned to
+ * counting (SC-6), so it is never derived twice.
  */
 async function deriveReversalLines(
   client: PoolClient,

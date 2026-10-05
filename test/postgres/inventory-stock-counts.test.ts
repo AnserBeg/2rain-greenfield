@@ -760,14 +760,20 @@ test(
       );
       // A reversal is never returned to counting: its lines are derived from
       // the count it reverses, not counted, so a reviewed reversal is posted
-      // or cancelled. The operation's own precondition refuses it.
+      // or cancelled (SC-6). The route refuses it by name, ahead of the
+      // declared precondition (pinned in inventory-definition.test.ts).
       await assert.rejects(
         count.command('reopen', reversal.recordId, reversed.readBack!.revision),
         refusal(
           'INVENTORY_POSTING_INPUT_INVALID',
-          /^INVENTORY_POSTING_INPUT_INVALID: the count precondition does not hold$/u,
+          /^INVENTORY_POSTING_INPUT_INVALID: a reversal is not counted, so it is not returned to counting; post or cancel it$/u,
         ),
-        'returning a reviewed reversal to counting must be refused by its precondition',
+        'returning a reviewed reversal to counting must be refused by name',
+      );
+      assert.equal(
+        (await read.stored(reversal.recordId))?.state,
+        state('reviewed'),
+        'the refused reversal stays reviewed',
       );
       const reversalLines = await read.lines(reversal.recordId);
       const correctionMovements = await read.movements(correction.recordId);
@@ -838,6 +844,7 @@ test(
         startKey,
       );
       assert.equal(started.outcome, 'succeeded');
+      assert.ok(started.trust?.changeDocumentId);
       // The count moves on under another key.
       const cancelled = await count.command(
         'cancel',
@@ -859,6 +866,11 @@ test(
         startKey,
       );
       assert.equal(replayed.outcome, 'succeeded');
+      assert.equal(
+        replayed.trust?.changeDocumentId,
+        started.trust?.changeDocumentId,
+        'the replay reports the committed Start',
+      );
       assert.deepEqual(await read.stored(created.recordId), after);
 
       // A fresh key with that revision is a new Start, refused as stale.
@@ -879,6 +891,61 @@ test(
           'code' in error &&
           error.code === 'SEMANTIC_OPERATION_IDEMPOTENCY_CONFLICT',
       );
+
+      // Review, Return to counting, Review again: the first Review, retried
+      // under its key after Return to counting, and Return to counting,
+      // retried under its key after the second Review, each replay.
+      const second = await count.create(fixture.location);
+      const counting = await count.command(
+        'start',
+        second.recordId,
+        second.revision,
+      );
+      const book = await read.onHand(fixture.location);
+      for (const value of await read.lines(second.recordId))
+        await count.enter(value, book.get(String(value.item)) ?? '0');
+      const reviewKey = randomUUID();
+      const reviewed = await count.command(
+        'review',
+        second.recordId,
+        counting.readBack!.revision,
+        reviewKey,
+      );
+      const reopenKey = randomUUID();
+      const reopened = await count.command(
+        'reopen',
+        second.recordId,
+        reviewed.readBack!.revision,
+        reopenKey,
+      );
+      await count.command(
+        'review',
+        second.recordId,
+        reopened.readBack!.revision,
+      );
+      const settled = await read.stored(second.recordId);
+      const settledLines = await read.lines(second.recordId);
+      assert.equal(settled?.state, state('reviewed'));
+      for (const [action, revision, key, original] of [
+        ['review', counting.readBack!.revision, reviewKey, reviewed],
+        ['reopen', reviewed.readBack!.revision, reopenKey, reopened],
+      ] as const) {
+        const retried = await count.command(
+          action,
+          second.recordId,
+          revision,
+          key,
+        );
+        assert.equal(retried.outcome, 'succeeded');
+        assert.ok(original.trust?.changeDocumentId);
+        assert.equal(
+          retried.trust?.changeDocumentId,
+          original.trust?.changeDocumentId,
+          `the ${action} replay reports the committed ${action}`,
+        );
+        assert.deepEqual(await read.stored(second.recordId), settled);
+        assert.deepEqual(await read.lines(second.recordId), settledLines);
+      }
     });
   },
 );

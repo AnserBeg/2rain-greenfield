@@ -222,7 +222,13 @@ class InventoryPostingCapabilityExecutor implements RegisteredCapabilityOperatio
    * transition (review round 1). So preparation refuses only a revision the
    * count never had; the current revision, state and precondition are judged
    * where a new execution runs -- under the count's row lock in the route,
-   * and by the kernel for Post.
+   * and by the kernel for Post, which finds the receipt first and then
+   * requires the reviewed count at exactly the shown revision.
+   *
+   * One exception, for Post's refusal only: a Post at the count's current
+   * revision cannot have committed (a committed Post moved the count one
+   * revision on), so it is a new execution, and its declared precondition is
+   * judged here, before policy and trust work, as it was before round 1.
    */
   async #prepareCount(
     request: RegisteredCapabilityOperationAuthorizationRequest,
@@ -237,6 +243,22 @@ class InventoryPostingCapabilityExecutor implements RegisteredCapabilityOperatio
     );
     if (input.expectedRevision > hydrated.currentRevision) {
       throw inputError('the rendered command revision is no longer current');
+    }
+    if (
+      command === 'post' &&
+      input.expectedRevision === hydrated.currentRevision
+    ) {
+      const precondition = evaluateRegisteredOperationPrecondition(
+        request.definition.precondition,
+        hydrated.values,
+      );
+      if (precondition.outcome !== 'holds') {
+        throw inputError(
+          precondition.outcome === 'unsupported'
+            ? 'the count precondition is not executable'
+            : 'the count precondition does not hold',
+        );
+      }
     }
     const scope = request.readBackDefinition.legalEntityScope;
     if (!scope || scope.cardinality !== 'exactlyOne') {
