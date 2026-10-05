@@ -1852,7 +1852,7 @@ export class PostgresInventoryPostingService {
         : null;
       await client.query('SAVEPOINT inventory_posting_write');
       let transactionRevision = -1;
-      let stockCountRevision: number | null = null;
+      let sourceDocumentRevision: number | null = null;
       try {
         // The companion must exist before the movements that reference it.
         if (
@@ -1916,10 +1916,10 @@ export class PostgresInventoryPostingService {
             recordedAt,
             coverage,
           );
-          stockCountRevision = parsed.sourceRevision + 1;
+          sourceDocumentRevision = parsed.sourceRevision + 1;
         }
         if (posting.postingRole === 'shipment') {
-          stockCountRevision = await writeShipmentConsequences(
+          sourceDocumentRevision = await writeShipmentConsequences(
             client,
             this.#binding,
             context,
@@ -1931,7 +1931,7 @@ export class PostgresInventoryPostingService {
           );
         }
         if (posting.postingRole === 'vendorReturn') {
-          stockCountRevision = await writeVendorReturnConsequences(
+          sourceDocumentRevision = await writeVendorReturnConsequences(
             client,
             this.#binding,
             context,
@@ -1943,7 +1943,7 @@ export class PostgresInventoryPostingService {
           );
         }
         if (posting.postingRole === 'customerReturn') {
-          stockCountRevision = await writeCustomerReturnConsequences(
+          sourceDocumentRevision = await writeCustomerReturnConsequences(
             client,
             this.#binding,
             context,
@@ -1973,7 +1973,7 @@ export class PostgresInventoryPostingService {
           );
         }
         if (isStockCountPosting(posting)) {
-          stockCountRevision = await transitionStockCountToPosted(
+          sourceDocumentRevision = await transitionStockCountToPosted(
             client,
             this.#binding,
             context,
@@ -2125,7 +2125,7 @@ export class PostgresInventoryPostingService {
         configuration,
         resultWithoutTrust,
         ids,
-        stockCountRevision ?? transactionRevision,
+        sourceDocumentRevision ?? transactionRevision,
       );
       const result = Object.freeze({ ...resultWithoutTrust, trust });
       await insertReceipt(
@@ -7141,7 +7141,7 @@ async function writeVendorReturnConsequences(
 }
 
 /**
- * Claim V4. Every relation a vendor return writes -- the return, its
+ * Claim V6. Every relation a vendor return writes -- the return, its
  * companion transaction and lines, and each order line's received row -- read
  * back column for column before commit; the received rows against the ledger
  * recomputed from the movements after the write.
@@ -10438,49 +10438,22 @@ async function validateReceiptReplay(
   idempotencyKey: string,
   client: PoolClient,
 ): Promise<InventoryPostingResultV1> {
-  let digestPosting = posting;
-  if (
-    (receipt.input_digest_version === 5 && posting.postingRole === 'receipt') ||
-    // RETURNS: a return's digest carries its authorization evidence too.
-    (receipt.input_digest_version === 7 &&
-      posting.postingRole === 'customerReturn') ||
-    (receipt.input_digest_version === 8 &&
-      posting.postingRole === 'vendorReturn')
-  ) {
-    // Versions 5, 7 and 8 include authorization evidence in their immutable
-    // preimage. Reconstruct that historical evidence, not today's policy
-    // revision. The gateway still authorizes every retry against current
-    // grants before here. No business input is replaced, and no recorded
-    // digest is rewritten.
-    const evidence = await client.query<{
-      policy_version: string;
-      policy_evaluator_version: string;
-    }>(
-      `SELECT policy_version, policy_evaluator_version
-         FROM platform.trust_action_invocations
-        WHERE tenant_id=$1 AND environment_id=$2 AND invocation_id=$3
-          AND outcome='SUCCEEDED' AND policy_decision='ALLOW'`,
-      [context.tenantId, context.environmentId, receipt.invocation_id],
-    );
-    if (evidence.rows.length !== 1)
-      throw postingError(
-        'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
-        'recorded receipt authorization evidence is missing',
-      );
-    // Only the authorization evidence is replaced; the posting keeps its own
-    // family, role and command shape.
-    digestPosting = {
-      ...posting,
-      command: {
-        ...posting.command,
-        authorization: {
-          decision: 'ALLOW',
-          evaluatorVersion: evidence.rows[0]!.policy_evaluator_version,
-          policyVersion: evidence.rows[0]!.policy_version,
-        },
-      },
-    } as ParsedPosting;
-  }
+  // Versions 5, 7 and 8 include authorization evidence in their immutable
+  // preimage. Reconstruct that historical evidence, not today's policy
+  // revision. The gateway still authorizes every retry against current
+  // grants before here. No business input is replaced, and no recorded
+  // digest is rewritten.
+  const digestPosting = digestCoversAuthorization(
+    receipt.input_digest_version,
+    posting,
+  )
+    ? await withRecordedAuthorization(
+        client,
+        context,
+        posting,
+        receipt.invocation_id,
+      )
+    : posting;
   const inputDigest = digestCommand(
     digestPosting,
     receipt.input_digest_version,
@@ -10522,15 +10495,93 @@ async function persistAdditionalReceipt(
       client,
     );
   const result = Object.freeze({ ...replay, replayed: true });
+  // RETURNS round 1 (B7, V7; digest version 5 alike). This receipt records
+  // the ORIGINAL posting's invocation (`result.trust.invocationId`), and its
+  // replay digests the command with that invocation's authorization evidence
+  // (`validateReceiptReplay`). So its digest is computed with the same
+  // evidence and the caller's own business fields; with today's evidence a
+  // duplicate of this key after a policy change could never match it.
+  const storedDigest = digestCoversAuthorization(inputDigest.version, posting)
+    ? Object.freeze({
+        value: digestCommand(
+          await withRecordedAuthorization(
+            client,
+            context,
+            posting,
+            result.trust.invocationId,
+          ),
+          inputDigest.version,
+        ),
+        version: inputDigest.version,
+      })
+    : inputDigest;
   await insertReceipt(
     client,
     context,
     registration,
     idempotencyKey,
-    inputDigest,
+    storedDigest,
     result,
   );
   return result;
+}
+
+/**
+ * Whether a receipt digest of this version covers the caller's authorization
+ * evidence: versions 5 (a receipt), 7 (a customer return) and 8 (a vendor
+ * return). A receipt of such a version is digested with the evidence of the
+ * invocation it records, whether it is replayed (`validateReceiptReplay`) or
+ * stored for another key (`persistAdditionalReceipt`).
+ */
+function digestCoversAuthorization(
+  version: number,
+  posting: ParsedPosting,
+): boolean {
+  return (
+    (version === 5 && posting.postingRole === 'receipt') ||
+    // RETURNS: a return's digest carries its authorization evidence too.
+    (version === 7 && posting.postingRole === 'customerReturn') ||
+    (version === 8 && posting.postingRole === 'vendorReturn')
+  );
+}
+
+/**
+ * The posting with its authorization evidence replaced by the evidence the
+ * accepted invocation `invocationId` recorded. Only the authorization evidence
+ * is replaced; the posting keeps its own family, role and command shape.
+ */
+async function withRecordedAuthorization(
+  client: PoolClient,
+  context: TrustedRequestContext,
+  posting: ParsedPosting,
+  invocationId: string,
+): Promise<ParsedPosting> {
+  const evidence = await client.query<{
+    policy_version: string;
+    policy_evaluator_version: string;
+  }>(
+    `SELECT policy_version, policy_evaluator_version
+       FROM platform.trust_action_invocations
+      WHERE tenant_id=$1 AND environment_id=$2 AND invocation_id=$3
+        AND outcome='SUCCEEDED' AND policy_decision='ALLOW'`,
+    [context.tenantId, context.environmentId, invocationId],
+  );
+  if (evidence.rows.length !== 1)
+    throw postingError(
+      'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
+      'recorded receipt authorization evidence is missing',
+    );
+  return {
+    ...posting,
+    command: {
+      ...posting.command,
+      authorization: {
+        decision: 'ALLOW',
+        evaluatorVersion: evidence.rows[0]!.policy_evaluator_version,
+        policyVersion: evidence.rows[0]!.policy_version,
+      },
+    },
+  } as ParsedPosting;
 }
 
 async function insertReceipt(

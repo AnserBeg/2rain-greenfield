@@ -3179,6 +3179,35 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
         }),
       { code: 'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT' },
     );
+    // RETURNS round 1 (P2), digest version 5: the same input under a NEW key
+    // after the policy changed replays the posted receipt by its natural
+    // effect and stores a receipt for that key bound to the original
+    // invocation; delivering that key again must replay it too.
+    const aliasReceipt = {
+      ...first,
+      idempotencyKey: randomUUID(),
+      authorization: {
+        ...first.authorization,
+        policyVersion: `${first.authorization.policyVersion}+later`,
+      },
+    };
+    const aliasReplay = await service.postGoodsReceipt(
+      database.context,
+      database.actor,
+      aliasReceipt,
+    );
+    assert.equal(aliasReplay.replayed, true);
+    const aliasDuplicate = await service.postGoodsReceipt(
+      database.context,
+      database.actor,
+      aliasReceipt,
+    );
+    assert.equal(
+      aliasDuplicate.replayed,
+      true,
+      'a new-key receipt replay after a policy change must replay its own duplicate',
+    );
+    assert.deepEqual(aliasDuplicate.trust, aliasReplay.trust);
     const races = await Promise.all([
       staged('3', locationPrimary),
       staged('3', locationTie),

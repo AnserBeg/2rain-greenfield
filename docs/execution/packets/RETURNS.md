@@ -18,18 +18,18 @@ Customer returns (`customer_return` family of `northstar.sales:capability.fulfil
 2. B2. A return lands in its chosen location and leaves shipped, the shipped row and the reservations untouched: what may still come back is net shipped less net returned.
 3. B3. A shipment correction or reversal may not take a line's net shipped below its net returned (`FULFILLMENT_SHIPMENT_BELOW_RETURNED`).
 4. B4. Returns and shipment corrections of one order serialize on the order row, then its line rows (FOR NO KEY UPDATE), taken before either ledger is read, so two returns into two locations cannot together exceed what shipped.
-5. B5. A correction or reversal names a posted return of the same order and takes back only that return's own movements, each once, from where they went, never more than a movement still adds; a reversal takes back all.
-6. B6. The return, its companion transaction and lines are read back column for column before commit (`verifyCustomerReturnPosting`), and the executed verifiers cover the observed write set.
-7. B7. Digest version 7 covers every header field and line: the same key with a changed return conflicts; a duplicate delivery replays without posting again; a retry under a later policy revision is digested with the recorded invocation's policy evidence and replays (as a receipt's version 5 does).
+5. B5. A correction or reversal names a posted return of the same order and takes back only that return's own movements, from where they went: each movement at most once per correction, never beyond the quantity it still adds; a reversal takes back all of it.
+6. B6. The module-plane relations a return writes (the return, its companion transaction and lines) are read back column for column before commit (`verifyCustomerReturnPosting`), and the executed verifiers cover the observed module-plane write set; platform trust rows are not column-verified, as for every family (filed `posting-platform-plane-writes-not-row-complete`).
+7. B7. Digest version 7 covers the normalized customer-return command except the idempotency key and the kernel-derived companion identities: the same key with a changed return conflicts; a duplicate delivery replays without posting again. A receipt is digested with the authorization evidence of the invocation it records, both when replayed (a retry under a later policy revision replays) and, since round 1, when stored for a new key whose posting replays by natural effect (its duplicate replays too); digest versions 5 and 8 alike. Current authorization stays the gateway's separate decision.
 
 Vendor returns (`vendor_return` family of `northstar.purchasing:capability.receiving`, digest version 8):
 8. V1. Per purchase order line, a vendor return never takes net received below zero, read from the ledger inside the posting; refused (`VENDOR_RETURN_QUANTITY_OUT_OF_BOUNDS`) with the order line, received-before and attempted.
-9. V2. Received is net of vendor returns (`receivedLedger` adds each return line's negative movement): the posted received row falls by the quantity sent back, the line reopens to receive, and a receipt correction cannot take back returned units.
+9. V2. Received is net of vendor returns (`receivedLedger` adds each return line's negative movement): the posted received row falls by the quantity sent back and the line reopens to receive; a receipt correction cannot take the order line's net received below zero (an order-line floor, not tracking of physical units).
 10. V3. The independent received sweep (`receivedFacts`) counts each posted vendor-return movement through its own lineage, so reconciliation reports no discrepancy after a return.
 11. V4. Destroying and rebuilding the received rows (`reconstructedReceivedFacts`) reproduces each line net of its vendor returns, verified by the sweep.
 12. V5. Vendor returns of one order serialize on the order row and its line rows before the received ledger is read.
-13. V6. The vendor return, its companion transaction and lines, and each line's received row are read back before commit (`verifyVendorReturnPosting`), the received rows against the ledger recomputed after the write.
-14. V7. Digest version 8 covers every header field and line, and a retry replays under a later policy revision, as B7.
+13. V6. The module-plane relations a vendor return writes (the return, its companion transaction and lines, each line's received row) are read back before commit (`verifyVendorReturnPosting`), the received rows against the ledger recomputed after the write; platform trust rows as B6.
+14. V7. Digest version 8 covers the normalized vendor-return command on the same terms as B7, with the same replay rules for both key paths.
 
 Outside the Critical set:
 15. Sales declares `customer_return` (RMA- numbers) and its lines, written only as drafts and posted through `customer_return_post`; Purchasing declares `vendor_return` (VRT-) and its lines behind a `vendorReturns` option the product application passes, posted through `vendor_return_post`. Migration 0029 admits digest versions 7 and 8.
@@ -101,7 +101,7 @@ V6; `vendor-return-digest-drops-quantities` and `vendor-return-replay-hashes-cur
 - Source-document reconciliation reports a return's companion transaction as an unrecognized type (unverifiable), as it does a shipment's.
 - Credits for returns stay separate steps (customer credit, vendor credit); a return does not propose one.
 
-Review: owed — `RETURNS-review-prompt.md` (round 1, ONLINE, user-run).
+Review: round 1 (owner-run on `9c310635`): one P2 under B7 and V7 (a new-key natural replay after a policy change stored a current-policy digest bound to the original invocation, so its duplicate conflicted; shared with receipt digest 5), wording and naming points; no other defect in B1-B6, V1-V6. Reproduced at `d34c32e4` (B7, V7 and the RECEIPT test red at the new key's duplicate), fixed at `76a15604`, naming at `98a83d8e`; claims reworded as the verdict asked. Not yet run green locally; controls `additional-receipt-hashes-current-policy` and `...-for-receipts` not yet run. Round 2 owed; its prompt is not yet written.
 
 ```record-claim
 {
