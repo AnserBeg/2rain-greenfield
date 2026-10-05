@@ -54,6 +54,7 @@ import {
 
 type Action =
   | 'sales_order_create_drop_ship_po'
+  | 'sales_order_create_special_order_po'
   | 'purchase_order_record_delivery'
   | 'drop_ship_delivery_post'
   | 'drop_ship_delivery_reverse';
@@ -74,6 +75,7 @@ type Changed = Readonly<{
 }>;
 const actions = new Map<Action, string>([
   ['sales_order_create_drop_ship_po', 'sales_order'],
+  ['sales_order_create_special_order_po', 'sales_order'],
   ['purchase_order_record_delivery', 'purchase_order'],
   ['drop_ship_delivery_post', 'drop_ship_delivery'],
   ['drop_ship_delivery_reverse', 'drop_ship_delivery'],
@@ -442,13 +444,20 @@ class DropShipExecutor implements RegisteredCapabilityOperationExecutor {
     return result.rows;
   }
   async #apply(client: PoolClient, prepared: Prepared): Promise<Changed> {
-    if (prepared.action === 'sales_order_create_drop_ship_po')
+    if (
+      prepared.action === 'sales_order_create_drop_ship_po' ||
+      prepared.action === 'sales_order_create_special_order_po'
+    )
       return this.#purchase(client, prepared);
     if (prepared.action === 'drop_ship_delivery_reverse')
       return this.#reverse(client, prepared);
     return this.#deliver(client, prepared);
   }
   async #purchase(client: PoolClient, p: Prepared): Promise<Changed> {
+    const route =
+      p.action === 'sales_order_create_special_order_po'
+        ? 'special_order'
+        : 'drop_ship';
     const sales = await this.#row(client, p.entity, p.scope, p.recordId);
     this.#assertRevision(sales, p);
     if (
@@ -462,7 +471,7 @@ class DropShipExecutor implements RegisteredCapabilityOperationExecutor {
       if (
         !String(
           this.#field(line, 'sales_order_line', 'fulfillment_route'),
-        ).endsWith(':option.fulfillment_route_drop_ship')
+        ).endsWith(`:option.fulfillment_route_${route}`)
       )
         continue;
       const link =
@@ -488,7 +497,12 @@ class DropShipExecutor implements RegisteredCapabilityOperationExecutor {
           'ship_to_region',
           'ship_to_postal_code',
           'ship_to_country',
-        ].map((key) => [key, this.#field(sales, 'sales_order', key) ?? null]),
+        ].map((key) => [
+          key,
+          route === 'special_order'
+            ? null
+            : (this.#field(sales, 'sales_order', key) ?? null),
+        ]),
       );
       const currency = this.#field(sales, 'sales_order', 'currency');
       const headerValues = {
@@ -564,7 +578,7 @@ class DropShipExecutor implements RegisteredCapabilityOperationExecutor {
       linked.push(purchaseLineId);
     }
     if (linked.length === 0)
-      refused('There are no drop-ship lines on this order');
+      refused(`There are no ${route} lines on this order`);
     return {
       revision: await this.#update(client, p.entity, p.scope, sales),
       before: 'confirmed',

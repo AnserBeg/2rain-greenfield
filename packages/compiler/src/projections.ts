@@ -870,20 +870,27 @@ function surfaceManifestPayload(
       // where a governed value is declared -- a wrong render, not a lesser one.
       // 15: an independent filtered progress stream, or scalar capability
       // arguments bound by a Task. Dropping either changes business meaning.
-      minimumVersion:
-        original.surfaces.some(
-          (surface) =>
-            'list' in surface &&
-            (surface.list as SurfaceList | undefined)?.progress
-              ?.additionalDone !== undefined,
-        ) ||
-        [...compositions.values()].some((value) =>
-          value?.actions.some((action) =>
-            action.steps.some((step) =>
-              step.bindings.some((binding) => binding.path[0] === 'arguments'),
-            ),
-          ),
-        )
+      minimumVersion: original.queries.some(
+        (query) =>
+          'readModel' in query &&
+          query.readModel?.resultFields.special_reservable !== undefined,
+      )
+        ? 16
+        : original.surfaces.some(
+              (surface) =>
+                'list' in surface &&
+                (surface.list as SurfaceList | undefined)?.progress
+                  ?.additionalDone !== undefined,
+            ) ||
+            [...compositions.values()].some((value) =>
+              value?.actions.some((action) =>
+                action.steps.some((step) =>
+                  step.bindings.some(
+                    (binding) => binding.path[0] === 'arguments',
+                  ),
+                ),
+              ),
+            )
           ? 15
           : [...compositions.values()].some(
                 (value) =>

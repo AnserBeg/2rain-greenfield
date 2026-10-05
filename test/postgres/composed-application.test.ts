@@ -3941,7 +3941,7 @@ async function assertBoundedFreshTenantInstallEvidence(
   assert.equal(
     servingScenarioCount,
     604,
-    'compiled DROP-SHIP head: 604 emitted scenarios',
+    'compiled SPECIAL-ORDER head: 604 emitted scenarios (measured, unchanged)',
   );
   await assertFreshInstallLineageEvidence(
     pool,
@@ -6281,7 +6281,7 @@ async function assertExactPartitionEvidence(
   assert.equal(
     evidence.results.length,
     527,
-    'compiled DROP-SHIP head: 527 constructible scenarios, observed executed here',
+    'compiled SPECIAL-ORDER head: 527 constructible scenarios, observed executed here',
   );
   assert.equal(
     derivations.length,

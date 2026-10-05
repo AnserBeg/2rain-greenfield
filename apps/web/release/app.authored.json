@@ -8970,6 +8970,13 @@
             "optionId": "northstar.app:option.fulfillment_route_drop_ship",
             "label": "Drop ship",
             "orderKey": 20
+          },
+          {
+            "kind": "enumOption",
+            "schemaVersion": "v6",
+            "optionId": "northstar.app:option.fulfillment_route_special_order",
+            "label": "Special order",
+            "orderKey": 30
           }
         ]
       },
@@ -9002,7 +9009,7 @@
         "maximumLength": 80
       },
       "kind": "fieldDefinition",
-      "label": "Drop-ship supplier",
+      "label": "Supplier",
       "orderKey": 110,
       "presence": "optional",
       "reportable": true,
@@ -15813,6 +15820,52 @@
       },
       "schemaVersion": "v6",
       "tier": "o1"
+    },
+    {
+      "confirmation": "humanRequired",
+      "effect": {
+        "kind": "registeredCapabilityEffect",
+        "schemaVersion": "v6",
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.commercial:capability.drop_ship"
+        }
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.sales"
+      },
+      "operationId": "northstar.app:operation.sales_order_create_special_order_po",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.sales_order_create_special_order_po"
+      },
+      "precondition": {
+        "kind": "fieldComparisonPredicate",
+        "schemaVersion": "v6",
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+        },
+        "operator": "equals",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v6",
+          "value": "northstar.app:state.sales_order_released"
+        }
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.sales_order_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o1"
     }
   ],
   "package": {
@@ -18019,6 +18072,18 @@
         "targetId": "northstar.app:entity.purchase_order"
       },
       "schemaVersion": "v6"
+    },
+    {
+      "action": "transition",
+      "kind": "permissionDefinition",
+      "label": "Create special-order PO",
+      "permissionId": "northstar.app:permission.sales_order_create_special_order_po",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order"
+      },
+      "schemaVersion": "v6"
     }
   ],
   "queries": [
@@ -19595,6 +19660,11 @@
             "kind": "queryReference",
             "schemaVersion": "v6",
             "targetId": "northstar.app:query.purchase_order_line_get"
+          },
+          "arrivals": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.purchase_order_received_get"
           }
         },
         "resultFields": {
@@ -19604,7 +19674,9 @@
           "delivered": "northstar.app:metric.line_delivered",
           "linked_line": "northstar.app:metric.sales_line_linked_line",
           "linked_order": "northstar.app:metric.sales_line_linked_order",
-          "route": "northstar.app:metric.sales_line_route"
+          "route": "northstar.app:metric.sales_line_route",
+          "arrived": "northstar.app:metric.sales_line_arrived",
+          "special_reservable": "northstar.app:metric.special_reservable"
         }
       }
     },
@@ -37054,6 +37126,11 @@
             "kind": "queryReference",
             "schemaVersion": "v6",
             "targetId": "northstar.app:query.purchase_order_line_get"
+          },
+          "arrivals": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.purchase_order_received_get"
           }
         },
         "resultFields": {
@@ -37063,7 +37140,8 @@
           "delivered": "northstar.app:metric.line_delivered",
           "linked_line": "northstar.app:metric.sales_line_linked_line",
           "linked_order": "northstar.app:metric.sales_line_linked_order",
-          "route": "northstar.app:metric.sales_line_route"
+          "route": "northstar.app:metric.sales_line_route",
+          "arrived": "northstar.app:metric.sales_line_arrived"
         }
       }
     },
@@ -37686,6 +37764,11 @@
             "kind": "queryReference",
             "schemaVersion": "v6",
             "targetId": "northstar.app:query.sales_order_line_get"
+          },
+          "arrivals": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.purchase_order_received_get"
           }
         },
         "resultFields": {
@@ -37699,7 +37782,8 @@
           "delivered": "northstar.app:metric.purchase_line_delivered",
           "linked_line": "northstar.app:metric.purchase_line_linked_line",
           "linked_order": "northstar.app:metric.purchase_line_linked_order",
-          "route": "northstar.app:metric.purchase_line_route"
+          "route": "northstar.app:metric.purchase_line_route",
+          "arrived": "northstar.app:metric.purchase_line_arrived"
         }
       }
     },
@@ -38584,6 +38668,11 @@
             "kind": "queryReference",
             "schemaVersion": "v6",
             "targetId": "northstar.app:query.purchase_order_line_get"
+          },
+          "arrivals": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.purchase_order_received_get"
           }
         },
         "resultFields": {
@@ -38595,7 +38684,9 @@
           "delivered": "northstar.app:metric.line_delivered",
           "linked_line": "northstar.app:metric.sales_line_linked_line",
           "linked_order": "northstar.app:metric.sales_line_linked_order",
-          "route": "northstar.app:metric.sales_line_route"
+          "route": "northstar.app:metric.sales_line_route",
+          "arrived": "northstar.app:metric.sales_line_arrived",
+          "special_reservable": "northstar.app:metric.special_reservable"
         }
       }
     },
@@ -42454,6 +42545,12 @@
                 "label": "Route",
                 "orderKey": 126,
                 "field": "northstar.app:metric.sales_line_route"
+              },
+              {
+                "columnId": "northstar.app:column.sales_order_lines_arrived",
+                "label": "Arrived",
+                "orderKey": 180,
+                "field": "northstar.app:metric.sales_line_arrived"
               }
             ]
           },
@@ -42630,6 +42727,19 @@
                 "label": "Route",
                 "orderKey": 126,
                 "field": "northstar.app:metric.sales_line_route"
+              },
+              {
+                "columnId": "northstar.app:column.sales_fulfillment_lines_arrived",
+                "label": "Arrived",
+                "orderKey": 180,
+                "field": "northstar.app:metric.sales_line_arrived"
+              },
+              {
+                "columnId": "northstar.app:column.special_reservable",
+                "label": "Arrived to reserve",
+                "orderKey": 185,
+                "field": "northstar.app:metric.special_reservable",
+                "presentation": { "role": "quantity", "priority": 50 }
               }
             ]
           },
@@ -43838,6 +43948,255 @@
               },
               "record": { "source": "selected", "field": "recordId" }
             }
+          },
+          {
+            "actionId": "northstar.app:action.create_special_order_po",
+            "orderKey": 120,
+            "label": "Create special-order PO",
+            "description": "Create or reuse dedicated purchase supply received into stock.",
+            "conditions": [
+              {
+                "value": {
+                  "source": "record",
+                  "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+                },
+                "operator": "equals",
+                "compare": "northstar.app:state.sales_order_released"
+              },
+              {
+                "value": {
+                  "source": "selected",
+                  "field": "northstar.app:metric.sales_line_route"
+                },
+                "operator": "equals",
+                "compare": "Special order"
+              }
+            ],
+            "inputs": [],
+            "steps": [
+              {
+                "stepId": "northstar.app:step.create_drop_ship_po",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.sales_order_create_special_order_po"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "record", "field": "recordId" }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": { "source": "record", "field": "revision" }
+                  }
+                ]
+              }
+            ],
+            "datasetId": "northstar.app:dataset.fulfillment_lines",
+            "presentation": { "placement": "selection" }
+          },
+          {
+            "actionId": "northstar.app:action.reserve_special_order",
+            "presentation": {
+              "placement": "selection",
+              "task": {
+                "summary": {
+                  "identity": {
+                    "datasetId": "northstar.app:dataset.fulfillment_lines",
+                    "columnId": "northstar.app:column.item"
+                  },
+                  "secondary": {
+                    "datasetId": "northstar.app:dataset.fulfillment_lines",
+                    "columnId": "northstar.app:column.sku"
+                  }
+                },
+                "confirmation": {
+                  "title": "Reserve",
+                  "reviewLabel": "Review reservation",
+                  "confirmLabel": "Confirm reservation",
+                  "quantity": {
+                    "source": "column",
+                    "datasetId": "northstar.app:dataset.fulfillment_lines",
+                    "columnId": "northstar.app:column.special_reservable"
+                  },
+                  "unit": {
+                    "datasetId": "northstar.app:dataset.fulfillment_lines",
+                    "columnId": "northstar.app:column.unit"
+                  },
+                  "context": {
+                    "source": "input",
+                    "inputId": "northstar.app:input.location"
+                  }
+                }
+              }
+            },
+            "label": "Reserve for the special order",
+            "description": "Reserve arrived, unshipped and unreserved supply at the stock location you choose.",
+            "orderKey": 15,
+            "datasetId": "northstar.app:dataset.fulfillment_lines",
+            "conditions": [
+              {
+                "value": {
+                  "source": "record",
+                  "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+                },
+                "operator": "equals",
+                "compare": "northstar.app:state.sales_order_released"
+              },
+              {
+                "value": {
+                  "source": "selected",
+                  "field": "northstar.app:metric.sales_line_route"
+                },
+                "operator": "equals",
+                "compare": "Special order"
+              },
+              {
+                "value": {
+                  "source": "selected",
+                  "field": "northstar.app:metric.special_reservable"
+                },
+                "operator": "positive",
+                "compare": null
+              }
+            ],
+            "inputs": [
+              {
+                "inputId": "northstar.app:input.location",
+                "label": "Stock location",
+                "orderKey": 20,
+                "type": "reference",
+                "required": true,
+                "query": {
+                  "kind": "queryReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:query.location_list"
+                },
+                "labelField": {
+                  "kind": "fieldReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:field.location_name"
+                }
+              }
+            ],
+            "steps": [
+              {
+                "stepId": "northstar.app:step.reserve_draft",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.reservation_create"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["legalEntityId"],
+                    "value": { "source": "generated", "value": "scope" }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.reservation_number"
+                    ],
+                    "value": { "source": "generated", "value": "uuid" }
+                  },
+                  {
+                    "path": ["values", "northstar.app:field.reservation_state"],
+                    "value": {
+                      "source": "literal",
+                      "value": "northstar.app:option.reservation_state_draft"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.reservation_item_id"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.sales_order_line_item_id"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.reservation_location_id"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.location"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.reservation_quantity"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:metric.special_reservable"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.reservation_unit_id"
+                    ],
+                    "value": {
+                      "source": "selected",
+                      "field": "northstar.app:field.sales_order_line_unit_id"
+                    }
+                  },
+                  {
+                    "path": [
+                      "values",
+                      "northstar.app:field.reservation_reason"
+                    ],
+                    "value": {
+                      "source": "literal",
+                      "value": "Release unused stock"
+                    }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.reservation_order_line"
+                    ],
+                    "value": { "source": "selected", "field": "recordId" }
+                  }
+                ]
+              },
+              {
+                "stepId": "northstar.app:step.reserve_commit",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.reservation_reserve"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.reserve_draft",
+                      "field": "recordId"
+                    }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": {
+                      "source": "step",
+                      "stepId": "northstar.app:step.reserve_draft",
+                      "field": "revision"
+                    }
+                  }
+                ]
+              }
+            ]
           }
         ]
       },
@@ -44274,7 +44633,7 @@
           },
           {
             "fieldId": "northstar.app:field.sales_order_line_drop_ship_supplier_id",
-            "label": "Drop-ship supplier",
+            "label": "Supplier (Drop ship or Special order)",
             "reference": {
               "queryId": "northstar.app:query.party_list",
               "getQueryId": "northstar.app:query.party_get",
@@ -44823,7 +45182,7 @@
           },
           {
             "fieldId": "northstar.app:field.sales_order_line_drop_ship_supplier_id",
-            "label": "Drop-ship supplier",
+            "label": "Supplier (Drop ship or Special order)",
             "reference": {
               "queryId": "northstar.app:query.party_list",
               "getQueryId": "northstar.app:query.party_get",
@@ -49437,6 +49796,12 @@
                 "label": "Route",
                 "orderKey": 126,
                 "field": "northstar.app:metric.purchase_line_route"
+              },
+              {
+                "columnId": "northstar.app:column.purchase_purchasing_priced_lines_arrived",
+                "label": "Arrived",
+                "orderKey": 180,
+                "field": "northstar.app:metric.purchase_line_arrived"
               }
             ]
           },
@@ -49626,6 +49991,12 @@
                 "label": "Route",
                 "orderKey": 126,
                 "field": "northstar.app:metric.purchase_line_route"
+              },
+              {
+                "columnId": "northstar.app:column.purchase_purchasing_lines_arrived",
+                "label": "Arrived",
+                "orderKey": 180,
+                "field": "northstar.app:metric.purchase_line_arrived"
               }
             ]
           },
@@ -49902,8 +50273,8 @@
                     "source": "selected",
                     "field": "northstar.app:metric.purchase_line_route"
                   },
-                  "operator": "equals",
-                  "compare": "Stock"
+                  "operator": "notEquals",
+                  "compare": "Drop ship"
                 }
               ],
               "fillLabel": "Fill open quantities"
@@ -50274,8 +50645,8 @@
                     "source": "selected",
                     "field": "northstar.app:metric.purchase_line_route"
                   },
-                  "operator": "equals",
-                  "compare": "Stock"
+                  "operator": "notEquals",
+                  "compare": "Drop ship"
                 }
               ],
               "fillLabel": "Fill open quantities"
@@ -50916,8 +51287,8 @@
                   "source": "selected",
                   "field": "northstar.app:metric.purchase_line_route"
                 },
-                "operator": "equals",
-                "compare": "Stock"
+                "operator": "notEquals",
+                "compare": "Drop ship"
               }
             ],
             "inputs": [
@@ -51272,8 +51643,8 @@
                   "source": "selected",
                   "field": "northstar.app:metric.purchase_line_route"
                 },
-                "operator": "equals",
-                "compare": "Stock"
+                "operator": "notEquals",
+                "compare": "Drop ship"
               }
             ],
             "inputs": [
@@ -51596,8 +51967,8 @@
                   "source": "selected",
                   "field": "northstar.app:metric.purchase_line_route"
                 },
-                "operator": "equals",
-                "compare": "Stock"
+                "operator": "notEquals",
+                "compare": "Drop ship"
               }
             ],
             "inputs": [

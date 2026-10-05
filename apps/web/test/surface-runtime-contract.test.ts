@@ -23,6 +23,7 @@ import {
 
 import * as listBehavior from '../../../packages/runtime/src/list-behavior/index.js';
 import { ModuleRuntimeInterpreterError } from '../../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import { InventoryPostingError } from '../../../packages/postgres-provider/src/inventory-posting-error.js';
 import {
   AuthenticatedRequestEntryAdapter,
   type UntrustedRequestInput,
@@ -63,6 +64,18 @@ import {
 } from '../src/component-registry.js';
 import { readDemoCompiledFixture } from '../src/demo-runtime.js';
 import { composedApplicationDefinition } from '../../../packages/domain/src/app/builder.js';
+test('special-order allocation refusals retain their named operator-facing identity', () => {
+  for (const code of [
+    'SPECIAL_ORDER_SUPPLY_LINK_REQUIRED',
+    'SPECIAL_ORDER_ARRIVAL_LIMIT',
+  ] as const)
+    assert.deepEqual(
+      operationMessageRef(
+        new InventoryPostingError(code, 'Dedicated supply is not ready'),
+      ),
+      { code: 'OPERATION_REFUSED', subject: code },
+    );
+});
 import {
   declaredCellText,
   declaredListArguments,

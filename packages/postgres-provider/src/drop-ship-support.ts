@@ -128,20 +128,21 @@ export async function assertStockRoutes(
   )
     return;
   const target = dropShipEntity(storage, `${side}_order_line`);
-  const route =
-    side === 'sales'
-      ? dropShipColumn(target, 'sales_order_line_fulfillment_route')
-      : dropShipRelation(storage, 'purchase_order_line_sales_line');
+  const sales = dropShipEntity(storage, 'sales_order_line');
+  const route = dropShipColumn(sales, 'sales_order_line_fulfillment_route');
+  const q = dropShipQuote;
+  const join =
+    side === 'purchase'
+      ? `LEFT JOIN ${dropShipTable(sales)} s ON s.tenant_id=t.tenant_id AND s.environment_id=t.environment_id AND s.${q(sales.legalEntity!.column)}=t.${q(target.legalEntity!.column)} AND s.record_id=t.${q(dropShipRelation(storage, 'purchase_order_line_sales_line'))} AND s.archived_at IS NULL`
+      : '';
   const rows = await client.query<{ route: string | null }>(
-    `SELECT ${dropShipQuote(route)}::text AS route FROM ${dropShipTable(target)} WHERE tenant_id=$1 AND environment_id=$2 AND ${dropShipQuote(target.legalEntity!.column)}=$3 AND record_id=ANY($4::uuid[]) AND archived_at IS NULL`,
+    `SELECT ${side === 'sales' ? 't' : 's'}.${q(route)}::text AS route FROM ${dropShipTable(target)} t ${join} WHERE t.tenant_id=$1 AND t.environment_id=$2 AND t.${q(target.legalEntity!.column)}=$3 AND t.record_id=ANY($4::uuid[]) AND t.archived_at IS NULL`,
     [scope.tenantId, scope.environmentId, scope.legalEntityId, lineIds],
   );
   if (
     rows.rows.length !== new Set(lineIds).size ||
     rows.rows.some((row) =>
-      side === 'purchase'
-        ? row.route !== null
-        : row.route?.endsWith(':option.fulfillment_route_drop_ship'),
+      row.route?.endsWith(':option.fulfillment_route_drop_ship'),
     )
   )
     dropShipRefused(
