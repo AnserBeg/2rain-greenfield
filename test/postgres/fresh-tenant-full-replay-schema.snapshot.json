@@ -14545,7 +14545,7 @@
       "domain": null,
       "name": "nsm_k_o5desofjsx4oqvflrbif2rrr4mjjxzhqilqdcavxt2q67762t54a",
       "type": "c",
-      "definition": "CHECK (nsm_c_5yjbvzfqo3rb7atejahzuqrd3a4kuvllgsb7wczdwtw6y6gp26oq = ANY (ARRAY['northstar.app:option.fulfillment_route_drop_ship'::text, 'northstar.app:option.fulfillment_route_stock'::text])) NOT VALID",
+      "definition": "CHECK (nsm_c_5yjbvzfqo3rb7atejahzuqrd3a4kuvllgsb7wczdwtw6y6gp26oq = ANY (ARRAY['northstar.app:option.fulfillment_route_drop_ship'::text, 'northstar.app:option.fulfillment_route_special_order'::text, 'northstar.app:option.fulfillment_route_stock'::text])) NOT VALID",
       "deferrable": false,
       "initially_deferred": false,
       "validated": false,

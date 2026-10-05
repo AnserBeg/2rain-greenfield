@@ -173,7 +173,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 14 adds record alerts and progression, multi-row Tasks and record
     // columns and links that name a relation of their record.
     // 15 adds independent List progress facts and scalar capability arguments.
-    maximumSupportedVersion: 15,
+    // 16 adds receipt-backed special-order allocation figures in declared Tasks.
+    maximumSupportedVersion: 16,
   },
 });
 

@@ -350,7 +350,15 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
       : received + delivered;
   };
   const linkedFactsOf = (row: SemanticRecordDto) =>
-    commercialLinkedFacts(row, ns, purchase, invoke);
+    commercialLinkedFacts(
+      row,
+      ns,
+      purchase,
+      invoke,
+      model.queries.arrivals
+        ? (lineId) => receivedIdentity(view, scopeId, lineId)
+        : undefined,
+    );
   /** Shipped or delivered quantity not yet on an invoice that counts (ruling D-B). */
   const toInvoice = (orderId: string, lines: readonly SemanticRecordDto[]) =>
     toSettle(orderId, lines, {
@@ -507,6 +515,15 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
         emit('linked_line', links.linkedLine);
         emit('linked_order', links.linkedOrder);
         emit('route', links.route);
+        if (model.resultFields.arrived)
+          emit(
+            'arrived',
+            purchase
+              ? received === null
+                ? null
+                : quantityText(received)
+              : links.arrived,
+          );
       }
       if (purchase && model.resultFields.received) {
         const ordered = units(

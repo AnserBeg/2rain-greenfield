@@ -2,6 +2,11 @@ import {
   PROJECTION_FAMILY_IDS,
   type StorageTargetPayloadV1,
 } from '@north-star/compiler';
+import type { Pool } from 'pg';
+import {
+  withSpecialOrderGate,
+  assertSpecialOrderPosting,
+} from './special-order-support.js';
 import {
   SEMANTIC_OPERATION_RESULT_VERSION,
   type RegisteredCapabilityOperationAuthorization,
@@ -54,7 +59,7 @@ interface PreparedReceiving {
 class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecutor {
   readonly capabilityId = RECEIVING_CAPABILITY_ID;
   readonly #binding: ReceiptBinding;
-  readonly #posting: PostgresInventoryPostingService;
+  readonly #posting: (pool: Pool) => PostgresInventoryPostingService;
   readonly #prepared = new WeakMap<object, PreparedReceiving>();
   constructor(
     private readonly context: PostgresCapabilityOperationExecutorContext,
@@ -68,19 +73,20 @@ class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecut
         'Receiving storage is absent',
       );
     this.#binding = binding;
-    this.#posting = new PostgresInventoryPostingService(
-      context.pool,
-      {
-        capabilityId: RECEIVING_CAPABILITY_ID,
-        capabilityVersion: RECEIVING_CAPABILITY_VERSION,
-        dependencySetRoot: INVENTORY_POSTING_DEPENDENCY_SET_ROOT,
-        releaseContentHash: context.releaseContentHash,
-        releaseId: context.releaseId,
-        storageTarget: storage,
-        storageTargetContentHash: storageContentHash,
-      },
-      { currentInstant: context.currentInstant },
-    );
+    this.#posting = (pool) =>
+      new PostgresInventoryPostingService(
+        pool,
+        {
+          capabilityId: RECEIVING_CAPABILITY_ID,
+          capabilityVersion: RECEIVING_CAPABILITY_VERSION,
+          dependencySetRoot: INVENTORY_POSTING_DEPENDENCY_SET_ROOT,
+          releaseContentHash: context.releaseContentHash,
+          releaseId: context.releaseId,
+          storageTarget: storage,
+          storageTargetContentHash: storageContentHash,
+        },
+        { currentInstant: context.currentInstant },
+      );
   }
   async prepareAuthorization(
     request: RegisteredCapabilityOperationAuthorizationRequest,
@@ -468,10 +474,26 @@ class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecut
           },
         ),
     );
-    const result = await this.#posting.postGoodsReceipt(
-      request.context,
-      await this.context.actorIssuer.issue(request.context),
-      command,
+    const actor = await this.context.actorIssuer.issue(request.context);
+    const result = await withSpecialOrderGate(
+      this.context.pool,
+      { ...request.context, legalEntityId: prepared.legalEntityId },
+      async (pool) => {
+        await assertSpecialOrderPosting(
+          pool,
+          request.context,
+          this.#binding.target,
+          { ...request.context, legalEntityId: prepared.legalEntityId },
+          'purchase',
+          command.sourceId,
+          command.lines,
+        );
+        return this.#posting(pool).postGoodsReceipt(
+          request.context,
+          actor,
+          command,
+        );
+      },
     );
     const scope = request.readBackDefinition.legalEntityScope;
     if (!scope || scope.cardinality !== 'exactlyOne')

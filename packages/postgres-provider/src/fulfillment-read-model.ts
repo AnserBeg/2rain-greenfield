@@ -1,5 +1,6 @@
 import { FULFILLMENT_READ_MODEL_BINDINGS } from '../../domain/src/sales/workspace.js';
 import { commercialLinkedFacts } from './commercial-link-read-model.js';
+import { receivedIdentity } from './goods-receipt.js';
 import {
   fulfillmentDecimal,
   fulfillmentProjectionIdentity,
@@ -380,10 +381,34 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
       emit('shipped', shipped);
       if (model.resultFields.delivered) emit('delivered', delivered);
       if (model.resultFields.route) {
-        const links = await commercialLinkedFacts(row, ns, false, invoke);
+        const links = await commercialLinkedFacts(
+          row,
+          ns,
+          false,
+          invoke,
+          model.queries.arrivals
+            ? (lineId) => receivedIdentity(view, scopeId, lineId)
+            : undefined,
+        );
         values[model.resultFields.route] = links.route;
         values[model.resultFields.linked_line!] = links.linkedLine;
         values[model.resultFields.linked_order!] = links.linkedOrder;
+        if (model.resultFields.arrived)
+          values[model.resultFields.arrived] = links.arrived;
+        if (model.resultFields.special_reservable) {
+          const arrived =
+            links.arrived === null
+              ? null
+              : fulfillmentQuantity(String(links.arrived));
+          const available =
+            arrived === null
+              ? null
+              : (arrived < ordered ? arrived : ordered) - shipped - covered;
+          emit(
+            'special_reservable',
+            available === null ? null : available < 0n ? 0n : available,
+          );
+        }
       }
       emit(
         'open_to_ship',

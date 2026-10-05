@@ -44,6 +44,11 @@
       },
       {
         "action": "transition",
+        "permissionId": "northstar.app:permission.sales_order_create_special_order_po",
+        "resource": "northstar.app:entity.sales_order"
+      },
+      {
+        "action": "transition",
         "permissionId": "northstar.app:permission.purchase_order_record_delivery",
         "resource": "northstar.app:entity.purchase_order"
       },

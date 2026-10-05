@@ -31,6 +31,11 @@ import {
   withModuleRuntimeRole,
 } from './module-runtime-interpreter.js';
 import { PostgresTrustService } from './trust/postgres-trust-service.js';
+import {
+  withSpecialOrderGate,
+  specialOrderFacts,
+  assertSpecialOrderBound,
+} from './special-order-support.js';
 
 export interface PreparedFulfillmentTarget {
   readonly legalEntityId: string;
@@ -72,139 +77,149 @@ export async function executeFulfillmentLifecycle(
       'Fulfillment transition requires its record and exact revision',
     );
 
-  const trust = await new PostgresTrustService(
+  const actor = await context.actorIssuer.issue(request.context);
+  const trust = await withSpecialOrderGate(
     context.pool,
-  ).executeIdempotentAcceptedMutation<{
-    recordId: string;
-    legalEntityId: string;
-    revision: number;
-  }>(
-    request.context,
-    await context.actorIssuer.issue(request.context),
-    {
-      actionId: request.definition.operationId,
-      idempotencyKey: request.idempotencyKey,
-      inputDigest: request.inputDigest,
-      releaseContentHash: request.view.release.contentHash,
-      releaseId: request.view.release.releaseId,
-    },
-    (client) =>
-      withModuleRuntimeRole(client, async () => {
-        const changed =
-          action === 'reserve'
-            ? await reserve(client, binding, request, prepared)
-            : action === 'release'
-              ? await release(client, binding, request, prepared)
-              : await changeOrder(client, binding, request, prepared, action);
-        const metadata = {
-          legalEntityId: {
-            classification: 'INTERNAL' as const,
-            value: changed.legalEntityId,
-          },
-          operationId: {
-            classification: 'INTERNAL' as const,
-            value: request.definition.operationId,
-          },
-          ...(changed.releasedReservationIds.length
-            ? {
-                releasedReservationIds: {
-                  classification: 'INTERNAL' as const,
-                  value: [...changed.releasedReservationIds],
+    { ...request.context, legalEntityId: prepared.legalEntityId },
+    (pool) =>
+      new PostgresTrustService(pool).executeIdempotentAcceptedMutation<{
+        recordId: string;
+        legalEntityId: string;
+        revision: number;
+      }>(
+        request.context,
+        actor,
+        {
+          actionId: request.definition.operationId,
+          idempotencyKey: request.idempotencyKey,
+          inputDigest: request.inputDigest,
+          releaseContentHash: request.view.release.contentHash,
+          releaseId: request.view.release.releaseId,
+        },
+        (client) =>
+          withModuleRuntimeRole(client, async () => {
+            const changed =
+              action === 'reserve'
+                ? await reserve(client, binding, request, prepared)
+                : action === 'release'
+                  ? await release(client, binding, request, prepared)
+                  : await changeOrder(
+                      client,
+                      binding,
+                      request,
+                      prepared,
+                      action,
+                    );
+            const metadata = {
+              legalEntityId: {
+                classification: 'INTERNAL' as const,
+                value: changed.legalEntityId,
+              },
+              operationId: {
+                classification: 'INTERNAL' as const,
+                value: request.definition.operationId,
+              },
+              ...(changed.releasedReservationIds.length
+                ? {
+                    releasedReservationIds: {
+                      classification: 'INTERNAL' as const,
+                      value: [...changed.releasedReservationIds],
+                    },
+                  }
+                : {}),
+            };
+            return {
+              mutationResult: {
+                recordId: changed.recordId,
+                legalEntityId: changed.legalEntityId,
+                revision: changed.revision,
+              },
+              command: {
+                actionId: request.definition.operationId,
+                causationId: null,
+                channel: request.channel,
+                correlationId: randomUUID(),
+                invocationId: randomUUID(),
+                metadata,
+                releaseContentHash: request.view.release.contentHash,
+                releaseId: request.view.release.releaseId,
+                policy: {
+                  decision: 'ALLOW' as const,
+                  evaluatorVersion: request.policyEvaluatorVersion,
+                  policyVersion: request.policyVersion,
+                  relevantInputs: metadata,
+                  schemaVersion: POLICY_DECISION_EVIDENCE_VERSION,
                 },
-              }
-            : {}),
-        };
-        return {
-          mutationResult: {
-            recordId: changed.recordId,
-            legalEntityId: changed.legalEntityId,
-            revision: changed.revision,
-          },
-          command: {
-            actionId: request.definition.operationId,
-            causationId: null,
-            channel: request.channel,
-            correlationId: randomUUID(),
-            invocationId: randomUUID(),
-            metadata,
-            releaseContentHash: request.view.release.contentHash,
-            releaseId: request.view.release.releaseId,
-            policy: {
-              decision: 'ALLOW' as const,
-              evaluatorVersion: request.policyEvaluatorVersion,
-              policyVersion: request.policyVersion,
-              relevantInputs: metadata,
-              schemaVersion: POLICY_DECISION_EVIDENCE_VERSION,
-            },
-            change: {
-              changeDocumentId: randomUUID(),
-              recordId: changed.recordId,
-              recordType: entity.entityId,
-              revision: changed.revision,
-              changes: [
-                {
-                  classification: 'INTERNAL' as const,
-                  fieldId: auditFieldId(
-                    action === 'reserve' || action === 'release'
-                      ? `${entity.entityId}.state`
-                      : `${entity.entityId}.lifecycle`,
-                  ),
-                  oldState: {
-                    state: 'VALUE' as const,
-                    value: changed.before,
-                  },
-                  newState: {
-                    state: 'VALUE' as const,
-                    value: changed.after,
-                  },
-                },
-                ...(changed.releasedReservationIds.length
-                  ? [
-                      {
-                        classification: 'INTERNAL' as const,
-                        fieldId: auditFieldId('releasedReservationIds'),
-                        oldState: {
-                          state: 'VALUE' as const,
-                          value: [] as string[],
-                        },
-                        newState: {
-                          state: 'VALUE' as const,
-                          value: [...changed.releasedReservationIds],
-                        },
+                change: {
+                  changeDocumentId: randomUUID(),
+                  recordId: changed.recordId,
+                  recordType: entity.entityId,
+                  revision: changed.revision,
+                  changes: [
+                    {
+                      classification: 'INTERNAL' as const,
+                      fieldId: auditFieldId(
+                        action === 'reserve' || action === 'release'
+                          ? `${entity.entityId}.state`
+                          : `${entity.entityId}.lifecycle`,
+                      ),
+                      oldState: {
+                        state: 'VALUE' as const,
+                        value: changed.before,
                       },
-                    ]
-                  : []),
-              ],
-            },
-            event: {
-              eventId: randomUUID(),
-              eventSchemaVersion: 'northstar.fulfillment-event/v1',
-              eventType: request.definition.operationId.replace(
-                ':operation.',
-                ':event.',
-              ),
-              payload: metadata,
-            },
-            outbox: {
-              outboxId: randomUUID(),
-              deduplicationKey: `${request.definition.operationId}:${request.context.principalId}:${request.idempotencyKey}`,
-            },
-          },
-        };
-      }),
-    prepared.itemId && prepared.locationId
-      ? async (client) => {
-          await acquireStockIdentityLocks(client, [
-            {
-              tenantId: request.context.tenantId,
-              environmentId: request.context.environmentId,
-              legalEntityId: prepared.legalEntityId,
-              itemId: prepared.itemId!,
-              locationId: prepared.locationId!,
-            },
-          ]);
-        }
-      : undefined,
+                      newState: {
+                        state: 'VALUE' as const,
+                        value: changed.after,
+                      },
+                    },
+                    ...(changed.releasedReservationIds.length
+                      ? [
+                          {
+                            classification: 'INTERNAL' as const,
+                            fieldId: auditFieldId('releasedReservationIds'),
+                            oldState: {
+                              state: 'VALUE' as const,
+                              value: [] as string[],
+                            },
+                            newState: {
+                              state: 'VALUE' as const,
+                              value: [...changed.releasedReservationIds],
+                            },
+                          },
+                        ]
+                      : []),
+                  ],
+                },
+                event: {
+                  eventId: randomUUID(),
+                  eventSchemaVersion: 'northstar.fulfillment-event/v1',
+                  eventType: request.definition.operationId.replace(
+                    ':operation.',
+                    ':event.',
+                  ),
+                  payload: metadata,
+                },
+                outbox: {
+                  outboxId: randomUUID(),
+                  deduplicationKey: `${request.definition.operationId}:${request.context.principalId}:${request.idempotencyKey}`,
+                },
+              },
+            };
+          }),
+        prepared.itemId && prepared.locationId
+          ? async (client) => {
+              await acquireStockIdentityLocks(client, [
+                {
+                  tenantId: request.context.tenantId,
+                  environmentId: request.context.environmentId,
+                  legalEntityId: prepared.legalEntityId,
+                  itemId: prepared.itemId!,
+                  locationId: prepared.locationId!,
+                },
+              ]);
+            }
+          : undefined,
+      ),
   );
   return fulfillmentReadBack(context, request, trust);
 }
@@ -386,6 +401,14 @@ async function reserve(
       ],
     ),
   );
+  const supply = await specialOrderFacts(
+    client,
+    binding.target,
+    { ...request.context, legalEntityId: prepared.legalEntityId },
+    lineId,
+  );
+  if (supply)
+    assertSpecialOrderBound(supply.arrived, shipped, lineReserved, quantity);
   if (onHand - identityReserved < quantity)
     throw fulfillmentError(
       'FULFILLMENT_RESERVATION_SHORTAGE',

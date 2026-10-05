@@ -2,6 +2,7 @@ import {
   PROJECTION_FAMILY_IDS,
   type StorageTargetPayloadV1,
 } from '@north-star/compiler';
+import type { Pool } from 'pg';
 import {
   assertNoDeliveredOrder,
   assertStockRoutes,
@@ -45,6 +46,10 @@ import {
 } from './inventory-posting-service.js';
 import { withModuleRuntimeRole } from './module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from './request-context.js';
+import {
+  withSpecialOrderGate,
+  assertSpecialOrderPosting,
+} from './special-order-support.js';
 
 interface PreparedFulfillment extends PreparedFulfillmentTarget {
   readonly request: RegisteredCapabilityOperationAuthorizationRequest;
@@ -53,7 +58,7 @@ interface PreparedFulfillment extends PreparedFulfillmentTarget {
 class FulfillmentCapabilityExecutor implements RegisteredCapabilityOperationExecutor {
   readonly capabilityId = FULFILLMENT_CAPABILITY_ID;
   readonly #binding: FulfillmentBinding;
-  readonly #posting: PostgresInventoryPostingService;
+  readonly #posting: (pool: Pool) => PostgresInventoryPostingService;
   readonly #prepared = new WeakMap<object, PreparedFulfillment>();
 
   constructor(
@@ -68,19 +73,20 @@ class FulfillmentCapabilityExecutor implements RegisteredCapabilityOperationExec
         'Fulfillment storage is absent',
       );
     this.#binding = binding;
-    this.#posting = new PostgresInventoryPostingService(
-      context.pool,
-      {
-        capabilityId: FULFILLMENT_CAPABILITY_ID,
-        capabilityVersion: FULFILLMENT_CAPABILITY_VERSION,
-        dependencySetRoot: INVENTORY_POSTING_DEPENDENCY_SET_ROOT,
-        releaseContentHash: context.releaseContentHash,
-        releaseId: context.releaseId,
-        storageTarget: storage,
-        storageTargetContentHash: storageContentHash,
-      },
-      { currentInstant: context.currentInstant },
-    );
+    this.#posting = (pool) =>
+      new PostgresInventoryPostingService(
+        pool,
+        {
+          capabilityId: FULFILLMENT_CAPABILITY_ID,
+          capabilityVersion: FULFILLMENT_CAPABILITY_VERSION,
+          dependencySetRoot: INVENTORY_POSTING_DEPENDENCY_SET_ROOT,
+          releaseContentHash: context.releaseContentHash,
+          releaseId: context.releaseId,
+          storageTarget: storage,
+          storageTargetContentHash: storageContentHash,
+        },
+        { currentInstant: context.currentInstant },
+      );
   }
 
   async prepareAuthorization(
@@ -309,10 +315,26 @@ class FulfillmentCapabilityExecutor implements RegisteredCapabilityOperationExec
         'Only named fulfillment operations are admitted by this route',
       );
     const command = await this.#shipmentCommand(request, prepared);
-    const result = await this.#posting.postShipment(
-      request.context,
-      await this.context.actorIssuer.issue(request.context),
-      command,
+    const actor = await this.context.actorIssuer.issue(request.context);
+    const result = await withSpecialOrderGate(
+      this.context.pool,
+      { ...request.context, legalEntityId: prepared.legalEntityId },
+      async (pool) => {
+        await assertSpecialOrderPosting(
+          pool,
+          request.context,
+          this.#binding.target,
+          { ...request.context, legalEntityId: prepared.legalEntityId },
+          'sales',
+          command.sourceId,
+          command.lines,
+        );
+        return this.#posting(pool).postShipment(
+          request.context,
+          actor,
+          command,
+        );
+      },
     );
     let record: SemanticOperationResultEnvelope['readBack'] = null;
     try {

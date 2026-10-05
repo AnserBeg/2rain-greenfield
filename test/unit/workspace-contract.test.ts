@@ -1168,6 +1168,7 @@ test('PAYABLES (PY-G): each order line shows its three-way match from the purcha
     'linked_line',
     'linked_order',
     'route',
+    'arrived',
   ]);
   assert.deepEqual(
     Object.fromEntries(
@@ -1184,6 +1185,7 @@ test('PAYABLES (PY-G): each order line shows its three-way match from the purcha
       deliveries: `${ns}:query.drop_ship_delivery_list`,
       lineSource: `${ns}:query.purchase_order_line_get`,
       linkedLine: `${ns}:query.sales_order_line_get`,
+      arrivals: `${ns}:query.purchase_order_received_get`,
     },
   );
 

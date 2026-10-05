@@ -41,6 +41,7 @@ const suiteDefinitions = [
       'test/unit/party-definition.test.ts',
       'test/unit/purchasing-definition.test.ts',
       'test/unit/sales-definition.test.ts',
+      'test/unit/special-order.test.ts',
       'test/unit/web-surface-hex-literal-ratchet.test.ts',
       'test/unit/workspace-contract.test.ts',
     ],
@@ -85,6 +86,7 @@ const suiteDefinitions = [
       'test/integration/security-scan-contract.test.ts',
       'test/integration/semantic-gateways.test.ts',
       'test/integration/semantic-query-legal-entity-scope.test.ts',
+      'test/integration/special-order.test.ts',
       'test/integration/surface-data-binding.test.ts',
       'test/integration/table-behavior.test.ts',
       'test/integration/toolchain-contract.test.ts',
@@ -131,6 +133,7 @@ const suiteDefinitions = [
       'test/postgres/composed-application.test.ts',
       'test/postgres/commercial-totals.test.ts',
       'test/postgres/drop-ship.test.ts',
+      'test/postgres/special-order.test.ts',
       'test/postgres/expected-receipts.test.ts',
       'test/postgres/fulfillment.test.ts',
       'test/postgres/order-lists.test.ts',
@@ -186,7 +189,7 @@ const suiteDefinitions = [
   },
   {
     discoveryPattern:
-      'test/postgres/**/@(commercial-totals|drop-ship|expected-receipts|fulfillment|order-lists|order-pages|packing-retrieval|payables|purchase-order-ending|receivables|receiving-authorization).test.ts',
+      'test/postgres/**/@(commercial-totals|drop-ship|special-order|expected-receipts|fulfillment|order-lists|order-pages|packing-retrieval|payables|purchase-order-ending|receivables|receiving-authorization).test.ts',
     expectedFiles: [
       'test/postgres/commercial-totals.test.ts',
       'test/postgres/drop-ship.test.ts',
@@ -199,6 +202,7 @@ const suiteDefinitions = [
       'test/postgres/purchase-order-ending.test.ts',
       'test/postgres/receivables.test.ts',
       'test/postgres/receiving-authorization.test.ts',
+      'test/postgres/special-order.test.ts',
     ],
     script: 'test:postgres:commercial',
   },

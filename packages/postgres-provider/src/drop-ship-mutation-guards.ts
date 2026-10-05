@@ -98,7 +98,9 @@ export async function assertDropShipMutation(
   const validate = async (values: Record<string, unknown>) => {
     if (
       values[`${ns}:field.sales_order_line_fulfillment_route`] !==
-      `${ns}:option.fulfillment_route_drop_ship`
+        `${ns}:option.fulfillment_route_drop_ship` &&
+      values[`${ns}:field.sales_order_line_fulfillment_route`] !==
+        `${ns}:option.fulfillment_route_special_order`
     )
       return;
     const supplier =

@@ -18,6 +18,7 @@
 | **BUILD** | `PAYABLES` | Vendor bills, payments and credits mirroring receivables, stacked on `packet/ORDER-PARITY`; sole local author on `packet/PAYABLES`; increments 1-2 2026-09-30, increment 3 (three-way match) chartered; outside the Critical set; [record](packets/PAYABLES.md); no merge/deployment |
 | **BUILD** | `DROP-SHIP` | BUILD complete/evidence-ready, branch `packet/DROP-SHIP`, executable `9c349098`; full 11-job CI PASS at `39c721ae`; PAYABLES `96ac2341` and green RELATION-INSTALL `f3330e98` merged; [record](packets/DROP-SHIP.md) and validated DIY; inherited Critical bridge owner review owed on #20; draft PR #19 only, no main merge/deployment |
 | **SUPPORT** | — | idle |
+| **BUILD** | `SPECIAL-ORDER` | Active on `packet/SPECIAL-ORDER` from DROP-SHIP `1b16c746`; dedicated stock receipt allocation and explicit reservation Task; outside the Critical set; [record](packets/SPECIAL-ORDER.md); draft PR against DROP-SHIP only, no integration/deployment |
 
 
 **Read this before starting or resuming any packet while more than one lane is
