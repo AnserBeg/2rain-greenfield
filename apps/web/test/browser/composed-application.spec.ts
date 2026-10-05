@@ -1174,10 +1174,10 @@ async function inventoryNavigationJourney(
     ).toHaveCount(0);
     await inventoryNavigation.getByText('Inventory', { exact: true }).click();
   }
+  // The List reads the stock documents query, so entry selects the company
+  // under that query's operand (STOCK-COUNTS).
   await page.goto(surfaceUrl(baseUrl, 'inventory_transaction_list'));
-  await expect(page).toHaveURL(
-    /inventory_transaction_list_legal_entity_scope=/u,
-  );
+  await expect(page).toHaveURL(/inventory_document_list_legal_entity_scope=/u);
 }
 
 async function inventoryRecordNavigationJourney(
@@ -1969,7 +1969,10 @@ async function scopedFormPersistenceJourney(
   // A scoped generic create refuses anything but exactly one well-formed
   // company. The stock count line form is the specimen now that the stock
   // count form is the count editor, as the transaction form is the stock
-  // document editor.
+  // document editor. Like every Inventory form it carries a workspace entry
+  // (its owner is the counts List), so two companies, or one the entry does
+  // not offer, are refused there before any operand is read or authorized;
+  // with none, entry does not default a form, and the create itself refuses.
   const lineScopeParameterId = await loadSurfaceScopeParameterId(
     'stock_count_line_form',
   );
@@ -1991,7 +1994,7 @@ async function scopedFormPersistenceJourney(
     lineScopeParameterId,
     multipleScopeUrl.href,
     countId,
-    'OPERATION_INPUT_INVALID',
+    'WORKSPACE_COMPANY_UNAVAILABLE',
   );
   await expectScopedStockCountLineCreateRefusal(
     page,
@@ -2012,9 +2015,10 @@ async function scopedFormPersistenceJourney(
       'not-a-uuid',
     ),
     countId,
-    // The authorization boundary refuses malformed scope before it can reach
-    // provider input parsing; it must never inherit the demo role's ALLOW.
-    'OPERATION_PERMISSION_DENIED',
+    // A malformed company is not one the entry offers: refused before it can
+    // reach authorization or provider input parsing, so it can never inherit
+    // the demo role's ALLOW.
+    'WORKSPACE_COMPANY_UNAVAILABLE',
   );
 }
 
@@ -2240,7 +2244,7 @@ async function expectScopedStockCountLineCreateRefusal(
   scopeParameterId: string,
   action: string,
   countId: string,
-  diagnosticCode: 'OPERATION_INPUT_INVALID' | 'OPERATION_PERMISSION_DENIED',
+  diagnosticCode: 'OPERATION_INPUT_INVALID' | 'WORKSPACE_COMPANY_UNAVAILABLE',
 ): Promise<void> {
   await page.goto(
     scopedSurfaceUrl(
