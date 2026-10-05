@@ -1,6 +1,6 @@
 # RELATION-INSTALL — install relation columns on existing company tables
 
-Status: resumed after the owner's Windows restart; Critical; owner-run review owed; no push, PR, merge or deployment.
+Status: draft PR #20 against PAYABLES; Critical; owner-run review owed; no merge or deployment.
 Base: PAYABLES `b91c5284e163d19a834802479dd2dc1e3a1201d1`.
 Critical scope: relation-column resolution and existing column-grant admission in `module-storage-materializer.ts`; no other Critical path changed.
 Design: `DROP-SHIP-RELATION-INSTALL-design.md` at DROP-SHIP `4000c486` (owner selected 2026-10-04).
@@ -29,10 +29,10 @@ Design: `DROP-SHIP-RELATION-INSTALL-design.md` at DROP-SHIP `4000c486` (owner se
 ## Gates
 
 - Typecheck PASS; focused Prettier PASS.
-- Focused real PostgreSQL transition: fixture correction after first run refused re-normalization of normalized bytes; corrected run pending. Production lookup unchanged.
+- Focused real PostgreSQL transition reached nullable storage, scoped FK/index, exact grants and a valid gateway create; fixture refusal expectation corrected to observed `MODULE_RELATION_VIOLATION` at `e1e8c70f`. Final restored run pending; no PostgreSQL PASS claimed.
 - Static expected-red validation PASS (161 entries / 14 manifests) on saved checkpoint. Mutation controls pending; no file mutated by a control yet.
-- Check-records PASS (162 records, 17 declaring; 534 paths and 152 symbols observed); focused lint and formatting PASS. The record-claim names executable `a87e719d`.
-- Full hosted CI and owner Critical review: pending.
+- Check-records PASS (162 records, 17 declaring; 534 paths and 152 symbols observed); focused lint and formatting PASS. The record-claim now names executable `e1e8c70f`.
+- Full hosted CI and owner Critical review: pending; draft PR https://github.com/AnserBeg/2rain-greenfield/pull/20. Controls remain gated on AC and >=2 GB Windows free memory, checked outside the lock (latest about 1.25 GB).
 
 ## Test it yourself
 
@@ -48,14 +48,14 @@ DROP-SHIP's user-facing delivery workflow is the next authorized checkpoint afte
 
 ## Review prompt
 
-`RELATION-INSTALL-review-prompt.md` names executable `a87e719d`; facts and questions only, 19 lines. Owner-run review pending; no self-review.
+`RELATION-INSTALL-review-prompt.md` names executable `e1e8c70f`; facts and questions only, 20 lines. Owner-run review pending; no self-review.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RELATION-INSTALL",
   "base": "b91c5284e163d19a834802479dd2dc1e3a1201d1",
-  "head": "a87e719d0c02907132a7accb843f6b82ce9061b6",
+  "head": "e1e8c70f6692ffd11d4b270a2cc8bc8e70d192d3",
   "changedPaths": [
     "packages/postgres-provider/src/module-storage-materializer.ts",
     "test/postgres/composed-application.test.ts",
