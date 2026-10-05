@@ -14,6 +14,7 @@ import {
   declaredListArguments,
   declaredListCsv,
   exportFileName,
+  figureBandLabel,
   readDeclaredListState,
   viewNeedsProgress,
   withheldProgressQuery,
@@ -28,6 +29,7 @@ import type {
   SemanticOperationMediationAuthority,
 } from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import {
+  registeredSemanticQueryFromPinnedView,
   SEMANTIC_QUERY_REQUEST_VERSION,
   type SemanticQueryResultEnvelope,
 } from '../../../packages/runtime/src/semantic-query-gateway.js';
@@ -43,6 +45,7 @@ import {
   renderRegisteredSurfaceComponent,
   surfaceSupportsRuntimeIntent,
   type SurfaceDataRenderState,
+  type SurfaceFormReferenceChoices,
   type SurfaceOperationFeedback,
   type SurfaceRelationPicker,
   type SurfaceRelationPickerOption,
@@ -307,6 +310,11 @@ export async function renderSurfaceRuntimeWithData(
     legalEntitySelection,
     url,
   );
+  const formReferences = await loadFormReferences(
+    view,
+    selection.selected,
+    gateways.queryGateway,
+  );
   const declaredList =
     selection.selected.list && binding.query.queryType === 'list'
       ? {
@@ -359,6 +367,7 @@ export async function renderSurfaceRuntimeWithData(
       queryParameterValues,
       binding.relationInputs,
       relationPickers,
+      formReferences,
     );
   }
 
@@ -457,7 +466,82 @@ export async function renderSurfaceRuntimeWithData(
     queryParameterValues,
     binding.relationInputs,
     relationPickers,
+    formReferences,
   );
+}
+
+/**
+ * A Record form's references (`surface.form`): each field's choices read
+ * through its declared list query for this request, labelled by the declared
+ * label field and sorted by it. A read the gateway refuses, or one that does
+ * not fit a single page, leaves the field `unavailable`: it keeps its plain
+ * control, so the stored id is never lost or replaced by a partial choice.
+ */
+async function loadFormReferences(
+  view: RuntimeViewContract.RequestRuntimeView,
+  surface: CompiledSurfaceDefinition,
+  queryGateway: SemanticQueryGateway,
+): Promise<Readonly<Record<string, SurfaceFormReferenceChoices>> | null> {
+  if (surface.surfaceRole !== 'form' || !surface.form) return null;
+  const unavailable = Object.freeze({ status: 'unavailable' as const });
+  const choices = await Promise.all(
+    surface.form.references.map(async (reference) => {
+      const query = registeredSemanticQueryFromPinnedView(
+        view,
+        reference.query.targetId,
+      );
+      if (!query || query.queryType !== 'list' || query.legalEntityScope)
+        return [reference.field, unavailable] as const;
+      try {
+        const result = await queryGateway.invoke(view, {
+          arguments: {
+            includeArchived: false,
+            list: {
+              cursor: null,
+              matchMode: 'substring',
+              pageSize: query.maximumResultCount,
+              relationLabels: [],
+              schemaVersion: SHARED_LIST_QUERY_VERSION,
+              search: '',
+              sort: [],
+            },
+          },
+          queryId: query.queryId,
+          schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+        });
+        if (result.outcome !== 'exact')
+          return [reference.field, unavailable] as const;
+        const shared = requireSharedListResult(result);
+        if (shared.listCoverage.hasMore)
+          return [reference.field, unavailable] as const;
+        const labelFieldId = reference.labelField.targetId;
+        const options = shared.records
+          .map((record) => {
+            const label =
+              record.displayValues?.[labelFieldId] ??
+              record.values[labelFieldId];
+            return Object.freeze({
+              label:
+                typeof label === 'string' && label.trim() !== ''
+                  ? label
+                  : shortIdentity(record.recordId),
+              recordId: record.recordId,
+            });
+          })
+          .sort((left, right) => left.label.localeCompare(right.label));
+        return [
+          reference.field,
+          Object.freeze({
+            options: Object.freeze(options),
+            status: 'ready' as const,
+          }),
+        ] as const;
+      } catch {
+        return [reference.field, unavailable] as const;
+      }
+    }),
+  );
+  return Object.freeze(Object.fromEntries(choices));
 }
 
 /**
@@ -628,6 +712,9 @@ async function exportDeclaredList(
   return Object.freeze({
     download: Object.freeze({
       body: declaredListCsv(list, result.records, (record, fieldId, value) => {
+        // A band's value is a code; its declared label is what it means.
+        const band = figureBandLabel(list, fieldId, value);
+        if (band !== null) return band;
         const presented = displayFieldValue(view, record, fieldId, value);
         // Only an enumeration's label replaces its stored value in a file.
         return typeof value === 'string' &&
@@ -1001,6 +1088,9 @@ function renderSelectedSurface(
   queryParameterValues: Readonly<Record<string, string>> = Object.freeze({}),
   relationInputs: EntityRelationAuthority | null = null,
   relationPickers: SurfaceRelationPickerState | null = null,
+  formReferences: Readonly<
+    Record<string, SurfaceFormReferenceChoices>
+  > | null = null,
 ): SurfaceRuntimeResponse {
   // Compact and full layouts are alternative renderings of these same slots;
   // a responsive implementation must never mount both at once.
@@ -1008,6 +1098,7 @@ function renderSelectedSurface(
     renderRegisteredSurfaceComponent({
       data,
       feedback,
+      ...(formReferences ? { formReferences } : {}),
       legalEntitySelection,
       operations,
       queryParameterValues,

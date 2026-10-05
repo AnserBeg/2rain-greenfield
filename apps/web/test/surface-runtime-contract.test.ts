@@ -69,6 +69,7 @@ import {
   declaredListArguments,
   declaredListCsv,
   declaredRowAction,
+  figureBandLabel,
   overdueDays,
   readDeclaredListState,
   startOfTodayUtc,
@@ -1165,6 +1166,155 @@ test('a declared List sends before-today as the injected day, keeps each tab ope
   assert.equal(
     csv,
     '\uFEFFNumber,Expected,ordered,received,open\r\nPO-1,2026-09-25T12:00:00.000Z,15,4,10.5\r\n',
+  );
+});
+
+/**
+ * REPLENISHMENT: Stock by item, as the product declares it, sends its figures
+ * with every page, count and export request -- a tab's band as `keep` -- the
+ * gateway's own contract parses them and binds them into the cursor, and a
+ * band's value is shown and exported as the label the List declares.
+ */
+test('a declared List sends its figures with every request, keeps each tab band and shows a band by its label', () => {
+  const ns = 'northstar.app';
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const surface = (
+    composedApplicationDefinition().surfaces as Array<Record<string, unknown>>
+  ).find((value) => value.surfaceId === id('surface', 'item_stock_list'))!;
+  const list = SurfaceListSchema.parse(surface.list);
+  const queryId = id('query', 'item_stock_list');
+  const now = new Date('2026-10-04T12:00:00.000Z');
+  const status = id('list_figure', 'item_stock_list_status');
+  const band = (local: string) => id('list_band', `item_stock_list_${local}`);
+  const view = (local: string) => id('list_view', `item_stock_list_${local}`);
+  type Sent = {
+    list: {
+      cursor: string | null;
+      figures?: {
+        keep?: { figureId: string; values: string[] };
+        sums: Array<{ figureId: string; sum: string }>;
+        bands?: Array<{ figureId: string; otherwise: string }>;
+      };
+    };
+  };
+  const sent = (
+    state: ReturnType<typeof readDeclaredListState>,
+    options: Partial<Parameters<typeof declaredListArguments>[2]> = {},
+  ) =>
+    declaredListArguments(list, state, {
+      mode: 'page',
+      now,
+      queryId,
+      scopeArguments: {},
+      ...options,
+    }) as unknown as Sent;
+  const state = (local?: string) =>
+    readDeclaredListState(
+      list,
+      new URL(
+        `http://list.local/?${local ? `view=${encodeURIComponent(view(local))}&` : ''}page=2`,
+      ),
+    );
+  // Every request carries the declaration's figures, labels left out.
+  const all = sent(state(), { pageOffset: 50 });
+  assert.deepEqual(
+    all.list.figures?.sums.map((value) => value.sum),
+    ['rows', 'related', 'remaining', 'remaining'],
+  );
+  assert.equal(all.list.figures?.keep, undefined);
+  assert.equal(all.list.figures?.bands?.[0]?.otherwise, band('healthy'));
+  assert.doesNotMatch(JSON.stringify(all.list.figures), /"label"/u);
+  // A tab keeps its band, for the page and for its count alike.
+  const shortage = sent(state('shortage'), { pageOffset: 50 });
+  assert.deepEqual(shortage.list.figures?.keep, {
+    figureId: status,
+    values: [band('shortage')],
+  });
+  assert.deepEqual(
+    sent(state(), { mode: 'count', viewId: view('reorder') }).list.figures
+      ?.keep,
+    { figureId: status, values: [band('reorder')] },
+  );
+  // The gateway's contract reads them back, and the page-2 cursor of one
+  // tab decodes for that tab and for no other.
+  const parse = (value: Sent) =>
+    listBehavior.parseSharedListArguments(
+      value as unknown as Parameters<
+        typeof listBehavior.parseSharedListArguments
+      >[0],
+      {
+        declaredParameterIds: [],
+        exportMaximumResultCount: 5000,
+        maximumResultCount: 100,
+        queryId,
+      },
+    );
+  assert.deepEqual(parse(shortage)?.figures?.keep, {
+    figureId: status,
+    values: [band('shortage')],
+  });
+  assert.equal(parse(shortage)?.pageOffset, 50);
+  assert.throws(
+    () => parse({ list: { ...all.list, cursor: shortage.list.cursor } }),
+    (error: unknown) =>
+      error instanceof listBehavior.SharedListContractError &&
+      error.code === 'LIST_CURSOR_INVALID',
+  );
+  // A keep the List's bands do not declare never reaches a statement.
+  assert.throws(
+    () =>
+      parse({
+        list: {
+          ...shortage.list,
+          cursor: null,
+          figures: {
+            ...shortage.list.figures!,
+            keep: { figureId: status, values: [band('overstock')] },
+          },
+        },
+      }),
+    (error: unknown) =>
+      error instanceof listBehavior.SharedListContractError &&
+      error.code === 'LIST_INPUT_MALFORMED',
+  );
+
+  // A band reads as its label in the page and in the export; a figure the
+  // statement could not state reads empty, never 0.
+  assert.equal(figureBandLabel(list, status, band('reorder')), 'Reorder');
+  assert.equal(figureBandLabel(list, status, 'not a band value'), null);
+  assert.equal(
+    figureBandLabel(list, id('field', 'item_sku'), band('reorder')),
+    null,
+  );
+  const row = {
+    archived: false,
+    entityId: id('entity', 'item'),
+    recordId: '00000000-0000-4000-8000-000000000001',
+    revision: 1,
+    values: {
+      [id('field', 'item_sku')]: 'VALVE-10',
+      [id('field', 'item_name')]: 'Valve',
+      [id('field', 'item_base_unit')]: 'EA',
+      [id('field', 'item_reorder_point')]: null,
+      ...Object.fromEntries(
+        ['on_hand', 'reserved', 'available', 'incoming', 'open_demand'].map(
+          (local) => [id('list_figure', `item_stock_list_${local}`), '1'],
+        ),
+      ),
+      [id('list_figure', 'item_stock_list_projected')]: '-4',
+      [status]: band('shortage'),
+    },
+  };
+  const present = (
+    _record: unknown,
+    fieldId: string,
+    value: Parameters<typeof figureBandLabel>[2],
+  ) => figureBandLabel(list, fieldId, value) ?? String(value);
+  const statusColumn = list.columns.find((value) => value.field === status)!;
+  assert.equal(declaredCellText(statusColumn, row, present), 'Shortage');
+  assert.equal(
+    declaredListCsv(list, [row], present),
+    "\uFEFFSKU,Item,Unit,On hand,Reserved,Available,Incoming,Open demand,Projected,Reorder point,Status\r\nVALVE-10,Valve,EA,1,1,1,1,1,'-4,,Shortage\r\n",
   );
 });
 

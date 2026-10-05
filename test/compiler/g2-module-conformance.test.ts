@@ -1800,6 +1800,37 @@ function composedApplicationWithoutSales(): Record<string, unknown> {
         ?.queries ?? {},
     ).every((dependency) => remaining.has(referenceTarget(dependency) ?? '')),
   );
+  // REPLENISHMENT: Stock by item and the Buying worklist add up Sales' order
+  // lines and reservations. Without Sales they go too, with the queries they
+  // read through, as the builder cuts a List whose figures' queries are not
+  // composed.
+  const kept = new Set(
+    (definition.queries as Array<Record<string, unknown>>).map((query) =>
+      String(query.queryId),
+    ),
+  );
+  const figured = (
+    definition.surfaces as Array<Record<string, unknown>>
+  ).filter((surface) => {
+    const figures = (surface.list as { figures?: unknown } | undefined)
+      ?.figures;
+    return (
+      figures !== undefined &&
+      [...JSON.stringify(figures).matchAll(/"targetId":"([^"]+)"/gu)].some(
+        ([, queryId]) => !kept.has(queryId!),
+      )
+    );
+  });
+  const cut = new Set(figured.map((surface) => String(surface.surfaceId)));
+  const cutQueries = new Set(
+    figured.map((surface) => referenceTarget(surface.dataSource) ?? ''),
+  );
+  definition.surfaces = (
+    definition.surfaces as Array<Record<string, unknown>>
+  ).filter((surface) => !cut.has(String(surface.surfaceId)));
+  definition.queries = (
+    definition.queries as Array<Record<string, unknown>>
+  ).filter((query) => !cutQueries.has(String(query.queryId)));
   const itemPage = `${APPLICATION_NAMESPACE}:surface.item_detail`;
   const plainItemPage = (
     catalogModuleDefinition(APPLICATION_NAMESPACE, { sellingPrices: true })

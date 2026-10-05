@@ -5775,6 +5775,23 @@ function composedApplicationWithoutInventoryForTransition(): Record<
       ? { ...plainItemPage, workspace: { membership: 'contextual' } }
       : surface,
   );
+  // REPLENISHMENT: Stock by item and the Buying worklist are Catalog's Lists
+  // that add up Inventory, Sales and Purchasing rows; without them they go,
+  // with their queries, as the builder cuts a List whose figures' queries are
+  // not composed.
+  const itemLists = new Set(
+    ['item_stock_list', 'item_buying_list'].map(
+      (local) => `${APPLICATION_NAMESPACE}:${local}`,
+    ),
+  );
+  const named = (value: unknown) =>
+    String(value).replace(/:(?:surface|query)\./u, ':');
+  withoutInventory.surfaces = (
+    withoutInventory.surfaces as Array<Record<string, unknown>>
+  ).filter((surface) => !itemLists.has(named(surface.surfaceId)));
+  withoutInventory.queries = (
+    withoutInventory.queries as Array<Record<string, unknown>>
+  ).filter((query) => !itemLists.has(named(query.queryId)));
   return withoutInventory;
 }
 

@@ -1,6 +1,7 @@
 /**
- * The item page (INVENTORY-PARITY): the item's own facts, then its stock at
- * each location and its latest movements. An item is shared by every company;
+ * The item page (INVENTORY-PARITY): the item's own facts -- with its reorder
+ * levels, preferred location and standard costs (REPLENISHMENT) -- then its
+ * stock at each location and its latest movements. An item is shared by every company;
  * its stock and movements belong to one. Each of them holds the item as plain
  * text, with no declared relation to it, so each dataset is scoped by that
  * field (`fieldScope`) and read in the company the page's entry chose.
@@ -74,6 +75,43 @@ export function itemStockWorkspace(namespace: string): Record<string, unknown> {
       column('price_cad', 'Price (CAD)', 50, f('item_price_cad'), money),
       column('price_usd', 'Price (USD)', 60, f('item_price_usd'), money),
       column('price_eur', 'Price (EUR)', 70, f('item_price_eur'), money),
+      // How much to keep and where, and what it usually costs to buy
+      // (REPLENISHMENT): set on the item's form.
+      column('reorder_point', 'Reorder point', 80, f('item_reorder_point')),
+      column('reorder_up_to', 'Reorder up to', 90, f('item_reorder_up_to')),
+      column(
+        'preferred_location',
+        'Preferred location',
+        100,
+        f('item_preferred_location_id'),
+        {
+          reference: {
+            query: q('location_get'),
+            labelField: ref('fieldReference', f('location_name')),
+          },
+        },
+      ),
+      column(
+        'standard_cost_cad',
+        'Standard cost (CAD)',
+        110,
+        f('item_standard_cost_cad'),
+        money,
+      ),
+      column(
+        'standard_cost_usd',
+        'Standard cost (USD)',
+        120,
+        f('item_standard_cost_usd'),
+        money,
+      ),
+      column(
+        'standard_cost_eur',
+        'Standard cost (EUR)',
+        130,
+        f('item_standard_cost_eur'),
+        money,
+      ),
     ],
     children: [
       {

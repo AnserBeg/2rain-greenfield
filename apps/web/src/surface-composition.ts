@@ -253,6 +253,13 @@ async function present(
    * that can itself be read.
    */
   related: ReadonlySet<string> = new Set(),
+  /**
+   * The record's own fields that hold another record's id, such as an item's
+   * preferred location (REPLENISHMENT). One whose record is gone -- archived
+   * or removed -- reads "—"; one current policy withholds still fails the
+   * fields, as a Task's re-check of its context requires.
+   */
+  absent: ReadonlySet<string> = new Set(),
 ): Promise<Row> {
   const cells: Record<string, string> = {};
   for (const column of columns) {
@@ -286,8 +293,11 @@ async function present(
       throw error;
     }
     if (
-      related.has(column.field) &&
-      (result.outcome !== 'exact' || result.records.length !== 1)
+      (related.has(column.field) &&
+        (result.outcome !== 'exact' || result.records.length !== 1)) ||
+      (absent.has(column.field) &&
+        (result.outcome === 'not-found' ||
+          (result.outcome === 'exact' && result.records.length === 0)))
     ) {
       cells[column.columnId] = text(null);
       continue;
@@ -330,6 +340,11 @@ export async function loadSurfaceComposition(
       record,
       composition.fields,
       new Set(compositionRelationTargets(view, surface)),
+      new Set(
+        composition.fields.flatMap((column) =>
+          column.reference ? [column.field] : [],
+        ),
+      ),
     );
   } catch {
     data.fieldsFailed = true;

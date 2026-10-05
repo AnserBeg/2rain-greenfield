@@ -12,11 +12,30 @@ import {
   parseNullableCursor,
   sharedListBindingDigest,
 } from './cursor.js';
+import {
+  parseSharedListFigures,
+  sharedListFigureKinds,
+  sharedListFigureRowFields,
+  type AuthorizedSharedListFigures,
+  type SharedListFigures,
+} from './figures.js';
 
 // The closed-contract primitives and cursor identity moved to siblings; both
 // stay part of this module's public surface so no caller import changes.
 export { SharedListContractError } from './contract.js';
 export { encodeSharedListCursor } from './cursor.js';
+export {
+  sharedListFigureKinds,
+  type AuthorizedSharedListFigures,
+  type SharedListFigureBand,
+  type SharedListFigureLatest,
+  type SharedListFigureOperand,
+  type SharedListFigures,
+  type SharedListFigureSum,
+  type SharedListFigureThreshold,
+  type SharedListFigureTotal,
+  type SharedListFigureWithin,
+} from './figures.js';
 
 export const SHARED_LIST_QUERY_VERSION =
   'northstar.shared-list-query/v1' as const;
@@ -140,6 +159,8 @@ export interface SharedListQueryRequest {
   }[];
   readonly beforeFilters?: readonly SharedListBeforeFilter[];
   readonly progress?: SharedListProgress;
+  /** Per-row figures the statement computes before the count and the page. */
+  readonly figures?: SharedListFigures;
   readonly relatedFilter?: SharedListRelatedFilter;
   readonly relationLabels: readonly SharedListRelationLabelRequest[];
   readonly referenceLabels?: readonly SharedListReferenceLabelRequest[];
@@ -180,6 +201,7 @@ export interface AuthorizedSharedListRequest {
   readonly referenceLabels?: readonly AuthorizedSharedListReferenceLabel[];
   readonly relatedFilter?: AuthorizedSharedListRelatedFilter;
   readonly progress?: AuthorizedSharedListProgress;
+  readonly figures?: AuthorizedSharedListFigures;
 }
 
 export interface SharedListCoverage {
@@ -209,6 +231,8 @@ export interface SharedListCoverage {
    */
   readonly beforeFilters?: readonly SharedListBeforeFilter[];
   readonly progress?: SharedListProgress;
+  /** Echoed and REQUIRED to match, as progress is: a band kept is a count. */
+  readonly figures?: SharedListFigures;
   /** Echoed so an executor that paged an export instead is observable. */
   readonly outputMode?: 'export';
   readonly projectedSearchValueCount: number;
@@ -264,6 +288,7 @@ export function parseSharedListArguments(
     outputMode: outputModeValue,
     progress: progressValue,
     beforeFilters: beforeFiltersValue,
+    figures: figuresValue,
     ...closedList
   } = list;
   assertExactKeys(closedList, [
@@ -312,6 +337,12 @@ export function parseSharedListArguments(
     throw malformed('one exact relation scope is allowed');
   const progress =
     progressValue === undefined ? undefined : parseProgress(progressValue);
+  const figures =
+    figuresValue === undefined
+      ? undefined
+      : parseSharedListFigures(figuresValue);
+  if (progress && figures)
+    throw malformed('a list reads progress or figures, not both');
   const beforeFilters =
     beforeFiltersValue === undefined
       ? undefined
@@ -369,6 +400,7 @@ export function parseSharedListArguments(
     ...(fieldFilters ? { fieldFilters } : {}),
     ...(relatedFilter ? { relatedFilter } : {}),
     ...(progress ? { progress } : {}),
+    ...(figures ? { figures } : {}),
     ...(beforeFilters ? { beforeFilters } : {}),
     relationLabels,
     ...(referenceLabels ? { referenceLabels } : {}),
@@ -387,6 +419,7 @@ export function parseSharedListArguments(
     ...(fieldFilters ? { fieldFilters } : {}),
     ...(relatedFilter ? { relatedFilter } : {}),
     ...(progress ? { progress } : {}),
+    ...(figures ? { figures } : {}),
     ...(beforeFilters ? { beforeFilters } : {}),
     relationLabels,
     ...(referenceLabels ? { referenceLabels } : {}),
@@ -454,6 +487,24 @@ export function authorizeSharedListFields(
       );
     }
   }
+  // A figure adds or compares the listed row's own exact decimals, which the
+  // query selects; its id shadows nothing the query projects.
+  if (query.figures) {
+    for (const fieldId of sharedListFigureRowFields(query.figures))
+      if (!input.selectedFieldIds.has(fieldId))
+        throw new SharedListContractError(
+          'LIST_FIELD_NOT_AUTHORIZED',
+          'a figure adds or compares a field the list query selects',
+          fieldId,
+        );
+    for (const figureId of sharedListFigureKinds(query.figures).keys())
+      if (input.selectedFieldIds.has(figureId) || relationIds.has(figureId))
+        throw new SharedListContractError(
+          'LIST_FIELD_NOT_AUTHORIZED',
+          'a figure would shadow a projected field or label',
+          figureId,
+        );
+  }
 }
 
 /**
@@ -481,11 +532,15 @@ export function requireSharedListEcho(
     !same(
       query.beforeFilters as ImmutableJsonValue | undefined,
       listCoverage.beforeFilters as ImmutableJsonValue | undefined,
+    ) ||
+    !same(
+      query.figures as ImmutableJsonValue | undefined,
+      listCoverage.figures as ImmutableJsonValue | undefined,
     )
   ) {
     throw new SharedListContractError(
       'LIST_RESULT_MALFORMED',
-      'the list result did not apply the requested progress or before filters',
+      'the list result did not apply the requested progress, figures or before filters',
     );
   }
 }

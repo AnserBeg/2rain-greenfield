@@ -307,11 +307,13 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     'MODULE_OPERATION_PRECONDITION_REFUSED',
   );
   await page.goto(lineFormUrl);
+  // The stored 10 at scale 18, shown in canonical spelling (REPLENISHMENT):
+  // the form saves the same exact value it shows.
   await expect(
     page.locator(
       '[name="value:northstar.app:field.sales_order_line_ordered_quantity"]',
     ),
-  ).toHaveValue('10.000000000000000000');
+  ).toHaveValue('10');
   expect(await businessState()).toEqual({
     lineQuantity: '10.000000000000000000',
     notes: 'Edited while draft',

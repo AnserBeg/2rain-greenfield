@@ -1,6 +1,7 @@
 import type {
   SurfaceComposition,
   SurfaceList,
+  SurfaceListFigures,
   VersionedNormalizedApplicationPackage,
 } from './schemas.js';
 import {
@@ -75,11 +76,36 @@ export function validateSurfaceLists(
     );
     if (list.columns.filter((column) => column.role === 'title').length !== 1)
       fail(id, 'a declared List has exactly one title column');
-    const columns = new Map(
+    const columns = new Map<string, SurfaceList['columns'][number]>(
       list.columns.map((column) => [column.columnId, column]),
     );
-    const progressOutputs = new Set(
+    const progressOutputs = new Set<string>(
       list.progress ? Object.values(list.progress.outputs) : [],
+    );
+    // Figures computed by the list statement, by id: sums and totals are
+    // exact decimals, a band names a range by value, a latest is a record id.
+    const figureKinds = new Map<string, 'band' | 'latest' | 'number'>([
+      ...(list.figures?.sums ?? []).map(
+        (sum) => [sum.figureId, 'number'] as const,
+      ),
+      ...(list.figures?.totals ?? []).map(
+        (total) => [total.figureId, 'number'] as const,
+      ),
+      ...(list.figures?.bands ?? []).map(
+        (band) => [band.figureId, 'band'] as const,
+      ),
+      ...(list.figures?.latest ?? []).map(
+        (latest) => [latest.figureId, 'latest'] as const,
+      ),
+    ]);
+    const bandValues = new Map<string, ReadonlySet<string>>(
+      (list.figures?.bands ?? []).map((band) => [
+        band.figureId,
+        new Set([
+          ...band.cases.map((entry) => entry.value),
+          band.otherwise.value,
+        ]),
+      ]),
     );
     // A read model's figures, such as an order's total, are computed from the
     // page the list statement returned, so they exist only after paging.
@@ -89,6 +115,34 @@ export function validateSurfaceLists(
         : [],
     );
     for (const column of list.columns) {
+      const figure = figureKinds.get(column.field);
+      if (figure) {
+        // Computed in the statement: shown as it is, never sorted, formatted
+        // or labelled like a field. A band reads as its row's status.
+        if (
+          column.sortable ||
+          column.format ||
+          column.reference ||
+          column.overdue ||
+          (figure === 'band'
+            ? column.role !== 'status' ||
+              !(column.statusRoles ?? []).every((entry) =>
+                bandValues.get(column.field)?.has(entry.value),
+              )
+            : column.role !== 'value' || column.statusRoles)
+        )
+          fail(
+            column.columnId,
+            'a figure column is an unsorted value and a band column its status',
+          );
+        if (column.statusRoles)
+          unique(
+            column.statusRoles.map((entry) => entry.value),
+            column.columnId,
+            'status role values',
+          );
+        continue;
+      }
       if (progressOutputs.has(column.field)) {
         // A progress figure exists only in the list statement's answer: it is
         // shown as it is, and never sorted, labelled or formatted like a field.
@@ -212,6 +266,15 @@ export function validateSurfaceLists(
         filterable(filter.field, filter.value, view.viewId);
       if (view.open && !list.progress)
         fail(view.viewId, "an open view needs the List's declared progress");
+      if (view.band) {
+        const values = bandValues.get(view.band.figure);
+        unique(view.band.values, view.viewId, 'view band values');
+        if (!values || !view.band.values.every((value) => values.has(value)))
+          fail(
+            view.viewId,
+            "a view keeps values of one of the List's band figures",
+          );
+      }
       if (view.before) {
         // Compared in SQL against an instant: a calendar date or a UTC
         // instant, never a text-stored offset time.
@@ -327,6 +390,227 @@ export function validateSurfaceLists(
           'a List that omits denied progress keeps a view that does not need it',
         );
     }
+    // Every figure names what the statement joins by compiled identity: list
+    // queries the gateway authorizes per request, fields they select, and the
+    // relations between their entities. Anything else is refused here.
+    const validateFigures = (figures: SurfaceListFigures) => {
+      if (list.progress)
+        fail(id, 'a List declares progress or figures, not both');
+      const declared = [...figureKinds.keys()];
+      unique(
+        [
+          ...figures.sums.map((entry) => entry.figureId),
+          ...(figures.totals ?? []).map((entry) => entry.figureId),
+          ...(figures.bands ?? []).map((entry) => entry.figureId),
+          ...(figures.latest ?? []).map((entry) => entry.figureId),
+        ],
+        id,
+        'figure ids',
+      );
+      if (
+        declared.some(
+          (figure) =>
+            fields.has(figure) ||
+            columns.has(figure) ||
+            readModelOutputs.has(figure) ||
+            progressOutputs.has(figure),
+        )
+      )
+        fail(id, 'list figures name no field, column or other output');
+      const selects = (
+        source: { selections: readonly { field: { targetId: string } }[] },
+        fieldId: string,
+      ) =>
+        source.selections.some(
+          (selection) => String(selection.field.targetId) === fieldId,
+        );
+      const read = (targetId: string) => {
+        const source = queries.get(targetId);
+        if (
+          !source ||
+          source.queryType !== 'list' ||
+          source.lifecycle !== 'active' ||
+          source.tier !== 'q0' ||
+          ('readModel' in source && source.readModel)
+        )
+          return fail(
+            id,
+            'list figures read active q0 list queries without a read model',
+          );
+        // The executor reads these rows within the List's own companies, so a
+        // company-scoped read needs a company-scoped List to be issued under.
+        if (
+          'legalEntityScope' in source &&
+          source.legalEntityScope &&
+          !('legalEntityScope' in query && query.legalEntityScope)
+        )
+          fail(id, 'list figures read company rows only under a company List');
+        return source;
+      };
+      const matched = (rows: {
+        query: { targetId: string };
+        match: string;
+      }) => {
+        const source = read(rows.query.targetId);
+        const match = fields.get(rows.match);
+        // A record id is 36 characters; a shorter field could not hold one.
+        if (
+          !selects(source, rows.match) ||
+          match?.entity.targetId !== source.sourceEntity.targetId ||
+          match.fieldType.kind !== 'textFieldType' ||
+          match.fieldType.maximumLength < 36
+        )
+          fail(
+            id,
+            "a figure's rows hold the listed record's id in a text field their query selects",
+          );
+        return source;
+      };
+      const decimal = (
+        source: { selections: readonly { field: { targetId: string } }[] },
+        fieldId: string,
+      ) => {
+        if (
+          !selects(source, fieldId) ||
+          fields.get(fieldId)?.fieldType.kind !== 'exactDecimalFieldType'
+        )
+          fail(id, 'a figure sums an exact decimal its query selects');
+      };
+      const parentOf = (
+        rows: ReturnType<typeof read>,
+        within: NonNullable<SurfaceListFigures['sums'][number]['within']>,
+      ) => {
+        const parent = read(within.query.targetId);
+        const relation = relations.get(within.relation);
+        if (
+          !relation ||
+          relation.lifecycle !== 'active' ||
+          relation.sourceEntity.targetId !== rows.sourceEntity.targetId ||
+          relation.targetEntity.targetId !== parent.sourceEntity.targetId
+        )
+          fail(id, "a figure's parent is its rows' parent through a relation");
+        unique(within.values, id, 'figure parent values');
+        const state = fields.get(within.field);
+        if (
+          !selects(parent, within.field) ||
+          (state?.fieldType.kind === 'enumFieldType' &&
+            !within.values.every((value) =>
+              state.fieldType.kind === 'enumFieldType'
+                ? state.fieldType.options.some(
+                    (option) => option.optionId === value,
+                  )
+                : false,
+            ))
+        )
+          fail(
+            id,
+            "a figure's parent values are values of a field its parent query selects",
+          );
+        return parent;
+      };
+      const numbers = new Set<string>();
+      for (const sum of figures.sums) {
+        const rows = matched(sum.rows);
+        // `rows` adds a quantity, `related` related rows, `remaining` both.
+        const quantity = sum.sum !== 'related';
+        const related = sum.sum !== 'rows';
+        if (
+          (sum.rows.quantity !== undefined) !== quantity ||
+          (sum.related !== undefined) !== related
+        )
+          fail(id, 'a figure names exactly the parts its sum adds up');
+        if (sum.rows.quantity !== undefined) decimal(rows, sum.rows.quantity);
+        if (sum.within) parentOf(rows, sum.within);
+        if (sum.related) {
+          const pointing = read(sum.related.query.targetId);
+          const relation = relations.get(sum.related.relation);
+          if (
+            !relation ||
+            relation.lifecycle !== 'active' ||
+            relation.sourceEntity.targetId !== pointing.sourceEntity.targetId ||
+            relation.targetEntity.targetId !== rows.sourceEntity.targetId
+          )
+            fail(
+              id,
+              "a figure's related rows point at its rows through a relation",
+            );
+          decimal(pointing, sum.related.quantity);
+        }
+        numbers.add(sum.figureId);
+      }
+      const listedDecimal = (fieldId: string) =>
+        selected.has(fieldId) &&
+        fields.get(fieldId)?.fieldType.kind === 'exactDecimalFieldType';
+      for (const total of figures.totals ?? []) {
+        for (const operand of [...total.plus, ...total.minus])
+          if (
+            'figure' in operand
+              ? !numbers.has(operand.figure)
+              : !listedDecimal(operand.field)
+          )
+            fail(
+              id,
+              'a total adds figures declared before it or exact decimals the List selects',
+            );
+        numbers.add(total.figureId);
+      }
+      for (const band of figures.bands ?? []) {
+        if (!numbers.has(band.of))
+          fail(id, 'a band names the range of a sum or a total');
+        for (const entry of band.cases) {
+          const threshold = entry.below ?? entry.atMost;
+          if (
+            (entry.below === undefined) === (entry.atMost === undefined) ||
+            (threshold &&
+              'field' in threshold &&
+              !listedDecimal(threshold.field))
+          )
+            fail(
+              id,
+              'a band case compares with one fixed decimal or exact decimal the List selects',
+            );
+        }
+        unique(
+          [...band.cases.map((entry) => entry.value), band.otherwise.value],
+          id,
+          'band values',
+        );
+      }
+      for (const latest of figures.latest ?? []) {
+        const rows = matched(latest.rows);
+        const parent = parentOf(rows, latest.within);
+        const by = fields.get(latest.by)?.fieldType;
+        if (
+          !selects(parent, latest.by) ||
+          !(
+            by?.kind === 'dateFieldType' ||
+            (by?.kind === 'dateTimeFieldType' &&
+              by.timezoneSemantics === 'utcInstant')
+          ) ||
+          !selects(parent, latest.value) ||
+          fields.get(latest.value)?.fieldType.kind !== 'textFieldType'
+        )
+          fail(
+            id,
+            'a latest figure orders its parents by a date and reads a record id their query selects',
+          );
+        // Joined on the record id alone, with no company, as a label is.
+        const label = queries.get(latest.label.query.targetId);
+        if (
+          !label ||
+          label.queryType !== 'list' ||
+          label.lifecycle !== 'active' ||
+          label.tier !== 'q0' ||
+          ('legalEntityScope' in label && label.legalEntityScope) ||
+          !selects(label, latest.label.field)
+        )
+          fail(
+            id,
+            'a latest label reads a selected field of an active unscoped q0 list query',
+          );
+      }
+    };
+    if (list.figures) validateFigures(list.figures);
     if (list.rowActions) {
       unique(
         list.rowActions.map((action) => action.actionId),

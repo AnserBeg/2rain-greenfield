@@ -39,6 +39,7 @@ import {
   declaredCellText,
   declaredListParameters,
   declaredRowAction,
+  figureBandLabel,
   orderedColumns,
   orderedFilters,
   orderedViews,
@@ -89,9 +90,25 @@ export type SurfaceRelationPickerState =
   | { readonly relationId: string; readonly status: 'refused' }
   | { readonly status: 'unavailable' };
 
+/**
+ * The records a Record form's reference field may hold, read through the
+ * declared list query for this request; `unavailable` when that read failed,
+ * so the field keeps its plain control and the stored id is never lost.
+ */
+export type SurfaceFormReferenceChoices =
+  | {
+      readonly options: readonly SurfaceRelationPickerOption[];
+      readonly status: 'ready';
+    }
+  | { readonly status: 'unavailable' };
+
 export interface SurfaceComponentContext {
   readonly data?: SurfaceDataRenderState;
   readonly feedback?: SurfaceOperationFeedback | null;
+  /** A Record form's reference choices, by the field they choose. */
+  readonly formReferences?: Readonly<
+    Record<string, SurfaceFormReferenceChoices>
+  >;
   readonly legalEntitySelection?: readonly string[];
   readonly operations?: readonly CompiledSurfaceOperationBinding[];
   readonly queryParameterValues?: Readonly<Record<string, string>>;
@@ -540,7 +557,9 @@ function renderDataGrid(context: SurfaceComponentContext): string {
             : null,
         list: context.surface.list,
         now: data.declaredList.now,
+        // A band figure reads as the label its List declares for the value.
         present: (record, fieldId, value) =>
+          figureBandLabel(context.surface.list!, fieldId, value) ??
           displayFieldValue(context.view, record, fieldId, value),
         progressWithheld: data.declaredList.progressWithheld ?? null,
         recordLabel,
@@ -1853,13 +1872,23 @@ function renderFormFields(
       const value = record ? record.values[fieldId] : undefined;
       const field = fieldsById.get(fieldId);
       const inputField = inputFieldsById.get(fieldId);
-      const control = renderFormControl(
-        field,
-        inputField,
-        fieldId,
-        index,
-        value,
-      );
+      // A stored decimal is shown in canonical spelling -- `12.5`, not
+      // `12.500000000000000000` -- as the draft editor shows it: the same
+      // exact value, in the one spelling the write path admits, so a form
+      // saved without touching it is not refused (REPLENISHMENT: an item's
+      // prices beside its new levels).
+      const kind = field?.kind ?? inputField?.kind;
+      const shown =
+        kind !== undefined &&
+        STORED_DECIMAL_KINDS.has(kind) &&
+        typeof value === 'string'
+          ? canonicalStoredDecimal(value)
+          : value;
+      const choices = context.formReferences?.[fieldId];
+      const control =
+        choices?.status === 'ready'
+          ? renderFormReferenceControl(choices.options, fieldId, value)
+          : renderFormControl(field, inputField, fieldId, index, shown);
       const emptyIntent = renderEmptyIntentControl(
         inputField,
         fieldId,
@@ -1874,6 +1903,39 @@ function renderFormFields(
       return `<div class="form-field"><label><span>${escapeHtml(label)}</span>${control.html}</label>${unavailableValue}${emptyIntent}</div>`;
     })
     .join('');
+}
+
+/**
+ * A reference field as a choice of the records its declared list returned,
+ * shown by label and submitted as the record id the field already admits. A
+ * stored id the list did not return stays selectable, so an update that does
+ * not touch it never drops it.
+ */
+function renderFormReferenceControl(
+  options: readonly SurfaceRelationPickerOption[],
+  fieldId: string,
+  value: unknown,
+): RenderedFormControl {
+  const current = typeof value === 'string' ? value : '';
+  const offered =
+    current !== '' && !options.some((option) => option.recordId === current)
+      ? [
+          ...options,
+          {
+            label: `Unavailable (${shortIdentity(current)})`,
+            recordId: current,
+          },
+        ]
+      : options;
+  return {
+    html: `<select name="value:${escapeHtml(fieldId)}" data-field-kind="textFieldType" data-form-reference="${escapeHtml(fieldId)}" autocomplete="off"><option value=""${current === '' ? ' selected' : ''}>None</option>${offered
+      .map(
+        (option) =>
+          `<option value="${escapeHtml(option.recordId)}"${option.recordId === current ? ' selected' : ''}>${escapeHtml(option.label)}</option>`,
+      )
+      .join('')}</select>`,
+    storedValueUnavailable: false,
+  };
 }
 
 /**
@@ -2229,6 +2291,29 @@ function renderEnumControl(
       `<option value="${escapeHtml(option.optionId)}">${escapeHtml(option.label)}</option>`,
   );
   return `<input${kind} name="${name}" value="${renderInputValue(value)}" list="${listId}" autocomplete="off"><datalist id="${listId}">${suggestions.join('')}</datalist>`;
+}
+
+/** The kinds a generic form reads as an exact decimal. */
+const STORED_DECIMAL_KINDS: ReadonlySet<string> = new Set([
+  'exactDecimalFieldType',
+  'moneyFieldType',
+  'quantityFieldType',
+]);
+
+/**
+ * A stored exact decimal in the one spelling the write path admits -- no
+ * leading or trailing zeros, no `-0`. PostgreSQL states a numeric at its
+ * column's scale (`12.500000000000000000`); this is the same exact value as
+ * `12.5`, found by text work alone. Anything that is not a plain decimal is
+ * returned as it is, and refused by name if it is ever submitted.
+ */
+function canonicalStoredDecimal(value: string): string {
+  const match = /^(-?)(\d+)(?:\.(\d+))?$/u.exec(value);
+  if (!match) return value;
+  const integer = match[2]!.replace(/^0+(?=\d)/u, '');
+  const fraction = (match[3] ?? '').replace(/0+$/u, '');
+  const negative = match[1] === '-' && (integer !== '0' || fraction !== '');
+  return `${negative ? '-' : ''}${integer}${fraction ? `.${fraction}` : ''}`;
 }
 
 function renderInputValue(value: unknown): string {

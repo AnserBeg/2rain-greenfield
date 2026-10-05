@@ -13,6 +13,8 @@ const salesList = `${ns}:surface.sales_order_list`;
 const expectedList = `${ns}:surface.expected_receipt_list`;
 const purchaseList = `${ns}:surface.purchase_order_list`;
 const invoiceList = `${ns}:surface.customer_invoice_list`;
+const stockList = `${ns}:surface.item_stock_list`;
+const buyingList = `${ns}:surface.item_buying_list`;
 
 function application(): Json & { surfaces: Json[]; queries: Json[] } {
   return structuredClone(composedApplicationDefinition()) as Json & {
@@ -60,6 +62,9 @@ test('the composed application declares its Lists and they normalize unchanged',
     expectedList,
     // INVENTORY-PARITY: stock documents, by state and type.
     `${ns}:surface.inventory_transaction_list`,
+    // REPLENISHMENT: the Buying worklist and Stock by item.
+    buyingList,
+    stockList,
     `${ns}:surface.posted_stock_balance_list`,
     `${ns}:surface.purchase_order_list`,
     salesList,
@@ -621,6 +626,519 @@ test('List row actions, supplementary progress and read-model columns are refuse
   delete listOf(app).list.rowActions;
   delete (listOf(app).list.progress as { whenDenied?: string }).whenDenied;
   assert.doesNotThrow(() => normalizeApplicationPackage(app as never));
+});
+
+test('REPLENISHMENT: Stock by item and the Buying worklist read items in one company, with figures their statement adds up', () => {
+  const normalized = normalizeApplicationPackage(
+    composedApplicationDefinition() as never,
+  );
+  type Selected = { selections: Array<{ field: { targetId: string } }> };
+  const query = (local: string) =>
+    normalized.queries.find(
+      (value) => value.queryId === `${ns}:query.${local}`,
+    )! as unknown as Selected & {
+      legalEntityScope?: { cardinality: string };
+      exportMaximumResultCount?: number;
+      permission: { targetId: string };
+    };
+  const items = query('item_list');
+  // The Items List and its query are untouched: no company, no export.
+  assert.equal(items.legalEntityScope, undefined);
+  assert.equal(items.exportMaximumResultCount, undefined);
+  for (const local of ['item_stock_list', 'item_buying_list']) {
+    const clone = query(local);
+    assert.deepEqual(
+      clone.selections.map((selection) => selection.field.targetId),
+      items.selections.map((selection) => selection.field.targetId),
+    );
+    assert.equal(clone.permission.targetId, items.permission.targetId);
+    assert.equal(clone.legalEntityScope?.cardinality, 'exactlyOne');
+    assert.equal(clone.exportMaximumResultCount, 5000);
+  }
+  type Declared = {
+    label: string;
+    module: { targetId: string };
+    slots: Array<{ slot: string }>;
+    workspace: {
+      membership: string;
+      navigationModuleId?: string;
+      entry?: { authorizationQueryId: string };
+    };
+    list: {
+      columns: Array<{
+        label: string;
+        field: string;
+        role: string;
+        sortable: boolean;
+        statusRoles?: Array<{ value: string; role: string }>;
+      }>;
+      views: Array<{
+        label: string;
+        band?: { figure: string; values: string[] };
+      }>;
+      defaultSort: Array<{ columnId: string; direction: string }>;
+      figures: {
+        sums: Array<{ figureId: string; sum: string }>;
+        totals?: Array<{ figureId: string; floor?: string }>;
+        bands?: Array<{ figureId: string; of: string }>;
+        latest?: Array<{ figureId: string }>;
+      };
+    };
+  };
+  const declared = (surfaceId: string) =>
+    normalized.surfaces.find(
+      (surface) => surface.surfaceId === surfaceId,
+    ) as unknown as Declared;
+  const figure = (list: string, local: string) =>
+    `${ns}:list_figure.${list}_${local}`;
+  const stock = declared(stockList);
+  const buying = declared(buyingList);
+  for (const surface of [stock, buying]) {
+    // Catalog's Lists, listed in Inventory's group, entered like Posted
+    // stock and authorized by its query; read-only.
+    assert.equal(surface.module.targetId, `${ns}:module.catalog`);
+    assert.equal(surface.workspace.membership, 'operational');
+    assert.equal(
+      surface.workspace.navigationModuleId,
+      `${ns}:module.inventory`,
+    );
+    assert.equal(
+      surface.workspace.entry?.authorizationQueryId,
+      `${ns}:query.posted_stock_balance_list`,
+    );
+    assert.deepEqual(
+      surface.slots.map((slot) => slot.slot),
+      ['title', 'savedViews', 'dataGrid'],
+    );
+    assert.equal('rowActions' in surface.list, false);
+    // Figures are shown, never sorted: only the item's own fields sort.
+    assert.deepEqual(
+      surface.list.columns
+        .filter((column) => column.field.includes(':list_figure.'))
+        .map((column) => column.sortable),
+      surface.list.columns
+        .filter((column) => column.field.includes(':list_figure.'))
+        .map(() => false),
+    );
+  }
+  assert.equal(stock.label, 'Stock by item');
+  assert.deepEqual(
+    stock.list.columns.map((column) => column.label),
+    [
+      'SKU',
+      'Item',
+      'Unit',
+      'On hand',
+      'Reserved',
+      'Available',
+      'Incoming',
+      'Open demand',
+      'Projected',
+      'Reorder point',
+      'Status',
+    ],
+  );
+  assert.deepEqual(
+    stock.list.views.map((value) => [value.label, value.band?.values]),
+    [
+      ['All', undefined],
+      ['Shortage', [`${ns}:list_band.item_stock_list_shortage`]],
+      ['Reorder', [`${ns}:list_band.item_stock_list_reorder`]],
+    ],
+  );
+  assert.deepEqual(
+    stock.list.figures.sums.map((value) => [value.figureId, value.sum]),
+    [
+      [figure('item_stock_list', 'on_hand'), 'rows'],
+      [figure('item_stock_list', 'reserved'), 'related'],
+      [figure('item_stock_list', 'incoming'), 'remaining'],
+      [figure('item_stock_list', 'open_demand'), 'remaining'],
+    ],
+  );
+  assert.deepEqual(
+    stock.list.columns.find((column) => column.role === 'status')!.statusRoles,
+    [
+      { value: `${ns}:list_band.item_stock_list_shortage`, role: 'blocked' },
+      { value: `${ns}:list_band.item_stock_list_reorder`, role: 'attention' },
+      { value: `${ns}:list_band.item_stock_list_healthy`, role: 'success' },
+    ],
+  );
+  assert.equal(buying.label, 'Buying worklist');
+  assert.deepEqual(
+    buying.list.columns.map((column) => column.label),
+    [
+      'SKU',
+      'Item',
+      'Unit',
+      'Available',
+      'Incoming',
+      'Open demand',
+      'Projected',
+      'Reorder point',
+      'Reorder up to',
+      'Suggested',
+      'Last supplier',
+    ],
+  );
+  assert.deepEqual(
+    buying.list.views.map((value) => [value.label, value.band]),
+    [
+      [
+        'To buy',
+        {
+          figure: figure('item_buying_list', 'due'),
+          values: [`${ns}:list_band.item_buying_list_due`],
+        },
+      ],
+    ],
+  );
+  // Suggested restores the item's level, never below zero.
+  assert.equal(
+    buying.list.figures.totals!.find(
+      (value) => value.figureId === figure('item_buying_list', 'suggested'),
+    )!.floor,
+    'zero',
+  );
+  assert.deepEqual(
+    buying.list.figures.latest!.map((value) => value.figureId),
+    [figure('item_buying_list', 'last_supplier')],
+  );
+  for (const surface of [stock, buying])
+    assert.deepEqual(surface.list.defaultSort, [
+      {
+        columnId: `${ns}:list_column.${surface === stock ? 'item_stock_list' : 'item_buying_list'}_sku`,
+        direction: 'ascending',
+      },
+    ]);
+});
+
+test('List figures and band views are refused for each misuse the runtime cannot honour', () => {
+  type Figures = {
+    sums: Array<
+      Json & {
+        figureId: string;
+        rows: { query: { targetId: string }; match: string; quantity?: string };
+        within?: {
+          relation: string;
+          query: { targetId: string };
+          field: string;
+          values: string[];
+        };
+        related?: {
+          query: { targetId: string };
+          relation: string;
+          quantity: string;
+        };
+        sum: string;
+      }
+    >;
+    totals: Array<
+      Json & {
+        figureId: string;
+        plus: Json[];
+        minus: Json[];
+      }
+    >;
+    bands: Array<
+      Json & {
+        figureId: string;
+        of: string;
+        cases: Array<Json & { value: string }>;
+        otherwise: Json & { value: string };
+      }
+    >;
+    latest: Array<
+      Json & {
+        figureId: string;
+        by: string;
+        value: string;
+        label: { query: { targetId: string }; field: string };
+      }
+    >;
+  };
+  const figures = (
+    app: ReturnType<typeof application>,
+    surfaceId = stockList,
+  ) => listOf(app, surfaceId).list.figures as Figures;
+  const column = (
+    app: ReturnType<typeof application>,
+    local: string,
+    surfaceId = stockList,
+  ) =>
+    listOf(app, surfaceId).list.columns.find((value) =>
+      String(value.columnId).endsWith(`_list_${local}`),
+    )!;
+  const sum = (app: ReturnType<typeof application>, local: string) =>
+    figures(app).sums.find((value) => value.figureId.endsWith(`_${local}`))!;
+  const field = (local: string) => `${ns}:field.${local}`;
+  const queryRef = (local: string) => ({
+    kind: 'queryReference',
+    schemaVersion: 'v6',
+    targetId: `${ns}:query.${local}`,
+  });
+  const cases: Array<[string, (app: ReturnType<typeof application>) => void]> =
+    [
+      [
+        'list figures read active q0 list queries without a read model',
+        (app) => {
+          // The fulfillment read model's copy of the posted stock list.
+          sum(app, 'on_hand').rows.query = queryRef('item_stock_positions');
+        },
+      ],
+      [
+        'list figures read active q0 list queries without a read model',
+        (app) => {
+          sum(app, 'on_hand').rows.query = queryRef('posted_stock_balance_get');
+        },
+      ],
+      [
+        "a figure's rows hold the listed record's id in a text field their query selects",
+        (app) => {
+          // A unit code could never hold a record id.
+          sum(app, 'on_hand').rows.match = field(
+            'posted_stock_balance_unit_id',
+          );
+        },
+      ],
+      [
+        "a figure's rows hold the listed record's id in a text field their query selects",
+        (app) => {
+          // Another entity's item field.
+          sum(app, 'on_hand').rows.match = field('reservation_item_id');
+        },
+      ],
+      [
+        'a figure sums an exact decimal its query selects',
+        (app) => {
+          sum(app, 'on_hand').rows.quantity = field(
+            'posted_stock_balance_location_id',
+          );
+        },
+      ],
+      [
+        'a figure names exactly the parts its sum adds up',
+        (app) => {
+          sum(app, 'on_hand').sum = 'remaining';
+        },
+      ],
+      [
+        'a figure names exactly the parts its sum adds up',
+        (app) => {
+          delete sum(app, 'reserved').related;
+        },
+      ],
+      [
+        "a figure's related rows point at its rows through a relation",
+        (app) => {
+          sum(app, 'incoming').related!.relation =
+            `${ns}:relation.purchase_order_line_order`;
+        },
+      ],
+      [
+        "a figure's parent is its rows' parent through a relation",
+        (app) => {
+          sum(app, 'incoming').within!.relation =
+            `${ns}:relation.sales_order_line_order`;
+        },
+      ],
+      [
+        "a figure's parent values are values of a field its parent query selects",
+        (app) => {
+          sum(app, 'incoming').within!.values = [
+            `${ns}:state.purchase_order_shipped`,
+          ];
+        },
+      ],
+      [
+        "a figure's parent values are values of a field its parent query selects",
+        (app) => {
+          sum(app, 'incoming').within!.field = field('item_name');
+        },
+      ],
+      [
+        'list figures read company rows only under a company List',
+        (app) => {
+          // The same figures on an unscoped List: nothing issues it a company.
+          const query = app.queries.find(
+            (value) => value.queryId === `${ns}:query.item_stock_list`,
+          )!;
+          delete query.legalEntityScope;
+          delete query.parameters;
+          delete (listOf(app, stockList).surface.workspace as Json).entry;
+        },
+      ],
+      [
+        'a total adds figures declared before it or exact decimals the List selects',
+        (app) => {
+          // Projected is declared after Available.
+          figures(app).totals[0]!.plus = [
+            { figure: figures(app).totals[1]!.figureId },
+          ];
+        },
+      ],
+      [
+        'a total adds figures declared before it or exact decimals the List selects',
+        (app) => {
+          figures(app).totals[0]!.plus = [{ field: field('item_name') }];
+        },
+      ],
+      [
+        'a band names the range of a sum or a total',
+        (app) => {
+          figures(app).bands[0]!.of = figures(app).bands[0]!.figureId;
+        },
+      ],
+      [
+        'a band case compares with one fixed decimal or exact decimal the List selects',
+        (app) => {
+          const [first] = figures(app).bands[0]!.cases;
+          first!.atMost = { value: '0' };
+        },
+      ],
+      [
+        'a band case compares with one fixed decimal or exact decimal the List selects',
+        (app) => {
+          figures(app).bands[0]!.cases[1]!.atMost = {
+            field: field('item_name'),
+          };
+        },
+      ],
+      [
+        'band values must be unique',
+        (app) => {
+          // The worklist shows no band column, so only the band is wrong.
+          const band = figures(app, buyingList).bands[0]!;
+          band.otherwise.value = band.cases[0]!.value;
+        },
+      ],
+      [
+        'a latest figure orders its parents by a date and reads a record id their query selects',
+        (app) => {
+          figures(app, buyingList).latest[0]!.by = field(
+            'purchase_order_number',
+          );
+        },
+      ],
+      [
+        'a latest figure orders its parents by a date and reads a record id their query selects',
+        (app) => {
+          figures(app, buyingList).latest[0]!.value = field(
+            'purchase_order_freight_amount',
+          );
+        },
+      ],
+      [
+        'a latest label reads a selected field of an active unscoped q0 list query',
+        (app) => {
+          // A company's purchase orders cannot name a shared party.
+          figures(app, buyingList).latest[0]!.label.query = queryRef(
+            'purchase_order_list',
+          );
+        },
+      ],
+      [
+        'list figures name no field, column or other output',
+        (app) => {
+          // On hand renamed, everywhere the List names it, to a field's id.
+          const { surface } = listOf(app, stockList);
+          surface.list = JSON.parse(
+            JSON.stringify(surface.list).replaceAll(
+              sum(app, 'on_hand').figureId,
+              field('party_name'),
+            ),
+          ) as Json;
+        },
+      ],
+      [
+        'figure ids must be unique',
+        (app) => {
+          sum(app, 'reserved').figureId = sum(app, 'on_hand').figureId;
+          column(app, 'reserved').field = sum(app, 'on_hand').figureId;
+        },
+      ],
+      [
+        'a List declares progress or figures, not both',
+        (app) => {
+          // Expected receipts keeps its progress and gains the item figures.
+          listOf(app, expectedList).list.figures = structuredClone(
+            figures(app),
+          );
+        },
+      ],
+      [
+        'a figure column is an unsorted value and a band column its status',
+        (app) => {
+          column(app, 'on_hand').sortable = true;
+        },
+      ],
+      [
+        'a figure column is an unsorted value and a band column its status',
+        (app) => {
+          column(app, 'status').role = 'value';
+          delete column(app, 'status').statusRoles;
+        },
+      ],
+      [
+        'a figure column is an unsorted value and a band column its status',
+        (app) => {
+          column(app, 'status').statusRoles = [
+            {
+              value: `${ns}:list_band.item_stock_list_overstock`,
+              role: 'success',
+            },
+          ];
+        },
+      ],
+      [
+        "a view keeps values of one of the List's band figures",
+        (app) => {
+          (
+            listOf(app, stockList).list.views[1]!.band as { values: string[] }
+          ).values = [`${ns}:list_band.item_stock_list_overstock`];
+        },
+      ],
+      [
+        "a view keeps values of one of the List's band figures",
+        (app) => {
+          // Projected is a total, not a band.
+          (
+            listOf(app, stockList).list.views[1]!.band as { figure: string }
+          ).figure = figures(app).totals[1]!.figureId;
+        },
+      ],
+    ];
+  const outcomes = cases.map(([reason, mutate]) => [reason, refused(mutate)]);
+  for (const [reason, rule] of outcomes)
+    assert.match(
+      rule!,
+      new RegExp(reason!.replace(/[()']/gu, '.')),
+      `${reason!} -> ${rule!}`,
+    );
+  // Closed keys and bounds: an unknown member, a ninth sum or a third band
+  // is refused, not ignored.
+  assert.match(
+    refused((app) => {
+      (figures(app) as unknown as Json).weights = [];
+    }),
+    /closed supported schema/u,
+  );
+  assert.match(
+    refused((app) => {
+      const sums = figures(app).sums;
+      for (let index = sums.length; index < 9; index += 1)
+        sums.push({
+          ...structuredClone(sums[0]!),
+          figureId: `${ns}:list_figure.item_stock_list_extra_${String(index)}`,
+        });
+    }),
+    /closed supported schema/u,
+  );
+  assert.match(
+    refused((app) => {
+      (listOf(app, stockList).list.views[1]!.band as Json).open = true;
+    }),
+    /closed supported schema/u,
+  );
 });
 
 test('an unknown List key is refused rather than ignored', () => {

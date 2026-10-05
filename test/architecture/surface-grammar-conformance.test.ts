@@ -247,8 +247,10 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // number is currently a declaration, not a gate. Filed, not fixed -- see
   // `current-plan.md`, `runtime-capability-floor-unenforced`. This flat
   // fixture keeps Party, whose customer workspace (SALES-PARITY) offers a
-  // salesperson Task input with declared eligibility, so it requires 11.
-  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 11);
+  // salesperson Task input with declared eligibility, which requires 11, and
+  // Catalog, whose item form chooses the preferred location from the
+  // location list (a Record form reference, REPLENISHMENT), which requires 17.
+  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 17);
   // SALES-PARITY: Catalog's tax codes are a fifth setup List, still flat.
   assert.equal(flatCompact.navigationEntryIds.length, 5);
   assert.deepEqual(
@@ -272,8 +274,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // + Party's three ship-to address and Catalog's three tax code surfaces
   // (SALES-PARITY), + the invoice, its lines, payments and credits (twelve),
   // + PURCHASING-PARITY's Expected receipts List, + PAYABLES' vendor bill,
-  // its lines, payments and credits (twelve).
-  assert.equal(groupedManifest.surfaces.length, 101);
+  // its lines, payments and credits (twelve), + REPLENISHMENT's Stock by item
+  // and Buying worklist.
+  assert.equal(groupedManifest.surfaces.length, 103);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -296,16 +299,18 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // record alerts and progression, multi-row Tasks and record columns naming
   // a relation (ORDER-PARITY increment B) require 14; the item page's
   // field-scoped stock and movements (INVENTORY-PARITY) require 15; a stock
-  // document's create values require 16.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 16);
+  // document's create values require 16; List figures, views keeping a band
+  // and the item form's location choice (REPLENISHMENT) require 17.
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 17);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.
   // SALES-PARITY: Catalog's tax codes list joins the supporting masters, and
   // the Invoices list joins Sales beside its orders. PURCHASING-PARITY:
   // Expected receipts joins Purchasing beside its orders; PAYABLES: so does
-  // the Bills list.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 16);
+  // the Bills list. REPLENISHMENT: Stock by item and the Buying worklist,
+  // Catalog's Lists, join Inventory's group.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 18);
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
@@ -337,6 +342,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
     'northstar.app:surface.inventory_movement_list',
     'northstar.app:surface.inventory_period_lock_list',
     'northstar.app:surface.inventory_transaction_list',
+    'northstar.app:surface.item_buying_list',
+    'northstar.app:surface.item_stock_list',
     'northstar.app:surface.legal_entity_list',
     'northstar.app:surface.posted_stock_balance_list',
     'northstar.app:surface.stock_count_list',
@@ -954,7 +961,41 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
     salesModuleDefinition('northstar.app'),
     'sales',
   );
-  return withPlainItemPage(composed);
+  return withPlainItemPage(withoutItemStockLists(composed));
+}
+
+/**
+ * REPLENISHMENT: Stock by item and the Buying worklist are Catalog's Lists,
+ * listed in Inventory's group, that add up Inventory, Sales and Purchasing
+ * rows. Without those modules they go, with their queries, as the builder
+ * cuts a List whose figures' queries are not composed. The item form keeps
+ * its location choice: Location stays.
+ */
+function withoutItemStockLists(
+  composed: Record<string, unknown>,
+): Record<string, unknown> {
+  const lists = new Set([
+    'northstar.app:surface.item_stock_list',
+    'northstar.app:surface.item_buying_list',
+  ]);
+  const queries = new Set([
+    'northstar.app:query.item_stock_list',
+    'northstar.app:query.item_buying_list',
+  ]);
+  const surfaces = composed.surfaces;
+  const declared = composed.queries;
+  assert.ok(Array.isArray(surfaces));
+  assert.ok(Array.isArray(declared));
+  assert.equal(
+    surfaces.filter((surface) => lists.has(surface.surfaceId)).length,
+    2,
+    'flat fixture must find both item Lists exactly once',
+  );
+  return {
+    ...composed,
+    surfaces: surfaces.filter((surface) => !lists.has(surface.surfaceId)),
+    queries: declared.filter((query) => !queries.has(query.queryId)),
+  };
 }
 
 /**

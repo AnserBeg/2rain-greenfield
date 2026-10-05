@@ -6,7 +6,9 @@ import {
 import {
   SurfaceWorkspaceSchema,
   SurfaceDocumentEditorSchema,
+  SurfaceFormSchema,
   SurfaceListSchema,
+  type SurfaceForm,
   type SurfaceList,
   type SurfaceWorkspace,
   type SurfaceDocumentEditor,
@@ -276,6 +278,8 @@ export interface CompiledSurfaceSlot {
 
 export interface CompiledSurfaceDefinition {
   readonly list?: SurfaceList;
+  /** A Record form's references: fields chosen from another List's records. */
+  readonly form?: SurfaceForm;
   readonly workspace?: SurfaceWorkspace;
   readonly documentEditor?: SurfaceDocumentEditor;
   readonly composition?: SurfaceComposition;
@@ -992,6 +996,9 @@ function parseSurface(
     ...(value.list === undefined
       ? {}
       : { list: SurfaceListSchema.parse(value.list) }),
+    ...(value.form === undefined
+      ? {}
+      : { form: SurfaceFormSchema.parse(value.form) }),
     ...(value.documentEditor === undefined
       ? {}
       : {
