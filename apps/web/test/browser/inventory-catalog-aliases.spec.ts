@@ -106,6 +106,10 @@ test('an item is found by its aliases, the stock Lists follow the company rule a
     await purchasing.click();
     await page.getByRole('link', { name: 'New', exact: true }).click();
     await pick(page, 'Vendor', 'Alpine', 'Alpine Office Supply');
+    // The supplier's defaults land before the line is picked, as the
+    // replenishment spec waits for them: a pick made while they apply is
+    // cleared by the editor's re-render.
+    await expect(page.getByLabel('Currency *')).toHaveValue('CAD');
     await pick(page, 'Line 1 product', 'nb-ruled', 'Field notebook');
 
     // Inventory -> Stock by item: the labels are not stocked and never short
