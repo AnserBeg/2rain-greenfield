@@ -38,7 +38,9 @@ Base: `packet/INVENTORY-PARITY` at `e3da0a39` (merged at `14c8c74a` in `445d87ae
 - Pins from the compile: surface floor 16 -> 17 (grouped and runtime); flat grammar fixture 11 -> 17 (the item form's location choice); surfaces 101 -> 103; navigation leaves 16 -> 18 (Inventory 6 -> 8); verification 573 -> 579 scenarios (six item search exclusions), executed 496 -> 502, derived 77; numbered fields unchanged (11).
 - Coverage re-derived from INVENTORY-PARITY's document: 2673 -> 2721 obligations, 831 -> 878 observed, PASS. Expected-red manifests: 158 entries in 13 still name live text.
 - Full-replay schema snapshot regenerated under the lock (15m45s): exactly six nullable item columns.
-- Local, one file at a time: unit (surface-list, workspace-contract, catalog-definition) 29/29; compiler `g2-module-conformance` pass; architecture grammar, purity, UX and nine more pass; integration REPLENISHMENT 2/2 and the item page witness; web contract 39/39.
+- Local, one file at a time: unit (every file of the unit list) pass, surface-list + workspace-contract + catalog-definition 29/29; compiler and agent files pass; architecture (grammar, runtime seam, purity, UX, boundaries, reachability and the rest that need no container) pass; integration `surface-data-binding` whole file pass (REPLENISHMENT 2 tests, with negative controls for both bridges); web contract 39/39; the replenishment browser journey 1/1 (2.3m, under the shared lock).
+- The generic Record form showed a stored decimal at scale 18 and re-sent it on save, which the write path refuses: every priced item's form refused every save. It now shows the canonical spelling, as the draft editor does (`919eb800`, `398aed56`; the composed sales-order journey reads its line quantity as `10`).
+- CI on PR #16: `398aed56` fully green -- quality, both browser jobs (operations 19m22s, with the replenishment journey and the composed journeys), the three PostgreSQL jobs, scans, observability, the compile budget and executed-file reachability. Before it: `4afb02e1` green on all three PostgreSQL jobs (schema and isolation with `replenishment.test.ts`: every figure, tab and suggestion equal the stored-row oracle; composed; commercial), quality, browser, scans and observability; the operations browser reached the item form's save (fixed above). Earlier reds, all fixed: the browser journey's locators (`94552d4e`, `63c5ab9d`), the export-row literal (`4afb02e1`), one composed-job "Connection terminated unexpectedly" (green on the next run, unchanged code), SURF001 on the form's decimal import (`398aed56`).
 
 ## Test it yourself
 
@@ -60,23 +62,25 @@ Base: `packet/INVENTORY-PARITY` at `e3da0a39` (merged at `14c8c74a` in `445d87ae
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "REPLENISHMENT",
   "base": "e3da0a3918620c5ce3e494eba3fdf1b3f8c91c4a",
-  "head": "60cf225c84b37ae27a0af34705a0bc7decec41b7",
+  "head": "398aed56ad9cf0efbaabee2c4c20a696c027deca",
   "changedPaths": [
     "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts",
-    "apps/web/src/list-declaration.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts",
-    "apps/web/test/browser/composed-application.spec.ts", "apps/web/test/browser/inventory-replenishment.spec.ts", "apps/web/test/surface-runtime-contract.test.ts",
-    "packages/canonical-model/src/index.ts", "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-list.ts",
-    "packages/canonical-model/src/surface-workspace.ts", "packages/compiler/src/projections.ts", "packages/domain/src/app/builder.ts",
-    "packages/domain/src/app/list-declarations.ts", "packages/domain/src/app/order-entry.ts", "packages/domain/src/catalog/definition.ts",
-    "packages/domain/src/inventory/item-stock-workspace.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/runtime/src/list-behavior/cursor.ts",
-    "packages/runtime/src/list-behavior/figures.ts", "packages/runtime/src/list-behavior/index.ts", "packages/runtime/src/request-runtime-view.ts",
-    "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/repository-hygiene.test.ts", "test/architecture/surface-grammar-conformance.test.ts",
-    "test/compiler/g2-module-conformance.test.ts", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/order-entry-fixture.ts",
-    "test/integration/surface-data-binding.test.ts", "test/postgres/composed-application.test.ts", "test/postgres/fresh-tenant-full-replay-schema.snapshot.json",
-    "test/postgres/module-storage-transition.test.ts", "test/postgres/replenishment.test.ts", "test/postgres/request-runtime-view.test.ts",
-    "test/unit/canonical-model/surface-list.test.ts", "test/unit/workspace-contract.test.ts"
+    "apps/web/src/list-declaration.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-contract.ts",
+    "apps/web/src/surface-runtime.ts", "apps/web/test/browser/composed-application.spec.ts", "apps/web/test/browser/inventory-replenishment.spec.ts",
+    "apps/web/test/browser/sales-order.composed-application.spec.ts", "apps/web/test/surface-runtime-contract.test.ts", "packages/canonical-model/src/index.ts",
+    "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-list.ts", "packages/canonical-model/src/surface-workspace.ts",
+    "packages/compiler/src/projections.ts", "packages/domain/src/app/builder.ts", "packages/domain/src/app/list-declarations.ts",
+    "packages/domain/src/app/order-entry.ts", "packages/domain/src/catalog/definition.ts", "packages/domain/src/inventory/item-stock-workspace.ts",
+    "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/runtime/src/list-behavior/cursor.ts", "packages/runtime/src/list-behavior/figures.ts",
+    "packages/runtime/src/list-behavior/index.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-query-gateway.ts",
+    "test/architecture/repository-hygiene.test.ts", "test/architecture/surface-grammar-conformance.test.ts", "test/compiler/g2-module-conformance.test.ts",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/order-entry-fixture.ts", "test/integration/surface-data-binding.test.ts",
+    "test/postgres/composed-application.test.ts", "test/postgres/fresh-tenant-full-replay-schema.snapshot.json", "test/postgres/module-storage-transition.test.ts",
+    "test/postgres/replenishment.test.ts", "test/postgres/request-runtime-view.test.ts", "test/unit/canonical-model/surface-list.test.ts",
+    "test/unit/workspace-contract.test.ts"
   ],
   "symbols": [
+    {"path": "apps/web/src/component-registry.ts", "name": "canonicalStoredDecimal"},
     {"path": "apps/web/src/list-declaration.ts", "name": "figureBandLabel"},
     {"path": "apps/web/src/surface-runtime.ts", "name": "loadFormReferences"},
     {"path": "packages/canonical-model/src/schemas.ts", "name": "SurfaceFormSchema"},
