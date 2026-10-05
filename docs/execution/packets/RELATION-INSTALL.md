@@ -1,7 +1,7 @@
 # RELATION-INSTALL — install relation columns on existing company tables
 
 Status: draft PR #20 against PAYABLES; Critical; owner-run review owed; no merge or deployment.
-Base: PAYABLES `b91c5284e163d19a834802479dd2dc1e3a1201d1`.
+Base: PAYABLES `96ac234122322b2cbe18349299664f56c8f5190a` (upstream review/CI refresh; app envelope unchanged).
 Critical scope: relation-column resolution and existing column-grant admission in `module-storage-materializer.ts`; no other Critical path changed.
 Design: `DROP-SHIP-RELATION-INSTALL-design.md` at DROP-SHIP `4000c486` (owner selected 2026-10-04).
 
@@ -22,18 +22,18 @@ Design: `DROP-SHIP-RELATION-INSTALL-design.md` at DROP-SHIP `4000c486` (owner se
 ## Controls
 
 - `relation-install-target-missing` -> claim 1: disable the new relation lookup branch.
-- `relation-install-foreign-company-target` -> claim 2: remove company columns only when resolving the newly added relation.
+- `relation-install-foreign-company-target` -> claim 2: remove company columns at `applyDdlElement`'s FK installer for the synthetic added relation.
 - `relation-install-column-write-grant-absent` -> claim 3: omit add-column UPDATE admission.
-- Manifest: `test/evidence/RELATION-INSTALL.expected-red.json`; valid executions pending, after executable commit, on AC with >=2 GB free Windows memory.
+- Manifest: `test/evidence/RELATION-INSTALL.expected-red.json`; committed controls run through owner-approved evidence-on-demand CI. Local controls remain behind AC and >=2 GB free Windows memory checks.
 - First target-missing attempt ran but failed the restored-green prerequisite; no discriminating red is claimed. Its container was removed and source restored. Further unmutated diagnosis expired at the lock before starting. The test now exposes typed preparation codes and isolates this transition from unrelated historical installs; bounds unchanged.
 
 ## Gates
 
 - Typecheck PASS; focused Prettier PASS.
-- Full hosted [CI PASS](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37268185759) at `66cf178a`, including the real PostgreSQL transition. Revised test at `d59e1d4a` awaits fresh PostgreSQL/CI evidence; its first isolated run refused the absent bootstrap-to-base projection, now supplied by compilation.
-- Static expected-red validation PASS (161 entries / 14 manifests). Three valid mutation-control outcomes remain pending; first attempt failed restored-green, not accepted as evidence.
-- Check-records, typecheck, focused lint and formatting PASS. Record-claim names executable `d59e1d4a`; production code remains the same 17-line `locateColumn` addition.
-- Refreshed hosted CI and owner Critical review pending; draft PR https://github.com/AnserBeg/2rain-greenfield/pull/20. Controls check AC and >=2 GB Windows free memory outside the lock (latest about 1.1 GB, below the minimum; no test started).
+- Full hosted [earlier CI PASS](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37268185759) at `66cf178a`. [Refreshed CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37277958211) at `8505c168` has passing composed PostgreSQL and schema jobs; full completion remains pending.
+- [Controls at `8505c168`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37277961005): target-missing and column-write-grant-absent each killed one declared test for its declared reason, then restored one passing test. Foreign-company-target survived because its mutation did not reach the FK installer; no red is claimed for it. Its committed mutation now targets that installer; all three await a fresh run.
+- Static expected-red validation PASS (165 entries / 14 manifests). Typecheck, focused lint and formatting PASS; record-claim names executable `b318205c`. The diff to refreshed PAYABLES remains the same 17-line production addition.
+- Refreshed hosted CI, revised control evidence and owner Critical review pending; draft PR https://github.com/AnserBeg/2rain-greenfield/pull/20. Latest Windows memory about 1.36 GB remains below the local control minimum; no local control started.
 
 ## Test it yourself
 
@@ -49,14 +49,14 @@ DROP-SHIP's user-facing delivery workflow is the next authorized checkpoint afte
 
 ## Review prompt
 
-`RELATION-INSTALL-review-prompt.md` names executable `d59e1d4a`; facts and questions only. Owner-run review pending; no self-review.
+`RELATION-INSTALL-review-prompt.md` names executable `b318205c`; facts and questions only. Owner-run review pending; no self-review.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RELATION-INSTALL",
-  "base": "b91c5284e163d19a834802479dd2dc1e3a1201d1",
-  "head": "d59e1d4a1c2b5183067dd36d5eb5680f19fcb23d",
+  "base": "96ac234122322b2cbe18349299664f56c8f5190a",
+  "head": "b318205c0b885ecbbdcc2e14c18ba0345f71acbf",
   "changedPaths": [
     "packages/postgres-provider/src/module-storage-materializer.ts",
     "test/postgres/composed-application.test.ts",
@@ -75,4 +75,4 @@ DROP-SHIP's user-facing delivery workflow is the next authorized checkpoint afte
 ## Continuation checkpoint — 2026-10-05
 
 - Next: focused revised PostgreSQL transition, all three controls and fresh CI; no application artifact, deadline or readiness change.
-- Authorized step 6 is active: DROP-SHIP merged `66cf178a`; draft PR #19 continues on its own worktree. It still owes schema regeneration, local PostgreSQL/browser and full green CI.
+- Authorized step 6 is active: DROP-SHIP merged the refreshed PAYABLES and bridge at `76a3628c`; draft PR #19 continues on its own worktree. Schema regeneration, PostgreSQL/browser and full green CI remain owed.
