@@ -18,6 +18,7 @@ Base: `681f4675` on `packet/VALUATION`, stacked on `packet/PAYABLES`.
 - Owner rulings are recorded in ADR-0067: derived moving average, unvalued quantities, no FX, separate currencies, landed cost after payables; it amends the plan's reserved valuation seam and ADR-0017, retaining quantity-only movements and the accounting exclusion.
 - Inventory value lives beside Items in Catalog because the existing canonical grammar keeps a surface, query and source entity in one module; one item/company row labels each currency's independent figures.
 - Known value is labelled as such; unknown stock never receives the PO or selling price, and no cross-currency total is claimed. Existing selling prices remain visible beside item costs; the fixture deliberately uses a PO estimate of 99 against actual costs of 5 and 15.
+- Costed document queries retain dedicated plain stored gets for release admission; existing public document query identities and links remain valid.
 - Shared item storage remains tenant-level; valuation adds a company query operand for its company-owned dependencies, without adding a column or changing identity.
 
 ## Slices
@@ -35,8 +36,8 @@ None owed: no Critical-set path changes.
 - Focused moving-average/shipment/invoice unit cases 9/9; scoped/paged/current-policy and shipment lineage integration 4/4; web metadata/print contracts 2/2; release freshness `--check` PASS.
 - Compiled from the PAYABLES base envelope: one added lineage entry (6 total), 102 surfaces, 17 navigation destinations, 573 verification scenarios; coverage re-derived: 2654 obligations / 811 observed, unchanged.
 - Local typecheck, lint and formatting PASS after merging `681f4675`; focused unit/workspace/surface grammar 44/44, compiler/integration/web contracts 237/237, List 6/6, numbering PostgreSQL 2/2, item contract 1/1 and suite inventory 1/1 pass. Stored-row oracle and valuation browser passed locally and in hosted CI.
-- Slice 1 full CI [36801057149](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36801057149) green at `45b03f7f62103c5824b099c16dd4a2409de991a3`, all ten jobs including reachability. Slice 2 full CI pending.
-- Slice 2 local typecheck, lint, format and surface grammar (25/25) PASS. Its independent stored-row oracle and browser journey are registered for hosted PostgreSQL/operations jobs; local checks wait for the machine's exclusive container slot. Standalone coverage check lacks a reachability run token; the full CI run supplies it. No readiness bound or timeout changed.
+- Slice 1 full CI [36801057149](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36801057149) green at `45b03f7f62103c5824b099c16dd4a2409de991a3`, all ten jobs including reachability. Slice 2 CI [36841431777](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36841431777) passed quality/security/performance but refused release admission because costing replaced the only plain shipment/invoice gets. Canonical stored gets and a compiled-artifact contract correct this; refreshed full CI pending.
+- Slice 2 local typecheck, lint, format and surface grammar (25/25) PASS. Its independent stored-row oracle and browser journey are registered for hosted PostgreSQL/operations jobs. The earlier local PostgreSQL attempt exited 75 before launch because the lock stayed busy; Docker is now unavailable in WSL, so those gates run in hosted CI. Standalone coverage check lacks a reachability run token; the full CI run supplies it. No readiness bound or timeout changed.
 - Small bridges: PAYABLES numbering and composed navigation inventories measured from compilation; fixtures that remove Inventory also remove composed Catalog cost reads; navigation/composed counts are pinned to the compiled output, and the new unit/PostgreSQL files enter the suite inventories.
 
 ## Test it yourself
@@ -52,7 +53,7 @@ None owed: no Critical-set path changes.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "VALUATION",
   "base": "681f46751b2a4c3cc9027956534b741c35dd4a03",
-  "head": "0bd80b5f7c3cb40b9e8f45cafd7c83995702ab64",
+  "head": "1a0f73c0c93f6aa5df2d0eaaa65e3ab89e6feeee",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
