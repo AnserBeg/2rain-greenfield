@@ -448,10 +448,10 @@ export const INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY = Object.freeze({
 } satisfies PostgresCapabilityOperationExecutorFactory);
 
 /**
- * Which route an operation of the posting capability takes: a stock document
- * reads back as its transaction (`inventory_transaction_post`); a stock
- * count's command (STOCK-COUNTS) reads back as the count. Anything else is
- * not an admitted operation.
+ * Which route an operation of the posting capability takes: a stock
+ * document's Post reads back as its transaction; a stock count's command
+ * (STOCK-COUNTS) reads back as the count. Anything else is not an admitted
+ * operation.
  */
 function postingRoute(
   request:

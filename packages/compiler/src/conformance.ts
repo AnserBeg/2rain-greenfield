@@ -737,6 +737,8 @@ const STOCK_COUNT_MODULE_FIELD_RULES = Object.freeze([
         { label: 'counting', optionLocalId: 'stock_count_state_counting' },
         { label: 'reviewed', optionLocalId: 'stock_count_state_reviewed' },
         { label: 'posted', optionLocalId: 'stock_count_state_posted' },
+        // STOCK-COUNTS: a count not posted can be cancelled.
+        { label: 'cancelled', optionLocalId: 'stock_count_state_cancelled' },
       ],
     },
   },
@@ -777,6 +779,34 @@ const STOCK_COUNT_MODULE_FIELD_RULES = Object.freeze([
     fieldLocalId: 'stock_count_reason_narrative',
     presence: 'optional',
     shape: { kind: 'text', maximumLength: 1000 },
+  },
+  // STOCK-COUNTS: the count's type and counting mode, labels for the count.
+  {
+    fieldLocalId: 'stock_count_count_type',
+    presence: 'optional',
+    shape: {
+      kind: 'enum',
+      options: [
+        {
+          label: 'correction',
+          optionLocalId: 'stock_count_count_type_correction',
+        },
+        { label: 'cycle', optionLocalId: 'stock_count_count_type_cycle' },
+        { label: 'annual', optionLocalId: 'stock_count_count_type_annual' },
+        { label: 'opening', optionLocalId: 'stock_count_count_type_opening' },
+      ],
+    },
+  },
+  {
+    fieldLocalId: 'stock_count_counting_mode',
+    presence: 'optional',
+    shape: {
+      kind: 'enum',
+      options: [
+        { label: 'open', optionLocalId: 'stock_count_counting_mode_open' },
+        { label: 'blind', optionLocalId: 'stock_count_counting_mode_blind' },
+      ],
+    },
   },
 ] as const satisfies readonly InventoryMovementModuleFieldRule[]);
 const STOCK_COUNT_LINE_MODULE_FIELD_RULES = Object.freeze([

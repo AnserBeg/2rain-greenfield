@@ -16,10 +16,11 @@ import type { ImmutableJsonValue } from '../../runtime/src/request-runtime-view.
  * STOCK-COUNTS: what each line of one count expects and differs by. While the
  * count is a draft or counting, expected is what is posted at the count's
  * location now -- the posted stock list, under current policy and the page's
- * company -- and variance is the physical count less it; once the count is
- * reviewed, both are the figures its review froze, which the posting kernel
- * checks again under its stock locks. It answers only for the lines of one
- * count (the executor's echoed parent scope).
+ * company -- and variance is the physical count less it, except that a blind
+ * count states neither until it is reviewed; once reviewed, both are the
+ * figures its review froze, which the posting kernel checks again under its
+ * stock locks. It answers only for the lines of one count (the executor's
+ * echoed parent scope).
  *
  * A display, not the rule: a withheld count or stock read states no figure,
  * and nothing here decides what posts.
@@ -142,10 +143,14 @@ export const inventoryCountReadModel: SemanticQueryReadModelExecutor = async ({
   const counting =
     state === option('stock_count_state_draft') ||
     state === option('stock_count_state_counting');
+  // A blind count states no expectation until it is reviewed (ruling SC-4).
+  const blind =
+    count?.values[field('stock_count_counting_mode')] ===
+    option('stock_count_counting_mode_blind');
   // What is posted at the count's location now, by product.
   let posted: Map<string, bigint> | null = null;
   const location = count?.values[field('stock_count_location_id')];
-  if (counting && typeof location === 'string') {
+  if (counting && !blind && typeof location === 'string') {
     try {
       posted = new Map();
       for (const balance of await list('stock', {

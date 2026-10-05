@@ -221,9 +221,11 @@ function counts(fixture: Fixture) {
     location: string,
     options: {
       readonly kind?: string;
+      readonly mode?: 'blind' | 'open';
       readonly narrative?: string;
       readonly state?: string;
       readonly supersedes?: string;
+      readonly type?: 'annual' | 'correction' | 'cycle' | 'opening';
     } = {},
   ) =>
     fixture.create(
@@ -236,11 +238,13 @@ function counts(fixture: Fixture) {
         reason_code: 'PHYSICAL_COUNT',
         reason_narrative:
           options.narrative ?? 'Cycle count by the stock count test',
+        count_type: `${ns}:option.stock_count_count_type_${options.type ?? 'cycle'}`,
+        counting_mode: `${ns}:option.stock_count_counting_mode_${options.mode ?? 'open'}`,
       },
       options.supersedes ? { supersedes: options.supersedes } : {},
     );
   const command = (
-    action: 'post' | 'review' | 'start',
+    action: 'cancel' | 'post' | 'reopen' | 'review' | 'start',
     recordId: string,
     expectedRevision: number,
     key = randomUUID(),
@@ -535,6 +539,111 @@ test(
         'a stale count stays reviewed',
       );
       assert.deepEqual(await read.movements(second.recordId), []);
+
+      // Return to counting, count again and review: the count now speaks for
+      // the ledger as it stands, and posts.
+      const reopened = await count.command(
+        'reopen',
+        second.recordId,
+        secondReviewed.readBack!.revision,
+      );
+      assert.equal(
+        reopened.readBack?.values[countField('state')],
+        state('counting'),
+      );
+      const recounted = await read.onHand(VANCOUVER_WAREHOUSE);
+      for (const value of await read.lines(second.recordId))
+        await count.enter(value, recounted.get(String(value.item))!);
+      const rereviewed = await count.command(
+        'review',
+        second.recordId,
+        reopened.readBack!.revision,
+      );
+      await count.command(
+        'post',
+        second.recordId,
+        rereviewed.readBack!.revision,
+      );
+      assert.deepEqual(
+        (await read.onHand(VANCOUVER_WAREHOUSE)).get(fixture.item),
+        recounted.get(fixture.item),
+        'a count that agrees with the ledger leaves it as it is',
+      );
+
+      // A blind count states no expectation until it is reviewed.
+      const blind = await count.create(VANCOUVER_WAREHOUSE, { mode: 'blind' });
+      const blindStarted = await count.command(
+        'start',
+        blind.recordId,
+        blind.revision,
+      );
+      const concealed = await listed(fixture, 'stock_count_count_lines', {
+        parentScope: {
+          relationId: `${ns}:relation.stock_count_line_session`,
+          recordId: blind.recordId,
+        },
+      });
+      assert.ok(concealed.records.length > 0);
+      assert.ok(
+        concealed.records.every(
+          (record) =>
+            record.values[`${ns}:metric.count_book`] === null &&
+            record.values[`${ns}:metric.count_variance`] === null,
+        ),
+        'a blind count hides what is expected while counting',
+      );
+      const blindLines = await read.lines(blind.recordId);
+      assert.ok(
+        blindLines.every((value) => value.expected === '0'),
+        'and stores no expectation a line page could show',
+      );
+      const blindBook = await read.onHand(VANCOUVER_WAREHOUSE);
+      for (const value of blindLines)
+        await count.enter(value, blindBook.get(String(value.item))!);
+      await count.command(
+        'review',
+        blind.recordId,
+        blindStarted.readBack!.revision,
+      );
+      const revealed = await listed(fixture, 'stock_count_count_lines', {
+        parentScope: {
+          relationId: `${ns}:relation.stock_count_line_session`,
+          recordId: blind.recordId,
+        },
+      });
+      assert.equal(
+        revealed.records.find(
+          (record) => record.values[lineField('item_id')] === fixture.item,
+        )!.values[`${ns}:metric.count_book`],
+        blindBook.get(fixture.item),
+        'review shows what was expected',
+      );
+      // Cancel it: a count not posted can be cancelled, and then nothing
+      // about it changes.
+      const blindStored = await read.stored(blind.recordId);
+      const cancelled = await count.command(
+        'cancel',
+        blind.recordId,
+        Number(blindStored!.revision),
+      );
+      assert.equal(
+        cancelled.readBack?.values[countField('state')],
+        state('cancelled'),
+      );
+      await assert.rejects(
+        fixture.invoke('stock_count_update', {
+          recordId: blind.recordId,
+          expectedRevision: cancelled.readBack!.revision,
+          patch: { [countField('reason_narrative')]: 'Reopened by hand' },
+        }),
+        moduleRefusal('MODULE_OPERATION_PRECONDITION_REFUSED'),
+      );
+      assert.deepEqual(await read.movements(blind.recordId), []);
+
+      // A quick correction starts empty: the counter adds what is counted.
+      const quick = await count.create(main, { type: 'correction' });
+      await count.command('start', quick.recordId, quick.revision);
+      assert.deepEqual(await read.lines(quick.recordId), []);
 
       // Correct: a correction of the posted count, at the same location,
       // started from the products it counted.

@@ -35,7 +35,21 @@ import { PostgresTrustService } from './trust/postgres-trust-service.js';
 type StorageEntityTarget = StorageTargetPayloadV1['entities'][number];
 type StorageColumnTarget = StorageEntityTarget['columns'][number];
 
-export type StockCountCommand = 'start' | 'review' | 'post';
+export type StockCountCommand =
+  'start' | 'review' | 'post' | 'reopen' | 'cancel';
+/** Each command's states before and after; Post is the kernel's own. */
+const TRANSITIONS: Readonly<
+  Record<
+    Exclude<StockCountCommand, 'post'>,
+    readonly [from: readonly CountState[], to: CountState]
+  >
+> = {
+  start: [['draft'], 'counting'],
+  review: [['counting'], 'reviewed'],
+  reopen: [['reviewed'], 'counting'],
+  cancel: [['draft', 'counting', 'reviewed'], 'cancelled'],
+};
+type CountState = 'cancelled' | 'counting' | 'draft' | 'posted' | 'reviewed';
 
 export interface StockCountBinding {
   readonly count: StorageEntityTarget;
@@ -74,9 +88,10 @@ export interface StockCountBinding {
     sourceType: string;
     unitId: string;
   }>;
-  readonly states: Readonly<
-    Record<'counting' | 'draft' | 'posted' | 'reviewed', string>
-  >;
+  readonly states: Readonly<Record<CountState, string>>;
+  /** Count types whose Start lists no product: the counter adds each. */
+  readonly startsEmpty: ReadonlySet<string>;
+  readonly countTypeFieldId: string;
   readonly supersedesColumn: string;
 }
 
@@ -110,9 +125,10 @@ export interface HydratedStockCount {
 export function stockCountCommandOf(
   operationId: string,
 ): StockCountCommand | null {
-  const match = /:operation\.stock_count_(start|review|post)$/u.exec(
-    operationId,
-  );
+  const match =
+    /:operation\.stock_count_(start|review|post|reopen|cancel)$/u.exec(
+      operationId,
+    );
   return match ? (match[1] as StockCountCommand) : null;
 }
 
@@ -128,6 +144,18 @@ export function stockCountBinding(
   const [line] = entity('stock_count_line');
   const [movement] = entity('inventory_movement');
   if (!count || !line || !movement) return null;
+  // A release from before the count route (an earlier entry of the lineage,
+  // replayed or served) has no route to bind: its counts are records only.
+  const has = (target: StorageEntityTarget, suffix: string) =>
+    target.columns.some((column) =>
+      column.canonicalFieldId.endsWith(`:field.${suffix}`),
+    );
+  if (
+    !has(line, 'stock_count_line_physical_quantity') ||
+    !has(count, 'stock_count_count_type') ||
+    !has(count, 'stock_count_counting_mode')
+  )
+    return null;
   if (
     !count.legalEntity ||
     !line.legalEntity ||
@@ -191,11 +219,22 @@ export function stockCountBinding(
       unitId: physicalField(movement, 'inventory_movement_unit_id'),
     }),
     states: Object.freeze({
+      cancelled: requiredOption(state, 'stock_count_state_cancelled'),
       counting: requiredOption(state, 'stock_count_state_counting'),
       draft: requiredOption(state, 'stock_count_state_draft'),
       posted: requiredOption(state, 'stock_count_state_posted'),
       reviewed: requiredOption(state, 'stock_count_state_reviewed'),
     }),
+    startsEmpty: new Set(
+      ['correction', 'opening'].map((type) =>
+        requiredOption(
+          requiredColumn(count.columns, 'stock_count_count_type'),
+          `stock_count_count_type_${type}`,
+        ),
+      ),
+    ),
+    countTypeFieldId: requiredColumn(count.columns, 'stock_count_count_type')
+      .canonicalFieldId,
     supersedesColumn: relationColumn(count.entityId, count.entityId),
   });
 }
@@ -265,20 +304,25 @@ export function stockCountPostingCommand(
 /**
  * Start counting (draft -> counting): a line for every product the ledger
  * holds above zero at the count's location now, or -- for a correction -- for
- * every product the corrected count named, each not counted yet. Expected,
- * counted and variance start at zero for Review to replace.
+ * every product the corrected count named, each not counted yet; a quick
+ * correction or an opening count lists nothing. Expected, counted and
+ * variance start at zero for Review to replace.
  *
  * Review (counting -> reviewed): the counted instant is now; each line's
  * expected is the ledger at the location as of it, its counted quantity the
  * physical count entered and its variance their difference. A reversal's
  * lines are derived instead, each the exact inverse of a movement the count
  * it reverses posted.
+ *
+ * Return to counting (reviewed -> counting) keeps what was entered for Review
+ * to read again; Cancel count (draft, counting or reviewed -> cancelled)
+ * ends a count that is not posted. Neither touches a line.
  */
 export async function executeStockCountChange(
   context: PostgresCapabilityOperationExecutorContext,
   binding: StockCountBinding,
   request: RegisteredCapabilityOperationExecutionRequest,
-  command: 'review' | 'start',
+  command: Exclude<StockCountCommand, 'post'>,
   input: { readonly expectedRevision: number; readonly recordId: string },
   authorizedLegalEntityId: string,
 ): Promise<{
@@ -322,21 +366,20 @@ export async function executeStockCountChange(
         if (count.legalEntityId !== authorizedLegalEntityId) {
           throw inputError('the count scope changed after authorization');
         }
-        const from = command === 'start' ? 'draft' : 'counting';
-        const to = command === 'start' ? 'counting' : 'reviewed';
-        if (
-          count.currentRevision !== input.expectedRevision ||
-          count.state !== binding.states[from]
-        ) {
+        const [states, to] = TRANSITIONS[command];
+        const from = states.find(
+          (state) => count.state === binding.states[state],
+        );
+        if (count.currentRevision !== input.expectedRevision || !from) {
           throw new InventoryPostingError(
             'INVENTORY_TRANSACTION_STATE_CONFLICT',
             'the count changed since it was shown',
           );
         }
-        let lineCount: number;
+        let lineCount = 0;
         if (command === 'start') {
           lineCount = await startCount(client, binding, request, count, now);
-        } else {
+        } else if (command === 'review') {
           const role = count.kind === 'initial' ? 'count' : 'correction';
           const narrative = count.reasonNarrative?.trim() ?? '';
           if (
@@ -484,6 +527,13 @@ async function startCount(
       'a reversal is not counted: its lines come from the count it reverses',
     );
   }
+  const type = count.values[binding.countTypeFieldId];
+  if (
+    count.kind === 'initial' &&
+    typeof type === 'string' &&
+    binding.startsEmpty.has(type)
+  )
+    return 0;
   const m = binding.movementFields;
   const products =
     count.kind === 'initial'

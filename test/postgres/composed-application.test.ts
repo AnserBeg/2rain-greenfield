@@ -3604,13 +3604,14 @@ async function assertBoundedFreshTenantInstallEvidence(
   // invoice number is searchable, so it adds no search exclusion. RETURNS
   // adds 58, measured from the compiled plan: the customer return (18) and
   // its lines (13), the vendor return (15) and its lines (12). STOCK-COUNTS
-  // takes 1 net, measured the same way: retiring the two companion relations
-  // from the generic contract drops their archive-restrict probes (2), and
-  // the line's physical count adds a search exclusion (1).
+  // adds 3 net, measured the same way: retiring the two companion relations
+  // from the generic contract drops their archive-restrict probes (2); the
+  // line's physical count adds a search exclusion (1), and the count's type
+  // and counting mode each an enumeration check and a search exclusion (4).
   assert.equal(
     servingScenarioCount,
-    630,
-    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, 58 for returns, and 1 fewer for stock counts',
+    634,
+    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, 58 for returns, and 3 for stock counts',
   );
   await assertFreshInstallLineageEvidence(
     pool,
@@ -5963,11 +5964,11 @@ async function assertExactPartitionEvidence(
   // (each vendor document has a generic create, replayed by this oracle over
   // the compiled head): 573, 496. RETURNS' 58 execute as well (each return
   // and each return line has a generic create): 631, 554. STOCK-COUNTS'
-  // change is on a count and its line, both with a generic create: 630, 553.
+  // change is on a count and its line, both with a generic create: 634, 557.
   assert.equal(
     evidence.results.length,
-    553,
-    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72, returns 58, and stock counts 1 fewer',
+    557,
+    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72, returns 58, and stock counts 3',
   );
   assert.equal(
     derivations.length,

@@ -76,7 +76,9 @@ function ids(namespace: string) {
       },
       stockCount: {
         actorId: field('stock_count', 'actor_id'),
+        countType: field('stock_count', 'count_type'),
         countedAt: field('stock_count', 'counted_at'),
+        countingMode: field('stock_count', 'counting_mode'),
         kind: field('stock_count', 'kind'),
         locationId: field('stock_count', 'location_id'),
         number: field('stock_count', 'number'),
@@ -129,7 +131,14 @@ function ids(namespace: string) {
      * the posting route: start counting (lines from posted stock), review
      * (the server reads expected), post (the posting kernel).
      */
-    countCommands: ['start', 'review', 'post'] as const,
+    countCommands: ['start', 'review', 'post', 'reopen', 'cancel'] as const,
+    countOperationIds: {
+      start: `${namespace}:operation.stock_count_start`,
+      review: `${namespace}:operation.stock_count_review`,
+      post: `${namespace}:operation.stock_count_post`,
+      reopen: `${namespace}:operation.stock_count_reopen`,
+      cancel: `${namespace}:operation.stock_count_cancel`,
+    },
     packageId: `${namespace}:package.inventory`,
     queryIds: {
       onHand: `${namespace}:query.inventory_movement_on_hand`,
@@ -524,6 +533,8 @@ export function inventoryModuleDefinition(
           'counting',
           'reviewed',
           'posted',
+          // STOCK-COUNTS: appended, so every released option keeps its order.
+          'cancelled',
         ]),
       ),
       field(
@@ -576,6 +587,37 @@ export function inventoryModuleDefinition(
         'Reason narrative',
         90,
         text(1000),
+        { optional: true },
+      ),
+      // STOCK-COUNTS: what kind of count this is -- a label, and whether
+      // Start counting lists the location's products (a cycle count or an
+      // annual stocktake does; a quick correction or an opening count starts
+      // empty).
+      field(
+        definitionIds,
+        entityIds.stockCount,
+        fieldIds.stockCount.countType,
+        'Count type',
+        100,
+        enumeration(definitionIds, 'stock_count_count_type', [
+          'correction',
+          'cycle',
+          'annual',
+          'opening',
+        ]),
+        { optional: true },
+      ),
+      // STOCK-COUNTS: a blind count hides what is expected until review.
+      field(
+        definitionIds,
+        entityIds.stockCount,
+        fieldIds.stockCount.countingMode,
+        'Counting mode',
+        110,
+        enumeration(definitionIds, 'stock_count_counting_mode', [
+          'open',
+          'blind',
+        ]),
         { optional: true },
       ),
 
@@ -1069,7 +1111,11 @@ function standardOperationPreconditions(
   const stockCountMutable = (): Record<string, unknown> => ({
     kind: 'allPredicate',
     schemaVersion: version,
-    terms: [notInState('reviewed'), notInState('posted')],
+    terms: [
+      notInState('reviewed'),
+      notInState('posted'),
+      notInState('cancelled'),
+    ],
   });
   if (local === 'stock_count') {
     return {
@@ -1516,25 +1562,37 @@ function postingOperation(ids: InventoryIds): Record<string, unknown> {
  * guarded by the state it acts on and read back as the count. Start counting
  * fills the lines from posted stock; Review freezes the evidence -- the
  * counted instant, expected from the ledger as of it, counted from what was
- * entered, and their variance; Post hands the reviewed count to the kernel.
+ * entered, and their variance; Post hands the reviewed count to the kernel;
+ * Return to counting reopens a reviewed count; Cancel count ends one that is
+ * not posted.
  */
 function countOperations(ids: InventoryIds): Array<Record<string, unknown>> {
-  const inState = (state: string) =>
-    fieldComparison(ids.fieldIds.stockCount.state, 'equals', {
-      kind: 'textValue',
-      schemaVersion: version,
-      value: `${ids.namespace}:option.stock_count_state_${state}`,
-    });
+  const inState = (...states: readonly string[]): Record<string, unknown> => {
+    const [only, ...more] = states.map((state) =>
+      fieldComparison(ids.fieldIds.stockCount.state, 'equals', {
+        kind: 'textValue',
+        schemaVersion: version,
+        value: `${ids.namespace}:option.stock_count_state_${state}`,
+      }),
+    );
+    return more.length
+      ? { kind: 'anyPredicate', schemaVersion: version, terms: [only, ...more] }
+      : only!;
+  };
   const commands: Record<
     (typeof ids.countCommands)[number],
-    readonly [label: string, state: string, confirmed: boolean]
+    readonly [label: string, states: readonly string[], confirmed: boolean]
   > = {
-    start: ['Start counting', 'draft', false],
-    review: ['Review', 'counting', false],
-    post: ['Post', 'reviewed', true],
+    start: ['Start counting', ['draft'], false],
+    review: ['Review', ['counting'], false],
+    post: ['Post', ['reviewed'], true],
+    // Back to counting, as it was: what was entered stays, Review reads again.
+    reopen: ['Return to counting', ['reviewed'], false],
+    // A count not posted can be cancelled; a cancelled count stays cancelled.
+    cancel: ['Cancel count', ['draft', 'counting', 'reviewed'], true],
   };
   return ids.countCommands.map((action) => {
-    const [label, state, confirmed] = commands[action];
+    const [label, states, confirmed] = commands[action];
     return {
       confirmation: confirmed ? 'humanRequired' : 'none',
       effect: {
@@ -1545,12 +1603,12 @@ function countOperations(ids: InventoryIds): Array<Record<string, unknown>> {
       kind: 'operationDefinition',
       label,
       module: reference('moduleReference', ids.moduleId),
-      operationId: `${ids.namespace}:operation.stock_count_${action}`,
+      operationId: ids.countOperationIds[action],
       permission: reference(
         'permissionReference',
         `${ids.namespace}:permission.stock_count_${action}`,
       ),
-      precondition: inState(state),
+      precondition: inState(...states),
       readBack: reference(
         'queryReference',
         `${ids.namespace}:query.stock_count_get`,
@@ -1597,6 +1655,9 @@ function stockDocumentListQuery(ids: InventoryIds): Record<string, unknown> {
     });
   return {
     ...clone,
+    // A filtered query is a q1 query: the compiler lowers its predicate into
+    // the list statement, before the count and the page.
+    tier: 'q1',
     filter: {
       kind: 'anyPredicate',
       schemaVersion: version,

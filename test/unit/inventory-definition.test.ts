@@ -78,7 +78,7 @@ test('INVENTORY-PARITY: the standalone kernel harness keeps the module it has al
   ]);
 });
 
-test('STOCK-COUNTS: the product mounts stock counts numbered CNT-000001 with Start counting, Review and Post on the posting route; a reviewed count is frozen and the companion relations are retired', () => {
+test('STOCK-COUNTS: the product mounts stock counts numbered CNT-000001 with Start counting, Review, Post, Return to counting and Cancel count on the posting route; a reviewed or cancelled count is frozen and the companion relations are retired', () => {
   type Operation = Record<string, unknown> & {
     operationId: string;
     label?: string;
@@ -119,9 +119,14 @@ test('STOCK-COUNTS: the product mounts stock counts numbered CNT-000001 with Sta
     operations.find(
       (value) => value.operationId === `${ns}:operation.${local}`,
     );
-  // Each command acts in one state, on the posting capability's route.
+  // Each command acts in its states, on the posting capability's route.
+  const either = (...locals: string[]) => ({
+    kind: 'anyPredicate',
+    schemaVersion: 'v6',
+    terms: locals.map(state),
+  });
   assert.deepEqual(
-    ['start', 'review', 'post'].map((action) => {
+    ['start', 'review', 'post', 'reopen', 'cancel'].map((action) => {
       const value = operation(`stock_count_${action}`)!;
       return [
         value.label,
@@ -132,23 +137,33 @@ test('STOCK-COUNTS: the product mounts stock counts numbered CNT-000001 with Sta
         value.precondition,
       ];
     }),
-    [
-      ['Start counting', 'draft', 'none'],
-      ['Review', 'counting', 'none'],
-      ['Post', 'reviewed', 'humanRequired'],
-    ].map(([label, local, confirmation]) => [
+    (
+      [
+        ['Start counting', state('draft'), 'none'],
+        ['Review', state('counting'), 'none'],
+        ['Post', state('reviewed'), 'humanRequired'],
+        ['Return to counting', state('reviewed'), 'none'],
+        [
+          'Cancel count',
+          either('draft', 'counting', 'reviewed'),
+          'humanRequired',
+        ],
+      ] as const
+    ).map(([label, precondition, confirmation]) => [
       label,
       'o1',
       'registeredCapabilityEffect',
       'northstar.inventory:capability.posting',
       confirmation,
-      state(local!),
+      precondition,
     ]),
   );
   // The standalone kernel harness has no count route.
   assert.equal(
     (inventoryModuleDefinition(ns).operations as Operation[]).some((value) =>
-      /:operation\.stock_count_(start|review|post)$/u.test(value.operationId),
+      /:operation\.stock_count_(start|review|post|reopen|cancel)$/u.test(
+        value.operationId,
+      ),
     ),
     false,
   );
@@ -157,7 +172,7 @@ test('STOCK-COUNTS: the product mounts stock counts numbered CNT-000001 with Sta
     assert.deepEqual(operation(`stock_count_${action}`)!.precondition, {
       kind: 'allPredicate',
       schemaVersion: 'v6',
-      terms: ['reviewed', 'posted'].map((local) => ({
+      terms: ['reviewed', 'posted', 'cancelled'].map((local) => ({
         kind: 'notPredicate',
         schemaVersion: 'v6',
         term: state(local),

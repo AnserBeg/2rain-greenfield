@@ -349,9 +349,9 @@ const companionDerivedInventoryPostingInputDigestVersion = 4 as const;
  * production caller. The standard version 2 keeps its role, because version 2
  * receipts ARE released data.
  *
- * STOCK-COUNTS ends that premise: the `stock_count_post` route is
- * `postStockCount`'s first production caller, so version-4 receipts are now
- * released data and version 4 is frozen. Any change to the stock-count digest
+ * STOCK-COUNTS ends that premise: a stock count's Post on the posting route
+ * is `postStockCount`'s first production caller, so version-4 receipts are
+ * now released data and version 4 is frozen. Any change to the stock-count digest
  * input is a version 5 with its own `CHECK` migration (ADR-0063, amended).
  *
  * A stored version-3 receipt is still DECODED under version 3 -- nothing is

@@ -35,6 +35,11 @@ test('a count of one location starts from posted stock, is reviewed against the 
       await expect(
         page.locator(`[name$=":${ns}:field.stock_count_${local}"]`),
       ).toHaveCount(0);
+    // A new count opens with one blank line; Start counting adds the
+    // location's products, so the blank line goes.
+    await page
+      .getByRole('button', { name: 'Remove line 1', exact: true })
+      .click();
     const count = await saveDraft(page);
 
     // Start counting lists every product posted here; Expected is the posted

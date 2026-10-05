@@ -1643,16 +1643,21 @@ test('STOCK-COUNTS: a stock count is entered like a document, its new lines star
     surface(source, 'stock_count_list').workspace.membership,
     'operational',
   );
-  // Editable while a draft or counting; one location, a reason, a narrative.
+  // Editable while a draft or counting; one location, a reason, a narrative,
+  // the count's type and whether it is blind.
   assert.deepEqual(editor(source).editableStateIds, [
     `${ns}:option.stock_count_state_draft`,
     `${ns}:option.stock_count_state_counting`,
   ]);
   assert.deepEqual(
     editor(source).headerFields.map((value) => value.fieldId),
-    ['location_id', 'reason_code', 'reason_narrative'].map(
-      (local) => `${ns}:field.stock_count_${local}`,
-    ),
+    [
+      'location_id',
+      'reason_code',
+      'reason_narrative',
+      'count_type',
+      'counting_mode',
+    ].map((local) => `${ns}:field.stock_count_${local}`),
   );
   // A line is a product, what was found, and the product's own unit.
   assert.deepEqual(

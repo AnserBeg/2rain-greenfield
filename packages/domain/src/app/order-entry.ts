@@ -695,6 +695,44 @@ export function orderEntrySurfaces(
         field('stock_count_reason_narrative', 'Narrative', {
           presentation: { kind: 'multiline' },
         }),
+        // A label for the count; a quick correction or an opening count
+        // starts empty, the others list the location's products.
+        field('stock_count_count_type', 'Count type', {
+          presentation: {
+            kind: 'choice',
+            options: [
+              { value: option('count_type_cycle'), label: 'Cycle count' },
+              { value: option('count_type_annual'), label: 'Annual stocktake' },
+              {
+                value: option('count_type_correction'),
+                label: 'Quick correction',
+              },
+              {
+                value: option('count_type_opening'),
+                label: 'Opening inventory',
+              },
+            ],
+            defaultValue: option('count_type_cycle'),
+          },
+        }),
+        // Blind (ruling SC-4): expected stays hidden until the count is
+        // reviewed.
+        field('stock_count_counting_mode', 'Counting mode', {
+          presentation: {
+            kind: 'choice',
+            options: [
+              {
+                value: option('counting_mode_open'),
+                label: 'Open: show what is expected while counting',
+              },
+              {
+                value: option('counting_mode_blind'),
+                label: 'Blind: hide what is expected until review',
+              },
+            ],
+            defaultValue: option('counting_mode_open'),
+          },
+        }),
       ],
       createValues: [
         {
