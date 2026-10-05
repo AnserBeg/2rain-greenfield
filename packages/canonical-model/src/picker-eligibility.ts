@@ -58,3 +58,56 @@ export function pickerEligibilityProblem(
   }
   return null;
 }
+
+/** A child entity whose text field also answers a List's or a picker's search. */
+export interface SearchChild {
+  readonly queryId: string;
+  readonly relationId: string;
+  readonly fieldId: string;
+}
+
+/**
+ * Why a search through children cannot be honoured, or `null` when it can
+ * (CATALOG-EXTRAS). The statement reads the child entity whole -- every
+ * active child, in no company -- so its list must be an active unscoped q0
+ * list without a read model or a filter the kernel would not admit; the
+ * child's own relation must be parentScopedChild and point at the searched
+ * entity; the field must be one of the child's text fields that list
+ * selects. Shared by declared Lists and draft editor pickers.
+ */
+export function searchChildProblem(
+  model: VersionedNormalizedApplicationPackage,
+  child: SearchChild,
+  searchedEntityId: string,
+): string | null {
+  const query = model.queries.find((value) => value.queryId === child.queryId);
+  const relation = model.relations.find(
+    (value) => value.relationId === child.relationId,
+  );
+  const field = model.fields.find((value) => value.fieldId === child.fieldId);
+  if (
+    query?.queryType !== 'list' ||
+    query.lifecycle !== 'active' ||
+    query.tier !== 'q0' ||
+    ('legalEntityScope' in query && query.legalEntityScope) ||
+    ('readModel' in query && query.readModel) ||
+    ('filter' in query &&
+      query.filter &&
+      inspectPredicateForExecution(query.filter).outcome !== 'accepted')
+  )
+    return 'a search through children reads an active unscoped q0 list query of the child entity';
+  if (
+    relation?.lifecycle !== 'active' ||
+    relation.ownership !== 'parentScopedChild' ||
+    relation.sourceEntity.targetId !== query.sourceEntity.targetId ||
+    relation.targetEntity.targetId !== searchedEntityId
+  )
+    return 'a search through children follows their parentScopedChild relation to the searched entity';
+  if (
+    field?.entity.targetId !== query.sourceEntity.targetId ||
+    field.fieldType.kind !== 'textFieldType' ||
+    !query.selections.some((value) => value.field.targetId === child.fieldId)
+  )
+    return 'a search through children matches a text field their list query selects';
+  return null;
+}

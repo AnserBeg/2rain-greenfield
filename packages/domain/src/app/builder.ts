@@ -69,9 +69,13 @@ const MODULE_REGISTRY = Object.freeze([
     moduleName: 'purchasing',
   }),
   Object.freeze({
-    // Stock documents recorded like the other documents (INVENTORY-PARITY).
+    // Stock documents recorded like the other documents (INVENTORY-PARITY),
+    // and a company's reorder rule (CATALOG-EXTRAS).
     create: (namespace: string) =>
-      inventoryModuleDefinition(namespace, { documentEntry: true }),
+      inventoryModuleDefinition(namespace, {
+        companyReorderRule: true,
+        documentEntry: true,
+      }),
     moduleName: 'inventory',
   }),
   Object.freeze({
@@ -80,9 +84,11 @@ const MODULE_REGISTRY = Object.freeze([
     moduleName: 'party',
   }),
   Object.freeze({
-    // Reorder points, a preferred location and standard costs (REPLENISHMENT).
+    // Reorder points, a preferred location and standard costs (REPLENISHMENT);
+    // aliases, an inventory policy and a reorder rule (CATALOG-EXTRAS).
     create: (namespace: string) =>
       catalogModuleDefinition(namespace, {
+        catalogExtras: true,
         replenishment: true,
         sellingPrices: true,
       }),

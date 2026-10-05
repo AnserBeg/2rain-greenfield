@@ -222,8 +222,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   );
   // Party, Catalog and Location; SALES-PARITY adds Party's ship-to address
   // book, contextual to the Party list, and Catalog's tax codes (list,
-  // detail, form each).
-  assert.equal(flatManifest.surfaces.length, 18);
+  // detail, form each); CATALOG-EXTRAS an item's aliases, contextual to the
+  // Items List (list, detail, form).
+  assert.equal(flatManifest.surfaces.length, 21);
   assert.equal(flatManifest.navigation, null);
   assert.equal(
     flatManifest.payloadSchemaVersion,
@@ -249,8 +250,10 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // fixture keeps Party, whose customer workspace (SALES-PARITY) offers a
   // salesperson Task input with declared eligibility, which requires 11, and
   // Catalog, whose item form chooses the preferred location from the
-  // location list (a Record form reference, REPLENISHMENT), which requires 17.
-  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 17);
+  // location list (a Record form reference, REPLENISHMENT), which requires
+  // 17, and whose Items List also searches the items' aliases
+  // (CATALOG-EXTRAS), which requires 20.
+  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 20);
   // SALES-PARITY: Catalog's tax codes are a fifth setup List, still flat.
   assert.equal(flatCompact.navigationEntryIds.length, 5);
   assert.deepEqual(
@@ -275,8 +278,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // (SALES-PARITY), + the invoice, its lines, payments and credits (twelve),
   // + PURCHASING-PARITY's Expected receipts List, + PAYABLES' vendor bill,
   // its lines, payments and credits (twelve), + REPLENISHMENT's Stock by item
-  // and Buying worklist.
-  assert.equal(groupedManifest.surfaces.length, 103);
+  // and Buying worklist, + CATALOG-EXTRAS' item aliases (three).
+  assert.equal(groupedManifest.surfaces.length, 106);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -300,8 +303,11 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // a relation (ORDER-PARITY increment B) require 14; the item page's
   // field-scoped stock and movements (INVENTORY-PARITY) require 15; a stock
   // document's create values require 16; List figures, views keeping a band
-  // and the item form's location choice (REPLENISHMENT) require 17.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 17);
+  // and the item form's location choice (REPLENISHMENT) require 17; searches
+  // through an item's aliases, the reorder point chosen by an item's rule,
+  // bands by an item's inventory policy and the merge Task's choice that
+  // leaves the item out (CATALOG-EXTRAS) require 20.
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 20);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.
@@ -870,8 +876,10 @@ function compileDefinition(
 
 function composedApplicationWithInventory(): Record<string, unknown> {
   const composed = structuredClone(composedApplicationDefinition());
-  // As the product mounts it: with stock documents (INVENTORY-PARITY).
+  // As the product mounts it: with stock documents (INVENTORY-PARITY)
+  // and a company's reorder rule (CATALOG-EXTRAS).
   const inventory = inventoryModuleDefinition('northstar.app', {
+    companyReorderRule: true,
     documentEntry: true,
   });
   for (const collectionName of [
@@ -943,7 +951,10 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
   let composed = composedApplicationWithInventory();
   composed = withoutModule(
     composed,
-    inventoryModuleDefinition('northstar.app', { documentEntry: true }),
+    inventoryModuleDefinition('northstar.app', {
+      companyReorderRule: true,
+      documentEntry: true,
+    }),
     'inventory',
   );
   composed = withoutModule(

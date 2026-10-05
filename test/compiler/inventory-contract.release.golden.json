@@ -129,6 +129,10 @@
       },
       {
         "classification": "tenantShared",
+        "familyId": "item_alias"
+      },
+      {
+        "classification": "tenantShared",
         "familyId": "location"
       },
       {
@@ -278,6 +282,11 @@
         "semantics": "crossEntityAllowed",
         "sourceFamilyId": "party_address",
         "targetFamilyId": "party"
+      },
+      {
+        "semantics": "crossEntityAllowed",
+        "sourceFamilyId": "item_alias",
+        "targetFamilyId": "item"
       },
       {
         "semantics": "sameEntity",
@@ -515,7 +524,7 @@
     ],
     "kind": "quantityOnlyMovement"
   },
-  "releaseRoot": "dc5aca3914279f4088a007e0d1be25064b58fa3061a2127154ca5e519f65ab04",
+  "releaseRoot": "1db3d727023ecf149edb41f1e3c089defcca49bc8d721216cdeace049fa02809",
   "storageTargetPayloadVersions": {
     "entityOwned": "northstar.storage-target-payload/v3",
     "tenantShared": "northstar.storage-target-payload/v1"

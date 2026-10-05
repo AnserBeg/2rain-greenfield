@@ -214,6 +214,8 @@ export async function workspaceSearch(
   cursor: string | null,
   eligibility?: ReferenceEligibility,
   parentScope?: { readonly relationId: string; readonly recordId: string },
+  /** Children whose text also answers the search -- an item's aliases. */
+  searchChildren?: readonly ReferenceSearchChild[],
 ): Promise<{
   records: readonly SemanticRecordDto[];
   hasMore: boolean;
@@ -251,6 +253,17 @@ export async function workspaceSearch(
           relationLabels: [],
           ...(relatedFilter ? { relatedFilter } : {}),
           ...(parentScope ? { parentScope } : {}),
+          // Echoed or refused by the gateway: a picker never searches
+          // without the children it declares (CATALOG-EXTRAS).
+          ...(searchChildren?.length
+            ? {
+                searchChildren: searchChildren.map((child) => ({
+                  fieldId: child.fieldId,
+                  queryId: child.queryId,
+                  relationId: child.relationId,
+                })),
+              }
+            : {}),
         },
       },
     }),
@@ -277,6 +290,13 @@ export async function workspaceSearch(
     hasMore: result.listCoverage.hasMore,
     nextCursor: result.listCoverage.nextCursor,
   };
+}
+
+/** A child entity whose text field also answers a picker's search. */
+export interface ReferenceSearchChild {
+  readonly fieldId: string;
+  readonly queryId: string;
+  readonly relationId: string;
 }
 
 /** A picker's declared eligibility: records another entity points at. */

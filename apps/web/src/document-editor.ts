@@ -923,6 +923,7 @@ async function editorResponse(
         cursor,
         field.reference.eligibility,
         parent ?? undefined,
+        field.reference.searchChildren,
       );
       records.push(...result.records);
       cursor = result.nextCursor;
@@ -1646,6 +1647,9 @@ async function editorResponse(
           scope,
           term,
           null,
+          undefined,
+          undefined,
+          reference.searchChildren,
         ),
         reference.eligibility
           ? workspaceSearch(
@@ -1656,6 +1660,8 @@ async function editorResponse(
               term,
               null,
               reference.eligibility,
+              undefined,
+              reference.searchChildren,
             )
           : null,
       ]);

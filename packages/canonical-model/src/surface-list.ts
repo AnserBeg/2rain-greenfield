@@ -9,6 +9,7 @@ import {
   compareCodeUnits,
   diagnostic,
 } from './diagnostics.js';
+import { searchChildProblem } from './picker-eligibility.js';
 
 /**
  * A declared List is cross-reference checked against the surface's own list
@@ -87,6 +88,9 @@ export function validateSurfaceLists(
     const figureKinds = new Map<string, 'band' | 'latest' | 'number'>([
       ...(list.figures?.sums ?? []).map(
         (sum) => [sum.figureId, 'number'] as const,
+      ),
+      ...(list.figures?.choices ?? []).map(
+        (choice) => [choice.figureId, 'number'] as const,
       ),
       ...(list.figures?.totals ?? []).map(
         (total) => [total.figureId, 'number'] as const,
@@ -400,6 +404,7 @@ export function validateSurfaceLists(
       unique(
         [
           ...figures.sums.map((entry) => entry.figureId),
+          ...(figures.choices ?? []).map((entry) => entry.figureId),
           ...(figures.totals ?? []).map((entry) => entry.figureId),
           ...(figures.bands ?? []).map((entry) => entry.figureId),
           ...(figures.latest ?? []).map((entry) => entry.figureId),
@@ -541,6 +546,80 @@ export function validateSurfaceLists(
       const listedDecimal = (fieldId: string) =>
         selected.has(fieldId) &&
         fields.get(fieldId)?.fieldType.kind === 'exactDecimalFieldType';
+      // An enumeration of the listed row's own, and options of it.
+      const listedOptions = (
+        fieldId: string,
+        values: readonly string[],
+        what: string,
+      ) => {
+        const type = fields.get(fieldId)?.fieldType;
+        unique(values, id, `${what} values`);
+        if (
+          !selected.has(fieldId) ||
+          type?.kind !== 'enumFieldType' ||
+          !values.every((value) =>
+            type.options.some((option) => option.optionId === value),
+          )
+        )
+          fail(
+            id,
+            `a ${what} names options of an enumeration the List selects`,
+          );
+      };
+      // CATALOG-EXTRAS: per row, the first case holding the row's own value
+      // of an enumeration, else the otherwise; a missing value leaves the
+      // figure unstated. A percentage reads the List's one company -- the
+      // legal entity it is read in -- through an unscoped list of companies;
+      // the executor holds that list to the legal-entity master.
+      for (const choice of figures.choices ?? []) {
+        listedOptions(
+          choice.by,
+          choice.cases.flatMap((entry) => entry.values),
+          'choice',
+        );
+        const taken = (
+          value: NonNullable<
+            SurfaceListFigures['choices']
+          >[number]['otherwise'],
+        ) => {
+          if (!value) return;
+          const operand = 'percent' in value ? value.percent.of : value;
+          if (
+            'figure' in operand
+              ? !numbers.has(operand.figure)
+              : !listedDecimal(operand.field)
+          )
+            fail(
+              id,
+              'a choice takes figures declared before it or exact decimals the List selects',
+            );
+          if (!('percent' in value)) return;
+          const company = queries.get(value.percent.company.query.targetId);
+          if (!('legalEntityScope' in query && query.legalEntityScope))
+            fail(
+              id,
+              "a company's percentage is read only under a company List",
+            );
+          if (
+            !company ||
+            company.queryType !== 'list' ||
+            company.lifecycle !== 'active' ||
+            company.tier !== 'q0' ||
+            ('legalEntityScope' in company && company.legalEntityScope) ||
+            ('readModel' in company && company.readModel) ||
+            !selects(company, value.percent.company.field) ||
+            fields.get(value.percent.company.field)?.fieldType.kind !==
+              'exactDecimalFieldType'
+          )
+            fail(
+              id,
+              "a company's percentage is an exact decimal of an active unscoped q0 list query",
+            );
+        };
+        for (const entry of choice.cases) taken(entry.value);
+        taken(choice.otherwise);
+        numbers.add(choice.figureId);
+      }
       for (const total of figures.totals ?? []) {
         for (const operand of [...total.plus, ...total.minus])
           if (
@@ -559,8 +638,11 @@ export function validateSurfaceLists(
           fail(id, 'a band names the range of a sum or a total');
         for (const entry of band.cases) {
           const threshold = entry.below ?? entry.atMost;
+          // Exactly one test: a comparison, or the row's own enumeration.
           if (
-            (entry.below === undefined) === (entry.atMost === undefined) ||
+            [entry.below, entry.atMost, entry.when].filter(
+              (value) => value !== undefined,
+            ).length !== 1 ||
             (threshold &&
               'field' in threshold &&
               !listedDecimal(threshold.field))
@@ -569,6 +651,14 @@ export function validateSurfaceLists(
               id,
               'a band case compares with one fixed decimal or exact decimal the List selects',
             );
+          if (
+            threshold &&
+            'figure' in threshold &&
+            !numbers.has(threshold.figure)
+          )
+            fail(id, 'a band case compares with a figure declared before it');
+          if (entry.when)
+            listedOptions(entry.when.field, entry.when.values, 'band case');
         }
         unique(
           [...band.cases.map((entry) => entry.value), band.otherwise.value],
@@ -611,6 +701,27 @@ export function validateSurfaceLists(
       }
     };
     if (list.figures) validateFigures(list.figures);
+    // CATALOG-EXTRAS: a search that also finds a row through its children,
+    // each through its own relation once.
+    if (list.searchChildren) {
+      unique(
+        list.searchChildren.map((child) => child.relation),
+        id,
+        'search children relations',
+      );
+      for (const child of list.searchChildren) {
+        const problem = searchChildProblem(
+          model,
+          {
+            queryId: child.query.targetId,
+            relationId: child.relation,
+            fieldId: child.field,
+          },
+          String(query.sourceEntity.targetId),
+        );
+        if (problem) fail(id, problem);
+      }
+    }
     if (list.rowActions) {
       unique(
         list.rowActions.map((action) => action.actionId),
