@@ -55,6 +55,7 @@ export function catalogModuleDefinition(
      * it has always compiled.
      */
     readonly sellingPrices?: boolean;
+    readonly units?: boolean;
   } = {},
 ): Record<string, unknown> {
   const definitionIds = ids(namespace);
@@ -80,7 +81,7 @@ export function catalogModuleDefinition(
     fieldIds.taxName,
     fieldIds.taxRatePercent,
   ];
-  return {
+  const definition = {
     assertions: [
       conformanceAssertion(
         definitionIds,
@@ -271,6 +272,9 @@ export function catalogModuleDefinition(
       ...when(entitySurfaces(definitionIds, 'tax_code', 'Tax code')),
     ],
   };
+  return options.units
+    ? withUnitMasters(definition, definitionIds)
+    : definition;
 }
 
 export const CATALOG_IDS = Object.freeze({
@@ -545,4 +549,168 @@ function conformanceAssertion(
     kind: 'assertionDefinition',
     schemaVersion: version,
   };
+}
+
+/** Code-keyed masters; document conversion waits for UNITS-VERIFICATION. */
+function withUnitMasters(
+  definition: Record<string, unknown>,
+  ids: CatalogIds,
+): Record<string, unknown> {
+  const namespace = ids.namespace;
+  const ref = (kind: string, local: string) =>
+    reference(kind, `${namespace}:${local}`);
+  const master = (
+    local: string,
+    label: string,
+    fields: Record<string, unknown>[],
+    orderKey: number,
+  ) => {
+    const entityId = `${namespace}:entity.${local}`;
+    return {
+      assertions: [
+        conformanceAssertion(ids, local, `${namespace}:query.${local}_get`),
+      ],
+      entities: [entity(ids, local, label, entityId, orderKey)],
+      fields,
+      operations: entityOperations(ids, local, entityId),
+      permissions: entityPermissions(ids, local, entityId),
+      queries: entityQueries(
+        ids,
+        local,
+        entityId,
+        fields.map((field) => String(field.fieldId)),
+        [
+          {
+            authority: 'identifier',
+            fieldId: String(fields[0]!.fieldId),
+            localId: 'code',
+          },
+        ],
+      ),
+      storageMappings: [storageMapping(ids, local, entityId)],
+      surfaces: entitySurfaces(ids, local, label),
+    };
+  };
+  const text = (
+    local: string,
+    name: string,
+    label: string,
+    orderKey: number,
+    unique = false,
+  ) =>
+    textField({
+      entityId: `${namespace}:entity.${local}`,
+      fieldId: `${namespace}:field.${local}_${name}`,
+      label,
+      orderKey,
+      maximumLength: name === 'name' ? 120 : 32,
+      presence: 'required',
+      searchable: true,
+      ...(unique
+        ? { businessKey: 'tenantEnvironmentCaseInsensitiveUnique' as const }
+        : {}),
+    });
+  const factor = (name: string, label: string, orderKey: number) => ({
+    ...decimalField(
+      `${namespace}:entity.unit_conversion`,
+      `${namespace}:field.unit_conversion_${name}`,
+      label,
+      orderKey,
+    ),
+    presence: 'required',
+    defaultSemantics: 'none',
+    fieldType: {
+      kind: 'exactDecimalFieldType',
+      precision: 38,
+      scale: 0,
+      representation: 'canonicalString',
+      schemaVersion: version,
+    },
+  });
+  const units = master(
+    'unit',
+    'Unit',
+    [
+      text('unit', 'code', 'Code', 10, true),
+      text('unit', 'name', 'Name', 20),
+      {
+        ...text('unit', 'decimals', 'Decimals', 30),
+        searchable: false,
+        fieldType: {
+          kind: 'enumFieldType',
+          schemaVersion: version,
+          options: Array.from({ length: 19 }, (_, decimals) => ({
+            kind: 'enumOption',
+            schemaVersion: version,
+            optionId: `${namespace}:option.unit_decimals_${decimals}`,
+            label: String(decimals),
+            orderKey: decimals + 1,
+          })),
+        },
+      },
+    ],
+    30,
+  );
+  const conversions = master(
+    'unit_conversion',
+    'Unit conversion',
+    [
+      text('unit_conversion', 'code', 'Conversion code', 10, true),
+      text('unit_conversion', 'from_unit', 'From unit code', 20),
+      text('unit_conversion', 'to_unit', 'Base unit code', 30),
+      factor('numerator', 'Numerator', 40),
+      factor('denominator', 'Denominator', 50),
+    ],
+    40,
+  );
+  // Company-owned conversion rules reuse the existing legal-entity scope.
+  conversions.queries = conversions.queries.map((query) => {
+    const parameterId = `${String(query.queryId).replace(':query.', ':parameter.')}_legal_entity_scope`;
+    return {
+      ...query,
+      legalEntityScope: {
+        kind: 'queryLegalEntityScope',
+        schemaVersion: version,
+        cardinality: 'exactlyOne',
+        operand: {
+          kind: 'queryParameterReference',
+          schemaVersion: version,
+          parameterId,
+        },
+      },
+      parameters: [
+        {
+          kind: 'queryParameterDefinition',
+          schemaVersion: version,
+          parameterId,
+          orderKey: 10,
+        },
+      ],
+    };
+  });
+  const relations = [
+    {
+      kind: 'relationDefinition',
+      schemaVersion: version,
+      relationId: `${namespace}:relation.unit_conversion_item`,
+      sourceEntity: ref('entityReference', 'entity.unit_conversion'),
+      targetEntity: ref('entityReference', 'entity.item'),
+      cardinality: 'manyToOne',
+      ownership: 'reference',
+      required: false,
+      joinEligibility: 'query',
+      archiveBehavior: 'restrict',
+      orderKey: 10,
+    },
+  ];
+  const result = { ...definition };
+  for (const key of Object.keys(units) as (keyof typeof units)[]) {
+    result[key] = [
+      ...(definition[key] as unknown[]),
+      ...units[key],
+      ...conversions[key],
+    ];
+  }
+  result.relations = [...(definition.relations as unknown[]), ...relations];
+  return result;
 }

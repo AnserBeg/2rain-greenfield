@@ -871,6 +871,56 @@
         "action": "update",
         "permissionId": "northstar.app:permission.stock_count_update",
         "resource": "northstar.app:entity.stock_count"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.unit_archive",
+        "resource": "northstar.app:entity.unit"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.unit_create",
+        "resource": "northstar.app:entity.unit"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.unit_read",
+        "resource": "northstar.app:entity.unit"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.unit_restore",
+        "resource": "northstar.app:entity.unit"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.unit_update",
+        "resource": "northstar.app:entity.unit"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.unit_conversion_archive",
+        "resource": "northstar.app:entity.unit_conversion"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.unit_conversion_create",
+        "resource": "northstar.app:entity.unit_conversion"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.unit_conversion_read",
+        "resource": "northstar.app:entity.unit_conversion"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.unit_conversion_restore",
+        "resource": "northstar.app:entity.unit_conversion"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.unit_conversion_update",
+        "resource": "northstar.app:entity.unit_conversion"
       }
     ],
     "northstar.shell:package.demo": [

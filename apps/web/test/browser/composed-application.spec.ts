@@ -1013,6 +1013,8 @@ async function inventoryNavigationJourney(
     'Party role',
     'Item',
     'Tax code',
+    'Unit conversion',
+    'Unit',
     'Location',
   ]);
   // Inside the collapsed Sales and Purchasing groups: hidden text names

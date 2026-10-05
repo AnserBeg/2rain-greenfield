@@ -5760,6 +5760,54 @@ function composedApplicationWithoutInventoryForTransition(): Record<
     inventoryModuleDefinition(APPLICATION_NAMESPACE, { documentEntry: true }),
     'inventory',
   );
+  // UNITS: conversion setup also requires Inventory's company master.
+  // Remove the setup extension by its actual declaration identities; retain
+  // the pre-existing Catalog and its selling-price declarations.
+  const catalogWithUnits = catalogModuleDefinition(APPLICATION_NAMESPACE, {
+    sellingPrices: true,
+    units: true,
+  });
+  const catalogWithoutUnits = catalogModuleDefinition(APPLICATION_NAMESPACE, {
+    sellingPrices: true,
+  });
+  for (const collection of [
+    'assertions',
+    'entities',
+    'fields',
+    'operations',
+    'permissions',
+    'queries',
+    'relations',
+    'stateMachines',
+    'storageMappings',
+    'surfaces',
+  ] as const) {
+    const idKey = {
+      assertions: 'assertionId',
+      entities: 'entityId',
+      fields: 'fieldId',
+      operations: 'operationId',
+      permissions: 'permissionId',
+      queries: 'queryId',
+      relations: 'relationId',
+      stateMachines: 'machineId',
+      storageMappings: 'storageMappingId',
+      surfaces: 'surfaceId',
+    }[collection];
+    const plainIds = new Set(
+      (catalogWithoutUnits[collection] as Array<Record<string, unknown>>).map(
+        (entry) => entry[idKey],
+      ),
+    );
+    const setupIds = new Set(
+      (catalogWithUnits[collection] as Array<Record<string, unknown>>)
+        .filter((entry) => !plainIds.has(entry[idKey]))
+        .map((entry) => entry[idKey]),
+    );
+    withoutInventory[collection] = (
+      withoutInventory[collection] as Array<Record<string, unknown>>
+    ).filter((entry) => !setupIds.has(entry[idKey]));
+  }
   // INVENTORY-PARITY: the item page shows Inventory's stock and movements;
   // without Inventory it is Catalog's plain record page, as it was before.
   const itemPage = `${APPLICATION_NAMESPACE}:surface.item_detail`;

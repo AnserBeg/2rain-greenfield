@@ -81,7 +81,7 @@ const MODULE_REGISTRY = Object.freeze([
   }),
   Object.freeze({
     create: (namespace: string) =>
-      catalogModuleDefinition(namespace, { sellingPrices: true }),
+      catalogModuleDefinition(namespace, { sellingPrices: true, units: true }),
     moduleName: 'catalog',
   }),
   Object.freeze({ create: locationModuleDefinition, moduleName: 'location' }),

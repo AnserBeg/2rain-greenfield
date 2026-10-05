@@ -273,7 +273,7 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // (SALES-PARITY), + the invoice, its lines, payments and credits (twelve),
   // + PURCHASING-PARITY's Expected receipts List, + PAYABLES' vendor bill,
   // its lines, payments and credits (twelve).
-  assert.equal(groupedManifest.surfaces.length, 101);
+  assert.equal(groupedManifest.surfaces.length, 107);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -305,7 +305,7 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // the Invoices list joins Sales beside its orders. PURCHASING-PARITY:
   // Expected receipts joins Purchasing beside its orders; PAYABLES: so does
   // the Bills list.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 16);
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 18);
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
@@ -954,6 +954,30 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
     salesModuleDefinition('northstar.app'),
     'sales',
   );
+  // The setup masters are real destinations; omit them in this intentionally
+  // below-budget fixture, while the grouped arm keeps the full application.
+  for (const key of [
+    'assertions',
+    'entities',
+    'fields',
+    'operations',
+    'permissions',
+    'queries',
+    'relations',
+    'storageMappings',
+    'surfaces',
+  ]) {
+    composed[key] = (composed[key] as Record<string, unknown>[]).filter(
+      (entry) =>
+        !Object.values(entry).some(
+          (value) =>
+            typeof value === 'string' &&
+            /^northstar\.app:(?:assertion|entity|field|operation|permission|query|relation|storage|surface)\.unit(?:_|$)/.test(
+              value,
+            ),
+        ),
+    );
+  }
   return withPlainItemPage(composed);
 }
 
