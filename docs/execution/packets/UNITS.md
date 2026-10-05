@@ -56,7 +56,7 @@ Local PostgreSQL units test deferred before taking the lock: Windows free memory
 Local browser was cancelled while queued behind other lanes; it never acquired the lock or started a container.
 Hosted [run 37264551758](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37264551758) found one test lint error; corrected with explicit contract assertions and a passing focused lint/contract check.
 Hosted [run 37264939890](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37264939890) found the existing stale-binding control's array-tail victim had moved; re-pointed at the same binding, preserving its mutation and kills. All 158 manifest entries validate; its local re-execution is deferred by the memory guard.
-Pending: full hosted CI at the corrected tip, including the new PostgreSQL and operations browser tests.
+Full hosted CI at the current draft tip is tracked in [PR checks](https://github.com/AnserBeg/2rain-greenfield/pull/17/checks), including the new PostgreSQL and operations browser tests; every job must pass before this checkpoint is evidence ready.
 Local container work requires at least 1.2 GB Windows free memory before taking the exclusive test lock; browser uses one worker.
 
 ## Test it yourself
