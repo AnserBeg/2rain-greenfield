@@ -1089,6 +1089,12 @@ test(
           await runtime.close();
         }
       },
+      // The data volume, not a check: this deployment keeps the lineage, two
+      // compiled successors and four verifications' records with their
+      // write-ahead log, which passed the default 256 MB at CATALOG-EXTRAS'
+      // lineage entry 8 ("No space left on device"). As the full-replay
+      // generator does.
+      { dataSizeMegabytes: 1024 },
     );
   },
 );
@@ -4073,6 +4079,11 @@ test(
           await reversed.close();
         }
       },
+      // The data volume, not a check: two tenants' lineages and four
+      // verifications' records with their write-ahead log passed the default
+      // 256 MB at CATALOG-EXTRAS' lineage entry 8. As the full-replay
+      // generator does.
+      { dataSizeMegabytes: 1024 },
     );
   },
 );

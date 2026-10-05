@@ -406,7 +406,33 @@ test(
         }),
         refusedBy('MODULE_UNIQUE_VIOLATION', `${ns}:field.item_alias_value`),
       );
-      // An item is archived only once no active alias names it.
+      // An item is archived only once nothing restricting it names it: the
+      // duplicate, which has no stock of its own, while an alias names it;
+      // the notebook, which has stock, by its movements first.
+      const extra = randomUUID();
+      const named = await fixture.invoke('item_alias_create', {
+        recordId: extra,
+        values: {
+          [`${ns}:field.item_alias_value`]: 'OFF-100-OLD',
+          [`${ns}:field.item_alias_kind`]: `${ns}:option.item_alias_kind_alternate_sku`,
+        },
+        relations: { [`${ns}:relation.item_alias_item`]: scenario.duplicate },
+      });
+      assert.equal(named.outcome, 'succeeded');
+      await assert.rejects(
+        fixture.invoke('item_archive', {
+          recordId: scenario.duplicate,
+          expectedRevision: await revisionOf(
+            fixture,
+            'item',
+            scenario.duplicate,
+          ),
+        }),
+        refusedBy(
+          'MODULE_ARCHIVE_RESTRICTED',
+          `${ns}:relation.item_alias_item`,
+        ),
+      );
       await assert.rejects(
         fixture.invoke('item_archive', {
           recordId: scenario.notebook,
@@ -418,9 +444,14 @@ test(
         }),
         refusedBy(
           'MODULE_ARCHIVE_RESTRICTED',
-          `${ns}:relation.item_alias_item`,
+          `${ns}:field.inventory_movement_item_id#inventory-reference`,
         ),
       );
+      const unnamed = await fixture.invoke('item_alias_archive', {
+        recordId: extra,
+        expectedRevision: await revisionOf(fixture, 'item_alias', extra),
+      });
+      assert.equal(unnamed.outcome, 'succeeded');
       // A removed alias finds nothing, and its value is free again.
       const removed = await fixture.invoke('item_alias_archive', {
         recordId: scenario.supplierCode,

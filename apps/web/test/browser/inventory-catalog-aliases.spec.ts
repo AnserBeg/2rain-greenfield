@@ -69,6 +69,7 @@ test('an item is found by its aliases, the stock Lists follow the company rule a
     await expect(
       page.getByRole('heading', { level: 1, name: 'Field notebook' }),
     ).toBeVisible();
+    const itemUrl = page.url();
     const aliases = page.locator(
       `[data-composition-dataset="${ns}:dataset.item_aliases"] tbody tr`,
     );
@@ -78,14 +79,16 @@ test('an item is found by its aliases, the stock Lists follow the company rule a
     ]);
     await page.getByRole('button', { name: 'Add alias', exact: true }).click();
     await dialog.getByLabel('Alias', { exact: true }).fill('NB-RULED-80');
+    // A select is found by its role: its label's text includes the chosen
+    // option.
     await dialog
-      .getByLabel('Kind', { exact: true })
+      .getByRole('combobox', { name: 'Kind', exact: true })
       .selectOption({ label: 'Alternate SKU' });
     await finish('Add alias');
     await expect(page.getByRole('status').first()).toContainText(
       'Add alias: done',
     );
-    await page.reload();
+    await page.goto(itemUrl);
     await expect(aliases.locator('strong')).toHaveText([
       '0012345678905',
       'ALP-NB-80',
@@ -102,6 +105,7 @@ test('an item is found by its aliases, the stock Lists follow the company rule a
       await navigation.getByText('Purchasing', { exact: true }).click();
     await purchasing.click();
     await page.getByRole('link', { name: 'New', exact: true }).click();
+    await pick(page, 'Vendor', 'Alpine', 'Alpine Office Supply');
     await pick(page, 'Line 1 product', 'nb-ruled', 'Field notebook');
 
     // Inventory -> Stock by item: the labels are not stocked and never short
@@ -143,9 +147,9 @@ test('an item is found by its aliases, the stock Lists follow the company rule a
     ).toHaveCount(0);
     await capture(page, testInfo, 'catalog-extras-worklist');
 
-    // The duplicate merges into the notebook: never offered itself.
-    const duplicate = new URL(url);
-    duplicate.searchParams.set('surface', `${ns}:surface.item_detail`);
+    // The duplicate merges into the notebook: never offered itself. Its page
+    // is the notebook's, for the other record.
+    const duplicate = new URL(itemUrl);
     duplicate.searchParams.set('record', scenario.duplicate);
     await page.goto(duplicate.toString());
     await expect(
@@ -157,7 +161,10 @@ test('an item is found by its aliases, the stock Lists follow the company rule a
     await page
       .getByRole('button', { name: 'Merge into another item', exact: true })
       .click();
-    const survivor = dialog.getByLabel('Surviving item (SKU)');
+    const survivor = dialog.getByRole('combobox', {
+      name: 'Surviving item (SKU)',
+      exact: true,
+    });
     await expect(
       survivor.locator('option', { hasText: 'OFF-100-DUP' }),
     ).toHaveCount(0);
