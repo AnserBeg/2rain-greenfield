@@ -57,6 +57,7 @@ Local browser was cancelled while queued behind other lanes; it never acquired t
 Hosted [run 37264551758](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37264551758) found one test lint error; corrected with explicit contract assertions and a passing focused lint/contract check.
 Hosted [run 37264939890](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37264939890) found the existing stale-binding control's array-tail victim had moved; re-pointed at the same binding, preserving its mutation and kills. All 158 manifest entries validate; its local re-execution is deferred by the memory guard.
 Hosted [run 37265336413](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37265336413) found the inventory-contract golden omitted the added setup families/relation; re-derived from compilation (37 families, 38 relations, root `a624f034...16625c2`), and its focused deterministic case passes.
+Hosted [run 37267766925](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37267766925) observed the new unit test in argv while the reachability producer omitted it; registered the actual invocation. Focused producer wiring, lint and formatting pass; coverage decisions and checks are unchanged.
 Full hosted CI at the current draft tip is tracked in [PR checks](https://github.com/AnserBeg/2rain-greenfield/pull/17/checks), including the new PostgreSQL and operations browser tests; every job must pass before this checkpoint is evidence ready.
 Local container work requires at least 1.2 GB Windows free memory before taking the exclusive test lock; browser uses one worker.
 
@@ -83,7 +84,7 @@ After the Windows restart: typecheck, formatting and changed-file lint pass. Loc
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "UNITS",
   "base": "e3da0a3918620c5ce3e494eba3fdf1b3f8c91c4a",
-  "head": "6bf1b673f4d2604bf46139b46845d20065bedf73",
+  "head": "1ec46df1a388d6727f7d7c27823600e883543ad5",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
@@ -107,6 +108,7 @@ After the Windows restart: typecheck, formatting and changed-file lint pass. Loc
     "test/compiler/inventory-contract.release.golden.json",
     "test/evidence/policy-unbound-refusal.expected-red.json",
     "test/fixtures/g2/language-conformance/coverage-decisions.json",
+    "test/helpers/reachability-producers.ts",
     "test/integration/units.test.ts",
     "test/postgres/composed-application.test.ts",
     "test/postgres/fresh-tenant-full-replay-schema.snapshot.json",
