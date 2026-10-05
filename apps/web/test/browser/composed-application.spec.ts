@@ -996,7 +996,8 @@ async function inventoryNavigationJourney(
   ).toHaveText(['Sales', 'Purchasing', 'Inventory', 'Party', 'More']);
   // Sales lists its invoices beside its orders (ruling C), Purchasing its
   // expected receipts (PURCHASING-PARITY) and its bills (PAYABLES) beside its
-  // orders and Catalog its tax codes beside its items (ruling B).
+  // orders, Inventory Catalog's Buying worklist and Stock by item
+  // (REPLENISHMENT) and Catalog its tax codes beside its items (ruling B).
   await expect(navigation.locator('a > span:nth-child(2)')).toHaveText([
     'Invoices',
     'Sales orders',
@@ -1006,6 +1007,8 @@ async function inventoryNavigationJourney(
     'Inventory movement',
     'Inventory period lock',
     'Inventory transactions',
+    'Buying worklist',
+    'Stock by item',
     'Legal entity',
     'Posted stock',
     'Stock count',
@@ -1079,6 +1082,8 @@ async function inventoryNavigationJourney(
       'Inventory movement',
       'Inventory period lock',
       'Inventory transactions',
+      'Buying worklist',
+      'Stock by item',
       'Legal entity',
       'Posted stock',
       'Stock count',
@@ -1156,6 +1161,9 @@ async function inventoryNavigationJourney(
     'Inventory movement',
     'Inventory period lock',
     'Inventory transactions',
+    // REPLENISHMENT: Catalog's items, read in the company like the rest.
+    'Buying worklist',
+    'Stock by item',
     'Stock count',
   ]) {
     await inventoryNavigation
