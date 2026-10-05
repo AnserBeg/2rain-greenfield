@@ -1,7 +1,7 @@
 # ADR-0063: A receipt digest covers the caller's input, and versions when that input changes
 
 Date: 2026-08-31
-Status: accepted (packet `PUR-2b`, merge `2e85696`, 2026-09-01; status line swept the same day on `5g3-prog` R6). **Amended 2026-09-01 by `posting-kernel-admission`** (see the amendment section at the end): the version-4 input is corrected to exclude the derived `postingRole`, and decision 3's three encodings are reduced to one authority.
+Status: accepted (packet `PUR-2b`, merge `2e85696`, 2026-09-01; status line swept the same day on `5g3-prog` R6). **Amended 2026-09-01 by `posting-kernel-admission`** (see the amendment section at the end): the version-4 input is corrected to exclude the derived `postingRole`, and decision 3's three encodings are reduced to one authority. **Amended 2026-10-05 by `STOCK-COUNTS`**: decision 4's premise ends and version 4 is frozen (last section).
 Tier: Critical (review per `review-tiers`)
 
 Extends [ADR-0060](ADR-0060-a-posting-family-declares-whether-the-kernel-writes-its-companion.md),
@@ -306,3 +306,23 @@ the check was moved, not because the sentence was softened.**
 
 The shipped artifact is also pinned deterministically: a test reds the matrix
 when the head release's fact differs from the provider's version.
+
+## Amendment 2026-10-05 — `STOCK-COUNTS`
+
+**Decision 4's premise ends.** A stock count is now started, reviewed and posted
+through its own commands on the posting capability's route, and its Post calls
+`postStockCount`: the first production caller. From the first tenant, version-4
+receipts are released data.
+
+- **Version 4 is frozen.** Any change to what a stock-count digest covers is a
+  version 5 with its own `CHECK` migration, as receipts (v5), shipments (v6) and
+  returns (v7, v8) did. The command's shape and the version-4 digest input did
+  not change in `STOCK-COUNTS`; the kernel gained a refusal
+  (`INVENTORY_COUNT_EXPECTED_STALE`) and a validation rule (each item once).
+- **The real case of decision 4 is moot.** `legacy-reviewed-counts-carry-a-caller-chosen-companion`
+  rested on releases 4-13 requiring both companion relations. ADR-0066's
+  re-baseline removed them: every entry of the current lineage (decoded at
+  `STOCK-COUNTS`, seven entries) carries both relations as optional, and no
+  tenant holds released data. `STOCK-COUNTS` also retires both relations from
+  every generic input and form, so no generic writer can name a companion; the
+  kernel's must-be-null fence stays as the backstop.

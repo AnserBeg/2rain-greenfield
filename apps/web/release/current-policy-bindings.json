@@ -614,6 +614,61 @@
       },
       {
         "action": "archive",
+        "permissionId": "northstar.app:permission.customer_return_archive",
+        "resource": "northstar.app:entity.customer_return"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.customer_return_create",
+        "resource": "northstar.app:entity.customer_return"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.customer_return_post",
+        "resource": "northstar.app:entity.customer_return"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.customer_return_read",
+        "resource": "northstar.app:entity.customer_return"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.customer_return_restore",
+        "resource": "northstar.app:entity.customer_return"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.customer_return_update",
+        "resource": "northstar.app:entity.customer_return"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.customer_return_line_archive",
+        "resource": "northstar.app:entity.customer_return_line"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.customer_return_line_create",
+        "resource": "northstar.app:entity.customer_return_line"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.customer_return_line_read",
+        "resource": "northstar.app:entity.customer_return_line"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.customer_return_line_restore",
+        "resource": "northstar.app:entity.customer_return_line"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.customer_return_line_update",
+        "resource": "northstar.app:entity.customer_return_line"
+      },
+      {
+        "action": "archive",
         "permissionId": "northstar.app:permission.customer_invoice_archive",
         "resource": "northstar.app:entity.customer_invoice"
       },
@@ -794,6 +849,61 @@
       },
       {
         "action": "archive",
+        "permissionId": "northstar.app:permission.vendor_return_archive",
+        "resource": "northstar.app:entity.vendor_return"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.vendor_return_create",
+        "resource": "northstar.app:entity.vendor_return"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.vendor_return_post",
+        "resource": "northstar.app:entity.vendor_return"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.vendor_return_read",
+        "resource": "northstar.app:entity.vendor_return"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.vendor_return_restore",
+        "resource": "northstar.app:entity.vendor_return"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.vendor_return_update",
+        "resource": "northstar.app:entity.vendor_return"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.vendor_return_line_archive",
+        "resource": "northstar.app:entity.vendor_return_line"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.vendor_return_line_create",
+        "resource": "northstar.app:entity.vendor_return_line"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.vendor_return_line_read",
+        "resource": "northstar.app:entity.vendor_return_line"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.vendor_return_line_restore",
+        "resource": "northstar.app:entity.vendor_return_line"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.vendor_return_line_update",
+        "resource": "northstar.app:entity.vendor_return_line"
+      },
+      {
+        "action": "archive",
         "permissionId": "northstar.app:permission.vendor_payment_archive",
         "resource": "northstar.app:entity.vendor_payment"
       },
@@ -828,6 +938,11 @@
         "resource": "northstar.app:entity.stock_count"
       },
       {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.stock_count_cancel",
+        "resource": "northstar.app:entity.stock_count"
+      },
+      {
         "action": "create",
         "permissionId": "northstar.app:permission.stock_count_create",
         "resource": "northstar.app:entity.stock_count"
@@ -858,13 +973,33 @@
         "resource": "northstar.app:entity.stock_count_line"
       },
       {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.stock_count_post",
+        "resource": "northstar.app:entity.stock_count"
+      },
+      {
         "action": "read",
         "permissionId": "northstar.app:permission.stock_count_read",
         "resource": "northstar.app:entity.stock_count"
       },
       {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.stock_count_reopen",
+        "resource": "northstar.app:entity.stock_count"
+      },
+      {
         "action": "restore",
         "permissionId": "northstar.app:permission.stock_count_restore",
+        "resource": "northstar.app:entity.stock_count"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.stock_count_review",
+        "resource": "northstar.app:entity.stock_count"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.stock_count_start",
         "resource": "northstar.app:entity.stock_count"
       },
       {

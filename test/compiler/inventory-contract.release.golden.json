@@ -225,6 +225,14 @@
       },
       {
         "classification": "entityOwned",
+        "familyId": "customer_return"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "customer_return_line"
+      },
+      {
+        "classification": "entityOwned",
         "familyId": "vendor_bill"
       },
       {
@@ -238,6 +246,14 @@
       {
         "classification": "entityOwned",
         "familyId": "vendor_credit"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "vendor_return"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "vendor_return_line"
       },
       {
         "classification": "entityOwned",
@@ -358,6 +374,41 @@
         "semantics": "sameEntity",
         "sourceFamilyId": "sales_order_shipped",
         "targetFamilyId": "sales_order_line"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "customer_return",
+        "targetFamilyId": "sales_order"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "customer_return",
+        "targetFamilyId": "customer_return"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "customer_return_line",
+        "targetFamilyId": "customer_return"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "customer_return_line",
+        "targetFamilyId": "sales_order_line"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "vendor_return",
+        "targetFamilyId": "purchase_order"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "vendor_return_line",
+        "targetFamilyId": "vendor_return"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "vendor_return_line",
+        "targetFamilyId": "purchase_order_line"
       },
       {
         "semantics": "sameEntity",
@@ -515,7 +566,7 @@
     ],
     "kind": "quantityOnlyMovement"
   },
-  "releaseRoot": "dc5aca3914279f4088a007e0d1be25064b58fa3061a2127154ca5e519f65ab04",
+  "releaseRoot": "2dd3099a5173a6e9e6a9b4fc602c0a9434b159a8571018d640e5e9633a5642b7",
   "storageTargetPayloadVersions": {
     "entityOwned": "northstar.storage-target-payload/v3",
     "tenantShared": "northstar.storage-target-payload/v1"

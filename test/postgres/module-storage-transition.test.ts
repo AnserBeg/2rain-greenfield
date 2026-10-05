@@ -170,6 +170,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
           '0026_inventory_projection_discrepancies.sql',
           '0027_receipt_posting.sql',
           '0028_sale_fulfillment.sql',
+          '0029_returns_posting.sql',
         ]);
         assert.equal(migrationResult.verified.length, allMigrations.length);
         await seedScope(admin);
@@ -5743,12 +5744,13 @@ function composedApplicationWithoutInventoryForTransition(): Record<
   const application = withoutModuleForTransition(
     withoutModuleForTransition(
       structuredClone(inventoryOwnedModuleDefinition()),
-      // As the product application composes it, commercial terms and
-      // payables included, so none of its purchase order fields or bill
-      // documents outlives the removal.
+      // As the product application composes it, commercial terms, payables
+      // and vendor returns included, so none of its purchase order fields,
+      // bill documents or return documents outlives the removal.
       purchasingModuleDefinition(APPLICATION_NAMESPACE, {
         commercialTerms: true,
         payables: true,
+        vendorReturns: true,
       }),
       'purchasing',
     ),

@@ -1320,6 +1320,25 @@ export const SurfaceDocumentEditorSchema = z.strictObject({
     .min(1)
     .max(8)
     .optional(),
+  /**
+   * Literal values every new line's first create also writes, in line fields
+   * the editor does not offer: figures the server sets later, such as a stock
+   * count line's expected, counted and variance, which its review replaces.
+   * An update never sends them. Optional v6 key (ADR-0047 §7).
+   */
+  lineCreateValues: z
+    .array(
+      z.strictObject({
+        fieldId: CanonicalIdSchema,
+        value: z.strictObject({
+          source: z.literal('literal'),
+          value: z.string().min(1).max(200),
+        }),
+      }),
+    )
+    .min(1)
+    .max(8)
+    .optional(),
 });
 export type SurfaceDocumentEditor = z.infer<typeof SurfaceDocumentEditorSchema>;
 export type SurfaceEditorField = SurfaceDocumentEditor['headerFields'][number];

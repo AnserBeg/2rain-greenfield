@@ -94,6 +94,27 @@ export async function receivedFacts(
     }
   >();
   const seenLines = new Set<string>();
+  const add = (row: Record<string, unknown>) => {
+    const aggregateIdentity = JSON.stringify([
+      scope.tenantId,
+      scope.environmentId,
+      String(row.legal_entity_id),
+      String(row.order_line_id),
+    ]);
+    const prior = sums.get(aggregateIdentity);
+    if (prior && prior.unitId !== row.unit_id)
+      throw receiptError(
+        'RECEIPT_PROJECTION_DIVERGED',
+        'Order line has mixed movement units',
+        { orderLineId: String(row.order_line_id) },
+      );
+    sums.set(aggregateIdentity, {
+      legalEntityId: String(row.legal_entity_id),
+      orderLineId: String(row.order_line_id),
+      quantity: (prior?.quantity ?? 0n) + receiptQuantity(String(row.quantity)),
+      unitId: String(row.unit_id),
+    });
+  };
   for (const row of rows.rows) {
     const lineIdentity = JSON.stringify([
       scope.tenantId,
@@ -120,25 +141,63 @@ export async function receivedFacts(
         { movementId: String(row.movement_id) },
       );
     seenLines.add(lineIdentity);
-    const aggregateIdentity = JSON.stringify([
-      scope.tenantId,
-      scope.environmentId,
-      String(row.legal_entity_id),
-      String(row.order_line_id),
-    ]);
-    const prior = sums.get(aggregateIdentity);
-    if (prior && prior.unitId !== row.unit_id)
-      throw receiptError(
-        'RECEIPT_PROJECTION_DIVERGED',
-        'Order line has mixed movement units',
-        { orderLineId: String(row.order_line_id) },
-      );
-    sums.set(aggregateIdentity, {
-      legalEntityId: String(row.legal_entity_id),
-      orderLineId: String(row.order_line_id),
-      quantity: (prior?.quantity ?? 0n) + receiptQuantity(String(row.quantity)),
-      unitId: String(row.unit_id),
-    });
+    add(row);
+  }
+  // RETURNS (ruling R-A): every posted vendor return is one negative movement
+  // per return line, attributed to that line's order line. Read movement by
+  // movement with its lineage, never through the posting writer's aggregate.
+  const v = binding.vendorReturnLine,
+    vr = binding.vendorReturn;
+  if (v && vr) {
+    const returns = await client.query(
+      `SELECT m.record_id AS movement_id,m.${q(m.legalEntity!.column)} AS legal_entity_id,
+      v.record_id AS return_line_id,v.${q(receiptColumn(v, 'vendor_return_line_quantity'))}::text AS line_quantity,
+      v.${q(receiptColumn(v, 'vendor_return_line_unit_id'))} AS line_unit,
+      v.${q(receiptColumn(v, 'vendor_return_line_item_id'))} AS line_item,
+      m.${q(receiptColumn(m, 'inventory_movement_item_id'))} AS movement_item,
+      m.${q(receiptColumn(m, 'inventory_movement_posting_role'))} AS posting_role,
+      m.${q(receiptColumn(m, 'inventory_movement_quantity_delta'))}::text AS quantity,m.${q(receiptColumn(m, 'inventory_movement_unit_id'))} AS unit_id,
+      v.${q(receiptRelation(binding, v, 'vendor_return_line_order_line'))} AS order_line_id,
+      vr.${q(receiptColumn(vr, 'vendor_return_state'))} AS return_state,
+      vr.${q(receiptRelation(binding, vr, 'vendor_return_order'))} AS return_order,
+      o.${q(receiptRelation(binding, o, 'purchase_order_line_order'))} AS line_order
+      FROM ${receiptTable(m)} m
+      LEFT JOIN ${receiptTable(v)} v ON v.tenant_id=m.tenant_id AND v.environment_id=m.environment_id AND v.${q(v.legalEntity!.column)}=m.${q(m.legalEntity!.column)} AND v.record_id::text=m.${q(receiptColumn(m, 'inventory_movement_source_line'))}
+      LEFT JOIN ${receiptTable(vr)} vr ON vr.tenant_id=v.tenant_id AND vr.environment_id=v.environment_id AND vr.${q(vr.legalEntity!.column)}=v.${q(v.legalEntity!.column)} AND vr.record_id=v.${q(receiptRelation(binding, v, 'vendor_return_line_return'))} AND vr.record_id::text=m.${q(receiptColumn(m, 'inventory_movement_source_id'))}
+      LEFT JOIN ${receiptTable(o)} o ON o.tenant_id=v.tenant_id AND o.environment_id=v.environment_id AND o.${q(o.legalEntity!.column)}=v.${q(v.legalEntity!.column)} AND o.record_id=v.${q(receiptRelation(binding, v, 'vendor_return_line_order_line'))}
+      WHERE m.tenant_id=$1 AND m.environment_id=$2 AND ($3::uuid[] IS NULL OR m.${q(m.legalEntity!.column)}=ANY($3)) AND m.${q(receiptColumn(m, 'inventory_movement_source_type'))}='vendorReturn' AND m.archived_at IS NULL ORDER BY m.record_id`,
+      [scope.tenantId, scope.environmentId, scope.legalEntityIds ?? null],
+    );
+    for (const row of returns.rows) {
+      const lineIdentity = JSON.stringify([
+        scope.tenantId,
+        scope.environmentId,
+        String(row.legal_entity_id),
+        'vendorReturn',
+        String(row.return_line_id),
+      ]);
+      if (
+        !row.order_line_id ||
+        !row.line_order ||
+        row.return_order !== row.line_order ||
+        row.return_state !==
+          receiptOption(vr, 'vendor_return_state', 'posted') ||
+        seenLines.has(lineIdentity) ||
+        row.line_item !== row.movement_item ||
+        row.line_unit !== row.unit_id ||
+        -receiptQuantity(String(row.line_quantity)) !==
+          receiptQuantity(String(row.quantity)) ||
+        row.posting_role !==
+          receiptOption(m, 'inventory_movement_posting_role', 'vendor_return')
+      )
+        throw receiptError(
+          'RECEIPT_PROJECTION_DIVERGED',
+          'Movement has unrecoverable vendor return/order attribution',
+          { movementId: String(row.movement_id) },
+        );
+      seenLines.add(lineIdentity);
+      add(row);
+    }
   }
   return [...sums]
     .sort(([a], [b]) => a.localeCompare(b))
@@ -159,19 +218,13 @@ async function reconstructedReceivedFacts(
   const m = binding.movement,
     l = binding.line,
     r = binding.receipt,
-    o = binding.orderLine;
-  const result = await client.query<{
-    legal_entity_id: string;
-    order_line_id: string;
-    quantity: string;
-    unit_id: string;
-    unit_count: string;
-  }>(
-    `SELECT m.${q(m.legalEntity!.column)} AS legal_entity_id,
+    o = binding.orderLine,
+    v = binding.vendorReturnLine,
+    vr = binding.vendorReturn;
+  const receipts = `SELECT m.${q(m.legalEntity!.column)} AS legal_entity_id,
             l.${q(receiptRelation(binding, l, 'goods_receipt_line_order_line'))}::text AS order_line_id,
-            sum(m.${q(receiptColumn(m, 'inventory_movement_quantity_delta'))})::numeric(38,18)::text AS quantity,
-            min(m.${q(receiptColumn(m, 'inventory_movement_unit_id'))}) AS unit_id,
-            count(DISTINCT m.${q(receiptColumn(m, 'inventory_movement_unit_id'))})::text AS unit_count
+            m.${q(receiptColumn(m, 'inventory_movement_quantity_delta'))} AS quantity,
+            m.${q(receiptColumn(m, 'inventory_movement_unit_id'))} AS unit_id
        FROM ${receiptTable(m)} m
        JOIN ${receiptTable(l)} l
          ON l.tenant_id=m.tenant_id
@@ -199,7 +252,57 @@ async function reconstructedReceivedFacts(
         AND l.${q(receiptColumn(l, 'goods_receipt_line_item_id'))}::text=m.${q(receiptColumn(m, 'inventory_movement_item_id'))}::text
         AND l.${q(receiptColumn(l, 'goods_receipt_line_unit_id'))}=m.${q(receiptColumn(m, 'inventory_movement_unit_id'))}
         AND l.${q(receiptColumn(l, 'goods_receipt_line_quantity'))}=m.${q(receiptColumn(m, 'inventory_movement_quantity_delta'))}
-        AND m.${q(receiptColumn(m, 'inventory_movement_posting_role'))}=$5
+        AND m.${q(receiptColumn(m, 'inventory_movement_posting_role'))}=$5`;
+  // RETURNS (ruling R-A): each posted vendor return line's one negative
+  // movement, joined through its own return and order line.
+  const vendorReturns =
+    v && vr
+      ? `SELECT m.${q(m.legalEntity!.column)} AS legal_entity_id,
+            v.${q(receiptRelation(binding, v, 'vendor_return_line_order_line'))}::text AS order_line_id,
+            m.${q(receiptColumn(m, 'inventory_movement_quantity_delta'))} AS quantity,
+            m.${q(receiptColumn(m, 'inventory_movement_unit_id'))} AS unit_id
+       FROM ${receiptTable(m)} m
+       JOIN ${receiptTable(v)} v
+         ON v.tenant_id=m.tenant_id
+        AND v.environment_id=m.environment_id
+        AND v.${q(v.legalEntity!.column)}=m.${q(m.legalEntity!.column)}
+        AND v.record_id::text=m.${q(receiptColumn(m, 'inventory_movement_source_line'))}
+       JOIN ${receiptTable(vr)} vr
+         ON vr.tenant_id=v.tenant_id
+        AND vr.environment_id=v.environment_id
+        AND vr.${q(vr.legalEntity!.column)}=v.${q(v.legalEntity!.column)}
+        AND vr.record_id=v.${q(receiptRelation(binding, v, 'vendor_return_line_return'))}
+        AND vr.record_id::text=m.${q(receiptColumn(m, 'inventory_movement_source_id'))}
+       JOIN ${receiptTable(o)} o
+         ON o.tenant_id=v.tenant_id
+        AND o.environment_id=v.environment_id
+        AND o.${q(o.legalEntity!.column)}=v.${q(v.legalEntity!.column)}
+        AND o.record_id=v.${q(receiptRelation(binding, v, 'vendor_return_line_order_line'))}
+      WHERE m.tenant_id=$1
+        AND m.environment_id=$2
+        AND ($3::uuid[] IS NULL OR m.${q(m.legalEntity!.column)}=ANY($3))
+        AND m.${q(receiptColumn(m, 'inventory_movement_source_type'))}='vendorReturn'
+        AND m.archived_at IS NULL
+        AND vr.${q(receiptColumn(vr, 'vendor_return_state'))}=$6
+        AND vr.${q(receiptRelation(binding, vr, 'vendor_return_order'))}=o.${q(receiptRelation(binding, o, 'purchase_order_line_order'))}
+        AND v.${q(receiptColumn(v, 'vendor_return_line_item_id'))}::text=m.${q(receiptColumn(m, 'inventory_movement_item_id'))}::text
+        AND v.${q(receiptColumn(v, 'vendor_return_line_unit_id'))}=m.${q(receiptColumn(m, 'inventory_movement_unit_id'))}
+        AND -v.${q(receiptColumn(v, 'vendor_return_line_quantity'))}=m.${q(receiptColumn(m, 'inventory_movement_quantity_delta'))}
+        AND m.${q(receiptColumn(m, 'inventory_movement_posting_role'))}=$7`
+      : null;
+  const result = await client.query<{
+    legal_entity_id: string;
+    order_line_id: string;
+    quantity: string;
+    unit_id: string;
+    unit_count: string;
+  }>(
+    `SELECT facts.legal_entity_id,
+            facts.order_line_id,
+            sum(facts.quantity)::numeric(38,18)::text AS quantity,
+            min(facts.unit_id) AS unit_id,
+            count(DISTINCT facts.unit_id)::text AS unit_count
+       FROM (${receipts}${vendorReturns ? ` UNION ALL ${vendorReturns}` : ''}) facts
       GROUP BY 1,2
       ORDER BY 1,2`,
     [
@@ -208,6 +311,16 @@ async function reconstructedReceivedFacts(
       scope.legalEntityIds ?? null,
       receiptOption(r, 'goods_receipt_state', 'posted'),
       receiptOption(m, 'inventory_movement_posting_role', 'receipt'),
+      ...(v && vr
+        ? [
+            receiptOption(vr, 'vendor_return_state', 'posted'),
+            receiptOption(
+              m,
+              'inventory_movement_posting_role',
+              'vendor_return',
+            ),
+          ]
+        : []),
     ],
   );
   return result.rows.map((row) => {

@@ -1,0 +1,222 @@
+{
+  "version": 1,
+  "packet": "STOCK-COUNTS",
+  "entries": [
+    {
+      "name": "count-expected-unchecked",
+      "claim": "C1. A posted initial count or correction leaves on-hand at the counted quantity as of the count's instant: each line's expected must equal the ledger for its item at the count's location, read under the stock locks taken at BEGIN, or the posting is refused with INVENTORY_COUNT_EXPECTED_STALE and writes nothing.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "        await assertCountExpectedIsLedger(\n          client,\n          this.#binding,\n          context,\n          posting,\n        );\n",
+      "replacement": "        // control: the expected-is-ledger check is not called\n",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "stock-count expected: a stale expected"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count expected: a stale expected is refused and posts nothing, and a count names each item once",
+          "expected": "Missing expected rejection: deleting the expected-is-ledger check must make this stale count post"
+        }
+      ]
+    },
+    {
+      "name": "count-repeats-an-item",
+      "claim": "C1. An initial count or a correction names each item once, so no variance is posted twice against one ledger balance.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "        throw inputError('a stock count names each item once');\n",
+      "replacement": "        void 'a stock count names each item once';\n",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "stock-count expected: a stale expected"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count expected: a stale expected is refused and posts nothing, and a count names each item once",
+          "expected": "Missing expected rejection: deleting the one-line-per-item rule must let one item be counted twice"
+        }
+      ]
+    },
+    {
+      "name": "count-expected-current-balance",
+      "claim": "C2. Expected is read as of the count's effective instant: a movement effective at that instant counts before it, and one dated after it never makes the count stale.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "        AND ${column('inventory_movement_effective_at')} <= $6::timestamptz\n",
+      "replacement": "        AND ($${column('inventory_movement_effective_at')} <= $$6::timestamptz OR $$6::timestamptz IS NOT NULL)\n",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "stock-count expected: a movement dated after"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count expected: a movement dated after the count does not make it stale, and one at its instant counts before it",
+          "expected": "INVENTORY_COUNT_EXPECTED_STALE: stock-count line \\S+ expects 0, but the ledger holds 4"
+        }
+      ]
+    },
+    {
+      "name": "correction-location-unchecked",
+      "claim": "C3. A correction supersedes exactly one posted count at the same location, and posts what is counted less what the ledger holds as of the correction's instant.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    String(prior.rows[0]!.locationId).toLowerCase() !== command.locationId\n  ) {\n",
+      "replacement": "    false\n  ) {\n",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "stock-count correction: a correction at another location"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count correction: a correction at another location is refused, and one posted count takes one correction",
+          "expected": "Missing expected rejection: deleting the same-location comparison must let a correction supersede a count of another location"
+        }
+      ]
+    },
+    {
+      "name": "reviewed-count-still-updatable",
+      "claim": "C4. The posting kernel is the only writer of what a count posts: a reviewed count and its lines take no generic create, update, archive or restore (nor does a posted or cancelled one), the companion relations are in no generic input or form, and the stock documents List reads only adjustments and transfers.",
+      "file": "packages/domain/src/inventory/definition.ts",
+      "original": "    terms: [\n      notInState('reviewed'),\n      notInState('posted'),\n      notInState('cancelled'),\n    ],\n",
+      "replacement": "    terms: [notInState('posted'), notInState('cancelled')],\n",
+      "test": {
+        "files": ["test/postgres/inventory-terminal-state.test.ts"],
+        "namePattern": "draft transaction and terminal stock-count evidence"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-terminal-state.test.ts",
+          "name": "draft transaction and terminal stock-count evidence is enforced by the real gateway and PostgreSQL interpreter",
+          "expected": "Missing expected rejection: restoring the not-posted guard must let a reviewed count be sent back to counting generically"
+        }
+      ]
+    },
+    {
+      "name": "count-companion-fence-removed",
+      "claim": "C5. A reviewed count that already names a companion transaction -- a shape no generic writer can now produce -- is refused by name before anything is written.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  const expectedCompanionId =\n    state === binding.stockCountReviewedState ? null : command.transactionId;",
+      "replacement": "  const expectedCompanionId = nullableUuid(row?.transactionId ?? null);",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "a reviewed count that already names a companion transaction"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count companion derivation: a reviewed count that already names a companion transaction is refused",
+          "expected": "the refusal must name the companion, not the reviewed evidence at large"
+        }
+      ]
+    },
+    {
+      "name": "count-physical-quantity-overwritten",
+      "claim": "C6. A count's Post changes nothing on the count or its lines beyond its transition: a line's physical count, and the count's type and counting mode, which no posting writes, are proved identical to the bytes the evidence lock froze.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $5::uuid,\n",
+      "replacement": "          SET $${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $$5::uuid,\n              $${quoted(declaredColumns(binding.stockCountLine, ['stock_count_line_physical_quantity'])[0]!)} = 987654,\n",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "three-value evidence"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count posting preserves three-value evidence and appends correction and exact reversal through the shared protocol",
+          "expected": "INVENTORY_COUNT_EVIDENCE_CONFLICT: stock-count line \\S+ was altered in a column its posting transition does not write"
+        }
+      ]
+    },
+    {
+      "name": "count-physical-quantity-last-decimal",
+      "claim": "C6. The read-back proves a line's physical count unchanged to its last decimal: a Post that moves 1.000000000000000001 to 1.000000000000000002 is refused, not compared as one JavaScript number.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $5::uuid,\n",
+      "replacement": "          SET $${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $$5::uuid,\n              $${quoted(declaredColumns(binding.stockCountLine, ['stock_count_line_physical_quantity'])[0]!)} = $${quoted(declaredColumns(binding.stockCountLine, ['stock_count_line_physical_quantity'])[0]!)} + 0.000000000000000001,\n",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "proved unchanged to its last decimal"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count read-back: a physical count is proved unchanged to its last decimal",
+          "expected": "INVENTORY_COUNT_EVIDENCE_CONFLICT: stock-count line \\S+ was altered in a column its posting transition does not write"
+        }
+      ]
+    },
+    {
+      "name": "count-replay-gated-on-next-revision",
+      "claim": "Defect 1 (round 1). A count command that committed replays under its key after the count moved on: preparation refuses only a revision the count never had, so the receipt, not \"exactly one revision later\", decides a replay.",
+      "file": "packages/postgres-provider/src/inventory-posting-capability-executor.ts",
+      "original": "    if (input.expectedRevision > hydrated.currentRevision) {\n",
+      "replacement": "    if (\n      hydrated.currentRevision !== input.expectedRevision &&\n      hydrated.currentRevision !== input.expectedRevision + 1\n    ) {\n",
+      "test": {
+        "files": ["test/postgres/inventory-stock-counts.test.ts"],
+        "namePattern": "replays under its key after the count moved on"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-counts.test.ts",
+          "name": "STOCK-COUNTS: a committed count command replays under its key after the count moved on",
+          "expected": "INVENTORY_POSTING_INPUT_INVALID: the rendered command revision is no longer current"
+        }
+      ]
+    },
+    {
+      "name": "reversal-reopen-route-check-removed",
+      "claim": "Defect 2 (round 1, SC-6). The route refuses Return to counting on a reversal by name, ahead of the declared precondition: a reviewed reversal is posted or cancelled, never re-derived.",
+      "file": "packages/postgres-provider/src/stock-count-route.ts",
+      "original": "        if (command === 'reopen' && count.kind === 'reversal') {\n",
+      "replacement": "        if (command === 'reopen' && count.kind === 'reversal' && false) {\n",
+      "test": {
+        "files": ["test/postgres/inventory-stock-counts.test.ts"],
+        "namePattern": "starts from posted stock, takes what was found"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-counts.test.ts",
+          "name": "STOCK-COUNTS: a count of one location starts from posted stock, takes what was found, reviews against the ledger and posts the difference",
+          "expected": "Input:\\s+'INVENTORY_POSTING_INPUT_INVALID: the count precondition does not hold'"
+        }
+      ]
+    },
+    {
+      "name": "reversal-reopen-precondition-dropped",
+      "claim": "Defect 2 (round 1, SC-6). Return to counting is declared for a reviewed count that is not a reversal, so it is not offered on a reversal.",
+      "file": "packages/domain/src/inventory/definition.ts",
+      "original": "              terms: [inState(...states), notReversal],\n",
+      "replacement": "              terms: [inState(...states)],\n",
+      "test": {
+        "files": ["test/unit/inventory-definition.test.ts"],
+        "namePattern": "STOCK-COUNTS: the product mounts"
+      },
+      "kills": [
+        {
+          "file": "test/unit/inventory-definition.test.ts",
+          "name": "STOCK-COUNTS: the product mounts stock counts numbered CNT-000001 with Start counting, Review, Post, Return to counting and Cancel count on the posting route; a reviewed or cancelled count is frozen and the companion relations are retired",
+          "expected": "Return to counting is declared for a reviewed count that is not a reversal \\(SC-6\\)"
+        }
+      ]
+    },
+    {
+      "name": "count-replay-digest-uses-current-policy",
+      "claim": "C7 (defect 3, round 1). A version-4 stock-count receipt is digested with the authorization evidence of the invocation it records, so an unchanged Post retried under its key after the policy version changed replays instead of conflicting.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "    (version === companionDerivedInventoryPostingInputDigestVersion &&\n      isStockCountPosting(posting)) ||\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "retried after a policy-version change"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count replay: an unchanged Post retried after a policy-version change replays its version-4 receipt",
+          "expected": "INVENTORY_POSTING_IDEMPOTENCY_CONFLICT: idempotency key \\S+ already names another posting"
+        }
+      ]
+    }
+  ]
+}

@@ -272,8 +272,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // + Party's three ship-to address and Catalog's three tax code surfaces
   // (SALES-PARITY), + the invoice, its lines, payments and credits (twelve),
   // + PURCHASING-PARITY's Expected receipts List, + PAYABLES' vendor bill,
-  // its lines, payments and credits (twelve).
-  assert.equal(groupedManifest.surfaces.length, 101);
+  // its lines, payments and credits (twelve), + RETURNS' customer and vendor
+  // returns and their lines (twelve).
+  assert.equal(groupedManifest.surfaces.length, 113);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -296,16 +297,17 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // record alerts and progression, multi-row Tasks and record columns naming
   // a relation (ORDER-PARITY increment B) require 14; the item page's
   // field-scoped stock and movements (INVENTORY-PARITY) require 15; a stock
-  // document's create values require 16.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 16);
+  // document's create values require 16; a stock count line's create values
+  // (STOCK-COUNTS) require 17.
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 17);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.
   // SALES-PARITY: Catalog's tax codes list joins the supporting masters, and
   // the Invoices list joins Sales beside its orders. PURCHASING-PARITY:
   // Expected receipts joins Purchasing beside its orders; PAYABLES: so does
-  // the Bills list.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 16);
+  // the Bills list; RETURNS: the Returns list joins Sales.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 17);
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
@@ -941,11 +943,12 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
   );
   composed = withoutModule(
     composed,
-    // As the product composes it: with its commercial terms (PURCHASING-PARITY)
-    // and its payables (PAYABLES).
+    // As the product composes it: with its commercial terms (PURCHASING-PARITY),
+    // its payables (PAYABLES) and its vendor returns (RETURNS).
     purchasingModuleDefinition('northstar.app', {
       commercialTerms: true,
       payables: true,
+      vendorReturns: true,
     }),
     'purchasing',
   );

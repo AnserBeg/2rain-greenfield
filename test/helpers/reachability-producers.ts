@@ -89,7 +89,7 @@ export const reachabilityProducers = [
   // and so do the commercial document workflows, each under the same bound,
   // so no job nears it.
   nodeProducer('postgres', 'postgres', 'test:postgres', [
-    'test/postgres/**/!(composed-application|commercial-totals|expected-receipts|fulfillment|order-lists|order-pages|packing-retrieval|payables|purchase-order-ending|receivables|receiving-authorization).test.ts',
+    'test/postgres/**/!(composed-application|commercial-totals|customer-return|expected-receipts|fulfillment|order-lists|order-pages|packing-retrieval|payables|purchase-order-ending|receivables|receiving-authorization|vendor-return).test.ts',
   ]),
   nodeProducer(
     'postgres-composed',
@@ -103,6 +103,7 @@ export const reachabilityProducers = [
     'test:postgres:commercial',
     [
       'test/postgres/commercial-totals.test.ts',
+      'test/postgres/customer-return.test.ts',
       'test/postgres/expected-receipts.test.ts',
       'test/postgres/fulfillment.test.ts',
       'test/postgres/order-lists.test.ts',
@@ -112,6 +113,7 @@ export const reachabilityProducers = [
       'test/postgres/purchase-order-ending.test.ts',
       'test/postgres/receivables.test.ts',
       'test/postgres/receiving-authorization.test.ts',
+      'test/postgres/vendor-return.test.ts',
     ],
   ),
   // The browser suite runs as three jobs under the same bound, split by file

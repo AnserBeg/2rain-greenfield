@@ -57,6 +57,8 @@ import {
   type LockedReceipt,
   type GoodsReceiptCommand,
   type DerivedGoodsReceiptCommand,
+  type VendorReturnCommand,
+  type DerivedVendorReturnCommand,
 } from './goods-receipt.js';
 import {
   FULFILLMENT_CAPABILITY_ID,
@@ -70,6 +72,8 @@ import {
   fulfillmentRelation,
   fulfillmentTable,
   quoteFulfillmentIdentifier,
+  type CustomerReturnCommand,
+  type DerivedCustomerReturnCommand,
   type DerivedShipmentCommand,
   type FulfillmentBinding,
   type ShipmentCommand,
@@ -148,6 +152,29 @@ interface PostingFamilyDeclarationV1 {
 }
 
 const INVENTORY_POSTING_FAMILIES_V1 = Object.freeze([
+  // RETURNS (ruling D): goods back from a customer against a shipped order
+  // line. A companion family of the fulfillment capability, as shipment is;
+  // skipped where the release declares no customer return.
+  Object.freeze({
+    capabilityId: FULFILLMENT_CAPABILITY_ID,
+    companion: {
+      companionEntitySuffix: 'inventory_transaction',
+      companionLineEntitySuffix: 'inventory_transaction_line',
+      numberPrefix: 'RT',
+      sourceLineEntitySuffix: 'customer_return_line',
+    },
+    familyId: 'customer_return',
+    origin: 'companion',
+    roles: [
+      {
+        movementOption: 'customer_return',
+        postingRole: 'customerReturn' as const,
+        transactionTypeOption: 'customer_return',
+      },
+    ],
+    sourceEntitySuffix: 'customer_return',
+    sourceType: 'customerReturn',
+  }),
   Object.freeze({
     capabilityId: FULFILLMENT_CAPABILITY_ID,
     companion: {
@@ -167,6 +194,29 @@ const INVENTORY_POSTING_FAMILIES_V1 = Object.freeze([
     ],
     sourceEntitySuffix: 'shipment',
     sourceType: 'shipment',
+  }),
+  // RETURNS (ruling R-A): goods received against purchase order lines sent
+  // back to the supplier. A companion family of the receiving capability, as
+  // goods receipt is; skipped where the release declares no vendor return.
+  Object.freeze({
+    capabilityId: RECEIVING_CAPABILITY_ID,
+    companion: {
+      companionEntitySuffix: 'inventory_transaction',
+      companionLineEntitySuffix: 'inventory_transaction_line',
+      numberPrefix: 'VR',
+      sourceLineEntitySuffix: 'vendor_return_line',
+    },
+    familyId: 'vendor_return',
+    origin: 'companion',
+    roles: [
+      {
+        movementOption: 'vendor_return',
+        postingRole: 'vendorReturn' as const,
+        transactionTypeOption: 'vendor_return',
+      },
+    ],
+    sourceEntitySuffix: 'vendor_return',
+    sourceType: 'vendorReturn',
   }),
   Object.freeze({
     capabilityId: RECEIVING_CAPABILITY_ID,
@@ -295,9 +345,14 @@ const companionDerivedInventoryPostingInputDigestVersion = 4 as const;
  * input already covers -- so it carried no information, and it was the one
  * kernel-derived value still in the version-4 input. Corrected IN PLACE at
  * version 4 rather than cut as version 5, because ADR-0063 section 4 proves
- * no version-4 receipt exists in released data: `postStockCount` has no
+ * no version-4 receipt existed in released data: `postStockCount` had no
  * production caller. The standard version 2 keeps its role, because version 2
  * receipts ARE released data.
+ *
+ * STOCK-COUNTS ends that premise: a stock count's Post on the posting route
+ * is `postStockCount`'s first production caller, so version-4 receipts are
+ * now released data and version 4 is frozen. Any change to the stock-count digest
+ * input is a version 5 with its own `CHECK` migration (ADR-0063, amended).
  *
  * A stored version-3 receipt is still DECODED under version 3 -- nothing is
  * rewritten and nothing is removed. What it may not do is have a fresh version-3
@@ -461,6 +516,8 @@ interface DerivedStockCountCommand extends Omit<
 export type InventoryPostingCommandV1 =
   | GoodsReceiptCommand
   | ShipmentCommand
+  | CustomerReturnCommand
+  | VendorReturnCommand
   | InventoryAdjustmentPostingCommandV1
   | InventoryStockCountPostingCommandV2
   | InventoryTransferPostingCommandV1;
@@ -474,12 +531,21 @@ export type InventoryPostingCommandV1 =
 type DerivedPostingCommand =
   | DerivedGoodsReceiptCommand
   | DerivedShipmentCommand
+  | DerivedCustomerReturnCommand
+  | DerivedVendorReturnCommand
   | InventoryAdjustmentPostingCommandV1
   | DerivedStockCountCommand
   | InventoryTransferPostingCommandV1;
 
 export type InventoryPostingRoleV1 =
-  'adjustment' | 'correction' | 'count' | 'transfer' | 'receipt' | 'shipment';
+  | 'adjustment'
+  | 'correction'
+  | 'count'
+  | 'transfer'
+  | 'receipt'
+  | 'shipment'
+  | 'customerReturn'
+  | 'vendorReturn';
 
 export interface InventoryMovementOrderEntryV1 {
   readonly effectiveAt: string;
@@ -878,7 +944,9 @@ interface VersionedInputDigest {
     | typeof standardInventoryPostingInputDigestVersion
     | typeof companionDerivedInventoryPostingInputDigestVersion
     | 5
-    | 6;
+    | 6
+    | 7
+    | 8;
 }
 
 interface EvidenceIds {
@@ -899,6 +967,16 @@ type ParsedPosting =
       readonly command: DerivedShipmentCommand;
       readonly family: ResolvedPostingFamily;
       readonly postingRole: 'shipment';
+    }
+  | {
+      readonly command: DerivedCustomerReturnCommand;
+      readonly family: ResolvedPostingFamily;
+      readonly postingRole: 'customerReturn';
+    }
+  | {
+      readonly command: DerivedVendorReturnCommand;
+      readonly family: ResolvedPostingFamily;
+      readonly postingRole: 'vendorReturn';
     }
   | {
       readonly command: DerivedGoodsReceiptCommand;
@@ -1197,6 +1275,204 @@ export class PostgresInventoryPostingService {
     });
   }
 
+  /**
+   * RETURNS (ruling D). Goods back from a customer against shipped order
+   * lines, into the one location the return names. An initial return adds
+   * positive quantities and compensates nothing; a correction or reversal
+   * takes back negative quantities, each naming a movement of the posted
+   * return it supersedes. The companion transaction and its lines are
+   * derived from the return, never supplied. What may be returned is decided
+   * inside `#post`, under the order's row locks, against the ledger.
+   */
+  async postCustomerReturn(
+    context: TrustedRequestContext,
+    actorEnvelope: TrustedActorEnvelope,
+    command: CustomerReturnCommand,
+  ): Promise<InventoryPostingResultV1> {
+    const family = this.#familyFor('customer_return');
+    validateCommandEnvelope(
+      command,
+      ['kind', 'returnNumber', 'orderId', 'locationId', 'supersedesReturnId'],
+      family,
+    );
+    requiredUuid(command.orderId, 'orderId');
+    requiredUuid(command.locationId, 'locationId');
+    requiredUuid(command.sourceId, 'sourceId');
+    requiredText(command.returnNumber, 'returnNumber', 60);
+    if (
+      command.sourceType !== 'customerReturn' ||
+      !['initial', 'correction', 'reversal'].includes(command.kind) ||
+      command.lines.length === 0 ||
+      (command.kind === 'initial') !== (command.supersedesReturnId === null)
+    )
+      throw inputError('Invalid customer return source or correction link');
+    if (command.supersedesReturnId !== null)
+      requiredUuid(command.supersedesReturnId, 'supersedesReturnId');
+    for (const line of command.lines)
+      exactKeys(line, [
+        'returnLineId',
+        'orderLineId',
+        'sourceLine',
+        'itemId',
+        'unitId',
+        'quantityDelta',
+        'reversalOfMovementId',
+      ]);
+    const normalized = {
+      ...normalizeCommandEnvelope(structuredClone(command)),
+      sourceId: command.sourceId.toLowerCase(),
+      orderId: command.orderId.toLowerCase(),
+      locationId: command.locationId.toLowerCase(),
+      supersedesReturnId: command.supersedesReturnId?.toLowerCase() ?? null,
+      lines: command.lines.map((line) => ({
+        ...line,
+        returnLineId: line.returnLineId.toLowerCase(),
+        orderLineId: line.orderLineId.toLowerCase(),
+        itemId: line.itemId.toLowerCase(),
+        reversalOfMovementId: line.reversalOfMovementId?.toLowerCase() ?? null,
+      })),
+    };
+    const ids = new Set<string>();
+    const derived: DerivedCustomerReturnCommand = {
+      ...normalized,
+      transactionId: deriveInventoryPostingCompanionId({
+        capabilityId: FULFILLMENT_CAPABILITY_ID,
+        familyId: 'customer_return',
+        companionFamilyId: family.companion!.companionEntityId,
+        sourceRecordId: normalized.sourceId,
+      }),
+      lines: normalized.lines.map((line) => {
+        for (const [value, label] of [
+          [line.returnLineId, 'returnLineId'],
+          [line.orderLineId, 'orderLineId'],
+          [line.itemId, 'itemId'],
+        ] as const)
+          requiredUuid(value, label);
+        requiredText(line.sourceLine, 'sourceLine', 80);
+        requiredText(line.unitId, 'unitId', 32);
+        if (line.reversalOfMovementId !== null)
+          requiredUuid(line.reversalOfMovementId, 'reversalOfMovementId');
+        if (ids.has(line.returnLineId))
+          throw inputError('Duplicate customer return line');
+        ids.add(line.returnLineId);
+        const quantity = fulfillmentQuantity(line.quantityDelta);
+        if (
+          quantity === 0n ||
+          (normalized.kind === 'initial'
+            ? quantity < 0n || line.reversalOfMovementId !== null
+            : quantity > 0n || line.reversalOfMovementId === null)
+        )
+          throw inputError(
+            'Return positive quantities; corrections take back a named return movement',
+          );
+        return {
+          ...line,
+          quantityDelta: fulfillmentDecimal(quantity),
+          transactionLineId: deriveInventoryPostingCompanionId({
+            capabilityId: FULFILLMENT_CAPABILITY_ID,
+            familyId: 'customer_return',
+            companionFamilyId: family.companion!.companionLineEntityId,
+            sourceRecordId: line.returnLineId,
+          }),
+        };
+      }),
+    };
+    return this.#post(context, actorEnvelope, {
+      command: derived,
+      family,
+      postingRole: 'customerReturn',
+    });
+  }
+
+  /**
+   * RETURNS (ruling R-A). Goods received against purchase order lines sent
+   * back from the one location the return names. Every line posts one
+   * negative movement attributed to its order line, so received falls by
+   * what went back and the line reopens to receive; a refund is the return
+   * followed by the existing "Close open remainder". What may go back is
+   * decided inside `#post`, under the order's row locks, against the ledger.
+   */
+  async postVendorReturn(
+    context: TrustedRequestContext,
+    actorEnvelope: TrustedActorEnvelope,
+    command: VendorReturnCommand,
+  ): Promise<InventoryPostingResultV1> {
+    const family = this.#familyFor('vendor_return');
+    validateCommandEnvelope(
+      command,
+      ['returnNumber', 'orderId', 'locationId'],
+      family,
+    );
+    requiredUuid(command.orderId, 'orderId');
+    requiredUuid(command.locationId, 'locationId');
+    requiredUuid(command.sourceId, 'sourceId');
+    requiredText(command.returnNumber, 'returnNumber', 60);
+    if (command.sourceType !== 'vendorReturn' || command.lines.length === 0)
+      throw inputError('Invalid vendor return source');
+    for (const line of command.lines)
+      exactKeys(line, [
+        'returnLineId',
+        'orderLineId',
+        'sourceLine',
+        'itemId',
+        'unitId',
+        'quantityDelta',
+      ]);
+    const normalized = {
+      ...normalizeCommandEnvelope(structuredClone(command)),
+      sourceId: command.sourceId.toLowerCase(),
+      orderId: command.orderId.toLowerCase(),
+      locationId: command.locationId.toLowerCase(),
+      lines: command.lines.map((line) => ({
+        ...line,
+        returnLineId: line.returnLineId.toLowerCase(),
+        orderLineId: line.orderLineId.toLowerCase(),
+        itemId: line.itemId.toLowerCase(),
+      })),
+    };
+    const ids = new Set<string>();
+    const derived: DerivedVendorReturnCommand = {
+      ...normalized,
+      transactionId: deriveInventoryPostingCompanionId({
+        capabilityId: RECEIVING_CAPABILITY_ID,
+        familyId: 'vendor_return',
+        companionFamilyId: family.companion!.companionEntityId,
+        sourceRecordId: normalized.sourceId,
+      }),
+      lines: normalized.lines.map((line) => {
+        for (const [value, label] of [
+          [line.returnLineId, 'returnLineId'],
+          [line.orderLineId, 'orderLineId'],
+          [line.itemId, 'itemId'],
+        ] as const)
+          requiredUuid(value, label);
+        requiredText(line.sourceLine, 'sourceLine', 80);
+        requiredText(line.unitId, 'unitId', 32);
+        if (ids.has(line.returnLineId))
+          throw inputError('Duplicate vendor return line');
+        ids.add(line.returnLineId);
+        const quantity = receiptQuantity(line.quantityDelta);
+        if (quantity >= 0n)
+          throw inputError('A vendor return sends back negative quantities');
+        return {
+          ...line,
+          quantityDelta: receiptDecimal(quantity),
+          transactionLineId: deriveInventoryPostingCompanionId({
+            capabilityId: RECEIVING_CAPABILITY_ID,
+            familyId: 'vendor_return',
+            companionFamilyId: family.companion!.companionLineEntityId,
+            sourceRecordId: line.returnLineId,
+          }),
+        };
+      }),
+    };
+    return this.#post(context, actorEnvelope, {
+      command: derived,
+      family,
+      postingRole: 'vendorReturn',
+    });
+  }
+
   #familyFor(familyId: string): ResolvedPostingFamily {
     return requiredPostingFamily(
       this.#binding,
@@ -1337,6 +1613,30 @@ export class PostgresInventoryPostingService {
               posting.command,
             )
           : null;
+      // RETURNS. The order row, then its lines ascending, then the return and
+      // its lines -- `lockShipment`'s order -- so a return and a shipment
+      // correction of one order serialize on the order row.
+      const customerReturnEvidence =
+        posting.postingRole === 'customerReturn'
+          ? await lockCustomerReturn(
+              client,
+              this.#binding.fulfillment!,
+              context,
+              posting.command,
+            )
+          : null;
+      // RETURNS. The order row, then its lines ascending, then the return and
+      // its lines -- `lockReceipt`'s order -- so a vendor return, a receipt,
+      // an amendment and a close of one order serialize on the order row.
+      const vendorReturnEvidence =
+        posting.postingRole === 'vendorReturn'
+          ? await lockVendorReturn(
+              client,
+              this.#binding.receipt!,
+              context,
+              posting.command,
+            )
+          : null;
       // PUR-2a. Execution is selected by the compiled family binding the entry
       // point resolved by `(capabilityId, familyId)`, not by a source-type
       // literal and not by a second lookup keyed on the role. An
@@ -1441,14 +1741,63 @@ export class PostgresInventoryPostingService {
           context,
           posting.command,
         );
+        await assertShipmentKeepsReturnedUnits(
+          client,
+          this.#binding.fulfillment!,
+          context,
+          posting.command,
+        );
         if (dateOrdinal(businessPeriod) > dateOrdinal(recordedPeriod))
           throw postingError(
             'FULFILLMENT_SHIPMENT_INVALID',
             'Shipments cannot be posted after the current tenant business day',
           );
       }
+      if (posting.postingRole === 'customerReturn') {
+        await assertCustomerReturnBounds(
+          client,
+          this.#binding.fulfillment!,
+          context,
+          posting.command,
+          customerReturnEvidence!,
+        );
+        await assertCustomerReturnCompensation(
+          client,
+          this.#binding.fulfillment!,
+          context,
+          posting.command,
+        );
+        if (dateOrdinal(businessPeriod) > dateOrdinal(recordedPeriod))
+          throw postingError(
+            'FULFILLMENT_RETURN_INVALID',
+            'Returns cannot be posted after the current tenant business day',
+          );
+      }
+      if (posting.postingRole === 'vendorReturn') {
+        await assertVendorReturnBounds(
+          client,
+          this.#binding.receipt!,
+          context,
+          posting.command,
+          vendorReturnEvidence!,
+        );
+        if (dateOrdinal(businessPeriod) > dateOrdinal(recordedPeriod))
+          throw postingError(
+            'VENDOR_RETURN_INVALID',
+            'Vendor returns cannot be posted after the current tenant business day',
+          );
+      }
       if (isStockCountPosting(posting)) {
         await assertStockCountCompensationAvailable(
+          client,
+          this.#binding,
+          context,
+          posting,
+        );
+        // STOCK-COUNTS. A count's expected is the ledger at its location as of
+        // its own instant, read under the stock locks taken at BEGIN, so the
+        // posted variance leaves on-hand at what was counted.
+        await assertCountExpectedIsLedger(
           client,
           this.#binding,
           context,
@@ -1503,14 +1852,16 @@ export class PostgresInventoryPostingService {
         : null;
       await client.query('SAVEPOINT inventory_posting_write');
       let transactionRevision = -1;
-      let stockCountRevision: number | null = null;
+      let sourceDocumentRevision: number | null = null;
       try {
         // The companion must exist before the movements that reference it.
         if (
           companionOrigin &&
           (isStockCountPosting(posting) ||
             posting.postingRole === 'receipt' ||
-            posting.postingRole === 'shipment')
+            posting.postingRole === 'shipment' ||
+            posting.postingRole === 'customerReturn' ||
+            posting.postingRole === 'vendorReturn')
         ) {
           transactionRevision = await writeCompanionTransaction(
             client,
@@ -1565,15 +1916,39 @@ export class PostgresInventoryPostingService {
             recordedAt,
             coverage,
           );
-          stockCountRevision = parsed.sourceRevision + 1;
+          sourceDocumentRevision = parsed.sourceRevision + 1;
         }
         if (posting.postingRole === 'shipment') {
-          stockCountRevision = await writeShipmentConsequences(
+          sourceDocumentRevision = await writeShipmentConsequences(
             client,
             this.#binding,
             context,
             posting,
             shipmentEvidence!,
+            actorEnvelope.actor.executionPrincipal.principalId,
+            recordedAt,
+            coverage,
+          );
+        }
+        if (posting.postingRole === 'vendorReturn') {
+          sourceDocumentRevision = await writeVendorReturnConsequences(
+            client,
+            this.#binding,
+            context,
+            posting,
+            vendorReturnEvidence!,
+            actorEnvelope.actor.executionPrincipal.principalId,
+            recordedAt,
+            coverage,
+          );
+        }
+        if (posting.postingRole === 'customerReturn') {
+          sourceDocumentRevision = await writeCustomerReturnConsequences(
+            client,
+            this.#binding,
+            context,
+            posting,
+            customerReturnEvidence!,
             actorEnvelope.actor.executionPrincipal.principalId,
             recordedAt,
             coverage,
@@ -1598,7 +1973,7 @@ export class PostgresInventoryPostingService {
           );
         }
         if (isStockCountPosting(posting)) {
-          stockCountRevision = await transitionStockCountToPosted(
+          sourceDocumentRevision = await transitionStockCountToPosted(
             client,
             this.#binding,
             context,
@@ -1750,7 +2125,7 @@ export class PostgresInventoryPostingService {
         configuration,
         resultWithoutTrust,
         ids,
-        stockCountRevision ?? transactionRevision,
+        sourceDocumentRevision ?? transactionRevision,
       );
       const result = Object.freeze({ ...resultWithoutTrust, trust });
       await insertReceipt(
@@ -2024,7 +2399,9 @@ function resolvePostingStorage(
           entity.entityId.endsWith(':entity.shipment') ||
           entity.entityId.endsWith(':entity.reservation') ||
           entity.entityId.endsWith(':entity.reservation_balance') ||
-          entity.entityId.endsWith(':entity.sales_order_shipped'),
+          entity.entityId.endsWith(':entity.sales_order_shipped') ||
+          entity.entityId.endsWith(':entity.customer_return') ||
+          entity.entityId.endsWith(':entity.vendor_return'),
       )
       .map((entity) => entity.entityId),
     movementEntity.entityId,
@@ -2044,14 +2421,25 @@ function resolvePostingStorage(
     writerInventory,
     [
       ...target.entities
-        .filter(
-          (entity) =>
-            entity.entityId.endsWith(':entity.goods_receipt') ||
-            entity.entityId.endsWith(':entity.purchase_order_received'),
-        )
+        .filter((entity) => entity.entityId.endsWith(':entity.goods_receipt'))
         .map((entity) => ({
           relation: entity.physicalTableName,
           verifiedBy: [verifyGoodsReceiptPosting],
+        })),
+      // A receipt and a vendor return each rewrite the lines' received rows.
+      ...target.entities
+        .filter((entity) =>
+          entity.entityId.endsWith(':entity.purchase_order_received'),
+        )
+        .map((entity) => ({
+          relation: entity.physicalTableName,
+          verifiedBy: [verifyGoodsReceiptPosting, verifyVendorReturnPosting],
+        })),
+      ...target.entities
+        .filter((entity) => entity.entityId.endsWith(':entity.vendor_return'))
+        .map((entity) => ({
+          relation: entity.physicalTableName,
+          verifiedBy: [verifyVendorReturnPosting],
         })),
       ...target.entities
         .filter(
@@ -2064,6 +2452,12 @@ function resolvePostingStorage(
         .map((entity) => ({
           relation: entity.physicalTableName,
           verifiedBy: [verifyShipmentPosting],
+        })),
+      ...target.entities
+        .filter((entity) => entity.entityId.endsWith(':entity.customer_return'))
+        .map((entity) => ({
+          relation: entity.physicalTableName,
+          verifiedBy: [verifyCustomerReturnPosting],
         })),
       { relation: movement.tableName, verifiedBy: [readBackMovements] },
       // A routed row is observed by reading the PARTITIONED PARENT, which is the
@@ -2095,6 +2489,8 @@ function resolvePostingStorage(
           assertAuthoredTransactionPersisted,
           verifyGoodsReceiptPosting,
           verifyShipmentPosting,
+          verifyCustomerReturnPosting,
+          verifyVendorReturnPosting,
         ],
       },
       {
@@ -2103,6 +2499,8 @@ function resolvePostingStorage(
           assertCompanionIdentitiesPersisted,
           verifyGoodsReceiptPosting,
           verifyShipmentPosting,
+          verifyCustomerReturnPosting,
+          verifyVendorReturnPosting,
         ],
       },
       ...(postedStockBalanceEntity
@@ -2598,6 +2996,20 @@ function resolvePostingFamilies(
       )
     )
       continue;
+    if (
+      declaration.familyId === 'customer_return' &&
+      !target.entities.some((entry) =>
+        entry.entityId.endsWith(':entity.customer_return'),
+      )
+    )
+      continue;
+    if (
+      declaration.familyId === 'vendor_return' &&
+      !target.entities.some((entry) =>
+        entry.entityId.endsWith(':entity.vendor_return'),
+      )
+    )
+      continue;
     const key = postingFamilyKey(
       declaration.capabilityId,
       declaration.familyId,
@@ -3049,6 +3461,10 @@ function validateStockCountCommand(
   }
   const naturalKeys = new Set<string>();
   const evidenceIds = new Set<string>();
+  // STOCK-COUNTS. An initial count or a correction names each item once:
+  // every line's expected is the whole ledger for its item, so a second line
+  // for the same item would post its variance twice.
+  const countedItems = new Set<string>();
   for (const line of command.lines) {
     exactKeys(line, [
       'countedQuantity',
@@ -3066,6 +3482,12 @@ function validateStockCountCommand(
       throw inputError('stock-count lines repeat a stockCountLineId');
     }
     evidenceIds.add(line.stockCountLineId.toLowerCase());
+    if (command.kind !== 'reversal') {
+      if (countedItems.has(line.itemId.toLowerCase())) {
+        throw inputError('a stock count names each item once');
+      }
+      countedItems.add(line.itemId.toLowerCase());
+    }
     const expected = decimalToScaled(
       line.expectedQuantity,
       'line.expectedQuantity',
@@ -3284,6 +3706,33 @@ function plannedMovements(
         line.reversalOfMovementId,
       ),
     );
+  // RETURNS: every line out of the vendor return's location.
+  if (posting.postingRole === 'vendorReturn')
+    return posting.command.lines.map((line) =>
+      plannedMovement(
+        posting.command,
+        line,
+        posting.command.locationId,
+        line.quantityDelta,
+        line.returnLineId,
+        'vendorReturn',
+        mintUuid,
+      ),
+    );
+  // RETURNS: every line into (or, correcting, out of) the return's location.
+  if (posting.postingRole === 'customerReturn')
+    return posting.command.lines.map((line) =>
+      plannedMovement(
+        posting.command,
+        line,
+        posting.command.locationId,
+        line.quantityDelta,
+        line.returnLineId,
+        'customerReturn',
+        mintUuid,
+        line.reversalOfMovementId,
+      ),
+    );
   if (posting.postingRole === 'adjustment') {
     return posting.command.lines.map((line) =>
       plannedMovement(
@@ -3340,7 +3789,9 @@ function plannedMovement(
     | DerivedStockCountLine
     | InventoryTransferLineV1
     | DerivedGoodsReceiptCommand['lines'][number]
-    | DerivedShipmentCommand['lines'][number],
+    | DerivedShipmentCommand['lines'][number]
+    | DerivedCustomerReturnCommand['lines'][number]
+    | DerivedVendorReturnCommand['lines'][number],
   locationId: string,
   quantityDelta: string,
   sourceLine: string,
@@ -3737,11 +4188,15 @@ function enforceReasonAndApproval(
 ): void {
   const { command } = posting;
   const postingRole =
-    posting.postingRole === 'receipt' || posting.postingRole === 'shipment'
-      ? posting.command.kind === 'initial'
-        ? 'adjustment'
-        : 'correction'
-      : posting.postingRole;
+    posting.postingRole === 'vendorReturn'
+      ? 'adjustment'
+      : posting.postingRole === 'receipt' ||
+          posting.postingRole === 'shipment' ||
+          posting.postingRole === 'customerReturn'
+        ? posting.command.kind === 'initial'
+          ? 'adjustment'
+          : 'correction'
+        : posting.postingRole;
   const reason = configuration.reasonRequirements[postingRole];
   if (
     command.reason.code.trim().length === 0 ||
@@ -3763,7 +4218,9 @@ function enforceReasonAndApproval(
   const exceeds =
     posting.postingRole === 'adjustment' ||
     posting.postingRole === 'receipt' ||
-    posting.postingRole === 'shipment'
+    posting.postingRole === 'shipment' ||
+    posting.postingRole === 'customerReturn' ||
+    posting.postingRole === 'vendorReturn'
       ? posting.command.lines.some(
           (line) =>
             absolute(decimalToScaled(line.quantityDelta, 'quantity')) >
@@ -4201,6 +4658,34 @@ function preserved(
         JSON.stringify(current[column] ?? null),
     reason,
   );
+}
+
+/**
+ * STOCK-COUNTS. The physical columns of fields a release MAY declare, named by
+ * explicit local id -- never every field the binding holds, which would derive
+ * a proof list from the row it proves. A release that does not declare a field
+ * has no such column; a column the row carries and no proof covers is refused
+ * by `assertPersistedRowVerified`.
+ */
+function declaredColumns(
+  entity: EntityBinding,
+  localIds: readonly string[],
+): string[] {
+  return localIds.flatMap((localId) => {
+    const field = entity.fields.get(localId);
+    return field ? [field.name] : [];
+  });
+}
+
+/**
+ * STOCK-COUNTS, review round 1 (C6). A row as each column's exact JSON text,
+ * for a preservation proof: a numeric(38,18) read through `to_jsonb` arrives
+ * as a JavaScript number, and 1.000000000000000001 and ...002 are one number.
+ * The keys are the row's columns, so the coverage equality reads them as
+ * before; each value is the column's jsonb text, compared as a string.
+ */
+function exactRowSql(alias: string): string {
+  return `(SELECT jsonb_object_agg(exact_column.key, exact_column.value::text) FROM jsonb_each(to_jsonb(${alias})) AS exact_column)`;
 }
 
 function preservedColumns(
@@ -5684,6 +6169,1135 @@ async function verifyShipmentPosting(
   }
 }
 
+/**
+ * RETURNS (ruling D). What a sales order line has taken back: the sum of the
+ * posted customer-return movements attributed to it through their return
+ * lines -- initial returns positive, corrections and reversals negative --
+ * read under the order's row lock. Shipped stays shipped: this ledger is
+ * apart from `shippedLedger`, and neither reads the other's movements.
+ */
+async function returnedLedger(
+  client: PoolClient,
+  binding: FulfillmentBinding,
+  context: TrustedRequestContext,
+  legalEntityId: string,
+  orderLineId: string,
+): Promise<{ quantity: bigint; unit: string | null; count: number }> {
+  const line = binding.customerReturnLine;
+  if (!line) return { quantity: 0n, unit: null, count: 0 };
+  const qf = quoteFulfillmentIdentifier;
+  const m = binding.movement;
+  const result = await client.query<{
+    quantity: string;
+    unit: string | null;
+    count: string;
+    units: string;
+  }>(
+    `SELECT coalesce(sum(m.${qf(fulfillmentColumn(m, 'inventory_movement_quantity_delta'))}),0)::text AS quantity,
+            min(m.${qf(fulfillmentColumn(m, 'inventory_movement_unit_id'))}) AS unit,
+            count(*)::text AS count,
+            count(DISTINCT m.${qf(fulfillmentColumn(m, 'inventory_movement_unit_id'))})::text AS units
+       FROM ${fulfillmentTable(m)} m
+       JOIN ${fulfillmentTable(line)} rl
+         ON rl.tenant_id=m.tenant_id AND rl.environment_id=m.environment_id
+        AND rl.${qf(line.legalEntity!.column)}=m.${qf(m.legalEntity!.column)}
+        AND rl.record_id::text=m.${qf(fulfillmentColumn(m, 'inventory_movement_source_line'))}
+        AND rl.${qf(fulfillmentRelation(binding, line, 'customer_return_line_return'))}::text=m.${qf(fulfillmentColumn(m, 'inventory_movement_source_id'))}
+      WHERE m.tenant_id=$1 AND m.environment_id=$2
+        AND m.${qf(m.legalEntity!.column)}=$3
+        AND rl.${qf(fulfillmentRelation(binding, line, 'customer_return_line_order_line'))}=$4
+        AND m.${qf(fulfillmentColumn(m, 'inventory_movement_source_type'))}='customerReturn'
+        AND m.archived_at IS NULL`,
+    [context.tenantId, context.environmentId, legalEntityId, orderLineId],
+  );
+  if (Number(result.rows[0]!.units) > 1)
+    throw postingError(
+      'FULFILLMENT_RETURN_INVALID',
+      'Order-line return ledger contains multiple base units',
+    );
+  return {
+    quantity: fulfillmentQuantity(result.rows[0]!.quantity),
+    unit: result.rows[0]!.unit,
+    count: Number(result.rows[0]!.count),
+  };
+}
+
+interface LockedCustomerReturn {
+  readonly header: Record<string, unknown>;
+  readonly lines: readonly Record<string, unknown>[];
+  readonly order: Record<string, unknown>;
+  readonly orderLines: ReadonlyMap<string, Record<string, unknown>>;
+}
+
+/** Ruling D, owner ruling of 2026-09-30: a confirmed or a closed order. */
+function assertReturnableSalesOrder(
+  binding: FulfillmentBinding,
+  order: Record<string, unknown>,
+): void {
+  const state = String(
+    order[
+      fulfillmentColumn(
+        binding.order,
+        'derived_state_field.machine.sales_order_lifecycle',
+      )
+    ],
+  );
+  if (
+    order.archived_at !== null ||
+    !(
+      state.endsWith(':state.sales_order_released') ||
+      state.endsWith(':state.sales_order_closed')
+    )
+  )
+    throw postingError(
+      'FULFILLMENT_ORDER_NOT_RELEASED',
+      'Returns require a confirmed or closed sales order',
+    );
+}
+
+async function lockCustomerReturn(
+  client: PoolClient,
+  binding: FulfillmentBinding,
+  context: TrustedRequestContext,
+  command: DerivedCustomerReturnCommand,
+): Promise<LockedCustomerReturn> {
+  const entity = binding.customerReturn;
+  const lineEntity = binding.customerReturnLine;
+  if (!entity || !lineEntity)
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_INVALID',
+      'Customer return storage is absent from the active release',
+    );
+  const qf = quoteFulfillmentIdentifier;
+  // Claim B4. What serializes the returns and the shipment corrections of an
+  // order: its row, then its lines ascending, FOR NO KEY UPDATE, taken before
+  // either ledger is read. Stock locks cannot serialize two returns into two
+  // different locations, and the period lock comes after the bound.
+  const serializeOrder = true;
+  const header = await fulfillmentRowForEntity(
+    client,
+    entity,
+    context,
+    command.legalEntityId,
+    command.sourceId,
+    false,
+  );
+  const candidateLines = await client.query<Record<string, unknown>>(
+    `SELECT record_id FROM ${fulfillmentTable(lineEntity)}
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${qf(lineEntity.legalEntity!.column)}=$3
+        AND ${qf(fulfillmentRelation(binding, lineEntity, 'customer_return_line_return'))}=$4
+        AND archived_at IS NULL ORDER BY record_id`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.sourceId,
+    ],
+  );
+  const order = await fulfillmentRowForEntity(
+    client,
+    binding.order,
+    context,
+    command.legalEntityId,
+    command.orderId,
+    serializeOrder,
+  );
+  assertReturnableSalesOrder(binding, order);
+  const orderLines = new Map<string, Record<string, unknown>>();
+  for (const id of [
+    ...new Set(command.lines.map((line) => line.orderLineId)),
+  ].sort())
+    orderLines.set(
+      id,
+      await fulfillmentRowForEntity(
+        client,
+        binding.orderLine,
+        context,
+        command.legalEntityId,
+        id,
+        serializeOrder,
+      ),
+    );
+  const lockedHeader = await fulfillmentRowForEntity(
+    client,
+    entity,
+    context,
+    command.legalEntityId,
+    command.sourceId,
+    true,
+  );
+  const linesResult = await client.query<Record<string, unknown>>(
+    `SELECT line.*, (SELECT relname FROM pg_class WHERE oid=line.tableoid) AS "__relation"
+       FROM ${fulfillmentTable(lineEntity)} line
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${qf(lineEntity.legalEntity!.column)}=$3
+        AND ${qf(fulfillmentRelation(binding, lineEntity, 'customer_return_line_return'))}=$4
+        AND archived_at IS NULL ORDER BY record_id FOR NO KEY UPDATE OF line`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.sourceId,
+    ],
+  );
+  if (
+    candidateLines.rows.length !== linesResult.rows.length ||
+    linesResult.rows.length !== command.lines.length ||
+    header.revision !== lockedHeader.revision
+  )
+    throw postingError(
+      'INVENTORY_TRANSACTION_STATE_CONFLICT',
+      'Customer return line set changed while posting locks were acquired',
+    );
+  return {
+    header: lockedHeader,
+    lines: linesResult.rows,
+    order,
+    orderLines,
+  };
+}
+
+async function assertCustomerReturnBounds(
+  client: PoolClient,
+  binding: FulfillmentBinding,
+  context: TrustedRequestContext,
+  command: DerivedCustomerReturnCommand,
+  locked: LockedCustomerReturn,
+): Promise<void> {
+  const entity = binding.customerReturn!;
+  const lineEntity = binding.customerReturnLine!;
+  const column = (name: string) =>
+    fulfillmentColumn(entity, `customer_return_${name}`);
+  const lineColumn = (name: string) =>
+    fulfillmentColumn(lineEntity, `customer_return_line_${name}`);
+  if (
+    locked.header.archived_at !== null ||
+    Number(locked.header.revision) !== command.sourceRevision ||
+    locked.header[column('state')] !==
+      fulfillmentOption(entity, 'customer_return_state', 'draft')
+  )
+    throw postingError(
+      'FULFILLMENT_RETURN_INVALID',
+      'Only a current draft customer return can be posted',
+    );
+  for (const [name, value] of [
+    ['number', command.returnNumber],
+    ['kind', fulfillmentOption(entity, 'customer_return_kind', command.kind)],
+    ['location_id', command.locationId],
+    ['reason_code', command.reason.code],
+    ['reason_narrative', command.reason.narrative],
+  ] as const)
+    if (locked.header[column(name)] !== value)
+      throw postingError(
+        'INVENTORY_TRANSACTION_STATE_CONFLICT',
+        `Customer return ${name} changed`,
+      );
+  const effectiveAt = locked.header[column('effective_at')];
+  if (
+    (effectiveAt instanceof Date
+      ? effectiveAt.toISOString()
+      : new Date(String(effectiveAt)).toISOString()) !== command.effectiveAt ||
+    locked.header[
+      fulfillmentRelation(binding, entity, 'customer_return_order')
+    ] !== command.orderId ||
+    locked.header[
+      fulfillmentRelation(binding, entity, 'customer_return_supersedes')
+    ] !== command.supersedesReturnId
+  )
+    throw postingError(
+      'INVENTORY_TRANSACTION_STATE_CONFLICT',
+      'Customer return attribution or effective instant changed',
+    );
+  const attemptedByOrderLine = new Map<string, bigint>();
+  for (const line of command.lines) {
+    const stored = locked.lines.find(
+      (row) => row.record_id === line.returnLineId,
+    );
+    const orderLine = locked.orderLines.get(line.orderLineId);
+    if (!stored || !orderLine)
+      throw postingError(
+        'FULFILLMENT_RETURN_INVALID',
+        'Customer return attribution is missing',
+      );
+    const storedQuantity = fulfillmentQuantity(
+      String(stored[lineColumn('quantity')]),
+    );
+    if (
+      storedQuantity !== fulfillmentQuantity(line.quantityDelta) ||
+      String(stored[lineColumn('line_number')]) !== line.sourceLine ||
+      stored[
+        fulfillmentRelation(
+          binding,
+          lineEntity,
+          'customer_return_line_order_line',
+        )
+      ] !== line.orderLineId ||
+      orderLine[
+        fulfillmentRelation(
+          binding,
+          binding.orderLine,
+          'sales_order_line_order',
+        )
+      ] !== command.orderId ||
+      stored[lineColumn('item_id')] !== line.itemId ||
+      stored[lineColumn('unit_id')] !== line.unitId ||
+      stored[lineColumn('reversal_of_movement_id')] !==
+        line.reversalOfMovementId ||
+      orderLine[
+        fulfillmentColumn(binding.orderLine, 'sales_order_line_item_id')
+      ] !== line.itemId ||
+      orderLine[
+        fulfillmentColumn(binding.orderLine, 'sales_order_line_unit_id')
+      ] !== line.unitId
+    )
+      throw postingError(
+        'FULFILLMENT_RETURN_INVALID',
+        'A return must preserve its order line, item, unit, quantity and correction attribution',
+      );
+    attemptedByOrderLine.set(
+      line.orderLineId,
+      (attemptedByOrderLine.get(line.orderLineId) ?? 0n) + storedQuantity,
+    );
+  }
+  // Claims B1 and B2. Per order line, what has been returned (net of
+  // corrections) plus what this return attempts stays between zero and what
+  // has been shipped (net of shipment corrections) -- both ledgers read under
+  // the order's row locks. A return never reduces what was shipped.
+  for (const [orderLineId, attempted] of attemptedByOrderLine) {
+    const shipped = await shippedLedger(
+      client,
+      binding,
+      context,
+      command.legalEntityId,
+      orderLineId,
+    );
+    const returned = await returnedLedger(
+      client,
+      binding,
+      context,
+      command.legalEntityId,
+      orderLineId,
+    );
+    const after = returned.quantity + attempted;
+    if (after < 0n || after > shipped.quantity)
+      throw postingError(
+        'FULFILLMENT_RETURN_QUANTITY_OUT_OF_BOUNDS',
+        'A return must keep what is returned between zero and what was shipped',
+        {
+          orderLineId,
+          shippedQuantity: fulfillmentDecimal(shipped.quantity),
+          returnedBefore: fulfillmentDecimal(returned.quantity),
+          attemptedQuantity: fulfillmentDecimal(attempted),
+        },
+      );
+  }
+}
+
+/**
+ * Claim B5. A correction or reversal names a posted return of the same order
+ * and takes back only that return's own movements, each once, from the
+ * location it put them in, never more than a movement still adds; a
+ * reversal takes back everything the return still adds.
+ */
+async function assertCustomerReturnCompensation(
+  client: PoolClient,
+  binding: FulfillmentBinding,
+  context: TrustedRequestContext,
+  command: DerivedCustomerReturnCommand,
+): Promise<void> {
+  if (command.kind === 'initial') return;
+  const entity = binding.customerReturn!;
+  const lineEntity = binding.customerReturnLine!;
+  const qf = quoteFulfillmentIdentifier;
+  const m = binding.movement;
+  const original = await fulfillmentRowForEntity(
+    client,
+    entity,
+    context,
+    command.legalEntityId,
+    command.supersedesReturnId!,
+    false,
+  );
+  if (
+    original[fulfillmentColumn(entity, 'customer_return_state')] !==
+      fulfillmentOption(entity, 'customer_return_state', 'posted') ||
+    original[fulfillmentRelation(binding, entity, 'customer_return_order')] !==
+      command.orderId
+  )
+    throw postingError(
+      'FULFILLMENT_RETURN_INVALID',
+      'A correction must name a posted return of the same order',
+    );
+  const movements = await client.query<Record<string, unknown>>(
+    `SELECT * FROM ${fulfillmentTable(m)} movement
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${qf(m.legalEntity!.column)}=$3
+        AND ${qf(fulfillmentColumn(m, 'inventory_movement_source_type'))}='customerReturn'
+        AND movement.${qf(fulfillmentColumn(m, 'inventory_movement_source_id'))}=$4
+        AND archived_at IS NULL ORDER BY record_id`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.supersedesReturnId,
+    ],
+  );
+  const remaining = new Map<string, bigint>();
+  for (const movement of movements.rows) {
+    const compensated = await client.query<{ quantity: string }>(
+      `SELECT coalesce(sum(${qf(fulfillmentColumn(m, 'inventory_movement_quantity_delta'))}),0)::text AS quantity
+         FROM ${fulfillmentTable(m)}
+        WHERE tenant_id=$1 AND environment_id=$2
+          AND ${qf(m.legalEntity!.column)}=$3
+          AND ${qf(fulfillmentColumn(m, 'inventory_movement_reversal_of_movement_id'))}=$4
+          AND archived_at IS NULL`,
+      [
+        context.tenantId,
+        context.environmentId,
+        command.legalEntityId,
+        movement.record_id,
+      ],
+    );
+    remaining.set(
+      String(movement.record_id),
+      fulfillmentQuantity(
+        String(
+          movement[fulfillmentColumn(m, 'inventory_movement_quantity_delta')],
+        ),
+      ) + fulfillmentQuantity(compensated.rows[0]!.quantity),
+    );
+  }
+  const used = new Set<string>();
+  for (const line of command.lines) {
+    if (used.has(line.reversalOfMovementId!))
+      throw postingError(
+        'FULFILLMENT_RETURN_INVALID',
+        'A correction can take back an original movement only once',
+      );
+    used.add(line.reversalOfMovementId!);
+    const movement = movements.rows.find(
+      (row) => row.record_id === line.reversalOfMovementId,
+    );
+    if (!movement)
+      throw postingError(
+        'FULFILLMENT_RETURN_INVALID',
+        'The compensated movement is not part of the linked return',
+      );
+    const originalLine = await fulfillmentRowForEntity(
+      client,
+      lineEntity,
+      context,
+      command.legalEntityId,
+      String(movement[fulfillmentColumn(m, 'inventory_movement_source_line')]),
+      false,
+    );
+    if (
+      originalLine[
+        fulfillmentRelation(
+          binding,
+          lineEntity,
+          'customer_return_line_order_line',
+        )
+      ] !== line.orderLineId ||
+      movement[fulfillmentColumn(m, 'inventory_movement_item_id')] !==
+        line.itemId ||
+      movement[fulfillmentColumn(m, 'inventory_movement_location_id')] !==
+        command.locationId ||
+      movement[fulfillmentColumn(m, 'inventory_movement_unit_id')] !==
+        line.unitId
+    )
+      throw postingError(
+        'FULFILLMENT_RETURN_INVALID',
+        'A correction must keep the original order line, item, location and unit',
+      );
+    const available = remaining.get(String(movement.record_id))!;
+    const attempted = -fulfillmentQuantity(line.quantityDelta);
+    if (
+      attempted <= 0n ||
+      attempted > available ||
+      (command.kind === 'reversal' && attempted !== available)
+    )
+      throw postingError(
+        'FULFILLMENT_RETURN_INVALID',
+        'A correction cannot take back more than the linked return still adds',
+      );
+  }
+  if (
+    command.kind === 'reversal' &&
+    movements.rows.some(
+      (row) =>
+        remaining.get(String(row.record_id))! > 0n &&
+        !used.has(String(row.record_id)),
+    )
+  )
+    throw postingError(
+      'FULFILLMENT_RETURN_INVALID',
+      'A reversal must take back every movement the linked return still adds',
+    );
+}
+
+/**
+ * Claim B3. A shipment correction or reversal restores stock and lowers what
+ * a line has shipped; it may not lower it below what the line has had
+ * returned, or the return would stand against units no longer shipped. Read
+ * under the order's row lock, which every return also takes first.
+ */
+async function assertShipmentKeepsReturnedUnits(
+  client: PoolClient,
+  binding: FulfillmentBinding,
+  context: TrustedRequestContext,
+  command: DerivedShipmentCommand,
+): Promise<void> {
+  if (command.kind === 'initial' || !binding.customerReturnLine) return;
+  const restoredByOrderLine = new Map<string, bigint>();
+  for (const line of command.lines)
+    restoredByOrderLine.set(
+      line.orderLineId,
+      (restoredByOrderLine.get(line.orderLineId) ?? 0n) +
+        fulfillmentQuantity(line.quantityDelta),
+    );
+  for (const [orderLineId, restored] of restoredByOrderLine) {
+    const shipped = await shippedLedger(
+      client,
+      binding,
+      context,
+      command.legalEntityId,
+      orderLineId,
+    );
+    const returned = await returnedLedger(
+      client,
+      binding,
+      context,
+      command.legalEntityId,
+      orderLineId,
+    );
+    const shippedAfter = shipped.quantity - restored;
+    if (shippedAfter < returned.quantity)
+      throw postingError(
+        'FULFILLMENT_SHIPMENT_BELOW_RETURNED',
+        'A shipment correction cannot take back units the customer has already returned',
+        {
+          orderLineId,
+          shippedAfter: fulfillmentDecimal(shippedAfter),
+          returned: fulfillmentDecimal(returned.quantity),
+        },
+      );
+  }
+}
+
+async function writeCustomerReturnConsequences(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  posting: Extract<ParsedPosting, { postingRole: 'customerReturn' }>,
+  locked: LockedCustomerReturn,
+  actorId: string,
+  recordedAt: string,
+  coverage: ExecutedVerifierCoverage,
+): Promise<number> {
+  const entity = binding.fulfillment!.customerReturn!;
+  const command = posting.command;
+  const changed = await client.query<{ revision: number }>(
+    `UPDATE ${fulfillmentTable(entity)}
+        SET ${quoteFulfillmentIdentifier(fulfillmentColumn(entity, 'customer_return_state'))}=$5,
+            revision=revision+1
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${quoteFulfillmentIdentifier(entity.legalEntity!.column)}=$3
+        AND record_id=$4 AND revision=$6 RETURNING revision`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.sourceId,
+      fulfillmentOption(entity, 'customer_return_state', 'posted'),
+      command.sourceRevision,
+    ],
+  );
+  if (changed.rows.length !== 1)
+    throw postingError(
+      'INVENTORY_TRANSACTION_STATE_CONFLICT',
+      'Customer return changed while it was posted',
+    );
+  await verifyCustomerReturnPosting(
+    client,
+    binding,
+    context,
+    posting,
+    locked,
+    actorId,
+    recordedAt,
+    coverage,
+  );
+  return Number(changed.rows[0]!.revision);
+}
+
+/**
+ * Claim B6. Every relation a return writes -- the return itself and its
+ * companion transaction and lines -- read back column for column before
+ * commit; each read mints a coverage token from the row PostgreSQL returned.
+ */
+async function verifyCustomerReturnPosting(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  posting: Extract<ParsedPosting, { postingRole: 'customerReturn' }>,
+  locked: LockedCustomerReturn,
+  actorId: string,
+  recordedAt: string,
+  coverage: ExecutedVerifierCoverage,
+): Promise<void> {
+  const command = posting.command;
+  const entity = binding.fulfillment!.customerReturn!;
+  const verify = async (
+    target: EntityBinding,
+    id: string,
+    expected: Record<string, unknown>,
+  ) => {
+    const result = await client.query<Record<string, unknown>>(
+      `SELECT row.*, (SELECT relname FROM pg_class WHERE oid=row.tableoid) AS "__relation"
+         FROM ${table(binding, target)} row
+        WHERE tenant_id=$1 AND environment_id=$2
+          AND ${quoted(target.legalEntityColumn!)}=$3
+          AND ${quoted(target.recordIdColumn)}=$4`,
+      [context.tenantId, context.environmentId, command.legalEntityId, id],
+    );
+    if (result.rows.length !== 1)
+      throw postingError(
+        'INVENTORY_POSTING_STORAGE_REJECTED',
+        'Customer return posting read-back row is missing',
+        { recordId: id },
+      );
+    const { __relation, ...actual } = result.rows[0]!;
+    const equals = (value: unknown, wanted: unknown): boolean =>
+      value instanceof Date
+        ? value.toISOString() ===
+          (wanted instanceof Date ? wanted.toISOString() : wanted)
+        : value === wanted;
+    assertPersistedRowVerified(
+      `customer return posting ${id}`,
+      'INVENTORY_POSTING_STORAGE_REJECTED',
+      target,
+      actual,
+      { recordId: id },
+      Object.entries(expected)
+        .filter(
+          ([column]) =>
+            column !== '__relation' &&
+            !target.foldedColumns.some((folded) => folded.name === column),
+        )
+        .map(([column, value]) =>
+          verified(
+            column,
+            equals(actual[column], value),
+            'differs from the committed customer return fact',
+          ),
+        ),
+    );
+    coverage.observed(verifyCustomerReturnPosting, __relation);
+  };
+  const base = (id: string) => ({
+    tenant_id: context.tenantId,
+    environment_id: context.environmentId,
+    legal_entity_id: command.legalEntityId,
+    record_id: id,
+    revision: '1',
+    archived_at: null,
+  });
+  const numeric = (value: string) => {
+    const scaled = fulfillmentQuantity(value);
+    const abs = scaled < 0n ? -scaled : scaled;
+    return `${scaled < 0n ? '-' : ''}${abs / 10n ** 18n}.${(abs % 10n ** 18n).toString().padStart(18, '0')}`;
+  };
+  await verify(bindEntity(entity), command.sourceId, {
+    ...locked.header,
+    revision: String(command.sourceRevision + 1),
+    [fulfillmentColumn(entity, 'customer_return_state')]: fulfillmentOption(
+      entity,
+      'customer_return_state',
+      'posted',
+    ),
+  });
+  const transaction: Record<string, unknown> = base(command.transactionId);
+  for (const [name, value] of [
+    [
+      'number',
+      companionTransactionNumber(posting.family, command.transactionId),
+    ],
+    ['type', transactionType(posting.family, 'customerReturn')],
+    ['state', binding.transactionPostedState],
+    ['reason_code', command.reason.code],
+    ['reason_narrative', command.reason.narrative],
+    ['source_type', 'customerReturn'],
+    ['source_id', command.sourceId],
+    ['effective_at', command.effectiveAt],
+    ['recorded_at', recordedAt],
+    ['actor_id', actorId],
+  ] as const)
+    transaction[
+      requiredField(binding.transaction, `inventory_transaction_${name}`).name
+    ] = value;
+  await verify(binding.transaction, command.transactionId, transaction);
+  for (const line of command.lines) {
+    const expected: Record<string, unknown> = {
+      ...base(line.transactionLineId),
+      [binding.transactionLineRelationToTransactionColumn]:
+        command.transactionId,
+    };
+    for (const [name, value] of [
+      ['line_number', line.sourceLine],
+      ['item_id', line.itemId],
+      [
+        'from_location_id',
+        line.quantityDelta.startsWith('-') ? command.locationId : null,
+      ],
+      [
+        'to_location_id',
+        line.quantityDelta.startsWith('-') ? null : command.locationId,
+      ],
+      ['quantity', numeric(line.quantityDelta)],
+      ['unit_id', line.unitId],
+    ] as const)
+      expected[
+        requiredField(
+          binding.transactionLine,
+          `inventory_transaction_line_${name}`,
+        ).name
+      ] = value;
+    await verify(binding.transactionLine, line.transactionLineId, expected);
+  }
+}
+
+interface LockedVendorReturn {
+  readonly header: Record<string, unknown>;
+  readonly lines: readonly Record<string, unknown>[];
+  readonly orderLines: ReadonlyMap<string, Record<string, unknown>>;
+  readonly priorProgress: ReadonlyMap<string, Record<string, unknown> | null>;
+}
+
+async function lockVendorReturn(
+  client: PoolClient,
+  binding: ReceiptBinding,
+  context: TrustedRequestContext,
+  command: DerivedVendorReturnCommand,
+): Promise<LockedVendorReturn> {
+  const entity = binding.vendorReturn;
+  const lineEntity = binding.vendorReturnLine;
+  if (!entity || !lineEntity)
+    throw postingError(
+      'INVENTORY_POSTING_STORAGE_INVALID',
+      'Vendor return storage is absent from the active release',
+    );
+  const qr = quoteReceiptIdentifier;
+  // Claim V5. What serializes a line's vendor returns with its receipts,
+  // amendments and close: the order row, then its lines ascending, FOR NO
+  // KEY UPDATE, taken before the received ledger is read. Stock locks cannot
+  // serialize two returns from two different locations.
+  const serializeOrder = true;
+  const order = await receiptRow(
+    client,
+    binding.order,
+    context,
+    command.legalEntityId,
+    command.orderId,
+    serializeOrder,
+  );
+  const state = receiptColumn(
+    binding.order,
+    'derived_state_field.machine.purchase_order_lifecycle',
+  );
+  if (
+    order.archived_at !== null ||
+    !String(order[state]).endsWith(':state.purchase_order_released')
+  )
+    throw postingError(
+      'RECEIPT_ORDER_NOT_RELEASED',
+      'Reopen a closed order before returning goods to the vendor',
+    );
+  const orderLines = new Map<string, Record<string, unknown>>();
+  const priorProgress = new Map<string, Record<string, unknown> | null>();
+  for (const id of [
+    ...new Set(command.lines.map((line) => line.orderLineId)),
+  ].sort()) {
+    const row = await receiptRow(
+      client,
+      binding.orderLine,
+      context,
+      command.legalEntityId,
+      id,
+      serializeOrder,
+    );
+    if (
+      row.archived_at !== null ||
+      row[
+        receiptRelation(binding, binding.orderLine, 'purchase_order_line_order')
+      ] !== command.orderId
+    )
+      throw postingError(
+        'VENDOR_RETURN_INVALID',
+        'A vendor return line does not belong to the order',
+      );
+    orderLines.set(id, row);
+    const prior = await client.query<Record<string, unknown>>(
+      `SELECT * FROM ${receiptTable(binding.received)}
+        WHERE tenant_id=$1 AND environment_id=$2
+          AND ${qr(binding.received.legalEntity!.column)}=$3 AND record_id=$4`,
+      [
+        context.tenantId,
+        context.environmentId,
+        command.legalEntityId,
+        receivedIdentity(context, command.legalEntityId, id),
+      ],
+    );
+    priorProgress.set(id, prior.rows[0] ?? null);
+  }
+  const header = await receiptRow(
+    client,
+    entity,
+    context,
+    command.legalEntityId,
+    command.sourceId,
+    true,
+  );
+  const lines = await client.query<Record<string, unknown>>(
+    `SELECT line.* FROM ${receiptTable(lineEntity)} line
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${qr(lineEntity.legalEntity!.column)}=$3
+        AND ${qr(receiptRelation(binding, lineEntity, 'vendor_return_line_return'))}=$4
+        AND archived_at IS NULL ORDER BY record_id FOR NO KEY UPDATE`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.sourceId,
+    ],
+  );
+  if (lines.rows.length !== command.lines.length)
+    throw postingError(
+      'INVENTORY_TRANSACTION_STATE_CONFLICT',
+      'Vendor return line set changed',
+    );
+  return { header, lines: lines.rows, orderLines, priorProgress };
+}
+
+async function assertVendorReturnBounds(
+  client: PoolClient,
+  binding: ReceiptBinding,
+  context: TrustedRequestContext,
+  command: DerivedVendorReturnCommand,
+  locked: LockedVendorReturn,
+): Promise<void> {
+  const entity = binding.vendorReturn!;
+  const lineEntity = binding.vendorReturnLine!;
+  const column = (name: string) =>
+    receiptColumn(entity, `vendor_return_${name}`);
+  const lineColumn = (name: string) =>
+    receiptColumn(lineEntity, `vendor_return_line_${name}`);
+  if (
+    locked.header.archived_at !== null ||
+    Number(locked.header.revision) !== command.sourceRevision ||
+    locked.header[column('state')] !==
+      receiptOption(entity, 'vendor_return_state', 'draft')
+  )
+    throw postingError(
+      'VENDOR_RETURN_INVALID',
+      'Only a current draft vendor return can be posted',
+    );
+  for (const [name, value] of [
+    ['number', command.returnNumber],
+    ['location_id', command.locationId],
+    ['reason_code', command.reason.code],
+    ['reason_narrative', command.reason.narrative],
+  ] as const)
+    if (locked.header[column(name)] !== value)
+      throw postingError(
+        'INVENTORY_TRANSACTION_STATE_CONFLICT',
+        `Vendor return ${name} changed`,
+      );
+  const effectiveAt = locked.header[column('effective_at')];
+  if (
+    (effectiveAt instanceof Date
+      ? effectiveAt.toISOString()
+      : new Date(String(effectiveAt)).toISOString()) !== command.effectiveAt ||
+    locked.header[receiptRelation(binding, entity, 'vendor_return_order')] !==
+      command.orderId
+  )
+    throw postingError(
+      'INVENTORY_TRANSACTION_STATE_CONFLICT',
+      'Vendor return attribution or effective instant changed',
+    );
+  const attemptedByOrderLine = new Map<string, bigint>();
+  for (const line of command.lines) {
+    const stored = locked.lines.find(
+      (row) => row.record_id === line.returnLineId,
+    );
+    const orderLine = locked.orderLines.get(line.orderLineId);
+    if (!stored || !orderLine)
+      throw postingError(
+        'VENDOR_RETURN_INVALID',
+        'Vendor return attribution is missing',
+      );
+    const storedQuantity = receiptQuantity(
+      String(stored[lineColumn('quantity')]),
+    );
+    if (
+      storedQuantity <= 0n ||
+      -storedQuantity !== receiptQuantity(line.quantityDelta) ||
+      String(stored[lineColumn('line_number')]) !== line.sourceLine ||
+      stored[
+        receiptRelation(binding, lineEntity, 'vendor_return_line_order_line')
+      ] !== line.orderLineId ||
+      stored[lineColumn('item_id')] !== line.itemId ||
+      stored[lineColumn('unit_id')] !== line.unitId ||
+      orderLine[
+        receiptColumn(binding.orderLine, 'purchase_order_line_item_id')
+      ] !== line.itemId
+    )
+      throw postingError(
+        'VENDOR_RETURN_INVALID',
+        'A vendor return must preserve its order line, item, unit and quantity',
+      );
+    attemptedByOrderLine.set(
+      line.orderLineId,
+      (attemptedByOrderLine.get(line.orderLineId) ?? 0n) +
+        receiptQuantity(line.quantityDelta),
+    );
+  }
+  // Claim V1. Per order line, what has been received -- receipts net of
+  // their corrections and of earlier vendor returns, read from the ledger
+  // under the order's row locks -- stays at or above zero after this return.
+  for (const [orderLineId, attempted] of attemptedByOrderLine) {
+    const ledger = await receivedLedger(
+      client,
+      binding,
+      context,
+      command.legalEntityId,
+      orderLineId,
+    );
+    const receivedBefore = receiptQuantity(ledger.quantity);
+    if (receivedBefore + attempted < 0n)
+      throw postingError(
+        'VENDOR_RETURN_QUANTITY_OUT_OF_BOUNDS',
+        'A vendor return cannot send back more than the line has received',
+        {
+          orderLineId,
+          receivedBefore: ledger.quantity,
+          attemptedQuantity: receiptDecimal(attempted),
+        },
+      );
+  }
+}
+
+async function writeVendorReturnConsequences(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  posting: Extract<ParsedPosting, { postingRole: 'vendorReturn' }>,
+  locked: LockedVendorReturn,
+  actorId: string,
+  recordedAt: string,
+  coverage: ExecutedVerifierCoverage,
+): Promise<number> {
+  const receipt = binding.receipt!;
+  const entity = receipt.vendorReturn!;
+  const command = posting.command;
+  const changed = await client.query<{ revision: number }>(
+    `UPDATE ${receiptTable(entity)}
+        SET ${quoteReceiptIdentifier(receiptColumn(entity, 'vendor_return_state'))}=$5,
+            revision=revision+1
+      WHERE tenant_id=$1 AND environment_id=$2
+        AND ${quoteReceiptIdentifier(entity.legalEntity!.column)}=$3
+        AND record_id=$4 AND revision=$6 RETURNING revision`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.sourceId,
+      receiptOption(entity, 'vendor_return_state', 'posted'),
+      command.sourceRevision,
+    ],
+  );
+  if (changed.rows.length !== 1)
+    throw postingError(
+      'INVENTORY_TRANSACTION_STATE_CONFLICT',
+      'Vendor return changed while it was posted',
+    );
+  // What each line has received, net of this return, written only after the
+  // bound passed and verified against the ledger below.
+  await client.query('SET LOCAL ROLE north_star_receipt_projection_writer');
+  await writeReceivedProjection(client, receipt, context, command);
+  await client.query('SET LOCAL ROLE north_star_module_runtime');
+  await verifyVendorReturnPosting(
+    client,
+    binding,
+    context,
+    posting,
+    locked,
+    actorId,
+    recordedAt,
+    coverage,
+  );
+  return Number(changed.rows[0]!.revision);
+}
+
+/**
+ * Claim V6. Every relation a vendor return writes -- the return, its
+ * companion transaction and lines, and each order line's received row -- read
+ * back column for column before commit; the received rows against the ledger
+ * recomputed from the movements after the write.
+ */
+async function verifyVendorReturnPosting(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  posting: Extract<ParsedPosting, { postingRole: 'vendorReturn' }>,
+  locked: LockedVendorReturn,
+  actorId: string,
+  recordedAt: string,
+  coverage: ExecutedVerifierCoverage,
+): Promise<void> {
+  const command = posting.command;
+  const receipt = binding.receipt!;
+  const entity = receipt.vendorReturn!;
+  const verify = async (
+    target: EntityBinding,
+    id: string,
+    expected: Record<string, unknown>,
+  ) => {
+    const result = await client.query<Record<string, unknown>>(
+      `SELECT row.*, (SELECT relname FROM pg_class WHERE oid=row.tableoid) AS "__relation"
+         FROM ${table(binding, target)} row
+        WHERE tenant_id=$1 AND environment_id=$2
+          AND ${quoted(target.legalEntityColumn!)}=$3
+          AND ${quoted(target.recordIdColumn)}=$4`,
+      [context.tenantId, context.environmentId, command.legalEntityId, id],
+    );
+    if (result.rows.length !== 1)
+      throw postingError(
+        'RECEIPT_PROJECTION_DIVERGED',
+        'Vendor return posting read-back row is missing',
+        { recordId: id },
+      );
+    const { __relation, ...actual } = result.rows[0]!;
+    const equals = (value: unknown, wanted: unknown): boolean =>
+      value instanceof Date
+        ? value.toISOString() ===
+          (wanted instanceof Date ? wanted.toISOString() : wanted)
+        : value === wanted;
+    assertPersistedRowVerified(
+      `vendor return posting ${id}`,
+      'RECEIPT_PROJECTION_DIVERGED',
+      target,
+      actual,
+      { recordId: id },
+      Object.entries(expected)
+        .filter(
+          ([column]) =>
+            column !== '__relation' &&
+            !target.foldedColumns.some((folded) => folded.name === column),
+        )
+        .map(([column, value]) =>
+          verified(
+            column,
+            equals(actual[column], value),
+            'differs from the posted vendor return fact',
+          ),
+        ),
+    );
+    coverage.observed(verifyVendorReturnPosting, __relation);
+  };
+  const base = (id: string) => ({
+    tenant_id: context.tenantId,
+    environment_id: context.environmentId,
+    legal_entity_id: command.legalEntityId,
+    record_id: id,
+    revision: '1',
+    archived_at: null,
+  });
+  const numeric = (value: string) => {
+    const scaled = receiptQuantity(value);
+    const abs = scaled < 0n ? -scaled : scaled;
+    return `${scaled < 0n ? '-' : ''}${abs / 10n ** 18n}.${(abs % 10n ** 18n).toString().padStart(18, '0')}`;
+  };
+  await verify(bindEntity(entity), command.sourceId, {
+    ...locked.header,
+    revision: String(command.sourceRevision + 1),
+    [receiptColumn(entity, 'vendor_return_state')]: receiptOption(
+      entity,
+      'vendor_return_state',
+      'posted',
+    ),
+  });
+  const header: Record<string, unknown> = base(command.transactionId);
+  for (const [name, value] of [
+    [
+      'number',
+      companionTransactionNumber(posting.family, command.transactionId),
+    ],
+    ['type', transactionType(posting.family, 'vendorReturn')],
+    ['state', binding.transactionPostedState],
+    ['reason_code', command.reason.code],
+    ['reason_narrative', command.reason.narrative],
+    ['source_type', 'vendorReturn'],
+    ['source_id', command.sourceId],
+    ['effective_at', command.effectiveAt],
+    ['recorded_at', recordedAt],
+    ['actor_id', actorId],
+  ] as const)
+    header[
+      requiredField(binding.transaction, `inventory_transaction_${name}`).name
+    ] = value;
+  await verify(binding.transaction, command.transactionId, header);
+  for (const line of command.lines) {
+    const expected: Record<string, unknown> = {
+      ...base(line.transactionLineId),
+      [binding.transactionLineRelationToTransactionColumn]:
+        command.transactionId,
+    };
+    for (const [name, value] of [
+      ['line_number', line.sourceLine],
+      ['item_id', line.itemId],
+      ['from_location_id', command.locationId],
+      ['to_location_id', null],
+      ['quantity', numeric(line.quantityDelta)],
+      ['unit_id', line.unitId],
+    ] as const)
+      expected[
+        requiredField(
+          binding.transactionLine,
+          `inventory_transaction_line_${name}`,
+        ).name
+      ] = value;
+    await verify(binding.transactionLine, line.transactionLineId, expected);
+  }
+  for (const [id] of locked.orderLines) {
+    // Independently recomputed from the persisted movements after the write.
+    const ledger = await receivedLedger(
+      client,
+      receipt,
+      context,
+      command.legalEntityId,
+      id,
+    );
+    const rowId = receivedIdentity(context, command.legalEntityId, id);
+    await verify(bindEntity(receipt.received), rowId, {
+      ...base(rowId),
+      revision: String(Number(locked.priorProgress.get(id)?.revision ?? 0) + 1),
+      [receiptRelation(
+        receipt,
+        receipt.received,
+        'purchase_order_received_order_line',
+      )]: id,
+      [receiptColumn(
+        receipt.received,
+        'purchase_order_received_received_quantity',
+      )]: numeric(ledger.quantity),
+      [receiptColumn(receipt.received, 'purchase_order_received_unit_id')]:
+        ledger.unit,
+    });
+  }
+}
+
 async function verifyGoodsReceiptPosting(
   client: PoolClient,
   binding: PostingStorageBinding,
@@ -5845,7 +7459,15 @@ async function writeCompanionTransaction(
   family: ResolvedPostingFamily,
   posting: Extract<
     ParsedPosting,
-    { postingRole: 'correction' | 'count' | 'receipt' | 'shipment' }
+    {
+      postingRole:
+        | 'correction'
+        | 'count'
+        | 'receipt'
+        | 'shipment'
+        | 'customerReturn'
+        | 'vendorReturn';
+    }
   >,
   recordedAt: string,
 ): Promise<number> {
@@ -6091,7 +7713,7 @@ async function assertCompanionIdentitiesPersisted(
             source.${quoted(binding.stockCountStateColumn)} AS "sourceState",
             source.${quoted(binding.stockCountActorColumn)} AS "sourceActorId",
             to_char(source.${quoted(binding.stockCountRecordedAtColumn)} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "sourceRecordedAt",
-            to_jsonb(source) AS "sourcePersistedRow",
+            ${exactRowSql('source')} AS "sourcePersistedRow",
             to_jsonb(companion) AS "companionPersistedRow",
             companion.tenant_id::text AS "companionTenantId",
             companion.environment_id::text AS "companionEnvironmentId",
@@ -6205,6 +7827,12 @@ async function assertCompanionIdentitiesPersisted(
           binding.stockCountReasonNarrativeColumn,
           binding.stockCountSupersedesColumn,
           requiredField(binding.stockCount, 'stock_count_number').name,
+          // STOCK-COUNTS. A count's type and counting mode are evidence the
+          // count carried before Post, and no posting writes them.
+          ...declaredColumns(binding.stockCount, [
+            'stock_count_count_type',
+            'stock_count_counting_mode',
+          ]),
         ],
       ),
     ],
@@ -6343,7 +7971,7 @@ async function assertCompanionIdentitiesPersisted(
             companion.${quoted(binding.transactionLineToLocationColumn)}::text AS "companionToLocationId",
             companion.${quoted(binding.transactionLine.revisionColumn)}::integer AS "companionRevision",
             (SELECT relation.relname FROM pg_catalog.pg_class AS relation WHERE relation.oid = companion.tableoid) AS "observedCompanionRelation",
-            to_jsonb(source) AS "sourcePersistedRow",
+            ${exactRowSql('source')} AS "sourcePersistedRow",
             to_jsonb(companion) AS "companionPersistedRow"
        FROM ${table(binding, binding.stockCountLine)} AS source
        JOIN ${table(binding, binding.transactionLine)} AS companion
@@ -6435,6 +8063,11 @@ async function assertCompanionIdentitiesPersisted(
             binding.stockCountLineVarianceColumn,
             binding.stockCountLineUnitColumn,
             binding.stockCountLineReversalColumn,
+            // STOCK-COUNTS. The physical count entered while counting; Review
+            // copied it into counted, and no posting writes it.
+            ...declaredColumns(binding.stockCountLine, [
+              'stock_count_line_physical_quantity',
+            ]),
           ],
         ),
       ],
@@ -6738,7 +8371,9 @@ async function assertInventoryLineSet(
     }
   } else if (
     posting.postingRole !== 'receipt' &&
-    posting.postingRole !== 'shipment'
+    posting.postingRole !== 'shipment' &&
+    posting.postingRole !== 'customerReturn' &&
+    posting.postingRole !== 'vendorReturn'
   ) {
     for (const line of posting.command.lines) {
       assertInventoryLineMatches(
@@ -6871,7 +8506,7 @@ async function lockAndAssertStockCountEvidence(
             source.${quoted(binding.stockCountSupersedesColumn)}::text AS "supersedesStockCountId",
             source.${quoted(binding.stockCountRelationToTransactionColumn)}::text AS "transactionId",
             source.${quoted(binding.stockCount.revisionColumn)}::integer AS revision,
-            to_jsonb(source) AS "priorRow"
+            ${exactRowSql('source')} AS "priorRow"
        FROM ${table(binding, binding.stockCount)} AS source
       WHERE tenant_id = $1 AND environment_id = $2
         AND ${quoted(binding.stockCount.legalEntityColumn!)} = $3
@@ -6889,9 +8524,9 @@ async function lockAndAssertStockCountEvidence(
   const state = row?.state;
   // PUR-2a. The companion identity is a POST-TIME OUTPUT, so a reviewed count
   // must not already name one: the kernel writes it at post time, so a reviewed
-  // source carrying one was written by something else. (The kernel is the only
-  // writer WITHIN a posting; generic writers remain open -- see
-  // `companion-writers-not-closed`.) An
+  // source carrying one was written by something else. (STOCK-COUNTS retired
+  // both companion relations from every generic input and form, so no generic
+  // writer reaches them; this fence is the backstop.) An
   // already-posted count is the replay case, and there the stored identity
   // must be exactly the derived one.
   const expectedCompanionId =
@@ -6947,7 +8582,7 @@ async function lockAndAssertStockCountEvidence(
             source.${quoted(binding.stockCountLineUnitColumn)} AS "unitId",
             source.${quoted(binding.stockCountLineReversalColumn)}::text AS "reversalOfMovementId",
             source.${quoted(binding.stockCountLineRelationToTransactionLineColumn)}::text AS "transactionLineId",
-            to_jsonb(source) AS "priorRow"
+            ${exactRowSql('source')} AS "priorRow"
        FROM ${table(binding, binding.stockCountLine)} AS source
       WHERE tenant_id = $1 AND environment_id = $2
         AND ${quoted(binding.stockCountLine.legalEntityColumn!)} = $3
@@ -7145,6 +8780,96 @@ async function assertStockCountCompensationAvailable(
         'INVENTORY_COUNT_COMPENSATION_CONFLICT',
         `reversal line ${line.stockCountLineId} is not the exact inverse of its superseded movement`,
         { stockCountLineId: line.stockCountLineId },
+      );
+    }
+  }
+}
+
+/**
+ * STOCK-COUNTS. A count's expected quantity is what the ledger holds for the
+ * line's item at the count's location in its legal entity, summed over every
+ * live movement effective at or before the count's own instant. An initial
+ * count and a correction must carry exactly that, so the variance they post
+ * leaves on-hand at the counted quantity as of that instant; a stale expected
+ * -- a movement posted for the item since the count was reviewed -- is refused
+ * with INVENTORY_COUNT_EXPECTED_STALE, and the posting's transaction rolls
+ * back: no movement, count transition or accepted receipt is committed (the
+ * failed invocation itself may be recorded).
+ *
+ * Two consequences of "at or before the count's instant", both deliberate:
+ * a movement effective at the same instant (a fixed test clock, two postings
+ * inside one tick) is included in the sum; and a movement dated after the
+ * count never makes it stale, because the count speaks only of its own
+ * instant. The first is a statement about this inclusive sum only, not about
+ * the kernel's full movement order: there, equal effective and recorded times
+ * fall to the later keys of the same-instant tuple, which need not place that
+ * movement before this posting's. Read under the stock-identity locks every
+ * posting takes at BEGIN, so no other posting for these items at this
+ * location can change the sum before this posting commits.
+ *
+ * A reversal is exempt. `assertStockCountCompensationAvailable` checks each
+ * of its lines against the one movement that line names (same item, location
+ * and unit, the exact negative quantity, a movement of the reversed count).
+ * That is a per-line check, not a proof that the lines reverse every movement
+ * of the reversed count exactly once; the route derives them from that
+ * count's movements (`deriveReversalLines`).
+ */
+async function assertCountExpectedIsLedger(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  posting: Extract<ParsedPosting, { postingRole: 'correction' | 'count' }>,
+): Promise<void> {
+  const { command } = posting;
+  if (command.kind === 'reversal') return;
+  const column = (local: string) =>
+    quoted(requiredField(binding.movement, local).name);
+  const itemColumn = column('inventory_movement_item_id');
+  const posted = await client.query<{
+    itemId: string;
+    postedQuantity: string;
+  }>(
+    `SELECT ${itemColumn}::text AS "itemId",
+            COALESCE(sum(${column('inventory_movement_quantity_delta')}), 0)::text AS "postedQuantity"
+       FROM ${table(binding, binding.movement)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoted(binding.movement.legalEntityColumn!)} = $3
+        AND ${column('inventory_movement_location_id')} = $4
+        AND ${itemColumn}::text = ANY($5::text[])
+        AND ${column('inventory_movement_effective_at')} <= $6::timestamptz
+        AND ${quoted(binding.movement.archiveColumn)} IS NULL
+      GROUP BY ${itemColumn}`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.locationId,
+      command.lines.map((line) => line.itemId),
+      command.effectiveAt,
+    ],
+  );
+  const ledger = new Map(
+    posted.rows.map((row) => [
+      String(row.itemId).toLowerCase(),
+      databaseDecimalToScaled(String(row.postedQuantity)),
+    ]),
+  );
+  for (const line of command.lines) {
+    const postedQuantity = ledger.get(line.itemId) ?? 0n;
+    if (
+      postedQuantity !==
+      decimalToScaled(line.expectedQuantity, 'line.expectedQuantity')
+    ) {
+      throw postingError(
+        'INVENTORY_COUNT_EXPECTED_STALE',
+        `stock-count line ${line.stockCountLineId} expects ${line.expectedQuantity}, but the ledger holds ${scaledToDecimal(postedQuantity)} for its item at the count's location as of ${command.effectiveAt}; review the count again`,
+        {
+          expectedQuantity: line.expectedQuantity,
+          itemId: line.itemId,
+          locationId: command.locationId,
+          postedQuantity: scaledToDecimal(postedQuantity),
+          stockCountLineId: line.stockCountLineId,
+        },
       );
     }
   }
@@ -8713,39 +10438,22 @@ async function validateReceiptReplay(
   idempotencyKey: string,
   client: PoolClient,
 ): Promise<InventoryPostingResultV1> {
-  let digestPosting = posting;
-  if (receipt.input_digest_version === 5 && posting.postingRole === 'receipt') {
-    // Version 5 includes authorization evidence in its immutable preimage.
-    // Reconstruct that historical evidence, not today's policy revision. The
-    // gateway still authorizes every retry against current grants before here.
-    // No business input is replaced, and no recorded digest is rewritten.
-    const evidence = await client.query<{
-      policy_version: string;
-      policy_evaluator_version: string;
-    }>(
-      `SELECT policy_version, policy_evaluator_version
-         FROM platform.trust_action_invocations
-        WHERE tenant_id=$1 AND environment_id=$2 AND invocation_id=$3
-          AND outcome='SUCCEEDED' AND policy_decision='ALLOW'`,
-      [context.tenantId, context.environmentId, receipt.invocation_id],
-    );
-    if (evidence.rows.length !== 1)
-      throw postingError(
-        'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
-        'recorded receipt authorization evidence is missing',
-      );
-    digestPosting = {
-      ...posting,
-      command: {
-        ...posting.command,
-        authorization: {
-          decision: 'ALLOW',
-          evaluatorVersion: evidence.rows[0]!.policy_evaluator_version,
-          policyVersion: evidence.rows[0]!.policy_version,
-        },
-      },
-    };
-  }
+  // Versions 4, 5, 7 and 8 include authorization evidence in their immutable
+  // preimage. Reconstruct that historical evidence, not today's policy
+  // revision. The gateway still authorizes every retry against current
+  // grants before here. No business input is replaced, and no recorded
+  // digest is rewritten.
+  const digestPosting = digestCoversAuthorization(
+    receipt.input_digest_version,
+    posting,
+  )
+    ? await withRecordedAuthorization(
+        client,
+        context,
+        posting,
+        receipt.invocation_id,
+      )
+    : posting;
   const inputDigest = digestCommand(
     digestPosting,
     receipt.input_digest_version,
@@ -8787,15 +10495,102 @@ async function persistAdditionalReceipt(
       client,
     );
   const result = Object.freeze({ ...replay, replayed: true });
+  // RETURNS round 1 (B7, V7; digest version 5 alike). This receipt records
+  // the ORIGINAL posting's invocation (`result.trust.invocationId`), and its
+  // replay digests the command with that invocation's authorization evidence
+  // (`validateReceiptReplay`). So its digest is computed with the same
+  // evidence and the caller's own business fields; with today's evidence a
+  // duplicate of this key after a policy change could never match it.
+  const storedDigest = digestCoversAuthorization(inputDigest.version, posting)
+    ? Object.freeze({
+        value: digestCommand(
+          await withRecordedAuthorization(
+            client,
+            context,
+            posting,
+            result.trust.invocationId,
+          ),
+          inputDigest.version,
+        ),
+        version: inputDigest.version,
+      })
+    : inputDigest;
   await insertReceipt(
     client,
     context,
     registration,
     idempotencyKey,
-    inputDigest,
+    storedDigest,
     result,
   );
   return result;
+}
+
+/**
+ * Whether a receipt digest of this version covers the caller's authorization
+ * evidence: versions 4 (a stock count), 5 (a receipt), 7 (a customer return)
+ * and 8 (a vendor return). A receipt of such a version is digested with the
+ * evidence of the invocation it records, whether it is replayed
+ * (`validateReceiptReplay`) or stored for another key
+ * (`persistAdditionalReceipt`).
+ */
+function digestCoversAuthorization(
+  version: number,
+  posting: ParsedPosting,
+): boolean {
+  return (
+    // STOCK-COUNTS, review round 1: version 4 is the caller's command less
+    // its key and the derived identities (`callerStockCountInput`), so its
+    // authorization is in the preimage, and the count route rebuilds a
+    // retried Post with the policy version current at the retry. The
+    // preimage is unchanged; only the evidence it is computed with is the
+    // recorded invocation's.
+    (version === companionDerivedInventoryPostingInputDigestVersion &&
+      isStockCountPosting(posting)) ||
+    (version === 5 && posting.postingRole === 'receipt') ||
+    // RETURNS: a return's digest carries its authorization evidence too.
+    (version === 7 && posting.postingRole === 'customerReturn') ||
+    (version === 8 && posting.postingRole === 'vendorReturn')
+  );
+}
+
+/**
+ * The posting with its authorization evidence replaced by the evidence the
+ * accepted invocation `invocationId` recorded. Only the authorization evidence
+ * is replaced; the posting keeps its own family, role and command shape.
+ */
+async function withRecordedAuthorization(
+  client: PoolClient,
+  context: TrustedRequestContext,
+  posting: ParsedPosting,
+  invocationId: string,
+): Promise<ParsedPosting> {
+  const evidence = await client.query<{
+    policy_version: string;
+    policy_evaluator_version: string;
+  }>(
+    `SELECT policy_version, policy_evaluator_version
+       FROM platform.trust_action_invocations
+      WHERE tenant_id=$1 AND environment_id=$2 AND invocation_id=$3
+        AND outcome='SUCCEEDED' AND policy_decision='ALLOW'`,
+    [context.tenantId, context.environmentId, invocationId],
+  );
+  if (evidence.rows.length !== 1)
+    throw postingError(
+      'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT',
+      'recorded receipt authorization evidence is missing',
+    );
+  return {
+    ...posting,
+    command: {
+      ...posting.command,
+      authorization: {
+        decision: 'ALLOW',
+        evaluatorVersion: evidence.rows[0]!.policy_evaluator_version,
+        policyVersion: evidence.rows[0]!.policy_version,
+      },
+    },
+  } as ParsedPosting;
 }
 
 async function insertReceipt(
@@ -8849,7 +10644,7 @@ async function persistAcceptedEvidence(
   const namespace = capabilityNamespace(registration.capabilityId);
   const eventType = `${namespace}:event.${postingRole}_posted`;
   const eventVersion = `${namespace}-${postingRole}-posted/v1`;
-  const recordType = `${namespace}:record.${postingRole === 'receipt' ? 'goods_receipt' : isStockCountPosting(posting) ? 'stock_count' : postingRole}`;
+  const recordType = `${namespace}:record.${postingRole === 'receipt' ? 'goods_receipt' : postingRole === 'customerReturn' ? 'customer_return' : postingRole === 'vendorReturn' ? 'vendor_return' : isStockCountPosting(posting) ? 'stock_count' : postingRole}`;
   const metadata = redactEvidenceMetadata({
     capabilityVersion: classified('INTERNAL', registration.capabilityVersion),
     configurationReleaseRoot: classified(
@@ -9047,7 +10842,10 @@ async function persistAcceptedEvidence(
       recordType,
       isStockCountPosting(posting)
         ? posting.command.stockCountId
-        : postingRole === 'receipt' || postingRole === 'shipment'
+        : postingRole === 'receipt' ||
+            postingRole === 'shipment' ||
+            postingRole === 'customerReturn' ||
+            postingRole === 'vendorReturn'
           ? command.sourceId
           : command.transactionId,
       transactionRevision,
@@ -9213,6 +11011,13 @@ function naturalEffects(
     return posting.command.lines.map((line) => ({
       sourceLine: line.shipmentLineId,
     }));
+  if (
+    posting.postingRole === 'customerReturn' ||
+    posting.postingRole === 'vendorReturn'
+  )
+    return posting.command.lines.map((line) => ({
+      sourceLine: line.returnLineId,
+    }));
   if (posting.postingRole === 'receipt')
     return posting.command.lines.map((line) => ({
       sourceLine: line.receiptLineId,
@@ -9235,13 +11040,18 @@ function naturalEffects(
 
 function currentCommandDigest(posting: ParsedPosting): VersionedInputDigest {
   const version =
-    posting.postingRole === 'receipt' || posting.postingRole === 'shipment'
-      ? posting.postingRole === 'receipt'
-        ? 5
-        : 6
-      : isStockCountPosting(posting)
-        ? companionDerivedInventoryPostingInputDigestVersion
-        : standardInventoryPostingInputDigestVersion;
+    posting.postingRole === 'vendorReturn'
+      ? 8
+      : posting.postingRole === 'customerReturn'
+        ? 7
+        : posting.postingRole === 'receipt' ||
+            posting.postingRole === 'shipment'
+          ? posting.postingRole === 'receipt'
+            ? 5
+            : 6
+          : isStockCountPosting(posting)
+            ? companionDerivedInventoryPostingInputDigestVersion
+            : standardInventoryPostingInputDigestVersion;
   return Object.freeze({
     value: digestCommand(posting, version),
     version,
@@ -9249,6 +11059,42 @@ function currentCommandDigest(posting: ParsedPosting): VersionedInputDigest {
 }
 
 function digestCommand(posting: ParsedPosting, version: number): string {
+  // RETURNS, version 7: the caller's customer-return input -- every header
+  // field and every line -- without the key and the kernel-derived companion
+  // identities, exactly as versions 5 and 6 cover a receipt and a shipment.
+  if (version === 7 && posting.postingRole === 'customerReturn') {
+    const { idempotencyKey, transactionId, lines, ...input } = posting.command;
+    void idempotencyKey;
+    void transactionId;
+    return createHash('sha256')
+      .update(
+        canonicalize({
+          ...input,
+          lines: lines.map(({ transactionLineId, ...returned }) => {
+            void transactionLineId;
+            return returned;
+          }),
+        }),
+      )
+      .digest('hex');
+  }
+  // RETURNS, version 8: the caller's vendor-return input, the same way.
+  if (version === 8 && posting.postingRole === 'vendorReturn') {
+    const { idempotencyKey, transactionId, lines, ...input } = posting.command;
+    void idempotencyKey;
+    void transactionId;
+    return createHash('sha256')
+      .update(
+        canonicalize({
+          ...input,
+          lines: lines.map(({ transactionLineId, ...sentBack }) => {
+            void transactionLineId;
+            return sentBack;
+          }),
+        }),
+      )
+      .digest('hex');
+  }
   if (version === 6 && posting.postingRole === 'shipment') {
     const { idempotencyKey, transactionId, lines, ...input } = posting.command;
     void idempotencyKey;
@@ -9316,7 +11162,9 @@ function recordedResultForReplay(
     version !== stockCountInventoryPostingInputDigestVersion &&
     version !== companionDerivedInventoryPostingInputDigestVersion &&
     version !== 5 &&
-    version !== 6
+    version !== 6 &&
+    version !== 7 &&
+    version !== 8
   ) {
     return unsupportedReceiptVersion(version);
   }
@@ -9353,6 +11201,8 @@ function requiredRecordedPostingRole(
 ): InventoryPostingRoleV1 {
   if (version === 5 && postingRole === 'receipt') return postingRole;
   if (version === 6 && postingRole === 'shipment') return postingRole;
+  if (version === 7 && postingRole === 'customerReturn') return postingRole;
+  if (version === 8 && postingRole === 'vendorReturn') return postingRole;
   if (
     version === standardInventoryPostingInputDigestVersion &&
     (postingRole === 'adjustment' || postingRole === 'transfer')

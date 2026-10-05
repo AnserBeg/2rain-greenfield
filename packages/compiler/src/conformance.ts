@@ -62,10 +62,14 @@ const LEGAL_ENTITY_FAMILY_RULES = Object.freeze([
   { classification: 'entityOwned', familyId: 'customer_invoice_line' },
   { classification: 'entityOwned', familyId: 'customer_payment' },
   { classification: 'entityOwned', familyId: 'customer_credit' },
+  { classification: 'entityOwned', familyId: 'customer_return' },
+  { classification: 'entityOwned', familyId: 'customer_return_line' },
   { classification: 'entityOwned', familyId: 'vendor_bill' },
   { classification: 'entityOwned', familyId: 'vendor_bill_line' },
   { classification: 'entityOwned', familyId: 'vendor_payment' },
   { classification: 'entityOwned', familyId: 'vendor_credit' },
+  { classification: 'entityOwned', familyId: 'vendor_return' },
+  { classification: 'entityOwned', familyId: 'vendor_return_line' },
   { classification: 'entityOwned', familyId: 'stock_count' },
   { classification: 'entityOwned', familyId: 'stock_count_line' },
 ] as const);
@@ -293,6 +297,41 @@ const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
     semantics: 'sameEntity',
     sourceFamilyId: 'sales_order_shipped',
     targetFamilyId: 'sales_order_line',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'customer_return',
+    targetFamilyId: 'sales_order',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'customer_return',
+    targetFamilyId: 'customer_return',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'customer_return_line',
+    targetFamilyId: 'customer_return',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'customer_return_line',
+    targetFamilyId: 'sales_order_line',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_return',
+    targetFamilyId: 'purchase_order',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_return_line',
+    targetFamilyId: 'vendor_return',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_return_line',
+    targetFamilyId: 'purchase_order_line',
   },
   {
     semantics: 'sameEntity',
@@ -559,6 +598,14 @@ const INVENTORY_MOVEMENT_MODULE_FIELD_RULES = Object.freeze([
           label: 'reBaseline',
           optionLocalId: 'inventory_posting_role_re_baseline',
         },
+        {
+          label: 'customerReturn',
+          optionLocalId: 'inventory_posting_role_customer_return',
+        },
+        {
+          label: 'vendorReturn',
+          optionLocalId: 'inventory_posting_role_vendor_return',
+        },
       ],
     },
     storage: inventoryMovementStorageRule(),
@@ -690,6 +737,8 @@ const STOCK_COUNT_MODULE_FIELD_RULES = Object.freeze([
         { label: 'counting', optionLocalId: 'stock_count_state_counting' },
         { label: 'reviewed', optionLocalId: 'stock_count_state_reviewed' },
         { label: 'posted', optionLocalId: 'stock_count_state_posted' },
+        // STOCK-COUNTS: a count not posted can be cancelled.
+        { label: 'cancelled', optionLocalId: 'stock_count_state_cancelled' },
       ],
     },
   },
@@ -731,6 +780,34 @@ const STOCK_COUNT_MODULE_FIELD_RULES = Object.freeze([
     presence: 'optional',
     shape: { kind: 'text', maximumLength: 1000 },
   },
+  // STOCK-COUNTS: the count's type and counting mode, labels for the count.
+  {
+    fieldLocalId: 'stock_count_count_type',
+    presence: 'optional',
+    shape: {
+      kind: 'enum',
+      options: [
+        {
+          label: 'correction',
+          optionLocalId: 'stock_count_count_type_correction',
+        },
+        { label: 'cycle', optionLocalId: 'stock_count_count_type_cycle' },
+        { label: 'annual', optionLocalId: 'stock_count_count_type_annual' },
+        { label: 'opening', optionLocalId: 'stock_count_count_type_opening' },
+      ],
+    },
+  },
+  {
+    fieldLocalId: 'stock_count_counting_mode',
+    presence: 'optional',
+    shape: {
+      kind: 'enum',
+      options: [
+        { label: 'open', optionLocalId: 'stock_count_counting_mode_open' },
+        { label: 'blind', optionLocalId: 'stock_count_counting_mode_blind' },
+      ],
+    },
+  },
 ] as const satisfies readonly InventoryMovementModuleFieldRule[]);
 const STOCK_COUNT_LINE_MODULE_FIELD_RULES = Object.freeze([
   {
@@ -765,6 +842,13 @@ const STOCK_COUNT_LINE_MODULE_FIELD_RULES = Object.freeze([
     fieldLocalId: 'stock_count_line_reversal_of_movement_id',
     presence: 'optional',
     shape: { kind: 'text', maximumLength: 80 },
+  },
+  // STOCK-COUNTS: what was found, entered while counting; review copies it
+  // into the counted quantity.
+  {
+    fieldLocalId: 'stock_count_line_physical_quantity',
+    presence: 'optional',
+    shape: { kind: 'decimal', precision: 38, scale: 18 },
   },
 ] as const satisfies readonly InventoryMovementModuleFieldRule[]);
 const INVENTORY_MOVEMENT_CANDIDATE_FIELDS = Object.freeze([
@@ -1565,6 +1649,36 @@ function validatePinnedStockCountTerminalGuard(
     },
   };
   const expectedPreconditionRoot = inventoryCanonicalRoot(expectedPrecondition);
+  // STOCK-COUNTS: the guard may also refuse other states of the count -- a
+  // reviewed count is frozen until it posts -- as conjuncts of exactly the
+  // same shape over another option of the state. Posted stays refused by every
+  // arm, and nothing but such refusals may join it.
+  const postedOption = `${namespace}:option.stock_count_state_posted`;
+  const stateRefusal = (term: unknown): boolean => {
+    if (!isRecord(term) || !isRecord(term.term)) return false;
+    const comparison = term.term;
+    const value = comparison.value;
+    return (
+      isRecord(value) &&
+      typeof value.value === 'string' &&
+      value.value.startsWith(`${namespace}:option.stock_count_state_`) &&
+      inventoryCanonicalRoot({
+        ...term,
+        term: { ...comparison, value: { ...value, value: postedOption } },
+      }) === expectedPreconditionRoot
+    );
+  };
+  const guardsTerminalState = (precondition: unknown): boolean =>
+    inventoryCanonicalRoot(precondition) === expectedPreconditionRoot ||
+    (isRecord(precondition) &&
+      Object.keys(precondition).length === 3 &&
+      precondition.kind === 'allPredicate' &&
+      precondition.schemaVersion === authoredOperations.languageVersion &&
+      Array.isArray(precondition.terms) &&
+      precondition.terms.every(stateRefusal) &&
+      precondition.terms.some(
+        (term) => inventoryCanonicalRoot(term) === expectedPreconditionRoot,
+      ));
   for (const [action, effectKind] of [
     ['archive', 'archiveRecordEffect'],
     ['create', 'createRecordEffect'],
@@ -1586,8 +1700,7 @@ function validatePinnedStockCountTerminalGuard(
       operation.effect.kind !== effectKind ||
       !('entity' in operation.effect) ||
       operation.effect.entity.targetId !== entityId ||
-      inventoryCanonicalRoot(authoredOperation.precondition) !==
-        expectedPreconditionRoot
+      !guardsTerminalState(authoredOperation.precondition)
     ) {
       diagnostics.push(
         inventoryModuleDiagnostic(
@@ -1616,6 +1729,9 @@ function validatePinnedInventoryCountRelations(
   ) {
     return;
   }
+  // STOCK-COUNTS: the two kernel-written companions are retired from the
+  // generic contract -- no create input, form or picker offers them -- while
+  // their columns stay in storage for the posting kernel to write.
   const rules = [
     [
       'stock_count_transaction',
@@ -1623,6 +1739,7 @@ function validatePinnedInventoryCountRelations(
       'inventory_transaction',
       'reference',
       false, // PUR-2a: kernel-written companion. ADR-0060.
+      'retired',
     ],
     [
       'stock_count_supersedes',
@@ -1630,6 +1747,7 @@ function validatePinnedInventoryCountRelations(
       'stock_count',
       'reference',
       false,
+      'active',
     ],
     [
       'stock_count_line_session',
@@ -1637,6 +1755,7 @@ function validatePinnedInventoryCountRelations(
       'stock_count',
       'parentScopedChild',
       true,
+      'active',
     ],
     [
       'stock_count_line_transaction_line',
@@ -1644,15 +1763,23 @@ function validatePinnedInventoryCountRelations(
       'inventory_transaction_line',
       'reference',
       false, // PUR-2a: kernel-written companion. ADR-0060.
+      'retired',
     ],
   ] as const;
-  for (const [localId, source, target, ownership, required] of rules) {
+  for (const [
+    localId,
+    source,
+    target,
+    ownership,
+    required,
+    lifecycle,
+  ] of rules) {
     const relationId = `${namespace}:relation.${localId}`;
     const relation = packageRevision.relations.find(
       (candidate) => candidate.relationId === relationId,
     );
     if (
-      relation?.lifecycle !== 'active' ||
+      relation?.lifecycle !== lifecycle ||
       relation.cardinality !== 'manyToOne' ||
       relation.ownership !== ownership ||
       relation.required !== required ||

@@ -188,6 +188,18 @@ unless it is closed, so four conditions bind:
 **Recorded as debt:** conditions 1–3 are owed for stock-count companions today
 and are not in place.
 
+> **Note 2026-10-05 (`STOCK-COUNTS`).** For stock-count companions, condition 1
+> holds (type `countCorrection`), condition 2 holds as constrained writers --
+> a reviewed, posted or cancelled count and its lines take no generic create,
+> update, archive or restore, and both companion relations are retired from
+> every generic input and form -- and condition 3 holds for every companion: the
+> stock documents List reads a q1 query admitting only adjustments and
+> transfers, proven by a query in `test/postgres/inventory-stock-counts.test.ts`.
+> Left, filed: a generic create can still store a DRAFT transaction typed as a
+> companion (release verification samples the type's first option, a goods
+> receipt); the route never posts it, the List never shows it, and the kernel
+> never adopts it as a companion.
+
 ---
 
 ## 4. Provider ownership

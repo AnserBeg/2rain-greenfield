@@ -70,6 +70,7 @@ const legalEntityId = '34000000-0000-4000-8000-000000000003';
 const principalId = '78000000-0000-4000-8000-000000000007';
 const itemId = '45000000-0000-4000-8000-000000000004';
 const locationId = '56000000-0000-4000-8000-000000000005';
+const otherLocationId = '56000000-0000-4000-8000-000000000006';
 const recordedAt = '2026-07-30T13:00:00.000Z';
 const effectiveAt = '2026-07-30T12:00:00.000Z';
 const postedStockNegativeControl =
@@ -453,6 +454,368 @@ test('stock-count posting preserves three-value evidence and appends correction 
       ]);
     }
   });
+});
+
+// STOCK-COUNTS C1. A count posts only the expected the ledger holds at its
+// location as of its own instant, so on-hand afterwards is what was counted;
+// one reviewed before a posting it does not know about is refused whole.
+test('stock-count expected: a stale expected is refused and posts nothing, and a count names each item once', async () => {
+  await withCompanionEnvironment(
+    'count-expected-stale',
+    async ({ actor, binding, context, runtimePool, service }) => {
+      const first = countCommand({
+        countedQuantity: '5',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 31,
+        supersedesStockCountId: null,
+        varianceQuantity: '5',
+      });
+      await seedReviewedCount(runtimePool, context, binding, first);
+      await service.postStockCount(context, actor, first);
+
+      // Reviewed while nothing was on hand; 5 have been posted since.
+      const stale = countCommand({
+        countedQuantity: '3',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 32,
+        supersedesStockCountId: null,
+        varianceQuantity: '3',
+      });
+      await seedReviewedCount(runtimePool, context, binding, stale);
+      const victim =
+        'deleting the expected-is-ledger check must make this stale count post';
+      await assert.rejects(
+        () => service.postStockCount(context, actor, stale),
+        (error: unknown) => {
+          assert.ok(error instanceof InventoryPostingError, victim);
+          assert.equal(error.code, 'INVENTORY_COUNT_EXPECTED_STALE', victim);
+          assert.deepEqual(
+            error.details,
+            {
+              expectedQuantity: '0',
+              itemId,
+              locationId,
+              postedQuantity: '5',
+              stockCountLineId: stale.lines[0]!.stockCountLineId,
+            },
+            victim,
+          );
+          return true;
+        },
+        victim,
+      );
+      assert.equal(
+        await readPostedStockQuantity(runtimePool, context, binding),
+        '5.000000000000000000',
+        'a refused count must leave on-hand where it was',
+      );
+      assert.deepEqual(
+        await readCountOutcome(runtimePool, context, binding, stale),
+        { movements: 0, state: 'reviewed' },
+        'a refused count stays reviewed and writes no movement',
+      );
+
+      // Reviewed against the ledger, the same count leaves 3 on hand.
+      const fresh = countCommand({
+        countedQuantity: '3',
+        expectedQuantity: '5',
+        kind: 'initial',
+        sequence: 33,
+        supersedesStockCountId: null,
+        varianceQuantity: '-2',
+      });
+      await seedReviewedCount(runtimePool, context, binding, fresh);
+      const posted = await service.postStockCount(context, actor, fresh);
+      assert.equal(posted.movements[0]?.quantityDelta, '-2');
+      assert.equal(
+        await readPostedStockQuantity(runtimePool, context, binding),
+        '3.000000000000000000',
+        'a posted count leaves on-hand at what was counted',
+      );
+
+      // Each line's expected is the whole ledger for its item, so a second
+      // line for the same item would post its variance twice. Reviewed and
+      // stored like any count, so only the rule stands between it and Post.
+      const single = countCommand({
+        countedQuantity: '3',
+        expectedQuantity: '3',
+        kind: 'initial',
+        sequence: 34,
+        supersedesStockCountId: null,
+        varianceQuantity: '0',
+      });
+      const twice = {
+        ...single,
+        lines: [
+          single.lines[0]!,
+          {
+            ...single.lines[0]!,
+            countedQuantity: '4',
+            sourceLine: '35',
+            stockCountLineId: '63000000-0000-4000-8000-000000000035',
+            varianceQuantity: '1',
+          },
+        ],
+      };
+      await seedReviewedCount(runtimePool, context, binding, twice);
+      await assertCountPostingRejected(
+        () => service.postStockCount(context, actor, twice),
+        'INVENTORY_POSTING_INPUT_INVALID',
+        /a stock count names each item once/u,
+        'deleting the one-line-per-item rule must let one item be counted twice',
+      );
+      assert.equal(
+        await readPostedStockQuantity(runtimePool, context, binding),
+        '3.000000000000000000',
+        'a count naming one item twice posts nothing',
+      );
+    },
+  );
+});
+
+// STOCK-COUNTS C2. Expected is read as of the count's own instant: a movement
+// dated after it is not part of what was counted, and one at that instant is.
+test('stock-count expected: a movement dated after the count does not make it stale, and one at its instant counts before it', async () => {
+  await withCompanionEnvironment(
+    'count-expected-as-of',
+    async ({ actor, binding, context, runtimePool, service }) => {
+      // Counted at 12:30: 4 found where the ledger held nothing.
+      const later = {
+        ...countCommand({
+          countedQuantity: '4',
+          expectedQuantity: '0',
+          kind: 'initial',
+          sequence: 41,
+          supersedesStockCountId: null,
+          varianceQuantity: '4',
+        }),
+        effectiveAt: '2026-07-30T12:30:00.000Z',
+      };
+      await seedReviewedCount(runtimePool, context, binding, later);
+      await service.postStockCount(context, actor, later);
+
+      // Counted at 12:00, before those 4 were: its expected is still 0.
+      const earlier = countCommand({
+        countedQuantity: '2',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 42,
+        supersedesStockCountId: null,
+        varianceQuantity: '2',
+      });
+      await seedReviewedCount(runtimePool, context, binding, earlier);
+      const posted = await service.postStockCount(context, actor, earlier);
+      assert.equal(
+        posted.movements[0]?.quantityDelta,
+        '2',
+        'a movement dated after the count must not make its expected stale',
+      );
+
+      // Counted at 12:30 again: both movements are at or before that instant,
+      // the one at 12:30 itself included.
+      const atInstant = {
+        ...countCommand({
+          countedQuantity: '6',
+          expectedQuantity: '6',
+          kind: 'initial',
+          sequence: 43,
+          supersedesStockCountId: null,
+          varianceQuantity: '0',
+        }),
+        effectiveAt: '2026-07-30T12:30:00.000Z',
+      };
+      await seedReviewedCount(runtimePool, context, binding, atInstant);
+      const confirmed = await service.postStockCount(context, actor, atInstant);
+      assert.equal(confirmed.movements[0]?.quantityDelta, '0');
+      assert.equal(
+        await readPostedStockQuantity(runtimePool, context, binding),
+        '6.000000000000000000',
+      );
+    },
+  );
+});
+
+// STOCK-COUNTS C3. A correction supersedes exactly one posted count at the same
+// location, and posts what is counted less what the ledger holds now.
+test('stock-count correction: a correction at another location is refused, and one posted count takes one correction', async () => {
+  await withCompanionEnvironment(
+    'count-correction-location',
+    async ({ actor, binding, context, runtimePool, service }) => {
+      await withModuleRole(runtimePool, context, (client) =>
+        insertEntity(
+          client,
+          binding,
+          binding.location,
+          {
+            location_code: 'LOC-COUNT-OTHER',
+            location_name: 'Another count location',
+          },
+          otherLocationId,
+          null,
+          {},
+        ),
+      );
+      const original = countCommand({
+        countedQuantity: '5',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 51,
+        supersedesStockCountId: null,
+        varianceQuantity: '5',
+      });
+      await seedReviewedCount(runtimePool, context, binding, original);
+      await service.postStockCount(context, actor, original);
+
+      // A true count of the other location, filed as this count's correction.
+      const elsewhere = {
+        ...countCommand({
+          countedQuantity: '1',
+          expectedQuantity: '0',
+          kind: 'correction',
+          sequence: 52,
+          supersedesStockCountId: original.stockCountId,
+          varianceQuantity: '1',
+        }),
+        locationId: otherLocationId,
+      };
+      await seedReviewedCount(runtimePool, context, binding, elsewhere);
+      await assertCountPostingRejected(
+        () => service.postStockCount(context, actor, elsewhere),
+        'INVENTORY_COUNT_COMPENSATION_CONFLICT',
+        /must supersede one posted count at the same location/u,
+        'deleting the same-location comparison must let a correction supersede a count of another location',
+      );
+
+      const here = countCommand({
+        countedQuantity: '4',
+        expectedQuantity: '5',
+        kind: 'correction',
+        sequence: 53,
+        supersedesStockCountId: original.stockCountId,
+        varianceQuantity: '-1',
+      });
+      await seedReviewedCount(runtimePool, context, binding, here);
+      const corrected = await service.postStockCount(context, actor, here);
+      assert.equal(corrected.movements[0]?.postingRole, 'correction');
+      assert.equal(corrected.movements[0]?.quantityDelta, '-1');
+      assert.equal(
+        await readPostedStockQuantity(runtimePool, context, binding),
+        '4.000000000000000000',
+      );
+
+      const again = countCommand({
+        countedQuantity: '3',
+        expectedQuantity: '4',
+        kind: 'correction',
+        sequence: 54,
+        supersedesStockCountId: original.stockCountId,
+        varianceQuantity: '-1',
+      });
+      await seedReviewedCount(runtimePool, context, binding, again);
+      await assertCountPostingRejected(
+        () => service.postStockCount(context, actor, again),
+        'INVENTORY_COUNT_COMPENSATION_CONFLICT',
+        /already has a posted compensation/u,
+        'deleting the one-compensation rule must let a count be corrected twice',
+      );
+    },
+  );
+});
+
+// STOCK-COUNTS C6, review round 1: Post proves the columns it does not write
+// unchanged to their last decimal. A physical count of 1.000000000000000001 is
+// a numeric(38,18), which a JavaScript number cannot tell from ...002.
+test('stock-count read-back: a physical count is proved unchanged to its last decimal', async () => {
+  await withCompanionEnvironment(
+    'count-physical-exact',
+    async ({ actor, binding, context, runtimePool, service }) => {
+      const exact = '1.000000000000000001';
+      const count = countCommand({
+        countedQuantity: exact,
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 51,
+        supersedesStockCountId: null,
+        varianceQuantity: exact,
+      });
+      await seedReviewedCount(runtimePool, context, binding, count, {
+        physicalQuantity: exact,
+      });
+      const posted = await service.postStockCount(context, actor, count);
+      assert.equal(posted.movements[0]?.quantityDelta, exact);
+    },
+  );
+});
+
+// STOCK-COUNTS, review round 1 (defect 3). Version 4's digest covers the
+// caller's authorization evidence, and the count route builds a retried Post
+// with the policy version current at the retry. So an unchanged Post retried
+// under its key after the policy version changed is digested with the
+// evidence of the invocation its receipt records, and replays. Under a new
+// key it replays by its natural effect, and that key's duplicate replays too.
+// Changed business input under the original key still conflicts.
+test('stock-count replay: an unchanged Post retried after a policy-version change replays its version-4 receipt', async () => {
+  await withCompanionEnvironment(
+    'count-policy-change-replay',
+    async ({ actor, binding, context, databasePool, runtimePool, service }) => {
+      const command = countCommand({
+        countedQuantity: '4',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 52,
+        supersedesStockCountId: null,
+        varianceQuantity: '4',
+      });
+      await seedReviewedCount(runtimePool, context, binding, command);
+      const posted = await service.postStockCount(context, actor, command);
+      const stored = await readReceipt(databasePool, command.idempotencyKey);
+      assert.equal(stored.inputDigestVersion, 4);
+      const later: InventoryStockCountPostingCommandV2 = {
+        ...command,
+        authorization: {
+          ...command.authorization,
+          policyVersion: `${command.authorization.policyVersion}+later`,
+        },
+      };
+      const retried = await service.postStockCount(context, actor, later);
+      assert.equal(
+        retried.replayed,
+        true,
+        'an unchanged Post retried after a policy-version change must replay',
+      );
+      assert.deepEqual(retried.trust, posted.trust);
+      assert.deepEqual(
+        await readReceipt(databasePool, command.idempotencyKey),
+        stored,
+        'the recorded digest is not rewritten',
+      );
+
+      const alias = { ...later, idempotencyKey: randomUUID() };
+      const aliasReplay = await service.postStockCount(context, actor, alias);
+      assert.equal(aliasReplay.replayed, true);
+      const aliasDuplicate = await service.postStockCount(
+        context,
+        actor,
+        alias,
+      );
+      assert.equal(
+        aliasDuplicate.replayed,
+        true,
+        'a new-key replay after a policy change must replay its own duplicate',
+      );
+      assert.deepEqual(aliasDuplicate.trust, aliasReplay.trust);
+
+      await assert.rejects(
+        service.postStockCount(context, actor, {
+          ...later,
+          reason: { ...later.reason, narrative: 'A different narrative' },
+        }),
+        { code: 'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT' },
+      );
+    },
+  );
 });
 
 /**
@@ -2026,17 +2389,20 @@ async function assertRejectedStockCountCommands(input: {
     'deleting the counted-minus-expected comparison must make this command post',
   );
 
+  // STOCK-COUNTS. Every count below that posts, or must reach a refusal the
+  // expected check precedes, expects what the ledger holds at its instant:
+  // the chain above left 5 on hand.
   const firstPrior = countCommand({
-    countedQuantity: '1',
-    expectedQuantity: '0',
+    countedQuantity: '6',
+    expectedQuantity: '5',
     kind: 'initial',
     sequence: 5,
     supersedesStockCountId: null,
     varianceQuantity: '1',
   });
   const secondPrior = countCommand({
-    countedQuantity: '1',
-    expectedQuantity: '0',
+    countedQuantity: '7',
+    expectedQuantity: '6',
     kind: 'initial',
     sequence: 6,
     supersedesStockCountId: null,
@@ -2047,8 +2413,8 @@ async function assertRejectedStockCountCommands(input: {
     await service.postStockCount(context, actor, prior);
   }
   const persistedSupersedes = countCommand({
-    countedQuantity: '2',
-    expectedQuantity: '1',
+    countedQuantity: '8',
+    expectedQuantity: '7',
     kind: 'correction',
     sequence: 7,
     supersedesStockCountId: firstPrior.stockCountId,
@@ -2067,8 +2433,8 @@ async function assertRejectedStockCountCommands(input: {
   );
 
   const reviewedPrior = countCommand({
-    countedQuantity: '1',
-    expectedQuantity: '0',
+    countedQuantity: '8',
+    expectedQuantity: '7',
     kind: 'initial',
     sequence: 8,
     supersedesStockCountId: null,
@@ -2076,8 +2442,8 @@ async function assertRejectedStockCountCommands(input: {
   });
   await seedReviewedCount(runtimePool, context, binding, reviewedPrior);
   const correctionOfUnposted = countCommand({
-    countedQuantity: '2',
-    expectedQuantity: '1',
+    countedQuantity: '8',
+    expectedQuantity: '7',
     kind: 'correction',
     sequence: 9,
     supersedesStockCountId: reviewedPrior.stockCountId,
@@ -2092,8 +2458,8 @@ async function assertRejectedStockCountCommands(input: {
   );
 
   const inversePrior = countCommand({
-    countedQuantity: '3',
-    expectedQuantity: '0',
+    countedQuantity: '10',
+    expectedQuantity: '7',
     kind: 'initial',
     sequence: 10,
     supersedesStockCountId: null,
@@ -2102,8 +2468,8 @@ async function assertRejectedStockCountCommands(input: {
   await seedReviewedCount(runtimePool, context, binding, inversePrior);
   await service.postStockCount(context, actor, inversePrior);
   const inverseCorrection = countCommand({
-    countedQuantity: '5',
-    expectedQuantity: '3',
+    countedQuantity: '12',
+    expectedQuantity: '10',
     kind: 'correction',
     sequence: 11,
     supersedesStockCountId: inversePrior.stockCountId,
@@ -2116,8 +2482,8 @@ async function assertRejectedStockCountCommands(input: {
     inverseCorrection,
   );
   const inexactReversal = countCommand({
-    countedQuantity: '4',
-    expectedQuantity: '5',
+    countedQuantity: '11',
+    expectedQuantity: '12',
     kind: 'reversal',
     reversalOfMovementId: inverseCorrectionResult.movements[0]!.movementId,
     sequence: 12,
@@ -2134,8 +2500,8 @@ async function assertRejectedStockCountCommands(input: {
 
   const missingNarrative = {
     ...countCommand({
-      countedQuantity: '1',
-      expectedQuantity: '0',
+      countedQuantity: '13',
+      expectedQuantity: '12',
       kind: 'initial',
       sequence: 13,
       supersedesStockCountId: null,
@@ -2161,8 +2527,8 @@ async function assertRejectedStockCountCommands(input: {
   );
   assert.equal(configured.rowCount, 1);
   const belowCountThreshold = countCommand({
-    countedQuantity: '5',
-    expectedQuantity: '0',
+    countedQuantity: '17',
+    expectedQuantity: '12',
     kind: 'initial',
     sequence: 14,
     supersedesStockCountId: null,
@@ -2176,8 +2542,8 @@ async function assertRejectedStockCountCommands(input: {
     'the count role must read its distinct threshold of 10, not correction threshold 1',
   );
   const negativeCorrectionAboveThreshold = countCommand({
-    countedQuantity: '3',
-    expectedQuantity: '5',
+    countedQuantity: '15',
+    expectedQuantity: '17',
     kind: 'correction',
     sequence: 15,
     supersedesStockCountId: belowCountThreshold.stockCountId,
@@ -2320,6 +2686,36 @@ function monetaryMembers(value: unknown): string[] {
   };
   inspect(value);
   return found.toSorted();
+}
+
+/** One count's state and how many movements name it as their source. */
+async function readCountOutcome(
+  pool: Pool,
+  context: TrustedRequestContext,
+  binding: StorageBinding,
+  command: InventoryStockCountPostingCommandV2,
+): Promise<{ movements: number; state: string }> {
+  return withModuleRole(pool, context, async (client) => {
+    const count = await client.query<{ state: string }>(
+      `SELECT ${quoted(field(binding.stockCount, 'stock_count_state').physicalName)} AS state
+         FROM ${table(binding, binding.stockCount)}
+        WHERE tenant_id=$1 AND environment_id=$2
+          AND ${quoted(binding.stockCount.recordIdColumn)}=$3`,
+      [tenantId, environmentId, command.stockCountId],
+    );
+    const movements = await client.query<{ count: number }>(
+      `SELECT count(*)::int AS count
+         FROM ${table(binding, binding.movement)}
+        WHERE tenant_id=$1 AND environment_id=$2
+          AND ${quoted(field(binding.movement, 'inventory_movement_source_id').physicalName)}=$3`,
+      [tenantId, environmentId, command.stockCountId],
+    );
+    assert.equal(count.rowCount, 1);
+    return {
+      movements: movements.rows[0]!.count,
+      state: String(count.rows[0]!.state).split('_').at(-1)!,
+    };
+  });
 }
 
 async function readPersistedCountChain(
@@ -2786,6 +3182,7 @@ async function seedReviewedCount(
   context: TrustedRequestContext,
   binding: StorageBinding,
   command: InventoryStockCountPostingCommandV2,
+  options: { readonly physicalQuantity?: string } = {},
 ): Promise<void> {
   // PUR-2a ACCEPTANCE CONTROL. Nothing here stages an inventory transaction or
   // its lines. A reviewed stock count is created with NO companion at all; the
@@ -2834,6 +3231,9 @@ async function seedReviewedCount(
           stock_count_line_reversal_of_movement_id: line.reversalOfMovementId,
           stock_count_line_unit_id: line.unitId,
           stock_count_line_variance_quantity: line.varianceQuantity,
+          ...(options.physicalQuantity === undefined
+            ? {}
+            : { stock_count_line_physical_quantity: options.physicalQuantity }),
         },
         line.stockCountLineId,
         command.legalEntityId,

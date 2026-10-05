@@ -1594,3 +1594,144 @@ test('INVENTORY-PARITY: a new stock document is dated now, not midnight, a defau
     '2026-09-30T00:00:00.000Z',
   );
 });
+
+test('STOCK-COUNTS: a stock count is entered like a document, its new lines start expected, counted and variance at zero, and its page states each line through the count read model', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type Editor = Loose & {
+    editableStateIds: string[];
+    headerFields: (Loose & { fieldId: string })[];
+    lineFields: (Loose & { fieldId: string })[];
+    createValues: (Loose & { fieldId: string; value: Loose })[];
+    lineCreateValues: (Loose & { fieldId: string; value: Loose })[];
+  };
+  const ns = 'northstar.app';
+  const surface = (candidate: Loose, local: string) =>
+    (candidate.surfaces as Loose[]).find(
+      (value) => value.surfaceId === `${ns}:surface.${local}`,
+    ) as Loose & {
+      documentEditor?: Editor;
+      composition?: Loose & {
+        children: (Loose & { datasetId: string; query: Loose })[];
+        actions: (Loose & { actionId: string; steps: Loose[] })[];
+      };
+      label: string;
+      workspace: Loose & { membership: string };
+    };
+  const editor = (candidate: Loose) =>
+    surface(candidate, 'stock_count_form').documentEditor!;
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  // The form and the record page carry the editor; the List is the counts.
+  assert.deepEqual(
+    surface(source, 'stock_count_detail').documentEditor,
+    editor(source),
+  );
+  assert.equal(surface(source, 'stock_count_list').label, 'Stock counts');
+  assert.equal(
+    surface(source, 'stock_count_list').workspace.membership,
+    'operational',
+  );
+  // Editable while a draft or counting; one location, a reason, a narrative,
+  // the count's type and whether it is blind.
+  assert.deepEqual(editor(source).editableStateIds, [
+    `${ns}:option.stock_count_state_draft`,
+    `${ns}:option.stock_count_state_counting`,
+  ]);
+  assert.deepEqual(
+    editor(source).headerFields.map((value) => value.fieldId),
+    [
+      'location_id',
+      'reason_code',
+      'reason_narrative',
+      'count_type',
+      'counting_mode',
+    ].map((local) => `${ns}:field.stock_count_${local}`),
+  );
+  // A line is a product, what was found, and the product's own unit.
+  assert.deepEqual(
+    editor(source).lineFields.map((value) => value.fieldId),
+    ['item_id', 'physical_quantity', 'unit_id'].map(
+      (local) => `${ns}:field.stock_count_line_${local}`,
+    ),
+  );
+  // Nobody types expected, counted or variance: a new line starts each at
+  // zero, and Review replaces them.
+  assert.deepEqual(
+    editor(source).lineCreateValues,
+    ['expected_quantity', 'counted_quantity', 'variance_quantity'].map(
+      (local) => ({
+        fieldId: `${ns}:field.stock_count_line_${local}`,
+        value: { source: 'literal', value: '0' },
+      }),
+    ),
+  );
+  const lineValueRefusal =
+    /a line create value is a line field no editor field offers, holding a literal it admits/;
+  // Not a field the editor offers, nor the line number it assigns, nor a
+  // header field, nor a figure the field cannot hold.
+  refuse((candidate) => {
+    editor(candidate).lineCreateValues[0]!.fieldId =
+      `${ns}:field.stock_count_line_physical_quantity`;
+  }, lineValueRefusal);
+  refuse((candidate) => {
+    editor(candidate).lineCreateValues[0]!.fieldId =
+      `${ns}:field.stock_count_line_line_number`;
+  }, lineValueRefusal);
+  refuse((candidate) => {
+    editor(candidate).lineCreateValues[0]!.fieldId =
+      `${ns}:field.stock_count_reason_code`;
+  }, lineValueRefusal);
+  refuse((candidate) => {
+    editor(candidate).lineCreateValues[0]!.value = {
+      source: 'literal',
+      value: '0.50',
+    };
+  }, lineValueRefusal);
+  refuse((candidate) => {
+    editor(candidate).lineCreateValues.push(
+      structuredClone(editor(candidate).lineCreateValues[0]!),
+    );
+  }, /a line create value names each field once/);
+  // A literal and nothing else.
+  refuse((candidate) => {
+    editor(candidate).lineCreateValues[0]!.value = {
+      source: 'generated',
+      value: 'instant',
+    };
+  }, /CANON_SCHEMA_INVALID/);
+  // The record page reads its lines through the count read model, and offers
+  // Correct and Reverse on a posted count.
+  const page = surface(source, 'stock_count_detail').composition!;
+  const lines = page.children.find(
+    (value) => value.datasetId === `${ns}:dataset.stock_count_stock_count_line`,
+  )!;
+  assert.equal(
+    (lines.query as { targetId: string }).targetId,
+    `${ns}:query.stock_count_count_lines`,
+  );
+  assert.deepEqual(
+    page.actions.map((value) => value.actionId),
+    ['correct_count', 'reverse_count', 'open_compensation'].map(
+      (local) => `${ns}:action.${local}`,
+    ),
+  );
+  const countLines = (source.queries as Loose[]).find(
+    (value) => value.queryId === `${ns}:query.stock_count_count_lines`,
+  ) as Loose & { readModel: Loose & { binding: string } };
+  assert.equal(
+    countLines.readModel.binding,
+    'northstar.inventory:read_model.count_line',
+  );
+});

@@ -56,6 +56,8 @@ test('the composed application declares its Lists and they normalize unchanged',
   assert.deepEqual(declared.map((surface) => surface.surfaceId).sort(), [
     // Ruling C: the Invoices List.
     `${ns}:surface.customer_invoice_list`,
+    // RETURNS (ruling D): the customer returns List.
+    `${ns}:surface.customer_return_list`,
     // PURCHASING-PARITY: what is still to arrive, beside Purchase orders.
     expectedList,
     // INVENTORY-PARITY: stock documents, by state and type.
@@ -63,6 +65,8 @@ test('the composed application declares its Lists and they normalize unchanged',
     `${ns}:surface.posted_stock_balance_list`,
     `${ns}:surface.purchase_order_list`,
     salesList,
+    // STOCK-COUNTS: the stock counts List, by state.
+    `${ns}:surface.stock_count_list`,
     // PAYABLES: the Bills List, by bill state.
     `${ns}:surface.vendor_bill_list`,
   ]);

@@ -174,7 +174,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // columns and links that name a relation of their record.
     // 15 adds composition datasets scoped by a field of their own entity.
     // 16 adds a draft editor's create values.
-    maximumSupportedVersion: 16,
+    // 17 adds a draft editor's line create values (STOCK-COUNTS).
+    maximumSupportedVersion: 17,
   },
 });
 

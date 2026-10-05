@@ -2707,3 +2707,77 @@ test('PAYABLES: twenty-four permissions, entity-owned queries, a bill List expor
     12,
   );
 });
+
+test('RETURNS: vendor returns are declared only with their option, take VRT numbers, change only while drafts and post through receiving', () => {
+  assert.doesNotMatch(
+    JSON.stringify(
+      purchasingModuleDefinition(namespace, {
+        commercialTerms: true,
+        payables: true,
+      }),
+    ),
+    /vendor_return/u,
+  );
+  const declared = purchasingModuleDefinition(namespace, {
+    vendorReturns: true,
+  }) as unknown as {
+    entities: Array<{ entityId: string }>;
+    fields: Array<{
+      fieldId: string;
+      numbering?: { prefix: string };
+      presence: string;
+    }>;
+    operations: Array<{
+      operationId: string;
+      precondition?: unknown;
+      tier: string;
+      effect: { kind: string; capability?: { targetId: string } };
+    }>;
+    relations: Array<{ relationId: string; ownership: string }>;
+  };
+  assert.deepEqual(
+    declared.entities
+      .map((entity) => entity.entityId)
+      .filter((id) => id.includes('vendor_return')),
+    [
+      `${namespace}:entity.vendor_return`,
+      `${namespace}:entity.vendor_return_line`,
+    ],
+  );
+  assert.equal(
+    declared.fields.find(
+      (field) => field.fieldId === `${namespace}:field.vendor_return_number`,
+    )?.numbering?.prefix,
+    'VRT',
+  );
+  assert.deepEqual(
+    declared.relations
+      .filter((relation) => relation.relationId.includes('vendor_return'))
+      .map((relation) => [relation.relationId, relation.ownership]),
+    [
+      [`${namespace}:relation.vendor_return_order`, 'reference'],
+      [`${namespace}:relation.vendor_return_line_return`, 'parentScopedChild'],
+      [`${namespace}:relation.vendor_return_line_order_line`, 'reference'],
+    ],
+  );
+  const post = declared.operations.find(
+    (operation) =>
+      operation.operationId === `${namespace}:operation.vendor_return_post`,
+  );
+  assert.ok(post?.precondition, 'post is offered only on a draft');
+  assert.equal(post.tier, 'o1');
+  assert.equal(post.effect.kind, 'registeredCapabilityEffect');
+  assert.equal(
+    post.effect.capability?.targetId,
+    'northstar.purchasing:capability.receiving',
+  );
+  for (const action of ['create', 'update', 'archive', 'restore'])
+    assert.ok(
+      declared.operations.find(
+        (operation) =>
+          operation.operationId ===
+          `${namespace}:operation.vendor_return_${action}`,
+      )?.precondition,
+      `vendor_return_${action} is guarded by the draft state`,
+    );
+});
