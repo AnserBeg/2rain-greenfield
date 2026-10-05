@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { assertDropShipMutation } from './drop-ship-mutation-guards.js';
 
 import {
   PARAMETERIZED_PREDICATE_LOWERING_PLAN_VERSION,
@@ -705,6 +706,7 @@ async function executeMutationOnClient(
   readBackSelections: readonly { readonly fieldId: string }[],
 ): Promise<SemanticRecordDto> {
   const definition = request.definition;
+  await assertDropShipMutation(client, storage, entity, request, input);
   switch (definition.effect.kind) {
     case 'createRecordEffect':
       await insertRecord(client, storage, entity, input, request.parentGuards);
@@ -802,7 +804,7 @@ export function verificationSentinelNumber(
  * its field refuses by name. A replay of the same idempotency key never reaches
  * this, so a retry keeps its number.
  */
-async function assignDocumentNumbers(
+export async function assignDocumentNumbers(
   client: PoolClient,
   entity: StorageEntity,
   definition: SemanticOperationExecutionRequest['definition'],
@@ -877,7 +879,7 @@ async function assignDocumentNumbers(
   return Object.freeze({ ...input, patch: Object.freeze(patch) });
 }
 
-async function insertRecord(
+export async function insertRecord(
   client: PoolClient,
   storage: StorageTargetPayloadV1,
   entity: StorageEntity,

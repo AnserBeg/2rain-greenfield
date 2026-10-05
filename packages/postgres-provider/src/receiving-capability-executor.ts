@@ -38,6 +38,7 @@ import {
 import { withModuleRuntimeRole } from './module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 import { executeReceivingOrderState } from './receiving-order-capability.js';
+import { assertStockRoutes } from './drop-ship-support.js';
 
 interface PreparedReceiving {
   readonly request: RegisteredCapabilityOperationAuthorizationRequest;
@@ -332,6 +333,7 @@ class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecut
               ],
             );
             const effectiveAt = field('effective_at');
+            await assertStockRoutes(client, binding.target, { ...request.context, legalEntityId }, 'purchase', rows.rows.map((row: Record<string, unknown>) => String(row[receiptRelation(binding, binding.line, 'goods_receipt_line_order_line')])));
             return {
               authorization: {
                 decision: 'ALLOW',

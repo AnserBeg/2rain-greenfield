@@ -653,6 +653,21 @@ export function composedListSpecs(
     labelField: `${namespace}:field.${labelField}`,
   });
   return {
+    drop_ship_delivery_list: {
+      pageSize: 25,
+      columns: [
+        { local: 'number', label: 'Delivery', field: `${namespace}:field.drop_ship_delivery_number`, role: 'title' },
+        { local: 'state', label: 'State', field: `${namespace}:field.drop_ship_delivery_state`, role: 'status' },
+        { local: 'date', label: 'Delivered', field: `${namespace}:field.drop_ship_delivery_delivery_date`, format: 'date' },
+        { local: 'quantity', label: 'Quantity', field: `${namespace}:field.drop_ship_delivery_quantity` },
+        { local: 'unit', label: 'Unit', field: `${namespace}:field.drop_ship_delivery_unit_id` },
+        { local: 'reference', label: 'Supplier reference', field: `${namespace}:field.drop_ship_delivery_external_reference` },
+      ],
+      defaultSort: [{ column: 'number', direction: 'descending' }],
+      views: ['draft', 'posted', 'reversed'].map((state) => ({ local: state, label: state[0]!.toUpperCase() + state.slice(1),
+        filters: { [`${namespace}:field.drop_ship_delivery_state`]: `${namespace}:option.drop_ship_delivery_state_${state}` } })),
+      filters: [], export: true,
+    },
     sales_order_list: documentList(
       namespace,
       'sales_order',

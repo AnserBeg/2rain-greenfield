@@ -12,6 +12,7 @@
     "./receiving-capability-executor": "./src/receiving-capability-executor.ts",
     "./receivables-capability-executor": "./src/receivables-capability-executor.ts",
     "./payables-capability-executor": "./src/payables-capability-executor.ts",
+    "./drop-ship-executor": "./src/drop-ship-executor.ts",
     "./inventory-provider-error-mappings": "./src/inventory-provider-error-mappings.ts",
     "./readiness": "./src/readiness.ts",
     "./release-activation-service": "./src/release-activation-service.ts",

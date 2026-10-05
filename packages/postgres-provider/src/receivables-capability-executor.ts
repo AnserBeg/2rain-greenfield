@@ -43,8 +43,10 @@ export const RECEIVABLES_SETTLEMENT_SPEC: SettlementSpec = Object.freeze({
     counterparty: 'customer_party_id',
     progressQuantity: 'shipped_quantity',
     unitFrom: 'orderLine' as const,
+    deliverySide: 'sales' as const,
   }),
   actions: Object.freeze([
+    ['sales_order_close', 'close', 'order'],
     ['customer_invoice_post', 'post', 'document'],
     ['customer_invoice_void', 'void', 'document'],
     ['customer_payment_post', 'pay', 'payment'],

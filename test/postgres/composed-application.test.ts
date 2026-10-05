@@ -54,6 +54,7 @@ import {
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
+import { DROP_SHIP_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/drop-ship-executor.js';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
 import {
   PostgresCurrentPolicyGateway,
@@ -1301,6 +1302,7 @@ async function assertApprovalEnforcementAndApprovedActivation(
       [
         INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
         RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+        DROP_SHIP_CAPABILITY_EXECUTOR_FACTORY,
       ],
     ).executeSemanticCandidateAndPersist(context, {
       compiledRelease: application.compiled,
@@ -1450,6 +1452,7 @@ async function assertApprovalRequiredForAdvancement(
         [
           INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
           RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+          DROP_SHIP_CAPABILITY_EXECUTOR_FACTORY,
         ],
       ).executeSemanticCandidateAndPersist(context, {
         compiledRelease: application.compiled,
@@ -1621,6 +1624,7 @@ async function assertReleaseServicesRejectNonExactReversePairs(
       [
         INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
         RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+        DROP_SHIP_CAPABILITY_EXECUTOR_FACTORY,
       ],
     ).executeSemanticCandidateAndPersist(context, {
       compiledRelease: immediateTarget.compiled,
@@ -2708,6 +2712,7 @@ async function assertFailClosedIdentitySeam(
     capabilityOperationExecutorFactories: [
       INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
       RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+      DROP_SHIP_CAPABILITY_EXECUTOR_FACTORY,
     ],
     compiledApplication,
     databaseUrl,
@@ -6394,6 +6399,7 @@ function createRuntime(
     capabilityOperationExecutorFactories: [
       INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
       RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+      DROP_SHIP_CAPABILITY_EXECUTOR_FACTORY,
     ],
     databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,

@@ -825,6 +825,7 @@ export function validateSurfaceCompositions(
               'values',
               'relations',
               'patch',
+              'arguments',
             ].includes(binding.path[0]!)
           )
             fail(
@@ -834,6 +835,11 @@ export function validateSurfaceCompositions(
           const operation = operations.get(step.operation.targetId)!;
           const effect = operation.effect;
           const root = binding.path[0]!;
+          if (
+            root === 'arguments' &&
+            (effect.kind !== 'registeredCapabilityEffect' || binding.path.length !== 2)
+          )
+            fail(surface.surfaceId, 'capability arguments require a registered effect and one scalar member');
           if (
             ['recordId', 'expectedRevision', 'legalEntityId'].includes(root) &&
             binding.path.length !== 1

@@ -1,5 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { dropShipBound, dropShipQuantity, dropShipQuantityText } from '../../packages/postgres-provider/src/drop-ship-support.js';
+
+test('D-B: supplier delivery bounds are exact on both linked lines', () => {
+  const amount = dropShipQuantity('0.000000000000000001');
+  assert.equal(dropShipQuantityText(amount), '0.000000000000000001');
+  assert.equal(dropShipQuantityText(dropShipQuantity('2.500000000000000000')), '2.5');
+  dropShipBound(amount, amount, amount);
+  for (const [delivered, sales, purchase] of [['0', '1', '1'], ['2', '1', '3'], ['2', '3', '1']])
+    assert.throws(() => dropShipBound(dropShipQuantity(delivered), dropShipQuantity(sales), dropShipQuantity(purchase)), /open sales or purchase quantity/u);
+  assert.throws(() => dropShipQuantity('0.0000000000000000001'), /exact non-negative/u);
+  assert.throws(() => dropShipQuantity('-1'), /exact non-negative/u);
+});
 
 import {
   chargeAmounts,

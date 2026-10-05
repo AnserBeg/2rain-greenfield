@@ -16,6 +16,20 @@ import { legalEntityReadScopeRequirement } from '../../packages/postgres-provide
 import { moneyText } from '../../apps/web/src/list-declaration.js';
 import { declaredDefault } from '../../apps/web/src/control-semantics.js';
 
+test('DROP-SHIP declares route, company-owned delivery, symmetric demand links and Tasks', () => {
+  const model = normalizeApplicationPackage(composedApplicationDefinition());
+  const delivery = model.entities.find((entity) => entity.entityId.endsWith(':entity.drop_ship_delivery'));
+  assert.ok(delivery);
+  const number = model.fields.find((field) => field.fieldId.endsWith(':field.drop_ship_delivery_number'))!;
+  assert.equal(number.numbering?.prefix, 'DSD');
+  assert.equal(model.relations.filter((relation) => relation.sourceEntity.targetId === delivery.entityId).length, 4);
+  for (const order of ['sales_order', 'purchase_order']) {
+    const page = model.surfaces.find((surface) => surface.surfaceId.endsWith(`:surface.${order}_detail`))!;
+    assert.ok('composition' in page && page.composition?.children.some((child) => child.label === 'Deliveries'));
+  }
+  assert.ok(model.operations.some((op) => op.operationId.endsWith(':operation.sales_order_create_drop_ship_po') && op.effect.kind === 'registeredCapabilityEffect'));
+});
+
 test('the scaffold exposes a canonical workspace contract', () => {
   assert.deepEqual(platformContract, {
     authority: 'canonical-model',

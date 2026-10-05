@@ -38,6 +38,7 @@ import {
 } from './module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 import { PostgresTrustService } from './trust/postgres-trust-service.js';
+import { deliveredByLine } from './drop-ship-support.js';
 
 /**
  * One settlement document family, driven by a spec: a document (an invoice or
@@ -50,7 +51,7 @@ import { PostgresTrustService } from './trust/postgres-trust-service.js';
  * The spec names every entity, field, relation, code and message; this file
  * names no module. Each module's spec file owns its identity.
  */
-export type SettlementAction = 'post' | 'void' | 'pay' | 'credit' | 'reopen';
+export type SettlementAction = 'post' | 'void' | 'pay' | 'credit' | 'reopen' | 'close';
 
 /** Which bound entity a named operation acts on. */
 type SettlementRole = 'document' | 'payment' | 'credit' | 'order';
@@ -102,6 +103,8 @@ export interface SettlementSpec {
      * as the supplier's own invoice number; absent when there is none.
      */
     uniqueReference?: string;
+    /** Optional off-ledger progress, beside the physical projection. */
+    deliverySide?: 'sales' | 'purchase';
   }>;
   /** The named operations, by operation local id. */
   readonly actions: readonly (readonly [
@@ -383,7 +386,7 @@ export async function progressByOrderLine(
       GROUP BY 1`,
     [scope.tenantId, scope.environmentId, scope.legalEntityId, orderLineIds],
   );
-  return new Map(
+  const combined = new Map(
     rows.rows.map((row) => {
       if (unit && (row.units !== 1 || typeof row.unit !== 'string'))
         throw refused(
@@ -399,6 +402,16 @@ export async function progressByOrderLine(
       ];
     }),
   );
+  if (spec.fields.deliverySide) {
+    const delivered = await deliveredByLine(client, binding.target, scope, spec.fields.deliverySide, orderLineIds);
+    for (const [line, fact] of delivered) {
+      const existing = combined.get(line);
+      if (unit && existing?.unit && existing.unit !== fact.unit)
+        throw refused('INVENTORY_POSTING_STORAGE_INVALID', 'Physical and supplier delivery units disagree');
+      combined.set(line, { quantity: (existing?.quantity ?? 0n) + fact.quantity, unit: unit ? fact.unit : null });
+    }
+  }
+  return combined;
 }
 
 class SettlementCapabilityExecutor implements RegisteredCapabilityOperationExecutor {
@@ -741,6 +754,8 @@ class SettlementCapabilityExecutor implements RegisteredCapabilityOperationExecu
         return this.#settle(client, request, prepared);
       case 'reopen':
         return this.#reopen(client, request, prepared);
+      case 'close':
+        return this.#close(client, request, prepared);
     }
   }
 
@@ -1278,6 +1293,32 @@ class SettlementCapabilityExecutor implements RegisteredCapabilityOperationExecu
       ],
       metadata: { [spec.metadataKeys.document]: documentId },
     };
+  }
+
+  /** Commercial progress closes an order without altering physical projections. */
+  async #close(client: PoolClient, request: RegisteredCapabilityOperationExecutionRequest, prepared: Prepared): Promise<Changed> {
+    const spec = this.#spec; const b = this.#binding;
+    const order = await this.#target(client, request, prepared);
+    const stateColumn = column(b.order, `derived_state_field.machine.${spec.entities.order}_lifecycle`);
+    const before = String(order[unquote(stateColumn)]);
+    if (!before.endsWith(`:state.${spec.entities.order}_released`)) throw refused(spec.codes.orderNotReady, 'Only a released order closes');
+    const lines = await client.query<Row>(`SELECT * FROM ${table(b.orderLine)} WHERE tenant_id=$1 AND environment_id=$2 AND ${quote(b.orderLine.legalEntity!.column)}=$3 AND ${relation(b, b.orderLine, spec.relations.orderLineOrder)}=$4 AND archived_at IS NULL ORDER BY record_id FOR NO KEY UPDATE`, [...this.#scope(request), prepared.legalEntityId, prepared.recordId]);
+    if (!lines.rows.length) throw refused(spec.codes.orderNotReady, 'An order without lines cannot close');
+    const progressed = await progressByOrderLine(client, spec, b, { ...request.context, legalEntityId: prepared.legalEntityId }, lines.rows.map((line) => String(line.record_id)));
+    for (const line of lines.rows) if (quantity(line[unquote(column(b.orderLine, `${spec.entities.orderLine}_ordered_quantity`))]) !== (progressed.get(String(line.record_id))?.quantity ?? 0n)) throw refused(spec.codes.orderNotReady, 'Close requires every line fully shipped, received or delivered');
+    // Preserve stock fulfillment's existing rule: no live reserved remainder.
+    // This is a read of the existing projection, never a stock/projection write.
+    if (spec.fields.deliverySide === 'sales') {
+      const reservation = b.target.entities.find((row) => row.entityId.endsWith(':entity.reservation'));
+      const balance = b.target.entities.find((row) => row.entityId.endsWith(':entity.reservation_balance'));
+      if (reservation && balance) {
+        const held = await client.query<{ count: number }>(`SELECT count(*)::int AS count FROM ${table(reservation)} r JOIN ${table(balance)} z ON z.${relation(b, balance, 'reservation_balance_reservation')}=r.record_id AND z.tenant_id=r.tenant_id AND z.environment_id=r.environment_id AND z.${quote(balance.legalEntity!.column)}=r.${quote(reservation.legalEntity!.column)} WHERE r.tenant_id=$1 AND r.environment_id=$2 AND r.${quote(reservation.legalEntity!.column)}=$3 AND r.${relation(b, reservation, 'reservation_order_line')}=ANY($4::uuid[]) AND r.archived_at IS NULL AND z.archived_at IS NULL AND z.${column(balance, 'reservation_balance_remaining_quantity')}>0 AND r.${column(reservation, 'reservation_state')}<>$5`, [...this.#scope(request), prepared.legalEntityId, lines.rows.map((line) => String(line.record_id)), option(reservation, 'reservation_state', 'released')]);
+        if (Number(held.rows[0]?.count ?? 0) > 0) throw refused('FULFILLMENT_RESERVATION_STATE_CONFLICT', 'Release every live reservation before closing the order');
+      }
+    }
+    const after = before.replace(/_released$/u, '_closed');
+    return { revision: await this.#update(client, request, b.order, prepared.legalEntityId, prepared.recordId, prepared.expectedRevision, [[stateColumn, after]]),
+      changes: [{ field: `${b.order.entityId}.lifecycle`, before, after }], metadata: {} };
   }
 
   /** A closed order reopens while no document of it counts. */

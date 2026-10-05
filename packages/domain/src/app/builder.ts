@@ -23,6 +23,7 @@ import {
   receivingWorkspaceQueries,
 } from '../purchasing/workspace.js';
 import { inventoryDocumentWorkspace } from '../inventory/workspace.js';
+import { withDropShip } from './drop-ship.js';
 
 const version = 'v6' as const;
 const normalizationProfileVersion = 'northstar.normalization/v6' as const;
@@ -190,7 +191,7 @@ export function composedApplicationDefinition(): Record<string, unknown> {
     collection(definition, 'capabilityRequirements').slice(1),
   );
 
-  return withDeclaredLists({
+  return withDeclaredLists(withDropShip({
     assertions: merged(definitions, 'assertions'),
     capabilityRequirements: [sharedCapability, ...moduleCapabilities],
     entities: merged(definitions, 'entities'),
@@ -289,7 +290,7 @@ export function composedApplicationDefinition(): Record<string, unknown> {
       }),
       merged(definitions, 'queries') as Record<string, unknown>[],
     ),
-  });
+  }));
 }
 
 /** A worklist's List surface joins the composed surfaces beside its source. */
