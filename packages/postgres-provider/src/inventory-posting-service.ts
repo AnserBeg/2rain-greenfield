@@ -4660,6 +4660,23 @@ function preserved(
   );
 }
 
+/**
+ * STOCK-COUNTS. The physical columns of fields a release MAY declare, named by
+ * explicit local id -- never every field the binding holds, which would derive
+ * a proof list from the row it proves. A release that does not declare a field
+ * has no such column; a column the row carries and no proof covers is refused
+ * by `assertPersistedRowVerified`.
+ */
+function declaredColumns(
+  entity: EntityBinding,
+  localIds: readonly string[],
+): string[] {
+  return localIds.flatMap((localId) => {
+    const field = entity.fields.get(localId);
+    return field ? [field.name] : [];
+  });
+}
+
 function preservedColumns(
   prior: Readonly<Record<string, unknown>>,
   current: Readonly<Record<string, unknown>>,
@@ -7799,6 +7816,12 @@ async function assertCompanionIdentitiesPersisted(
           binding.stockCountReasonNarrativeColumn,
           binding.stockCountSupersedesColumn,
           requiredField(binding.stockCount, 'stock_count_number').name,
+          // STOCK-COUNTS. A count's type and counting mode are evidence the
+          // count carried before Post, and no posting writes them.
+          ...declaredColumns(binding.stockCount, [
+            'stock_count_count_type',
+            'stock_count_counting_mode',
+          ]),
         ],
       ),
     ],
@@ -8029,6 +8052,11 @@ async function assertCompanionIdentitiesPersisted(
             binding.stockCountLineVarianceColumn,
             binding.stockCountLineUnitColumn,
             binding.stockCountLineReversalColumn,
+            // STOCK-COUNTS. The physical count entered while counting; Review
+            // copied it into counted, and no posting writes it.
+            ...declaredColumns(binding.stockCountLine, [
+              'stock_count_line_physical_quantity',
+            ]),
           ],
         ),
       ],
