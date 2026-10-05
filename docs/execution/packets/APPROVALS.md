@@ -40,6 +40,7 @@ Status: [draft PR #14](https://github.com/AnserBeg/2rain-greenfield/pull/14); no
 - The [third CI run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36840959891) passed quality, all PostgreSQL jobs (composed 22/22, including both isolated rollback directions), the main browser suite, security and observability. Performance refused an indeterminate CPU-idle sample (73.3% < 90%); the operations journey exposed Buyer's incorrectly offered decision Tasks. The shared permission preview corrects that UI defect; the next full matrix is required. Docker is unavailable in the resumed WSL session; no new local container-backed test ran.
 - The permission-offer regression was observed red then green. The broader container-free integration/web-contract run passed 213/213, including denied, restored and unavailable-policy offers plus forged Task entry and unchanged confirmation enforcement. Final lint, typecheck, changed-source formatting, rebuilt release checks and coverage re-derivation passed; measured pins and both 10-entry numbering lists are unchanged.
 - The [fourth CI run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37255572539) passed quality, all PostgreSQL jobs, performance, security, the main browser suite and observability. The new approval browser journey passed; operations passed 29/31 and reachability was skipped. Its two stale tests now include the compiled approval/settings navigation leaves and use the declared amendment Task with approval off. Local formatting, typecheck, lint, base-envelope rebuild/check and coverage re-derivation passed; a fresh full matrix remains required.
+- The [fifth run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37257155072) passed quality, performance, security, schema/isolation and the main browser suite; commercial/composed PostgreSQL and observability were still running at this update. Operations passed 30/31, including the new approval and corrected navigation/amendment journeys. Receiving's final assertion now distinguishes the LOCAL_DEMO shell identity form from a visible business page with zero forms; its absent retry controls and persisted-effect assertions remain. Final formatting, lint, typecheck, release checks and re-derived pins passed; fresh full CI remains required.
 - The new PostgreSQL test is registered in `test:postgres:commercial` and repository hygiene; `purchase-approvals.spec.ts` is included in the operations browser job.
 - CI at the pushed PR SHA is the acceptance matrix. This draft is not accepted, merged or deployed; the owner requested a draft PR against PAYABLES only.
 - No timeout, threshold, existing action limit or PostgreSQL readiness bound has been raised. Local PostgreSQL/schema commands use the exclusive lock and local browsers use one worker.
@@ -61,7 +62,7 @@ Review: not owed — outside the Critical set. No stage boundary is integrated b
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "APPROVALS",
   "base": "681f46751b2a4c3cc9027956534b741c35dd4a03",
-  "head": "8051246edd2a17719ea81dba9c7365430540a1e4",
+  "head": "1afcfb5992e216118739fe48ca7b66cc52ab8260",
   "changedPaths": [
     "apps/api/src/composition-root.ts",
     "apps/web/release/app.authored.json",
