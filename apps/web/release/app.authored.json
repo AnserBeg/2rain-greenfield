@@ -15163,7 +15163,33 @@
         "targetId": "northstar.app:query.location_get"
       },
       "schemaVersion": "v6",
-      "tier": "o0"
+      "tier": "o0",
+      "fieldWrites": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.location_code"
+          },
+          "required": false
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.location_name"
+          },
+          "required": false
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.location_type"
+          },
+          "required": false
+        }
+      ]
     },
     {
       "confirmation": "none",
@@ -15194,7 +15220,39 @@
         "targetId": "northstar.app:query.location_get"
       },
       "schemaVersion": "v6",
-      "tier": "o0"
+      "tier": "o0",
+      "fieldWrites": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.location_code"
+          },
+          "required": false
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.location_name"
+          },
+          "required": false
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.location_type"
+          },
+          "required": false
+        }
+      ],
+      "relationWrites": [
+        {
+          "relation": "northstar.app:relation.location_parent",
+          "acyclic": true
+        }
+      ]
     },
     {
       "confirmation": "humanRequired",
@@ -15257,6 +15315,66 @@
       },
       "schemaVersion": "v6",
       "tier": "o0"
+    },
+    {
+      "confirmation": "none",
+      "effect": {
+        "entity": {
+          "kind": "entityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:entity.location"
+        },
+        "kind": "updateRecordEffect",
+        "schemaVersion": "v6"
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.location"
+      },
+      "operationId": "northstar.app:operation.location_update_status",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.location_update"
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.location_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o0",
+      "label": "Change status",
+      "presentation": "taskOnly",
+      "fieldWrites": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.location_status"
+          },
+          "required": true
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.location_status_reason"
+          },
+          "required": true,
+          "nonBlank": true
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.location_status_changed_at"
+          },
+          "required": true
+        }
+      ]
     }
   ],
   "package": {
@@ -35311,6 +35429,112 @@
     },
     {
       "kind": "queryDefinition",
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.location"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.location_read"
+      },
+      "queryId": "northstar.app:query.location_warehouse_list",
+      "queryType": "list",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.location_code"
+          },
+          "kind": "querySelection",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.location_warehouse_list_1"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.location_name"
+          },
+          "kind": "querySelection",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.location_warehouse_list_2"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.location_type"
+          },
+          "kind": "querySelection",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.location_warehouse_list_3"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.location_status"
+          },
+          "kind": "querySelection",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.location_warehouse_list_4"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.location_status_reason"
+          },
+          "kind": "querySelection",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.location_warehouse_list_5"
+        },
+        {
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.location_status_changed_at"
+          },
+          "kind": "querySelection",
+          "orderKey": 60,
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.location_warehouse_list_6"
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.location"
+      },
+      "tier": "q0",
+      "filter": {
+        "kind": "fieldComparisonPredicate",
+        "schemaVersion": "v6",
+        "operator": "equals",
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:field.location_type"
+        },
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v6",
+          "value": "northstar.app:option.warehouse"
+        }
+      }
+    },
+    {
+      "kind": "queryDefinition",
       "maximumResultCount": 1,
       "module": {
         "kind": "moduleReference",
@@ -48198,7 +48422,15 @@
                 },
                 "defaultFrom": {
                   "source": "record",
-                  "field": "northstar.app:field.purchase_order_receiving_location_id"
+                  "field": "northstar.app:field.purchase_order_receiving_location_id",
+                  "fallback": {
+                    "column": {
+                      "datasetId": "northstar.app:dataset.purchasing_lines",
+                      "columnId": "northstar.app:column.purchasing_item"
+                    },
+                    "field": "northstar.app:field.item_preferred_location_id",
+                    "selection": "common"
+                  }
                 }
               },
               {
@@ -48554,7 +48786,15 @@
                 },
                 "defaultFrom": {
                   "source": "record",
-                  "field": "northstar.app:field.purchase_order_receiving_location_id"
+                  "field": "northstar.app:field.purchase_order_receiving_location_id",
+                  "fallback": {
+                    "column": {
+                      "datasetId": "northstar.app:dataset.purchasing_lines",
+                      "columnId": "northstar.app:column.purchasing_item"
+                    },
+                    "field": "northstar.app:field.item_preferred_location_id",
+                    "selection": "common"
+                  }
                 }
               },
               {
@@ -49179,7 +49419,15 @@
                 },
                 "defaultFrom": {
                   "source": "record",
-                  "field": "northstar.app:field.purchase_order_receiving_location_id"
+                  "field": "northstar.app:field.purchase_order_receiving_location_id",
+                  "fallback": {
+                    "column": {
+                      "datasetId": "northstar.app:dataset.purchasing_lines",
+                      "columnId": "northstar.app:column.purchasing_item"
+                    },
+                    "field": "northstar.app:field.item_preferred_location_id",
+                    "selection": "selected"
+                  }
                 }
               },
               {
@@ -49527,7 +49775,15 @@
                 },
                 "defaultFrom": {
                   "source": "record",
-                  "field": "northstar.app:field.purchase_order_receiving_location_id"
+                  "field": "northstar.app:field.purchase_order_receiving_location_id",
+                  "fallback": {
+                    "column": {
+                      "datasetId": "northstar.app:dataset.purchasing_lines",
+                      "columnId": "northstar.app:column.purchasing_item"
+                    },
+                    "field": "northstar.app:field.item_preferred_location_id",
+                    "selection": "selected"
+                  }
                 }
               },
               {
@@ -58477,12 +58733,38 @@
             "sortable": true
           },
           {
+            "columnId": "northstar.app:list_column.location_list_parent",
+            "label": "Warehouse",
+            "orderKey": 40,
+            "field": "northstar.app:relation.location_parent",
+            "role": "value",
+            "priority": 3,
+            "sortable": true,
+            "reference": {
+              "relation": true,
+              "ancestor": {
+                "field": "northstar.app:field.location_type",
+                "values": ["northstar.app:option.warehouse"]
+              },
+              "query": {
+                "kind": "queryReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:query.location_list"
+              },
+              "labelField": {
+                "kind": "fieldReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:field.location_name"
+              }
+            }
+          },
+          {
             "columnId": "northstar.app:list_column.location_list_status",
             "label": "Inventory status",
-            "orderKey": 40,
+            "orderKey": 50,
             "field": "northstar.app:field.location_status",
             "role": "status",
-            "priority": 3,
+            "priority": 4,
             "sortable": true,
             "statusRoles": [
               {
@@ -58510,10 +58792,10 @@
           {
             "columnId": "northstar.app:list_column.location_list_status_reason",
             "label": "Status reason",
-            "orderKey": 50,
+            "orderKey": 60,
             "field": "northstar.app:field.location_status_reason",
             "role": "value",
-            "priority": 4,
+            "priority": 5,
             "sortable": false
           }
         ],
@@ -58594,7 +58876,28 @@
               }
             ]
           }
-        ]
+        ],
+        "hierarchyScope": {
+          "rows": true,
+          "selectorId": "northstar.app:list_selector.location_list_warehouse",
+          "label": "Warehouse",
+          "query": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.location_list"
+          },
+          "choices": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.location_warehouse_list"
+          },
+          "labelField": "northstar.app:field.location_name",
+          "relation": "northstar.app:relation.location_parent",
+          "rootFilter": {
+            "field": "northstar.app:field.location_type",
+            "value": "northstar.app:option.warehouse"
+          }
+        }
       }
     },
     {
@@ -58824,6 +59127,62 @@
         ],
         "actions": [
           {
+            "actionId": "northstar.app:action.location_move",
+            "label": "Move location",
+            "orderKey": 20,
+            "description": "Places this location inside another warehouse. Existing stock belongs to that warehouse without changing quantities or movements. A parent that creates a loop is refused.",
+            "conditions": [],
+            "inputs": [
+              {
+                "inputId": "northstar.app:input.location_new_parent",
+                "label": "New warehouse",
+                "orderKey": 10,
+                "type": "reference",
+                "required": true,
+                "query": {
+                  "kind": "queryReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:query.location_warehouse_list"
+                },
+                "labelField": {
+                  "kind": "fieldReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:field.location_name"
+                }
+              }
+            ],
+            "steps": [
+              {
+                "stepId": "northstar.app:step.location_move",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.location_update"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "record", "field": "recordId" }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": { "source": "record", "field": "revision" }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.location_parent"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.location_new_parent"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
             "actionId": "northstar.app:action.location_change_status",
             "label": "Change status",
             "description": "Sets what the stock held here may be used for. Every item at this location counts as usable or not from now on; nothing moves. The reason is kept with the status.",
@@ -58882,7 +59241,7 @@
                 "operation": {
                   "kind": "operationReference",
                   "schemaVersion": "v6",
-                  "targetId": "northstar.app:operation.location_update"
+                  "targetId": "northstar.app:operation.location_update_status"
                 },
                 "bindings": [
                   {
@@ -59700,6 +60059,44 @@
               }
             }
           ]
+        },
+        "hierarchyScope": {
+          "figures": [
+            {
+              "figure": "northstar.app:list_figure.item_stock_list_on_hand",
+              "reference": "northstar.app:field.posted_stock_balance_location_id"
+            },
+            {
+              "figure": "northstar.app:list_figure.item_stock_list_usable",
+              "reference": "northstar.app:field.posted_stock_balance_location_id"
+            },
+            {
+              "figure": "northstar.app:list_figure.item_stock_list_reserved",
+              "reference": "northstar.app:field.reservation_location_id"
+            },
+            {
+              "figure": "northstar.app:list_figure.item_stock_list_reserved_usable",
+              "reference": "northstar.app:field.reservation_location_id"
+            }
+          ],
+          "selectorId": "northstar.app:list_selector.item_stock_list_warehouse",
+          "label": "Warehouse",
+          "query": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.location_list"
+          },
+          "choices": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.location_warehouse_list"
+          },
+          "labelField": "northstar.app:field.location_name",
+          "relation": "northstar.app:relation.location_parent",
+          "rootFilter": {
+            "field": "northstar.app:field.location_type",
+            "value": "northstar.app:option.warehouse"
+          }
         }
       }
     },
@@ -60156,6 +60553,44 @@
               }
             }
           ]
+        },
+        "hierarchyScope": {
+          "figures": [
+            {
+              "figure": "northstar.app:list_figure.item_buying_list_on_hand",
+              "reference": "northstar.app:field.posted_stock_balance_location_id"
+            },
+            {
+              "figure": "northstar.app:list_figure.item_buying_list_usable",
+              "reference": "northstar.app:field.posted_stock_balance_location_id"
+            },
+            {
+              "figure": "northstar.app:list_figure.item_buying_list_reserved",
+              "reference": "northstar.app:field.reservation_location_id"
+            },
+            {
+              "figure": "northstar.app:list_figure.item_buying_list_reserved_usable",
+              "reference": "northstar.app:field.reservation_location_id"
+            }
+          ],
+          "selectorId": "northstar.app:list_selector.item_buying_list_warehouse",
+          "label": "Warehouse",
+          "query": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.location_list"
+          },
+          "choices": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.location_warehouse_list"
+          },
+          "labelField": "northstar.app:field.location_name",
+          "relation": "northstar.app:relation.location_parent",
+          "rootFilter": {
+            "field": "northstar.app:field.location_type",
+            "value": "northstar.app:option.warehouse"
+          }
         }
       }
     }

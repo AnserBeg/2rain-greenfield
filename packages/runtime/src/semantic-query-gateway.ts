@@ -47,6 +47,7 @@ import {
   requireSharedListResult,
   SharedListContractError,
   type AuthorizedSharedListFigures,
+  type AuthorizedSharedListHierarchy,
   type AuthorizedSharedListProgress,
   type AuthorizedSharedListRelatedFilter,
   type AuthorizedSharedListReferenceLabel,
@@ -957,6 +958,9 @@ async function authorizeSharedListProjection(
         sum.rows.matchFieldId,
         ...(sum.rows.quantityFieldId ? [sum.rows.quantityFieldId] : []),
         ...(sum.within ? referenced(sum.within) : []),
+        ...(query.hierarchy?.figures
+          ?.filter((entry) => entry.figureId === sum.figureId)
+          .map((entry) => entry.referenceFieldId) ?? []),
       ]);
       if (sum.within)
         use(sum.within.queryId, [sum.within.fieldId], sum.within.relationId);
@@ -1027,6 +1031,60 @@ async function authorizeSharedListProjection(
       figures: query.figures,
     });
   }
+  let hierarchy: AuthorizedSharedListHierarchy | undefined;
+  if (query.hierarchy) {
+    const declared = registeredQueryFromPinnedView(
+      view,
+      query.hierarchy.queryId,
+    );
+    if (
+      !declared ||
+      declared.lifecycle !== 'active' ||
+      declared.tier !== 'q0' ||
+      declared.queryType !== 'list' ||
+      declared.readModel ||
+      declared.legalEntityScope ||
+      declared.filter.kind !== 'booleanPredicate' ||
+      declared.filter.value !== true ||
+      !declared.selections.some(
+        (entry) => entry.fieldId === query.hierarchy!.rootFilter.fieldId,
+      ) ||
+      (query.hierarchy.rows &&
+        declared.sourceEntityId !== sourceDefinition.sourceEntityId) ||
+      (query.hierarchy.figures ?? []).some(
+        (entry) =>
+          !query.figures?.sums.some((sum) => sum.figureId === entry.figureId),
+      )
+    )
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        'hierarchy must read an active unfiltered list and declared sums',
+        query.hierarchy.queryId,
+      );
+    const decision = await authorizeCurrentPolicy(
+      currentPolicy,
+      view,
+      declared.permissionId,
+      Object.freeze({
+        arguments: Object.freeze({
+          relationId: query.hierarchy.relationId,
+          rootId: query.hierarchy.rootId,
+        }),
+        kind: 'registeredSemanticListRelationPolicyInput',
+        queryId: declared.queryId,
+        requestId: view.requestId,
+        schemaVersion: QUERY_POLICY_INPUT_VERSION,
+      }),
+    );
+    if (decision.decision === 'DENY') {
+      await recordDenied(declared.queryId, decision.policyVersion);
+      throw new SemanticQueryPolicyDeniedError(declared.queryId, view);
+    }
+    hierarchy = Object.freeze({
+      ...query.hierarchy,
+      entityId: declared.sourceEntityId,
+    });
+  }
   const relationLabels = [];
   for (const relation of query.relationLabels) {
     const targetDefinition = registeredQueryFromPinnedView(
@@ -1040,7 +1098,11 @@ async function authorizeSharedListProjection(
       targetDefinition.queryType !== 'list' ||
       !targetDefinition.selections.some(
         (selection) => selection.fieldId === relation.fieldId,
-      )
+      ) ||
+      (relation.ancestor !== undefined &&
+        !targetDefinition.selections.some(
+          (selection) => selection.fieldId === relation.ancestor!.fieldId,
+        ))
     ) {
       throw new SharedListContractError(
         'LIST_FIELD_NOT_AUTHORIZED',
@@ -1203,6 +1265,7 @@ async function authorizeSharedListProjection(
     ...(relatedFilter ? { relatedFilter } : {}),
     ...(progress ? { progress } : {}),
     ...(figures ? { figures } : {}),
+    ...(hierarchy ? { hierarchy } : {}),
   });
 }
 

@@ -1411,6 +1411,90 @@ async function seed(
         observed: true,
       };
     }
+    if (phase === 'locations-2') {
+      assert.equal(
+        (
+          await invoke('item_update', {
+            recordId: item,
+            expectedRevision: Number(
+              (await stored('item')).find((row) => row.record_id === item)!
+                .revision,
+            ),
+            patch: {
+              [`${ns}:field.item_reorder_point`]: '10',
+              [`${ns}:field.item_reorder_up_to`]: '20',
+            },
+          })
+        ).outcome,
+        'succeeded',
+      );
+      const second = await create(
+        'location',
+        {
+          code: 'L2-SECOND',
+          name: 'Second warehouse',
+          type: `${ns}:option.warehouse`,
+        },
+        {},
+        false,
+      );
+      const bin = await create(
+        'location',
+        {
+          code: 'L2-BIN',
+          name: 'Movable bin',
+          type: `${ns}:option.location_type_storage`,
+        },
+        { parent: location },
+        false,
+      );
+      const nested = await create(
+        'location',
+        {
+          code: 'L2-NESTED',
+          name: 'Nested bin',
+          type: `${ns}:option.location_type_storage`,
+        },
+        { parent: bin.recordId },
+        false,
+      );
+      const transfer = await stockDocument({
+        effective_at: new Date().toISOString(),
+        reason_code: 'L2-SETUP',
+        reason_narrative: 'Stock held in a nested bin',
+        type: `${ns}:option.inventory_transaction_type_transfer`,
+      });
+      await create(
+        'inventory_transaction_line',
+        {
+          from_location_id: location,
+          to_location_id: nested.recordId,
+          item_id: item,
+          line_number: '1',
+          quantity: '4',
+          unit_id: 'EA',
+        },
+        { transaction: transfer.recordId },
+      );
+      assert.equal(
+        (
+          await invoke('inventory_transaction_post', {
+            recordId: transfer.recordId,
+            expectedRevision: transfer.revision,
+          })
+        ).outcome,
+        'succeeded',
+      );
+      return {
+        phase,
+        notebook: item,
+        warehouse: location,
+        second: second.recordId,
+        bin: bin.recordId,
+        nested: nested.recordId,
+        observed: true,
+      };
+    }
     if (phase === 'locations') {
       // LOCATIONS: Field notebook's opening 10 at CAL-WH. A Quality hold
       // location of the quarantine type is created -- usable, its declared
@@ -1436,7 +1520,7 @@ async function seed(
         {},
         false,
       );
-      const quarantined = await invoke('location_update', {
+      const quarantined = await invoke('location_update_status', {
         recordId: hold.recordId,
         expectedRevision: hold.revision,
         patch: {

@@ -4,6 +4,7 @@ import {
 } from './surface-composition.js';
 import { validateSurfaceLists } from './surface-list.js';
 import { validateFieldNumbering } from './field-numbering.js';
+import { validateOperationWrites } from './operation-writes.js';
 import { validateSurfaceWorkspaces } from './surface-workspace.js';
 import { ZodError } from 'zod';
 
@@ -156,6 +157,7 @@ export function parseNormalizedApplicationPackageJson(
   validateSurfaceWorkspaces(normalized);
   validateSurfaceLists(normalized);
   validateFieldNumbering(normalized);
+  validateOperationWrites(normalized);
   enforceValueBounds(normalized);
   validateNormalizedDerivation(normalized);
   return deepFreeze(normalized);
@@ -472,6 +474,7 @@ export function normalizeApplicationPackage(
   validateSurfaceWorkspaces(normalized);
   validateSurfaceLists(normalized);
   validateFieldNumbering(normalized);
+  validateOperationWrites(normalized);
   enforceValueBounds(normalized);
   const normalizedBytes = new TextEncoder().encode(canonicalize(normalized));
   if (

@@ -822,7 +822,17 @@ const compositionInput = z.strictObject({
    * order's receiving location. Optional v6 key (ADR-0047 §7).
    */
   defaultFrom: z
-    .strictObject({ source: z.literal('record'), field: z.string().min(1) })
+    .strictObject({
+      source: z.literal('record'),
+      field: z.string().min(1),
+      fallback: z
+        .strictObject({
+          column: compositionTaskColumn,
+          field: CanonicalIdSchema,
+          selection: z.enum(['selected', 'common']),
+        })
+        .optional(),
+    })
     .optional(),
   /**
    * Asked once for each row of the Task's declared `rows`, such as the
@@ -1362,6 +1372,14 @@ const listColumn = z.strictObject({
     .strictObject({
       query: compositionReference('queryReference'),
       labelField: compositionReference('fieldReference'),
+      /** The column names a relation rather than a text field holding an id. */
+      relation: z.literal(true).optional(),
+      ancestor: z
+        .strictObject({
+          field: CanonicalIdSchema,
+          values: z.array(z.string().min(1).max(240)).min(1).max(8),
+        })
+        .optional(),
     })
     .optional(),
   statusRoles: z
@@ -1635,6 +1653,31 @@ export const SurfaceListSchema = z.strictObject({
   progress: listProgress.optional(),
   rowActions: z.array(listRowAction).min(1).max(3).optional(),
   figures: listFigures.optional(),
+  hierarchyScope: z
+    .strictObject({
+      selectorId: CanonicalIdSchema,
+      label: LabelSchema,
+      query: compositionReference('queryReference'),
+      choices: compositionReference('queryReference'),
+      labelField: CanonicalIdSchema,
+      relation: CanonicalIdSchema,
+      rootFilter: z.strictObject({
+        field: CanonicalIdSchema,
+        value: z.string().min(1).max(240),
+      }),
+      rows: z.literal(true).optional(),
+      figures: z
+        .array(
+          z.strictObject({
+            figure: CanonicalIdSchema,
+            reference: CanonicalIdSchema,
+          }),
+        )
+        .min(1)
+        .max(8)
+        .optional(),
+    })
+    .optional(),
 });
 export type SurfaceList = z.infer<typeof SurfaceListSchema>;
 export type SurfaceListProgress = NonNullable<SurfaceList['progress']>;
@@ -2164,11 +2207,39 @@ export type FieldNumbering = z.infer<typeof FieldNumberingSchema>;
  * the renderer derives a label from the id as before.
  */
 const operationLabel = LabelSchema.optional();
+/** Explicit operation inputs; absence retains the entity's ordinary writable fields. */
+const operationFieldWrites = z
+  .array(
+    z.strictObject({
+      field: CanonicalReferenceSchema,
+      required: z.boolean(),
+      nonBlank: z.boolean().optional(),
+    }),
+  )
+  .min(1)
+  .max(100)
+  .optional();
+const operationRelationWrites = z
+  .array(
+    z.strictObject({
+      relation: CanonicalIdSchema,
+      acyclic: z.literal(true).optional(),
+    }),
+  )
+  .min(1)
+  .max(100)
+  .optional();
 const normalizedV6OperationDefinition = normalizedV3OperationDefinition.extend({
   label: operationLabel,
+  fieldWrites: operationFieldWrites,
+  presentation: z.literal('taskOnly').optional(),
+  relationWrites: operationRelationWrites,
 });
 const authoredV6OperationDefinition = authoredV3OperationDefinition.extend({
   label: operationLabel,
+  fieldWrites: operationFieldWrites,
+  presentation: z.literal('taskOnly').optional(),
+  relationWrites: operationRelationWrites,
 });
 const normalizedV6FieldDefinition = normalizedV3FieldDefinition.extend({
   numbering: FieldNumberingSchema.optional(),

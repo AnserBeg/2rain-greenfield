@@ -7174,6 +7174,33 @@ test('Milestone C: receiving inputs are derived, offered and exact, never free t
       `<select name="${input('location')}" required><option value="">Select…</option><option value="${location}" selected>Calgary warehouse</option><option value="${otherLocation}" >Edmonton yard</option></select>`,
     ),
   );
+  // LOCATIONS-2: no Receive into uses the selected item's preferred location;
+  // an explicit order location above wins even when the item prefers another.
+  const priorOrder = f.executor.rows.get(order)!;
+  const priorItem = f.executor.rows.get(f.item)!;
+  f.executor.rows.set(order, {
+    ...priorOrder,
+    values: {
+      ...priorOrder.values,
+      [`${ns}:field.purchase_order_receiving_location_id`]: null,
+    },
+  });
+  f.executor.rows.set(f.item, {
+    ...priorItem,
+    values: {
+      ...priorItem.values,
+      [`${ns}:field.item_preferred_location_id`]: otherLocation,
+    },
+  });
+  const fallback = await submit({});
+  assert.match(
+    fallback.html,
+    new RegExp(
+      `<option value="${otherLocation}" selected>Edmonton yard</option>`,
+    ),
+  );
+  f.executor.rows.set(order, priorOrder);
+  f.executor.rows.set(f.item, priorItem);
   assert.match(
     entry.html,
     new RegExp(
@@ -9938,6 +9965,77 @@ test('ORDER-PARITY: a truck receipt receives several lines in one receipt, fille
   const token = hiddenValue(start.html, 'taskToken');
   // Every line with something to arrive, and the one whose figure is withheld.
   assert.deepEqual(taskRowIds(start.html), [lineA, lineC, lineD]);
+  // With no order location, the offered lines agree on their item's preference.
+  // A closed line is outside this Task and cannot change its default.
+  const priorOrder = f.executor.rows.get(order)!;
+  const priorItem = f.executor.rows.get(f.item)!;
+  const priorClosed = f.executor.rows.get(lineB!)!;
+  const priorOpen = f.executor.rows.get(lineD!)!;
+  const otherLocation = f.executor.seed('location', {
+    [id('field', 'location_name')]: 'Other receiving dock',
+  });
+  const otherItem = f.executor.seed('item', {
+    ...priorItem.values,
+    [id('field', 'item_name')]: 'Other product',
+    [id('field', 'item_preferred_location_id')]: otherLocation,
+  });
+  f.executor.rows.set(order, {
+    ...priorOrder,
+    values: {
+      ...priorOrder.values,
+      [id('field', 'purchase_order_receiving_location_id')]: null,
+    },
+  });
+  f.executor.rows.set(f.item, {
+    ...priorItem,
+    values: {
+      ...priorItem.values,
+      [id('field', 'item_preferred_location_id')]: location,
+    },
+  });
+  f.executor.rows.set(lineB!, {
+    ...priorClosed,
+    values: {
+      ...priorClosed.values,
+      [id('field', 'purchase_order_line_item_id')]: otherItem,
+    },
+  });
+  const preferred = await submitSurfaceRuntimeIntent(
+    f.view,
+    path,
+    { compositionAction: action },
+    gateways,
+  );
+  const locationOptions = (html: string) => {
+    const options = new RegExp(
+      `<select name="${regexpText(id('input', 'receive_lines_location'))}"[^>]*>([\\s\\S]*?)</select>`,
+      'u',
+    ).exec(html)?.[1];
+    assert.ok(options);
+    return options;
+  };
+  assert.match(
+    locationOptions(preferred.html),
+    new RegExp(`value="${location}" selected`, 'u'),
+  );
+  f.executor.rows.set(lineD!, {
+    ...priorOpen,
+    values: {
+      ...priorOpen.values,
+      [id('field', 'purchase_order_line_item_id')]: otherItem,
+    },
+  });
+  const conflicting = await submitSurfaceRuntimeIntent(
+    f.view,
+    path,
+    { compositionAction: action },
+    gateways,
+  );
+  assert.doesNotMatch(locationOptions(conflicting.html), / selected/u);
+  f.executor.rows.set(order, priorOrder);
+  f.executor.rows.set(f.item, priorItem);
+  f.executor.rows.set(lineB!, priorClosed);
+  f.executor.rows.set(lineD!, priorOpen);
   const quantity = (line: string) =>
     `${id('input', 'receive_lines_quantity')}@${line}`;
   const cost = (line: string) => `${id('input', 'receive_lines_cost')}@${line}`;
@@ -12785,7 +12883,7 @@ test('LOCATIONS: a location changes its status with a reason in one update, its 
   const [update] = f.executor.calls;
   assert.equal(
     update!.definition.operationId,
-    id('operation', 'location_update'),
+    id('operation', 'location_update_status'),
   );
   const changed = asRecord(update!.input);
   assert.equal(changed.recordId, main);
@@ -12953,12 +13051,12 @@ test('LOCATIONS slice 2: a location names the location it is inside, its contain
   assert.match(picker, /<option value="">None<\/option>/u);
   for (const recordId of [warehouse, bin])
     assert.match(picker, new RegExp(`<option value="${recordId}">`, 'u'));
-  // An existing location's form states the parent is locked.
+  // An existing location changes its parent through the declared Move Task.
   const editing = await renderSurfaceRuntimeWithData(
     f.view,
     `/?${new URLSearchParams({ surface: id('surface', 'location_form'), record: bin }).toString()}`,
     f.gateways,
   );
-  assert.match(editing.html, /Locked after creation/u);
+  assert.match(editing.html, /Relation changes/u);
   assert.doesNotMatch(editing.html, /name="relation:/u);
 });

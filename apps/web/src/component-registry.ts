@@ -11,7 +11,10 @@ import {
 import { randomUUID } from 'node:crypto';
 
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
-import { evaluateRegisteredOperationPrecondition } from '../../../packages/runtime/src/semantic-operation-gateway.js';
+import {
+  evaluateRegisteredOperationPrecondition,
+  parsePinnedOperationCatalog,
+} from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   registeredSemanticQueryFromPinnedView,
   type SemanticAggregateResultEnvelope,
@@ -1256,7 +1259,16 @@ function renderRelationFreeze(
   relations: readonly CompiledSurfaceRelationInput[],
 ): string {
   if (relations.length === 0) return '';
-  return `<aside class="relation-freeze" data-relation-freeze role="note"><h3>Locked after creation</h3><ul>${relations.map((relation) => `<li data-relation-id="${escapeHtml(relation.relationId)}"><strong>${escapeHtml(fieldLabel(relation.relationId, surfaceEntityId(context)))}</strong> is chosen when this record is created and cannot be changed later.</li>`).join('')}</ul></aside>`;
+  const mutable = new Set(
+    parsePinnedOperationCatalog(context.view.projections.operation.payload)
+      .find(
+        (entry) =>
+          entry.operationId ===
+          operationForIntent(context, 'update')?.operationId,
+      )
+      ?.inputContract?.relationInputs.map((entry) => entry.relationId) ?? [],
+  );
+  return `<aside class="relation-freeze" data-relation-freeze role="note"><h3>${mutable.size ? 'Relation changes' : 'Locked after creation'}</h3><ul>${relations.map((relation) => `<li data-relation-id="${escapeHtml(relation.relationId)}"><strong>${escapeHtml(fieldLabel(relation.relationId, surfaceEntityId(context)))}</strong> ${mutable.has(relation.relationId) ? 'changes through its declared Task on the record page.' : 'is chosen when this record is created and cannot be changed later.'}</li>`).join('')}</ul></aside>`;
 }
 
 function renderReleaseSummary({
@@ -2439,7 +2451,9 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
     coverage.returnedCount === 0 ? 0 : coverage.pageOffset + 1;
   const lastVisible = coverage.pageOffset + coverage.returnedCount;
   const narrowed =
-    state.search.length > 0 || Object.keys(state.filterValues).length > 0;
+    state.search.length > 0 ||
+    Object.keys(state.filterValues).length > 0 ||
+    !!state.hierarchyRootId;
   const formHidden = [
     ...declaredListParameters(state, base, { page: 1 }).entries(),
   ]
@@ -2449,6 +2463,7 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
         name !== 'page' &&
         name !== 'sort' &&
         name !== 'dir' &&
+        name !== list.hierarchyScope?.selectorId &&
         !list.filters.some((filter) => filter.filterId === name),
     )
     .map(
@@ -2471,6 +2486,9 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
           .join('')}</select></div>`,
     )
     .join('');
+  const hierarchyControl = list.hierarchyScope
+    ? `<div class="form-field"><label for="${controlId('hierarchy')}">${escapeHtml(list.hierarchyScope.label)}</label><select id="${controlId('hierarchy')}" name="${escapeHtml(list.hierarchyScope.selectorId)}"><option value="">All</option>${(state.hierarchyChoices ?? []).map((choice) => `<option value="${escapeHtml(choice.recordId)}"${state.hierarchyRootId === choice.recordId ? ' selected' : ''}>${escapeHtml(choice.label)}</option>`).join('')}</select></div>`
+    : '';
   const sortable = orderedColumns(list).filter((column) => column.sortable);
   const current = state.sort[0];
   const sortControls =
@@ -2484,8 +2502,8 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
             '',
           )}</select></div><div class="form-field"><label for="${controlId('dir')}">Order</label><select id="${controlId('dir')}" name="dir"><option value="asc"${current?.direction === 'descending' ? '' : ' selected'}>Ascending</option><option value="desc"${current?.direction === 'descending' ? ' selected' : ''}>Descending</option></select></div>`
       : '';
-  const clearHref = `/?${declaredListParameters(state, base, { filterValues: {}, page: 1, search: '' }).toString()}`;
-  const controls = `<form class="list-controls" data-list-search method="get" action="/">${formHidden}<div class="form-field list-controls__search"><label><span>Search ${escapeHtml(input.recordLabel.toLowerCase())}</span><input type="search" name="q" value="${escapeHtml(state.search)}" maxlength="240" autocomplete="off"></label></div>${filterControls}${sortControls}<div class="list-controls__actions"><button type="submit">Apply</button>${narrowed ? `<a class="secondary-action" href="${escapeHtml(clearHref)}">Clear</a>` : ''}</div></form>`;
+  const clearHref = `/?${declaredListParameters(state, base, { filterValues: {}, hierarchyRootId: '', page: 1, search: '' }).toString()}`;
+  const controls = `<form class="list-controls" data-list-search method="get" action="/">${formHidden}<div class="form-field list-controls__search"><label><span>Search ${escapeHtml(input.recordLabel.toLowerCase())}</span><input type="search" name="q" value="${escapeHtml(state.search)}" maxlength="240" autocomplete="off"></label></div>${filterControls}${hierarchyControl}${sortControls}<div class="list-controls__actions"><button type="submit">Apply</button>${narrowed ? `<a class="secondary-action" href="${escapeHtml(clearHref)}">Clear</a>` : ''}</div></form>`;
   const sortState = new Map(
     state.sort.map((sort) => [sort.columnId, sort.direction]),
   );

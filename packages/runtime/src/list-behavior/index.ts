@@ -1,3 +1,12 @@
+import {
+  parseSharedListHierarchy,
+  type SharedListHierarchy,
+  type AuthorizedSharedListHierarchy,
+} from './hierarchy.js';
+export type {
+  SharedListHierarchy,
+  AuthorizedSharedListHierarchy,
+} from './hierarchy.js';
 import { canonicalize } from '@north-star/canonical-model';
 
 import type { ImmutableJsonValue } from '../request-runtime-view.js';
@@ -53,6 +62,10 @@ export interface SharedListSort {
 }
 
 export interface SharedListRelationLabelRequest {
+  readonly ancestor?: {
+    readonly fieldId: string;
+    readonly values: readonly string[];
+  };
   readonly fieldId: string;
   readonly queryId: string;
   readonly relationId: string;
@@ -161,6 +174,7 @@ export interface SharedListQueryRequest {
   readonly progress?: SharedListProgress;
   /** Per-row figures the statement computes before the count and the page. */
   readonly figures?: SharedListFigures;
+  readonly hierarchy?: SharedListHierarchy;
   readonly relatedFilter?: SharedListRelatedFilter;
   readonly relationLabels: readonly SharedListRelationLabelRequest[];
   readonly referenceLabels?: readonly SharedListReferenceLabelRequest[];
@@ -202,6 +216,7 @@ export interface AuthorizedSharedListRequest {
   readonly relatedFilter?: AuthorizedSharedListRelatedFilter;
   readonly progress?: AuthorizedSharedListProgress;
   readonly figures?: AuthorizedSharedListFigures;
+  readonly hierarchy?: AuthorizedSharedListHierarchy;
 }
 
 export interface SharedListCoverage {
@@ -233,6 +248,7 @@ export interface SharedListCoverage {
   readonly progress?: SharedListProgress;
   /** Echoed and REQUIRED to match, as progress is: a band kept is a count. */
   readonly figures?: SharedListFigures;
+  readonly hierarchy?: SharedListHierarchy;
   /** Echoed so an executor that paged an export instead is observable. */
   readonly outputMode?: 'export';
   readonly projectedSearchValueCount: number;
@@ -289,6 +305,7 @@ export function parseSharedListArguments(
     progress: progressValue,
     beforeFilters: beforeFiltersValue,
     figures: figuresValue,
+    hierarchy: hierarchyValue,
     ...closedList
   } = list;
   assertExactKeys(closedList, [
@@ -335,6 +352,10 @@ export function parseSharedListArguments(
         })();
   if (parentScope && referenceScope)
     throw malformed('one exact relation scope is allowed');
+  const hierarchy =
+    hierarchyValue === undefined
+      ? undefined
+      : parseSharedListHierarchy(hierarchyValue);
   const progress =
     progressValue === undefined ? undefined : parseProgress(progressValue);
   const figures =
@@ -401,6 +422,7 @@ export function parseSharedListArguments(
     ...(relatedFilter ? { relatedFilter } : {}),
     ...(progress ? { progress } : {}),
     ...(figures ? { figures } : {}),
+    ...(hierarchy ? { hierarchy } : {}),
     ...(beforeFilters ? { beforeFilters } : {}),
     relationLabels,
     ...(referenceLabels ? { referenceLabels } : {}),
@@ -420,6 +442,7 @@ export function parseSharedListArguments(
     ...(relatedFilter ? { relatedFilter } : {}),
     ...(progress ? { progress } : {}),
     ...(figures ? { figures } : {}),
+    ...(hierarchy ? { hierarchy } : {}),
     ...(beforeFilters ? { beforeFilters } : {}),
     relationLabels,
     ...(referenceLabels ? { referenceLabels } : {}),
@@ -534,13 +557,17 @@ export function requireSharedListEcho(
       listCoverage.beforeFilters as ImmutableJsonValue | undefined,
     ) ||
     !same(
+      query.hierarchy as ImmutableJsonValue | undefined,
+      listCoverage.hierarchy as ImmutableJsonValue | undefined,
+    ) ||
+    !same(
       query.figures as ImmutableJsonValue | undefined,
       listCoverage.figures as ImmutableJsonValue | undefined,
     )
   ) {
     throw new SharedListContractError(
       'LIST_RESULT_MALFORMED',
-      'the list result did not apply the requested progress, figures or before filters',
+      'the list result did not apply the requested progress, figures, hierarchy or before filters',
     );
   }
 }
@@ -750,7 +777,23 @@ function parseRelationLabels(
       if (!isRecord(entry)) {
         throw malformed('list relation label entry must be an object');
       }
-      assertExactKeys(entry, ['fieldId', 'queryId', 'relationId']);
+      const { ancestor, ...closed } = entry;
+      assertExactKeys(closed, ['fieldId', 'queryId', 'relationId']);
+      if (ancestor !== undefined) {
+        if (!isRecord(ancestor)) throw malformed('ancestor must be an object');
+        assertExactKeys(ancestor, ['fieldId', 'values']);
+        assertCanonicalId(ancestor.fieldId, 'ancestor fieldId');
+        if (
+          !Array.isArray(ancestor.values) ||
+          !ancestor.values.length ||
+          ancestor.values.length > 8 ||
+          ancestor.values.some(
+            (value) =>
+              typeof value !== 'string' || !value || value.length > 240,
+          )
+        )
+          throw malformed('ancestor values must be exact strings');
+      }
       assertCanonicalId(entry.fieldId, 'list relation label fieldId');
       assertCanonicalId(entry.queryId, 'list relation label queryId');
       assertCanonicalId(entry.relationId, 'list relation label relationId');
@@ -762,6 +805,14 @@ function parseRelationLabels(
         fieldId: entry.fieldId,
         queryId: entry.queryId,
         relationId: entry.relationId,
+        ...(isRecord(ancestor)
+          ? {
+              ancestor: {
+                fieldId: ancestor.fieldId as string,
+                values: ancestor.values as string[],
+              },
+            }
+          : {}),
       });
     }),
   );

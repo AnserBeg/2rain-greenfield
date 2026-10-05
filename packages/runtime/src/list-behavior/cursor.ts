@@ -99,6 +99,7 @@ export function sharedListBindingDigest(
     | 'relatedFilter'
     | 'progress'
     | 'figures'
+    | 'hierarchy'
     | 'beforeFilters'
     | 'relationLabels'
     | 'referenceLabels'
@@ -122,6 +123,7 @@ export function sharedListBindingDigest(
     ...(query.progress ? { progress: query.progress } : {}),
     // A window over items short of stock is not a window over all of them.
     ...(query.figures ? { figures: query.figures } : {}),
+    ...(query.hierarchy ? { hierarchy: query.hierarchy } : {}),
     ...(query.beforeFilters ? { beforeFilters: query.beforeFilters } : {}),
     queryId,
     relationLabels: query.relationLabels,

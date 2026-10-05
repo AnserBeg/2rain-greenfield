@@ -368,6 +368,7 @@ export class PostgresModuleRuntimeInterpreter
               client,
               request,
               currentEntity,
+              currentStorage,
               input,
             );
             const ids = {
@@ -537,6 +538,7 @@ async function prepareMutation(
   client: PoolClient,
   request: SemanticOperationExecutionRequest,
   entity: StorageEntity,
+  storage: StorageTargetPayloadV1,
   input: MutationInput,
 ): Promise<MutationPreparation> {
   const kind = request.definition.effect.kind;
@@ -555,7 +557,27 @@ async function prepareMutation(
       recordId: input.recordId,
     };
   }
-  const prior = await loadRawRecord(client, entity, input.recordId, true, []);
+  await enforceRelationUpdateGraph(
+    client,
+    storage,
+    entity,
+    request.definition.inputContract,
+    input,
+  );
+  const prior = await loadRawRecord(
+    client,
+    entity,
+    input.recordId,
+    true,
+    [],
+    relationTargetPlans(
+      storage,
+      entity,
+      Object.keys(input.relations).length
+        ? Object.keys(input.relations)
+        : undefined,
+    ),
+  );
   if (!prior) {
     throw failure('MODULE_RECORD_NOT_FOUND', 'module record was not found');
   }
@@ -580,7 +602,12 @@ async function prepareMutation(
   }
   const changes =
     kind === 'updateRecordEffect'
-      ? updateChanges(request.definition.inputContract, prior, input.patch)
+      ? updateChanges(
+          request.definition.inputContract,
+          prior,
+          input.patch,
+          input.relations,
+        )
       : // A transition's change document records the state move, not an
         // archive flip. The old and new states are both compiled, so the
         // document cannot disagree with what the UPDATE pinned.
@@ -608,6 +635,80 @@ async function prepareMutation(
     projectedRevision: prior.revision + 1,
     recordId: input.recordId,
   };
+}
+
+/** Serialize structural updates before source row locks, then check their projected graph. */
+async function enforceRelationUpdateGraph(
+  client: PoolClient,
+  storage: StorageTargetPayloadV1,
+  entity: StorageEntity,
+  contract: RegisteredOperationInputContract | undefined,
+  input: MutationInput,
+): Promise<void> {
+  if (!Object.keys(input.relations).length) return;
+  if (!contract?.relationUpdates)
+    throw failure(
+      'MODULE_RELATION_UNSUPPORTED',
+      'relations are create-only without an update contract',
+    );
+  const guarded = Object.keys(input.relations)
+    .sort()
+    .flatMap((relationId) => {
+      const policy = contract.relationInputs.find(
+        (entry) => entry.relationId === relationId,
+      );
+      const relation = storage.relations.find(
+        (entry) =>
+          entry.relationId === relationId &&
+          entry.sourceEntityId === entity.entityId,
+      );
+      if (!policy || !relation || relation.relationColumn.origin === 'field')
+        throw failure(
+          'MODULE_RELATION_UNSUPPORTED',
+          'unknown writable relation',
+          relationId,
+        );
+      if (!policy.acyclic) return [];
+      if (relation.targetEntityId !== entity.entityId)
+        throw failure(
+          'MODULE_SEMANTIC_CONTRACT_UNSUPPORTED',
+          'acyclic relation must target its source entity',
+          relationId,
+        );
+      return [{ relation, parentId: input.relations[relationId]! }];
+    });
+  for (const { relation } of guarded) {
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended(
+      'northstar.relation.graph:' || north_star_internal.trusted_tenant_id()::text || ':' ||
+      north_star_internal.trusted_environment_id()::text || ':' || $1, 0))`,
+      [relation.relationId],
+    );
+  }
+  for (const { relation, parentId } of guarded) {
+    const record = quoted(entity.recordIdentity.column);
+    const parent = quoted(relation.relationColumn.physicalName);
+    const result = await client.query<{ cycle: boolean }>(
+      `WITH RECURSIVE ancestors(id, parent_id, path, cycle) AS (
+      SELECT ${record}, ${parent}, ARRAY[${record}], false
+        FROM north_star_module.${quoted(entity.physicalTableName)}
+       WHERE tenant_id = north_star_internal.trusted_tenant_id()
+         AND environment_id = north_star_internal.trusted_environment_id() AND ${record} = $1
+      UNION ALL
+      SELECT p.${record}, p.${parent}, a.path || p.${record}, p.${record} = ANY(a.path)
+        FROM ancestors a JOIN north_star_module.${quoted(entity.physicalTableName)} p ON p.${record} = a.parent_id
+       WHERE p.tenant_id = north_star_internal.trusted_tenant_id()
+         AND p.environment_id = north_star_internal.trusted_environment_id() AND NOT a.cycle
+    ) SELECT EXISTS(SELECT 1 FROM ancestors WHERE id = $2 OR cycle) AS cycle`,
+      [parentId, input.recordId],
+    );
+    if (result.rows[0]?.cycle)
+      throw failure(
+        'MODULE_RELATION_CYCLE',
+        'the proposed parent would create a relation cycle',
+        relation.relationId,
+      );
+  }
 }
 
 /**
@@ -721,7 +822,7 @@ async function executeMutationOnClient(
         input.recordId,
         request.parentGuards,
       );
-      await updateRecord(client, entity, input);
+      await updateRecord(client, storage, entity, input, request.parentGuards);
       break;
     case 'archiveRecordEffect':
       await requireExistingParentGuards(
@@ -1062,10 +1163,15 @@ async function requireRelationTarget(
 
 async function updateRecord(
   client: PoolClient,
+  storage: StorageTargetPayloadV1,
   entity: StorageEntity,
   input: MutationInput,
+  parentGuards: readonly SemanticOperationParentGuard[],
 ): Promise<void> {
-  if (Object.keys(input.patch).length === 0) {
+  if (
+    Object.keys(input.patch).length === 0 &&
+    Object.keys(input.relations).length === 0
+  ) {
     throw failure('MODULE_PATCH_EMPTY', 'update patch must not be empty');
   }
   const knownFields = new Map(
@@ -1087,6 +1193,32 @@ async function updateRecord(
       }
       return `${quoted(column.physicalName)} = ${parameter(values, databaseValue(value))}`;
     });
+  for (const [relationId, recordId] of Object.entries(input.relations).sort(
+    compareEntry,
+  )) {
+    const relation = storage.relations.find(
+      (entry) =>
+        entry.relationId === relationId &&
+        entry.sourceEntityId === entity.entityId &&
+        entry.relationColumn.origin !== 'field',
+    );
+    if (!relation)
+      throw failure(
+        'MODULE_RELATION_UNSUPPORTED',
+        'unknown writable relation',
+        relationId,
+      );
+    await requireRelationTarget(
+      client,
+      storage,
+      relation,
+      recordId,
+      parentGuards,
+    );
+    assignments.push(
+      `${quoted(relation.relationColumn.physicalName)} = ${parameter(values, recordId)}`,
+    );
+  }
   assignments.push(
     `${quoted(entity.optimisticRevision.column)} = ${quoted(entity.optimisticRevision.column)} + 1`,
   );
@@ -1290,6 +1422,22 @@ async function executeQueryOnClient(
     definition.queryType === 'list' && list
       ? listFiguresPlan(storage, entity, list)
       : null;
+  const hierarchyPlan =
+    definition.queryType === 'list' && list
+      ? listHierarchyPlan(storage, list)
+      : null;
+  if (hierarchyPlan) {
+    const available = await client.query(
+      `SELECT 1 FROM north_star_module.${quoted(hierarchyPlan.entity.physicalTableName)} WHERE tenant_id = north_star_internal.trusted_tenant_id() AND environment_id = north_star_internal.trusted_environment_id() AND ${quoted(hierarchyPlan.entity.recordIdentity.column)} = $1::uuid AND ${quoted(hierarchyPlan.entity.archive.archivedAtColumn)} IS NULL AND ${quoted(hierarchyPlan.rootColumn)}::text = $2`,
+      [hierarchyPlan.rootId, hierarchyPlan.rootValue],
+    );
+    if (available.rowCount !== 1)
+      throw failure(
+        'MODULE_LIST_HIERARCHY_ROOT_UNAVAILABLE',
+        'the selected hierarchy root is unavailable',
+        hierarchyPlan.rootId,
+      );
+  }
   const readScope = await verifyLegalEntityReadScope(
     client,
     storage,
@@ -1366,6 +1514,7 @@ async function executeQueryOnClient(
           relatedFilterPlan(storage, entity, list),
           progressPlan,
           figuresPlan,
+          hierarchyPlan,
         );
       }
       const limit = boundedLimit(args.limit, definition.maximumResultCount);
@@ -2203,6 +2352,11 @@ async function listRecords(
 }
 
 interface ListRelationPlan {
+  readonly ancestor?: {
+    readonly parentColumn: string;
+    readonly filterColumn: string;
+    readonly values: readonly string[];
+  };
   readonly labelColumn: StorageEntity['columns'][number];
   readonly labelAlias: string;
   /** The relation id or reference id the label is reported and sorted under. */
@@ -2485,10 +2639,81 @@ type FigureOperandPlan =
 type FigureThresholdPlan =
   { readonly column: string } | { readonly value: string };
 
+interface ListHierarchyPlan {
+  readonly entity: StorageEntity;
+  readonly parentColumn: string;
+  readonly rootId: string;
+  readonly rootColumn: string;
+  readonly rootValue: string;
+}
+function listHierarchyPlan(
+  storage: StorageTargetPayloadV1,
+  list: AuthorizedSharedListRequest,
+): ListHierarchyPlan | null {
+  if (!list.query.hierarchy) return null;
+  const scope = list.hierarchy;
+  if (!scope)
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      'hierarchy reached executor without authorization',
+    );
+  const entity = requiredEntity(storage, scope.entityId);
+  const relation = storage.relations.find(
+    (entry) =>
+      entry.relationId === scope.relationId &&
+      entry.sourceEntityId === scope.entityId &&
+      entry.targetEntityId === scope.entityId &&
+      entry.ownership === 'reference',
+  );
+  const rootColumn = entity.columns.find(
+    (entry) => entry.canonicalFieldId === scope.rootFilter.fieldId,
+  );
+  if (
+    !relation ||
+    relation.relationColumn.origin === 'field' ||
+    !rootColumn ||
+    legalEntityReadScopeRequirement(entity)
+  )
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      'hierarchy must use a shared self reference and a compiled root field',
+      scope.relationId,
+    );
+  return Object.freeze({
+    entity,
+    parentColumn: relation.relationColumn.physicalName,
+    rootId: scope.rootId,
+    rootColumn: rootColumn.physicalName,
+    rootValue: scope.rootFilter.value,
+  });
+}
+/** UNION deduplicates ids, so old cyclic data terminates without a guessed depth bound. */
+function hierarchyMembersSql(
+  plan: ListHierarchyPlan,
+  _anchorAlias: string,
+  values: unknown[],
+): string {
+  const table = `north_star_module.${quoted(plan.entity.physicalTableName)}`;
+  const record = quoted(plan.entity.recordIdentity.column);
+  const parent = quoted(plan.parentColumn);
+  const active = quoted(plan.entity.archive.archivedAtColumn);
+  return `WITH RECURSIVE members(id) AS (
+    SELECT root.${record} FROM ${table} root
+     WHERE root.tenant_id = north_star_internal.trusted_tenant_id() AND root.environment_id = north_star_internal.trusted_environment_id()
+       AND root.${record} = ${parameter(values, plan.rootId)}::uuid AND root.${quoted(plan.rootColumn)}::text = ${parameter(values, plan.rootValue)} AND root.${active} IS NULL
+    UNION
+    SELECT child.${record} FROM ${table} child JOIN members m ON child.${parent} = m.id
+     WHERE child.tenant_id = north_star_internal.trusted_tenant_id() AND child.environment_id = north_star_internal.trusted_environment_id() AND child.${active} IS NULL
+  ) SELECT id::text FROM members`;
+}
 interface ListFiguresPlan {
   readonly sums: readonly {
     readonly figureId: string;
     readonly rows: FigureRowsPlan;
+    readonly hierarchy: {
+      readonly plan: ListHierarchyPlan;
+      readonly referenceColumn: string;
+    } | null;
     readonly within: FigureWithinPlan | null;
     readonly related: FigureRelatedPlan | null;
     readonly sum: 'related' | 'remaining' | 'rows';
@@ -2714,6 +2939,23 @@ function listFiguresPlan(
     return Object.freeze({
       figureId: sum.figureId,
       rows,
+      hierarchy: (() => {
+        const scope = list.hierarchy?.figures?.find(
+          (entry) => entry.figureId === sum.figureId,
+        );
+        if (!scope) return null;
+        const plan = listHierarchyPlan(storage, list);
+        const reference = column(
+          rows.entity,
+          scope.referenceFieldId,
+          ['textFieldType'],
+          'hierarchy figures require a compiled reference field',
+        );
+        return plan
+          ? Object.freeze({ plan, referenceColumn: reference.physicalName })
+          : null;
+      })(),
+
       within: sum.within ? withinPlan(rows, sum.within) : null,
       related,
       sum: sum.sum,
@@ -2880,7 +3122,7 @@ function listFiguresFromSql(
           : `greatest(${quantity!} - ${related!}, 0)`;
     return `(SELECT coalesce(sum(${term}), 0)
          FROM north_star_module.${quoted(sum.rows.entity.physicalTableName)} AS ${quoted(rowsAlias)}${sum.within ? parentJoin(sum.within, sum.rows, rowsAlias, parentAlias) : ''}
-        WHERE ${matching(sum.rows, rowsAlias)}) AS ${quoted(`sum_${String(index)}`)}`;
+        WHERE ${matching(sum.rows, rowsAlias)}${sum.hierarchy ? ` AND ${qualified(rowsAlias, sum.hierarchy.referenceColumn)}::text IN (${hierarchyMembersSql(sum.hierarchy.plan, rowsAlias, values)})` : ''}) AS ${quoted(`sum_${String(index)}`)}`;
   });
   const latestColumns = plan.latest.map((figure, index) => {
     const rowsAlias = `table_latest_${String(index)}_rows`;
@@ -3098,6 +3340,7 @@ async function listSharedRecords(
   relatedFilter: ListRelatedFilterPlan | null = null,
   progress: ListProgressPlan | null = null,
   figures: ListFiguresPlan | null = null,
+  hierarchy: ListHierarchyPlan | null = null,
 ): Promise<SemanticQueryResultEnvelope> {
   const sourceAlias = 'table_source';
   const selectedColumns = definition.selections.map((selection) => {
@@ -3173,6 +3416,16 @@ async function listSharedRecords(
         values,
         parentScope.recordId,
       )}::uuid`,
+    );
+  }
+  if (list.query.hierarchy?.rows) {
+    if (!hierarchy || hierarchy.entity.entityId !== entity.entityId)
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        'hierarchy rows require the queried entity',
+      );
+    predicates.push(
+      `${qualified(sourceAlias, entity.recordIdentity.column)}::text IN (${hierarchyMembersSql(hierarchy, sourceAlias, values)})`,
     );
   }
   if (relatedFilter) {
@@ -3301,6 +3554,7 @@ async function listSharedRecords(
       ? { progress: list.query.progress }
       : {}),
     ...(figures && list.query.figures ? { figures: list.query.figures } : {}),
+    ...(list.query.hierarchy ? { hierarchy: list.query.hierarchy } : {}),
     ...(list.query.beforeFilters
       ? { beforeFilters: list.query.beforeFilters }
       : {}),
@@ -3360,6 +3614,32 @@ function listRelationPlan(
     labelAlias: `nsm_table_relation_${String(index)}_label`,
     labelColumn,
     labelId: authorization.relationId,
+    ...(authorization.ancestor
+      ? {
+          ancestor: (() => {
+            const field = target.columns.find(
+              (entry) =>
+                entry.canonicalFieldId === authorization.ancestor!.fieldId,
+            );
+            if (
+              source.entityId !== target.entityId ||
+              !field ||
+              legalEntityReadScopeRequirement(target)
+            )
+              throw new SharedListContractError(
+                'LIST_FIELD_NOT_AUTHORIZED',
+                'ancestor labels require a shared self relation and compiled filter field',
+                authorization.relationId,
+              );
+            return Object.freeze({
+              parentColumn: relation.relationColumn.physicalName,
+              filterColumn: field.physicalName,
+              values: authorization.ancestor.values,
+            });
+          })(),
+        }
+      : {}),
+
     recordAlias: `nsm_table_relation_${String(index)}_record`,
     sourceColumn: relation.relationColumn.physicalName,
     sourceIsText: false,
@@ -3425,9 +3705,24 @@ function listFromSql(
 ): string {
   return [
     `FROM north_star_module.${quoted(entity.physicalTableName)} AS ${quoted(sourceAlias)}`,
-    ...relations.map(
-      (plan) =>
-        `LEFT JOIN north_star_module.${quoted(plan.target.physicalTableName)} AS ${quoted(plan.tableAlias)}
+    ...relations.map((plan) => {
+      if (plan.ancestor) {
+        const table = `north_star_module.${quoted(plan.target.physicalTableName)}`;
+        const id = quoted(plan.target.recordIdentity.column);
+        const parent = quoted(plan.ancestor.parentColumn);
+        return `LEFT JOIN LATERAL (
+          WITH RECURSIVE ancestors AS (
+            SELECT p.*, ARRAY[p.${id}] AS walk_path, 0 AS walk_depth FROM ${table} p
+             WHERE p.tenant_id = ${qualified(sourceAlias, 'tenant_id')} AND p.environment_id = ${qualified(sourceAlias, 'environment_id')}
+               AND p.${id} = ${qualified(sourceAlias, plan.sourceColumn)} AND p.${quoted(plan.target.archive.archivedAtColumn)} IS NULL
+            UNION ALL
+            SELECT p.*, a.walk_path || p.${id}, a.walk_depth + 1 FROM ancestors a JOIN ${table} p ON p.${id} = a.${parent}
+             WHERE p.tenant_id = ${qualified(sourceAlias, 'tenant_id')} AND p.environment_id = ${qualified(sourceAlias, 'environment_id')}
+               AND p.${quoted(plan.target.archive.archivedAtColumn)} IS NULL AND NOT p.${id} = ANY(a.walk_path)
+          ) SELECT * FROM ancestors WHERE ${quoted(plan.ancestor.filterColumn)}::text = ANY(${parameter(values, [...plan.ancestor.values])}::text[]) ORDER BY walk_depth LIMIT 1
+        ) AS ${quoted(plan.tableAlias)} ON true`;
+      }
+      return `LEFT JOIN north_star_module.${quoted(plan.target.physicalTableName)} AS ${quoted(plan.tableAlias)}
            ON ${qualified(plan.tableAlias, 'tenant_id')} = ${qualified(sourceAlias, 'tenant_id')}
           AND ${qualified(plan.tableAlias, 'environment_id')} = ${qualified(sourceAlias, 'environment_id')}
           AND ${qualified(plan.tableAlias, plan.target.recordIdentity.column)}${plan.sourceIsText ? '::text' : ''} = ${qualified(sourceAlias, plan.sourceColumn)}${legalEntityReadScopeJoinConjunction(
@@ -3435,8 +3730,8 @@ function listFromSql(
             readScope,
             values,
             plan.tableAlias,
-          )}`,
-    ),
+          )}`;
+    }),
   ].join('\n');
 }
 
@@ -4284,6 +4579,7 @@ async function loadRawRecord(
   recordId: string,
   includeArchived: boolean,
   filterPlans: readonly QueryFilterLoweringPlan[],
+  relationTargets: readonly RelationTargetPlan[] = [],
 ): Promise<RawRecord | null> {
   const values: unknown[] = [];
   const predicates = archivePredicate(entity, includeArchived);
@@ -4292,10 +4588,30 @@ async function loadRawRecord(
   );
   appendQueryFilterPredicates(entity, filterPlans, values, predicates);
   const result = await client.query<QueryResultRow>(
-    selectSql(entity, predicates, 'LIMIT 1'),
+    selectSql(
+      entity,
+      predicates,
+      'LIMIT 1 FOR UPDATE',
+      relationTargets.map((target) => target.column),
+    ),
     values,
   );
-  return result.rows[0] ? rawRecord(entity, result.rows[0]) : null;
+  const row = result.rows[0];
+  if (!row) return null;
+  const record = rawRecord(entity, row);
+  return relationTargets.length
+    ? Object.freeze({
+        ...record,
+        relationTargets: Object.freeze(
+          Object.fromEntries(
+            relationTargets.map((target) => [
+              target.relationId,
+              nullableUuid(row[target.column]),
+            ]),
+          ),
+        ),
+      })
+    : record;
 }
 
 async function loadScopedRawRecord(
@@ -4768,7 +5084,9 @@ export function parseMutationInput(
         expectedRevision: requiredRevision(input.expectedRevision),
         patch: immutableRecord(input.patch, 'patch'),
         recordId,
-        relations: Object.freeze({}),
+        relations: contract.relationUpdates
+          ? uuidRecord(input.relations, 'relations')
+          : Object.freeze({}),
         systemInput: null,
       });
     // A transition takes the SAME closed two-argument input as archive and
@@ -4799,6 +5117,15 @@ function validateMutationInput(
     contract.fields.map((field) => [field.fieldId, field] as const),
   );
   const writable = new Set(contract.writableFieldIds);
+  for (const fieldId of contract.requiredWriteFieldIds ?? []) {
+    if (!Object.hasOwn(input.patch, fieldId)) {
+      throw failure(
+        'MODULE_REQUIRED_FIELD_MISSING',
+        'required operation input field is missing',
+        fieldId,
+      );
+    }
+  }
   for (const [fieldId, value] of Object.entries(input.patch)) {
     const field = fields.get(fieldId);
     if (!field || !writable.has(fieldId) || !field.writable) {
@@ -4809,6 +5136,16 @@ function validateMutationInput(
       );
     }
     validateFieldValue(field, value);
+    if (
+      contract.nonBlankFieldIds?.includes(fieldId) &&
+      (typeof value !== 'string' || value.trim().length === 0)
+    ) {
+      throw failure(
+        'MODULE_FIELD_VALUE_INVALID',
+        'operation input requires nonblank text',
+        fieldId,
+      );
+    }
   }
   if (input.expectedRevision === null) {
     for (const field of contract.fields) {
@@ -5352,12 +5689,13 @@ function updateChanges(
   contract: RegisteredOperationInputContract | undefined,
   prior: RawRecord,
   patch: Readonly<Record<string, ImmutableJsonValue>>,
+  relations: Readonly<Record<string, string>>,
 ): readonly BusinessFieldChangeInput[] {
-  if (Object.keys(patch).length === 0) {
+  if (Object.keys(patch).length === 0 && Object.keys(relations).length === 0) {
     throw failure('MODULE_PATCH_EMPTY', 'update patch must not be empty');
   }
-  return Object.freeze(
-    Object.entries(patch)
+  return Object.freeze([
+    ...Object.entries(patch)
       .sort(compareEntry)
       .map(([fieldId, value]) =>
         Object.freeze({
@@ -5367,7 +5705,17 @@ function updateChanges(
           oldState: valueState(prior.values[fieldId] ?? null),
         }),
       ),
-  );
+    ...Object.entries(relations)
+      .sort(compareEntry)
+      .map(([relationId, value]) =>
+        Object.freeze({
+          classification: 'INTERNAL' as const,
+          fieldId: auditFieldId(relationId),
+          newState: valueState(value),
+          oldState: valueState(prior.relationTargets?.[relationId] ?? null),
+        }),
+      ),
+  ]);
 }
 
 function fieldClassification(

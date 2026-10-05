@@ -223,7 +223,17 @@ export function purchasingWorkspace(
           labelField: ref('fieldReference', f('location_name')),
           // Starts from where the order says its goods are received; the
           // operator may choose another.
-          defaultFrom: record(f('purchase_order_receiving_location_id')),
+          defaultFrom: {
+            ...record(f('purchase_order_receiving_location_id')),
+            fallback: {
+              column: {
+                datasetId: lines,
+                columnId: id('column', 'purchasing_item'),
+              },
+              field: f('item_preferred_location_id'),
+              selection: 'selected',
+            },
+          },
         },
         ...(known
           ? [
@@ -413,7 +423,17 @@ export function purchasingWorkspace(
           required: true,
           query: q('location_list'),
           labelField: ref('fieldReference', f('location_name')),
-          defaultFrom: record(f('purchase_order_receiving_location_id')),
+          defaultFrom: {
+            ...record(f('purchase_order_receiving_location_id')),
+            fallback: {
+              column: {
+                datasetId: lines,
+                columnId: id('column', 'purchasing_item'),
+              },
+              field: f('item_preferred_location_id'),
+              selection: 'common',
+            },
+          },
         },
         ...(known
           ? [

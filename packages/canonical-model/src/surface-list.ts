@@ -175,7 +175,22 @@ export function validateSurfaceLists(
           );
         continue;
       }
-      if (!selected.has(column.field))
+      const labelledRelation = column.reference?.relation
+        ? relations.get(column.field)
+        : undefined;
+      if (
+        column.reference?.relation &&
+        (!labelledRelation ||
+          labelledRelation.sourceEntity.targetId !==
+            query.sourceEntity.targetId ||
+          labelledRelation.joinEligibility !== 'query' ||
+          !['manyToOne', 'oneToOne'].includes(labelledRelation.cardinality))
+      )
+        fail(
+          column.columnId,
+          'a relation label reads a query-eligible to-one relation of the List entity',
+        );
+      if (!selected.has(column.field) && !labelledRelation)
         fail(column.columnId, 'list columns read fields the query selects');
       if (
         column.format === 'date' &&
@@ -199,11 +214,26 @@ export function validateSurfaceLists(
           column.columnId,
           'status role values',
         );
+      if (
+        column.reference?.ancestor &&
+        (!labelledRelation ||
+          labelledRelation.sourceEntity.targetId !==
+            labelledRelation.targetEntity.targetId ||
+          fields.get(column.reference.ancestor.field)?.entity.targetId !==
+            labelledRelation.targetEntity.targetId)
+      )
+        fail(
+          column.columnId,
+          'ancestor labels require a self relation and selected ancestor filter',
+        );
       if (!column.reference) continue;
       if (column.role === 'status')
         fail(column.columnId, 'a status column reads its own stored value');
       const source = fields.get(column.field);
-      if (!source || source.fieldType.kind !== 'textFieldType')
+      if (
+        !labelledRelation &&
+        (!source || source.fieldType.kind !== 'textFieldType')
+      )
         fail(column.columnId, 'a reference label reads a text record id');
       const target = queries.get(column.reference.query.targetId);
       if (
@@ -211,6 +241,9 @@ export function validateSurfaceLists(
         target.queryType !== 'list' ||
         target.lifecycle !== 'active' ||
         target.tier !== 'q0' ||
+        (labelledRelation &&
+          target.sourceEntity.targetId !==
+            labelledRelation.targetEntity.targetId) ||
         ('legalEntityScope' in target && target.legalEntityScope) ||
         !target.selections.some(
           (selection) =>
@@ -630,6 +663,69 @@ export function validateSurfaceLists(
       }
     };
     if (list.figures) validateFigures(list.figures);
+    if (list.hierarchyScope) {
+      const scope = list.hierarchyScope;
+      const graph = queries.get(scope.query.targetId);
+      const choices = queries.get(scope.choices.targetId);
+      const relation = relations.get(scope.relation);
+      if (
+        !graph ||
+        graph.lifecycle !== 'active' ||
+        graph.queryType !== 'list' ||
+        graph.tier !== 'q0' ||
+        ('legalEntityScope' in graph && graph.legalEntityScope) ||
+        graph.filter.kind !== 'booleanPredicate' ||
+        graph.filter.value !== true ||
+        !choices ||
+        choices.lifecycle !== 'active' ||
+        choices.queryType !== 'list' ||
+        choices.sourceEntity.targetId !== graph.sourceEntity.targetId ||
+        !choices.selections.some(
+          (entry) => entry.field.targetId === scope.labelField,
+        ) ||
+        !graph.selections.some(
+          (entry) => entry.field.targetId === scope.rootFilter.field,
+        ) ||
+        !relation ||
+        relation.lifecycle !== 'active' ||
+        relation.sourceEntity.targetId !== graph.sourceEntity.targetId ||
+        relation.targetEntity.targetId !== graph.sourceEntity.targetId ||
+        relation.ownership !== 'reference' ||
+        !['manyToOne', 'oneToOne'].includes(relation.cardinality) ||
+        ('fieldBinding' in relation && relation.fieldBinding) ||
+        relation.joinEligibility !== 'query' ||
+        (scope.rows &&
+          query.sourceEntity.targetId !== graph.sourceEntity.targetId) ||
+        (!scope.rows && !scope.figures)
+      )
+        fail(
+          id,
+          'hierarchy scope requires a query-eligible self relation and declared root choices',
+        );
+      for (const scoped of scope.figures ?? []) {
+        const sum = list.figures?.sums.find(
+          (entry) => entry.figureId === scoped.figure,
+        );
+        const rows = sum ? queries.get(sum.rows.query.targetId) : null;
+        if (
+          !rows ||
+          !('selections' in rows) ||
+          !rows.selections.some(
+            (entry) => entry.field.targetId === scoped.reference,
+          ) ||
+          fields.get(scoped.reference)?.fieldType.kind !== 'textFieldType'
+        )
+          fail(
+            id,
+            'hierarchy figures name a sum and its selected reference field',
+          );
+      }
+      unique(
+        (scope.figures ?? []).map((entry) => entry.figure),
+        id,
+        'hierarchy figures',
+      );
+    }
     if (list.rowActions) {
       unique(
         list.rowActions.map((action) => action.actionId),

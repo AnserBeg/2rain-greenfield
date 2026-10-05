@@ -546,7 +546,8 @@ export function readCompiledSurfaceDataBinding(
         );
       }
     }
-    if (operation.lifecycle !== 'active') continue;
+    if (operation.lifecycle !== 'active' || value.presentation === 'taskOnly')
+      continue;
     // The KNOWN LIMIT comment that stood here is deleted rather than moved:
     // it said an entity carrying a release AND a cancel "binds neither and
     // refuses by name", and named the rendering question as owed. That is what

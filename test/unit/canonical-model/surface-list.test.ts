@@ -48,6 +48,46 @@ function refused(mutate: (app: ReturnType<typeof application>) => void) {
   assert.fail('the declaration was accepted');
 }
 
+test('LOCATIONS-2: a warehouse selector requires a shared containment graph and sums selected location references', () => {
+  const scope = (app: ReturnType<typeof application>) =>
+    listOf(app, stockList).list.hierarchyScope as {
+      query: { targetId: string };
+      relation: string;
+      figures: { figure: string; reference: string }[];
+      rows?: boolean;
+    };
+  assert.match(
+    refused((app) => {
+      scope(app).query.targetId = `${ns}:query.item_list`;
+    }),
+    /hierarchy scope requires/,
+  );
+  assert.match(
+    refused((app) => {
+      scope(app).relation = `${ns}:relation.purchase_order_line_order`;
+    }),
+    /hierarchy scope requires/,
+  );
+  assert.match(
+    refused((app) => {
+      scope(app).rows = true;
+    }),
+    /hierarchy scope requires/,
+  );
+  assert.match(
+    refused((app) => {
+      scope(app).figures[0]!.reference = `${ns}:field.party_name`;
+    }),
+    /hierarchy figures name a sum and its selected reference field/,
+  );
+  assert.match(
+    refused((app) => {
+      scope(app).figures.push({ ...scope(app).figures[0]! });
+    }),
+    /hierarchy figures must be unique/,
+  );
+});
+
 test('the composed application declares its Lists and they normalize unchanged', () => {
   const normalized = normalizeApplicationPackage(
     composedApplicationDefinition() as never,
@@ -905,6 +945,7 @@ test('LOCATIONS: the Location List shows each location type and inventory status
       ['Code', 'title', true],
       ['Name', 'value', true],
       ['Type', 'value', true],
+      ['Warehouse', 'value', true],
       ['Inventory status', 'status', true],
       ['Status reason', 'value', false],
     ],

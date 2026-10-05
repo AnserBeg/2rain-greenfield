@@ -22,6 +22,12 @@ import {
  * the browser or over a fetched page.
  */
 export interface DeclaredListState {
+  readonly hierarchyRootId?: string;
+  readonly hierarchySelectorId?: string;
+  readonly hierarchyChoices?: readonly {
+    readonly recordId: string;
+    readonly label: string;
+  }[];
   readonly filterValues: Readonly<Record<string, string>>;
   readonly includeArchived: boolean;
   readonly page: number;
@@ -85,6 +91,16 @@ export function readDeclaredListState(
   );
   const page = Number(url.searchParams.get('page') ?? '1');
   return Object.freeze({
+    ...(list.hierarchyScope
+      ? {
+          hierarchySelectorId: list.hierarchyScope.selectorId,
+          hierarchyRootId: /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(
+            url.searchParams.get(list.hierarchyScope.selectorId) ?? '',
+          )
+            ? url.searchParams.get(list.hierarchyScope.selectorId)!
+            : '',
+        }
+      : {}),
     filterValues: Object.freeze(filterValues),
     includeArchived: url.searchParams.get('archived') === 'yes',
     page:
@@ -117,6 +133,14 @@ export function declaredListParameters(
   const next = { ...state, ...change };
   const parameters = new URLSearchParams(base);
   if (next.viewId) parameters.set('view', next.viewId);
+  // Selector identity is declared, its operand shares links, counts and exports.
+  if (next.hierarchyRootId !== undefined) {
+    const selector = next.hierarchySelectorId;
+    if (selector) {
+      if (next.hierarchyRootId) parameters.set(selector, next.hierarchyRootId);
+      else parameters.delete(selector);
+    }
+  }
   for (const [filterId, value] of Object.entries(next.filterValues))
     parameters.set(filterId, value);
   if (next.search.length > 0) parameters.set('q', next.search);
@@ -375,7 +399,7 @@ export function declaredListArguments(
   ]);
   const referenceLabels = Object.freeze(
     orderedColumns(list).flatMap((column) =>
-      column.reference
+      column.reference && !column.reference.relation
         ? [
             Object.freeze({
               fieldId: column.reference.labelField.targetId,
@@ -383,6 +407,27 @@ export function declaredListArguments(
               referenceId: column.columnId,
               sourceFieldId: column.field,
             }),
+          ]
+        : [],
+    ),
+  );
+  const relationLabels = Object.freeze(
+    orderedColumns(list).flatMap((column) =>
+      column.reference?.relation
+        ? [
+            {
+              fieldId: column.reference.labelField.targetId,
+              queryId: column.reference.query.targetId,
+              relationId: column.field,
+              ...(column.reference.ancestor
+                ? {
+                    ancestor: {
+                      fieldId: column.reference.ancestor.field,
+                      values: [...column.reference.ancestor.values],
+                    },
+                  }
+                : {}),
+            },
           ]
         : [],
     ),
@@ -399,7 +444,10 @@ export function declaredListArguments(
             ? [
                 Object.freeze({
                   direction: entry.direction,
-                  fieldId: column.reference ? column.columnId : column.field,
+                  fieldId:
+                    column.reference && !column.reference.relation
+                      ? column.columnId
+                      : column.field,
                 }),
               ]
             : [];
@@ -432,6 +480,27 @@ export function declaredListArguments(
         ]
       : [],
   );
+  const hierarchy =
+    list.hierarchyScope && state.hierarchyRootId
+      ? {
+          queryId: list.hierarchyScope.query.targetId,
+          relationId: list.hierarchyScope.relation,
+          rootId: state.hierarchyRootId,
+          rootFilter: {
+            fieldId: list.hierarchyScope.rootFilter.field,
+            value: list.hierarchyScope.rootFilter.value,
+          },
+          ...(list.hierarchyScope.rows ? { rows: true as const } : {}),
+          ...(list.hierarchyScope.figures
+            ? {
+                figures: list.hierarchyScope.figures.map((entry) => ({
+                  figureId: entry.figure,
+                  referenceFieldId: entry.reference,
+                })),
+              }
+            : {}),
+        }
+      : undefined;
   const digestInput: SharedListQueryRequest = {
     cursor: null,
     effectivePageSize: pageSize,
@@ -442,8 +511,9 @@ export function declaredListArguments(
     ...(fieldFilters.length > 0 ? { fieldFilters } : {}),
     ...(progress ? { progress } : {}),
     ...(figures ? { figures } : {}),
+    ...(hierarchy ? { hierarchy } : {}),
     ...(beforeFilters.length > 0 ? { beforeFilters } : {}),
-    relationLabels: [],
+    relationLabels,
     ...(referenceLabels.length > 0 ? { referenceLabels } : {}),
     requestedPageSize: pageSize,
     schemaVersion: SHARED_LIST_QUERY_VERSION,
@@ -462,12 +532,13 @@ export function declaredListArguments(
       ...(fieldFilters.length > 0 ? { fieldFilters } : {}),
       ...(progress ? { progress } : {}),
       ...(figures ? { figures } : {}),
+      ...(hierarchy ? { hierarchy } : {}),
       ...(beforeFilters.length > 0 ? { beforeFilters } : {}),
       matchMode: 'substring',
       ...(options.mode === 'export' ? { outputMode: 'export' } : {}),
       pageSize,
       ...(referenceLabels.length > 0 ? { referenceLabels } : {}),
-      relationLabels: [],
+      relationLabels,
       schemaVersion: SHARED_LIST_QUERY_VERSION,
       search: state.search,
       sort,
@@ -503,7 +574,11 @@ export function declaredCellText(
   present?: FieldPresenter,
 ): string | null {
   if (column.reference)
-    return record.relationLabels?.[column.columnId]?.label ?? null;
+    return (
+      record.relationLabels?.[
+        column.reference.relation ? column.field : column.columnId
+      ]?.label ?? null
+    );
   const value = record.values[column.field];
   if (value === null || value === undefined) return null;
   if (column.format === 'date' && typeof value === 'string') {
