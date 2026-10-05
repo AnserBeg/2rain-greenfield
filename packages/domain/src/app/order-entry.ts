@@ -790,6 +790,7 @@ export function orderEntrySurfaces(
             ? editor ||
               worklist ||
               local === 'posted_stock_balance' ||
+              local === 'inventory_value' ||
               local === 'customer_invoice' ||
               local === 'vendor_bill'
               ? 'operational'
@@ -810,6 +811,7 @@ export function orderEntrySurfaces(
         worklist ||
         stockPage ||
         local === 'posted_stock_balance' ||
+        local === 'inventory_value' ||
         (role === 'list' && companyScoped.has(listQueryId))
           ? {
               entry: {

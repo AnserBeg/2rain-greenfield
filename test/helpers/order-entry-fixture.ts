@@ -1,3 +1,8 @@
+import {
+  seedInventoryValuation,
+  seedInventoryShipmentValuation,
+  seedInventoryLandedValuation,
+} from './inventory-valuation-fixture.js';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
@@ -534,6 +539,45 @@ async function seed(
         observed: true,
       };
     }
+    if (phase === 'valuation')
+      return {
+        phase,
+        ...(await seedInventoryValuation({
+          invoke,
+          create,
+          scope,
+          item,
+          location,
+          customer,
+        })),
+        observed: true,
+      };
+    if (phase === 'valuation-shipped')
+      return {
+        phase,
+        ...(await seedInventoryShipmentValuation({
+          invoke,
+          create,
+          scope,
+          item,
+          location,
+          customer,
+        })),
+        observed: true,
+      };
+    if (phase === 'valuation-landed')
+      return {
+        phase,
+        ...(await seedInventoryLandedValuation({
+          invoke,
+          create,
+          scope,
+          item,
+          location,
+          customer,
+        })),
+        observed: true,
+      };
     if (phase === 'payables') {
       // PAYABLES: a released, priced purchase order at Net 30 with freight
       // and a fee, two of its three units received, for a browser proof to

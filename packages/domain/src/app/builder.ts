@@ -1,4 +1,10 @@
 import {
+  valuationQueries,
+  valuationSurfaces,
+  VALUATION_CAPABILITY_ID,
+  withShipmentValuation,
+} from '../inventory/valuation.js';
+import {
   invoiceWorkspace,
   salesWorkspace,
   salesWorkspaceQueries,
@@ -229,6 +235,12 @@ export function composedApplicationDefinition(): Record<string, unknown> {
     merged(definitions, 'queries') as Record<string, unknown>[],
   );
   const queries = [
+    // An item's value and cost, read in one company through Inventory's
+    // valuation (VALUATION).
+    ...valuationQueries(
+      APPLICATION_NAMESPACE,
+      merged(definitions, 'queries') as Record<string, unknown>[],
+    ),
     ...moduleQueries,
     // A worklist reads its own clone of its source List's query.
     ...worklistQueries(APPLICATION_NAMESPACE, moduleQueries),
@@ -241,7 +253,19 @@ export function composedApplicationDefinition(): Record<string, unknown> {
 
   const application = withDeclaredLists({
     assertions: merged(definitions, 'assertions'),
-    capabilityRequirements: [sharedCapability, ...moduleCapabilities],
+    capabilityRequirements: [
+      sharedCapability,
+      ...moduleCapabilities,
+      {
+        capabilityId: VALUATION_CAPABILITY_ID,
+        capabilityVersion: 1,
+        declaredEffects: ['read'],
+        kind: 'capabilityRequirement',
+        requiredProjections: ['query', 'surface', 'agent', 'reporting'],
+        schemaVersion: version,
+        supportStatus: 'supported',
+      },
+    ],
     entities: merged(definitions, 'entities'),
     fields: merged(definitions, 'fields'),
     hashAlgorithm: 'sha256',
@@ -335,18 +359,25 @@ export function composedApplicationDefinition(): Record<string, unknown> {
           };
         },
       ),
-      merged(definitions, 'queries') as Record<string, unknown>[],
+      [
+        ...(merged(definitions, 'queries') as Record<string, unknown>[]),
+        ...valuationQueries(
+          APPLICATION_NAMESPACE,
+          merged(definitions, 'queries') as Record<string, unknown>[],
+        ),
+      ],
     ),
   });
   // Warehouse mode (WAREHOUSE-MODE): a launcher over the Lists above, declared
-  // beside them with its own workspace.
-  return {
+  // beside them with its own workspace; then internal cost facts on the
+  // shipment and invoice pages (VALUATION).
+  return withShipmentValuation(APPLICATION_NAMESPACE, {
     ...application,
     surfaces: [
       ...application.surfaces,
       warehouseSurface(APPLICATION_NAMESPACE),
     ],
-  };
+  });
 }
 
 /** A worklist's List surface joins the composed surfaces beside its source. */
@@ -356,6 +387,10 @@ function withWorklistSurfaces(
 ): unknown[] {
   return [
     ...surfaces,
+    ...valuationSurfaces(
+      APPLICATION_NAMESPACE,
+      surfaces as Record<string, unknown>[],
+    ),
     ...worklistSurfaces(
       APPLICATION_NAMESPACE,
       surfaces as Record<string, unknown>[],

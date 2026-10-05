@@ -1613,6 +1613,34 @@ export function composedListSpecs(
     labelField: `${namespace}:field.${labelField}`,
   });
   return {
+    inventory_value_list: {
+      pageSize: 25,
+      columns: [
+        {
+          local: 'item',
+          label: 'Item',
+          field: `${namespace}:field.item_name`,
+          role: 'title',
+          sortable: true,
+        },
+        ...[
+          ['on_hand', 'On hand'],
+          ['average_cost', 'Average cost'],
+          ['inventory_value', 'Known value'],
+          ['unvalued_quantity', 'Unvalued quantity'],
+          ['landed_cost_coverage', 'Landed cost coverage'],
+        ].map(([local, label]) => ({
+          local: local!,
+          label: label!,
+          field: `${namespace}:metric.${local}`,
+          sortable: false,
+        })),
+      ],
+      defaultSort: [{ column: 'item', direction: 'ascending' }],
+      views: [{ local: 'all', label: 'All items', filters: {} }],
+      filters: [],
+      export: true,
+    },
     sales_order_list: documentList(
       namespace,
       'sales_order',

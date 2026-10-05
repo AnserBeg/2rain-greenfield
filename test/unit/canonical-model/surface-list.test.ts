@@ -62,6 +62,8 @@ test('the composed application declares its Lists and they normalize unchanged',
     expectedList,
     // INVENTORY-PARITY: stock documents, by state and type.
     `${ns}:surface.inventory_transaction_list`,
+    // VALUATION: derived known value and explicit unvalued quantity.
+    `${ns}:surface.inventory_value_list`,
     // REPLENISHMENT: the Buying worklist and Stock by item.
     buyingList,
     // CATALOG-EXTRAS: the Items List, found by an alias too.

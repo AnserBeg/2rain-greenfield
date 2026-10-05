@@ -1,3 +1,4 @@
+import { withoutInventoryValuation } from '../helpers/without-inventory-valuation.js';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -281,8 +282,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // + PURCHASING-PARITY's Expected receipts List, + PAYABLES' vendor bill,
   // its lines, payments and credits (twelve), + REPLENISHMENT's Stock by item
   // and Buying worklist, + CATALOG-EXTRAS' item aliases (three), +
-  // WAREHOUSE-MODE's Warehouse.
-  assert.equal(groupedManifest.surfaces.length, 107);
+  // WAREHOUSE-MODE's Warehouse, + VALUATION's Inventory value List.
+  assert.equal(groupedManifest.surfaces.length, 108);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -324,8 +325,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // Expected receipts joins Purchasing beside its orders; PAYABLES: so does
   // the Bills list. REPLENISHMENT: Stock by item and the Buying worklist,
   // Catalog's Lists, join Inventory's group. WAREHOUSE-MODE: the Warehouse
-  // launcher joins Inventory, the one Task navigation names.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 19);
+  // launcher joins Inventory, the one Task navigation names. VALUATION: the
+  // Inventory value List.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 20);
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
@@ -982,7 +984,9 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
     salesModuleDefinition('northstar.app'),
     'sales',
   );
-  return withPlainItemPage(withoutItemStockLists(composed));
+  return withPlainItemPage(
+    withoutItemStockLists(withoutInventoryValuation(composed)),
+  );
 }
 
 /**

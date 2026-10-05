@@ -1051,6 +1051,7 @@ async function inventoryNavigationJourney(
     'Stock count',
     'Party',
     'Party role',
+    'Inventory value',
     'Item',
     'Tax code',
     'Location',
@@ -1109,9 +1110,11 @@ async function inventoryNavigationJourney(
     navigation.getByRole('link', { name: 'Location', exact: true }),
   ).toBeVisible();
   await moreNavigation.getByText('More', { exact: true }).click();
-  const inventoryNavigation = primaryEntries
-    .getByRole('group')
-    .filter({ hasText: 'Inventory' });
+  const inventoryNavigation = primaryEntries.getByRole('group').filter({
+    has: page
+      .locator(':scope > summary')
+      .getByText('Inventory', { exact: true }),
+  });
   await expect(inventoryNavigation).toBeVisible();
   await inventoryNavigation.getByText('Inventory', { exact: true }).click();
   await expect(inventoryNavigation.locator('a > span:nth-child(2)')).toHaveText(
@@ -1233,9 +1236,11 @@ async function inventoryRecordNavigationJourney(
     name: 'Release navigation',
   });
   const primaryEntries = navigation.locator('.navigation-tree > li');
-  const inventoryNavigation = primaryEntries
-    .getByRole('group')
-    .filter({ hasText: 'Inventory' });
+  const inventoryNavigation = primaryEntries.getByRole('group').filter({
+    has: page
+      .locator(':scope > summary')
+      .getByText('Inventory', { exact: true }),
+  });
   const moreNavigation = primaryEntries
     .getByRole('group')
     .filter({ hasText: 'More' });
@@ -1703,7 +1708,11 @@ async function scopedInventoryJourney(
     .getByRole('navigation', { name: 'Release navigation' })
     .locator('.navigation-tree > li')
     .getByRole('group')
-    .filter({ hasText: 'Inventory' });
+    .filter({
+      has: page
+        .locator(':scope > summary')
+        .getByText('Inventory', { exact: true }),
+    });
   await scopedInventoryNavigation
     .getByText('Inventory', { exact: true })
     .click();

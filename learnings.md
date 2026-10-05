@@ -727,3 +727,13 @@ How to apply: reload actual display dependencies through governed reads; redact 
 Date: 2026-09-15
 Why: RAIN-META-SALES P2 reproduced an old review form dispatching replacement inputs from the same task session.
 How to apply: bind an immutable normalized preparation to a server-issued identity, reject stale confirmation before dispatch, and use deterministic barriers to prove delayed validation cannot overwrite newer or confirmed state. See [P1/P2 correction](docs/execution/packets/RAIN-META-SALES.md).
+
+## Retain plain entity reads beside derived document queries
+Date: 2026-10-04
+Why: VALUATION slice-two CI refused release admission after shipment and invoice gets gained read models; verification deliberately executes plain queries only.
+How to apply: preserve the original plain get identity for every costed entity and its declared probes; use a separate derived display query and assert both in the compiled artifact in the metadata contract. See [VALUATION](docs/execution/packets/VALUATION.md).
+
+## Derive source-shape fixtures from retained kernel facts
+Date: 2026-10-04
+Why: VALUATION's transfer fixture used identical source lines, while the kernel retains distinct `:in`/`:out` lines; legitimate transfer history would be refused.
+How to apply: match the stored source shape in replay tests and require the signed pair. See [VALUATION](docs/execution/packets/VALUATION-design.md).

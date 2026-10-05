@@ -41,6 +41,7 @@ export const reachabilityProducers = [
     'test/unit/commercial-amounts.test.ts',
     'test/unit/dev-environment.test.ts',
     'test/unit/inventory-definition.test.ts',
+    'test/unit/inventory-valuation.test.ts',
     'test/unit/language-conformance-ledger.test.ts',
     'test/unit/location-definition.test.ts',
     'test/unit/module-provider-error-mappings.test.ts',

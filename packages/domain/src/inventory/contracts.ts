@@ -522,7 +522,7 @@ export interface InventoryContractDefinitionV1 {
     readonly movementAmountFields: 'forbidden';
     readonly movementDerivedMonetaryArtifacts: 'compileFailure';
     readonly receiptCostOwner: 'G4';
-    readonly valuationCapability: 'unsupported';
+    readonly valuationCapability: 'registeredSourceCostReadModel';
   };
   readonly movement: {
     readonly fields: readonly {
@@ -881,7 +881,7 @@ export const INVENTORY_CONTRACT_V1 = Object.freeze({
     movementAmountFields: 'forbidden',
     movementDerivedMonetaryArtifacts: 'compileFailure',
     receiptCostOwner: 'G4',
-    valuationCapability: 'unsupported',
+    valuationCapability: 'registeredSourceCostReadModel',
   },
   movement: {
     fields: [

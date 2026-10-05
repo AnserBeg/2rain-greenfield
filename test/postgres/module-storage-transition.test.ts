@@ -1,3 +1,4 @@
+import { withoutInventoryValuation } from '../helpers/without-inventory-valuation.js';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
@@ -5757,13 +5758,15 @@ function composedApplicationWithoutInventoryForTransition(): Record<
     salesModuleDefinition(APPLICATION_NAMESPACE),
     'sales',
   );
-  const withoutInventory = withoutModuleForTransition(
-    application,
-    inventoryModuleDefinition(APPLICATION_NAMESPACE, {
-      companyReorderRule: true,
-      documentEntry: true,
-    }),
-    'inventory',
+  const withoutInventory = withoutInventoryValuation(
+    withoutModuleForTransition(
+      application,
+      inventoryModuleDefinition(APPLICATION_NAMESPACE, {
+        companyReorderRule: true,
+        documentEntry: true,
+      }),
+      'inventory',
+    ),
   );
   // INVENTORY-PARITY: the item page shows Inventory's stock and movements;
   // without Inventory it is Catalog's plain record page, as it was before.
