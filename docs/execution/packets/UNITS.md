@@ -1,6 +1,6 @@
 # UNITS — enter document quantities in another unit without changing the ledger
 
-Status: active setup BUILD; document slice stopped on UNITS-VERIFICATION. Branch `packet/UNITS`, based on INVENTORY-PARITY `e3da0a39`.
+Status: draft setup checkpoint, [PR #17](https://github.com/AnserBeg/2rain-greenfield/pull/17); document slice stopped on UNITS-VERIFICATION. Branch `packet/UNITS`, based on INVENTORY-PARITY `e3da0a39`.
 Review: not owed — the implemented diff excludes the Critical set. Draft PR only; no integration or deployment.
 
 ## Design before implementation
@@ -54,7 +54,8 @@ Language coverage re-derived: 2673 obligations, 832 observed (previously 831). L
 Passed: exclusive fresh-tenant schema replay; its owned container removed; check-records.
 Local PostgreSQL units test deferred before taking the lock: Windows free memory was 802132 KB, below 1.2 GB.
 Local browser was cancelled while queued behind other lanes; it never acquired the lock or started a container.
-Pending: full hosted CI, including the new PostgreSQL and operations browser tests.
+Hosted [run 37264551758](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37264551758) found one test lint error; corrected with explicit contract assertions and a passing focused lint/contract check.
+Pending: full hosted CI at the corrected tip, including the new PostgreSQL and operations browser tests.
 Local container work requires at least 1.2 GB Windows free memory before taking the exclusive test lock; browser uses one worker.
 
 ## Test it yourself
@@ -74,7 +75,7 @@ Program review: no stabilized new correctness domain or stage boundary at this s
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "UNITS",
   "base": "e3da0a3918620c5ce3e494eba3fdf1b3f8c91c4a",
-  "head": "a748e116b29a584f591ddcbeecc1f7596845f21d",
+  "head": "57430262d269dd0e3e36bf2c4fac52bd585a425b",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
