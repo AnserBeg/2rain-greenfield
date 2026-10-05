@@ -31,6 +31,7 @@ Base: `packet/PAYABLES` at `96ac2341`. Reference: PaneFlow `d057daff` (`db/schem
 - The asset class keeps its six classes, which the grammar renders as a typed suggestion field (five-option select limit); the spec and the test-it-yourself enter it that way.
 - Returnables out keeps its nine columns; wider than the panel at 1280 px, its table scrolls inside the panel (the shared CSS fix `59e16ff5`) rather than losing columns.
 - The owner asked for a round-1 review although no arm is owed outside the Critical set; the prompt asks neutral questions only.
+- The lineage-advancing composed tests split as RETURNS split them, ported byte-identical from INTEGRATION 3bcb1d25 with its `LINEAGE_INSTALL_VOLUME` preset in place of the per-test 1 GB literals; no bound changes.
 
 ## Gates
 
@@ -42,7 +43,8 @@ Base: `packet/PAYABLES` at `96ac2341`. Reference: PaneFlow `d057daff` (`db/schem
 - CI at `ffc0dcf6` (run 37341436034): quality, browser, composed browser, PostgreSQL schema/isolation and commercial (`returnables` 2/2, first GitHub run) passed. Three reds, none a returnables fact: the performance budget `COMPILE_BUDGET_INDETERMINATE` (CPU idle 73.9% < 90%, the GitHub flake; not relaxed); PostgreSQL composed out of data disk at six lineage entries (the two lineage-advancing tests get 1 GB, as LOCATIONS `86b5537f`: `c233beda`); the browser spec's locators (Party group label, the six-class datalist, task selects by accessible name: `b7137ea6`, `059d008f`, `5babf180`).
 - CI at `5babf180` (run 37344849073): the browser spec ran the whole custody journey, both refusals included, and stopped at the Returnables out capture: a 1292 px page at 1280 px. Measured on rendered List HTML in headless Chromium: a sortable header's `.sr-only` hint in a column past the panel escaped the table's scrolling wrapper. Fixed in the shared runtime CSS (`59e16ff5`, `.data-table-wrap{position:relative}`): page 1280 px, the table scrolls in its panel; 390 px unchanged.
 - After `59e16ff5`: tsc, eslint, prettier, `check:app-release` clean; unit (returnables, workspace contract, hex ratchet) 26/26; web contract 35/35; integration 241/241. Local browser run stopped for the owner's Docker pause (no container left); CI runs the spec.
-- CI at the head carrying `59e16ff5`: running at this commit; the green run is added when it lands.
+- CI at `8a9dcad4` (run 37347540167): quality, browser (3 jobs, the returnables spec included), PostgreSQL commercial and schema/isolation passed. Two reds: the performance budget `COMPILE_BUDGET_INDETERMINATE` again (CPU idle 76.5%); PostgreSQL composed timed out the advancement parent at its 300 s bound (the rollback-edge test beside it 275 s; base PAYABLES ran the parent in 147 s in a quiet hour). RETURNS met the same bound at lineage entry 6; its split, ported test-only with INTEGRATION's 1 GB preset (`2a9db6d4`, from 3bcb1d25), keeps every 300 s bound.
+- CI at the docs head over `2a9db6d4`: running at this commit; the green run is added when it lands.
 
 ## Test it yourself
 
@@ -63,7 +65,7 @@ Review: no arm owed (outside the Critical set); the owner asked for round 1 anyw
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RETURNABLE-ASSETS",
   "base": "96ac234122322b2cbe18349299664f56c8f5190a",
-  "head": "59e16ff5677d67297a12dae103137132d636277f",
+  "head": "2a9db6d499d1eb0520fb368a0aea4ba6efee3c5b",
   "changedPaths": [
     "apps/api/src/composition-root.ts", "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json",
     "apps/web/release/current-policy-bindings.json", "apps/web/src/surface-composition.ts", "apps/web/src/surface-runtime.ts",
@@ -74,7 +76,8 @@ Review: no arm owed (outside the Critical set); the owner asked for round 1 anyw
     "packages/domain/src/party/returnables.ts", "packages/domain/src/party/workspace.ts", "packages/postgres-provider/package.json",
     "packages/postgres-provider/src/inventory-posting-error.ts", "packages/postgres-provider/src/returnables-capability-executor.ts", "test/architecture/module-press-law.test.ts",
     "test/architecture/repository-hygiene.test.ts", "test/architecture/surface-grammar-conformance.test.ts", "test/compiler/inventory-contract.release.golden.json",
-    "test/helpers/generate-fresh-tenant-full-replay-schema.ts", "test/helpers/reachability-producers.ts", "test/helpers/without-returnables.ts",
+    "test/helpers/generate-fresh-tenant-full-replay-schema.ts", "test/helpers/postgres.ts", "test/helpers/reachability-producers.ts",
+    "test/helpers/without-returnables.ts",
     "test/integration/surface-data-binding.test.ts", "test/postgres/composed-application.test.ts", "test/postgres/document-numbering.test.ts",
     "test/postgres/fresh-tenant-full-replay-schema.snapshot.json", "test/postgres/module-storage-transition.test.ts", "test/postgres/returnables.test.ts",
     "test/unit/canonical-model/field-numbering.test.ts", "test/unit/canonical-model/surface-list.test.ts", "test/unit/returnables.test.ts"

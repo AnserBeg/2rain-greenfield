@@ -1,7 +1,7 @@
 # RETURNABLE-ASSETS — review round 1 prompt (ONLINE arm, user-run)
 
-Repository `AnserBeg/2rain-greenfield`, branch `packet/RETURNABLE-ASSETS` (draft PR #27), frozen executable SHA
-`59e16ff5`, base `packet/PAYABLES` at `96ac2341`. Diff: `git diff 96ac2341..59e16ff5`. No Critical-set path
+Repository `AnserBeg/2rain-greenfield`, branch `packet/RETURNABLE-ASSETS` (draft PR #27), frozen SHA
+`2a9db6d4`, base `packet/PAYABLES` at `96ac2341`. Diff: `git diff 96ac2341..2a9db6d4`. No Critical-set path
 (AGENTS.md §4) is changed.
 
 What was built, by area:
