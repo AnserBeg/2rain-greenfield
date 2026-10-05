@@ -982,6 +982,36 @@ test(
                   true,
                   'a return retry under a later policy revision must replay',
                 );
+                // Round 1 (P2): the same input under a NEW key after the policy
+                // changed replays the posted return by its natural effect and
+                // stores a receipt for that key bound to the original
+                // invocation; delivering that key again must replay it too.
+                const original = command('2');
+                const aliasCommand = {
+                  ...original,
+                  idempotencyKey: randomUUID(),
+                  authorization: {
+                    ...original.authorization,
+                    policyVersion: `${original.authorization.policyVersion}+later`,
+                  },
+                };
+                const alias = await service.postCustomerReturn(
+                  context,
+                  actor,
+                  aliasCommand,
+                );
+                assert.equal(alias.replayed, true);
+                const aliasDuplicate = await service.postCustomerReturn(
+                  context,
+                  actor,
+                  aliasCommand,
+                );
+                assert.equal(
+                  aliasDuplicate.replayed,
+                  true,
+                  'a new-key replay after a policy change must replay its own duplicate',
+                );
+                assert.deepEqual(aliasDuplicate.trust, alias.trust);
               } finally {
                 await directPool.end();
               }
