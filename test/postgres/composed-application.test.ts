@@ -1089,6 +1089,11 @@ test(
           await runtime.close();
         }
       },
+      // Every install and activation here keeps its release artifacts and
+      // their write-ahead log. At lineage entry 7 they filled the default
+      // 256 MB volume (sqlstate 53100), so this parent runs on the full-replay
+      // generator's 1 GB volume, as RETURNS' parent does at entry 6.
+      { dataSizeMegabytes: 1024 },
     );
   },
 );
@@ -4066,6 +4071,9 @@ test(
           await reversed.close();
         }
       },
+      // As the advancement parent: at lineage entry 7 its installs filled the
+      // default 256 MB volume (sqlstate 53100).
+      { dataSizeMegabytes: 1024 },
     );
   },
 );
@@ -5914,8 +5922,8 @@ async function assertExactPartitionEvidence(
   const salesScenarioIds = binding.plan.scenarios
     .filter((scenario) => salesEntityIds.has(scenario.entityId))
     .map((scenario) => scenario.scenarioId);
-  // 29 + 16, as `assertSalesVerificationCoverage` pins them per entity.
-  assert.equal(salesScenarioIds.length, 45);
+  // 29 + 17, as `assertSalesVerificationCoverage` pins them per entity.
+  assert.equal(salesScenarioIds.length, 46);
   assert.equal(
     salesScenarioIds.every((scenarioId) =>
       executedScenarioIdSet.has(scenarioId),
