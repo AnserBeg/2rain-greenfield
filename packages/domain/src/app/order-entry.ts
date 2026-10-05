@@ -23,6 +23,20 @@ export function orderEntrySurfaces(
     ((itemGet?.selections ?? []) as { field?: { targetId?: unknown } }[]).some(
       (selection) => selection.field?.targetId === id('field', name),
     );
+  // A location's inventory status changes only through its page's "Change
+  // status", with a reason (LOCATIONS): the generic form leaves it out.
+  const locationGet = queries.find(
+    (query) => query.queryId === id('query', 'location_get'),
+  );
+  const locationStatus = [
+    'location_status',
+    'location_status_reason',
+    'location_status_changed_at',
+  ].filter((name) =>
+    (
+      (locationGet?.selections ?? []) as { field?: { targetId?: unknown } }[]
+    ).some((selection) => selection.field?.targetId === id('field', name)),
+  );
   const company = {
     companyQueryId: id('query', 'legal_entity_list'),
     companyNameFieldId: id('field', 'legal_entity_name'),
@@ -814,6 +828,15 @@ export function orderEntrySurfaces(
                   },
                 },
               ],
+            },
+          }
+        : {}),
+      ...(role === 'form' && local === 'location' && locationStatus.length
+        ? {
+            form: {
+              kind: 'surfaceForm',
+              schemaVersion: 'v6',
+              omit: locationStatus.map((name) => id('field', name)),
             },
           }
         : {}),

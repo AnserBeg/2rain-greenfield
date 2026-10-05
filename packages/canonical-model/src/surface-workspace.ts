@@ -700,7 +700,9 @@ function validateSurfaceForms(model: VersionedNormalizedApplicationPackage) {
           ),
     );
     const seen = new Set<string>();
-    for (const reference of surface.form.references) {
+    if (!surface.form.references && !surface.form.omit)
+      fail(id, 'a form declares references, fields it omits, or both');
+    for (const reference of surface.form.references ?? []) {
       if (seen.has(reference.field))
         fail(id, 'a form field is chosen by one reference');
       seen.add(reference.field);
@@ -731,6 +733,50 @@ function validateSurfaceForms(model: VersionedNormalizedApplicationPackage) {
           id,
           'a form reference is chosen from an active unscoped q0 list query that selects its label',
         );
+    }
+    // A field the form leaves out is one a declared Task of the record's
+    // page sets, and one a create may leave unstated: omitting it hides no
+    // value from every editor and makes no create unsatisfiable.
+    const entityId = String(query!.sourceEntity.targetId);
+    const set = new Set(
+      model.surfaces.flatMap((candidate) => {
+        const source = queries.get(String(candidate.dataSource.targetId));
+        return candidate.surfaceRole === 'record' &&
+          candidate.lifecycle === 'active' &&
+          source?.sourceEntity.targetId === entityId &&
+          'composition' in candidate &&
+          candidate.composition
+          ? candidate.composition.actions.flatMap((action) =>
+              action.steps.flatMap((step) =>
+                step.bindings.flatMap((binding) =>
+                  binding.path[0] === 'patch' && binding.path.length === 2
+                    ? [binding.path[1]!]
+                    : [],
+                ),
+              ),
+            )
+          : [];
+      }),
+    );
+    for (const omitted of surface.form.omit ?? []) {
+      if (seen.has(omitted))
+        fail(id, 'a form field is omitted once and never chosen');
+      seen.add(omitted);
+      const field = fields.get(omitted);
+      if (
+        !selected.has(omitted) ||
+        !field ||
+        String(field.entity.targetId) !== entityId ||
+        (field.presence === 'required' &&
+          field.defaultSemantics !== 'declaredDefault' &&
+          field.defaultSemantics !== 'coalesceAtRead')
+      )
+        fail(
+          id,
+          'a form omits a field it reads that a create may leave unstated',
+        );
+      if (!set.has(omitted))
+        fail(id, "a form omits only fields a Task of its record's page sets");
     }
   }
 }

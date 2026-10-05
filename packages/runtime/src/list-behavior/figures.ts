@@ -21,13 +21,19 @@ export interface SharedListFigureRows {
   readonly quantityFieldId?: string;
 }
 
-/** Only rows whose parent, through their relation to it, holds a value. */
-export interface SharedListFigureWithin {
+/**
+ * Only rows whose parent holds a value: the parent through the rows' relation
+ * to it, or the record whose id the rows hold in one of their own text fields
+ * (`referenceFieldId`), as a stock balance holds its location (LOCATIONS).
+ */
+export type SharedListFigureWithin = {
   readonly fieldId: string;
   readonly queryId: string;
-  readonly relationId: string;
   readonly values: readonly string[];
-}
+} & (
+  | { readonly relationId: string; readonly referenceFieldId?: never }
+  | { readonly referenceFieldId: string; readonly relationId?: never }
+);
 
 /** Rows pointing at each figure row through a relation, and their quantity. */
 export interface SharedListFigureRelated {
@@ -198,19 +204,36 @@ function strings(
   return Object.freeze(entries);
 }
 
-function parseWithin(value: ImmutableJsonValue | undefined) {
+function parseWithin(
+  value: ImmutableJsonValue | undefined,
+): SharedListFigureWithin {
+  // A parent through a relation, or through a reference field: exactly one.
+  const reference = isRecord(value) && Object.hasOwn(value, 'referenceFieldId');
   const within = record(value, 'within', [
     'fieldId',
     'queryId',
-    'relationId',
+    reference ? 'referenceFieldId' : 'relationId',
     'values',
   ]);
-  return Object.freeze({
+  const common = {
     fieldId: canonicalId(within.fieldId, 'within fieldId'),
     queryId: canonicalId(within.queryId, 'within queryId'),
-    relationId: canonicalId(within.relationId, 'within relationId'),
     values: strings(within.values, 'within values', 8, false),
-  });
+  };
+  return Object.freeze(
+    reference
+      ? {
+          ...common,
+          referenceFieldId: canonicalId(
+            within.referenceFieldId,
+            'within referenceFieldId',
+          ),
+        }
+      : {
+          ...common,
+          relationId: canonicalId(within.relationId, 'within relationId'),
+        },
+  );
 }
 
 function parseOperand(value: ImmutableJsonValue): SharedListFigureOperand {

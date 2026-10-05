@@ -219,7 +219,9 @@ function figuresArgument(
     Object.freeze({
       fieldId: value.field,
       queryId: value.query.targetId,
-      relationId: value.relation,
+      ...('relation' in value
+        ? { relationId: value.relation }
+        : { referenceFieldId: value.reference }),
       values: Object.freeze([...value.values]),
     });
   const operand = (value: { figure: string } | { field: string }) =>

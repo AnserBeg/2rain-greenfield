@@ -58,7 +58,10 @@ import {
   messageBody,
   type SurfaceMessageRef,
 } from './message-render.js';
-import { readCompiledSurfaceDataBinding } from './surface-contract.js';
+import {
+  formFieldIds,
+  readCompiledSurfaceDataBinding,
+} from './surface-contract.js';
 import type {
   CompiledFieldOption,
   CompiledSurfaceDefinition,
@@ -1026,7 +1029,7 @@ function renderKeyFacts(context: SurfaceComponentContext): string {
   if (!record && context.surface.surfaceRole === 'form') {
     return slotPanel(
       context,
-      `<section class="panel key-facts-panel" data-data-state="empty"><div class="panel__heading"><div><h2>New ${escapeHtml(entityLabel(context.surface))}</h2></div></div><dl class="key-fact-grid"><div><dt>Mode</dt><dd>New record</dd></div><div><dt>Fields</dt><dd>${String(context.surface.fieldIds.length)} ready</dd></div><div><dt>State</dt><dd><span class="status-pill" data-status-role="inProgress">Draft</span></dd></div></dl></section>`,
+      `<section class="panel key-facts-panel" data-data-state="empty"><div class="panel__heading"><div><h2>New ${escapeHtml(entityLabel(context.surface))}</h2></div></div><dl class="key-fact-grid"><div><dt>Mode</dt><dd>New record</dd></div><div><dt>Fields</dt><dd>${String(formFieldIds(context.surface).length)} ready</dd></div><div><dt>State</dt><dd><span class="status-pill" data-status-role="inProgress">Draft</span></dd></div></dl></section>`,
       'key-facts-slot',
     );
   }
@@ -1862,7 +1865,7 @@ function renderFormFields(
   const inputFieldsById = new Map(
     (operation.inputFields ?? []).map((field) => [field.fieldId, field]),
   );
-  return surface.fieldIds
+  return formFieldIds(surface)
     .filter(
       (fieldId) =>
         operation.inputFields === null || inputFieldsById.has(fieldId),

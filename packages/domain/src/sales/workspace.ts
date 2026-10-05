@@ -1006,6 +1006,20 @@ export function salesWorkspaceQueries(
     'workspace_stock_reservations',
   );
   const stock = clone('posted_stock_balance_list', 'workspace_stock');
+  // Only stock at a usable location is available (LOCATIONS): where the
+  // application composes a location's inventory status, the stock figures
+  // read each location's status through its get, under current policy.
+  const locationStatus = queries.some(
+    (query) =>
+      query.queryId === `${namespace}:query.location_get` &&
+      (query.selections as { field: { targetId: string } }[]).some(
+        (selection) =>
+          selection.field.targetId === `${namespace}:field.location_status`,
+      ),
+  );
+  const locations: Record<string, string> = locationStatus
+    ? { locations: 'location_get' }
+    : {};
   // An item's stock by location in one company, with what active reservations
   // still hold there and what is left (INVENTORY-PARITY). A copy of the posted
   // stock list -- the same selections, scope and read permission -- so that
@@ -1027,6 +1041,14 @@ export function salesWorkspaceQueries(
           'queryReference',
           `${namespace}:query.reservation_balance_get`,
         ),
+        ...(locationStatus
+          ? {
+              locations: ref(
+                'queryReference',
+                `${namespace}:query.location_get`,
+              ),
+            }
+          : {}),
       },
       resultFields: {
         reserved: `${namespace}:metric.reserved`,
@@ -1176,6 +1198,7 @@ export function salesWorkspaceQueries(
       ['coverage', 'shipped', 'open_to_ship', 'available_now', 'short'],
       {
         ...dependencies,
+        ...locations,
         orderLines: 'commercial_lines',
         order: 'sales_order_get',
       },
@@ -1196,7 +1219,14 @@ export function salesWorkspaceQueries(
           : ['remaining', 'on_hand', 'reserved', 'available'];
       return {
         ...query,
-        readModel: fulfillment(name, outputs, dependencies),
+        readModel: fulfillment(
+          name,
+          outputs,
+          // A reservation's available stock is its location's, if usable.
+          name === 'reservation'
+            ? { ...dependencies, ...locations }
+            : dependencies,
+        ),
       };
     }),
     plain,

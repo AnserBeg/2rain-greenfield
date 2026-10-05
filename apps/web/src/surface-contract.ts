@@ -276,9 +276,26 @@ export interface CompiledSurfaceSlot {
   readonly slotId: string;
 }
 
+/**
+ * The fields a Record form shows and sends: its query's fields less those it
+ * declares omitted, which a declared Task of the record's page sets
+ * (`surface.form.omit`, LOCATIONS). One rule for the render and the reader.
+ */
+export function formFieldIds(
+  surface: CompiledSurfaceDefinition,
+): readonly string[] {
+  const omitted = new Set<string>(surface.form?.omit ?? []);
+  return omitted.size === 0
+    ? surface.fieldIds
+    : surface.fieldIds.filter((fieldId) => !omitted.has(fieldId));
+}
+
 export interface CompiledSurfaceDefinition {
   readonly list?: SurfaceList;
-  /** A Record form's references: fields chosen from another List's records. */
+  /**
+   * A Record form's references -- fields chosen from another List's
+   * records -- and the fields it leaves to a Task of the record's page.
+   */
   readonly form?: SurfaceForm;
   readonly workspace?: SurfaceWorkspace;
   readonly documentEditor?: SurfaceDocumentEditor;

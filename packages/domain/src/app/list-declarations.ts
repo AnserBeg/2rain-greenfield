@@ -110,13 +110,19 @@ interface ListFigureRowsSpec {
   readonly quantity?: string;
 }
 
-/** Only rows whose parent holds one of these values in a field. */
-interface ListFigureWithinSpec {
-  readonly relation: string;
+/**
+ * Only rows whose parent holds one of these values in a field: the parent
+ * through the rows' relation to it, or the record whose id the rows hold in a
+ * text field (`reference`), as a stock balance holds its location.
+ */
+type ListFigureWithinSpec = {
   readonly query: string;
   readonly field: string;
   readonly values: readonly string[];
-}
+} & (
+  | { readonly relation: string; readonly reference?: never }
+  | { readonly reference: string; readonly relation?: never }
+);
 
 type ListFigureOperandSpec =
   { readonly figure: string } | { readonly field: string };
@@ -711,10 +717,12 @@ export const ITEM_BUYING_LIST = 'item_buying_list';
 /**
  * Stock by item and the Buying worklist (REPLENISHMENT): one row per catalog
  * item, with figures the list statement adds up in the one company the List
- * is entered with. On hand is the item's posted stock; Reserved what its live
- * reservations still hold; Incoming what released purchase orders still have
- * to receive, line by line; Open demand what confirmed sales orders still
- * have to ship, line by line. Projected is on hand plus incoming less open
+ * is entered with. On hand is the item's posted stock; Usable the part of it
+ * held at usable locations (LOCATIONS); Reserved what its live reservations
+ * still hold; Available the usable stock less what reservations hold at
+ * usable locations; Incoming what released purchase orders still have to
+ * receive, line by line; Open demand what confirmed sales orders still have
+ * to ship, line by line. Projected is usable stock plus incoming less open
  * demand -- not available stock, since open demand already holds the units
  * reservations set aside. An item is due at or below its reorder point; one
  * without a reorder point never is, and without a reorder-up-to level its
@@ -740,30 +748,50 @@ function itemFigureList(
       field: `${namespace}:derived_state_field.machine.${document}_lifecycle`,
       values: states.map((state) => `${namespace}:state.${document}_${state}`),
     }) as const;
+  // Only rows held at a usable location (LOCATIONS, owner ruling L-A): stock
+  // in quarantine, damaged, in transit or return pending is on hand but
+  // neither usable nor available. A row naming no live location counts
+  // nowhere usable.
+  const usable = (locationField: string) => ({
+    reference: field(locationField),
+    query: query('location_list'),
+    field: field('location_status'),
+    values: [`${namespace}:option.location_status_usable`],
+  });
+  const onHand = {
+    query: query('posted_stock_balance_list'),
+    match: field('posted_stock_balance_item_id'),
+    quantity: field('posted_stock_balance_posted_quantity'),
+  };
+  // What each reservation still holds: nothing once released or consumed,
+  // and a draft has no balance yet.
+  const reservations = {
+    rows: {
+      query: query('workspace_stock_reservations'),
+      match: field('reservation_item_id'),
+    },
+    related: {
+      query: query('reservation_balance_list'),
+      relation: relation('reservation_balance_reservation'),
+      quantity: field('reservation_balance_remaining_quantity'),
+    },
+    sum: 'related' as const,
+  };
   const sums: ListFiguresSpec['sums'] = [
+    { figureId: figure('on_hand'), rows: onHand, sum: 'rows' },
     {
-      figureId: figure('on_hand'),
-      rows: {
-        query: query('posted_stock_balance_list'),
-        match: field('posted_stock_balance_item_id'),
-        quantity: field('posted_stock_balance_posted_quantity'),
-      },
+      figureId: figure('usable'),
+      rows: onHand,
+      within: usable('posted_stock_balance_location_id'),
       sum: 'rows',
     },
-    // What each reservation still holds: nothing once released or consumed,
-    // and a draft has no balance yet.
+    { figureId: figure('reserved'), ...reservations },
+    // What reservations hold at usable locations: Available is what is left
+    // of the usable stock (PaneFlow's `on_hand - reserved` where usable).
     {
-      figureId: figure('reserved'),
-      rows: {
-        query: query('workspace_stock_reservations'),
-        match: field('reservation_item_id'),
-      },
-      related: {
-        query: query('reservation_balance_list'),
-        relation: relation('reservation_balance_reservation'),
-        quantity: field('reservation_balance_remaining_quantity'),
-      },
-      sum: 'related',
+      figureId: figure('reserved_usable'),
+      ...reservations,
+      within: usable('reservation_location_id'),
     },
     {
       figureId: figure('incoming'),
@@ -804,12 +832,14 @@ function itemFigureList(
     totals: [
       {
         figureId: figure('available'),
-        plus: [{ figure: figure('on_hand') }],
-        minus: [{ figure: figure('reserved') }],
+        plus: [{ figure: figure('usable') }],
+        minus: [{ figure: figure('reserved_usable') }],
       },
+      // Usable stock, not on hand: what sits in quarantine cannot meet
+      // demand (PaneFlow's projected = usable + incoming - demand).
       {
         figureId: figure('projected'),
-        plus: [{ figure: figure('on_hand') }, { figure: figure('incoming') }],
+        plus: [{ figure: figure('usable') }, { figure: figure('incoming') }],
         minus: [{ figure: figure('open_demand') }],
       },
       // Back up to the item's level; unstated without one.
@@ -890,8 +920,12 @@ function itemFigureList(
         sortable: false,
       },
       ...(buying
-        ? []
-        : [shown('on_hand', 'On hand'), shown('reserved', 'Reserved')]),
+        ? [shown('usable', 'Usable')]
+        : [
+            shown('on_hand', 'On hand'),
+            shown('usable', 'Usable'),
+            shown('reserved', 'Reserved'),
+          ]),
       shown('available', 'Available'),
       shown('incoming', 'Incoming'),
       shown('open_demand', 'Open demand'),
@@ -951,6 +985,81 @@ function itemFigureList(
     filters: [],
     export: true,
     figures,
+  };
+}
+
+/**
+ * The locations (LOCATIONS): each with its type and inventory status, the
+ * status shown as a status and filtered by value, so what is in quarantine or
+ * damaged is one choice away. Names sort; the reason is shown, never sorted.
+ */
+function locationList(namespace: string): ListSpec {
+  const field = (name: string) => `${namespace}:field.location_${name}`;
+  const option = (name: string) => `${namespace}:option.${name}`;
+  const status = (name: string) => option(`location_status_${name}`);
+  const statuses = [
+    [status('usable'), 'Usable'],
+    [status('quarantine'), 'Quarantine'],
+    [status('damaged'), 'Damaged'],
+    [status('in_transit'), 'In transit'],
+    [status('return_pending'), 'Return pending'],
+  ] as const;
+  const types: (readonly [string, string])[] = [
+    [option('warehouse'), 'Warehouse'],
+    [option('store'), 'Store'],
+    ...(
+      [
+        ['storage', 'Storage'],
+        ['receiving', 'Receiving'],
+        ['shipping', 'Shipping'],
+        ['quarantine', 'Quarantine'],
+        ['in_transit', 'In transit'],
+        ['scrap', 'Scrap'],
+        ['yard', 'Yard'],
+      ] as const
+    ).map(
+      ([local, label]) => [option(`location_type_${local}`), label] as const,
+    ),
+  ];
+  return {
+    pageSize: 50,
+    columns: [
+      { local: 'code', label: 'Code', field: field('code'), role: 'title' },
+      { local: 'name', label: 'Name', field: field('name') },
+      { local: 'type', label: 'Type', field: field('type') },
+      {
+        local: 'status',
+        label: 'Inventory status',
+        field: field('status'),
+        role: 'status',
+        statusRoles: {
+          [status('usable')]: 'success',
+          [status('quarantine')]: 'attention',
+          [status('damaged')]: 'blocked',
+          [status('in_transit')]: 'inProgress',
+          [status('return_pending')]: 'attention',
+        },
+      },
+      {
+        local: 'status_reason',
+        label: 'Status reason',
+        field: field('status_reason'),
+        sortable: false,
+      },
+    ],
+    defaultSort: [{ column: 'code', direction: 'ascending' }],
+    views: [],
+    filters: [
+      {
+        local: 'status',
+        label: 'Inventory status',
+        field: field('status'),
+        options: statuses,
+      },
+      { local: 'type', label: 'Type', field: field('type'), options: types },
+    ],
+    // The location query declares no export limit; a short setup list.
+    export: false,
   };
 }
 
@@ -1257,6 +1366,8 @@ export function composedListSpecs(
     // Stock by item and the Buying worklist (REPLENISHMENT).
     [ITEM_STOCK_LIST]: itemFigureList(namespace, ITEM_STOCK_LIST),
     [ITEM_BUYING_LIST]: itemFigureList(namespace, ITEM_BUYING_LIST),
+    // Every location with its type and inventory status (LOCATIONS).
+    location_list: locationList(namespace),
     // A balance, not a document: no lifecycle, so no saved views; item and
     // location are named through their own lists rather than shown as ids.
     posted_stock_balance_list: {
@@ -1431,7 +1542,9 @@ function lowerFigures(figures: ListFiguresSpec) {
     targetId,
   });
   const within = (value: ListFigureWithinSpec) => ({
-    relation: value.relation,
+    ...(value.reference !== undefined
+      ? { reference: value.reference }
+      : { relation: value.relation }),
     query: queryReference(value.query),
     field: value.field,
     values: [...value.values],

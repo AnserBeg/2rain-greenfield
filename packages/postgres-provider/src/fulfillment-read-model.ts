@@ -119,6 +119,46 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
     } while (cursor !== null);
     return records;
   };
+  /**
+   * Whether a location's stock is usable (LOCATIONS, owner ruling L-A): its
+   * inventory status, read through the declared location get under current
+   * policy -- unscoped, since a location belongs to no company. A location
+   * that is gone or archived holds nothing usable. Without the declared
+   * query every location is usable, as before locations had a status.
+   */
+  const usableLocations = new Map<string, Promise<boolean>>();
+  const usableAt = (location: ImmutableJsonValue | undefined) => {
+    const queryId = model.queries.locations?.targetId;
+    if (!queryId) return Promise.resolve(true);
+    const key = String(location);
+    let known = usableLocations.get(key);
+    if (!known) {
+      known = (async () => {
+        const query = registeredSemanticQueryFromPinnedView(view, queryId);
+        if (
+          !query ||
+          query.queryType !== 'get' ||
+          query.readModel ||
+          query.legalEntityScope
+        )
+          throw new Error('Invalid fulfillment read-model dependency');
+        const read = await gateway.invoke(view, {
+          schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+          queryId: query.queryId,
+          arguments: { recordId: key, includeArchived: false },
+        });
+        const [found] = read.records;
+        return (
+          read.outcome === 'exact' &&
+          found !== undefined &&
+          found.values[`${ns}:field.location_status`] ===
+            `${ns}:option.location_status_usable`
+        );
+      })();
+      usableLocations.set(key, known);
+    }
+    return known;
+  };
   const remaining = async (reservation: SemanticRecordDto) => {
     const balanceId = fulfillmentProjectionIdentity(
       view,
@@ -218,9 +258,10 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
     return known;
   };
   /**
-   * Free stock of an item now: its posted on hand at every location of the
-   * company less what every live reservation of it still holds (owner ruling
-   * of 2026-09-30). Incoming purchase orders are not counted.
+   * Free stock of an item now: its posted on hand at every usable location of
+   * the company less what every live reservation of it still holds there
+   * (owner ruling of 2026-09-30; LOCATIONS). Incoming purchase orders are not
+   * counted, nor is stock in quarantine or any other unusable location.
    */
   const freeStock = new Map<string, Promise<bigint>>();
   const freeOf = (item: string) => {
@@ -236,20 +277,30 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
             },
           ],
         }))
-          onHand += fulfillmentQuantity(
-            String(
-              balance.values[
-                `${ns}:field.posted_stock_balance_posted_quantity`
-              ],
-            ),
-          );
+          if (
+            await usableAt(
+              balance.values[`${ns}:field.posted_stock_balance_location_id`],
+            )
+          )
+            onHand += fulfillmentQuantity(
+              String(
+                balance.values[
+                  `${ns}:field.posted_stock_balance_posted_quantity`
+                ],
+              ),
+            );
         let reserved = 0n;
         for (const reservation of await list('stockReservations', {
           fieldFilters: [
             { fieldId: `${ns}:field.reservation_item_id`, value: item },
           ],
         }))
-          reserved += await remaining(reservation);
+          if (
+            await usableAt(
+              reservation.values[`${ns}:field.reservation_location_id`],
+            )
+          )
+            reserved += await remaining(reservation);
         return onHand - reserved;
       })();
       freeStock.set(item, known);
@@ -382,19 +433,23 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
       emit('remaining', await remaining(row));
       emit('on_hand', onHand);
       emit('reserved', reserved);
-      emit('available', onHand - reserved);
+      // Nothing is available at a location whose stock is not usable.
+      emit('available', (await usableAt(location)) ? onHand - reserved : 0n);
     } else if (model.binding === FULFILLMENT_READ_MODEL_BINDINGS.stock) {
       // One posted balance of an item at a location, as the item page shows
-      // it: what reservations still hold there and what is left. Reads only.
+      // it: what reservations still hold there and what is left -- nothing
+      // at a location whose stock is not usable (LOCATIONS). Reads only.
       const onHand = fulfillmentQuantity(
         String(row.values[`${ns}:field.posted_stock_balance_posted_quantity`]),
       );
+      const location =
+        row.values[`${ns}:field.posted_stock_balance_location_id`]!;
       const reserved = await reservedAt(
         row.values[`${ns}:field.posted_stock_balance_item_id`]!,
-        row.values[`${ns}:field.posted_stock_balance_location_id`]!,
+        location,
       );
       emit('reserved', reserved);
-      emit('available', onHand - reserved);
+      emit('available', (await usableAt(location)) ? onHand - reserved : 0n);
     } else throw new Error('Unknown fulfillment read-model binding');
     rows.push({ ...row, values });
   }

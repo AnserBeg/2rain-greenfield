@@ -119,7 +119,7 @@ export function itemStockWorkspace(namespace: string): Record<string, unknown> {
         presentation: {
           selection: 'none',
           description:
-            'On hand is the stock posted at the location in this company. Reserved is what active reservations still hold there, and Available is on hand less reserved. Missing or unavailable data is not zero stock.',
+            'On hand is the stock posted at the location in this company and Reserved what reservations still hold there. Available is on hand less reserved at a usable location, and none elsewhere. Missing data is not zero stock.',
         },
         label: 'Stock by location',
         orderKey: 10,
@@ -130,6 +130,14 @@ export function itemStockWorkspace(namespace: string): Record<string, unknown> {
           column('stock_location', 'Location', 10, stock('location_id'), {
             ...location,
             ...role('primary', 10),
+          }),
+          // The location's inventory status (LOCATIONS): only a usable
+          // location's stock is available.
+          column('stock_status', 'Status', 15, stock('location_id'), {
+            reference: {
+              query: q('location_get'),
+              labelField: ref('fieldReference', f('location_status')),
+            },
           }),
           column('stock_on_hand', 'On hand', 20, stock('posted_quantity'), {
             ...role('quantity', 20),

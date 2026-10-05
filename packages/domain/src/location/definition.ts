@@ -19,16 +19,57 @@ function ids(namespace: string) {
       code: `${namespace}:field.location_code`,
       locationType: `${namespace}:field.location_type`,
       name: `${namespace}:field.location_name`,
+      // What the stock held here may be used for, and why it last changed
+      // (LOCATIONS): an attribute of the location, never a stock dimension.
+      status: `${namespace}:field.location_status`,
+      statusChangedAt: `${namespace}:field.location_status_changed_at`,
+      statusReason: `${namespace}:field.location_status_reason`,
     },
     moduleId: `${namespace}:module.location`,
     namespace,
     packageId: `${namespace}:package.location`,
+    statusOptionIds: {
+      damaged: `${namespace}:option.location_status_damaged`,
+      inTransit: `${namespace}:option.location_status_in_transit`,
+      quarantine: `${namespace}:option.location_status_quarantine`,
+      returnPending: `${namespace}:option.location_status_return_pending`,
+      usable: `${namespace}:option.location_status_usable`,
+    },
   } as const;
 }
 
+/**
+ * A location's inventory status (LOCATIONS, owner ruling L-A): only stock in a
+ * usable location counts as usable or available. Quarantine, damaged, in
+ * transit and return pending hold stock that is on hand but not to be sold.
+ * Option ids carry the field's name: a type and a status may share a word.
+ */
+const STATUSES = [
+  ['location_status_usable', 'Usable'],
+  ['location_status_quarantine', 'Quarantine'],
+  ['location_status_damaged', 'Damaged'],
+  ['location_status_in_transit', 'In transit'],
+  ['location_status_return_pending', 'Return pending'],
+] as const;
+
+/**
+ * The location types beside a warehouse and a store (owner ruling L-B),
+ * appended so the released constraint widens (`widenEnumDomain`, ADR-0064)
+ * and no stored type changes meaning.
+ */
+const WIDENED_TYPES = [
+  ['location_type_storage', 'Storage'],
+  ['location_type_receiving', 'Receiving'],
+  ['location_type_shipping', 'Shipping'],
+  ['location_type_quarantine', 'Quarantine'],
+  ['location_type_in_transit', 'In transit'],
+  ['location_type_scrap', 'Scrap'],
+  ['location_type_yard', 'Yard'],
+] as const;
+
 type LocationIds = ReturnType<typeof ids>;
 
-const { contentCapabilityId, entityIds, fieldIds, moduleId } =
+const { contentCapabilityId, entityIds, fieldIds, moduleId, statusOptionIds } =
   ids(LOCATION_NAMESPACE);
 
 /**
@@ -38,11 +79,28 @@ const { contentCapabilityId, entityIds, fieldIds, moduleId } =
  */
 export function locationModuleDefinition(
   namespace: string = LOCATION_NAMESPACE,
+  options: {
+    /**
+     * A location's inventory status with the reason and time it last
+     * changed, and the widened location types (LOCATIONS). Only the product
+     * application mounts them; the standalone harness keeps the Location it
+     * has always compiled.
+     */
+    readonly inventoryStatus?: boolean;
+  } = {},
 ): Record<string, unknown> {
   const definitionIds = ids(namespace);
   const { contentCapabilityId, entityIds, fieldIds, moduleId, packageId } =
     definitionIds;
-  const locationFields = [fieldIds.code, fieldIds.name, fieldIds.locationType];
+  const inventoryStatus = options.inventoryStatus === true;
+  const locationFields = [
+    fieldIds.code,
+    fieldIds.name,
+    fieldIds.locationType,
+    ...(inventoryStatus
+      ? [fieldIds.status, fieldIds.statusReason, fieldIds.statusChangedAt]
+      : []),
+  ];
   return {
     assertions: [
       conformanceAssertion(
@@ -103,8 +161,61 @@ export function locationModuleDefinition(
         [
           ['warehouse', 'Warehouse'],
           ['store', 'Store'],
+          ...(inventoryStatus ? WIDENED_TYPES : []),
         ],
       ),
+      ...(inventoryStatus
+        ? [
+            // Every location is usable until a declared status change with a
+            // reason says otherwise; a location released before this field
+            // existed reads usable (the column's declared default).
+            {
+              ...enumField(
+                definitionIds,
+                entityIds.location,
+                fieldIds.status,
+                'Inventory status',
+                40,
+                STATUSES,
+              ),
+              defaultSemantics: 'declaredDefault',
+              defaultValue: {
+                kind: 'textValue',
+                schemaVersion: version,
+                value: definitionIds.statusOptionIds.usable,
+              },
+            },
+            textField({
+              entityId: entityIds.location,
+              fieldId: fieldIds.statusReason,
+              label: 'Status reason',
+              maximumLength: 1000,
+              orderKey: 50,
+              presence: 'optional',
+              searchable: false,
+            }),
+            {
+              classification: 'internal',
+              collation: 'binary',
+              defaultSemantics: 'nullable',
+              entity: reference('entityReference', entityIds.location),
+              fieldId: fieldIds.statusChangedAt,
+              fieldType: {
+                kind: 'dateTimeFieldType',
+                precision: 'millisecond',
+                schemaVersion: version,
+                timezoneSemantics: 'utcInstant',
+              },
+              kind: 'fieldDefinition',
+              label: 'Status changed',
+              orderKey: 60,
+              presence: 'optional',
+              reportable: true,
+              schemaVersion: version,
+              searchable: false,
+            },
+          ]
+        : []),
     ],
     hashAlgorithm: 'sha256',
     impactAnalyses: [],
@@ -172,6 +283,7 @@ export const LOCATION_IDS = Object.freeze({
   fieldIds,
   moduleId,
   namespace: LOCATION_NAMESPACE,
+  statusOptionIds,
 });
 
 function entity(

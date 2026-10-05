@@ -24,6 +24,7 @@ import {
 } from '../purchasing/workspace.js';
 import { inventoryDocumentWorkspace } from '../inventory/workspace.js';
 import { itemStockWorkspace } from '../inventory/item-stock-workspace.js';
+import { locationWorkspace } from '../location/workspace.js';
 
 const version = 'v6' as const;
 const normalizationProfileVersion = 'northstar.normalization/v6' as const;
@@ -88,7 +89,12 @@ const MODULE_REGISTRY = Object.freeze([
       }),
     moduleName: 'catalog',
   }),
-  Object.freeze({ create: locationModuleDefinition, moduleName: 'location' }),
+  Object.freeze({
+    // An inventory status with its reason, and the widened types (LOCATIONS).
+    create: (namespace: string) =>
+      locationModuleDefinition(namespace, { inventoryStatus: true }),
+    moduleName: 'location',
+  }),
 ] as const);
 
 /** Record surfaces presented as documents with their own lines and actions. */
@@ -107,6 +113,9 @@ const RECORD_COMPOSITIONS: Readonly<
     inventoryDocumentWorkspace(namespace, 'stock_count'),
   // An item's stock by location and its movements (INVENTORY-PARITY).
   item_detail: itemStockWorkspace,
+  // A location's type and inventory status, changed with a reason
+  // (LOCATIONS).
+  location_detail: locationWorkspace,
 });
 
 /**
@@ -380,6 +389,16 @@ export const APPLICATION_IDS = Object.freeze({
       code: `${APPLICATION_NAMESPACE}:field.location_code`,
       locationType: `${APPLICATION_NAMESPACE}:field.location_type`,
       name: `${APPLICATION_NAMESPACE}:field.location_name`,
+      status: `${APPLICATION_NAMESPACE}:field.location_status`,
+      statusChangedAt: `${APPLICATION_NAMESPACE}:field.location_status_changed_at`,
+      statusReason: `${APPLICATION_NAMESPACE}:field.location_status_reason`,
+    }),
+    statusOptionIds: Object.freeze({
+      damaged: `${APPLICATION_NAMESPACE}:option.location_status_damaged`,
+      inTransit: `${APPLICATION_NAMESPACE}:option.location_status_in_transit`,
+      quarantine: `${APPLICATION_NAMESPACE}:option.location_status_quarantine`,
+      returnPending: `${APPLICATION_NAMESPACE}:option.location_status_return_pending`,
+      usable: `${APPLICATION_NAMESPACE}:option.location_status_usable`,
     }),
     formSurfaceId: `${APPLICATION_NAMESPACE}:surface.location_form`,
     listQueryId: `${APPLICATION_NAMESPACE}:query.location_list`,
