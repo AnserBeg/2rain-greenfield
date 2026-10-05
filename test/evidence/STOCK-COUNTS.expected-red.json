@@ -127,6 +127,24 @@
           "expected": "INVENTORY_COUNT_EVIDENCE_CONFLICT: stock-count line \\S+ was altered in a column its posting transition does not write"
         }
       ]
+    },
+    {
+      "name": "count-physical-quantity-last-decimal",
+      "claim": "C6. The read-back proves a line's physical count unchanged to its last decimal: a Post that moves 1.000000000000000001 to 1.000000000000000002 is refused, not compared as one JavaScript number.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $5::uuid,\n",
+      "replacement": "          SET $${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $$5::uuid,\n              $${quoted(declaredColumns(binding.stockCountLine, ['stock_count_line_physical_quantity'])[0]!)} = $${quoted(declaredColumns(binding.stockCountLine, ['stock_count_line_physical_quantity'])[0]!)} + 0.000000000000000001,\n",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "proved unchanged to its last decimal"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count read-back: a physical count is proved unchanged to its last decimal",
+          "expected": "INVENTORY_COUNT_EVIDENCE_CONFLICT: stock-count line \\S+ was altered in a column its posting transition does not write"
+        }
+      ]
     }
   ]
 }
