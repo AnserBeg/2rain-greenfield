@@ -97,7 +97,10 @@ import {
   SemanticQueryPolicyDeniedError,
 } from '../../packages/runtime/src/semantic-query-gateway.js';
 import type { RequestRuntimeView } from '../../packages/runtime/src/request-runtime-view.js';
-import { withEphemeralPostgres } from '../helpers/postgres.js';
+import {
+  LINEAGE_INSTALL_VOLUME,
+  withEphemeralPostgres,
+} from '../helpers/postgres.js';
 import {
   CURRENT_POLICY_BINDINGS_FILE,
   CURRENT_POLICY_BINDINGS_VERSION,
@@ -472,10 +475,9 @@ test(
 // borrow the real head and which needed a served tenant of its own. Round one
 // moved the source-changing direction out and left three tenants here: 251.1s
 // standalone, 1.19x margin, and then a TIMEOUT at 300s in the matrix. Round two
-// moved the profile-only direction out as well. Both now live in
-// "ADR-0047 §6 refuses a profile-only rollback edge by name and leaves a
-// source-changing one eligible", and this test is back to the two tenants it
-// had before adoption.
+// moved the profile-only direction out as well. Both now live in the two
+// "ADR-0047 §6" rollback-edge tests, one per direction since RETURNS, and this
+// test is back to the two tenants it had before adoption.
 //
 // THE LESSON IS THE UNIT, not the number: a standalone measurement is not
 // evidence about this bound. The prior in-matrix figure was 210.9s at a8c9d07
@@ -840,6 +842,11 @@ test(
 
 // Same harness limit: this parent performs one bounded fresh install and then
 // verifies and activates compiled successors through the normal upgrade path.
+// Its reversal journey -- the forward-only refusal, the non-exact reverse
+// pairs, the rollback and the forward replay -- is the next parent: together
+// they passed 300 s in-matrix at lineage entry 6 (CI 37261615364, both
+// attempts), so they split at that semantic boundary, each with this bound
+// and its own deployment, as the ADR-0047 rollback-edge directions did.
 test(
   'composed product advances an existing deployment to an exact compiled successor',
   { timeout: 300_000 },
@@ -971,6 +978,77 @@ test(
             sourceReleaseId,
             candidateReleaseId,
           );
+        } finally {
+          await runtime.close();
+        }
+      },
+      // Every install and activation here keeps its release artifacts and their
+      // write-ahead log. At lineage entry 6 they filled the default 256 MB
+      // volume (sqlstate 53100), so this parent runs on the full-replay
+      // generator's 1 GB volume.
+      LINEAGE_INSTALL_VOLUME,
+    );
+  },
+);
+
+// The advancement parent's reversal journey on a deployment of its own: the
+// same fresh install and the same storage-changing successor, reached through
+// the normal upgrade path, then everything that parent did after it.
+test(
+  'an advanced deployment refuses a forward-only reversal, reverses to its exact predecessor and replays forward',
+  { timeout: 300_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'g2-1g-release-reversal',
+      async ({ connection, pool }) => {
+        const compiledApplication = JSON.parse(
+          await readFile(compiledArtifactPath, 'utf8'),
+        ) as unknown;
+        const authoredApplication = JSON.parse(
+          await readFile(authoredArtifactPath, 'utf8'),
+        ) as Record<string, unknown>;
+        const databaseUrl = connectionUrl(connection);
+        let runtime = await createRuntime(
+          compiledApplication,
+          databaseUrl,
+          'advancing-tenant',
+        );
+        try {
+          await assertExactSwapTriggerEnabled(pool);
+          const sourceReleaseId = runtime.activeReleaseId;
+          const recordId = randomUUID();
+          const created = await createParty(runtime, recordId, 'P-UPGRADE-001');
+          assert.equal(created.outcome, 'succeeded');
+          const candidate = await compileCandidateEnvelope(
+            compiledApplication,
+            authoredApplication,
+            true,
+          );
+          await runtime.close();
+
+          runtime = await createRuntime(
+            candidate,
+            databaseUrl,
+            'advancing-tenant',
+          );
+          await assertExactSwapTriggerEnabled(pool);
+          assert.notEqual(
+            runtime.releaseRoot,
+            parseCompiledApplication(compiledApplication).application.compiled
+              .releaseRoot,
+          );
+          const after = await partyRowSnapshot(
+            pool,
+            runtime,
+            candidate,
+            recordId,
+          );
+          const candidateReleaseId = runtime.activeReleaseId;
+          await assertMaterializedReversibleForwardTransition(
+            pool,
+            sourceReleaseId,
+            candidateReleaseId,
+          );
           await runtime.close();
           await setLatestForwardTransitionRecoveryMode(
             pool,
@@ -1089,10 +1167,9 @@ test(
           await runtime.close();
         }
       },
-      // The whole lineage, then its successor or reverse edge: six entries
-      // overflow the default 256 MB data tmpfs, as nineteen did for the
-      // full-replay generator (SALES-PARITY 28461658). Room, not a bound.
-      { dataSizeMegabytes: 1024 },
+      // As the advancement parent: its installs and activations outgrow the
+      // default 256 MB volume.
+      LINEAGE_INSTALL_VOLUME,
     );
   },
 );
@@ -3953,12 +4030,18 @@ async function reopenServingRuntime(
 // They belong together anyway: each is the other's discriminating half. Direction
 // 1 alone is satisfied by a refusal that fires on every edge; direction 2 alone
 // is satisfied by one that fires on none.
+//
+// SPLIT AGAIN by RETURNS, one test per direction, each on a database of its own
+// under this same bound: its two fresh installs and the verified rollback
+// reached the 300 s bound in-matrix at lineage entry 6 (CI 37273179606, having
+// passed at 295 s and 291 s in 37261615364). The pair stays each other's
+// discriminating half: both are in this file and both must pass.
 test(
-  'ADR-0047 §6 refuses a profile-only rollback edge by name and leaves a source-changing one eligible',
+  'ADR-0047 §6 refuses a profile-only rollback edge by name',
   { timeout: 300_000 },
   async () => {
     await withEphemeralPostgres(
-      'lang-adopt-v5-rollback-edges',
+      'rollback-edge-profile-only',
       async ({ connection }) => {
         const compiledApplication = JSON.parse(
           await readFile(compiledArtifactPath, 'utf8'),
@@ -4011,7 +4094,27 @@ test(
           },
           'ADR-0047 §6: a profile-only edge refuses by its own name, not as a wrong predecessor',
         );
+      },
+      // The 1 GB volume the combined parent took when its two installs filled
+      // the default 256 MB at lineage entry 6 (sqlstate 53100).
+      LINEAGE_INSTALL_VOLUME,
+    );
+  },
+);
 
+// DIRECTION 2 of the pair above, on a database of its own.
+test(
+  'ADR-0047 §6 leaves a source-changing rollback edge eligible, serving it only after verification',
+  { timeout: 300_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'rollback-edge-source-changing',
+      async ({ connection }) => {
+        const compiledApplication = JSON.parse(
+          await readFile(compiledArtifactPath, 'utf8'),
+        ) as unknown;
+        const databaseUrl = connectionUrl(connection);
+        const tenantSlug = 'composed-tenant-b';
         // ADR-0066: the source-changing synthetic edge has a usable target.
         // Actual successful rollback discriminates this from deny-every-edge.
         // The obsolete pre-search first-party target is no longer retained.
@@ -4069,10 +4172,9 @@ test(
           await reversed.close();
         }
       },
-      // The whole lineage, then its successor or reverse edge: six entries
-      // overflow the default 256 MB data tmpfs, as nineteen did for the
-      // full-replay generator (SALES-PARITY 28461658). Room, not a bound.
-      { dataSizeMegabytes: 1024 },
+      // The 1 GB volume the combined parent took when its two installs filled
+      // the default 256 MB at lineage entry 6 (sqlstate 53100).
+      LINEAGE_INSTALL_VOLUME,
     );
   },
 );
