@@ -1100,8 +1100,10 @@ interface VerificationOperationContract {
 }
 
 interface VerificationQueryContractBase {
-  /** The declared predicate; see `gatewayExecutesQ0`. */
+  /** The declared predicate; see `gatewayExecutes`. */
   readonly filter: unknown;
+  /** A Q1 query's compiled filter plan, which the gateway executes. */
+  readonly filterPlan?: unknown;
   readonly legalEntityScope?: {
     readonly cardinality: 'exactlyOne' | 'nonEmptySet';
     readonly kind: 'queryLegalEntityScope';
@@ -1390,18 +1392,22 @@ class SemanticVerificationExecutor {
 
   /**
    * Archives every record verification created, newest first, reading each
-   * through its entity's plain get that the gateway executes. A record it
-   * cannot read -- no such get, or an answer that is neither the record nor
-   * `not-found` -- is refused by name, not skipped, once every record that
-   * can be read is archived.
+   * through its entity's first plain get that returns any live record by id
+   * (`gatewayExecutesQ0`). A record it cannot read -- no such get, or an
+   * answer that is neither the record nor `not-found` -- is refused by name,
+   * not skipped, once every record that can be read is archived.
    */
   async archiveProbeRecords(): Promise<void> {
     const unreadable: string[] = [];
     for (const record of [...this.#createdRecords].reverse()) {
-      const get = this.#findQueryForEntity(record.entityId, 'get');
+      const get = this.#findQueryForEntity(
+        record.entityId,
+        'get',
+        gatewayExecutesQ0,
+      );
       if (!get) {
         unreadable.push(
-          `${record.recordId} of ${record.entityId}, which has no get the gateway executes`,
+          `${record.recordId} of ${record.entityId}, which has no get that returns any live record by id`,
         );
         continue;
       }
@@ -1619,7 +1625,13 @@ class SemanticVerificationExecutor {
       {},
       relationOverrides,
     );
-    const search = this.#queryForEntity(scenario.entityId, 'search');
+    // The probe reads through the search's own filter, so any search the
+    // gateway executes serves, a Q1 one included (`gatewayExecutes`).
+    const search = this.#queryForEntity(
+      scenario.entityId,
+      'search',
+      gatewayExecutes,
+    );
     const excludedValue = record.values[scenario.subjectId];
     if (excludedValue === undefined) {
       throw failure(
@@ -1693,8 +1705,10 @@ class SemanticVerificationExecutor {
 
   async #typedErrorSurface(scenario: VerificationScenario, token: string) {
     const record = await this.#create(scenario.entityId, token);
+    // The get's answer is recorded as the positive probe and nothing is
+    // asserted of it, so any get the gateway executes serves.
     const get = await this.#invokeQuery(
-      this.#queryForEntity(scenario.entityId, 'get'),
+      this.#queryForEntity(scenario.entityId, 'get', gatewayExecutes),
       { recordId: record.recordId },
       record,
     );
@@ -1922,10 +1936,10 @@ class SemanticVerificationExecutor {
    * (`verificationSentinelNumber`); it is still read wherever the release lets
    * a caller read it by record id -- the create's read-back when that
    * projection selects the field, else a plain get that selects it and that
-   * the gateway runs -- and must be that sentinel. A read-back is a declared
-   * projection, not the record: one that omits the field says nothing about
-   * the assignment. Only when no read by record id that runs selects the field
-   * is the sentinel used unread.
+   * returns any live record by id (`gatewayExecutesQ0`) -- and must be that
+   * sentinel. A read-back is a declared projection, not the record: one that
+   * omits the field says nothing about the assignment. Only when no such read
+   * selects the field is the sentinel used unread.
    */
   async #assignedWitness(
     operation: VerificationOperationContract,
@@ -1953,11 +1967,11 @@ class SemanticVerificationExecutor {
       observed = readBack.values[fieldId];
       source = 'read-back';
     } else {
-      // The first plain get that selects the field and that the gateway runs
-      // (`gatewayExecutesQ0`); one it would answer `unsupported` without
-      // reading is no reader, and a read-model get is never the read
-      // (`#queryForEntity`). A get that runs returns any live record by id,
-      // so once one has run, anything but the record's sentinel fails.
+      // The first plain get that selects the field and that returns any live
+      // record by id (`gatewayExecutesQ0`); one the gateway would answer
+      // `unsupported` without reading is no reader, and a read-model get is
+      // never the read (`#findQueryForEntity`). Once such a get has run,
+      // anything but the record's sentinel fails.
       const get = this.#queries.find(
         (candidate) =>
           candidate.sourceEntityId === record.entityId &&
@@ -2397,31 +2411,38 @@ class SemanticVerificationExecutor {
   #queryForEntity(
     entityId: string,
     queryType: VerificationQueryContract['queryType'],
+    admits: (query: VerificationQueryContract) => boolean,
   ): VerificationQueryContract {
-    const query = this.#findQueryForEntity(entityId, queryType);
+    const query = this.#findQueryForEntity(entityId, queryType, admits);
     if (!query) {
       throw failure(
         'VERIFICATION_QUERY_MISSING',
-        `compiled ${queryType} query the gateway executes is missing for ${entityId}`,
+        `compiled ${queryType} query of ${entityId} that ${admits.name} admits is missing`,
       );
     }
     return query;
   }
 
+  /**
+   * The entity's first plain query of the type that `admits` admits: one the
+   * gateway executes (`gatewayExecutes`) for a probe that reads through the
+   * query's own filter, or a get that returns any live record by id
+   * (`gatewayExecutesQ0`) for a read that must find its record.
+   */
   #findQueryForEntity(
     entityId: string,
     queryType: VerificationQueryContract['queryType'],
+    admits: (query: VerificationQueryContract) => boolean,
   ): VerificationQueryContract | undefined {
     // Verification's gateway registers no read-model executors, so it reads
     // its records through the entity's plain query of that type. A read-model
     // query of the same type, such as an order read with its totals, presents
     // the same records; it sorts wherever its id falls and is never the read.
-    // Nor is a query the gateway answers `unsupported` without reading
-    // (`gatewayExecutesQ0`), wherever it sorts: it would find no record.
+    // Nor is a query `admits` refuses, wherever it sorts.
     return this.#queries.find(
       (candidate) =>
         candidate.sourceEntityId === entityId &&
-        gatewayExecutesQ0(candidate) &&
+        admits(candidate) &&
         candidate.queryType === queryType &&
         candidate.readModel === undefined,
     );
@@ -2826,20 +2847,30 @@ function hasRecord(value: unknown, recordId: string): boolean {
 }
 
 /**
- * Whether the query gateway runs this query as a Q0 read rather than
- * answering it `unsupported` without reading: it is active and Q0, and its
- * filter passes the gateway's own execution fence,
- * `inspectPredicateForExecution`, which admits only the literal `true`. The
- * compiler admits any boolean filter, so a declared Q0 query can carry `false`
- * and never run. A Q0 read that runs applies no filter, so a get returns any
- * live record by id.
+ * Whether the query gateway executes this query rather than answering it
+ * `unsupported` without a read, as `SemanticQueryGateway.invoke` decides: the
+ * query is active, and either Q0 with a filter the gateway's execution fence
+ * (`inspectPredicateForExecution`) accepts -- only the literal `true` -- or
+ * Q1 with a compiled filter plan, which the gateway hands to the executor.
+ * The compiler admits any boolean Q0 filter, so a declared Q0 query can carry
+ * `false` and never run; a Q1 plan applies the query's own filter.
+ */
+function gatewayExecutes(query: VerificationQueryContract): boolean {
+  if (query.lifecycle !== 'active') return false;
+  return query.tier === 'q0'
+    ? inspectPredicateForExecution(query.filter).outcome === 'accepted'
+    : Boolean(query.filterPlan);
+}
+
+/**
+ * Whether the gateway executes this query as a Q0 read (`gatewayExecutes`):
+ * its filter is then the literal `true` and the read applies no other, so a
+ * get returns any live record by id. Cleanup and the number witness read only
+ * through such gets; a Q1 get's filter could hide a live record, which cleanup
+ * would take as archived.
  */
 function gatewayExecutesQ0(query: VerificationQueryContract): boolean {
-  return (
-    query.lifecycle === 'active' &&
-    query.tier === 'q0' &&
-    inspectPredicateForExecution(query.filter).outcome === 'accepted'
-  );
+  return query.tier === 'q0' && gatewayExecutes(query);
 }
 
 /** A query result's outcome, with the gateway's reason when it has one. */
