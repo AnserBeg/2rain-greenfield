@@ -742,3 +742,8 @@ How to apply: accompany new Task bindings with a compiled-surface prepare/confir
 Date: 2026-10-01
 Why: an APPROVALS browser fixture started while the lineage was being rebuilt and pinned PAYABLES root `0f7ed4e6`, which lacks the approval setting operation, rather than the completed APPROVALS head.
 How to apply: serialize the complete base-envelope rebuild and its checks before launching fixtures, PostgreSQL tests or browser tests; a run that consumed an intermediate generated artifact is not acceptance evidence. See [APPROVALS](docs/execution/packets/APPROVALS.md).
+
+## Exercise denied-role Task offers as well as denied effects
+Date: 2026-10-04
+Why: APPROVALS' PostgreSQL test refused Buyer approval correctly, while the browser still showed Buyer an Approve button because shared Tasks checked record conditions but not current permission.
+How to apply: test permitted, denied and unavailable-policy Task offers through the shared runtime; keep previews advisory and test that execution still requires its own confirmation and current authorization. See [APPROVALS](docs/execution/packets/APPROVALS.md).

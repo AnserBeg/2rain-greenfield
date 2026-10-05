@@ -21,6 +21,7 @@ Status: [draft PR #14](https://github.com/AnserBeg/2rain-greenfield/pull/14); no
 - Compile-derived pins: 106 surfaces, 18 navigation leaves, 605 verification scenarios (507 constructible, 98 derived). Language coverage and the fresh-tenant schema snapshot are re-derived, not guessed.
 - PAYABLES `681f4675` is merged. The compile still declares 10 assigned-number fields and 10 uniqueness probes; approval request IDs add no document-number assignment, so both numbering lists are retained unchanged.
 - A capability argument envelope is emitted only when canonical Task bindings declare it. Historical record/revision-only command contracts remain byte-identical; each executor refuses unknown inner arguments.
+- The shared Task runtime previews all declared steps against current boundary/operation permissions before offering or opening a Task; denied or unavailable policy withholds the offer, not the record. This read-only preview is not authority: execution still checks exact inputs, current policy and required confirmation.
 
 ## Slices
 
@@ -35,10 +36,12 @@ Status: [draft PR #14](https://github.com/AnserBeg/2rain-greenfield/pull/14); no
 - Post-CI focused gates: units 68/68, an observed-red-then-green Place order Task round trip 1/1, web contracts 37/37, typecheck, lint, changed-path formatting and rebuilt release `--check` passed.
 - The [second CI run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36802117405) passed commercial PostgreSQL 20/20 (including APPROVAL-PO), schema/isolation, the main browser suite, performance and security. Quality's executable gates passed; its final diff check found an extra design EOF blank line, now removed. The inbox browser locator and an old unconfirmed Place order fixture are corrected; the next full matrix remains required.
 - The rollback fixture lost a PostgreSQL connection twice with both synthetic tenants in one database. Its two discriminating claims now have separate database lifecycles, with unchanged 256 MiB capacity and 300 s bounds; this is a test isolation correction, not a change to release activation or verification.
-- Latest local checks: typecheck, lint, changed-test formatting, base-envelope rebuild/check and coverage re-derivation passed (2,654 obligations, 814 declaration/lowering observations). The final focused browser attempt was lock-busy and ran no test.
+- Pre-affordance local checks: typecheck, lint, changed-test formatting, base-envelope rebuild/check and coverage re-derivation passed (2,654 obligations, 814 declaration/lowering observations). The focused browser attempt was lock-busy and ran no test.
+- The [third CI run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36840959891) passed quality, all PostgreSQL jobs (composed 22/22, including both isolated rollback directions), the main browser suite, security and observability. Performance refused an indeterminate CPU-idle sample (73.3% < 90%); the operations journey exposed Buyer's incorrectly offered decision Tasks. The shared permission preview corrects that UI defect; the next full matrix is required. Docker is unavailable in the resumed WSL session; no new local container-backed test ran.
+- The permission-offer regression was observed red then green. The broader container-free integration/web-contract run passed 213/213, including denied, restored and unavailable-policy offers plus forged Task entry and unchanged confirmation enforcement. Final lint, typecheck, changed-source formatting, rebuilt release checks and coverage re-derivation passed; measured pins and both 10-entry numbering lists are unchanged.
 - The new PostgreSQL test is registered in `test:postgres:commercial` and repository hygiene; `purchase-approvals.spec.ts` is included in the operations browser job.
 - CI at the pushed PR SHA is the acceptance matrix. This draft is not accepted, merged or deployed; the owner requested a draft PR against PAYABLES only.
-- No timeout, threshold, existing action limit or PostgreSQL readiness bound has been raised. PostgreSQL/schema commands use the exclusive lock and browsers use one worker.
+- No timeout, threshold, existing action limit or PostgreSQL readiness bound has been raised. Local PostgreSQL/schema commands use the exclusive lock and local browsers use one worker.
 - Local dependency-boundary tests passed 47/47 but their Docker cleanup controls briefly overlapped the locked replay in an incorrectly direct invocation; they completed and cleaned up. Subsequent runs must be exclusive.
 
 ## Test it yourself
@@ -57,7 +60,7 @@ Review: not owed — outside the Critical set. No stage boundary is integrated b
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "APPROVALS",
   "base": "681f46751b2a4c3cc9027956534b741c35dd4a03",
-  "head": "8b9824d5f34e135401451c0d0464342e2b4a8b28",
+  "head": "b296e12fb10499ebd010561567e0903833428398",
   "changedPaths": [
     "apps/api/src/composition-root.ts",
     "apps/web/release/app.authored.json",
@@ -65,6 +68,7 @@ Review: not owed — outside the Critical set. No stage boundary is integrated b
     "apps/web/release/current-policy-bindings.json",
     "apps/web/src/app-server.ts",
     "apps/web/src/component-registry.ts",
+    "apps/web/src/surface-composition.ts",
     "apps/web/src/surface-runtime.ts",
     "apps/web/test/browser/order-entry.spec.ts",
     "apps/web/test/browser/purchase-approvals.spec.ts",
@@ -87,6 +91,7 @@ Review: not owed — outside the Critical set. No stage boundary is integrated b
     "packages/postgres-provider/src/purchase-order-approval-executor.ts",
     "packages/postgres-provider/src/purchase-order-approval.ts",
     "packages/runtime/src/local-demo-actor.ts",
+    "packages/runtime/src/semantic-operation-gateway.ts",
     "test/architecture/repository-hygiene.test.ts",
     "test/architecture/surface-grammar-conformance.test.ts",
     "test/compiler/inventory-contract.release.golden.json",
@@ -94,6 +99,7 @@ Review: not owed — outside the Critical set. No stage boundary is integrated b
     "test/helpers/generate-fresh-tenant-full-replay-schema.ts",
     "test/helpers/order-entry-fixture.ts",
     "test/helpers/reachability-producers.ts",
+    "test/integration/semantic-gateways.test.ts",
     "test/integration/surface-data-binding.test.ts",
     "test/postgres/composed-application.test.ts",
     "test/postgres/fresh-tenant-full-replay-schema.snapshot.json",
