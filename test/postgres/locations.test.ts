@@ -336,22 +336,30 @@ test(
       ]);
 
       // The order's line: free stock now is the usable 6, so it is short 2.
-      const orderLine = async () =>
-        rows(
-          (
-            await read(
-              url(fixture, 'sales_order_detail', {
-                record: scenario.order,
-                ...scoped(fixture, 'commercial_order_get'),
-              }),
-            )
-          ).html,
-          'fulfillment_lines',
-        ).get(scenario.line)!;
-      assert.deepEqual(
-        [(await orderLine()).Short, (await orderLine())['Free stock now']],
-        ['2', '6'],
-      );
+      // Short is a quantity cell; free stock now one of its supporting
+      // details.
+      const orderLine = async () => {
+        const html = (
+          await read(
+            url(fixture, 'sales_order_detail', {
+              record: scenario.order,
+              ...scoped(fixture, 'commercial_order_get'),
+            }),
+          )
+        ).html;
+        const row =
+          new RegExp(
+            `<tr data-compact-card="true" data-presented-row="true" data-record-id="${scenario.line}"[^>]*>([\\s\\S]*?)</tr>`,
+            'u',
+          ).exec(html)?.[1] ?? '';
+        return [
+          rows(html, 'fulfillment_lines').get(scenario.line)?.Short,
+          /<span class="composition-cell-label">Free stock now<\/span> ([^<]*)<\/span>/u.exec(
+            row,
+          )?.[1],
+        ];
+      };
+      assert.deepEqual(await orderLine(), ['2', '6']);
 
       // "Change status" on the hold's page: inspected and released, with a
       // reason, through the real served Task.
@@ -417,10 +425,7 @@ test(
           ['QA-HOLD', 'Usable', '4'],
         ],
       );
-      assert.deepEqual(
-        [(await orderLine()).Short, (await orderLine())['Free stock now']],
-        ['0', '10'],
-      );
+      assert.deepEqual(await orderLine(), ['0', '10']);
 
       // The generic form leaves the status to the page, and a location it
       // creates reads usable; a widened type is admitted by the released

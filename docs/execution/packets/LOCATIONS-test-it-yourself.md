@@ -22,8 +22,8 @@ confirmed sale of 8 notebooks with nothing reserved yet.
    not listed there until you give it one on its form).
 3. More → Catalog → **Item** → **Field notebook**: Stock by location reads Calgary warehouse **Usable** 6 / 0 / **6**
    and QA-HOLD **Quarantine** 4 / 0 / **0** — nothing is available at the hold.
-4. Sales → Sales orders → the confirmed order of 8 notebooks: its fulfillment line reads Short **2** and Free stock
-   now **6**.
+4. Sales → Sales orders → the confirmed order of 8 notebooks: its fulfillment line reads Short **2**, and its
+   supporting details Free stock now **6**.
 
 ## §3 A status changes only with a reason
 
