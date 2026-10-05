@@ -68,6 +68,8 @@ export interface CompositionData {
   selectedDatasetId: string | null;
   url: string;
   scope: string | null;
+  /** Current-request advisory offers, never authority for a later invocation. */
+  offeredActionIds: ReadonlySet<string>;
 }
 const ordered = <T extends { orderKey: number }>(values: readonly T[]): T[] =>
   [...values].sort((a, b) => a.orderKey - b.orderKey);
@@ -311,7 +313,28 @@ export async function loadSurfaceComposition(
     selectedDatasetId: null,
     url: url.pathname + url.search,
     scope,
+    offeredActionIds: new Set(),
   };
+  const offeredActionIds = new Set<string>();
+  await Promise.all(
+    composition.actions
+      .filter((action) => !action.navigate)
+      .map(async (action) => {
+        try {
+          if (
+            (await gateways.operationGateway.previewTaskEligibility(
+              view,
+              action.steps.map((step) => step.operation.targetId),
+              scope,
+            )) === 'eligible'
+          )
+            offeredActionIds.add(action.actionId);
+        } catch {
+          // An unavailable policy decision withholds the offer, not the record.
+        }
+      }),
+  );
+  data.offeredActionIds = offeredActionIds;
   try {
     data.fields = await present(
       view,
@@ -493,6 +516,8 @@ function taskRows(action: Action, data: CompositionData): Row[] {
   );
 }
 function applicable(action: Action, data: CompositionData): boolean {
+  if (!action.navigate && !data.offeredActionIds.has(action.actionId))
+    return false;
   if (
     action.datasetId &&
     (!data.selected || action.datasetId !== data.selectedDatasetId)

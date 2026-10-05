@@ -121,6 +121,9 @@ test('Buyer submits, Manager rejects and approves, then Buyer places and stages 
     await expect(
       page.getByRole('button', { name: 'Approve', exact: true }),
     ).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: 'Reject', exact: true }),
+    ).toHaveCount(0);
     await switchPerson('manager');
     await page.getByRole('button', { name: 'Reject', exact: true }).click();
     await page

@@ -1741,6 +1741,9 @@ test('a record names its short rows and its progress, and offers only the first 
       selectedDatasetId: null,
       url: '/?surface=order&record=00000000-0000-4000-8000-000000000001',
       scope: null,
+      offeredActionIds: new Set(
+        composition.actions.map((action) => action.actionId),
+      ),
     };
   };
   const draft = { [state]: id('state', 'order_draft') };

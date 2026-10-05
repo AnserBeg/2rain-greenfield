@@ -666,6 +666,31 @@ export class SemanticOperationGateway {
     operationIds: readonly string[],
     legalEntityId: string | null,
   ): Promise<'eligible' | 'ineligible'> {
+    return this.#previewEligibility(view, operationIds, legalEntityId, false);
+  }
+
+  /**
+   * Advisory permission preview for a declared Task, whose own review/confirm
+   * flow may require human confirmation. This grants no invocation authority:
+   * invoke still requires its exact server-issued grant and current policy.
+   * Missing/retired operations and an empty Task remain ineligible.
+   */
+  async previewTaskEligibility(
+    view: IssuedRequestRuntimeView,
+    operationIds: readonly string[],
+    legalEntityId: string | null,
+  ): Promise<'eligible' | 'ineligible'> {
+    assertRequestRuntimeView(view);
+    if (operationIds.length === 0) return 'ineligible';
+    return this.#previewEligibility(view, operationIds, legalEntityId, true);
+  }
+
+  async #previewEligibility(
+    view: IssuedRequestRuntimeView,
+    operationIds: readonly string[],
+    legalEntityId: string | null,
+    taskWillConfirm: boolean,
+  ): Promise<'eligible' | 'ineligible'> {
     assertRequestRuntimeView(view);
     const catalog = readPinnedOperationCatalog(view);
     const allows = async (permissionId: string, operationId: string) =>
@@ -692,7 +717,7 @@ export class SemanticOperationGateway {
       if (
         !definition ||
         definition.lifecycle !== 'active' ||
-        definition.confirmation === 'humanRequired' ||
+        (!taskWillConfirm && definition.confirmation === 'humanRequired') ||
         !(await allows(OPERATION_BOUNDARY_PERMISSION_ID, operationId)) ||
         !(await allows(definition.permissionId, operationId))
       )

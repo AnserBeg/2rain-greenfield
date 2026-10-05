@@ -10564,6 +10564,64 @@ test('APPROVAL-PO: declared Tasks gate Place order on current approval and suppr
       html.replace(/<[^>]*>/gu, ' ').slice(-3500),
     );
   assert.match(html, /PO-000042/u);
+
+  f.deniedReads.add(`${ns}:permission.purchase_order_approve`);
+  const denied = await renderSurfaceRuntimeWithData(
+    f.view,
+    requestPath,
+    statingGateways(f, {}),
+  );
+  for (const action of ['approve', 'reject']) {
+    assert.ok(
+      !denied.html.includes(`value="${ns}:action.approval_${action}"`),
+      `${action} must not be offered without the current approve permission`,
+    );
+    const forged = await submitSurfaceRuntimeIntent(
+      f.view,
+      requestPath,
+      { compositionAction: `${ns}:action.approval_${action}` },
+      statingGateways(f, {}),
+    );
+    assert.equal(forged.statusCode, 422);
+    assert.match(forged.html, /COMPOSITION_TASK_UNAVAILABLE/u);
+  }
+  assert.match(
+    denied.html,
+    /PO-000042/u,
+    'denied decisions must not hide the record',
+  );
+  f.deniedReads.delete(`${ns}:permission.purchase_order_approve`);
+  const restored = await renderSurfaceRuntimeWithData(
+    f.view,
+    requestPath,
+    statingGateways(f, {}),
+  );
+  assert.ok(restored.html.includes(`value="${ns}:action.approval_approve"`));
+  const authorize = f.policy.authorize.bind(f.policy);
+  f.policy.authorize = (request) => {
+    if (
+      asRecord(request.decisionInput).kind ===
+      'semanticOperationEligibilityPolicyInput'
+    )
+      throw new Error('permission preview unavailable');
+    return authorize(request);
+  };
+  try {
+    const unavailable = await renderSurfaceRuntimeWithData(
+      f.view,
+      requestPath,
+      statingGateways(f, {}),
+    );
+    assert.ok(
+      !unavailable.html.includes(`value="${ns}:action.approval_approve"`),
+    );
+    assert.ok(
+      !unavailable.html.includes(`value="${ns}:action.approval_reject"`),
+    );
+    assert.match(unavailable.html, /PO-000042/u);
+  } finally {
+    f.policy.authorize = authorize;
+  }
 });
 
 test('PAYABLES: the order lists its bills and offers billing only while the order states something to bill; a bill binds its lines, payments and credits and offers each command in its states', async () => {
