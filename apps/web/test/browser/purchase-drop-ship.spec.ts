@@ -1,9 +1,21 @@
 import { test, expect } from '@playwright/test';
-import { withOrderEntryFixture } from '../../../../test/helpers/order-entry-fixture.js';
-import {
+import { require as tsxRequire } from 'tsx/cjs/api';
+import type * as FixtureModule from '../../../../test/helpers/order-entry-fixture.js';
+import type * as QueryModule from '../../../../packages/runtime/src/semantic-query-gateway.js';
+
+// The browser runner does not transpile backend fixture dependencies. Load
+// those through the scoped TypeScript loader used by the PostgreSQL tests.
+const { withOrderEntryFixture } = tsxRequire(
+  '../../../../test/helpers/order-entry-fixture.ts',
+  import.meta.url,
+) as typeof FixtureModule;
+const {
   SEMANTIC_QUERY_REQUEST_VERSION,
   registeredSemanticQueryFromPinnedView,
-} from '../../../../packages/runtime/src/semantic-query-gateway.js';
+} = tsxRequire(
+  '../../../../packages/runtime/src/semantic-query-gateway.ts',
+  import.meta.url,
+) as typeof QueryModule;
 
 test('a supplier delivery appears on both linked orders and reverses with its reason', async ({
   page,

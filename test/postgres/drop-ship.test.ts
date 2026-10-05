@@ -193,7 +193,13 @@ test('D-A/B/C: linked supplier delivery settles both orders without stock and re
       /precondition|confirmed/iu,
     );
     let salesOrder = await command('sales_order_release', draft);
-    const supplierRole = (await list('party_role_list')).find(
+    const supplierRole = (
+      await list('party_role_list', {
+        kind: 'parentScope',
+        relation: 'party_role_party',
+        recordId: fixture.customer,
+      })
+    ).find(
       (row) => row.values[field('party_role_kind')] === option('supplier'),
     )!;
     const inactiveRole = await fixture.invoke('party_role_update', {

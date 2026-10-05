@@ -15691,7 +15691,7 @@
       "module": {
         "kind": "moduleReference",
         "schemaVersion": "v6",
-        "targetId": "northstar.app:module.purchasing"
+        "targetId": "northstar.app:module.sales"
       },
       "operationId": "northstar.app:operation.sales_order_create_drop_ship_po",
       "permission": {
@@ -40505,7 +40505,7 @@
       }
     },
     {
-      "archiveBehavior": "restrict",
+      "archiveBehavior": "retainReference",
       "cardinality": "manyToOne",
       "foreignKeyActions": {
         "onDelete": "restrict",
@@ -40531,7 +40531,7 @@
       }
     },
     {
-      "archiveBehavior": "restrict",
+      "archiveBehavior": "retainReference",
       "cardinality": "manyToOne",
       "foreignKeyActions": {
         "onDelete": "restrict",

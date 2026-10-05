@@ -3896,8 +3896,8 @@ async function assertBoundedFreshTenantInstallEvidence(
   // invoice number is searchable, so it adds no search exclusion.
   assert.equal(
     servingScenarioCount,
-    606,
-    'compiled DROP-SHIP head: 573 base scenarios plus 33 delivery/link/ship-to scenarios',
+    604,
+    'compiled DROP-SHIP head: 604 emitted scenarios',
   );
   await assertFreshInstallLineageEvidence(
     pool,
@@ -6236,8 +6236,8 @@ async function assertExactPartitionEvidence(
   // the compiled head): 573, 496.
   assert.equal(
     evidence.results.length,
-    529,
-    'compiled DROP-SHIP head: 529 constructible scenarios, observed executed here',
+    527,
+    'compiled DROP-SHIP head: 527 constructible scenarios, observed executed here',
   );
   assert.equal(
     derivations.length,

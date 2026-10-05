@@ -196,6 +196,9 @@ export function withDropShip<T extends Node>(application: T): T {
     sourceEntity: ref('entityReference', id('entity', source)),
     targetEntity: ref('entityReference', id('entity', target)),
     required,
+    // Demand/supply references retain cancelled or archived document identity;
+    // confirmed-line and linked-purchase mutation guards own edit admission.
+    archiveBehavior: required ? 'restrict' : 'retainReference',
     orderKey: 200 + rows(result.relations).length,
   });
   for (const [local, source, target, required] of [
@@ -292,6 +295,7 @@ export function withDropShip<T extends Node>(application: T): T {
       find('operations', 'operationId', 'vendor_credit_post'),
     );
     source.operationId = id('operation', local);
+    source.module = find('entities', 'entityId', entity).module;
     source.permission = ref('permissionReference', id('permission', local));
     source.readBack = query(`${entity}_get`);
     node(source.effect).capability = ref(

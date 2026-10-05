@@ -642,6 +642,22 @@ test('sales compiler scenarios execute input refinements and operation/storage e
         38,
         18,
       ),
+      salesInputField(
+        'fulfillment_route',
+        'enumFieldType',
+        false,
+        null,
+        null,
+        null,
+      ),
+      salesInputField(
+        'drop_ship_supplier_id',
+        'textFieldType',
+        false,
+        80,
+        null,
+        null,
+      ),
     ],
   );
   assert.deepEqual(lineCreate.inputContract.relationInputs, [
@@ -650,6 +666,12 @@ test('sales compiler scenarios execute input refinements and operation/storage e
       relationId: 'northstar.app:relation.sales_order_line_order',
       required: true,
       targetEntityId: 'northstar.app:entity.sales_order',
+    },
+    {
+      archiveBehavior: 'retainReference',
+      relationId: 'northstar.app:relation.sales_order_line_purchase_line',
+      required: false,
+      targetEntityId: 'northstar.app:entity.purchase_order_line',
     },
   ]);
 
@@ -728,11 +750,17 @@ test('sales compiler scenarios execute input refinements and operation/storage e
       ),
       `missing additive relation for ${local}`,
     );
-  assert.equal(
-    effects.every((effect) =>
-      ['additive', 'none'].includes(effect.semanticEffect),
+  assert.deepEqual(
+    effects.filter(
+      (effect) => !['additive', 'none'].includes(effect.semanticEffect),
     ),
-    true,
+    [
+      {
+        kind: 'addForeignKey',
+        semanticEffect: 'tightening',
+        subjectId: 'northstar.app:relation.purchase_order_line_sales_line',
+      },
+    ],
   );
 });
 
@@ -1729,7 +1757,11 @@ function composedApplicationWithoutSales(): Record<string, unknown> {
   const salesModuleId = 'northstar.app:module.sales';
   const salesEntityIds = new Set(
     (definition.entities as Array<Record<string, unknown>>)
-      .filter((entry) => referenceTarget(entry.module) === salesModuleId)
+      .filter(
+        (entry) =>
+          referenceTarget(entry.module) === salesModuleId ||
+          entry.entityId === 'northstar.app:entity.drop_ship_delivery',
+      )
       .map((entry) => String(entry.entityId)),
   );
   const belongsToSales = (
@@ -1750,8 +1782,19 @@ function composedApplicationWithoutSales(): Record<string, unknown> {
       case 'modules':
         return String(entry.moduleId) === salesModuleId;
       case 'operations':
+        return (
+          referenceTarget(entry.module) === salesModuleId ||
+          String(entry.operationId).startsWith(
+            'northstar.app:operation.drop_ship_delivery_',
+          )
+        );
       case 'surfaces':
-        return referenceTarget(entry.module) === salesModuleId;
+        return (
+          referenceTarget(entry.module) === salesModuleId ||
+          String(entry.surfaceId).startsWith(
+            'northstar.app:surface.drop_ship_delivery_',
+          )
+        );
       case 'queries':
         return salesEntityIds.has(referenceTarget(entry.sourceEntity) ?? '');
       case 'relations':
@@ -1784,6 +1827,25 @@ function composedApplicationWithoutSales(): Record<string, unknown> {
       (entry) =>
         !belongsToSales(collectionName, entry as Record<string, unknown>),
     );
+  }
+  // This storage-only predecessor has no cross-module commercial composition.
+  // DROP-SHIP's Purchasing read models depend on Sales queries removed above.
+  const queries = definition.queries as Array<Record<string, unknown>>;
+  const queryIds = new Set(queries.map((entry) => String(entry.queryId)));
+  for (const query of queries) {
+    const model = query.readModel as
+      { queries: Record<string, { targetId: string }> } | undefined;
+    if (
+      model &&
+      Object.values(model.queries).some(
+        (dependency) => !queryIds.has(dependency.targetId),
+      )
+    )
+      delete query.readModel;
+  }
+  for (const surface of definition.surfaces as Array<Record<string, unknown>>) {
+    delete surface.composition;
+    delete surface.list;
   }
   return definition;
 }

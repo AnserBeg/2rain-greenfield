@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { assertDropShipMutation } from './drop-ship-mutation-guards.js';
+import { InventoryPostingError } from './inventory-posting-error.js';
 import {
   additionalListProgressSql,
   type AdditionalListProgressPlan,
@@ -710,7 +711,13 @@ async function executeMutationOnClient(
   readBackSelections: readonly { readonly fieldId: string }[],
 ): Promise<SemanticRecordDto> {
   const definition = request.definition;
-  await assertDropShipMutation(client, storage, entity, request, input);
+  try {
+    await assertDropShipMutation(client, storage, entity, request, input);
+  } catch (error) {
+    if (error instanceof InventoryPostingError)
+      throw failure(error.code, error.message, entity.entityId, error.details);
+    throw error;
+  }
   switch (definition.effect.kind) {
     case 'createRecordEffect':
       await insertRecord(client, storage, entity, input, request.parentGuards);
