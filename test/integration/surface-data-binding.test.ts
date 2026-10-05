@@ -12337,6 +12337,27 @@ test('REPLENISHMENT: the item form chooses its preferred location from the locat
   // A new item starts with none chosen.
   const created = await form();
   assert.match(select(created.html) ?? '', /<option value="" selected>None/u);
+  // The item page names the location; the header and facts never depend on
+  // reading it.
+  const itemPage = () =>
+    renderSurfaceRuntimeWithData(
+      f.view,
+      `/?${new URLSearchParams({
+        surface: id('surface', 'item_detail'),
+        record: valve,
+        [id('parameter', 'posted_stock_balance_list_legal_entity_scope')]:
+          f.scopes[0]!,
+      }).toString()}`,
+      f.gateways,
+    );
+  const preferred = (html: string) =>
+    /<div><dt>Preferred location<\/dt><dd>([^<]*)<\/dd><\/div>/u.exec(
+      html,
+    )?.[1];
+  const named = await itemPage();
+  assert.equal(named.statusCode, 200);
+  assert.equal(preferred(named.html), 'Vancouver warehouse');
+  assert.match(named.html, /<div><dt>Standard cost \(CAD\)<\/dt><dd>12\.50</u);
   // A location list the principal may not read leaves the plain control:
   // the stored id is kept, never replaced by a partial choice.
   f.deniedReads.add(id('permission', 'location_read'));
@@ -12348,5 +12369,24 @@ test('REPLENISHMENT: the item form chooses its preferred location from the locat
       `name="value:${field('item_preferred_location_id')}" value="${vancouver}"`,
       'u',
     ),
+  );
+  // Withheld, the location reads "—" and the page still reads.
+  const withheld = await itemPage();
+  assert.match(withheld.html, /<h1>Valve<\/h1>/u);
+  assert.equal(preferred(withheld.html), '—');
+  assert.doesNotMatch(withheld.html, /Vancouver warehouse/u);
+  f.deniedReads.delete(id('permission', 'location_read'));
+  // An archived location is gone from the choice and from the page alike;
+  // the item keeps its id.
+  f.executor.rows.set(vancouver, {
+    ...f.executor.rows.get(vancouver)!,
+    archived: true,
+  });
+  const gone = await itemPage();
+  assert.match(gone.html, /<h1>Valve<\/h1>/u);
+  assert.equal(preferred(gone.html), '—');
+  assert.match(
+    select((await form(valve)).html) ?? '',
+    new RegExp(`<option value="${vancouver}" selected>Unavailable \\(`, 'u'),
   );
 });

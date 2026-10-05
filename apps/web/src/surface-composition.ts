@@ -247,10 +247,11 @@ async function present(
   record: SemanticRecordDto,
   columns: readonly Column[],
   /**
-   * Columns naming a relation of the record, such as an invoice's order. The
-   * related record is read through its own get under current policy; one it
-   * withholds, or one that is gone, reads "—" rather than failing the page
-   * that can itself be read.
+   * The record's own columns read through another record's get: a relation
+   * of the record, such as an invoice's order, or a field holding a record's
+   * id, such as an item's preferred location (REPLENISHMENT). Each is read
+   * under current policy; one it withholds, or one that is gone, reads "—"
+   * rather than failing the page that can itself be read.
    */
   related: ReadonlySet<string> = new Set(),
 ): Promise<Row> {
@@ -329,7 +330,12 @@ export async function loadSurfaceComposition(
       scope,
       record,
       composition.fields,
-      new Set(compositionRelationTargets(view, surface)),
+      new Set([
+        ...compositionRelationTargets(view, surface),
+        ...composition.fields.flatMap((column) =>
+          column.reference ? [column.field] : [],
+        ),
+      ]),
     );
   } catch {
     data.fieldsFailed = true;
