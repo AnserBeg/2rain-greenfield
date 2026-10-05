@@ -4280,6 +4280,9 @@ function prepareEntityInsert(
     ),
     ...relationColumns.map((relation) => {
       const value = relationIds[relation.targetEntityId];
+      // An optional relation the seed does not name stays unset, as a
+      // location inside no other does (LOCATIONS slice 2).
+      if (value === undefined && relation.relationColumn.nullable) return null;
       assert.ok(value, `missing relation ${relation.relationId}`);
       return value;
     }),

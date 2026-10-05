@@ -175,9 +175,11 @@ test('a quarantined location keeps its stock on hand but neither usable nor avai
     ).toBeVisible();
     await page.getByLabel('Code', { exact: true }).fill('CAL-A1');
     await page.getByLabel('Name', { exact: true }).fill('Aisle 1');
+    // Nine types: the generic form offers them as suggestions on a text
+    // input, each suggestion's value the option's id.
     await page
       .getByRole('combobox', { name: 'Type', exact: true })
-      .selectOption({ label: 'Storage' });
+      .fill(`${ns}:option.location_type_storage`);
     await page
       .getByRole('combobox', { name: 'Parent', exact: true })
       .selectOption(scenario.warehouse);
