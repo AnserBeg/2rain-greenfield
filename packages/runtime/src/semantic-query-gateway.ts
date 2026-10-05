@@ -43,8 +43,10 @@ import type { RequestRuntimeView as IssuedRequestRuntimeView } from './request-r
 import {
   authorizeSharedListFields,
   parseSharedListArguments,
+  requireSharedListEcho,
   requireSharedListResult,
   SharedListContractError,
+  type AuthorizedSharedListProgress,
   type AuthorizedSharedListRelatedFilter,
   type AuthorizedSharedListReferenceLabel,
   type AuthorizedSharedListRequest,
@@ -587,6 +589,12 @@ export class SemanticQueryGateway {
             this.observePredicateReceipt,
             (queryId, policyVersion) =>
               this.#recordDenied(view, queryId, policyVersion),
+            declaredScope && scopeSelection
+              ? {
+                  members: scopeSelection,
+                  parameterId: declaredScope.operand.parameterId,
+                }
+              : null,
           )
         : null;
     if (listQuery && !list) {
@@ -676,7 +684,10 @@ export class SemanticQueryGateway {
           definition.queryId,
         );
       }
-      requireSharedListResult(result);
+      requireSharedListEcho(
+        list.query,
+        requireSharedListResult(result).listCoverage,
+      );
     }
     if (
       result.kind === 'semanticAggregateResult' &&
@@ -793,12 +804,79 @@ async function authorizeSharedListProjection(
   observePredicateReceipt:
     ((receipt: PredicateKernelReceipt) => void) | undefined,
   recordDenied: (queryId: string, policyVersion: string) => Promise<void>,
+  /** The companies the listed query reads, as its own declared operand. */
+  scope: {
+    readonly members: readonly string[];
+    readonly parameterId: string;
+  } | null = null,
 ): Promise<AuthorizedSharedListRequest | null> {
   authorizeSharedListFields(query, {
     selectedFieldIds: new Set(
       sourceDefinition.selections.map((selection) => selection.fieldId),
     ),
   });
+  let progress: AuthorizedSharedListProgress | undefined;
+  if (query.progress) {
+    const entityIds: Record<'done' | 'lines', string> = {
+      done: '',
+      lines: '',
+    };
+    for (const role of ['lines', 'done'] as const) {
+      const summedRows = query.progress[role];
+      const summed = registeredQueryFromPinnedView(view, summedRows.queryId);
+      // Progress sums company rows inside the listed row's own company, so
+      // unlike a label it may read a company-scoped list; what it may not read
+      // is anything narrower than the whole entity, as its filter would drop.
+      if (
+        !summed ||
+        summed.lifecycle !== 'active' ||
+        summed.tier !== 'q0' ||
+        summed.queryType !== 'list' ||
+        !summed.selections.some(
+          (selection) => selection.fieldId === summedRows.fieldId,
+        )
+      ) {
+        throw new SharedListContractError(
+          'LIST_FIELD_NOT_AUTHORIZED',
+          'list progress must sum a selected field of an active pinned list query',
+          summedRows.queryId,
+        );
+      }
+      // Decided for the companies the list reads, so a company-scoped grant
+      // answers for exactly the rows the statement will add up.
+      const decision = await authorizeCurrentPolicy(
+        currentPolicy,
+        view,
+        summed.permissionId,
+        Object.freeze({
+          arguments: Object.freeze({
+            fieldId: summedRows.fieldId,
+            relationId: summedRows.relationId,
+            ...(scope
+              ? { [scope.parameterId]: Object.freeze([...scope.members]) }
+              : {}),
+          }),
+          kind: 'registeredSemanticListProgressPolicyInput',
+          queryId: summed.queryId,
+          requestId: view.requestId,
+          schemaVersion: QUERY_POLICY_INPUT_VERSION,
+        }),
+      );
+      if (decision.decision === 'DENY') {
+        await recordDenied(summed.queryId, decision.policyVersion);
+        throw new SemanticQueryPolicyDeniedError(summed.queryId, view);
+      }
+      const predicateReceipt = inspectPredicateForExecution(summed.filter);
+      observePredicateReceiptSafely(observePredicateReceipt, predicateReceipt);
+      if (predicateReceipt.outcome !== 'accepted') return null;
+      entityIds[role] = summed.sourceEntityId;
+    }
+    progress = Object.freeze({
+      ...query.progress,
+      doneEntityId: entityIds.done,
+      linesEntityId: entityIds.lines,
+    });
+  }
   const relationLabels = [];
   for (const relation of query.relationLabels) {
     const targetDefinition = registeredQueryFromPinnedView(
@@ -973,6 +1051,7 @@ async function authorizeSharedListProjection(
       ? { referenceLabels: Object.freeze(referenceLabels) }
       : {}),
     ...(relatedFilter ? { relatedFilter } : {}),
+    ...(progress ? { progress } : {}),
   });
 }
 

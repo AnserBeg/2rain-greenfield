@@ -270,8 +270,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   const compact = projectCompactSurfaces(groupedManifest.surfaces, grouped);
   // 34 + RECEIPT's seventeen Purchasing surfaces + Sales' nineteen surfaces,
   // + Party's three ship-to address and Catalog's three tax code surfaces
-  // (SALES-PARITY), + the invoice, its lines, payments and credits (twelve).
-  assert.equal(groupedManifest.surfaces.length, 88);
+  // (SALES-PARITY), + the invoice, its lines, payments and credits (twelve),
+  // + PURCHASING-PARITY's Expected receipts List.
+  assert.equal(groupedManifest.surfaces.length, 89);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -288,14 +289,16 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // left unguarded, but this particular assertion is now weaker than it reads.
   // Draft document editing and workspace entry require reader 8; picker
   // eligibility and typed Task inputs require 9; declared Lists require 10;
-  // editor defaults, scoped pickers and Task input eligibility require 11.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 11);
+  // editor defaults, scoped pickers and Task input eligibility require 11;
+  // List progress, open and before-today views and overdue dates require 12.
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 12);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.
   // SALES-PARITY: Catalog's tax codes list joins the supporting masters, and
-  // the Invoices list joins Sales beside its orders.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 14);
+  // the Invoices list joins Sales beside its orders. PURCHASING-PARITY:
+  // Expected receipts joins Purchasing beside its orders.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 15);
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
@@ -928,7 +931,8 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
   );
   composed = withoutModule(
     composed,
-    purchasingModuleDefinition('northstar.app'),
+    // As the product composes it: with its commercial terms (PURCHASING-PARITY).
+    purchasingModuleDefinition('northstar.app', { commercialTerms: true }),
     'purchasing',
   );
   composed = withoutModule(

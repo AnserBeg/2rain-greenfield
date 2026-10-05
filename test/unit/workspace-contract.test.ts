@@ -434,6 +434,60 @@ test('picker eligibility and Task input presentation are closed, typed declarati
   }, /derived inputs require/);
 });
 
+test('a reference Task input may start from a field its record query selects', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type Input = Loose & {
+    inputId: string;
+    defaultFrom?: { source: string; field: string };
+  };
+  const receiveInput = (candidate: Loose, name: string) =>
+    (
+      (candidate.surfaces as Loose[]).find((value) =>
+        String(value.surfaceId).endsWith(':surface.purchase_order_detail'),
+      )!.composition as { actions: { actionId: string; inputs: Input[] }[] }
+    ).actions
+      .find((action) => action.actionId.endsWith(':action.receive_known'))!
+      .inputs.find((input) =>
+        input.inputId.endsWith(`:input.receive_${name}`),
+      )!;
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+  const receivingLocation = {
+    source: 'record',
+    field: 'northstar.app:field.purchase_order_receiving_location_id',
+  };
+  // Admitted and kept: the order's receiving location, which the workspace's
+  // record query selects, on the receiving location picker.
+  assert.deepEqual(
+    receiveInput(
+      normalizeApplicationPackage(structuredClone(source)) as unknown as Loose,
+      'location',
+    ).defaultFrom,
+    receivingLocation,
+  );
+  // Refused on a text input, and from a field the record query does not select.
+  refuse((candidate) => {
+    receiveInput(candidate, 'cost').defaultFrom = receivingLocation;
+  }, /only reference inputs default from a declared record field/);
+  refuse((candidate) => {
+    receiveInput(candidate, 'location').defaultFrom!.field =
+      'northstar.app:field.location_name';
+  }, /only reference inputs default from a declared record field/);
+  // A closed declaration: the record is its only source.
+  refuse((candidate) => {
+    receiveInput(candidate, 'location').defaultFrom!.source = 'selected';
+  }, /CANON_SCHEMA_INVALID/);
+});
+
 test('editor defaults, scoped pickers, Task input eligibility and print blocks are closed, typed declarations', () => {
   const source = composedApplicationDefinition();
   type Loose = Record<string, unknown>;

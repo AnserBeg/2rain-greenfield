@@ -122,10 +122,10 @@ test(
           kind: 'initial' | 'correction' | 'reversal',
           original?: { receipt: string; movement: string },
         ) {
+          // The receipt number is assigned by the server (RCV-000001).
           const id = await create(
             'goods_receipt',
             {
-              number: `AUTH-GR-${randomUUID()}`,
               state: `${ns}:option.goods_receipt_state_draft`,
               kind: `${ns}:option.goods_receipt_kind_${kind}`,
               effective_at: new Date().toISOString(),

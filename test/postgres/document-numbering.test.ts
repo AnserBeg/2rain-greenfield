@@ -157,6 +157,8 @@ test(
         ['sales_order_create', 'SO'],
         ['purchase_order_create', 'PO'],
         ['shipment_create', 'SHP'],
+        // PURCHASING-PARITY: a goods receipt is numbered the same way.
+        ['goods_receipt_create', 'RCV'],
       ] as const) {
         const inputContract = contract.find(
           (value) => value.operationId === `${ns}:operation.${operation}`,
@@ -198,6 +200,7 @@ test(
           'customer_credit_number',
           'customer_invoice_number',
           'customer_payment_number',
+          'goods_receipt_number',
           'purchase_order_number',
           'sales_order_number',
           'shipment_number',
@@ -248,7 +251,7 @@ test(
               numbered.some((entry) => entry.fieldId === scenario.subjectId),
           )
           .map((scenario) => executed.has(scenario.scenarioId)),
-        [true, true, true, true, true, true],
+        [true, true, true, true, true, true, true],
         'each number’s uniqueness probe executed',
       );
       const derivationCodes = (
@@ -368,6 +371,26 @@ test(
       assert.equal(
         purchase.readBack?.values[`${ns}:field.purchase_order_number`],
         'PO-000001',
+      );
+      // Its receipt draft takes its own number (PURCHASING-PARITY).
+      const receipt = await invoke('goods_receipt_create', {
+        recordId: randomUUID(),
+        legalEntityId: fixture.scope,
+        values: {
+          [`${ns}:field.goods_receipt_state`]: `${ns}:option.goods_receipt_state_draft`,
+          [`${ns}:field.goods_receipt_kind`]: `${ns}:option.goods_receipt_kind_initial`,
+          [`${ns}:field.goods_receipt_effective_at`]: new Date().toISOString(),
+          [`${ns}:field.goods_receipt_location_id`]: fixture.location,
+          [`${ns}:field.goods_receipt_reason_code`]: 'RECEIVE',
+          [`${ns}:field.goods_receipt_reason_narrative`]: 'Numbered receipt',
+        },
+        relations: {
+          [`${ns}:relation.goods_receipt_order`]: purchase.readBack!.recordId,
+        },
+      });
+      assert.equal(
+        receipt.readBack?.values[`${ns}:field.goods_receipt_number`],
+        'RCV-000001',
       );
 
       // The scan reads a number of any digit count. Stored numbers are set

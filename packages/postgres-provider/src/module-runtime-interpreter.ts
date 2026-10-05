@@ -63,6 +63,7 @@ import {
   type AuthorizedSharedListRelationLabel,
   type AuthorizedSharedListReferenceLabel,
   type AuthorizedSharedListRequest,
+  type SharedListBeforeFilter,
   type SharedListCoverage,
 } from '../../runtime/src/list-behavior/index.js';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
@@ -1275,11 +1276,19 @@ async function executeQueryOnClient(
           ),
         ]
       : [];
+  const progressPlan =
+    definition.queryType === 'list' && list
+      ? listProgressPlan(storage, entity, list)
+      : null;
   const readScope = await verifyLegalEntityReadScope(
     client,
     storage,
     request.legalEntityReadScope,
-    [entity, ...relationPlans.map((plan) => plan.target)],
+    [
+      entity,
+      ...relationPlans.map((plan) => plan.target),
+      ...(progressPlan ? [progressPlan.lines, progressPlan.done] : []),
+    ],
   );
   if (definition.queryType === 'aggregate') {
     return executeAggregateQuery(
@@ -1332,6 +1341,7 @@ async function executeQueryOnClient(
           readScope,
           parentScopePlan(storage, entity, list),
           relatedFilterPlan(storage, entity, list),
+          progressPlan,
         );
       }
       const limit = boundedLimit(args.limit, definition.maximumResultCount);
@@ -2200,6 +2210,221 @@ interface ListRelatedFilterPlan {
   }[];
 }
 
+interface ListProgressPlan {
+  readonly done: StorageEntity;
+  /** The done rows' column that holds a line's record id. */
+  readonly doneLineColumn: string;
+  readonly doneQuantityColumn: string;
+  readonly lines: StorageEntity;
+  /** The lines' column that holds the listed record's id. */
+  readonly linesParentColumn: string;
+  readonly linesQuantityColumn: string;
+  readonly openIn: {
+    readonly column: StorageEntity['columns'][number];
+    readonly values: readonly string[];
+  } | null;
+  readonly openOnly: boolean;
+  readonly outputs: {
+    readonly done: string;
+    readonly open: string;
+    readonly ordered: string;
+  };
+}
+
+/**
+ * Resolves list progress against the PINNED COMPILED storage, never against
+ * caller input: the lines must be the queried entity's `parentScopedChild`
+ * children, the done rows must point at those lines, both quantities must be
+ * compiled exact decimal columns, and the open states a compiled column of the
+ * queried entity. Anything else fails closed rather than summing a column a
+ * request happened to name.
+ */
+function listProgressPlan(
+  storage: StorageTargetPayloadV1,
+  entity: StorageEntity,
+  list: AuthorizedSharedListRequest,
+): ListProgressPlan | null {
+  const requested = list.progress;
+  if (!list.query.progress) return null;
+  if (!requested)
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      'list progress reached the executor without authorization',
+      list.query.progress.lines.queryId,
+    );
+  const lines = requiredEntity(storage, requested.linesEntityId);
+  const done = requiredEntity(storage, requested.doneEntityId);
+  const toLines = storage.relations.find(
+    (candidate) =>
+      candidate.relationId === requested.lines.relationId &&
+      candidate.sourceEntityId === lines.entityId &&
+      candidate.targetEntityId === entity.entityId &&
+      candidate.ownership === 'parentScopedChild',
+  );
+  const toDone = storage.relations.find(
+    (candidate) =>
+      candidate.relationId === requested.done.relationId &&
+      candidate.sourceEntityId === done.entityId &&
+      candidate.targetEntityId === lines.entityId,
+  );
+  if (!toLines || !toDone)
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      'list progress does not match the compiled storage relations',
+      (toLines ? requested.done : requested.lines).relationId,
+    );
+  const quantity = (target: StorageEntity, fieldId: string) => {
+    const column = target.columns.find(
+      (candidate) => candidate.canonicalFieldId === fieldId,
+    );
+    if (!column || column.fieldContract.fieldKind !== 'exactDecimalFieldType')
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        'list progress sums a compiled exact decimal column',
+        fieldId,
+      );
+    return column.physicalName;
+  };
+  const states = requested.openIn;
+  const stateColumn = states
+    ? entity.columns.find(
+        (candidate) => candidate.canonicalFieldId === states.fieldId,
+      )
+    : undefined;
+  if (states && !stateColumn)
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      'list progress states name a compiled column of the queried entity',
+      states.fieldId,
+    );
+  return Object.freeze({
+    done,
+    doneLineColumn: toDone.relationColumn.physicalName,
+    doneQuantityColumn: quantity(done, requested.done.fieldId),
+    lines,
+    linesParentColumn: toLines.relationColumn.physicalName,
+    linesQuantityColumn: quantity(lines, requested.lines.fieldId),
+    openIn:
+      states && stateColumn
+        ? Object.freeze({ column: stateColumn, values: states.values })
+        : null,
+    openOnly: requested.openOnly === true,
+    outputs: requested.outputs,
+  });
+}
+
+const PROGRESS_ALIAS = 'table_progress';
+
+/**
+ * Per listed row, one lateral answer: the sum of its active lines' quantity,
+ * the sum of the active done rows of those same lines, and the open remainder
+ * between them -- zero outside the declared open states. It sits in FROM, so
+ * the count and the page read the same figures and `openOnly` filters before
+ * both. Every joined row is pinned to the listed row's tenant, environment and
+ * company, and conjoined with the issued read scope, as a relation label is.
+ */
+function listProgressFromSql(
+  entity: StorageEntity,
+  sourceAlias: string,
+  plan: ListProgressPlan,
+  readScope: VerifiedLegalEntityReadScope | null,
+  values: unknown[],
+): string {
+  const line = 'table_progress_line';
+  const done = 'table_progress_done';
+  const sameCompany = (
+    alias: string,
+    target: StorageEntity,
+    anchorAlias: string,
+    anchor: StorageEntity,
+  ) => {
+    const joined = legalEntityReadScopeRequirement(target);
+    const owner = legalEntityReadScopeRequirement(anchor);
+    return joined && owner
+      ? `
+          AND ${qualified(alias, joined.column)} = ${qualified(anchorAlias, owner.column)}`
+      : '';
+  };
+  const activeLines = () =>
+    `${qualified(line, 'tenant_id')} = ${qualified(sourceAlias, 'tenant_id')}
+          AND ${qualified(line, 'environment_id')} = ${qualified(sourceAlias, 'environment_id')}
+          AND ${qualified(line, plan.linesParentColumn)} = ${qualified(sourceAlias, entity.recordIdentity.column)}
+          AND ${qualified(line, plan.lines.archive.archivedAtColumn)} IS NULL${sameCompany(line, plan.lines, sourceAlias, entity)}${legalEntityReadScopeJoinConjunction(plan.lines, readScope, values, line)}`;
+  const ordered = `(SELECT coalesce(sum(${qualified(line, plan.linesQuantityColumn)}), 0)
+         FROM north_star_module.${quoted(plan.lines.physicalTableName)} AS ${quoted(line)}
+        WHERE ${activeLines()})`;
+  const recorded = `(SELECT coalesce(sum(${qualified(done, plan.doneQuantityColumn)}), 0)
+         FROM north_star_module.${quoted(plan.lines.physicalTableName)} AS ${quoted(line)}
+         JOIN north_star_module.${quoted(plan.done.physicalTableName)} AS ${quoted(done)}
+           ON ${qualified(done, 'tenant_id')} = ${qualified(line, 'tenant_id')}
+          AND ${qualified(done, 'environment_id')} = ${qualified(line, 'environment_id')}
+          AND ${qualified(done, plan.doneLineColumn)} = ${qualified(line, plan.lines.recordIdentity.column)}
+          AND ${qualified(done, plan.done.archive.archivedAtColumn)} IS NULL${sameCompany(done, plan.done, line, plan.lines)}${legalEntityReadScopeJoinConjunction(plan.done, readScope, values, done)}
+        WHERE ${activeLines()})`;
+  const totals = 'table_progress_totals';
+  const remainder = `${qualified(totals, 'ordered_total')} - ${qualified(totals, 'done_total')}`;
+  const open = plan.openIn
+    ? `CASE WHEN ${qualified(sourceAlias, plan.openIn.column.physicalName)}::text = ANY(${parameter(values, [...plan.openIn.values])}::text[]) THEN ${remainder} ELSE 0 END`
+    : remainder;
+  return `CROSS JOIN LATERAL (
+    SELECT ${qualified(totals, 'ordered_total')} AS ${quoted('ordered_total')},
+           ${qualified(totals, 'done_total')} AS ${quoted('done_total')},
+           ${open} AS ${quoted('open_total')}
+      FROM (SELECT ${ordered} AS ${quoted('ordered_total')},
+                   ${recorded} AS ${quoted('done_total')}) AS ${quoted(totals)}
+  ) AS ${quoted(PROGRESS_ALIAS)}`;
+}
+
+/**
+ * Before-today filters resolve against the queried entity's selected columns:
+ * a calendar date is compared with the instant's UTC date, a UTC instant with
+ * the instant itself. A text-stored offset time is refused, never compared.
+ */
+function appendListBeforePredicates(
+  selectedColumns: readonly StorageEntity['columns'][number][],
+  sourceAlias: string,
+  filters: readonly SharedListBeforeFilter[],
+  values: unknown[],
+  predicates: string[],
+): void {
+  for (const filter of filters) {
+    const column = selectedColumns.find(
+      (candidate) => candidate.canonicalFieldId === filter.fieldId,
+    );
+    const contract = column?.fieldContract;
+    const instant =
+      contract?.fieldKind === 'dateTimeFieldType' &&
+      contract.temporal.timezoneSemantics === 'utcInstant';
+    if (!column || !(instant || contract?.fieldKind === 'dateFieldType'))
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        'a before filter compares a selected date or UTC instant column',
+        filter.fieldId,
+      );
+    const bound = parameter(values, filter.before);
+    predicates.push(
+      instant
+        ? `${qualified(sourceAlias, column.physicalName)} < ${bound}::timestamptz`
+        : `${qualified(sourceAlias, column.physicalName)} < (${bound}::timestamptz AT TIME ZONE 'UTC')::date`,
+    );
+  }
+}
+
+/** A summed exact decimal as its canonical string: no trailing zeros. */
+function canonicalProgressDecimal(value: unknown): string {
+  const text = typeof value === 'string' ? value : String(value);
+  const match = /^(-?)(\d+)(?:\.(\d+))?$/u.exec(text);
+  if (!match)
+    throw failure(
+      'MODULE_LIST_RESULT_INVALID',
+      'list progress is not an exact decimal',
+    );
+  const [, sign, whole, fraction = ''] = match;
+  const kept = fraction.replace(/0+$/u, '');
+  const digits = `${BigInt(whole!).toString()}${kept ? `.${kept}` : ''}`;
+  return sign && digits !== '0' ? `-${digits}` : digits;
+}
+
 /**
  * Resolves a related-record existence filter against the PINNED COMPILED
  * relation: the related entity must be the relation's source and the queried
@@ -2296,6 +2521,7 @@ async function listSharedRecords(
   readScope: VerifiedLegalEntityReadScope | null,
   parentScope: ListParentScopePlan | null,
   relatedFilter: ListRelatedFilterPlan | null = null,
+  progress: ListProgressPlan | null = null,
 ): Promise<SemanticQueryResultEnvelope> {
   const sourceAlias = 'table_source';
   const selectedColumns = definition.selections.map((selection) => {
@@ -2312,13 +2538,12 @@ async function listSharedRecords(
     return column;
   });
   const values: unknown[] = [];
-  const fromSql = listFromSql(
-    entity,
-    sourceAlias,
-    relationPlans,
-    readScope,
-    values,
-  );
+  const fromSql = [
+    listFromSql(entity, sourceAlias, relationPlans, readScope, values),
+    ...(progress
+      ? [listProgressFromSql(entity, sourceAlias, progress, readScope, values)]
+      : []),
+  ].join('\n');
   const predicates = listArchivePredicates(
     entity,
     sourceAlias,
@@ -2401,6 +2626,18 @@ async function listSharedRecords(
       `${qualified(sourceAlias, column.physicalName)}::text = ${parameter(values, filter.value)}`,
     );
   }
+  // Ahead of the count and the page window, like every filter above: a tab of
+  // orders with something still to arrive, or arriving late, counts and pages
+  // exactly that set.
+  if (progress?.openOnly)
+    predicates.push(`${qualified(PROGRESS_ALIAS, 'open_total')} > 0`);
+  appendListBeforePredicates(
+    selectedColumns,
+    sourceAlias,
+    list.query.beforeFilters ?? [],
+    values,
+    predicates,
+  );
   const whereSql = predicates.length > 0 ? predicates.join(' AND ') : 'true';
   const count = await client.query<{ total_count: string }>(
     `SELECT count(*)::text AS total_count ${fromSql} WHERE ${whereSql}`,
@@ -2417,7 +2654,7 @@ async function listSharedRecords(
   const limitSql = parameter(pageValues, list.query.effectivePageSize + 1);
   const offsetSql = parameter(pageValues, list.query.pageOffset);
   const rows = await client.query<QueryResultRow>(
-    `SELECT ${listSelectList(entity, sourceAlias, selectedColumns, relationPlans)}
+    `SELECT ${listSelectList(entity, sourceAlias, selectedColumns, relationPlans, progress !== null)}
        ${fromSql}
       WHERE ${whereSql}
       ORDER BY ${listOrderBy(
@@ -2433,7 +2670,7 @@ async function listSharedRecords(
   const hasMore = rows.rows.length > list.query.effectivePageSize;
   const pageRows = rows.rows.slice(0, list.query.effectivePageSize);
   const records = pageRows.map((row) =>
-    toListDto(entity, row, selectedColumns, relationPlans),
+    toListDto(entity, row, selectedColumns, relationPlans, progress),
   );
   const nextOffset = list.query.pageOffset + records.length;
   const listCoverage: SharedListCoverage = Object.freeze({
@@ -2454,6 +2691,13 @@ async function listSharedRecords(
       : {}),
     ...(relatedFilter && list.query.relatedFilter
       ? { relatedFilter: list.query.relatedFilter }
+      : {}),
+    // Echoed only when applied: the gateway requires both back unchanged.
+    ...(progress && list.query.progress
+      ? { progress: list.query.progress }
+      : {}),
+    ...(list.query.beforeFilters
+      ? { beforeFilters: list.query.beforeFilters }
       : {}),
     ...(list.query.outputMode ? { outputMode: list.query.outputMode } : {}),
     projectedSearchValueCount:
@@ -2606,6 +2850,7 @@ function listSelectList(
   sourceAlias: string,
   selectedColumns: readonly StorageEntity['columns'][number][],
   relations: readonly ListRelationPlan[],
+  progress = false,
 ): string {
   const rawColumns = [
     entity.recordIdentity.column,
@@ -2621,7 +2866,18 @@ function listSelectList(
     `${qualified(plan.tableAlias, plan.target.recordIdentity.column)} AS ${quoted(plan.recordAlias)}`,
     `${visibleFieldExpression(plan.labelColumn, plan.tableAlias)} AS ${quoted(plan.labelAlias)}`,
   ]);
-  return [...rawColumns, ...displays, ...relationValues].join(', ');
+  const progressValues = progress
+    ? (['ordered', 'done', 'open'] as const).map(
+        (figure) =>
+          `${qualified(PROGRESS_ALIAS, `${figure}_total`)}::text AS ${quoted(`nsm_table_progress_${figure}`)}`,
+      )
+    : [];
+  return [
+    ...rawColumns,
+    ...displays,
+    ...relationValues,
+    ...progressValues,
+  ].join(', ');
 }
 
 function listOrderBy(
@@ -2677,12 +2933,32 @@ function toListDto(
   row: QueryResultRow,
   selectedColumns: readonly StorageEntity['columns'][number][],
   relations: readonly ListRelationPlan[],
+  progress: ListProgressPlan | null = null,
 ): SemanticRecordDto {
-  const base = toDto(
+  const projected = toDto(
     entity,
     rawRecord(entity, row),
     selectedColumns.map((column) => ({ fieldId: column.canonicalFieldId })),
   );
+  // The summed figures ride the row's values under their declared ids, as
+  // canonical exact decimals the List shows and exports unchanged.
+  const base = progress
+    ? Object.freeze({
+        ...projected,
+        values: Object.freeze({
+          ...projected.values,
+          [progress.outputs.ordered]: canonicalProgressDecimal(
+            row.nsm_table_progress_ordered,
+          ),
+          [progress.outputs.done]: canonicalProgressDecimal(
+            row.nsm_table_progress_done,
+          ),
+          [progress.outputs.open]: canonicalProgressDecimal(
+            row.nsm_table_progress_open,
+          ),
+        }),
+      })
+    : projected;
   const displayValues = Object.freeze(
     Object.fromEntries(
       selectedColumns.map((column, index) => [

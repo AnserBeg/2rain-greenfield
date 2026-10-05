@@ -27,13 +27,13 @@
       "original": "      if (\n        entity.legalEntity &&\n        !entity.factStorage &&\n        !entity.periodLock &&\n        entityOwnedMutableColumnNames(target, entity).includes(\n          column.physicalName,\n        )\n      ) {\n        await client.query(\n          `GRANT UPDATE (${quoted(column.physicalName)})\n             ON north_star_module.${quoted(entity.physicalTableName)}\n             TO north_star_module_runtime`,\n        );\n      }\n",
       "replacement": "",
       "test": {
-        "files": ["test/postgres/fulfillment.test.ts"],
-        "namePattern": "fulfillment serializes competing reservations"
+        "files": ["test/postgres/composed-application.test.ts"],
+        "namePattern": "a fresh install replays a synthetic storage history"
       },
       "kills": [
         {
-          "file": "test/postgres/fulfillment.test.ts",
-          "name": "fulfillment serializes competing reservations and shipments, fences stock writers, and rebuilds projections",
+          "file": "test/postgres/composed-application.test.ts",
+          "name": "a fresh install replays a synthetic storage history: every intermediate refuses serving, an added company column is granted, and a second tenant replaying the earlier create keeps that grant",
           "expected": "missing managed column grant"
         }
       ]
@@ -46,12 +46,12 @@
       "replacement": "    if (tableLevel.rows.length >= 0)\n",
       "test": {
         "files": ["test/postgres/composed-application.test.ts"],
-        "namePattern": "ADR-0047 \u00a76 refuses a profile-only rollback edge"
+        "namePattern": "a fresh install replays a synthetic storage history"
       },
       "kills": [
         {
           "file": "test/postgres/composed-application.test.ts",
-          "name": "ADR-0047 \u00a76 refuses a profile-only rollback edge by name and leaves a source-changing one eligible",
+          "name": "a fresh install replays a synthetic storage history: every intermediate refuses serving, an added company column is granted, and a second tenant replaying the earlier create keeps that grant",
           "expected": "missing managed column grant"
         }
       ]

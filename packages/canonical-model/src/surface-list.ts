@@ -20,6 +20,9 @@ export function validateSurfaceLists(
   const fields = new Map(
     model.fields.map((field) => [String(field.fieldId), field]),
   );
+  const relations = new Map(
+    model.relations.map((relation) => [String(relation.relationId), relation]),
+  );
   const fail = (id: string, reason: string): never => {
     throw new CanonicalModelError([
       diagnostic(
@@ -70,7 +73,24 @@ export function validateSurfaceLists(
     const columns = new Map(
       list.columns.map((column) => [column.columnId, column]),
     );
+    const progressOutputs = new Set(
+      list.progress ? Object.values(list.progress.outputs) : [],
+    );
     for (const column of list.columns) {
+      if (progressOutputs.has(column.field)) {
+        // A progress figure exists only in the list statement's answer: it is
+        // shown as it is, and never sorted, labelled or formatted like a field.
+        if (
+          column.sortable ||
+          column.role !== 'value' ||
+          column.format ||
+          column.reference ||
+          column.statusRoles ||
+          column.overdue
+        )
+          fail(column.columnId, 'a progress column is an unsorted plain value');
+        continue;
+      }
       if (!selected.has(column.field))
         fail(column.columnId, 'list columns read fields the query selects');
       if (
@@ -160,6 +180,107 @@ export function validateSurfaceLists(
       );
       for (const filter of view.filters)
         filterable(filter.field, filter.value, view.viewId);
+      if (view.open && !list.progress)
+        fail(view.viewId, "an open view needs the List's declared progress");
+      if (view.before) {
+        // Compared in SQL against an instant: a calendar date or a UTC
+        // instant, never a text-stored offset time.
+        const compared = fields.get(view.before.field)?.fieldType;
+        if (
+          !selected.has(view.before.field) ||
+          !(
+            compared?.kind === 'dateFieldType' ||
+            (compared?.kind === 'dateTimeFieldType' &&
+              compared.timezoneSemantics === 'utcInstant')
+          )
+        )
+          fail(
+            view.viewId,
+            'a before view compares a selected date or UTC instant field',
+          );
+      }
+    }
+    for (const column of list.columns) {
+      if (!column.overdue) continue;
+      // One declaration drives both the tab and the marker: the named view
+      // keeps rows before today on the very date this column shows.
+      const marked = list.views.find(
+        (view) => view.viewId === column.overdue?.view,
+      );
+      if (column.format !== 'date' || marked?.before?.field !== column.field)
+        fail(
+          column.columnId,
+          'an overdue marker names a view that keeps rows before today on its own date',
+        );
+    }
+    if (list.progress) {
+      const progress = list.progress;
+      const source = (entry: typeof progress.lines) => {
+        const summed = queries.get(entry.query.targetId);
+        if (
+          !summed ||
+          summed.queryType !== 'list' ||
+          summed.lifecycle !== 'active' ||
+          summed.tier !== 'q0'
+        )
+          return fail(id, 'list progress reads an active q0 list query');
+        if (
+          !summed.selections.some(
+            (selection) => selection.field.targetId === entry.quantity,
+          ) ||
+          fields.get(entry.quantity)?.fieldType.kind !== 'exactDecimalFieldType'
+        )
+          fail(id, 'list progress sums an exact decimal its query selects');
+        // The executor joins these rows within the List's own companies, so a
+        // company-scoped read needs a company-scoped List to be issued under.
+        if (
+          'legalEntityScope' in summed &&
+          summed.legalEntityScope &&
+          !('legalEntityScope' in query && query.legalEntityScope)
+        )
+          fail(
+            id,
+            'list progress reads company rows only under a company List',
+          );
+        return summed;
+      };
+      const lines = source(progress.lines);
+      const done = source(progress.done);
+      const toLines = relations.get(progress.lines.relation);
+      if (
+        !toLines ||
+        toLines.lifecycle !== 'active' ||
+        toLines.ownership !== 'parentScopedChild' ||
+        toLines.sourceEntity.targetId !== lines.sourceEntity.targetId ||
+        toLines.targetEntity.targetId !== query.sourceEntity.targetId
+      )
+        fail(
+          id,
+          "list progress lines are the List's children through a parentScopedChild relation",
+        );
+      const toDone = relations.get(progress.done.relation);
+      if (
+        !toDone ||
+        toDone.lifecycle !== 'active' ||
+        toDone.sourceEntity.targetId !== done.sourceEntity.targetId ||
+        toDone.targetEntity.targetId !== lines.sourceEntity.targetId
+      )
+        fail(
+          id,
+          'list progress done rows point at its lines through a relation',
+        );
+      unique(Object.values(progress.outputs), id, 'progress outputs');
+      if (
+        [...progressOutputs].some(
+          (output) => fields.has(output) || columns.has(output),
+        )
+      )
+        fail(id, 'list progress outputs name no field or column');
+      if (progress.openIn) {
+        unique(progress.openIn.values, id, 'progress open values');
+        for (const value of progress.openIn.values)
+          filterable(progress.openIn.field, value, id);
+      }
     }
     // The gateway accepts at most four exact filters per request: the busiest
     // view's filters plus every declared filter must fit, or some would drop.

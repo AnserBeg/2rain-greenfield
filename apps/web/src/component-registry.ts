@@ -39,6 +39,8 @@ import {
   orderedColumns,
   orderedFilters,
   orderedViews,
+  overdueDays,
+  startOfTodayUtc,
   type DeclaredListColumn,
   type DeclaredListState,
   type FieldPresenter,
@@ -129,9 +131,13 @@ export type SurfaceDataRenderState =
       readonly salesOrder?: SalesOrderSection;
       readonly packingDocument?: ShipmentPackingDocument;
       readonly result?: SemanticQueryResultEnvelope;
-      /** Server counts per saved view and the request's declared List state. */
+      /**
+       * Server counts per saved view, the request's declared List state, and
+       * the instant the request's "before today" views were counted at.
+       */
       readonly declaredList?: {
         readonly counts: Readonly<Record<string, number>>;
+        readonly now: Date;
         readonly state: DeclaredListState;
       };
       readonly status: 'READY';
@@ -516,6 +522,7 @@ function renderDataGrid(context: SurfaceComponentContext): string {
             ? (binding.query.exportMaximumResultCount ?? null)
             : null,
         list: context.surface.list,
+        now: data.declaredList.now,
         present: (record, fieldId, value) =>
           displayFieldValue(context.view, record, fieldId, value),
         recordLabel,
@@ -1549,7 +1556,7 @@ function findRelatedSurface(
   try {
     const entityId = readCompiledSurfaceDataBinding(view, surface).query
       .sourceEntityId;
-    return surfaces.find((candidate) => {
+    const matches = (candidate: CompiledSurfaceDefinition) => {
       if (candidate.lifecycle !== 'active' || candidate.surfaceRole !== role) {
         return false;
       }
@@ -1561,10 +1568,53 @@ function findRelatedSurface(
       } catch {
         return false;
       }
-    });
+    };
+    if (role !== 'list') return surfaces.find(matches);
+    // A worklist may list the same records beside the entity's own List; the
+    // way back to "the list" is the one that owns the entity's Record.
+    const candidates = surfaces.filter(matches);
+    if (candidates.length > 1) {
+      const owners = recordWorkspaceOwners(view, surfaces, entityId);
+      return (
+        candidates.find((candidate) => owners.has(candidate.surfaceId)) ??
+        candidates[0]
+      );
+    }
+    return candidates[0];
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The workspaces that own an entity's active Record surfaces. When more than
+ * one List reads an entity -- a worklist beside the entity's own List -- the
+ * List named here is the one that stands for the entity: the picker authority,
+ * the breadcrumb and the navigation destination of its records.
+ */
+export function recordWorkspaceOwners(
+  view: RuntimeViewContract.RequestRuntimeView,
+  surfaces: readonly CompiledSurfaceDefinition[],
+  entityId: string,
+): ReadonlySet<string> {
+  return new Set(
+    surfaces.flatMap((candidate) => {
+      if (
+        candidate.lifecycle !== 'active' ||
+        candidate.surfaceRole !== 'record' ||
+        !candidate.workspace?.ownerSurfaceId
+      )
+        return [];
+      try {
+        return readCompiledSurfaceDataBinding(view, candidate).query
+          .sourceEntityId === entityId
+          ? [candidate.workspace.ownerSurfaceId]
+          : [];
+      } catch {
+        return [];
+      }
+    }),
+  );
 }
 
 function slotRegistrationSupportsIntent(
@@ -2149,6 +2199,8 @@ interface DeclaredListRenderInput {
   readonly detailHref: (record: SemanticRecordDto) => string | null;
   readonly exportLimit: number | null;
   readonly list: SurfaceList;
+  /** The request's instant: overdue dates are judged against its day. */
+  readonly now: Date;
   readonly present: FieldPresenter;
   readonly recordLabel: string;
   readonly records: readonly SemanticRecordDto[];
@@ -2276,7 +2328,10 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
             const role = declaredStatusRole(column, record);
             return `<td ${label}>${text === null ? '<span class="muted">—</span>' : `<span class="status-pill"${role ? ` data-status-role="${escapeHtml(role)}"` : ''}>${escapeHtml(text)}</span>`}</td>`;
           }
-          return `<td ${label}>${text === null ? '<span class="muted">—</span>' : escapeHtml(text)}</td>`;
+          // A declared overdue date reads "N days late" when the row meets its
+          // view's conditions -- the same ones its tab was counted by.
+          const late = overdueDays(list, column, record, input.now);
+          return `<td ${label}>${text === null ? '<span class="muted">—</span>' : escapeHtml(text)}${late === null ? '' : ` <span class="status-pill" data-status-role="attention" data-overdue-days="${String(late)}">${escapeHtml(`${String(late)} ${late === 1 ? 'day' : 'days'} late`)}</span>`}</td>`;
         })
         .join('');
       const title =
@@ -2320,5 +2375,9 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
     coverage.totalCount > 0
       ? `Showing ${String(firstVisible)}–${String(lastVisible)}`
       : '';
-  return `<section class="panel data-panel" data-data-state="exact" data-list-result="${escapeHtml(coverage.schemaVersion)}" data-declared-list="true"><div class="panel__heading"><div><h2>${escapeHtml(input.recordLabel)}</h2></div><div class="list-summary"><span class="status-pill" data-status-role="success" data-list-total="${String(coverage.totalCount)}">${escapeHtml(count)}</span>${range ? `<span class="muted">${escapeHtml(range)}</span>` : ''}${exportControl}</div></div>${controls}${empty}${input.records.length > 0 ? `<div class="data-table-wrap" data-list-rendering="responsive-single"><table><thead><tr>${input.selectionCell ? '<th scope="col">Select</th>' : ''}${header}</tr></thead><tbody>${body}</tbody></table></div>` : ''}${paging}</section>`;
+  // A List that compares dates with today names the day it was counted on.
+  const anchor = list.views.some((view) => view.before)
+    ? ` data-list-anchor="${escapeHtml(startOfTodayUtc(input.now).toISOString())}"`
+    : '';
+  return `<section class="panel data-panel" data-data-state="exact" data-list-result="${escapeHtml(coverage.schemaVersion)}" data-declared-list="true"${anchor}><div class="panel__heading"><div><h2>${escapeHtml(input.recordLabel)}</h2></div><div class="list-summary"><span class="status-pill" data-status-role="success" data-list-total="${String(coverage.totalCount)}">${escapeHtml(count)}</span>${range ? `<span class="muted">${escapeHtml(range)}</span>` : ''}${exportControl}</div></div>${controls}${empty}${input.records.length > 0 ? `<div class="data-table-wrap" data-list-rendering="responsive-single"><table><thead><tr>${input.selectionCell ? '<th scope="col">Select</th>' : ''}${header}</tr></thead><tbody>${body}</tbody></table></div>` : ''}${paging}</section>`;
 }

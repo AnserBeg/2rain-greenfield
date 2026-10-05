@@ -15,10 +15,11 @@ import type { SharedListQueryRequest } from './index.js';
  * CURSOR IDENTITY. A page window only means something against the exact query
  * shape it was minted for, so the binding digest covers every member that can
  * move a row into or out of the set -- archive inclusion, match mode, search,
- * sort, relation labels and the parent scope -- and the cursor carries a
- * checksum over that digest. A cursor minted for one shape, one parent or one
- * relation therefore cannot decode against another; it is refused rather than
- * silently reinterpreted as an offset into a different set.
+ * sort, relation labels, the parent scope, progress and before filters -- and
+ * the cursor carries a checksum over that digest. A cursor minted for one
+ * shape, one parent or one relation therefore cannot decode against another;
+ * it is refused rather than silently reinterpreted as an offset into a
+ * different set.
  */
 const SHARED_LIST_CURSOR_VERSION = 'northstar.shared-list-cursor/v1' as const;
 
@@ -96,6 +97,8 @@ export function sharedListBindingDigest(
     | 'referenceScope'
     | 'fieldFilters'
     | 'relatedFilter'
+    | 'progress'
+    | 'beforeFilters'
     | 'relationLabels'
     | 'referenceLabels'
     | 'search'
@@ -113,6 +116,10 @@ export function sharedListBindingDigest(
     ...(query.fieldFilters ? { fieldFilters: query.fieldFilters } : {}),
     // Likewise a window over customers is not a window over suppliers.
     ...(query.relatedFilter ? { relatedFilter: query.relatedFilter } : {}),
+    // A window over orders with something open is not a window over all of
+    // them, and yesterday's "before today" is not today's.
+    ...(query.progress ? { progress: query.progress } : {}),
+    ...(query.beforeFilters ? { beforeFilters: query.beforeFilters } : {}),
     queryId,
     relationLabels: query.relationLabels,
     // A window sorted or searched by customer name is not a window over ids.

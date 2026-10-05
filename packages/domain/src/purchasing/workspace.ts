@@ -12,7 +12,10 @@ export function purchasingWorkspace(
   const f = (name: string) => id('field', name);
   const record = (field: string) => ({ source: 'record', field });
   const selected = (field: string) => ({ source: 'selected', field });
-  const literal = (value: string | null) => ({ source: 'literal', value });
+  const literal = (value: string | boolean | null) => ({
+    source: 'literal',
+    value,
+  });
   const generated = (value: string) => ({ source: 'generated', value });
   const input = (name: string) => ({
     source: 'input',
@@ -67,7 +70,16 @@ export function purchasingWorkspace(
       : {}),
     ...(role ? { presentation: { role, priority: orderKey } } : {}),
   });
+  // Shown with grouped digits and two decimals, never rounded.
+  const money = <T extends object>(value: T) => ({
+    ...value,
+    format: 'money' as const,
+  });
   const lines = id('dataset', 'purchasing_lines');
+  // What each line costs and the order's totals (ruling B extended to
+  // purchasing), read through the commercial purchase order queries.
+  const pricedLines = id('dataset', 'purchasing_priced_lines');
+  const metric = (name: string) => id('metric', name);
   const receipts = id('dataset', 'purchasing_receipts');
   const receive = (known: boolean) => {
     const suffix = known ? 'known' : 'absent';
@@ -91,6 +103,15 @@ export function purchasingWorkspace(
           ),
           operator: 'equals',
           compare: id('state', 'purchase_order_released'),
+        },
+        // Nothing is offered to receive on a line with nothing left to arrive:
+        // its open quantity reads exactly '0'. A withheld received read states
+        // no open quantity at all, and receiving stays offered -- the
+        // receiving kernel refuses an over-receipt either way.
+        {
+          value: selected(metric('open_to_receive')),
+          operator: 'notEquals',
+          compare: '0',
         },
       ],
       inputs: [
@@ -125,6 +146,9 @@ export function purchasingWorkspace(
           required: true,
           query: q('location_list'),
           labelField: ref('fieldReference', f('location_name')),
+          // Starts from where the order says its goods are received; the
+          // operator may choose another.
+          defaultFrom: record(f('purchase_order_receiving_location_id')),
         },
         ...(known
           ? [
@@ -158,19 +182,37 @@ export function purchasingWorkspace(
               },
             ]
           : []),
+        // The receipt's paperwork, kept on the receipt; both may stay empty.
+        {
+          inputId: id('input', 'receive_packing_slip'),
+          label: 'Packing slip / delivery note',
+          orderKey: 60,
+          type: 'text',
+          required: false,
+        },
+        {
+          inputId: id('input', 'receive_notes'),
+          label: 'Notes',
+          orderKey: 70,
+          type: 'text',
+          required: false,
+          presentation: { kind: 'multiline' },
+        },
       ],
       steps: [
         create(
           header,
           'goods_receipt',
           {
-            number: generated('uuid'),
+            // The receipt number is assigned by the server (RCV-000001).
             state: literal(id('option', 'goods_receipt_state_draft')),
             kind: literal(id('option', 'goods_receipt_kind_initial')),
             effective_at: generated('instant'),
             location_id: input('location'),
             reason_code: literal('RECEIVE'),
             reason_narrative: literal('Receive from purchase order'),
+            packing_slip: input('packing_slip'),
+            notes: input('notes'),
           },
           { order: record('recordId') },
         ),
@@ -213,6 +255,8 @@ export function purchasingWorkspace(
           id('column', 'purchasing_ordered'),
           id('column', 'purchasing_expected'),
           id('column', 'purchasing_currency'),
+          id('column', 'purchasing_payment_terms'),
+          id('column', 'purchasing_total'),
         ],
       },
       context: {
@@ -225,7 +269,14 @@ export function purchasingWorkspace(
       task: { mode: 'nativeDialog', fallback: 'page' },
       print: {
         label: 'Purchase order',
-        datasets: [lines],
+        datasets: [pricedLines],
+        totals: [
+          id('column', 'purchasing_subtotal'),
+          id('column', 'purchasing_freight'),
+          id('column', 'purchasing_other_fee'),
+          id('column', 'purchasing_tax'),
+          id('column', 'purchasing_total'),
+        ],
         note: id('column', 'purchasing_notes'),
       },
     },
@@ -248,16 +299,155 @@ export function purchasingWorkspace(
         40,
         f('purchase_order_expected_date'),
       ),
+      // Where the goods are received; shown in the document's details.
+      column(
+        'receive_into',
+        'Receive into',
+        42,
+        f('purchase_order_receiving_location_id'),
+        ['location_get', 'location_name'],
+      ),
       column('currency', 'Currency', 45, f('purchase_order_currency')),
+      column(
+        'payment_terms',
+        'Payment terms',
+        46,
+        f('purchase_order_payment_terms'),
+      ),
       // Read back as stored; shown in the document's sections.
       column('notes', 'Notes', 50, f('purchase_order_notes')),
+      column('tax_code', 'Tax code', 60, f('purchase_order_tax_code_id'), [
+        'tax_code_get',
+        'tax_code_code',
+      ]),
+      money(
+        column('freight', 'Freight', 61, f('purchase_order_freight_amount')),
+      ),
+      column(
+        'freight_tax_code',
+        'Freight tax code',
+        62,
+        f('purchase_order_freight_tax_code_id'),
+        ['tax_code_get', 'tax_code_code'],
+      ),
+      money(
+        column(
+          'other_fee',
+          'Other fee',
+          63,
+          f('purchase_order_other_fee_amount'),
+        ),
+      ),
+      column(
+        'other_fee_tax_code',
+        'Other fee tax code',
+        64,
+        f('purchase_order_other_fee_tax_code_id'),
+        ['tax_code_get', 'tax_code_code'],
+      ),
+      money(column('subtotal', 'Subtotal', 70, metric('order_subtotal'))),
+      money(column('charges', 'Charges', 71, metric('order_charges'))),
+      money(column('tax', 'Tax', 72, metric('order_tax'))),
+      money(column('total', 'Total', 73, metric('order_total'))),
     ],
     children: [
+      {
+        datasetId: pricedLines,
+        label: 'Priced lines',
+        orderKey: 5,
+        query: q('commercial_purchase_order_lines'),
+        presentation: { selection: 'none' },
+        parent: {
+          relationId: id('relation', 'purchase_order_line_order'),
+          value: record('recordId'),
+          ownership: 'parentScopedChild',
+        },
+        sort: [
+          {
+            fieldId: f('purchase_order_line_line_number'),
+            direction: 'ascending',
+          },
+        ],
+        columns: [
+          column(
+            'priced_line',
+            'Line',
+            10,
+            f('purchase_order_line_line_number'),
+            undefined,
+            'secondary',
+          ),
+          column(
+            'priced_item',
+            'Product',
+            20,
+            f('purchase_order_line_item_id'),
+            ['item_get', 'item_name'],
+            'primary',
+          ),
+          column(
+            'priced_quantity',
+            'Quantity',
+            30,
+            f('purchase_order_line_ordered_quantity'),
+            undefined,
+            'quantity',
+          ),
+          money(
+            column(
+              'priced_unit_cost',
+              'Unit cost',
+              40,
+              f('purchase_order_line_unit_price'),
+              undefined,
+              'secondary',
+            ),
+          ),
+          column(
+            'priced_discount',
+            'Discount %',
+            50,
+            f('purchase_order_line_discount_percent'),
+            undefined,
+            'detail',
+          ),
+          column(
+            'priced_tax_code',
+            'Tax code',
+            60,
+            f('purchase_order_line_tax_code_id'),
+            ['tax_code_get', 'tax_code_code'],
+            'detail',
+          ),
+          money(
+            column(
+              'priced_tax',
+              'Tax',
+              70,
+              metric('line_tax'),
+              undefined,
+              'quantity',
+            ),
+          ),
+          money(
+            column(
+              'priced_amount',
+              'Amount',
+              80,
+              metric('line_amount'),
+              undefined,
+              'quantity',
+            ),
+          ),
+        ],
+      },
       {
         datasetId: lines,
         label: 'Order lines',
         orderKey: 10,
-        query: q('purchase_order_line_list'),
+        // Read with what has arrived and what is still to arrive
+        // (PURCHASING-PARITY), through the commercial purchase line query.
+        query: q('commercial_purchase_order_lines'),
         presentation: { selection: 'explicit', selectedActions: 'row' },
         parent: {
           relationId: id('relation', 'purchase_order_line_order'),
@@ -300,6 +490,22 @@ export function purchasingWorkspace(
             'Ordered',
             30,
             f('purchase_order_line_ordered_quantity'),
+            undefined,
+            'quantity',
+          ),
+          column(
+            'received',
+            'Received',
+            32,
+            metric('received'),
+            undefined,
+            'quantity',
+          ),
+          column(
+            'open',
+            'Open',
+            34,
+            metric('open_to_receive'),
             undefined,
             'quantity',
           ),
@@ -361,12 +567,80 @@ export function purchasingWorkspace(
             undefined,
             'secondary',
           ),
+          column(
+            'packing_slip',
+            'Packing slip',
+            40,
+            f('goods_receipt_packing_slip'),
+            undefined,
+            'secondary',
+          ),
         ],
       },
     ],
     actions: [
       receive(true),
       receive(false),
+      {
+        // PURCHASING-PARITY: what will not arrive stops being expected. The
+        // line's ordered quantity becomes what was received, through the
+        // staged amendment request and the receiving amend, which refuses a
+        // quantity below what was received; the reason stays with the request.
+        actionId: id('action', 'close_remainder'),
+        label: 'Close open remainder',
+        description:
+          'Stops expecting what has not arrived on this line: its ordered quantity becomes the quantity received. Nothing received is changed.',
+        orderKey: 25,
+        datasetId: lines,
+        presentation: { placement: 'selection' },
+        conditions: [
+          {
+            value: record(
+              id('derived_state_field', 'machine.purchase_order_lifecycle'),
+            ),
+            operator: 'equals',
+            compare: id('state', 'purchase_order_released'),
+          },
+          {
+            value: selected(metric('open_to_receive')),
+            operator: 'positive',
+            compare: null,
+          },
+        ],
+        inputs: [
+          {
+            inputId: id('input', 'close_remainder_reason'),
+            label: 'Reason',
+            orderKey: 10,
+            type: 'text',
+            required: true,
+            presentation: { kind: 'multiline' },
+          },
+        ],
+        steps: [
+          create(
+            'close_remainder_request',
+            'purchase_order_amendment',
+            {
+              number: generated('uuid'),
+              line_revision: selected('revision'),
+              // What the operator saw received; the amend uses what is
+              // received when it runs.
+              quantity: selected(metric('received')),
+              close_remainder: literal(true),
+              reason: {
+                source: 'input',
+                inputId: id('input', 'close_remainder_reason'),
+              },
+            },
+            { order_line: selected('recordId') },
+          ),
+          step('close_remainder_amend', 'purchase_order_line_amend', [
+            bind(['recordId'], selected('recordId')),
+            bind(['expectedRevision'], selected('revision')),
+          ]),
+        ],
+      },
       {
         actionId: id('action', 'open_receipt'),
         label: 'Open receipt',
