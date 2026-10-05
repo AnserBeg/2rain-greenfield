@@ -824,56 +824,6 @@
       },
       {
         "action": "archive",
-        "permissionId": "northstar.app:permission.stock_count_archive",
-        "resource": "northstar.app:entity.stock_count"
-      },
-      {
-        "action": "create",
-        "permissionId": "northstar.app:permission.stock_count_create",
-        "resource": "northstar.app:entity.stock_count"
-      },
-      {
-        "action": "archive",
-        "permissionId": "northstar.app:permission.stock_count_line_archive",
-        "resource": "northstar.app:entity.stock_count_line"
-      },
-      {
-        "action": "create",
-        "permissionId": "northstar.app:permission.stock_count_line_create",
-        "resource": "northstar.app:entity.stock_count_line"
-      },
-      {
-        "action": "read",
-        "permissionId": "northstar.app:permission.stock_count_line_read",
-        "resource": "northstar.app:entity.stock_count_line"
-      },
-      {
-        "action": "restore",
-        "permissionId": "northstar.app:permission.stock_count_line_restore",
-        "resource": "northstar.app:entity.stock_count_line"
-      },
-      {
-        "action": "update",
-        "permissionId": "northstar.app:permission.stock_count_line_update",
-        "resource": "northstar.app:entity.stock_count_line"
-      },
-      {
-        "action": "read",
-        "permissionId": "northstar.app:permission.stock_count_read",
-        "resource": "northstar.app:entity.stock_count"
-      },
-      {
-        "action": "restore",
-        "permissionId": "northstar.app:permission.stock_count_restore",
-        "resource": "northstar.app:entity.stock_count"
-      },
-      {
-        "action": "update",
-        "permissionId": "northstar.app:permission.stock_count_update",
-        "resource": "northstar.app:entity.stock_count"
-      },
-      {
-        "action": "archive",
         "permissionId": "northstar.app:permission.price_list_archive",
         "resource": "northstar.app:entity.price_list"
       },
@@ -946,6 +896,56 @@
         "action": "update",
         "permissionId": "northstar.app:permission.price_list_assignment_update",
         "resource": "northstar.app:entity.price_list_assignment"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.stock_count_archive",
+        "resource": "northstar.app:entity.stock_count"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.stock_count_create",
+        "resource": "northstar.app:entity.stock_count"
+      },
+      {
+        "action": "archive",
+        "permissionId": "northstar.app:permission.stock_count_line_archive",
+        "resource": "northstar.app:entity.stock_count_line"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.stock_count_line_create",
+        "resource": "northstar.app:entity.stock_count_line"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.stock_count_line_read",
+        "resource": "northstar.app:entity.stock_count_line"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.stock_count_line_restore",
+        "resource": "northstar.app:entity.stock_count_line"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.stock_count_line_update",
+        "resource": "northstar.app:entity.stock_count_line"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.stock_count_read",
+        "resource": "northstar.app:entity.stock_count"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.stock_count_restore",
+        "resource": "northstar.app:entity.stock_count"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.stock_count_update",
+        "resource": "northstar.app:entity.stock_count"
       }
     ],
     "northstar.shell:package.demo": [
