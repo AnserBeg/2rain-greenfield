@@ -39,8 +39,18 @@ confirmed sale of 8 notebooks with nothing reserved yet.
 More → Location → **New**: Type offers Warehouse, Store, Storage, Receiving, Shipping, Quarantine, In transit, Scrap
 and Yard, and the form asks for no status: a new location is **Usable** until its page changes it.
 
-## Not in this slice
+## §5 A location inside a warehouse (slice 2)
 
-Warehouses containing locations, a warehouse filter on the stock Lists, transfers between warehouses through
-in-transit with "Receive transfer", and receiving into the item's preferred location wait on RELATION-INSTALL. Posting
-does not yet refuse to reserve or ship from a quarantined location (ruling L-C): the figures exclude it.
+1. More → Location → **New**: Code `CAL-A1`, Name `Aisle 1`, Type: choose **Storage** from the suggestions (the box then
+   holds its id), **Parent** Calgary warehouse → **Save**.
+2. Open **Aisle 1**: its facts read Inside **Calgary warehouse**. Record actions → Edit: the form says the parent is
+   chosen when the location is created and cannot be changed later.
+3. Open **Calgary warehouse**: **Locations inside** lists CAL-A1 (Storage, Usable). Record actions → Archive is
+   refused while a location is inside it.
+
+## Not built yet
+
+A warehouse filter on the stock Lists, transfers between warehouses through in-transit with "Receive transfer",
+receiving into the item's preferred location and moving a location under another after it is created each need a
+platform mechanism first (record, slice 2). Posting does not yet refuse to reserve or ship from a quarantined
+location (ruling L-C): the figures exclude it.
