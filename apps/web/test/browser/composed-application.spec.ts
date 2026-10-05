@@ -663,8 +663,8 @@ async function readFocusRingCoverage(
       label: 'declared list with rows',
     },
     {
-      // A plain record page. A party's page is its customer workspace now, so
-      // the generic record sections are read on a location's.
+      // A record page with its own workspace and no datasets: a location's
+      // (LOCATIONS), its status in the header.
       go: async () => {
         await page.goto(surfaceUrl(baseUrl, 'location_list'));
         const href = await page
@@ -2644,8 +2644,10 @@ async function partyLifecycleJourney(
   await expect(sectionsSlot).toContainText('browser-persisted@example.test');
   const partyUrl = page.url();
 
-  // The generic record page, read on a location's: its field sections with
-  // their compact disclosure, the sticky command bar and the action overflow.
+  // A location's page is its own workspace (LOCATIONS): its name, code and
+  // inventory status in the header, "Change status" beside its Record
+  // actions, which keep Edit and the archive overflow. The generic record
+  // page's own sections are read in the standalone Location journey.
   await page.goto(surfaceUrl(baseUrl, 'location_list'));
   const locationHref = await page
     .locator('.record-link')
@@ -2654,36 +2656,30 @@ async function partyLifecycleJourney(
   expect(locationHref).not.toBeNull();
   await page.goto(new URL(locationHref!, baseUrl).href);
   await expect(
-    page.locator('[data-platform-slot="record:sections"] [data-field-id]'),
-  ).toHaveCount(3);
+    page.getByRole('heading', { level: 1, name: 'Calgary warehouse' }),
+  ).toBeVisible();
   await expect(
-    page.locator('[data-platform-slot="record:keyFacts"]'),
-  ).toContainText('Revision');
-  await page.setViewportSize({ height: 844, width: 390 });
-  const compactSections = page.locator(
-    '[data-platform-slot="record:sections"] details.record-section-group',
-  );
-  await expect(compactSections).toHaveAttribute('open', '');
+    page.locator(
+      '[data-platform-slot="record:titleStatus"] .composition-subtitle',
+    ),
+  ).toHaveText('CAL-WH');
   await expect(
-    page.locator('[data-platform-slot="record:commandBar"] .command-bar'),
-  ).toHaveCSS('position', 'sticky');
-  const compactSectionSummary = compactSections.locator('summary');
-  await compactSectionSummary.focus();
-  await page.keyboard.press('Enter');
-  await expect(compactSections).not.toHaveAttribute('open', '');
-  await page.setViewportSize({ height: 720, width: 1280 });
-  await expect(compactSectionSummary).toBeVisible();
-  await compactSectionSummary.focus();
-  await page.keyboard.press('Enter');
-  await expect(compactSections).toHaveAttribute('open', '');
-  await expect(compactSections.getByText('Calgary warehouse')).toBeVisible();
-  const overflow = page.locator(
-    '[data-platform-slot="record:commandBar"] details.action-overflow',
+    page.locator(
+      '[data-platform-slot="record:titleStatus"] .composition-business-status',
+    ),
+  ).toHaveText('Usable');
+  await expect(keyFactsSlot).toContainText('Revision');
+  await expect(technical('Activity')).toHaveText('Active');
+  const locationActions = page.locator(
+    '[data-platform-slot="record:commandBar"] details.composition-record-actions',
   );
+  await locationActions.locator(':scope > summary').click();
+  await expect(
+    locationActions.getByRole('link', { name: 'Edit', exact: true }),
+  ).toBeVisible();
   const archive = page.getByRole('button', { name: 'Archive' });
-  await expect(overflow).toBeVisible();
   await expect(archive).toBeHidden();
-  await overflow.locator('summary').click();
+  await locationActions.locator('details.action-overflow > summary').click();
   await expect(archive).toBeVisible();
 
   // The party's own commands sit under its Record actions.

@@ -65,6 +65,8 @@ test('the composed application declares its Lists and they normalize unchanged',
     // REPLENISHMENT: the Buying worklist and Stock by item.
     buyingList,
     stockList,
+    // LOCATIONS: each location's type and inventory status.
+    `${ns}:surface.location_list`,
     `${ns}:surface.posted_stock_balance_list`,
     `${ns}:surface.purchase_order_list`,
     salesList,
@@ -729,6 +731,7 @@ test('REPLENISHMENT: Stock by item and the Buying worklist read items in one com
       'Item',
       'Unit',
       'On hand',
+      'Usable',
       'Reserved',
       'Available',
       'Incoming',
@@ -750,9 +753,59 @@ test('REPLENISHMENT: Stock by item and the Buying worklist read items in one com
     stock.list.figures.sums.map((value) => [value.figureId, value.sum]),
     [
       [figure('item_stock_list', 'on_hand'), 'rows'],
+      [figure('item_stock_list', 'usable'), 'rows'],
       [figure('item_stock_list', 'reserved'), 'related'],
+      [figure('item_stock_list', 'reserved_usable'), 'related'],
       [figure('item_stock_list', 'incoming'), 'remaining'],
       [figure('item_stock_list', 'open_demand'), 'remaining'],
+    ],
+  );
+  // LOCATIONS: Usable, and what reservations hold, only at a usable location
+  // -- reached through the location id the rows hold, not a relation.
+  for (const [local, holder] of [
+    ['usable', 'posted_stock_balance_location_id'],
+    ['reserved_usable', 'reservation_location_id'],
+  ] as const)
+    assert.deepEqual(
+      (
+        stock.list.figures.sums.find(
+          (value) => value.figureId === figure('item_stock_list', local),
+        ) as unknown as { within: Json }
+      ).within,
+      {
+        reference: `${ns}:field.${holder}`,
+        query: {
+          kind: 'queryReference',
+          schemaVersion: 'v6',
+          targetId: `${ns}:query.location_list`,
+        },
+        field: `${ns}:field.location_status`,
+        values: [`${ns}:option.location_status_usable`],
+      },
+    );
+  // Available and Projected start from usable stock, not on hand.
+  assert.deepEqual(
+    (
+      stock.list.figures.totals as unknown as Array<{
+        figureId: string;
+        plus: Json[];
+        minus: Json[];
+      }>
+    ).map((value) => [value.figureId, value.plus, value.minus]),
+    [
+      [
+        figure('item_stock_list', 'available'),
+        [{ figure: figure('item_stock_list', 'usable') }],
+        [{ figure: figure('item_stock_list', 'reserved_usable') }],
+      ],
+      [
+        figure('item_stock_list', 'projected'),
+        [
+          { figure: figure('item_stock_list', 'usable') },
+          { figure: figure('item_stock_list', 'incoming') },
+        ],
+        [{ figure: figure('item_stock_list', 'open_demand') }],
+      ],
     ],
   );
   assert.deepEqual(
@@ -770,6 +823,7 @@ test('REPLENISHMENT: Stock by item and the Buying worklist read items in one com
       'SKU',
       'Item',
       'Unit',
+      'Usable',
       'Available',
       'Incoming',
       'Open demand',
@@ -812,6 +866,94 @@ test('REPLENISHMENT: Stock by item and the Buying worklist read items in one com
     ]);
 });
 
+test('LOCATIONS: the Location List shows each location type and inventory status and filters by either', () => {
+  const normalized = normalizeApplicationPackage(
+    composedApplicationDefinition() as never,
+  );
+  const location = normalized.surfaces.find(
+    (surface) => surface.surfaceId === `${ns}:surface.location_list`,
+  ) as unknown as {
+    workspace: { membership: string };
+    list: {
+      columns: Array<{
+        label: string;
+        role: string;
+        sortable: boolean;
+        statusRoles?: Array<{ value: string; role: string }>;
+      }>;
+      filters: Array<{
+        label: string;
+        field: string;
+        options: Array<{ value: string; label: string }>;
+      }>;
+      views: Json[];
+      export?: Json;
+    };
+  };
+  const status = (local: string) => `${ns}:option.location_status_${local}`;
+  // A setup List, as before: no company, no export, no saved views.
+  assert.equal(location.workspace.membership, 'setup');
+  assert.deepEqual(location.list.views, []);
+  assert.equal(location.list.export, undefined);
+  assert.deepEqual(
+    location.list.columns.map((column) => [
+      column.label,
+      column.role,
+      column.sortable,
+    ]),
+    [
+      ['Code', 'title', true],
+      ['Name', 'value', true],
+      ['Type', 'value', true],
+      ['Inventory status', 'status', true],
+      ['Status reason', 'value', false],
+    ],
+  );
+  assert.deepEqual(
+    location.list.columns.find((column) => column.role === 'status')!
+      .statusRoles,
+    [
+      { value: status('usable'), role: 'success' },
+      { value: status('quarantine'), role: 'attention' },
+      { value: status('damaged'), role: 'blocked' },
+      { value: status('in_transit'), role: 'inProgress' },
+      { value: status('return_pending'), role: 'attention' },
+    ],
+  );
+  const [byStatus, byType] = location.list.filters;
+  assert.equal(byStatus!.field, `${ns}:field.location_status`);
+  assert.deepEqual(
+    byStatus!.options.map((option) => option.label),
+    ['Usable', 'Quarantine', 'Damaged', 'In transit', 'Return pending'],
+  );
+  // Every type a location may have: a warehouse and a store as before, and
+  // the widened ones (owner ruling L-B).
+  assert.equal(byType!.field, `${ns}:field.location_type`);
+  assert.deepEqual(
+    byType!.options.map((option) => option.label),
+    [
+      'Warehouse',
+      'Store',
+      'Storage',
+      'Receiving',
+      'Shipping',
+      'Quarantine',
+      'In transit',
+      'Scrap',
+      'Yard',
+    ],
+  );
+  const typeField = normalized.fields.find(
+    (field) => field.fieldId === `${ns}:field.location_type`,
+  )!;
+  assert.deepEqual(
+    typeField.fieldType.kind === 'enumFieldType'
+      ? typeField.fieldType.options.map((option) => option.optionId)
+      : [],
+    byType!.options.map((option) => option.value),
+  );
+});
+
 test('List figures and band views are refused for each misuse the runtime cannot honour', () => {
   type Figures = {
     sums: Array<
@@ -819,7 +961,8 @@ test('List figures and band views are refused for each misuse the runtime cannot
         figureId: string;
         rows: { query: { targetId: string }; match: string; quantity?: string };
         within?: {
-          relation: string;
+          relation?: string;
+          reference?: string;
           query: { targetId: string };
           field: string;
           values: string[];
@@ -953,6 +1096,38 @@ test('List figures and band views are refused for each misuse the runtime cannot
         "a figure's parent values are values of a field its parent query selects",
         (app) => {
           sum(app, 'incoming').within!.field = field('item_name');
+        },
+      ],
+      [
+        "a figure's parent is the record whose id its rows hold in a text field their query selects",
+        (app) => {
+          // A unit code could never hold a location's id.
+          sum(app, 'usable').within!.reference = field(
+            'posted_stock_balance_unit_id',
+          );
+        },
+      ],
+      [
+        "a figure's parent is the record whose id its rows hold in a text field their query selects",
+        (app) => {
+          // Another entity's location field.
+          sum(app, 'usable').within!.reference = field(
+            'reservation_location_id',
+          );
+        },
+      ],
+      [
+        "a figure's parent values are values of a field its parent query selects",
+        (app) => {
+          // A location type is not an inventory status.
+          sum(app, 'usable').within!.values = [`${ns}:option.warehouse`];
+        },
+      ],
+      [
+        'list figures read active q0 list queries without a read model',
+        (app) => {
+          // A location is read through its List, never its get.
+          sum(app, 'usable').within!.query = queryRef('location_get');
         },
       ],
       [
@@ -1136,6 +1311,14 @@ test('List figures and band views are refused for each misuse the runtime cannot
   assert.match(
     refused((app) => {
       (listOf(app, stockList).list.views[1]!.band as Json).open = true;
+    }),
+    /closed supported schema/u,
+  );
+  // A parent is reached through a relation or a reference field, never both.
+  assert.match(
+    refused((app) => {
+      sum(app, 'usable').within!.relation =
+        `${ns}:relation.purchase_order_line_order`;
     }),
     /closed supported schema/u,
   );

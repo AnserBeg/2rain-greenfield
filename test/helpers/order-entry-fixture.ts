@@ -1411,6 +1411,95 @@ async function seed(
         observed: true,
       };
     }
+    if (phase === 'locations') {
+      // LOCATIONS: Field notebook's opening 10 at CAL-WH. A Quality hold
+      // location of the quarantine type is created -- usable, its declared
+      // default -- and put in quarantine by the update "Change status" makes:
+      // the status, its reason and the instant at once. A transfer then moves
+      // 4 notebooks into it, and a confirmed sale of 8 notebooks reserves
+      // nothing yet; each step through its governed operation. Usable is the
+      // 6 left at CAL-WH: the order is short 2.
+      const at = () => new Date().toISOString();
+      const done = async (local: string, recordId: string, revision: number) =>
+        assert.equal(
+          (await invoke(local, { recordId, expectedRevision: revision }))
+            .outcome,
+          'succeeded',
+        );
+      const hold = await create(
+        'location',
+        {
+          code: 'QA-HOLD',
+          name: 'Quality hold',
+          type: `${ns}:option.location_type_quarantine`,
+        },
+        {},
+        false,
+      );
+      const quarantined = await invoke('location_update', {
+        recordId: hold.recordId,
+        expectedRevision: hold.revision,
+        patch: {
+          [`${ns}:field.location_status`]: `${ns}:option.location_status_quarantine`,
+          [`${ns}:field.location_status_reason`]:
+            'Water damage on an inbound pallet',
+          [`${ns}:field.location_status_changed_at`]: at(),
+        },
+      });
+      assert.equal(quarantined.outcome, 'succeeded');
+      const transfer = await stockDocument({
+        effective_at: at(),
+        reason_code: 'HOLD',
+        reason_narrative: 'Held for inspection',
+        type: `${ns}:option.inventory_transaction_type_transfer`,
+      });
+      await create(
+        'inventory_transaction_line',
+        {
+          from_location_id: location,
+          to_location_id: hold.recordId,
+          item_id: item,
+          line_number: '1',
+          quantity: '4',
+          unit_id: 'EA',
+        },
+        { transaction: transfer.recordId },
+      );
+      await done(
+        'inventory_transaction_post',
+        transfer.recordId,
+        transfer.revision,
+      );
+      const order = await create('sales_order', {
+        customer_party_id: customer,
+        order_date: at(),
+        requested_date: at(),
+        currency: 'CAD',
+        notes: 'Locations order',
+        ...shipTo,
+      });
+      const line = await create(
+        'sales_order_line',
+        {
+          item_id: item,
+          line_number: '1',
+          ordered_quantity: '8',
+          unit_id: 'EA',
+          unit_price: null,
+        },
+        { order: order.recordId },
+      );
+      await done('sales_order_release', order.recordId, order.revision);
+      return {
+        phase,
+        notebook: item,
+        warehouse: location,
+        hold: hold.recordId,
+        order: order.recordId,
+        line: line.recordId,
+        observed: true,
+      };
+    }
     if (phase === 'second_company') {
       const company = await create(
         'legal_entity',

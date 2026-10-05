@@ -3528,11 +3528,13 @@ async function assertBoundedFreshTenantInstallEvidence(
   // REPLENISHMENT adds 6, measured: one search exclusion for each of the
   // item's six non-searchable fields (reorder point and up-to level, preferred
   // location, standard cost in three currencies). Its two Lists' queries add
-  // none: a List over items adds no entity.
+  // none: a List over items adds no entity. LOCATIONS adds 4, measured: one
+  // search exclusion for each of the location's three non-searchable status
+  // fields (status, reason, time) and the status's enum rejection.
   assert.equal(
     servingScenarioCount,
-    579,
-    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables and 6 for replenishment',
+    583,
+    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, 6 for replenishment and 4 for locations',
   );
   await assertFreshInstallLineageEvidence(
     pool,
@@ -5855,11 +5857,12 @@ async function assertExactPartitionEvidence(
   // request, each with a generic create: 501, 424. PAYABLES' 72 execute too
   // (each vendor document has a generic create, replayed by this oracle over
   // the compiled head): 573, 496. REPLENISHMENT's 6 item search exclusions
-  // execute through the item's generic create: 579, 502.
+  // execute through the item's generic create: 579, 502. LOCATIONS' 4 execute
+  // through the location's: 583, 506.
   assert.equal(
     evidence.results.length,
-    502,
-    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72 and replenishment 6',
+    506,
+    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72, replenishment 6 and locations 4',
   );
   assert.equal(
     derivations.length,
