@@ -27,12 +27,12 @@ then open the printed URL. Ctrl-C stops it and removes its container. The demo s
 
 1. Inventory → **Inventory period lock** → the company's row. The page reads *Posting period*; with nothing closed
    it offers only **Close period through**.
-2. **Close period through** → *Close through (UTC)*: today, 23:59:59 → **Review Close period through** (it shows
+2. **Close period through** → *Close through (UTC)*: today's UTC date, 23:59:59 → **Review Close period through** (it shows
    the instant as stored, `…T23:59:59.000Z`) → **Confirm Close period through**: *Close period through: done*.
    Reopen the lock page: its title is that instant, and **Reopen to** is now offered.
 3. Post a stock document dated now: Inventory transactions → New → Adjustment, Reason **Found**, To **Calgary
    warehouse**, 1 → Save draft → **Post** → **Confirm Post**: refused, `INVENTORY_PERIOD_CLOSED`. Nothing moves.
-4. **Close period through** yesterday 00:00:00 → Review → Confirm: refused, `MODULE_PERIOD_LOCK_DIRECTION_INVALID`.
+4. **Close period through** yesterday at 00:00 → Review → Confirm: refused, `MODULE_PERIOD_LOCK_DIRECTION_INVALID`.
    Closing never moves the date back; only Reopen does, under its own permission and confirmation.
-5. **Reopen to** → yesterday 00:00:00 → Review → **Confirm Reopen to**: *Reopen to: done*. Open the stock document
+5. **Reopen to** → yesterday at 00:00 → Review → **Confirm Reopen to**: *Reopen to: done*. Open the stock document
    from step 3 again → **Post** → **Confirm Post**: *Post complete*.

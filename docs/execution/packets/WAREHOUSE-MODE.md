@@ -35,7 +35,7 @@ Base: `packet/INVENTORY-PARITY` at `e3da0a39`. Reference: PaneFlow `d057daff` (`
 
 ## Gates
 
-- Local, `e21319e0`..`a2e82357`: tsc clean; eslint and prettier clean on every changed file; release entry 7 rebuilt from INVENTORY-PARITY's six-entry envelope (28,924,518 -> 34,100,056 B), `--check` PASS, demo `--check` PASS; unit 212/212 (new `surface-launcher` 3/3), with its evidence then `check-language-coverage` PASS; compiler 175/175; integration 243/243 and `surface-data-binding` 127/127 (WAREHOUSE-MODE 2/2); web contract 39/39; architecture: grammar 25/25, seam/ux/purity/press law/boundaries 94/94, reachability 11/11, hygiene 37/38 (the matrix-lock control refused over another lane's live container, the gate working); language coverage 2673 -> 2681 obligations, 831 -> 838 observed.
+- Local, `e21319e0`..`78df7c7e` (the last only moves the Warehouse's append in the builder; the authored application is byte-identical): tsc clean; eslint and prettier clean on every changed file; release entry 7 rebuilt from INVENTORY-PARITY's six-entry envelope (28,924,518 -> 34,100,056 B), `--check` PASS, demo `--check` PASS; unit 212/212 (new `surface-launcher` 3/3), with its evidence then `check-language-coverage` PASS; compiler 175/175; integration 243/243 and `surface-data-binding` 127/127 (WAREHOUSE-MODE 2/2); web contract 39/39; architecture: grammar 25/25, seam/ux/purity/press law/boundaries 94/94, reachability 11/11, hygiene 37/38 (the matrix-lock control refused over another lane's live container, the gate working); language coverage 2673 -> 2681 obligations, 831 -> 838 observed.
 - Container runs, one at a time under the exclusive lock: PostgreSQL `period-lock-commands` 1/1 (152 s); browser `inventory-warehouse-mode` 2/2 (Warehouse 3.6 min; period lock 2.8 min after `a2e82357`, a filtered run exiting 1 by the reachability reporter's own rule).
 - Pins from the compile: surfaces 101 -> 102, navigation leaves 16 -> 17 (Inventory adds Warehouse), surface floor 16 -> 18, runtime support 16 -> 18, message catalog 48 -> 50; verification plan 573 scenarios, unchanged; no storage change, so the full-replay schema snapshot is not regenerated.
 - CI on PR #18, run 3 (`659c4cab`): Browser runner and scans green; red on the language-coverage argv check (the unit producer lacked the new file, fixed in `bc4c6eeb`), the period-lock journey (a zero seconds field, fixed in `a2e82357`; the Warehouse journey passed) and the compile budget (`COMPILE_BUDGET_INDETERMINATE`, CPU idle 73.3%); its PostgreSQL jobs were superseded by the next push.
@@ -62,7 +62,7 @@ Base: `packet/INVENTORY-PARITY` at `e3da0a39`. Reference: PaneFlow `d057daff` (`
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WAREHOUSE-MODE",
   "base": "e3da0a3918620c5ce3e494eba3fdf1b3f8c91c4a",
-  "head": "a2e8235718266f9e3583dde79c3cdd4b1ec9c17b",
+  "head": "78df7c7e5b4c5848db5e78de0a5efbd1a9164bdf",
   "changedPaths": [
     "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts",
     "apps/web/src/message-catalog.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-contract.ts",
