@@ -104,16 +104,16 @@ test('kegs go out to a customer against a deposit, come back or are forfeited, a
     // Issue six kegs: a custody record and its first Issue, the deposit paid
     // by cheque.
     await task('Issue returnables').click();
-    await dialog
-      .getByLabel('Returnable type', { exact: true })
-      .selectOption({ label: '50 L keg' });
-    await expect(dialog.getByLabel('Direction', { exact: true })).toHaveValue(
+    // A select sits inside its label, whose text then includes the options:
+    // a choice is found by its exact accessible name.
+    const choice = (name: string) =>
+      dialog.getByRole('combobox', { name, exact: true });
+    await choice('Returnable type').selectOption({ label: '50 L keg' });
+    await expect(choice('Direction')).toHaveValue(
       `${ns}:option.returnable_custody_direction_out`,
     );
     await dialog.getByLabel('Quantity', { exact: true }).fill('6');
-    await dialog
-      .getByLabel('Deposit paid by', { exact: true })
-      .selectOption({ label: 'Cheque' });
+    await choice('Deposit paid by').selectOption({ label: 'Cheque' });
     await dialog
       .getByLabel('Reference (cheque or transfer number)')
       .fill('CHQ-4410');
@@ -193,9 +193,7 @@ test('kegs go out to a customer against a deposit, come back or are forfeited, a
     await page.goto(custodyUrl);
     await task('Refund deposit').click();
     await dialog.getByLabel('Amount refunded', { exact: true }).fill('120');
-    await dialog
-      .getByLabel('Refunded by', { exact: true })
-      .selectOption({ label: 'Bank transfer' });
+    await choice('Refunded by').selectOption({ label: 'Bank transfer' });
     await dialog
       .getByLabel('Reference (cheque or transfer number)')
       .fill('EFT-88');
