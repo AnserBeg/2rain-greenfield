@@ -660,6 +660,8 @@ test('sales compiler scenarios execute input refinements and operation/storage e
         38,
         18,
       ),
+      // SALES-EXTRAS: the price list that priced the line.
+      salesInputField('price_list_id', 'textFieldType', false, 80, null, null),
     ],
   );
   assert.deepEqual(lineCreate.inputContract.relationInputs, [

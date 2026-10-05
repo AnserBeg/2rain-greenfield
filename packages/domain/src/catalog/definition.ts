@@ -15,6 +15,11 @@ function ids(namespace: string) {
     entityIds: {
       item: `${namespace}:entity.item`,
       taxCode: `${namespace}:entity.tax_code`,
+      // Price lists (SALES-EXTRAS): a list's prices per item and quantity
+      // break, and the customers it is assigned to.
+      priceList: `${namespace}:entity.price_list`,
+      priceListEntry: `${namespace}:entity.price_list_entry`,
+      priceListAssignment: `${namespace}:entity.price_list_assignment`,
     },
     fieldIds: {
       baseUnit: `${namespace}:field.item_base_unit`,
@@ -28,6 +33,19 @@ function ids(namespace: string) {
       taxCode: `${namespace}:field.tax_code_code`,
       taxName: `${namespace}:field.tax_code_name`,
       taxRatePercent: `${namespace}:field.tax_code_rate_percent`,
+      priceListCode: `${namespace}:field.price_list_code`,
+      priceListName: `${namespace}:field.price_list_name`,
+      priceListCurrency: `${namespace}:field.price_list_currency`,
+      priceListPriority: `${namespace}:field.price_list_priority`,
+      priceListStatus: `${namespace}:field.price_list_status`,
+      entryItemId: `${namespace}:field.price_list_entry_item_id`,
+      entryMinimumQuantity: `${namespace}:field.price_list_entry_minimum_quantity`,
+      entryUnitPrice: `${namespace}:field.price_list_entry_unit_price`,
+      assignmentPartyId: `${namespace}:field.price_list_assignment_party_id`,
+    },
+    relationIds: {
+      entryPriceList: `${namespace}:relation.price_list_entry_price_list`,
+      assignmentPriceList: `${namespace}:relation.price_list_assignment_price_list`,
     },
     moduleId: `${namespace}:module.catalog`,
     namespace,
@@ -80,6 +98,30 @@ export function catalogModuleDefinition(
     fieldIds.taxName,
     fieldIds.taxRatePercent,
   ];
+  const priceListFields = [
+    fieldIds.priceListCode,
+    fieldIds.priceListName,
+    fieldIds.priceListCurrency,
+    fieldIds.priceListPriority,
+    fieldIds.priceListStatus,
+  ];
+  const entryFields = [
+    fieldIds.entryItemId,
+    fieldIds.entryMinimumQuantity,
+    fieldIds.entryUnitPrice,
+  ];
+  const assignmentFields = [fieldIds.assignmentPartyId];
+  // Price lists (SALES-EXTRAS), each with its prices and its customers.
+  const priceListEntities = [
+    ['price_list', 'Price list', entityIds.priceList, 30],
+    ['price_list_entry', 'Price list price', entityIds.priceListEntry, 40],
+    [
+      'price_list_assignment',
+      'Price list customer',
+      entityIds.priceListAssignment,
+      50,
+    ],
+  ] as const;
   return {
     assertions: [
       conformanceAssertion(
@@ -92,6 +134,13 @@ export function catalogModuleDefinition(
           definitionIds,
           'tax_code',
           `${namespace}:query.tax_code_get`,
+        ),
+        ...priceListEntities.map(([local]) =>
+          conformanceAssertion(
+            definitionIds,
+            local,
+            `${namespace}:query.${local}_get`,
+          ),
         ),
       ]),
     ],
@@ -119,6 +168,9 @@ export function catalogModuleDefinition(
       entity(definitionIds, 'item', 'Item', entityIds.item, 10),
       ...when([
         entity(definitionIds, 'tax_code', 'Tax code', entityIds.taxCode, 20),
+        ...priceListEntities.map(([local, label, entityId, orderKey]) =>
+          entity(definitionIds, local, label, entityId, orderKey),
+        ),
       ]),
     ],
     fields: [
@@ -196,6 +248,107 @@ export function catalogModuleDefinition(
           defaultSemantics: 'none',
           presence: 'required',
         },
+        // A price list (SALES-EXTRAS): its code and name, the one currency
+        // its prices are in, its rank among a customer's lists (highest
+        // first) and whether it prices anything at all.
+        textField({
+          businessKey: 'tenantEnvironmentCaseInsensitiveUnique',
+          entityId: entityIds.priceList,
+          fieldId: fieldIds.priceListCode,
+          label: 'Price list code',
+          maximumLength: 20,
+          orderKey: 10,
+          presence: 'required',
+          searchable: true,
+        }),
+        textField({
+          entityId: entityIds.priceList,
+          fieldId: fieldIds.priceListName,
+          label: 'Name',
+          maximumLength: 120,
+          orderKey: 20,
+          presence: 'required',
+          searchable: true,
+        }),
+        enumField(
+          definitionIds,
+          entityIds.priceList,
+          fieldIds.priceListCurrency,
+          'Currency',
+          30,
+          [
+            ['price_list_currency_cad', 'CAD'],
+            ['price_list_currency_usd', 'USD'],
+            ['price_list_currency_eur', 'EUR'],
+          ],
+        ),
+        {
+          ...decimalField(
+            entityIds.priceList,
+            fieldIds.priceListPriority,
+            'Priority',
+            40,
+          ),
+          defaultSemantics: 'none',
+          fieldType: {
+            kind: 'integerFieldType',
+            representation: 'canonicalString',
+            schemaVersion: version,
+          },
+          presence: 'required',
+        },
+        enumField(
+          definitionIds,
+          entityIds.priceList,
+          fieldIds.priceListStatus,
+          'Status',
+          50,
+          [
+            ['price_list_status_active', 'Active'],
+            ['price_list_status_inactive', 'Inactive'],
+          ],
+        ),
+        // One price of an item, from a minimum quantity up (a quantity
+        // break); the item is the record a sales line chooses.
+        textField({
+          entityId: entityIds.priceListEntry,
+          fieldId: fieldIds.entryItemId,
+          label: 'Item',
+          maximumLength: 80,
+          orderKey: 10,
+          presence: 'required',
+          searchable: true,
+        }),
+        {
+          ...decimalField(
+            entityIds.priceListEntry,
+            fieldIds.entryMinimumQuantity,
+            'Minimum quantity',
+            20,
+          ),
+          defaultSemantics: 'none',
+          presence: 'required',
+        },
+        {
+          ...decimalField(
+            entityIds.priceListEntry,
+            fieldIds.entryUnitPrice,
+            'Unit price',
+            30,
+          ),
+          defaultSemantics: 'none',
+          presence: 'required',
+        },
+        // A customer the list prices for.
+        textField({
+          entityId: entityIds.priceListAssignment,
+          fieldId: fieldIds.assignmentPartyId,
+          label: 'Customer',
+          maximumLength: 80,
+          orderKey: 10,
+          presence: 'required',
+          searchable: true,
+        }),
       ]),
     ],
     hashAlgorithm: 'sha256',
@@ -221,6 +374,11 @@ export function catalogModuleDefinition(
     operations: [
       ...entityOperations(definitionIds, 'item', entityIds.item),
       ...when(entityOperations(definitionIds, 'tax_code', entityIds.taxCode)),
+      ...when(
+        priceListEntities.flatMap(([local, , entityId]) =>
+          entityOperations(definitionIds, local, entityId),
+        ),
+      ),
     ],
     package: {
       kind: 'packageDefinition',
@@ -233,6 +391,11 @@ export function catalogModuleDefinition(
     permissions: [
       ...entityPermissions(definitionIds, 'item', entityIds.item),
       ...when(entityPermissions(definitionIds, 'tax_code', entityIds.taxCode)),
+      ...when(
+        priceListEntities.flatMap(([local, , entityId]) =>
+          entityPermissions(definitionIds, local, entityId),
+        ),
+      ),
     ],
     queries: [
       ...entityQueries(definitionIds, 'item', entityIds.item, itemFields, [
@@ -258,17 +421,86 @@ export function catalogModuleDefinition(
           ],
         ),
       ),
+      ...when([
+        ...entityQueries(
+          definitionIds,
+          'price_list',
+          entityIds.priceList,
+          priceListFields,
+          [
+            {
+              authority: 'identifier',
+              fieldId: fieldIds.priceListCode,
+              localId: 'code',
+            },
+            {
+              authority: 'advisory',
+              fieldId: fieldIds.priceListName,
+              localId: 'name',
+            },
+          ],
+        ),
+        ...entityQueries(
+          definitionIds,
+          'price_list_entry',
+          entityIds.priceListEntry,
+          entryFields,
+          [
+            {
+              authority: 'advisory',
+              fieldId: fieldIds.entryItemId,
+              localId: 'item',
+            },
+          ],
+        ),
+        ...entityQueries(
+          definitionIds,
+          'price_list_assignment',
+          entityIds.priceListAssignment,
+          assignmentFields,
+          [
+            {
+              authority: 'advisory',
+              fieldId: fieldIds.assignmentPartyId,
+              localId: 'party',
+            },
+          ],
+        ),
+      ]),
     ],
-    relations: [],
+    relations: when([
+      ownedRelation(
+        definitionIds.relationIds.entryPriceList,
+        entityIds.priceListEntry,
+        entityIds.priceList,
+        10,
+      ),
+      ownedRelation(
+        definitionIds.relationIds.assignmentPriceList,
+        entityIds.priceListAssignment,
+        entityIds.priceList,
+        20,
+      ),
+    ]),
     schemaVersion: version,
     stateMachines: [],
     storageMappings: [
       storageMapping(definitionIds, 'item', entityIds.item),
       ...when([storageMapping(definitionIds, 'tax_code', entityIds.taxCode)]),
+      ...when(
+        priceListEntities.map(([local, , entityId]) =>
+          storageMapping(definitionIds, local, entityId),
+        ),
+      ),
     ],
     surfaces: [
       ...entitySurfaces(definitionIds, 'item', 'Item'),
       ...when(entitySurfaces(definitionIds, 'tax_code', 'Tax code')),
+      ...when(
+        priceListEntities.flatMap(([local, label]) =>
+          entitySurfaces(definitionIds, local, label),
+        ),
+      ),
     ],
   };
 }
@@ -329,6 +561,69 @@ function decimalField(
     reportable: true,
     schemaVersion: version,
     searchable: false,
+  };
+}
+
+/** A required enumeration, such as a price list's currency or status. */
+function enumField(
+  ids: CatalogIds,
+  entityId: string,
+  fieldId: string,
+  label: string,
+  orderKey: number,
+  options: ReadonlyArray<readonly [string, string]>,
+): Record<string, unknown> {
+  return {
+    classification: 'internal',
+    collation: 'binary',
+    defaultSemantics: 'none',
+    entity: reference('entityReference', entityId),
+    fieldId,
+    fieldType: {
+      kind: 'enumFieldType',
+      options: options.map(([local, optionLabel], index) => ({
+        kind: 'enumOption',
+        label: optionLabel,
+        optionId: `${ids.namespace}:option.${local}`,
+        orderKey: (index + 1) * 10,
+        schemaVersion: version,
+      })),
+      schemaVersion: version,
+    },
+    kind: 'fieldDefinition',
+    label,
+    orderKey,
+    presence: 'required',
+    reportable: true,
+    schemaVersion: version,
+    searchable: false,
+  };
+}
+
+/** A child owned by its parent record, such as a price list's prices. */
+function ownedRelation(
+  relationId: string,
+  sourceEntityId: string,
+  targetEntityId: string,
+  orderKey: number,
+): Record<string, unknown> {
+  return {
+    archiveBehavior: 'restrict',
+    cardinality: 'manyToOne',
+    foreignKeyActions: {
+      onDelete: 'restrict',
+      onUpdate: 'restrict',
+      schemaVersion: version,
+    },
+    joinEligibility: 'query',
+    kind: 'relationDefinition',
+    orderKey,
+    ownership: 'parentScopedChild',
+    relationId,
+    required: true,
+    schemaVersion: version,
+    sourceEntity: reference('entityReference', sourceEntityId),
+    targetEntity: reference('entityReference', targetEntityId),
   };
 }
 

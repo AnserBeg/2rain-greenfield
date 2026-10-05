@@ -40,6 +40,9 @@ const LEGAL_ENTITY_FAMILY_RULES = Object.freeze([
   { classification: 'tenantShared', familyId: 'item' },
   { classification: 'tenantShared', familyId: 'location' },
   { classification: 'tenantShared', familyId: 'tax_code' },
+  { classification: 'tenantShared', familyId: 'price_list' },
+  { classification: 'tenantShared', familyId: 'price_list_entry' },
+  { classification: 'tenantShared', familyId: 'price_list_assignment' },
   { classification: 'entityOwned', familyId: 'inventory_movement' },
   { classification: 'entityOwned', familyId: 'inventory_transaction' },
   { classification: 'entityOwned', familyId: 'inventory_transaction_line' },
@@ -213,6 +216,17 @@ const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
     semantics: 'crossEntityAllowed',
     sourceFamilyId: 'party_address',
     targetFamilyId: 'party',
+  },
+  // A price list's prices and customers, tenant-wide as the list is.
+  {
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'price_list_entry',
+    targetFamilyId: 'price_list',
+  },
+  {
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'price_list_assignment',
+    targetFamilyId: 'price_list',
   },
   {
     semantics: 'sameEntity',

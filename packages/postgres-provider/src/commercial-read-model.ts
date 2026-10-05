@@ -502,16 +502,20 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
       }
       // A unit price that differs from the list price it started from was
       // set by hand (ruling B); without a list price there is nothing to mark.
-      // A purchase line has no list price: its cost is always typed.
+      // A price a price list set reads as that (SALES-EXTRAS). A purchase
+      // line has no list price: its cost is always typed.
       if (!purchase) {
         const list = row.values[field('sales_order_line_list_price')];
         const unit = row.values[field('sales_order_line_unit_price')];
+        const priceList = row.values[field('sales_order_line_price_list_id')];
         emit(
           'price_basis',
           list === null || list === undefined || list === ''
             ? null
             : sameExact(list, unit)
-              ? 'List price'
+              ? typeof priceList === 'string' && priceList !== ''
+                ? 'Price list'
+                : 'List price'
               : 'Manual price',
         );
       }

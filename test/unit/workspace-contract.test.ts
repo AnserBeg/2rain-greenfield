@@ -1178,3 +1178,118 @@ test('PAYABLES (PY-G): each order line shows its three-way match from the purcha
     normalizeApplicationPackage(structuredClone(source)),
   );
 });
+
+test('SALES-EXTRAS: a tiered default reads declared Lists of assigned tables and owned rows, against a decimal quantity of its row', () => {
+  const source = composedApplicationDefinition();
+  // The product declaration normalizes.
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  type Tiers = {
+    tables: {
+      queryId: string;
+      assignment: { relationId: string; headerFieldId: string };
+      match: Array<{ fieldId: string; value?: string; headerFieldId?: string }>;
+      rankFieldId: string;
+      getQueryId?: string;
+      labelFieldId?: string;
+    };
+    rows: { relationId: string; quantityFieldId: string };
+    pick?: 'table';
+  };
+  type Field = {
+    fieldId: string;
+    defaultFrom?: { tiers?: Tiers };
+    presentation?: { kind: string; tiers?: Tiers };
+  };
+  const refused = (
+    suffix: string,
+    change: (tiers: Tiers, field: Field) => void,
+    message: string,
+  ) => {
+    const candidate = structuredClone(source);
+    for (const surface of candidate.surfaces as Record<string, unknown>[]) {
+      const editor = surface.documentEditor as
+        { lineFields: Field[] } | undefined;
+      const field = editor?.lineFields.find((value) =>
+        value.fieldId.endsWith(suffix),
+      );
+      const tiers = field?.defaultFrom?.tiers ?? field?.presentation?.tiers;
+      if (field && tiers) change(tiers, field);
+    }
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        JSON.stringify(error.diagnostics).includes('tiered'),
+      message,
+    );
+  };
+  refused(
+    'line_unit_price',
+    (tiers) => {
+      tiers.rows.relationId = tiers.tables.assignment.relationId;
+    },
+    'rows are owned by a table',
+  );
+  refused(
+    'line_unit_price',
+    (tiers) => {
+      tiers.tables.match[0]!.fieldId = 'northstar.app:field.party_name';
+    },
+    'a match names a field of the tables',
+  );
+  refused(
+    'line_unit_price',
+    (tiers) => {
+      tiers.tables.match[1]!.value = 'northstar.app:option.active';
+    },
+    'a fixed match is an admissible value of its field',
+  );
+  refused(
+    'line_unit_price',
+    (tiers) => {
+      tiers.tables.rankFieldId = 'northstar.app:field.price_list_code';
+    },
+    'the rank is numeric',
+  );
+  refused(
+    'line_unit_price',
+    (tiers) => {
+      tiers.rows.quantityFieldId =
+        'northstar.app:field.sales_order_line_unit_id';
+    },
+    'the quantity is a decimal of the row',
+  );
+  refused(
+    'line_unit_price',
+    (tiers) => {
+      tiers.tables.assignment.headerFieldId =
+        'northstar.app:field.sales_order_currency';
+    },
+    'the party is a header reference',
+  );
+  refused(
+    'line_unit_price',
+    (tiers) => {
+      tiers.pick = 'table';
+      tiers.tables.getQueryId = 'northstar.app:query.price_list_get';
+      tiers.tables.labelFieldId = 'northstar.app:field.price_list_code';
+    },
+    'a default supplies a value, never its table',
+  );
+  refused(
+    'line_price_list_id',
+    (tiers) => {
+      delete tiers.tables.getQueryId;
+    },
+    'a picked table is named through its get',
+  );
+  refused(
+    'line_list_price',
+    (tiers) => {
+      tiers.pick = 'table';
+    },
+    'a decimal field cannot hold a picked table',
+  );
+});

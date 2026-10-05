@@ -6451,6 +6451,8 @@ test('Milestone B: reference fields answer in place, bound to their own request 
         s.id(s.line, `${s.f.ns}:field.sales_order_line_unit_id`),
         s.id(s.line, `${s.f.ns}:field.sales_order_line_unit_price`),
         s.id(s.line, `${s.f.ns}:field.sales_order_line_list_price`),
+        // SALES-EXTRAS: the price list that priced it, if one did.
+        s.id(s.line, `${s.f.ns}:field.sales_order_line_price_list_id`),
         `${s.id(s.line, `${s.f.ns}:field.sales_order_line_tax_code_id`)}-field`,
         s.id(s.line, `${s.f.ns}:field.sales_order_line_tax_rate_percent`),
       ]);
@@ -10795,4 +10797,120 @@ test('PAYABLES (PY-G): each order line shows its three-way match as the read mod
   assert.equal(fact(withheld.html), '—');
   assert.match(withheld.html, /BILL-000007/u);
   f.deniedReads.delete(id('permission', 'purchase_order_read'));
+});
+
+/**
+ * SALES-EXTRAS price lists: a sales line's price comes from the customer's
+ * highest-priority active list in the order's currency, for the largest
+ * quantity break at or below the line's quantity, through the editor's
+ * declared tiered default -- re-read when the quantity changes while the
+ * price is not one typed by hand.
+ */
+test("SALES-EXTRAS: a sales line takes its customer's price list break, follows its quantity, and keeps a typed price", async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const list = (
+    code: string,
+    priority: string,
+    currency: 'cad' | 'usd',
+    status: 'active' | 'inactive',
+    breaks: readonly (readonly [string, string])[],
+  ) => {
+    const recordId = f.executor.seed('price_list', {
+      [`${ns}:field.price_list_code`]: code,
+      [`${ns}:field.price_list_name`]: `${code} prices`,
+      [`${ns}:field.price_list_currency`]: `${ns}:option.price_list_currency_${currency}`,
+      [`${ns}:field.price_list_priority`]: priority,
+      [`${ns}:field.price_list_status`]: `${ns}:option.price_list_status_${status}`,
+    });
+    for (const [minimum, price] of breaks)
+      f.executor.seed('price_list_entry', {
+        [`${ns}:field.price_list_entry_item_id`]: f.item,
+        [`${ns}:field.price_list_entry_minimum_quantity`]: minimum,
+        [`${ns}:field.price_list_entry_unit_price`]: price,
+        [`${ns}:relation.price_list_entry_price_list`]: recordId,
+      });
+    f.executor.seed('price_list_assignment', {
+      [`${ns}:field.price_list_assignment_party_id`]: f.party,
+      [`${ns}:relation.price_list_assignment_price_list`]: recordId,
+    });
+    return recordId;
+  };
+  const wholesale = list('WHOLESALE', '10', 'cad', 'active', [
+    ['1', '11'],
+    ['10', '9.5'],
+    ['50', '8.75'],
+  ]);
+  // Lower priority, another currency, or inactive: none of them prices it.
+  list('RETAIL', '1', 'cad', 'active', [['1', '12']]);
+  list('EXPORT', '20', 'usd', 'active', [['1', '7']]);
+  list('PROMO', '99', 'cad', 'inactive', [['1', '5']]);
+  let editor = (await f.open())!;
+  const html = () => Object.values(editor.slots!).join('');
+  const header =
+    /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_currency"/.exec(
+      html(),
+    )![1]!;
+  const line =
+    /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_line_item_id"/.exec(
+      html(),
+    )![1]!;
+  const name = (row: string, field: string) =>
+    `draft:${row}:${ns}:field.${field}`;
+  const control = (field: string) =>
+    `editor-${line}-${`${ns}:field.${field}`.replace(/[^a-z0-9]/giu, '-')}`;
+  const shown = (field: string) => {
+    const match = new RegExp(
+      `<(?:input|output)[^>]*id="${control(field)}"[^>]*?(?:value="([^"]*)"[^>]*)?>([^<]*)`,
+      'u',
+    ).exec(html());
+    assert.ok(match, `${field} is rendered`);
+    return match[1] ?? match[2]!;
+  };
+  const refresh = async (values: Record<string, string>) => {
+    editor = (await f.post(editor, 'refresh', values))!;
+    assert.equal(editor.statusCode, 200);
+  };
+  // Customer, currency, product and a quantity of 4: the 1+ break of the
+  // highest-priority active CAD list.
+  await refresh({
+    [name(header, 'sales_order_customer_party_id')]: f.party,
+    [name(header, 'sales_order_currency')]: 'CAD',
+    [name(line, 'sales_order_line_item_id')]: f.item,
+    [name(line, 'sales_order_line_ordered_quantity')]: '4',
+  });
+  assert.equal(shown('sales_order_line_unit_price'), '11');
+  assert.equal(shown('sales_order_line_list_price'), '11');
+  assert.equal(shown('sales_order_line_price_list_id'), 'WHOLESALE');
+  // 12 crosses the 10 break; the price follows while it is not typed.
+  await refresh({ [name(line, 'sales_order_line_ordered_quantity')]: '12' });
+  assert.equal(shown('sales_order_line_unit_price'), '9.5');
+  assert.equal(shown('sales_order_line_list_price'), '9.5');
+  // A typed price stays when the quantity moves again; the list price moves.
+  await refresh({
+    [name(line, 'sales_order_line_unit_price')]: '8',
+    [name(line, 'sales_order_line_ordered_quantity')]: '60',
+  });
+  assert.equal(shown('sales_order_line_unit_price'), '8');
+  await refresh({ [name(line, 'sales_order_line_ordered_quantity')]: '4' });
+  assert.equal(shown('sales_order_line_unit_price'), '8');
+  assert.equal(shown('sales_order_line_list_price'), '11');
+  // Saved as shown: the typed price, the list's price and the list itself.
+  const values = f.values(editor);
+  delete values[name(line, 'sales_order_line_unit_price')];
+  values[name(line, 'sales_order_line_ordered_quantity')] = '4';
+  const saved = (await f.post(editor, 'save', values))!;
+  assert.equal(saved.statusCode, 303);
+  const lineCall = f.executor.calls.find((call) =>
+    call.definition.operationId.endsWith('.sales_order_line_create'),
+  )!;
+  const stored = asRecord(asRecord(lineCall.input).values);
+  assert.deepEqual(
+    [
+      stored[`${ns}:field.sales_order_line_unit_price`],
+      stored[`${ns}:field.sales_order_line_list_price`],
+      stored[`${ns}:field.sales_order_line_price_list_id`],
+    ],
+    ['8', '11', wholesale],
+  );
 });

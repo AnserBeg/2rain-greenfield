@@ -165,6 +165,7 @@ function ids(namespace: string) {
         discountPercent: field('sales_order_line', 'discount_percent'),
         taxCodeId: field('sales_order_line', 'tax_code_id'),
         taxRatePercent: field('sales_order_line', 'tax_rate_percent'),
+        priceListId: field('sales_order_line', 'price_list_id'),
       },
     },
     machineId,
@@ -513,6 +514,18 @@ export function salesModuleDefinition(
         'Tax rate %',
         90,
         decimal(),
+        { optional: true },
+      ),
+      // The price list that priced the line when its product and quantity
+      // were chosen (SALES-EXTRAS), kept beside the price it set; none when
+      // the item's own list price applied.
+      field(
+        definitionIds,
+        entityIds.salesOrderLine,
+        fieldIds.salesOrderLine.priceListId,
+        'Price list',
+        100,
+        text(80),
         { optional: true },
       ),
     ],

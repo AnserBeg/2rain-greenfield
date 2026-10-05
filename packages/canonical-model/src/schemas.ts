@@ -1106,6 +1106,57 @@ const sourceByHeader = z.strictObject({
     .min(1)
     .max(8),
 });
+/**
+ * A value read from the best of the ranked tables a header party is assigned
+ * to, ahead of the declaration's own source -- a customer's price lists and
+ * their quantity breaks (SALES-EXTRAS). The tables are the records of a List
+ * that an assignment record ties to the header's party, matching header values
+ * or fixed values, highest rank first; in each, the rows for the reference's
+ * selection whose minimum is at or below the row's quantity (an empty quantity
+ * is 1), the largest minimum winning and, among equal minimums, the lowest
+ * value. The first table with such a row supplies the value -- or, with
+ * `pick: 'table'`, that table's record id. With none, the declaration's own
+ * source applies; a withheld read states no value. Optional v6 key (ADR-0047
+ * §7).
+ */
+const tieredSource = z.strictObject({
+  tables: z.strictObject({
+    queryId: CanonicalIdSchema,
+    assignment: z.strictObject({
+      queryId: CanonicalIdSchema,
+      relationId: CanonicalIdSchema,
+      fieldId: CanonicalIdSchema,
+      headerFieldId: CanonicalIdSchema,
+    }),
+    match: z
+      .array(
+        z.union([
+          z.strictObject({
+            fieldId: CanonicalIdSchema,
+            headerFieldId: CanonicalIdSchema,
+          }),
+          z.strictObject({
+            fieldId: CanonicalIdSchema,
+            value: z.string().min(1).max(180),
+          }),
+        ]),
+      )
+      .max(3),
+    rankFieldId: CanonicalIdSchema,
+    /** How a picked table is named: its exact get and the field it shows. */
+    getQueryId: CanonicalIdSchema.optional(),
+    labelFieldId: CanonicalIdSchema.optional(),
+  }),
+  rows: z.strictObject({
+    queryId: CanonicalIdSchema,
+    relationId: CanonicalIdSchema,
+    referenceFieldId: CanonicalIdSchema,
+    minimumFieldId: CanonicalIdSchema,
+    quantityFieldId: CanonicalIdSchema,
+    valueFieldId: CanonicalIdSchema,
+  }),
+  pick: z.literal('table').optional(),
+});
 const editorPresentation = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('multiline') }),
   z.strictObject({
@@ -1125,10 +1176,15 @@ const editorPresentation = z.discriminatedUnion('kind', [
     kind: z.literal('derived'),
     /** A sibling reference field in the same row whose record supplies the value. */
     referenceFieldId: CanonicalIdSchema,
-    /** A field selected by that reference's list query. */
-    sourceFieldId: CanonicalIdSchema,
+    /**
+     * A field selected by that reference's list query. Absent only for a
+     * tiered source picking its table, which has no value of its own.
+     */
+    sourceFieldId: CanonicalIdSchema.optional(),
     /** The source instead chosen by a header value. Optional v6 key (ADR-0047 §7). */
     sourceByHeader: sourceByHeader.optional(),
+    /** A ranked table read first (see `tieredSource`). Optional v6 key. */
+    tiers: tieredSource.optional(),
   }),
 ]);
 /**
@@ -1230,6 +1286,12 @@ const editorField = z.strictObject({
        * line's tax code from the order's, taken when its product is chosen.
        */
       headerFieldId: CanonicalIdSchema.optional(),
+      /**
+       * A ranked table read first, such as the customer's price lists (see
+       * `tieredSource`); its value follows the header's and the row's values
+       * it reads while it is not changed by hand. Optional v6 key.
+       */
+      tiers: tieredSource.optional(),
     })
     .optional(),
   /**
@@ -1268,6 +1330,7 @@ export type SurfaceEditorReference = NonNullable<
   SurfaceEditorField['reference']
 >;
 export type SurfaceEditorCreate = NonNullable<SurfaceEditorReference['create']>;
+export type SurfaceEditorTiers = z.infer<typeof tieredSource>;
 /**
  * Optional v6 List presentation over the surface's own list query. Every
  * column, view, filter and sort names a field that query selects -- or a label

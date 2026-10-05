@@ -221,10 +221,11 @@ test('compiled navigation stays flat within budget and groups mounted modules be
     flatManifest.surfaces,
     flatManifest.navigation,
   );
-  // Party, Catalog and Location; SALES-PARITY adds Party's ship-to address
-  // book, contextual to the Party list, and Catalog's tax codes (list,
-  // detail, form each).
-  assert.equal(flatManifest.surfaces.length, 18);
+  // Party and Catalog (Location left out since SALES-EXTRAS, below);
+  // SALES-PARITY adds Party's ship-to address book, contextual to the Party
+  // list, and Catalog's tax codes (list, detail, form each); SALES-EXTRAS
+  // Catalog's price lists, their prices and customers (the same).
+  assert.equal(flatManifest.surfaces.length, 24);
   assert.equal(flatManifest.navigation, null);
   assert.equal(
     flatManifest.payloadSchemaVersion,
@@ -250,7 +251,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // fixture keeps Party, whose customer workspace (SALES-PARITY) offers a
   // salesperson Task input with declared eligibility, so it requires 11.
   assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 11);
-  // SALES-PARITY: Catalog's tax codes are a fifth setup List, still flat.
+  // SALES-PARITY: Catalog's tax codes are a fifth setup List, still flat;
+  // SALES-EXTRAS' price lists take Location's place.
   assert.equal(flatCompact.navigationEntryIds.length, 5);
   assert.deepEqual(
     navigationRuleIds(
@@ -273,8 +275,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // + Party's three ship-to address and Catalog's three tax code surfaces
   // (SALES-PARITY), + the invoice, its lines, payments and credits (twelve),
   // + PURCHASING-PARITY's Expected receipts List, + PAYABLES' vendor bill,
-  // its lines, payments and credits (twelve).
-  assert.equal(groupedManifest.surfaces.length, 101);
+  // its lines, payments and credits (twelve), + SALES-EXTRAS' price list,
+  // its prices and customers (nine).
+  assert.equal(groupedManifest.surfaces.length, 110);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -295,16 +298,17 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // List progress, open and before-today views and overdue dates require 12;
   // List row actions and supplementary progress (ORDER-PARITY) require 13;
   // record alerts and progression, multi-row Tasks and record columns naming
-  // a relation (ORDER-PARITY increment B) require 14.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 14);
+  // a relation (ORDER-PARITY increment B) require 14; ranked editor defaults
+  // (SALES-EXTRAS price lists) require 15.
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 15);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.
   // SALES-PARITY: Catalog's tax codes list joins the supporting masters, and
   // the Invoices list joins Sales beside its orders. PURCHASING-PARITY:
   // Expected receipts joins Purchasing beside its orders; PAYABLES: so does
-  // the Bills list.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 16);
+  // the Bills list; SALES-EXTRAS: the Price lists join the masters.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 17);
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
@@ -949,6 +953,15 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
     composed,
     salesModuleDefinition('northstar.app'),
     'sales',
+  );
+  // SALES-EXTRAS' price lists are Catalog's third setup List, so Party,
+  // Catalog and Location together reach six entries -- past the flat budget,
+  // which then groups them (as the grouped arm below shows). The flat arm
+  // keeps Party and Catalog.
+  composed = withoutModule(
+    composed,
+    locationModuleDefinition('northstar.app'),
+    'location',
   );
   return dropDanglingReadModels(composed);
 }

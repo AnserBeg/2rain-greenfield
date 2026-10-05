@@ -558,6 +558,14 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
                 field('sales_order_line_list_price'),
               ),
             ),
+            // The price list that set the line's price (SALES-EXTRAS).
+            column(
+              'priced_price_list',
+              'Price list',
+              52,
+              field('sales_order_line_price_list_id'),
+              ['price_list_get', 'price_list_code'],
+            ),
             column(
               'priced_discount',
               'Discount %',
@@ -584,7 +592,12 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
           'priced_item',
           ['priced_unit', 'priced_unit_price', 'priced_basis'],
           ['priced_quantity', 'priced_tax', 'priced_amount'],
-          ['priced_list_price', 'priced_discount', 'priced_tax_code'],
+          [
+            'priced_list_price',
+            'priced_price_list',
+            'priced_discount',
+            'priced_tax_code',
+          ],
         ),
       },
       {

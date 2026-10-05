@@ -136,6 +136,7 @@ const suiteDefinitions = [
       'test/postgres/order-pages.test.ts',
       'test/postgres/packing-retrieval.test.ts',
       'test/postgres/payables.test.ts',
+      'test/postgres/price-lists.test.ts',
       'test/postgres/purchase-order-ending.test.ts',
       'test/postgres/receivables.test.ts',
       'test/postgres/receiving-authorization.test.ts',
@@ -185,7 +186,7 @@ const suiteDefinitions = [
   },
   {
     discoveryPattern:
-      'test/postgres/**/@(commercial-totals|customer-credit|expected-receipts|fulfillment|order-lists|order-pages|packing-retrieval|payables|purchase-order-ending|receivables|receiving-authorization).test.ts',
+      'test/postgres/**/@(commercial-totals|customer-credit|expected-receipts|fulfillment|order-lists|order-pages|packing-retrieval|payables|price-lists|purchase-order-ending|receivables|receiving-authorization).test.ts',
     expectedFiles: [
       'test/postgres/commercial-totals.test.ts',
       'test/postgres/customer-credit.test.ts',
@@ -195,6 +196,7 @@ const suiteDefinitions = [
       'test/postgres/order-pages.test.ts',
       'test/postgres/packing-retrieval.test.ts',
       'test/postgres/payables.test.ts',
+      'test/postgres/price-lists.test.ts',
       'test/postgres/purchase-order-ending.test.ts',
       'test/postgres/receivables.test.ts',
       'test/postgres/receiving-authorization.test.ts',
