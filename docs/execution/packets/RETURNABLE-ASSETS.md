@@ -30,7 +30,7 @@ Base: `packet/PAYABLES` at `96ac2341`. Reference: PaneFlow `d057daff` (`db/schem
 - A Return makes the deposit on it refundable; the refund is its own event (PaneFlow's "Deposit refund remains a separate financial action"). A refused post leaves its draft event, shown as Draft, as a refused payment does.
 - The asset class keeps its six classes, which the grammar renders as a typed suggestion field (five-option select limit); the spec and the test-it-yourself enter it that way.
 - Returnables out keeps its nine columns; wider than the panel at 1280 px, its table scrolls inside the panel (the shared CSS fix `59e16ff5`) rather than losing columns.
-- The owner asked for a round-1 review although no arm is owed outside the Critical set; the prompt asks neutral questions only.
+- The orchestrator requested a round-1 review although no arm is owed outside the Critical set, because the packet changes the shared runtime (party-page company entry, List table CSS); the prompt asks neutral questions only.
 - The lineage-advancing composed tests split as RETURNS split them, ported byte-identical from INTEGRATION 3bcb1d25 with its `LINEAGE_INSTALL_VOLUME` preset in place of the per-test 1 GB literals; no bound changes.
 
 ## Gates
@@ -58,7 +58,7 @@ Base: `packet/PAYABLES` at `96ac2341`. Reference: PaneFlow `d057daff` (`db/schem
 - A refused first Issue from the party page leaves its New custody record and draft event (archivable), as a refused post leaves its draft elsewhere.
 - At 1280 px Returnables out scrolls its last columns inside the panel (a 1054 px table in 922 px); a column priority that hides some first is a List-grammar choice.
 
-Review: no arm owed (outside the Critical set); the owner asked for round 1 anyway: `RETURNABLE-ASSETS-review-prompt.md`.
+Review: no arm owed (outside the Critical set); round 1 requested by the orchestrator for the shared-runtime change: `RETURNABLE-ASSETS-review-prompt.md`.
 
 ```record-claim
 {
