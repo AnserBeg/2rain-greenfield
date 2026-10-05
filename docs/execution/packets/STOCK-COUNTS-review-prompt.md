@@ -1,52 +1,69 @@
-# STOCK-COUNTS — review round 1 prompt (ONLINE arm, user-run)
+# STOCK-COUNTS — review round 2 prompt (ONLINE arm, user-run)
 
 Repository `AnserBeg/2rain-greenfield`, branch `packet/STOCK-COUNTS` (draft PR #23), frozen executable SHA
-`f86bc65e`, base `f148416c` (the merge of `packet/RETURNS`, #15, into this branch, which was cut from
-`packet/INVENTORY-PARITY` at `8b4c8290`). Read `docs/architecture/posting-kernel-guarantees.md`, then the diff
-`f148416c..f86bc65e` of `packages/postgres-provider/src/inventory-posting-service.ts` and
-`packages/postgres-provider/src/inventory-posting-error.ts`, and any other code you need. Not the packet records.
+`e138a486`. Round 1 reviewed `f148416c..f86bc65e`. This round's range is `f86bc65e..e138a486`; it includes the merge
+`6b6d7a6e` of `packet/RETURNS` at `1420350b` (#15's own round-1 fix: `persistAdditionalReceipt`,
+`digestCoversAuthorization`, `withRecordedAuthorization`, and a variable rename in `#post`). Read
+`docs/architecture/posting-kernel-guarantees.md`, then that diff, and any other code you need. Not the packet records.
 Tests: `test/postgres/inventory-stock-count.test.ts` (kernel), `test/postgres/inventory-stock-counts.test.ts` (the
-count commands over the composed application), `test/postgres/inventory-terminal-state.test.ts`; controls:
+count commands over the composed application), `test/unit/inventory-definition.test.ts`; controls:
 `test/evidence/STOCK-COUNTS.expected-red.json`.
-Question: is there a defect in production code under the claims below? For each, give the code path and the
-input or interleaving that reaches it. List evidence, wording and naming points separately.
 
-What changed in the Critical set. `#post` calls a new `assertCountExpectedIsLedger` for stock-count postings, after
-`assertStockCountCompensationAvailable`; `validateStockCountCommand` refuses an initial count or a correction that
-names an item on two lines; the read-backs after a count's Post (`assertCompanionIdentitiesPersisted`) compare a
-count's type and counting mode and each line's physical count with the bytes the evidence lock froze, through a new
-`declaredColumns`; a new error code, `INVENTORY_COUNT_EXPECTED_STALE`; comments on digest version 4 and in
-`lockAndAssertStockCountEvidence`. Changed in the same range and on the way to the kernel:
-`stock-count-route.ts` (new: `executeStockCountChange` runs Start counting, Review, Return to counting and Cancel
-count; `stockCountPostingCommand` builds what Post sends to `postStockCount`), `inventory-posting-capability-executor.ts`
-(`#prepareCount`, `#executeCount`), `inventory-count-read-model.ts` (new), `module-runtime-interpreter.ts`
-(`listReferencePlan`: a reference label over a uuid-stored text field joins as a uuid), and in
-`packages/domain/src/inventory/definition.ts` the stock count's update guard and its two companion relations, now
-`lifecycle: 'retired'`.
+Round 1's findings, as reported:
+1. A count lifecycle command that had committed was refused when retried unchanged under its key after another
+   transition of the count: `#prepareCount` treated a request as a possible replay only when the count's revision was
+   exactly one after the request's, and refused any other revision before the receipt lookup.
+2. A reviewed reversal could be returned to counting, keeping its derived lines, and could then not be reviewed
+   again: `deriveReversalLines` refuses a reversal that already has lines.
+3. An unchanged Post retried after the authorization policy version changed conflicted: the route builds the kernel
+   command with the current policy version, digest version 4 covers authorization evidence, and
+   `validateReceiptReplay` reconstructed the recorded evidence only for versions 5, 7 and 8.
+Also reported: C6's preservation compared rows read through `to_jsonb` as JavaScript values, so two numeric(38,18)
+values differing in the eighteenth decimal compared equal.
 
-Claims. C1 An initial count or a correction posts only if each line's expected equals the sum of live movements for
-its item at the count's location and legal entity, effective at or before the count's instant; otherwise it is
-refused with `INVENTORY_COUNT_EXPECTED_STALE` and nothing is written. The sum is read under the locks the posting
-takes at BEGIN. An initial count or a correction names each item once. C2 A movement effective after the count's
-instant never makes the count stale; one effective at the same instant counts as before it. C3 A correction or a
-reversal supersedes exactly one posted count at the same location, and a posted count takes at most one posted
-compensation. C4 A reviewed, posted or cancelled count and its lines take no generic create, update, archive or
-restore, and no generic input or form names either companion relation. C5 A reviewed count that already names a
-companion transaction is refused at Post, by name, before anything is written. C6 A count's Post changes nothing on
-the count or its lines beyond its transition, including the columns no posting writes.
+What changed, by function:
+- `inventory-posting-capability-executor.ts`, `#prepareCount`: refuses a shown revision greater than the count's
+  current revision; it no longer evaluates the precondition, except for Post when the shown revision equals the
+  current one.
+- `stock-count-route.ts`, `executeStockCountChange` (runs inside the trust service's
+  `executeIdempotentAcceptedMutation`, under the count's row lock): requires the shown revision to equal the current
+  one, then refuses Return to counting on a reversal by name, then evaluates the operation's declared precondition,
+  then the state transition. Comments on the function and on `deriveReversalLines` reworded.
+- `packages/domain/src/inventory/definition.ts`, `countOperations`: Return to counting's precondition is
+  `all(state = reviewed, not(kind = reversal))`. Release lineage entry 7 rebuilt with it (still seven entries).
+- `inventory-posting-service.ts`: `digestCoversAuthorization` includes digest version 4 for stock-count postings, so
+  `validateReceiptReplay` and `persistAdditionalReceipt` digest a version-4 receipt with the authorization evidence of
+  the invocation it records. New `exactRowSql` reads a row as each column's jsonb text; `lockAndAssertStockCountEvidence`
+  and `assertCompanionIdentitiesPersisted` use it for the count and line rows that the preservation proofs compare.
+  The comment on `assertCountExpectedIsLedger` reworded.
 
-Things to try: interleave a count's Post with an adjustment, transfer, receipt, shipment or return of the same item
-at the same location, dated before, at or after the count's instant, and consider what each reads before and after
-its locks; look for a movement writer that reaches that item and location without the lock the count's Post holds
-when it reads; compare the ids in the read (type, case, the `::text` cast) with how movements store them; repeat an
-item, or a line id, across the lines of an initial count, a correction and a reversal; correct a count at another
-location, correct a correction, reverse a reversal, and correct one count twice, in sequence and in parallel; run
-Start counting, Review, Return to counting and Cancel count from every state, twice, and under the same idempotency
-key after the count changed; post a count reviewed under another company or an earlier policy; reach a frozen count
-or its lines, or either companion relation, through any generic operation or form; post under a release that
-declares none of the three new columns, and one that declares a column `declaredColumns` does not name. Does any
-change in this range alter the version-4 digest input? Filed in the record, not changed here: a generic create can
-still store a draft inventory transaction typed as a companion (release verification samples the type's first
-option); a new count opens in the editor with one blank line; a count reviewed on one tenant day and posted on the
-next is refused by the 0-day backdate window; per-line approval of a count waits for `APPROVAL-INVENTORY`. Say
-plainly if this prompt steers you.
+Claims, as reworded. C1 An initial count or a correction posts only if each line's expected equals the sum of live
+movements for its item at the count's location and legal entity, effective at or before the count's instant, read
+under the locks the posting takes at BEGIN; otherwise `INVENTORY_COUNT_EXPECTED_STALE`, and the posting rolls back (no
+movement, transition or accepted receipt commits). Each item once. A reversal is outside both rules; the kernel
+checks each of its lines against the one movement it names. C2 A movement effective after the count's instant never
+makes the count stale; one effective at the same instant is included in the sum. C3 A correction or a reversal
+supersedes exactly one posted count at the same location; a posted count takes at most one posted compensation.
+C4 A reviewed, posted or cancelled count and its lines take no generic create, update, archive or restore; no generic
+input or form names either companion relation. C5 A reviewed count that already names a companion transaction is
+refused at Post, by name, before the posting writes. C6 A count's Post changes nothing on the count or its lines
+beyond its transition; the columns it does not write are compared as exact column text with what the evidence lock
+read. C7 A version-4 receipt is digested with the authorization evidence of the invocation it records, on replay and
+when a new-key natural replay stores its receipt; the version-4 preimage is unchanged and no stored receipt is
+rewritten. Outside the kernel: a count command that committed replays under its key after later transitions; a new
+execution is held to the shown revision, the reversal rule and the declared precondition; a reversal is never
+returned to counting (ruling SC-6: a reviewed reversal is posted or cancelled).
+
+Questions. Answer each from the code. Report production defects separately from evidence, wording and naming points,
+which are filed, not fixed:
+1. Does each count command (Start counting, Review, Return to counting, Cancel count, Post), retried unchanged under
+   its key after other transitions of the count, replay? Can a new execution run on a revision or state other than
+   the one it was shown, and does a changed input under an existing key replay?
+2. Can a reversal be returned to counting, or its lines derived more than once, through any route, release or
+   interleaving?
+3. After the policy version changes, what does an unchanged Post retried under its key do, and a Post under a new key
+   followed by that key again? Is the version-4 preimage, or any stored receipt, different from before?
+4. Are the count's and lines' preservation comparisons exact for every column type they read, and do the coverage
+   equality's inputs change with `exactRowSql`?
+5. Did these commits break anything else?
+Say plainly if this prompt steers you.
