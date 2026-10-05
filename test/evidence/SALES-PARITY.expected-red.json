@@ -240,8 +240,8 @@
       "name": "verification-searches-by-an-assigned-number",
       "claim": "A search-exclusion probe whose entity's only searchable text is its assigned number (payment, credit) takes the number as its positive field.",
       "file": "packages/postgres-provider/src/release-verification-service.ts",
-      "original": "      createOperation.inputContract.assignedFields?.find(\n",
-      "replacement": "      ([] as { fieldId: string }[]).find(\n",
+      "original": "        createOperation.inputContract.assignedFields?.find(\n",
+      "replacement": "        ([] as { fieldId: string }[]).find(\n",
       "test": {
         "files": ["test/postgres/document-numbering.test.ts"],
         "namePattern": "document numbers are assigned by the server"
@@ -312,8 +312,8 @@
       "name": "verification-searches-through-an-executed-q1-search",
       "claim": "Release verification's search-exclusion probe reads through the entity's first plain search its gateway executes (Q0 with a filter the gateway's fence accepts, or Q1 with a compiled filter plan, as SemanticQueryGateway.invoke decides), so a release whose plain search is an executable Q1 query ahead of a Q0 search the gateway does not run verifies instead of failing VERIFICATION_QUERY_MISSING.",
       "file": "packages/postgres-provider/src/release-verification-service.ts",
-      "original": "      'search',\n      gatewayExecutes,\n",
-      "replacement": "      'search',\n      function q0Only(query: VerificationQueryContract) {\n        return query.tier === 'q0' && gatewayExecutes(query);\n      },\n",
+      "original": "        gatewayExecutes(candidate),\n",
+      "replacement": "        candidate.tier === 'q0' &&\n        gatewayExecutes(candidate),\n",
       "test": {
         "files": ["test/postgres/document-numbering.test.ts"],
         "namePattern": "an executable Q1 search"
@@ -322,13 +322,13 @@
         {
           "file": "test/postgres/document-numbering.test.ts",
           "name": "release verification probes search through an executable Q1 search, ahead of a Q0 search the gateway does not run",
-          "expected": "compiled search query of northstar\\.party:entity\\.party that q0Only admits is missing"
+          "expected": "compiled search query of northstar\\.party:entity\\.party that gatewayExecutes admits is missing"
         }
       ]
     },
     {
       "name": "verification-archives-through-literal-true-q1-gets",
-      "claim": "Release verification's cleanup and number witness read through a plain get that returns any live record by id -- one the gateway executes whose filter is the literal true, a Q1 get included -- so an entity whose only plain get is a literal-true Q1 get (its operations reading back through a Q0 read-model get) has its probe records archived instead of refused as VERIFICATION_PROBE_RECORD_UNREADABLE.",
+      "claim": "Release verification's cleanup reads its probe records through a plain get that returns any live record by id -- one the gateway executes whose filter is the literal true, a Q1 get included -- so an entity whose only plain get is a literal-true Q1 get (its operations reading back through a Q0 read-model get) has its probe records archived instead of refused as VERIFICATION_PROBE_RECORD_UNREADABLE.",
       "file": "packages/postgres-provider/src/release-verification-service.ts",
       "original": "    gatewayExecutes(query) &&\n    inspectPredicateForExecution(query.filter).outcome === 'accepted'\n",
       "replacement": "    query.tier === 'q0' &&\n    gatewayExecutes(query) &&\n    inspectPredicateForExecution(query.filter).outcome === 'accepted'\n",
@@ -341,6 +341,83 @@
           "file": "test/postgres/document-numbering.test.ts",
           "name": "release verification archives its probe records through a literal-true Q1 get when the entity has no plain Q0 get",
           "expected": "of northstar\\.party:entity\\.party, which has no get that returns any live record by id"
+        }
+      ]
+    },
+    {
+      "name": "verification-searches-through-the-first-literal-true-search",
+      "claim": "Release verification's search-exclusion probe reads through the first plain search of the entity with the literal true filter (Q0 or Q1) that the gateway executes and that selects a positive field, ahead of any earlier filtered search, so an earlier search whose filter excludes the arranged record cannot stand in for it.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "      (candidate) =>\n        inspectPredicateForExecution(candidate.search.filter).outcome ===\n        'accepted',\n",
+      "replacement": "      () => true,\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "filter excludes its record"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "release verification probes search through a later literal-true search when an earlier Q1 search's filter excludes its record",
+          "expected": "did not return record [0-9a-f-]+ through northstar\\.party:query\\.party_search:"
+        }
+      ]
+    },
+    {
+      "name": "verification-tries-filtered-searches-until-one-returns-its-record",
+      "claim": "Without a literal-true search, release verification's search-exclusion probe reads the executable filtered searches in catalog order and uses the first that returns the arranged record; when none does, it refuses as VERIFICATION_SEARCH_WITNESS_UNCONSTRUCTABLE, naming each search tried.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "      if (hasRecord(witness.included, record.recordId)) return witness;\n",
+      "replacement": "      return witness;\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "the first filtered search that returns its record|no search can witness"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "release verification probes search through the first filtered search that returns its record",
+          "expected": "did not return record [0-9a-f-]+ through northstar\\.party:query\\.party_search:"
+        },
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "release verification refuses a search probe that no search can witness, naming each search it tried",
+          "expected": "did not return record [0-9a-f-]+ through northstar\\.party:query\\.party_search:"
+        }
+      ]
+    },
+    {
+      "name": "verification-search-candidates-select-a-positive-field",
+      "claim": "Release verification's search-exclusion probe considers only searches that select a positive field, so a literal-true search selecting no searchable field (which the interpreter refuses) cannot stand in for a usable one.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "      return positiveFieldId ? [{ positiveFieldId, search }] : [];\n",
+      "replacement": "      return [{ positiveFieldId: positiveFieldId ?? '', search }];\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "the first literal-true search with a positive field"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "release verification probes search through the first literal-true search with a positive field",
+          "expected": "northstar\\.party:query\\.party_a_search has no usable lowered search column"
+        }
+      ]
+    },
+    {
+      "name": "verification-witness-reads-through-literal-true-q1-gets",
+      "claim": "Release verification's number witness reads an assigned number the create's read-back omits through a literal-true Q1 get that selects it, not only through Q0 gets, so the number is read rather than taken as its sentinel unread.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "          returnsAnyLiveRecordById(candidate) &&\n",
+      "replacement": "          returnsAnyLiveRecordById(candidate) &&\n          candidate.tier === 'q0' &&\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "a Q1 get whose filter is the literal true"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "release verification reads an assigned number through a Q1 get whose filter is the literal true",
+          "expected": "the witness read the account number through the Q1 get"
         }
       ]
     }
