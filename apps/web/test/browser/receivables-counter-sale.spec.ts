@@ -106,9 +106,11 @@ test('a counter sale confirms, ships, invoices and takes payment in one Task, an
     );
     await expect(tab.locator('.list-view__count')).toHaveText('1');
     await tab.click();
+    await expect(tab).toHaveAttribute('aria-current', 'page');
+    await expect(page.locator('tbody tr[data-record-id]')).toHaveCount(1);
     await expect(
-      page.getByRole('link', { name: order.number, exact: true }),
-    ).toBeVisible();
+      page.locator(`tr[data-record-id="${order.recordId}"]`),
+    ).toContainText(order.number);
   });
 });
 
