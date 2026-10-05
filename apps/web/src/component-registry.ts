@@ -24,7 +24,6 @@ import {
 } from '../../../packages/runtime/src/list-behavior/index.js';
 
 import { escapeHtml, shortIdentity } from './html.js';
-import { canonicalDecimal, DECIMAL_KINDS } from './control-semantics.js';
 import {
   renderReceivingSection,
   renderReceivingNavigation,
@@ -1881,9 +1880,9 @@ function renderFormFields(
       const kind = field?.kind ?? inputField?.kind;
       const shown =
         kind !== undefined &&
-        DECIMAL_KINDS.includes(kind) &&
+        STORED_DECIMAL_KINDS.has(kind) &&
         typeof value === 'string'
-          ? (canonicalDecimal(value) ?? value)
+          ? canonicalStoredDecimal(value)
           : value;
       const choices = context.formReferences?.[fieldId];
       const control =
@@ -2292,6 +2291,29 @@ function renderEnumControl(
       `<option value="${escapeHtml(option.optionId)}">${escapeHtml(option.label)}</option>`,
   );
   return `<input${kind} name="${name}" value="${renderInputValue(value)}" list="${listId}" autocomplete="off"><datalist id="${listId}">${suggestions.join('')}</datalist>`;
+}
+
+/** The kinds a generic form reads as an exact decimal. */
+const STORED_DECIMAL_KINDS: ReadonlySet<string> = new Set([
+  'exactDecimalFieldType',
+  'moneyFieldType',
+  'quantityFieldType',
+]);
+
+/**
+ * A stored exact decimal in the one spelling the write path admits -- no
+ * leading or trailing zeros, no `-0`. PostgreSQL states a numeric at its
+ * column's scale (`12.500000000000000000`); this is the same exact value as
+ * `12.5`, found by text work alone. Anything that is not a plain decimal is
+ * returned as it is, and refused by name if it is ever submitted.
+ */
+function canonicalStoredDecimal(value: string): string {
+  const match = /^(-?)(\d+)(?:\.(\d+))?$/u.exec(value);
+  if (!match) return value;
+  const integer = match[2]!.replace(/^0+(?=\d)/u, '');
+  const fraction = (match[3] ?? '').replace(/0+$/u, '');
+  const negative = match[1] === '-' && (integer !== '0' || fraction !== '');
+  return `${negative ? '-' : ''}${integer}${fraction ? `.${fraction}` : ''}`;
 }
 
 function renderInputValue(value: unknown): string {
