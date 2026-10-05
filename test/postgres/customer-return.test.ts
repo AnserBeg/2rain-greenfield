@@ -98,8 +98,8 @@ test(
             values: Record<string, ImmutableJsonValue>,
             relations: Record<string, string | null> = {},
             scoped = true,
+            recordId: string = randomUUID(),
           ) => {
-            const recordId = randomUUID();
             const result = await invoke(`${local}_create`, {
               ...(scoped ? { legalEntityId } : {}),
               recordId,
@@ -151,18 +151,26 @@ test(
             false,
           );
           const adjust = async (quantity: string, locationId: string) => {
-            const stock = await create('inventory_transaction', {
-              actor_id: 'customer-return-test',
-              effective_at: now,
-              number: `ADJ-RET-${randomUUID()}`,
-              reason_code: 'SETUP',
-              reason_narrative: 'Customer return stock',
-              recorded_at: now,
-              source_id: randomUUID(),
-              source_type: 'test',
-              state: `${ns}:option.inventory_transaction_state_draft`,
-              type: `${ns}:option.inventory_transaction_type_adjustment`,
-            });
+            // A stock document names itself as its posting source, and the
+            // server numbers it (INVENTORY-PARITY).
+            const document = randomUUID();
+            const stock = await create(
+              'inventory_transaction',
+              {
+                actor_id: 'customer-return-test',
+                effective_at: now,
+                reason_code: 'SETUP',
+                reason_narrative: 'Customer return stock',
+                recorded_at: now,
+                source_id: document,
+                source_type: 'inventoryTransaction',
+                state: `${ns}:option.inventory_transaction_state_draft`,
+                type: `${ns}:option.inventory_transaction_type_adjustment`,
+              },
+              {},
+              true,
+              document,
+            );
             await create(
               'inventory_transaction_line',
               {
