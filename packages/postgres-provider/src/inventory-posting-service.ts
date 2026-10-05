@@ -345,9 +345,14 @@ const companionDerivedInventoryPostingInputDigestVersion = 4 as const;
  * input already covers -- so it carried no information, and it was the one
  * kernel-derived value still in the version-4 input. Corrected IN PLACE at
  * version 4 rather than cut as version 5, because ADR-0063 section 4 proves
- * no version-4 receipt exists in released data: `postStockCount` has no
+ * no version-4 receipt existed in released data: `postStockCount` had no
  * production caller. The standard version 2 keeps its role, because version 2
  * receipts ARE released data.
+ *
+ * STOCK-COUNTS ends that premise: the `stock_count_post` route is
+ * `postStockCount`'s first production caller, so version-4 receipts are now
+ * released data and version 4 is frozen. Any change to the stock-count digest
+ * input is a version 5 with its own `CHECK` migration (ADR-0063, amended).
  *
  * A stored version-3 receipt is still DECODED under version 3 -- nothing is
  * rewritten and nothing is removed. What it may not do is have a fresh version-3
@@ -1784,6 +1789,15 @@ export class PostgresInventoryPostingService {
       }
       if (isStockCountPosting(posting)) {
         await assertStockCountCompensationAvailable(
+          client,
+          this.#binding,
+          context,
+          posting,
+        );
+        // STOCK-COUNTS. A count's expected is the ledger at its location as of
+        // its own instant, read under the stock locks taken at BEGIN, so the
+        // posted variance leaves on-hand at what was counted.
+        await assertCountExpectedIsLedger(
           client,
           this.#binding,
           context,
@@ -3447,6 +3461,10 @@ function validateStockCountCommand(
   }
   const naturalKeys = new Set<string>();
   const evidenceIds = new Set<string>();
+  // STOCK-COUNTS. An initial count or a correction names each item once:
+  // every line's expected is the whole ledger for its item, so a second line
+  // for the same item would post its variance twice.
+  const countedItems = new Set<string>();
   for (const line of command.lines) {
     exactKeys(line, [
       'countedQuantity',
@@ -3464,6 +3482,12 @@ function validateStockCountCommand(
       throw inputError('stock-count lines repeat a stockCountLineId');
     }
     evidenceIds.add(line.stockCountLineId.toLowerCase());
+    if (command.kind !== 'reversal') {
+      if (countedItems.has(line.itemId.toLowerCase())) {
+        throw inputError('a stock count names each item once');
+      }
+      countedItems.add(line.itemId.toLowerCase());
+    }
     const expected = decimalToScaled(
       line.expectedQuantity,
       'line.expectedQuantity',
@@ -8461,9 +8485,9 @@ async function lockAndAssertStockCountEvidence(
   const state = row?.state;
   // PUR-2a. The companion identity is a POST-TIME OUTPUT, so a reviewed count
   // must not already name one: the kernel writes it at post time, so a reviewed
-  // source carrying one was written by something else. (The kernel is the only
-  // writer WITHIN a posting; generic writers remain open -- see
-  // `companion-writers-not-closed`.) An
+  // source carrying one was written by something else. (STOCK-COUNTS retired
+  // both companion relations from every generic input and form, so no generic
+  // writer reaches them; this fence is the backstop.) An
   // already-posted count is the replay case, and there the stored identity
   // must be exactly the derived one.
   const expectedCompanionId =
@@ -8717,6 +8741,88 @@ async function assertStockCountCompensationAvailable(
         'INVENTORY_COUNT_COMPENSATION_CONFLICT',
         `reversal line ${line.stockCountLineId} is not the exact inverse of its superseded movement`,
         { stockCountLineId: line.stockCountLineId },
+      );
+    }
+  }
+}
+
+/**
+ * STOCK-COUNTS. A count's expected quantity is what the ledger holds for the
+ * line's item at the count's location in its legal entity, summed over every
+ * live movement effective at or before the count's own instant. An initial
+ * count and a correction must carry exactly that, so the variance they post
+ * leaves on-hand at the counted quantity as of that instant; a stale expected
+ * -- a movement posted for the item since the count was reviewed -- is refused
+ * and nothing is written.
+ *
+ * Two consequences of "at or before the count's instant", both deliberate:
+ * a movement effective at the same instant (a fixed test clock, two postings
+ * inside one tick) counts as before the count, which is also where the
+ * same-instant order places it (its recorded time is no later than this
+ * posting's, by the floor in `enforceNegativeStock`); and a movement dated
+ * after the count never makes it stale, because the count speaks only of its
+ * own instant. Read under the stock-identity locks every posting takes at
+ * BEGIN, so nothing can change the answer before this posting commits.
+ *
+ * A reversal is exempt: each of its lines must already be the exact inverse
+ * of the movement it compensates (`assertStockCountCompensationAvailable`).
+ */
+async function assertCountExpectedIsLedger(
+  client: PoolClient,
+  binding: PostingStorageBinding,
+  context: TrustedRequestContext,
+  posting: Extract<ParsedPosting, { postingRole: 'correction' | 'count' }>,
+): Promise<void> {
+  const { command } = posting;
+  if (command.kind === 'reversal') return;
+  const column = (local: string) =>
+    quoted(requiredField(binding.movement, local).name);
+  const itemColumn = column('inventory_movement_item_id');
+  const posted = await client.query<{
+    itemId: string;
+    postedQuantity: string;
+  }>(
+    `SELECT ${itemColumn}::text AS "itemId",
+            COALESCE(sum(${column('inventory_movement_quantity_delta')}), 0)::text AS "postedQuantity"
+       FROM ${table(binding, binding.movement)}
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND ${quoted(binding.movement.legalEntityColumn!)} = $3
+        AND ${column('inventory_movement_location_id')} = $4
+        AND ${itemColumn} = ANY($5::text[])
+        AND ${column('inventory_movement_effective_at')} <= $6::timestamptz
+        AND ${quoted(binding.movement.archiveColumn)} IS NULL
+      GROUP BY ${itemColumn}`,
+    [
+      context.tenantId,
+      context.environmentId,
+      command.legalEntityId,
+      command.locationId,
+      command.lines.map((line) => line.itemId),
+      command.effectiveAt,
+    ],
+  );
+  const ledger = new Map(
+    posted.rows.map((row) => [
+      String(row.itemId).toLowerCase(),
+      databaseDecimalToScaled(String(row.postedQuantity)),
+    ]),
+  );
+  for (const line of command.lines) {
+    const postedQuantity = ledger.get(line.itemId) ?? 0n;
+    if (
+      postedQuantity !==
+      decimalToScaled(line.expectedQuantity, 'line.expectedQuantity')
+    ) {
+      throw postingError(
+        'INVENTORY_COUNT_EXPECTED_STALE',
+        `stock-count line ${line.stockCountLineId} expects ${line.expectedQuantity}, but the ledger holds ${scaledToDecimal(postedQuantity)} for its item at the count's location as of ${command.effectiveAt}; review the count again`,
+        {
+          expectedQuantity: line.expectedQuantity,
+          itemId: line.itemId,
+          locationId: command.locationId,
+          postedQuantity: scaledToDecimal(postedQuantity),
+          stockCountLineId: line.stockCountLineId,
+        },
       );
     }
   }
