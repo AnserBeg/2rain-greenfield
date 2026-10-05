@@ -1,6 +1,6 @@
 # SUPPLY-WARNINGS — the Sales orders List says which orders wait for supply, which hold reserved stock to ship, and what each is short
 
-Status: executable on draft PR #26 against `packet/LOCATIONS` (stacked on #22 <- #16 <- #13 <- #11 <- #10 <- #8 <- #7); no merge, no deployment. ORDER-PARITY increment C. Sole LOCAL BUILD under the owner's standing instruction (take the recommended choice, record it, report it).
+Status: executable and CI-green at `5c138dab` (run 37318468812, attempt 2) on draft PR #26 against `packet/LOCATIONS` (stacked on #22 <- #16 <- #13 <- #11 <- #10 <- #8 <- #7); no merge, no deployment. ORDER-PARITY increment C. Sole LOCAL BUILD under the owner's standing instruction (take the recommended choice, record it, report it).
 Tier: outside the Critical set — a canonical List key, the compiler's surface floor and agent presets, the shared List contract, gateway and list statement, the web runtime and domain metadata; no posting-kernel, serializer, materializer, activation, verification, trust, migration or RLS change. Admission to reserve or ship stays in the kernel.
 Base: `packet/LOCATIONS` at `be722966`. Reference: PaneFlow `d057daff` (`lib/server/inventory-domain.ts` `salesWorklistFilter`, `salesBlockedSupply`; `lib/domain/sales-availability.ts`); design `design-sales-purchasing-leftovers.md` §1, §2, §3, §9, §10.
 
@@ -37,7 +37,8 @@ Base: `packet/LOCATIONS` at `be722966`. Reference: PaneFlow `d057daff` (`lib/ser
 - Release: lineage entry 9 rebuilt from LOCATIONS' eight (39.6 -> 45.0 MB), `--check` PASS; storage target, query catalog and verification plan unchanged, so no schema snapshot and no scenario pins move.
 - Pins from the compile: surface floor 19 -> 21 (grouped and runtime; the flat fixture holds no Sales List and stays 19).
 - Coverage re-derived from LOCATIONS' document: 2725 -> 2774 obligations, 886 -> 921 observed, PASS.
-- CI: pending on PR #26.
+- CI on PR #26: `360579c6` ([run 37315264891](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37315264891)) green on quality, scans, observability, both PostgreSQL suites beside the composed one (schema and isolation 236/236; commercial 20/20 with `order-lists-supply.test.ts`), composed 22/22, browser 87/87 and operations browser 13/13 with `order-lists-supply.spec.ts`; reds not of this code: `COMPILE_BUDGET_INDETERMINATE` (CPU idle 87.3%) and the composed browser job cancelled at its 20-minute bound after a 17-minute Chromium install.
+- `5c138dab` ([run 37318468812](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37318468812)) attempt 1: every job green but the composed PostgreSQL job, where "composed product advances an existing deployment to an exact compiled successor" reached its 300 s bound (239.6 s at `360579c6` on the same nine entries, 274.6 s on LOCATIONS' eight; every test of that attempt ran 20-35 % slower). Whole workflow rerun once, never a longer bound: attempt 2 fully green -- quality, compile budget, scans, observability, the three PostgreSQL jobs (composed 22/22, that test 205.4 s; commercial 20/20; schema and isolation), the three browser jobs and executed-file reachability.
 
 ## Test it yourself
 
@@ -52,6 +53,7 @@ Base: `packet/LOCATIONS` at `be722966`. Reference: PaneFlow `d057daff` (`lib/ser
 
 - Each supply tab's count computes free stock per order and item in a correlated subquery; on the distributor seed (about 1,300 orders) measure the Blocked by supply count.
 - The surface floor 21 may meet CATALOG-EXTRAS' 20 on merge: whichever lands second keeps both lines in the floor chain.
+- "composed product advances an existing deployment to an exact compiled successor" installs every lineage entry and ran 240-300 s of its 300 s bound at nine entries: the R2 re-baseline (ADR-0066), not a longer bound, is the remedy before the next entry.
 
 ```record-claim
 {
