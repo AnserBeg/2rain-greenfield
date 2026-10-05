@@ -1594,3 +1594,225 @@ test('INVENTORY-PARITY: a new stock document is dated now, not midnight, a defau
     '2026-09-30T00:00:00.000Z',
   );
 });
+
+test('REPLENISHMENT: an item keeps its reorder levels, preferred location and standard costs; two item Lists sit in Inventory; a purchase line starts from the standard cost', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  const ns = 'northstar.app';
+  const surface = (candidate: Loose, local: string) =>
+    (candidate.surfaces as Loose[]).find(
+      (value) => value.surfaceId === `${ns}:surface.${local}`,
+    ) as Loose & {
+      composition?: {
+        fields: Array<{
+          field: string;
+          format?: string;
+          reference?: { query: { targetId: string } };
+        }>;
+      };
+      form?: {
+        references: Array<{
+          field: string;
+          query: { targetId: string };
+          labelField: { targetId: string };
+        }>;
+      };
+      workspace?: Loose & {
+        membership: string;
+        ownerSurfaceId?: string;
+        navigationModuleId?: string;
+      };
+      documentEditor?: {
+        lineFields: Array<
+          Loose & {
+            fieldId: string;
+            label: string;
+            defaultFrom?: {
+              referenceFieldId: string;
+              sourceByHeader?: {
+                headerFieldId: string;
+                cases: Array<{ value: string; sourceFieldId: string }>;
+              };
+            };
+          }
+        >;
+      };
+    };
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  const replenishment = [
+    'item_reorder_point',
+    'item_reorder_up_to',
+    'item_preferred_location_id',
+    'item_standard_cost_cad',
+    'item_standard_cost_usd',
+    'item_standard_cost_eur',
+  ].map((name) => `${ns}:field.${name}`);
+  // Optional fields every item read selects; the location is a record id.
+  const fields = new Map(
+    (source.fields as Array<Loose & { fieldId: string }>).map((value) => [
+      value.fieldId,
+      value,
+    ]),
+  );
+  for (const fieldId of replenishment) {
+    const declared = fields.get(fieldId) as Loose & {
+      presence: string;
+      fieldType: { kind: string; maximumLength?: number };
+    };
+    assert.equal(declared.presence, 'optional', fieldId);
+    assert.equal(
+      declared.fieldType.kind,
+      fieldId.endsWith('_location_id')
+        ? 'textFieldType'
+        : 'exactDecimalFieldType',
+    );
+  }
+  for (const local of ['item_get', 'item_list']) {
+    const query = (source.queries as Loose[]).find(
+      (value) => value.queryId === `${ns}:query.${local}`,
+    ) as Loose & { selections: Array<{ field: { targetId: string } }> };
+    const selected = query.selections.map((value) => value.field.targetId);
+    assert.ok(
+      replenishment.every((fieldId) => selected.includes(fieldId)),
+      local,
+    );
+  }
+  // The item page shows them: costs as money, the location by name.
+  const page = surface(source, 'item_detail');
+  const shown = new Map(
+    page.composition!.fields.map((value) => [value.field, value]),
+  );
+  for (const fieldId of replenishment) assert.ok(shown.has(fieldId), fieldId);
+  assert.equal(
+    shown.get(`${ns}:field.item_standard_cost_usd`)!.format,
+    'money',
+  );
+  assert.equal(
+    shown.get(`${ns}:field.item_preferred_location_id`)!.reference!.query
+      .targetId,
+    `${ns}:query.location_get`,
+  );
+  // The item form chooses the location from the location list by name.
+  assert.deepEqual(surface(source, 'item_form').form!.references, [
+    {
+      field: `${ns}:field.item_preferred_location_id`,
+      query: {
+        kind: 'queryReference',
+        schemaVersion: 'v6',
+        targetId: `${ns}:query.location_list`,
+      },
+      labelField: {
+        kind: 'fieldReference',
+        schemaVersion: 'v6',
+        targetId: `${ns}:field.location_name`,
+      },
+    },
+  ]);
+  // Three Lists read items; the Items List keeps the page and the form.
+  for (const local of ['item_detail', 'item_form'])
+    assert.equal(
+      surface(source, local).workspace!.ownerSurfaceId,
+      `${ns}:surface.item_list`,
+    );
+  for (const local of ['item_stock_list', 'item_buying_list']) {
+    assert.equal(surface(source, local).workspace!.membership, 'operational');
+    assert.equal(
+      surface(source, local).workspace!.navigationModuleId,
+      `${ns}:module.inventory`,
+    );
+  }
+  // Ruling PC: a purchase line's unit cost starts from the item's standard
+  // cost in the order currency, as a sales line's price does from its price.
+  const unitCost = surface(
+    source,
+    'purchase_order_form',
+  ).documentEditor!.lineFields.find(
+    (value) => value.fieldId === `${ns}:field.purchase_order_line_unit_price`,
+  )!;
+  assert.equal(unitCost.label, 'Unit cost');
+  assert.deepEqual(unitCost.defaultFrom, {
+    referenceFieldId: `${ns}:field.purchase_order_line_item_id`,
+    sourceByHeader: {
+      headerFieldId: `${ns}:field.purchase_order_currency`,
+      cases: ['cad', 'usd', 'eur'].map((code) => ({
+        value: code.toUpperCase(),
+        sourceFieldId: `${ns}:field.item_standard_cost_${code}`,
+      })),
+    },
+  });
+  refuse((candidate) => {
+    surface(candidate, 'purchase_order_form').documentEditor!.lineFields.find(
+      (value) => value.fieldId === `${ns}:field.purchase_order_line_unit_price`,
+    )!.defaultFrom!.sourceByHeader!.cases[0]!.sourceFieldId =
+      `${ns}:field.item_preferred_location_id`;
+  }, /an editor default requires a sibling reference/);
+
+  // A navigation module is another declared module of a navigation List.
+  const navigation =
+    /a navigation module names another declared module of a navigation List/;
+  refuse((candidate) => {
+    surface(candidate, 'item_stock_list').workspace!.navigationModuleId =
+      `${ns}:module.catalog`;
+  }, navigation);
+  refuse((candidate) => {
+    surface(candidate, 'item_stock_list').workspace!.navigationModuleId =
+      `${ns}:module.warehouse`;
+  }, navigation);
+  refuse((candidate) => {
+    surface(candidate, 'item_detail').workspace!.navigationModuleId =
+      `${ns}:module.inventory`;
+  }, navigation);
+
+  // A form reference chooses a long-enough text field the form reads, from
+  // an active unscoped q0 list query that selects its label, once per field.
+  const reference = (candidate: Loose) =>
+    surface(candidate, 'item_form').form!.references[0]!;
+  const chooses =
+    /a form reference chooses a text field the form reads, long enough for a record id/;
+  refuse((candidate) => {
+    reference(candidate).field = `${ns}:field.item_reorder_point`;
+  }, chooses);
+  refuse((candidate) => {
+    // A unit code could never hold a location's id.
+    reference(candidate).field = `${ns}:field.item_base_unit`;
+  }, chooses);
+  refuse((candidate) => {
+    reference(candidate).field = `${ns}:field.party_name`;
+  }, chooses);
+  const chosen =
+    /a form reference is chosen from an active unscoped q0 list query that selects its label/;
+  refuse((candidate) => {
+    reference(candidate).query.targetId =
+      `${ns}:query.posted_stock_balance_list`;
+  }, chosen);
+  refuse((candidate) => {
+    reference(candidate).query.targetId = `${ns}:query.location_get`;
+  }, chosen);
+  refuse((candidate) => {
+    reference(candidate).labelField.targetId = `${ns}:field.party_name`;
+  }, chosen);
+  refuse((candidate) => {
+    const form = surface(candidate, 'item_form').form!;
+    form.references.push(structuredClone(form.references[0]!));
+  }, /a form field is chosen by one reference/);
+  refuse((candidate) => {
+    surface(candidate, 'item_detail').form = structuredClone(
+      surface(candidate, 'item_form').form,
+    );
+  }, /form references belong to a Record form/);
+  refuse((candidate) => {
+    (reference(candidate) as unknown as Loose).create = true;
+  }, /CANON_SCHEMA_INVALID/);
+});

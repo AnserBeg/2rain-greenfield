@@ -1179,9 +1179,12 @@ async function assertRealProductDefinition(
     // SALES-PARITY adds Party's ship-to address book and Catalog's tax codes,
     // then the invoice, its lines, payments and credits (list, detail, form
     // each). PURCHASING-PARITY adds the Expected receipts List; PAYABLES the
-    // vendor bill, its lines, payments and credits (list, detail, form each).
-    assert.equal(surfaces.length, 101);
+    // vendor bill, its lines, payments and credits (list, detail, form each);
+    // REPLENISHMENT Stock by item and the Buying worklist.
+    assert.equal(surfaces.length, 103);
     assert.ok(surfaces.includes('northstar.app:surface.expected_receipt_list'));
+    assert.ok(surfaces.includes('northstar.app:surface.item_stock_list'));
+    assert.ok(surfaces.includes('northstar.app:surface.item_buying_list'));
     for (const local of [
       'goods_receipt',
       'goods_receipt_line',
@@ -3522,10 +3525,14 @@ async function assertBoundedFreshTenantInstallEvidence(
   // compiled plan: vendor bill (23), bill line (17), vendor payment (17) and
   // vendor credit (15) -- the receivables documents' shapes; the supplier's
   // invoice number is searchable, so it adds no search exclusion.
+  // REPLENISHMENT adds 6, measured: one search exclusion for each of the
+  // item's six non-searchable fields (reorder point and up-to level, preferred
+  // location, standard cost in three currencies). Its two Lists' queries add
+  // none: a List over items adds no entity.
   assert.equal(
     servingScenarioCount,
-    573,
-    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, and 72 for payables',
+    579,
+    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables and 6 for replenishment',
   );
   await assertFreshInstallLineageEvidence(
     pool,
@@ -5847,11 +5854,12 @@ async function assertExactPartitionEvidence(
   // on the purchase order, its line, the goods receipt and the amendment
   // request, each with a generic create: 501, 424. PAYABLES' 72 execute too
   // (each vendor document has a generic create, replayed by this oracle over
-  // the compiled head): 573, 496.
+  // the compiled head): 573, 496. REPLENISHMENT's 6 item search exclusions
+  // execute through the item's generic create: 579, 502.
   assert.equal(
     evidence.results.length,
-    496,
-    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, and payables 72',
+    502,
+    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72 and replenishment 6',
   );
   assert.equal(
     derivations.length,
