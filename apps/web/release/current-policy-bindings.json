@@ -4,6 +4,51 @@
     "northstar.app:package.application": [
       {
         "action": "archive",
+        "permissionId": "northstar.app:permission.drop_ship_delivery_archive",
+        "resource": "northstar.app:entity.drop_ship_delivery"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.drop_ship_delivery_create",
+        "resource": "northstar.app:entity.drop_ship_delivery"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.drop_ship_delivery_read",
+        "resource": "northstar.app:entity.drop_ship_delivery"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.drop_ship_delivery_restore",
+        "resource": "northstar.app:entity.drop_ship_delivery"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.drop_ship_delivery_update",
+        "resource": "northstar.app:entity.drop_ship_delivery"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.drop_ship_delivery_post",
+        "resource": "northstar.app:entity.drop_ship_delivery"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.drop_ship_delivery_reverse",
+        "resource": "northstar.app:entity.drop_ship_delivery"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.sales_order_create_drop_ship_po",
+        "resource": "northstar.app:entity.sales_order"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.purchase_order_record_delivery",
+        "resource": "northstar.app:entity.purchase_order"
+      },
+      {
+        "action": "archive",
         "permissionId": "northstar.app:permission.purchase_order_amendment_archive",
         "resource": "northstar.app:entity.purchase_order_amendment"
       },

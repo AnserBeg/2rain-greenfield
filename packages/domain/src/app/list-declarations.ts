@@ -59,6 +59,13 @@ export interface ListSpec {
   readonly progress?: {
     readonly lines: ListProgressSourceSpec;
     readonly done: ListProgressSourceSpec;
+    readonly additionalDone?: ListProgressSourceSpec & {
+      readonly filters: readonly {
+        readonly field: string;
+        readonly value: string;
+      }[];
+      readonly output: string;
+    };
     readonly openIn?: {
       readonly field: string;
       readonly values: readonly string[];
@@ -653,6 +660,54 @@ export function composedListSpecs(
     labelField: `${namespace}:field.${labelField}`,
   });
   return {
+    drop_ship_delivery_list: {
+      pageSize: 25,
+      columns: [
+        {
+          local: 'number',
+          label: 'Delivery',
+          field: `${namespace}:field.drop_ship_delivery_number`,
+          role: 'title',
+        },
+        {
+          local: 'state',
+          label: 'State',
+          field: `${namespace}:field.drop_ship_delivery_state`,
+          role: 'status',
+        },
+        {
+          local: 'date',
+          label: 'Delivered',
+          field: `${namespace}:field.drop_ship_delivery_delivery_date`,
+          format: 'date',
+        },
+        {
+          local: 'quantity',
+          label: 'Quantity',
+          field: `${namespace}:field.drop_ship_delivery_quantity`,
+        },
+        {
+          local: 'unit',
+          label: 'Unit',
+          field: `${namespace}:field.drop_ship_delivery_unit_id`,
+        },
+        {
+          local: 'reference',
+          label: 'Supplier reference',
+          field: `${namespace}:field.drop_ship_delivery_external_reference`,
+        },
+      ],
+      defaultSort: [{ column: 'number', direction: 'descending' }],
+      views: ['draft', 'posted', 'reversed'].map((state) => ({
+        local: state,
+        label: state[0]!.toUpperCase() + state.slice(1),
+        filters: {
+          [`${namespace}:field.drop_ship_delivery_state`]: `${namespace}:option.drop_ship_delivery_state_${state}`,
+        },
+      })),
+      filters: [],
+      export: true,
+    },
     sales_order_list: documentList(
       namespace,
       'sales_order',
@@ -843,6 +898,15 @@ function lowerList(namespace: string, listLocal: string, spec: ListSpec) {
           progress: {
             lines: progressSource(spec.progress.lines),
             done: progressSource(spec.progress.done),
+            ...(spec.progress.additionalDone
+              ? {
+                  additionalDone: {
+                    ...progressSource(spec.progress.additionalDone),
+                    filters: [...spec.progress.additionalDone.filters],
+                    output: spec.progress.additionalDone.output,
+                  },
+                }
+              : {}),
             ...(spec.progress.openIn
               ? {
                   openIn: {
@@ -911,10 +975,46 @@ export function declareLists(
     const local = String(surface.surfaceId).split(':surface.')[1] ?? '';
     const spec = specs[local];
     if (!spec) return surface;
+    // Separate commercial facts count beside physical progress before paging.
+    const order = spec.progress?.lines.relation
+      .split(':relation.')[1]
+      ?.replace('_line_order', '');
+    const composedSpec: ListSpec =
+      spec.progress &&
+      specs.drop_ship_delivery_list &&
+      (order === 'sales_order' || order === 'purchase_order')
+        ? {
+            ...spec,
+            columns: [
+              ...spec.columns,
+              {
+                local: 'delivered',
+                label: 'Delivered',
+                field: `${namespace}:list_output.${local}_delivered`,
+                sortable: false,
+              },
+            ],
+            progress: {
+              ...spec.progress,
+              additionalDone: {
+                query: `${namespace}:query.drop_ship_delivery_list`,
+                relation: `${namespace}:relation.drop_ship_delivery_${order.replace('_order', '')}_line`,
+                quantity: `${namespace}:field.drop_ship_delivery_quantity`,
+                filters: [
+                  {
+                    field: `${namespace}:field.drop_ship_delivery_state`,
+                    value: `${namespace}:option.drop_ship_delivery_state_posted`,
+                  },
+                ],
+                output: `${namespace}:list_output.${local}_delivered`,
+              },
+            },
+          }
+        : spec;
     const slots = surface.slots as Record<string, unknown>[];
     return {
       ...surface,
-      list: lowerList(namespace, local, spec),
+      list: lowerList(namespace, local, composedSpec),
       slots:
         spec.views.length > 0 &&
         !slots.some((slot) => slot.slot === 'savedViews')

@@ -857,12 +857,15 @@ async function authorizeSharedListProjection(
   });
   let progress: AuthorizedSharedListProgress | undefined;
   if (query.progress) {
-    const entityIds: Record<'done' | 'lines', string> = {
+    const entityIds: Partial<
+      Record<'done' | 'lines' | 'additionalDone', string>
+    > = {
       done: '',
       lines: '',
     };
-    for (const role of ['lines', 'done'] as const) {
+    for (const role of ['lines', 'done', 'additionalDone'] as const) {
       const summedRows = query.progress[role];
+      if (!summedRows) continue;
       const summed = registeredQueryFromPinnedView(view, summedRows.queryId);
       // Progress sums company rows inside the listed row's own company, so
       // unlike a label it may read a company-scoped list; what it may not read
@@ -910,11 +913,28 @@ async function authorizeSharedListProjection(
       observePredicateReceiptSafely(observePredicateReceipt, predicateReceipt);
       if (predicateReceipt.outcome !== 'accepted') return null;
       entityIds[role] = summed.sourceEntityId;
+      if (
+        'fieldFilters' in summedRows &&
+        summedRows.fieldFilters.some(
+          (filter) =>
+            !summed.selections.some(
+              (selection) => selection.fieldId === filter.fieldId,
+            ),
+        )
+      )
+        throw new SharedListContractError(
+          'LIST_FIELD_NOT_AUTHORIZED',
+          'additional progress filters must be selected by their query',
+          summed.queryId,
+        );
     }
     progress = Object.freeze({
       ...query.progress,
-      doneEntityId: entityIds.done,
-      linesEntityId: entityIds.lines,
+      doneEntityId: entityIds.done!,
+      linesEntityId: entityIds.lines!,
+      ...(entityIds.additionalDone
+        ? { additionalDoneEntityId: entityIds.additionalDone }
+        : {}),
     });
   }
   const relationLabels = [];

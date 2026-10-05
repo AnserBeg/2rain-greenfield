@@ -103,6 +103,13 @@ export interface SharedListProgressSource {
 export interface SharedListProgress {
   readonly done: SharedListProgressSource;
   readonly lines: SharedListProgressSource;
+  readonly additionalDone?: SharedListProgressSource & {
+    readonly fieldFilters: readonly {
+      readonly fieldId: string;
+      readonly value: string;
+    }[];
+    readonly output: string;
+  };
   readonly openIn?: {
     readonly fieldId: string;
     readonly values: readonly string[];
@@ -172,6 +179,7 @@ export interface AuthorizedSharedListReferenceLabel extends SharedListReferenceL
 export interface AuthorizedSharedListProgress extends SharedListProgress {
   readonly doneEntityId: string;
   readonly linesEntityId: string;
+  readonly additionalDoneEntityId?: string;
 }
 
 export interface AuthorizedSharedListRequest {
@@ -602,7 +610,7 @@ function parseProgressSource(
 
 function parseProgress(value: ImmutableJsonValue): SharedListProgress {
   if (!isRecord(value)) throw malformed('list progress must be an object');
-  const { openIn, openOnly, ...closed } = value;
+  const { openIn, openOnly, additionalDone, ...closed } = value;
   assertExactKeys(closed, ['done', 'lines', 'outputs']);
   const outputs = closed.outputs;
   if (!isRecord(outputs))
@@ -613,6 +621,22 @@ function parseProgress(value: ImmutableJsonValue): SharedListProgress {
   assertCanonicalId(outputs.ordered, 'list progress ordered output');
   if (new Set([outputs.done, outputs.open, outputs.ordered]).size !== 3)
     throw malformed('list progress outputs must be three distinct ids');
+  const extra =
+    additionalDone === undefined
+      ? undefined
+      : (() => {
+          if (!isRecord(additionalDone))
+            throw malformed('additional progress must be an object');
+          const { fieldFilters, output, ...source } = additionalDone;
+          assertCanonicalId(output, 'additional progress output');
+          if ([outputs.done, outputs.open, outputs.ordered].includes(output))
+            throw malformed('additional progress output is distinct');
+          return Object.freeze({
+            ...parseProgressSource(source, 'additionalDone'),
+            fieldFilters: parseExactFieldFilters(fieldFilters),
+            output,
+          });
+        })();
   if (openOnly !== undefined && openOnly !== true)
     throw malformed('list progress openOnly is true when present');
   const states =
@@ -645,6 +669,7 @@ function parseProgress(value: ImmutableJsonValue): SharedListProgress {
   return Object.freeze({
     done: parseProgressSource(closed.done, 'done'),
     lines: parseProgressSource(closed.lines, 'lines'),
+    ...(extra ? { additionalDone: extra } : {}),
     ...(states ? { openIn: states } : {}),
     ...(openOnly === true ? { openOnly: true as const } : {}),
     outputs: Object.freeze({

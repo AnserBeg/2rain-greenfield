@@ -727,3 +727,13 @@ How to apply: reload actual display dependencies through governed reads; redact 
 Date: 2026-09-15
 Why: RAIN-META-SALES P2 reproduced an old review form dispatching replacement inputs from the same task session.
 How to apply: bind an immutable normalized preparation to a server-issued identity, reject stale confirmation before dispatch, and use deterministic barriers to prove delayed validation cannot overwrite newer or confirmed state. See [P1/P2 correction](docs/execution/packets/RAIN-META-SALES.md).
+
+## Derive a cloned command's module from its target entity
+Date: 2026-10-05
+Why: DROP-SHIP's Sales command inherited Purchasing's module from its vendor-credit template; the compiler's without-Sales predecessor retained the command but removed its permission and read-back query.
+How to apply: copy the target entity's module when re-expressing a command across modules, and compile its dependent predecessor as well as the full application. See [DROP-SHIP](docs/execution/packets/DROP-SHIP.md).
+
+## Normalize stored revisions before constructing trust commands
+Date: 2026-10-05
+Why: DROP-SHIP returned an SQL `bigint` revision unchanged; the PostgreSQL driver returns a string, while accepted trust commands require a positive safe-integer number.
+How to apply: normalize and validate revisions at the provider boundary, retain the trust check, and test the driver's actual representation plus the governed PostgreSQL journey. See [DROP-SHIP](docs/execution/packets/DROP-SHIP.md).

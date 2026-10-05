@@ -54,6 +54,7 @@ import {
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
+import { DROP_SHIP_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/drop-ship-executor.js';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
 import {
   PostgresCurrentPolicyGateway,
@@ -838,6 +839,410 @@ test(
   },
 );
 
+test(
+  'relation install advances a released company table with nullable storage, scoped FK and index, exact grants and governed writes',
+  { timeout: 300_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'relation-install',
+      async ({ connection, pool }) => {
+        const base = relationInstallBase(
+          JSON.parse(await readFile(compiledArtifactPath, 'utf8')) as unknown,
+        );
+        const head = appendRelationSuccessor(base);
+        const storage = storageTarget(
+          parseCompiledApplication(head).application.compiled,
+        );
+        const relation = storage.relations.find(
+          (candidate) => candidate.relationId === installedRelationId,
+        )!;
+        assert.ok(relation);
+        const source = storage.entities.find(
+          (candidate) => candidate.entityId === relation.sourceEntityId,
+        )!;
+        const target = storage.entities.find(
+          (candidate) => candidate.entityId === relation.targetEntityId,
+        )!;
+        assert.ok(source.legalEntity);
+        const column = relation.relationColumn.physicalName;
+        const index = source.indexes.find(
+          (candidate) =>
+            candidate.indexKind === 'relation' &&
+            candidate.columnNames.includes(column),
+        )!;
+        assert.ok(index);
+        const transition = projectionPayload<{ elements: { kind: string }[] }>(
+          parseCompiledApplication(head).application.compiled,
+          PROJECTION_FAMILY_IDS.storageTransition,
+        );
+        assert.deepEqual(
+          transition.elements.map((element) => element.kind).toSorted(),
+          ['addColumn', 'addForeignKey', 'createIndex'].toSorted(),
+        );
+        const databaseUrl = connectionUrl(connection);
+        let runtime = await createRuntime(
+          base,
+          databaseUrl,
+          'relation-install',
+        );
+        const invoke = (local: string, input: ImmutableJsonValue) =>
+          runtime.entry.run({ headers: {} }, (view) =>
+            runtime.operationGateway.invoke(
+              view,
+              {
+                schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+                operationId: `northstar.app:operation.${local}`,
+                input,
+                idempotencyKey: randomUUID(),
+                confirmationGrant: null,
+              },
+              runtime.operationMediation.issueInvocation(view, 'UI'),
+            ),
+          );
+        const company = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
+        const orderId = randomUUID();
+        const oldLineId = randomUUID();
+        const createLine = (
+          recordId: string,
+          number: string,
+          extra: Record<string, string> = {},
+        ) =>
+          invoke('purchase_order_line_create', {
+            recordId,
+            legalEntityId: company,
+            values: {
+              'northstar.app:field.purchase_order_line_line_number': number,
+              'northstar.app:field.purchase_order_line_item_id':
+                'RELATION-ITEM',
+              'northstar.app:field.purchase_order_line_ordered_quantity': '5',
+              'northstar.app:field.purchase_order_line_unit_price': '7',
+            },
+            relations: {
+              [APPLICATION_IDS.purchasing.lineRelationId]: orderId,
+              ...extra,
+            },
+          });
+        const readLink = async (recordId: string) =>
+          (
+            await pool.query<{ link: string | null }>(
+              `SELECT ${quoteSqlIdentifier(column)}::text AS link FROM north_star_module.${quoteSqlIdentifier(source.physicalTableName)}
+          WHERE tenant_id = $1 AND environment_id = $2 AND record_id = $3`,
+              [
+                runtime.identity.tenantId,
+                runtime.identity.environmentId,
+                recordId,
+              ],
+            )
+          ).rows[0]?.link;
+        try {
+          await invoke('purchase_order_create', {
+            recordId: orderId,
+            legalEntityId: company,
+            relations: {},
+            values: {
+              'northstar.app:field.purchase_order_supplier_party_id':
+                'RELATION-SUPPLIER',
+              'northstar.app:field.purchase_order_currency': 'CAD',
+              'northstar.app:field.purchase_order_order_date':
+                '2026-10-04T00:00:00.000Z',
+              'northstar.app:field.purchase_order_expected_date':
+                '2026-10-05T00:00:00.000Z',
+              'northstar.app:field.purchase_order_notes':
+                'relation install fixture',
+            },
+          });
+          await createLine(oldLineId, '1');
+          const before = await pool.query<{ present: boolean }>(
+            `SELECT EXISTS (
+          SELECT 1 FROM information_schema.columns WHERE table_schema = 'north_star_module' AND table_name = $1 AND column_name = $2
+        ) AS present`,
+            [source.physicalTableName, column],
+          );
+          assert.equal(
+            before.rows[0]?.present,
+            false,
+            'the released base must not already contain the new relation column',
+          );
+          await runtime.close();
+          try {
+            runtime = await createRuntime(
+              head,
+              databaseUrl,
+              'relation-install',
+            );
+          } catch (error) {
+            const code = (error as { code?: unknown } | null)?.code;
+            if (error instanceof Error && typeof code === 'string')
+              throw new Error(`${code}: ${error.message}`, { cause: error });
+            throw error;
+          }
+          const columns = await pool.query<{
+            data_type: string;
+            is_nullable: string;
+            column_default: string | null;
+          }>(
+            `SELECT data_type, is_nullable, column_default FROM information_schema.columns
+            WHERE table_schema = 'north_star_module' AND table_name = $1 AND column_name = $2`,
+            [source.physicalTableName, column],
+          );
+          assert.deepEqual(columns.rows, [
+            { data_type: 'uuid', is_nullable: 'YES', column_default: null },
+          ]);
+          assert.equal(
+            await readLink(oldLineId),
+            null,
+            'install leaves pre-existing business rows unlinked',
+          );
+          const fk = await pool.query<{ definition: string; target: string }>(
+            `SELECT pg_get_constraintdef(oid) AS definition, confrelid::regclass::text AS target
+             FROM pg_constraint WHERE conrelid = $1::regclass AND conname = $2`,
+            [
+              `north_star_module.${quoteSqlIdentifier(source.physicalTableName)}`,
+              relation.foreignKey.physicalName,
+            ],
+          );
+          assert.equal(fk.rows.length, 1);
+          assert.equal(
+            fk.rows[0]!.target,
+            `north_star_module.${target.physicalTableName}`,
+          );
+          assert.match(
+            fk.rows[0]!.definition,
+            /FOREIGN KEY \(tenant_id, environment_id, legal_entity_id,/u,
+            'the added FK retains company scope',
+          );
+          assert.match(
+            fk.rows[0]!.definition,
+            /REFERENCES .*\(tenant_id, environment_id, legal_entity_id, record_id\) ON UPDATE RESTRICT ON DELETE RESTRICT/u,
+          );
+          const installedIndex = await pool.query<{
+            definition: string;
+            indisvalid: boolean;
+          }>(
+            `SELECT pg_get_indexdef(i.indexrelid) AS definition, i.indisvalid FROM pg_index i
+           JOIN pg_class c ON c.oid = i.indexrelid WHERE i.indrelid = $1::regclass AND c.relname = $2`,
+            [
+              `north_star_module.${quoteSqlIdentifier(source.physicalTableName)}`,
+              index.physicalName,
+            ],
+          );
+          assert.equal(installedIndex.rows.length, 1);
+          assert.equal(installedIndex.rows[0]!.indisvalid, true);
+          assert.ok(
+            installedIndex.rows[0]!.definition.includes(
+              `(tenant_id, environment_id, legal_entity_id, ${column})`,
+            ),
+          );
+          await assertColumnUpdateGranted(
+            pool,
+            { table: source.physicalTableName, column },
+            'the added relation gets column UPDATE, never table UPDATE',
+          );
+          const originalRelation = storage.relations.find(
+            (candidate) =>
+              candidate.relationId ===
+              APPLICATION_IDS.purchasing.lineRelationId,
+          )!;
+          const grants = await pool.query<{
+            column_name: string;
+            privilege_type: string;
+            is_grantable: string;
+          }>(
+            `SELECT column_name, privilege_type, is_grantable FROM information_schema.column_privileges
+           WHERE table_schema = 'north_star_module' AND table_name = $1 AND grantee = 'north_star_module_runtime'
+             AND column_name = ANY($2::text[]) ORDER BY column_name, privilege_type`,
+            [
+              source.physicalTableName,
+              [column, originalRelation.relationColumn.physicalName],
+            ],
+          );
+          const privileges = (name: string) =>
+            grants.rows
+              .filter((row) => row.column_name === name)
+              .map(({ privilege_type, is_grantable }) => ({
+                privilege_type,
+                is_grantable,
+              }));
+          assert.deepEqual(
+            privileges(column),
+            privileges(originalRelation.relationColumn.physicalName),
+            'added and creation-time relation columns have identical privileges',
+          );
+          const linkedLineId = randomUUID();
+          const result = await createLine(linkedLineId, '2', {
+            [installedRelationId]: orderId,
+          });
+          assert.equal(result.outcome, 'succeeded');
+          assert.equal(
+            await readLink(linkedLineId),
+            orderId,
+            'a governed gateway write persists the installed relation',
+          );
+
+          const foreignCompany = randomUUID();
+          const foreignOrder = randomUUID();
+          const master = storage.entities.find(
+            (candidate) => candidate.legalEntityMaster !== undefined,
+          )!;
+          const code = master.legalEntityMaster!.fieldColumns.code;
+          await copyRelationFixtureRow(
+            pool,
+            master.physicalTableName,
+            company,
+            {
+              record_id: foreignCompany,
+              [code]: 'REL-FOREIGN',
+              [master.legalEntityMaster!.fieldColumns.isDefault]: false,
+            },
+          );
+          const number = target.columns.find(
+            (candidate) =>
+              candidate.canonicalFieldId ===
+              'northstar.app:field.purchase_order_number',
+          )!.physicalName;
+          await copyRelationFixtureRow(
+            pool,
+            target.physicalTableName,
+            orderId,
+            {
+              record_id: foreignOrder,
+              legal_entity_id: foreignCompany,
+              [number]: 'REL-FOREIGN-PO',
+            },
+          );
+          const refusedLineId = randomUUID();
+          await assert.rejects(
+            createLine(refusedLineId, '3', {
+              [installedRelationId]: foreignOrder,
+            }),
+            (error: unknown) => {
+              assert.ok(error instanceof ModuleRuntimeInterpreterError);
+              assert.equal(error.code, 'MODULE_RELATION_VIOLATION');
+              return true;
+            },
+          );
+          assert.equal(
+            await readLink(refusedLineId),
+            undefined,
+            'foreign-company gateway refusal writes no line',
+          );
+          await assert.rejects(
+            pool.query(
+              `UPDATE north_star_module.${quoteSqlIdentifier(source.physicalTableName)} SET ${quoteSqlIdentifier(column)} = $1 WHERE record_id = $2`,
+              [foreignOrder, linkedLineId],
+            ),
+            (error: unknown) => (error as { code?: string }).code === '23503',
+            'the persisted FK refuses a foreign-company target independently of the gateway',
+          );
+          assert.equal(
+            await readLink(linkedLineId),
+            orderId,
+            'the rejected FK write leaves the valid link unchanged',
+          );
+        } finally {
+          await runtime.close();
+        }
+      },
+    );
+  },
+);
+
+const installedRelationId =
+  'northstar.app:relation.purchase_order_line_installed_reference';
+
+function relationInstallBase(compiledApplication: unknown): unknown {
+  const previous = parseCompiledApplication(compiledApplication);
+  const bytes = previous.application.normalizedDefinitionBytes;
+  // Isolate this transition from unrelated historical installs. The fixture
+  // still releases the base, persists rows, then upgrades the same tenant.
+  // No checked-in application release or lineage is changed.
+  const initial = compileApplication({
+    dependencies: [],
+    expectedActiveRelease: expectedActiveReleaseFrom(
+      previous.bootstrap.compiled,
+    ),
+    kind: 'compilerInput',
+    limits: { ...DEFAULT_COMPILER_LIMITS },
+    normalizedDefinitionBytes: bytes,
+    profile: profileForNormalizedBytes(bytes),
+  });
+  assert.equal(initial.status, 'compiled');
+  return {
+    applications: [serializedRelease(bytes, initial as CompileSuccess)],
+    bootstrap: serializedRelease(
+      previous.bootstrap.normalizedDefinitionBytes,
+      previous.bootstrap.compiled,
+    ),
+    schemaVersion: 'northstar.web:compiled-application-release/v2',
+  };
+}
+
+function appendRelationSuccessor(compiledApplication: unknown): unknown {
+  const previous = parseCompiledApplication(compiledApplication);
+  const definition = structuredClone(composedApplicationDefinition()) as {
+    relations: Record<string, unknown>[];
+    package: { version: string };
+  };
+  assert.equal(
+    canonicalize(normalizeApplicationPackage(definition)),
+    new TextDecoder().decode(previous.application.normalizedDefinitionBytes),
+    'the synthetic relation successor starts from the exact recorded head definition',
+  );
+  const original = definition.relations.find(
+    (relation) =>
+      relation.relationId === APPLICATION_IDS.purchasing.lineRelationId,
+  );
+  assert.ok(original);
+  definition.relations.push({
+    ...structuredClone(original),
+    relationId: installedRelationId,
+    required: false,
+    ownership: 'reference',
+    orderKey: 999,
+  });
+  definition.package.version = '1.0.99';
+  const bytes = new TextEncoder().encode(
+    canonicalize(normalizeApplicationPackage(definition)),
+  );
+  const successor = compileSuccessor(previous.application.compiled, bytes);
+  return {
+    applications: [
+      ...previous.applications.map((release) =>
+        serializedRelease(release.normalizedDefinitionBytes, release.compiled),
+      ),
+      serializedRelease(bytes, successor),
+    ],
+    bootstrap: serializedRelease(
+      previous.bootstrap.normalizedDefinitionBytes,
+      previous.bootstrap.compiled,
+    ),
+    schemaVersion: 'northstar.web:compiled-application-release/v2',
+  };
+}
+
+async function copyRelationFixtureRow(
+  pool: pg.Pool,
+  table: string,
+  recordId: string,
+  overrides: Record<string, ImmutableJsonValue>,
+): Promise<void> {
+  const columns = await pool.query<{ attname: string }>(
+    `SELECT attname FROM pg_attribute WHERE attrelid = $1::regclass AND attnum > 0 AND NOT attisdropped AND attgenerated = '' ORDER BY attnum`,
+    [`north_star_module.${quoteSqlIdentifier(table)}`],
+  );
+  const names = columns.rows
+    .map((column) => quoteSqlIdentifier(column.attname))
+    .join(', ');
+  await pool.query(
+    `INSERT INTO north_star_module.${quoteSqlIdentifier(table)} (${names})
+    SELECT ${columns.rows.map((column) => `copied.${quoteSqlIdentifier(column.attname)}`).join(', ')}
+    FROM north_star_module.${quoteSqlIdentifier(table)} original,
+      LATERAL jsonb_populate_record(NULL::north_star_module.${quoteSqlIdentifier(table)}, to_jsonb(original) || $1::jsonb) copied
+    WHERE original.record_id = $2`,
+    [JSON.stringify(overrides), recordId],
+  );
+}
+
 // Same harness limit: this parent performs one bounded fresh install and then
 // verifies and activates compiled successors through the normal upgrade path.
 test(
@@ -847,9 +1252,12 @@ test(
     await withEphemeralPostgres(
       'g2-1g-release-advancement',
       async ({ connection, pool }) => {
-        const compiledApplication = JSON.parse(
-          await readFile(compiledArtifactPath, 'utf8'),
-        ) as unknown;
+        // This test exercises successors and rollback from the exact head
+        // definition, not unrelated historical installation. The full
+        // recorded lineage is exercised by the fresh-tenant replay test.
+        const compiledApplication = relationInstallBase(
+          JSON.parse(await readFile(compiledArtifactPath, 'utf8')) as unknown,
+        );
         const authoredApplication = JSON.parse(
           await readFile(authoredArtifactPath, 'utf8'),
         ) as Record<string, unknown>;
@@ -1063,6 +1471,7 @@ test(
           );
           await assertEmptyRollbackSelectorFailsClosed(
             runtime,
+            compiledApplication,
             databaseUrl,
             pool,
           );
@@ -1095,6 +1504,7 @@ test(
 
 async function assertEmptyRollbackSelectorFailsClosed(
   runtime: ComposedApplicationRuntime,
+  compiledApplication: unknown,
   databaseUrl: string,
   adminPool: pg.Pool,
 ): Promise<void> {
@@ -1106,6 +1516,7 @@ async function assertEmptyRollbackSelectorFailsClosed(
     await assert.rejects(
       async () => {
         unexpectedlyStarted = await startComposedApplication({
+          compiledApplication,
           databaseUrl,
           host: '127.0.0.1',
           port: 0,
@@ -1180,7 +1591,7 @@ async function assertRealProductDefinition(
     // then the invoice, its lines, payments and credits (list, detail, form
     // each). PURCHASING-PARITY adds the Expected receipts List; PAYABLES the
     // vendor bill, its lines, payments and credits (list, detail, form each).
-    assert.equal(surfaces.length, 101);
+    assert.equal(surfaces.length, 104);
     assert.ok(surfaces.includes('northstar.app:surface.expected_receipt_list'));
     for (const local of [
       'goods_receipt',
@@ -1301,6 +1712,7 @@ async function assertApprovalEnforcementAndApprovedActivation(
       [
         INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
         RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+        DROP_SHIP_CAPABILITY_EXECUTOR_FACTORY,
       ],
     ).executeSemanticCandidateAndPersist(context, {
       compiledRelease: application.compiled,
@@ -1450,6 +1862,7 @@ async function assertApprovalRequiredForAdvancement(
         [
           INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
           RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+          DROP_SHIP_CAPABILITY_EXECUTOR_FACTORY,
         ],
       ).executeSemanticCandidateAndPersist(context, {
         compiledRelease: application.compiled,
@@ -1621,6 +2034,7 @@ async function assertReleaseServicesRejectNonExactReversePairs(
       [
         INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
         RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+        DROP_SHIP_CAPABILITY_EXECUTOR_FACTORY,
       ],
     ).executeSemanticCandidateAndPersist(context, {
       compiledRelease: immediateTarget.compiled,
@@ -2708,6 +3122,7 @@ async function assertFailClosedIdentitySeam(
     capabilityOperationExecutorFactories: [
       INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
       RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+      DROP_SHIP_CAPABILITY_EXECUTOR_FACTORY,
     ],
     compiledApplication,
     databaseUrl,
@@ -3525,8 +3940,8 @@ async function assertBoundedFreshTenantInstallEvidence(
   // invoice number is searchable, so it adds no search exclusion.
   assert.equal(
     servingScenarioCount,
-    573,
-    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, and 72 for payables',
+    604,
+    'compiled DROP-SHIP head: 604 emitted scenarios',
   );
   await assertFreshInstallLineageEvidence(
     pool,
@@ -5865,8 +6280,8 @@ async function assertExactPartitionEvidence(
   // the compiled head): 573, 496.
   assert.equal(
     evidence.results.length,
-    496,
-    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, and payables 72',
+    527,
+    'compiled DROP-SHIP head: 527 constructible scenarios, observed executed here',
   );
   assert.equal(
     derivations.length,
@@ -5906,8 +6321,8 @@ async function assertExactPartitionEvidence(
   const salesScenarioIds = binding.plan.scenarios
     .filter((scenario) => salesEntityIds.has(scenario.entityId))
     .map((scenario) => scenario.scenarioId);
-  // 29 + 16, as `assertSalesVerificationCoverage` pins them per entity.
-  assert.equal(salesScenarioIds.length, 45);
+  // 29 + 19, measured from the compiled verification plan and pinned per entity.
+  assert.equal(salesScenarioIds.length, 48);
   assert.equal(
     salesScenarioIds.every((scenarioId) =>
       executedScenarioIdSet.has(scenarioId),
@@ -6091,7 +6506,8 @@ function assertReceivingVerificationCoverage(
     // exclusion), tax code, freight and fee with codes and frozen rates;
     // the line's discount, tax code and frozen rate; then its receive-into
     // location.
-    purchase_order: 22,
+    // DROP-SHIP: seven copied customer ship-to fields.
+    purchase_order: 29,
     purchase_order_line: 15,
   })) {
     assert.equal(
@@ -6124,7 +6540,8 @@ function assertSalesVerificationCoverage(compiledApplication: unknown): void {
     // then the tax code and two charges with codes and frozen rates.
     sales_order: 29,
     // SALES-PARITY: list price, discount, tax code and frozen rate.
-    sales_order_line: 16,
+    // DROP-SHIP route/supplier fields and retained (not restrictive) line links.
+    sales_order_line: 19,
     sales_order_shipped: 10,
     // SALES-PARITY: carrier, reference type and reference, then six ship-to lines.
     shipment: 29,
@@ -6372,7 +6789,7 @@ function assertIndependentConstructibilityPartition(
   );
 }
 
-function createRuntime(
+async function createRuntime(
   compiledApplication: unknown,
   databaseUrl: string,
   tenantSlug: string,
@@ -6385,24 +6802,40 @@ function createRuntime(
   ) => Promise<void>,
   monotonicMilliseconds?: () => number,
 ) {
-  return createComposedApplicationRuntime({
-    ...(monotonicMilliseconds ? { monotonicMilliseconds } : {}),
-    ...(afterFreshTenantIntermediateActivation
-      ? { afterFreshTenantIntermediateActivation }
-      : {}),
-    compiledApplication,
-    capabilityOperationExecutorFactories: [
-      INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
-      RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
-    ],
-    databaseUrl,
-    inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
-    localDemoIdentity: true,
-    migrationsDirectory,
-    providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
-    ...(releaseSelection ? { releaseSelection } : {}),
-    tenantSlug,
-  });
+  // Recycle test-cluster WAL between installs within its existing 256 MB
+  // tmpfs. The recorded application lineage and every verifier still run.
+  const checkpoint = new pg.Pool({ connectionString: databaseUrl, max: 1 });
+  try {
+    const runtime = await createComposedApplicationRuntime({
+      ...(monotonicMilliseconds ? { monotonicMilliseconds } : {}),
+      afterFreshTenantIntermediateActivation: async (observation) => {
+        await afterFreshTenantIntermediateActivation?.(observation);
+        await checkpoint.query('CHECKPOINT');
+      },
+      compiledApplication,
+      capabilityOperationExecutorFactories: [
+        INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+        RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+        DROP_SHIP_CAPABILITY_EXECUTOR_FACTORY,
+      ],
+      databaseUrl,
+      inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
+      localDemoIdentity: true,
+      migrationsDirectory,
+      providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+      ...(releaseSelection ? { releaseSelection } : {}),
+      tenantSlug,
+    });
+    try {
+      await checkpoint.query('CHECKPOINT');
+      return runtime;
+    } catch (error) {
+      await runtime.close();
+      throw error;
+    }
+  } finally {
+    await checkpoint.end();
+  }
 }
 
 function connectionUrl(connection: pg.PoolConfig): string {

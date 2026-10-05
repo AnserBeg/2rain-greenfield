@@ -1,4 +1,5 @@
 import { FULFILLMENT_READ_MODEL_BINDINGS } from '../../domain/src/sales/workspace.js';
+import { commercialLinkedFacts } from './commercial-link-read-model.js';
 import {
   fulfillmentDecimal,
   fulfillmentProjectionIdentity,
@@ -153,12 +154,54 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
    */
   const lineFigures = new Map<
     string,
-    Promise<{ covered: bigint; shipped: bigint; ordered: bigint }>
+    Promise<{
+      covered: bigint;
+      shipped: bigint;
+      ordered: bigint;
+      delivered: bigint | null;
+    }>
   >();
+  const isDropShip = (line: SemanticRecordDto) =>
+    String(
+      line.values[`${ns}:field.sales_order_line_fulfillment_route`],
+    ).endsWith(':option.fulfillment_route_drop_ship');
+  const deliveredOf = async (
+    line: SemanticRecordDto,
+  ): Promise<bigint | null> => {
+    if (!model.queries.deliveries) return 0n;
+    try {
+      let delivered = 0n;
+      for (const document of await list(
+        'deliveries',
+        {},
+        {
+          relationId: `${ns}:relation.drop_ship_delivery_sales_line`,
+          recordId: line.recordId,
+        },
+      ))
+        if (
+          document.values[`${ns}:field.drop_ship_delivery_state`] ===
+          `${ns}:option.drop_ship_delivery_state_posted`
+        )
+          delivered += fulfillmentQuantity(
+            String(document.values[`${ns}:field.drop_ship_delivery_quantity`]),
+          );
+      return delivered;
+    } catch (error) {
+      if (error instanceof SemanticQueryPolicyDeniedError) return null;
+      throw error;
+    }
+  };
   const figuresOf = (line: SemanticRecordDto) => {
     let known = lineFigures.get(line.recordId);
     if (!known) {
       known = (async () => {
+        const ordered = fulfillmentQuantity(
+          String(line.values[`${ns}:field.sales_order_line_ordered_quantity`]),
+        );
+        const delivered = await deliveredOf(line);
+        if (isDropShip(line))
+          return { covered: 0n, shipped: 0n, ordered, delivered };
         const reservations = await list(
           'reservations',
           {},
@@ -188,12 +231,9 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
               ),
             )
           : 0n;
-        const ordered = fulfillmentQuantity(
-          String(line.values[`${ns}:field.sales_order_line_ordered_quantity`]),
-        );
         if (shipped < 0n || shipped > ordered || covered < 0n)
           throw new Error('Fulfillment projections require reconciliation');
-        return { covered, shipped, ordered };
+        return { covered, shipped, ordered, delivered };
       })();
       lineFigures.set(line.recordId, known);
     }
@@ -298,6 +338,10 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
         const unallocated = new Map<string, bigint>();
         const figures = new Map<string, { available: bigint; short: bigint }>();
         for (const line of lines) {
+          if (isDropShip(line)) {
+            figures.set(line.recordId, { available: 0n, short: 0n });
+            continue;
+          }
           const item = String(
             line.values[`${ns}:field.sales_order_line_item_id`],
           );
@@ -331,10 +375,20 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
       values[field] = value === null ? null : fulfillmentDecimal(value);
     };
     if (model.binding === FULFILLMENT_READ_MODEL_BINDINGS.line) {
-      const { covered, shipped, ordered } = await figuresOf(row);
+      const { covered, shipped, ordered, delivered } = await figuresOf(row);
       emit('coverage', covered);
       emit('shipped', shipped);
-      emit('open_to_ship', ordered - shipped);
+      if (model.resultFields.delivered) emit('delivered', delivered);
+      if (model.resultFields.route) {
+        const links = await commercialLinkedFacts(row, ns, false, invoke);
+        values[model.resultFields.route] = links.route;
+        values[model.resultFields.linked_line!] = links.linkedLine;
+        values[model.resultFields.linked_order!] = links.linkedOrder;
+      }
+      emit(
+        'open_to_ship',
+        delivered === null ? null : ordered - shipped - delivered,
+      );
       // Declared only where a page states what the order is short.
       if (model.resultFields.short) {
         const own = (await shortageOf())?.get(row.recordId);

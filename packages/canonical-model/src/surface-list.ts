@@ -79,7 +79,14 @@ export function validateSurfaceLists(
       list.columns.map((column) => [column.columnId, column]),
     );
     const progressOutputs = new Set(
-      list.progress ? Object.values(list.progress.outputs) : [],
+      list.progress
+        ? [
+            ...Object.values(list.progress.outputs),
+            ...(list.progress.additionalDone
+              ? [list.progress.additionalDone.output]
+              : []),
+          ]
+        : [],
     );
     // A read model's figures, such as an order's total, are computed from the
     // page the list statement returned, so they exist only after paging.
@@ -299,7 +306,47 @@ export function validateSurfaceLists(
           id,
           'list progress done rows point at its lines through a relation',
         );
-      unique(Object.values(progress.outputs), id, 'progress outputs');
+      if (progress.additionalDone) {
+        const additional = source(progress.additionalDone);
+        const link = relations.get(progress.additionalDone.relation);
+        if (
+          !link ||
+          link.lifecycle !== 'active' ||
+          link.sourceEntity.targetId !== additional.sourceEntity.targetId ||
+          link.targetEntity.targetId !== lines.sourceEntity.targetId
+        )
+          fail(id, 'additional progress facts point at the same lines');
+        unique(
+          progress.additionalDone.filters.map((filter) => filter.field),
+          id,
+          'additional progress filters',
+        );
+        for (const filter of progress.additionalDone.filters) {
+          const field = fields.get(filter.field);
+          if (
+            !field ||
+            field.entity.targetId !== additional.sourceEntity.targetId ||
+            !additional.selections.some(
+              (selection) => selection.field.targetId === filter.field,
+            ) ||
+            !['enumFieldType', 'textFieldType', 'booleanFieldType'].includes(
+              field.fieldType.kind,
+            )
+          )
+            fail(
+              id,
+              'additional progress filters name selected scalar fields of their query',
+            );
+        }
+      }
+      unique(
+        [
+          ...Object.values(progress.outputs),
+          ...(progress.additionalDone ? [progress.additionalDone.output] : []),
+        ],
+        id,
+        'progress outputs',
+      );
       if (
         [...progressOutputs].some(
           (output) => fields.has(output) || columns.has(output),

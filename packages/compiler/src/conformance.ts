@@ -66,6 +66,7 @@ const LEGAL_ENTITY_FAMILY_RULES = Object.freeze([
   { classification: 'entityOwned', familyId: 'vendor_bill_line' },
   { classification: 'entityOwned', familyId: 'vendor_payment' },
   { classification: 'entityOwned', familyId: 'vendor_credit' },
+  { classification: 'entityOwned', familyId: 'drop_ship_delivery' },
   { classification: 'entityOwned', familyId: 'stock_count' },
   { classification: 'entityOwned', familyId: 'stock_count_line' },
 ] as const);
@@ -184,6 +185,20 @@ const LEGAL_ENTITY_MASTER_FIELD_ROLES = Object.freeze({
   status: 'legal_entity_status',
 } as const);
 const LEGAL_ENTITY_RELATION_RULES = Object.freeze([
+  ...(
+    [
+      ['sales_order_line', 'purchase_order_line'],
+      ['purchase_order_line', 'sales_order_line'],
+      ['drop_ship_delivery', 'sales_order'],
+      ['drop_ship_delivery', 'sales_order_line'],
+      ['drop_ship_delivery', 'purchase_order'],
+      ['drop_ship_delivery', 'purchase_order_line'],
+    ] as const
+  ).map(([sourceFamilyId, targetFamilyId]) => ({
+    semantics: 'sameEntity' as const,
+    sourceFamilyId,
+    targetFamilyId,
+  })),
   {
     semantics: 'sameEntity',
     sourceFamilyId: 'inventory_movement',

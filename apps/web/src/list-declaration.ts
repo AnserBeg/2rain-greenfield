@@ -187,6 +187,21 @@ function progressArgument(list: SurfaceList, open: boolean) {
       queryId: progress.lines.query.targetId,
       relationId: progress.lines.relation,
     }),
+    ...(progress.additionalDone
+      ? {
+          additionalDone: Object.freeze({
+            fieldId: progress.additionalDone.quantity,
+            queryId: progress.additionalDone.query.targetId,
+            relationId: progress.additionalDone.relation,
+            fieldFilters: Object.freeze(
+              progress.additionalDone.filters.map((filter) =>
+                Object.freeze({ fieldId: filter.field, value: filter.value }),
+              ),
+            ),
+            output: progress.additionalDone.output,
+          }),
+        }
+      : {}),
     ...(progress.openIn
       ? {
           openIn: Object.freeze({
@@ -453,6 +468,9 @@ export function withheldProgressQuery(
   const summed: readonly string[] = [
     progress.lines.query.targetId,
     progress.done.query.targetId,
+    ...(progress.additionalDone
+      ? [progress.additionalDone.query.targetId]
+      : []),
   ];
   return summed.includes(error.queryId) ? error.queryId : null;
 }

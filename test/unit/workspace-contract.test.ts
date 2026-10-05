@@ -16,6 +16,50 @@ import { legalEntityReadScopeRequirement } from '../../packages/postgres-provide
 import { moneyText } from '../../apps/web/src/list-declaration.js';
 import { declaredDefault } from '../../apps/web/src/control-semantics.js';
 
+test('DROP-SHIP declares route, company-owned delivery, symmetric demand links and Tasks', () => {
+  const model = normalizeApplicationPackage(composedApplicationDefinition());
+  const delivery = model.entities.find((entity) =>
+    entity.entityId.endsWith(':entity.drop_ship_delivery'),
+  );
+  assert.ok(delivery);
+  const number = model.fields.find((field) =>
+    field.fieldId.endsWith(':field.drop_ship_delivery_number'),
+  )!;
+  assert.equal(
+    'numbering' in number
+      ? (number.numbering as { prefix: string }).prefix
+      : null,
+    'DSD',
+  );
+  assert.equal(
+    model.relations.filter(
+      (relation) => relation.sourceEntity.targetId === delivery.entityId,
+    ).length,
+    4,
+  );
+  for (const order of ['sales_order', 'purchase_order']) {
+    const page = model.surfaces.find((surface) =>
+      surface.surfaceId.endsWith(`:surface.${order}_detail`),
+    )!;
+    assert.ok(
+      'composition' in page &&
+        page.composition &&
+        typeof page.composition === 'object' &&
+        'children' in page.composition &&
+        (page.composition.children as { label: string }[]).some(
+          (child) => child.label === 'Deliveries',
+        ),
+    );
+  }
+  assert.ok(
+    model.operations.some(
+      (op) =>
+        op.operationId.endsWith(':operation.sales_order_create_drop_ship_po') &&
+        op.effect.kind === 'registeredCapabilityEffect',
+    ),
+  );
+});
+
 test('the scaffold exposes a canonical workspace contract', () => {
   assert.deepEqual(platformContract, {
     authority: 'canonical-model',
@@ -924,6 +968,7 @@ test('PAYABLES: the purchase order lists its bills and offers billing only when 
     ),
     {
       lines: `${ns}:query.commercial_purchase_lines`,
+      deliveries: `${ns}:query.drop_ship_delivery_list`,
       received: `${ns}:query.purchase_order_received_get`,
       bills: `${ns}:query.vendor_bill_list`,
       billLines: `${ns}:query.vendor_bill_line_list`,
@@ -1119,6 +1164,10 @@ test('PAYABLES (PY-G): each order line shows its three-way match from the purcha
     'billed',
     'to_bill',
     'match_status',
+    'delivered',
+    'linked_line',
+    'linked_order',
+    'route',
   ]);
   assert.deepEqual(
     Object.fromEntries(
@@ -1132,6 +1181,9 @@ test('PAYABLES (PY-G): each order line shows its three-way match from the purcha
       billLines: `${ns}:query.vendor_bill_line_list`,
       bills: `${ns}:query.vendor_bill_list`,
       bill: `${ns}:query.vendor_bill_get`,
+      deliveries: `${ns}:query.drop_ship_delivery_list`,
+      lineSource: `${ns}:query.purchase_order_line_get`,
+      linkedLine: `${ns}:query.sales_order_line_get`,
     },
   );
 

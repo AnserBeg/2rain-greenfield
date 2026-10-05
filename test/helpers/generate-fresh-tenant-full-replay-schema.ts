@@ -11,6 +11,7 @@ import { FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
 import { RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receivables-capability-executor.js';
 import { PAYABLES_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/payables-capability-executor.js';
+import { DROP_SHIP_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/drop-ship-executor.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import { captureSchemaSnapshot } from '../../packages/postgres-provider/src/migrations.js';
 import { withEphemeralPostgres } from './postgres.js';
@@ -51,6 +52,7 @@ async function main(): Promise<void> {
             FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY,
             RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY,
             PAYABLES_CAPABILITY_EXECUTOR_FACTORY,
+            DROP_SHIP_CAPABILITY_EXECUTOR_FACTORY,
           ],
           compiledApplication: {
             applications: compiledApplication.applications.slice(0, index + 1),

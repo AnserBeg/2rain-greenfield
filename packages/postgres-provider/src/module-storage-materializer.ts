@@ -6067,6 +6067,23 @@ function locateColumn(
     );
     if (column) return { column, entity };
   }
+  const relations = target.relations.filter(
+    (relation) =>
+      relation.relationColumn.origin !== 'field' &&
+      relation.relationId === element.subjectId &&
+      relation.relationColumn.physicalName === element.physicalObjectName,
+  );
+  if (relations.length === 1) {
+    const relation = relations[0]!;
+    return {
+      column: {
+        ...relation.relationColumn,
+        defaultSemantics: 'nullable' as const,
+        defaultValue: null,
+      },
+      entity: requiredEntity(target, relation.sourceEntityId),
+    };
+  }
   throw failure('ELEMENT_TARGET_MISSING', element.elementId);
 }
 

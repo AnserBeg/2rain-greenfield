@@ -1799,11 +1799,15 @@ test('PURCHASING-PARITY: an order line shows what is still to arrive, and its op
   // PAYABLES adds what is billed, what is still to bill and the match status.
   assert.deepEqual(Object.keys(lines.resultFields).toSorted(), [
     'billed',
+    'delivered',
     'line_amount',
     'line_tax',
+    'linked_line',
+    'linked_order',
     'match_status',
     'open_to_receive',
     'received',
+    'route',
     'to_bill',
   ]);
   assert.equal(
@@ -1851,6 +1855,10 @@ test('PURCHASING-PARITY: an order line shows what is still to arrive, and its op
       ['purchasing_billed', 'billed'],
       ['purchasing_to_bill', 'to_bill'],
       ['purchasing_match', 'match_status'],
+      ['purchase_order_delivered', 'purchase_line_delivered'],
+      ['purchase_linked_line', 'purchase_line_linked_line'],
+      ['purchase_linked_order', 'purchase_line_linked_order'],
+      ['purchase_route', 'purchase_line_route'],
     ],
   );
   // Offered on a released order's line with something still open; the new
@@ -1877,6 +1885,14 @@ test('PURCHASING-PARITY: an order line shows what is still to arrive, and its op
       },
       operator: 'positive',
       compare: null,
+    },
+    {
+      value: {
+        source: 'selected',
+        field: 'northstar.app:metric.purchase_line_route',
+      },
+      operator: 'equals',
+      compare: 'Stock',
     },
   ]);
   assert.deepEqual(

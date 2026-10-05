@@ -46,9 +46,11 @@ export const PAYABLES_SETTLEMENT_SPEC: SettlementSpec = Object.freeze({
     progressQuantity: 'received_quantity',
     // A purchase order line carries no unit; the receipt recorded one.
     unitFrom: 'progress' as const,
+    deliverySide: 'purchase' as const,
     uniqueReference: 'supplier_invoice_number',
   }),
   actions: Object.freeze([
+    ['purchase_order_close', 'close', 'order'],
     ['vendor_bill_post', 'post', 'document'],
     ['vendor_bill_void', 'void', 'document'],
     ['vendor_payment_post', 'pay', 'payment'],

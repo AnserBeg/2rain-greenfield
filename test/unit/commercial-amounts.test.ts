@@ -1,5 +1,59 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import pg from 'pg';
+import {
+  dropShipBound,
+  dropShipQuantity,
+  dropShipQuantityText,
+  dropShipRevision,
+} from '../../packages/postgres-provider/src/drop-ship-support.js';
+
+test('D-B: supplier delivery bounds are exact on both linked lines', () => {
+  const amount = dropShipQuantity('0.000000000000000001');
+  assert.equal(dropShipQuantityText(amount), '0.000000000000000001');
+  assert.equal(
+    dropShipQuantityText(dropShipQuantity('2.500000000000000000')),
+    '2.5',
+  );
+  assert.equal(
+    dropShipQuantityText(dropShipQuantity('5.000000000000000000')),
+    '5',
+  );
+  dropShipBound(amount, amount, amount);
+  for (const [delivered, sales, purchase] of [
+    ['0', '1', '1'],
+    ['2', '1', '3'],
+    ['2', '3', '1'],
+  ])
+    assert.throws(
+      () =>
+        dropShipBound(
+          dropShipQuantity(delivered),
+          dropShipQuantity(sales),
+          dropShipQuantity(purchase),
+        ),
+      /open sales or purchase quantity/u,
+    );
+  assert.throws(
+    () => dropShipQuantity('0.0000000000000000001'),
+    /exact non-negative/u,
+  );
+  assert.throws(() => dropShipQuantity('-1'), /exact non-negative/u);
+});
+
+test('drop-ship revisions normalize PostgreSQL bigint strings and reject unsafe values', () => {
+  const stored = pg.types.getTypeParser(20)('3');
+  assert.equal(typeof stored, 'string');
+  assert.equal(dropShipRevision(stored), 3);
+  assert.equal(dropShipRevision('3'), 3);
+  assert.equal(dropShipRevision(3), 3);
+  assert.equal(
+    dropShipRevision(String(Number.MAX_SAFE_INTEGER)),
+    Number.MAX_SAFE_INTEGER,
+  );
+  for (const value of [null, true, '', '0', '-1', '1.5', '9007199254740993'])
+    assert.throws(() => dropShipRevision(value), /positive safe integer/u);
+});
 
 import {
   chargeAmounts,

@@ -340,7 +340,9 @@ test('sales queries and storage are explicitly entity-owned', () => {
     );
   assert.deepEqual(
     LEGAL_ENTITY_RELATION_SEMANTICS_V1.find(
-      (rule) => rule.sourceFamilyId === 'sales_order_line',
+      (rule) =>
+        rule.sourceFamilyId === 'sales_order_line' &&
+        rule.targetFamilyId === 'sales_order',
     ),
     {
       semantics: 'sameEntity',
@@ -378,12 +380,12 @@ test('sales leads compiled business navigation and fulfillment is registered beh
   const salesOperations = composed.operations.filter((operation) =>
     operation.operationId.includes(':operation.sales_order'),
   );
-  // Close and cancel (fulfillment), and reopen (receivables, ruling F).
+  // Close/cancel, reopen (ruling F), and Create drop-ship PO (D-C).
   assert.equal(
     salesOperations.filter(
       (operation) => operation.effect.kind === 'registeredCapabilityEffect',
     ).length,
-    3,
+    4,
   );
   assert.match(JSON.stringify(salesModuleDefinition()), /reservation/gu);
   assert.match(JSON.stringify(salesModuleDefinition()), /shipment/gu);

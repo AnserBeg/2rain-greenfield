@@ -3,6 +3,10 @@ import {
   type StorageTargetPayloadV1,
 } from '@north-star/compiler';
 import {
+  assertNoDeliveredOrder,
+  assertStockRoutes,
+} from './drop-ship-support.js';
+import {
   SEMANTIC_OPERATION_RESULT_VERSION,
   type RegisteredCapabilityOperationAuthorization,
   type RegisteredCapabilityOperationAuthorizationRequest,
@@ -219,7 +223,39 @@ class FulfillmentCapabilityExecutor implements RegisteredCapabilityOperationExec
         'Fulfillment authorization is not bound to this execution',
       );
     const operation = request.definition.operationId;
-    if (operation.endsWith(':operation.reservation_reserve'))
+    if (operation.endsWith(':operation.reservation_reserve')) {
+      await withTrustedRequestTransaction(
+        this.context.pool,
+        request.context,
+        (client) =>
+          withModuleRuntimeRole(client, async () => {
+            const row = await client.query<Record<string, unknown>>(
+              `SELECT * FROM ${fulfillmentTable(this.#binding.reservation)} WHERE tenant_id=$1 AND environment_id=$2 AND record_id=$3 AND archived_at IS NULL`,
+              [
+                request.context.tenantId,
+                request.context.environmentId,
+                prepared.recordId,
+              ],
+            );
+            await assertStockRoutes(
+              client,
+              this.#binding.target,
+              { ...request.context, legalEntityId: prepared.legalEntityId },
+              'sales',
+              row.rows.map((row) =>
+                String(
+                  row[
+                    fulfillmentRelation(
+                      this.#binding,
+                      this.#binding.reservation,
+                      'reservation_order_line',
+                    )
+                  ],
+                ),
+              ),
+            );
+          }),
+      );
       return executeFulfillmentLifecycle(
         this.context,
         this.#binding,
@@ -227,6 +263,7 @@ class FulfillmentCapabilityExecutor implements RegisteredCapabilityOperationExec
         prepared,
         'reserve',
       );
+    }
     if (operation.endsWith(':operation.reservation_release'))
       return executeFulfillmentLifecycle(
         this.context,
@@ -243,7 +280,21 @@ class FulfillmentCapabilityExecutor implements RegisteredCapabilityOperationExec
         prepared,
         'close',
       );
-    if (operation.endsWith(':operation.sales_order_cancel'))
+    if (operation.endsWith(':operation.sales_order_cancel')) {
+      await withTrustedRequestTransaction(
+        this.context.pool,
+        request.context,
+        (client) =>
+          withModuleRuntimeRole(client, () =>
+            assertNoDeliveredOrder(
+              client,
+              this.#binding.target,
+              { ...request.context, legalEntityId: prepared.legalEntityId },
+              'sales',
+              prepared.recordId,
+            ),
+          ),
+      );
       return executeFulfillmentLifecycle(
         this.context,
         this.#binding,
@@ -251,6 +302,7 @@ class FulfillmentCapabilityExecutor implements RegisteredCapabilityOperationExec
         prepared,
         'cancel',
       );
+    }
     if (!operation.endsWith(':operation.shipment_post'))
       throw fulfillmentError(
         'INVENTORY_POSTING_INPUT_INVALID',
@@ -355,6 +407,23 @@ class FulfillmentCapabilityExecutor implements RegisteredCapabilityOperationExec
             ],
           );
           const effectiveAt = field('effective_at');
+          await assertStockRoutes(
+            client,
+            binding.target,
+            { ...request.context, legalEntityId },
+            'sales',
+            rows.rows.map((row) =>
+              String(
+                row[
+                  fulfillmentRelation(
+                    binding,
+                    binding.shipmentLine,
+                    'shipment_line_order_line',
+                  )
+                ],
+              ),
+            ),
+          );
           return {
             authorization: {
               decision: 'ALLOW',
