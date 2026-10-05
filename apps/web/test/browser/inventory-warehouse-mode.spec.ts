@@ -194,13 +194,13 @@ test('the period lock closes a period and reopens it, each reviewed and confirme
       page,
       'Close period through',
       'Close through',
-      `${yesterday}T00:00:00`,
+      `${yesterday}T00:00`,
       'MODULE_PERIOD_LOCK_DIRECTION_INVALID',
     );
 
     // Reopen to yesterday, confirmed: the same document now posts.
     await openPeriodLock(page);
-    await command(page, 'Reopen to', 'Reopen to', `${yesterday}T00:00:00`);
+    await command(page, 'Reopen to', 'Reopen to', `${yesterday}T00:00`);
     await page.goto(documentUrl);
     await post(page);
     await expect(page.getByRole('status')).toContainText('Post complete');
@@ -272,7 +272,8 @@ async function scan(page: Page, code: string) {
 
 /**
  * A record command entered, reviewed and confirmed; with `refusal`, the
- * confirmed command is refused by that code.
+ * confirmed command is refused by that code. The picker drops a zero seconds
+ * field (`…T00:00`), and the review shows the instant as the field stores it.
  */
 async function command(
   page: Page,
@@ -287,7 +288,7 @@ async function command(
     .getByRole('button', { name: `Review ${label}`, exact: true })
     .click();
   await expect(page.locator('.composition-reviewed-inputs')).toContainText(
-    `${value}.000Z`,
+    `${value.length === 16 ? `${value}:00` : value}.000Z`,
   );
   await page
     .getByRole('button', { name: `Confirm ${label}`, exact: true })
