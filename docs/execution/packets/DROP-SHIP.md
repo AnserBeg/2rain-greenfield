@@ -1,6 +1,6 @@
 # DROP-SHIP — supplier delivery directly to the customer
 
-Status: unfinished BUILD on `packet/DROP-SHIP`, PAYABLES `96ac2341` and RELATION-INSTALL `b318205c` merged. Bridge draft [PR #20](https://github.com/AnserBeg/2rain-greenfield/pull/20) awaits refreshed controls/CI and owner review. DROP-SHIP draft [PR #19](https://github.com/AnserBeg/2rain-greenfield/pull/19) awaits post-bridge validation. No main merge or deployment; own Critical set unchanged.
+Status: unfinished BUILD on `packet/DROP-SHIP`, PAYABLES `96ac2341` and RELATION-INSTALL `d3d1812b` merged. Bridge draft [PR #20](https://github.com/AnserBeg/2rain-greenfield/pull/20) awaits refreshed controls/CI and owner review. DROP-SHIP draft [PR #19](https://github.com/AnserBeg/2rain-greenfield/pull/19) awaits post-bridge validation. No main merge or deployment; own Critical set unchanged.
 
 ## Design (written before implementation)
 
@@ -25,8 +25,8 @@ Status: unfinished BUILD on `packet/DROP-SHIP`, PAYABLES `96ac2341` and RELATION
 - Combined hygiene/grammar run: 35/36; one lock-control test was refused by its live-container contamination guard during this packet's exclusive schema replay. Registration checks independently pass. Lint has no errors; formatting and diff whitespace checked.
 - Exact-base release rebuild/check passes: five inherited entries plus one; 104 surfaces, 16 navigation leaves, 604 scenarios, 527 constructible candidates / 77 without a create operation. PostgreSQL has NOT observed those execution pins yet. Both numbering pin lists include DSD: 11 fields, 11 uniqueness probes, measured from compiled assigned fields.
 - Coverage declaration inventory re-derived: 2658 obligations / 824 observed declarations. Local coverage gate refused missing reachability receipts; no execution receipts were invented.
-- Prior full-replay generation and CI failed with `ELEMENT_TARGET_MISSING` on `purchase_order_line_sales_line`; the failed generator cleaned its container and did not rewrite the snapshot. RELATION-INSTALL is now merged; post-bridge regeneration remains pending.
-- New commercial PostgreSQL journey is registered in package scripts, reachability and hygiene; its first local attempt never started (lock busy). New `purchase-drop-ship.spec.ts` is operations-browser reachable; browser not run. Full DROP-SHIP CI acceptance remains unmet.
+- Prior full-replay generation failed with `ELEMENT_TARGET_MISSING`; its container was cleaned and snapshot untouched. With RELATION-INSTALL merged, [hosted regeneration](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37279897119) at `5d2d9027` PASS. The generated full-replay snapshot is committed at `88ce5ce6`; release bytes are unchanged since generation.
+- New commercial PostgreSQL journey is registered in package scripts, reachability and hygiene; the first local attempt never started (lock busy), and the current exclusive run is pending. New `purchase-drop-ship.spec.ts` is operations-browser reachable; local browser not run. Full DROP-SHIP CI acceptance remains unmet.
 - Post-bridge correction: two existing unit files now account for DSD numbering, the exact sales-line/order relation and the fourth registered sales-order operation. Focused 14/14 PASS; formatting, typecheck and release `--check` PASS. Coverage re-derived again from unchanged declarations.
 - Hosted run `37271614092` is red: compiler input/fixture pins, browser backend-loader failure and opaque generic guard refusal. Corrected at `e9751adc`: Sales command module, retained references, typed refusal, scoped browser loader and fixture closure. Four changed compiler/unit files PASS 93/93; lint/format/typecheck PASS. Full new CI remains pending.
 - [Hosted run `37274390870`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37274390870) is red: padded stored quantities rejected by governed PO creation, undeclared navigation placement, stale progress/CSV/fixture pins, stale schema snapshot and repeated-install WAL capacity. `14116111` canonicalizes copied quantity/date inputs, declares contextual actions, fixes browser selection and affected fixtures/pins, and checkpoints the composed test. Snapshot regeneration and fresh full CI remain pending.
@@ -50,7 +50,7 @@ Review: no separate DROP-SHIP arm; inherited Critical bridge owner-run review is
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "DROP-SHIP",
   "base": "96ac234122322b2cbe18349299664f56c8f5190a",
-  "head": "d3a119c07249503b936d67ff8f822b1370c33eb8",
+  "head": "88ce5ce6c1f64ba4878ac48429dca4048870b993",
   "changedPaths": [
     "apps/api/src/composition-root.ts",
     "apps/web/release/app.authored.json",
@@ -106,6 +106,7 @@ Review: no separate DROP-SHIP arm; inherited Critical bridge owner-run review is
     "test/postgres/document-numbering.test.ts",
     "test/postgres/drop-ship.test.ts",
     "test/postgres/expected-receipts.test.ts",
+    "test/postgres/fresh-tenant-full-replay-schema.snapshot.json",
     "test/postgres/inventory-posting.test.ts",
     "test/postgres/module-storage-transition.test.ts",
     "test/postgres/order-lists.test.ts",
