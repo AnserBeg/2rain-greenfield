@@ -109,6 +109,24 @@
           "expected": "the refusal must name the companion, not the reviewed evidence at large"
         }
       ]
+    },
+    {
+      "name": "count-physical-quantity-overwritten",
+      "claim": "C6. A count's Post changes nothing on the count or its lines beyond its transition: a line's physical count, and the count's type and counting mode, which no posting writes, are proved identical to the bytes the evidence lock froze.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "          SET ${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $5::uuid,\n",
+      "replacement": "          SET $${quoted(binding.stockCountLineRelationToTransactionLineColumn)} = $$5::uuid,\n              $${quoted(declaredColumns(binding.stockCountLine, ['stock_count_line_physical_quantity'])[0]!)} = 987654,\n",
+      "test": {
+        "files": ["test/postgres/inventory-stock-count.test.ts"],
+        "namePattern": "three-value evidence"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-stock-count.test.ts",
+          "name": "stock-count posting preserves three-value evidence and appends correction and exact reversal through the shared protocol",
+          "expected": "INVENTORY_COUNT_EVIDENCE_CONFLICT: stock-count line \\S+ was altered in a column its posting transition does not write"
+        }
+      ]
     }
   ]
 }
