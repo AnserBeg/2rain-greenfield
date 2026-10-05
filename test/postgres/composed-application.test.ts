@@ -1471,6 +1471,7 @@ test(
           );
           await assertEmptyRollbackSelectorFailsClosed(
             runtime,
+            compiledApplication,
             databaseUrl,
             pool,
           );
@@ -1503,6 +1504,7 @@ test(
 
 async function assertEmptyRollbackSelectorFailsClosed(
   runtime: ComposedApplicationRuntime,
+  compiledApplication: unknown,
   databaseUrl: string,
   adminPool: pg.Pool,
 ): Promise<void> {
@@ -1514,6 +1516,7 @@ async function assertEmptyRollbackSelectorFailsClosed(
     await assert.rejects(
       async () => {
         unexpectedlyStarted = await startComposedApplication({
+          compiledApplication,
           databaseUrl,
           host: '127.0.0.1',
           port: 0,
