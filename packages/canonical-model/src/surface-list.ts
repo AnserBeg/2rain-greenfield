@@ -76,10 +76,10 @@ export function validateSurfaceLists(
     );
     if (list.columns.filter((column) => column.role === 'title').length !== 1)
       fail(id, 'a declared List has exactly one title column');
-    const columns = new Map(
+    const columns = new Map<string, SurfaceList['columns'][number]>(
       list.columns.map((column) => [column.columnId, column]),
     );
-    const progressOutputs = new Set(
+    const progressOutputs = new Set<string>(
       list.progress ? Object.values(list.progress.outputs) : [],
     );
     // Figures computed by the list statement, by id: sums and totals are
@@ -98,7 +98,7 @@ export function validateSurfaceLists(
         (latest) => [latest.figureId, 'latest'] as const,
       ),
     ]);
-    const bandValues = new Map(
+    const bandValues = new Map<string, ReadonlySet<string>>(
       (list.figures?.bands ?? []).map((band) => [
         band.figureId,
         new Set([
@@ -269,10 +269,7 @@ export function validateSurfaceLists(
       if (view.band) {
         const values = bandValues.get(view.band.figure);
         unique(view.band.values, view.viewId, 'view band values');
-        if (
-          !values ||
-          !view.band.values.every((value) => values.has(value))
-        )
+        if (!values || !view.band.values.every((value) => values.has(value)))
           fail(
             view.viewId,
             "a view keeps values of one of the List's band figures",
@@ -450,7 +447,10 @@ export function validateSurfaceLists(
           fail(id, 'list figures read company rows only under a company List');
         return source;
       };
-      const matched = (rows: { query: { targetId: string }; match: string }) => {
+      const matched = (rows: {
+        query: { targetId: string };
+        match: string;
+      }) => {
         const source = read(rows.query.targetId);
         const match = fields.get(rows.match);
         // A record id is 36 characters; a shorter field could not hold one.

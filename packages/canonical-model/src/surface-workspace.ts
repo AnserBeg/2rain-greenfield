@@ -47,7 +47,7 @@ export function validateSurfaceWorkspaces(
       )
         fail(
           surface.surfaceId,
-          "a navigation module names another declared module of a navigation List",
+          'a navigation module names another declared module of a navigation List',
         );
       if (workspace.ownerSurfaceId) {
         const owner = surfaces.get(workspace.ownerSurfaceId);
@@ -695,7 +695,9 @@ function validateSurfaceForms(model: VersionedNormalizedApplicationPackage) {
     const selected = new Set(
       query!.queryType === 'aggregate'
         ? []
-        : query!.selections.map((selection) => String(selection.field.targetId)),
+        : query!.selections.map((selection) =>
+            String(selection.field.targetId),
+          ),
     );
     const seen = new Set<string>();
     for (const reference of surface.form.references) {

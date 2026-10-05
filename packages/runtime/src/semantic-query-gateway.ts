@@ -956,11 +956,7 @@ async function authorizeSharedListProjection(
       if (sum.within)
         use(sum.within.queryId, [sum.within.fieldId], sum.within.relationId);
       if (sum.related)
-        use(
-          sum.related.queryId,
-          [sum.related.fieldId],
-          sum.related.relationId,
-        );
+        use(sum.related.queryId, [sum.related.fieldId], sum.related.relationId);
     }
     for (const latest of query.figures.latest ?? []) {
       use(latest.rows.queryId, [latest.rows.matchFieldId]);

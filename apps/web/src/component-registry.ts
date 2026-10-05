@@ -1909,7 +1909,10 @@ function renderFormReferenceControl(
     current !== '' && !options.some((option) => option.recordId === current)
       ? [
           ...options,
-          { label: `Unavailable (${shortIdentity(current)})`, recordId: current },
+          {
+            label: `Unavailable (${shortIdentity(current)})`,
+            recordId: current,
+          },
         ]
       : options;
   return {

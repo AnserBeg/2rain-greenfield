@@ -16,10 +16,10 @@ import type { SharedListQueryRequest } from './index.js';
  * shape it was minted for, so the binding digest covers every member that can
  * move a row into or out of the set -- archive inclusion, match mode, search,
  * sort, relation labels, the parent scope, progress, figures and before
- * filters -- and the cursor carries a checksum over that digest. A cursor minted for one
- * shape, one parent or one relation therefore cannot decode against another;
- * it is refused rather than silently reinterpreted as an offset into a
- * different set.
+ * filters -- and the cursor carries a checksum over that digest. A cursor
+ * minted for one shape, one parent or one relation therefore cannot decode
+ * against another; it is refused rather than silently reinterpreted as an
+ * offset into a different set.
  */
 const SHARED_LIST_CURSOR_VERSION = 'northstar.shared-list-cursor/v1' as const;
 

@@ -50,8 +50,7 @@ export interface SharedListFigureSum {
 
 /** A figure declared before, or an exact decimal the listed query selects. */
 export type SharedListFigureOperand =
-  | { readonly figureId: string }
-  | { readonly fieldId: string };
+  { readonly figureId: string } | { readonly fieldId: string };
 
 export interface SharedListFigureTotal {
   readonly figureId: string;
@@ -62,8 +61,7 @@ export interface SharedListFigureTotal {
 
 /** A listed row's exact decimal, or a canonical decimal, compared with. */
 export type SharedListFigureThreshold =
-  | { readonly fieldId: string }
-  | { readonly value: string };
+  { readonly fieldId: string } | { readonly value: string };
 
 export interface SharedListFigureBandCase {
   readonly atMost?: SharedListFigureThreshold;
@@ -162,7 +160,8 @@ function record(
   required: readonly string[],
   optional: readonly string[] = [],
 ): Readonly<Record<string, ImmutableJsonValue | undefined>> {
-  if (!isRecord(value)) throw malformed(`list figures ${name} must be an object`);
+  if (!isRecord(value))
+    throw malformed(`list figures ${name} must be an object`);
   assertExactKeys(value, [...required, ...optional], true);
   if (required.some((key) => !Object.hasOwn(value, key)))
     throw malformed(`list figures ${name} is missing a required member`);
@@ -175,11 +174,7 @@ function list(
   minimum: number,
   maximum: number,
 ): readonly ImmutableJsonValue[] {
-  if (
-    !Array.isArray(value) ||
-    value.length < minimum ||
-    value.length > maximum
-  )
+  if (!Array.isArray(value) || value.length < minimum || value.length > maximum)
     throw malformed(
       `list figures ${name} holds ${String(minimum)} to ${String(maximum)} entries`,
     );
@@ -238,7 +233,10 @@ function parseThreshold(
   if (!isRecord(value)) throw malformed('list figures threshold is an object');
   if (Object.hasOwn(value, 'value')) {
     assertExactKeys(value, ['value']);
-    if (typeof value.value !== 'string' || !signedDecimalPattern.test(value.value))
+    if (
+      typeof value.value !== 'string' ||
+      !signedDecimalPattern.test(value.value)
+    )
       throw malformed('list figures threshold value is a canonical decimal');
     return Object.freeze({ value: value.value });
   }
@@ -257,12 +255,12 @@ function parseThreshold(
 export function parseSharedListFigures(
   value: ImmutableJsonValue,
 ): SharedListFigures {
-  const figures = record(value, 'argument', ['sums'], [
-    'bands',
-    'keep',
-    'latest',
-    'totals',
-  ]);
+  const figures = record(
+    value,
+    'argument',
+    ['sums'],
+    ['bands', 'keep', 'latest', 'totals'],
+  );
   const ids = new Set<string>();
   const declare = (figureId: unknown) => {
     const id = canonicalId(figureId, 'figureId');
@@ -273,14 +271,19 @@ export function parseSharedListFigures(
   const numbers = new Set<string>();
   const sums = list(figures.sums, 'sums', 1, 8).map(
     (entry): SharedListFigureSum => {
-      const sum = record(entry, 'sum', ['figureId', 'rows', 'sum'], [
-        'related',
-        'within',
-      ]);
+      const sum = record(
+        entry,
+        'sum',
+        ['figureId', 'rows', 'sum'],
+        ['related', 'within'],
+      );
       const figureId = declare(sum.figureId);
-      const rows = record(sum.rows, 'rows', ['matchFieldId', 'queryId'], [
-        'quantityFieldId',
-      ]);
+      const rows = record(
+        sum.rows,
+        'rows',
+        ['matchFieldId', 'queryId'],
+        ['quantityFieldId'],
+      );
       if (
         sum.sum !== 'rows' &&
         sum.sum !== 'related' &&
@@ -296,7 +299,11 @@ export function parseSharedListFigures(
       const related =
         sum.related === undefined
           ? undefined
-          : record(sum.related, 'related', ['fieldId', 'queryId', 'relationId']);
+          : record(sum.related, 'related', [
+              'fieldId',
+              'queryId',
+              'relationId',
+            ]);
       numbers.add(figureId);
       return Object.freeze({
         figureId,
@@ -325,7 +332,9 @@ export function parseSharedListFigures(
               }),
         }),
         sum: sum.sum,
-        ...(sum.within === undefined ? {} : { within: parseWithin(sum.within) }),
+        ...(sum.within === undefined
+          ? {}
+          : { within: parseWithin(sum.within) }),
       });
     },
   );
@@ -334,9 +343,12 @@ export function parseSharedListFigures(
       ? undefined
       : list(figures.totals, 'totals', 1, 6).map(
           (entry): SharedListFigureTotal => {
-            const total = record(entry, 'total', ['figureId', 'minus', 'plus'], [
-              'floor',
-            ]);
+            const total = record(
+              entry,
+              'total',
+              ['figureId', 'minus', 'plus'],
+              ['floor'],
+            );
             const figureId = declare(total.figureId);
             if (total.floor !== undefined && total.floor !== 'zero')
               throw malformed('list figures total floor is zero');
@@ -380,11 +392,16 @@ export function parseSharedListFigures(
               throw malformed('list figures band names a sum or a total');
             const cases = list(band.cases, 'band cases', 1, 4).map(
               (candidate): SharedListFigureBandCase => {
-                const entry = record(candidate, 'band case', ['value'], [
-                  'atMost',
-                  'below',
-                ]);
-                if ((entry.below === undefined) === (entry.atMost === undefined))
+                const entry = record(
+                  candidate,
+                  'band case',
+                  ['value'],
+                  ['atMost', 'below'],
+                );
+                if (
+                  (entry.below === undefined) ===
+                  (entry.atMost === undefined)
+                )
                   throw malformed(
                     'list figures band case compares with exactly one threshold',
                   );
@@ -435,14 +452,20 @@ export function parseSharedListFigures(
               'queryId',
             ]);
             return Object.freeze({
-              byFieldId: canonicalId(latestFigure.byFieldId, 'latest byFieldId'),
+              byFieldId: canonicalId(
+                latestFigure.byFieldId,
+                'latest byFieldId',
+              ),
               figureId,
               label: Object.freeze({
                 fieldId: canonicalId(label.fieldId, 'label fieldId'),
                 queryId: canonicalId(label.queryId, 'label queryId'),
               }),
               rows: Object.freeze({
-                matchFieldId: canonicalId(rows.matchFieldId, 'rows matchFieldId'),
+                matchFieldId: canonicalId(
+                  rows.matchFieldId,
+                  'rows matchFieldId',
+                ),
                 queryId: canonicalId(rows.queryId, 'rows queryId'),
               }),
               valueFieldId: canonicalId(

@@ -2474,12 +2474,10 @@ interface FigureRelatedPlan {
 }
 
 type FigureOperandPlan =
-  | { readonly figureId: string }
-  | { readonly column: string };
+  { readonly figureId: string } | { readonly column: string };
 
 type FigureThresholdPlan =
-  | { readonly column: string }
-  | { readonly value: string };
+  { readonly column: string } | { readonly value: string };
 
 interface ListFiguresPlan {
   readonly sums: readonly {
@@ -2511,7 +2509,10 @@ interface ListFiguresPlan {
     readonly within: FigureWithinPlan;
     readonly byColumn: string;
     readonly valueColumn: string;
-    readonly label: { readonly entity: StorageEntity; readonly column: StorageColumn };
+    readonly label: {
+      readonly entity: StorageEntity;
+      readonly column: StorageColumn;
+    };
   }[];
   readonly keep: {
     readonly figureId: string;
@@ -2559,7 +2560,10 @@ function listFiguresPlan(
   const entityOf = (queryId: string) => {
     const entityId = authorized.entityIds[queryId];
     if (!entityId)
-      return refuse(queryId, 'a figure query reached the executor unauthorized');
+      return refuse(
+        queryId,
+        'a figure query reached the executor unauthorized',
+      );
     const target = requiredEntity(storage, entityId);
     entities.set(target.entityId, target);
     return target;
@@ -2640,9 +2644,7 @@ function listFiguresPlan(
       ['exactDecimalFieldType'],
       'a figure adds or compares a compiled exact decimal of the listed entity',
     ).physicalName;
-  const operand = (
-    value: SharedListFigureOperand,
-  ): FigureOperandPlan =>
+  const operand = (value: SharedListFigureOperand): FigureOperandPlan =>
     'figureId' in value
       ? Object.freeze({ figureId: value.figureId })
       : Object.freeze({ column: listedDecimal(value.fieldId) });
@@ -2918,12 +2920,10 @@ function listFiguresFromSql(
     );
   });
   return `CROSS JOIN LATERAL (
-    SELECT ${[...sumColumns, ...latestColumns].join(',
-           ')}
+    SELECT ${[...sumColumns, ...latestColumns].join(',\n           ')}
   ) AS ${quoted(FIGURE_SUMS_ALIAS)}
   CROSS JOIN LATERAL (
-    SELECT ${['1 AS "figures"', ...figureColumns].join(',
-           ')}
+    SELECT ${['1 AS "figures"', ...figureColumns].join(',\n           ')}
   ) AS ${quoted(FIGURES_ALIAS)}`;
 }
 
@@ -2938,7 +2938,9 @@ function listFigureColumns(plan: ListFiguresPlan): readonly {
   const totals = new Map(
     plan.totals.map((total, index) => [total.figureId, index]),
   );
-  const bands = new Map(plan.bands.map((band, index) => [band.figureId, index]));
+  const bands = new Map(
+    plan.bands.map((band, index) => [band.figureId, index]),
+  );
   const latest = new Map(
     plan.latest.map((figure, index) => [figure.figureId, index]),
   );
@@ -3552,8 +3554,9 @@ function toListDto(
             ...base.values,
             ...Object.fromEntries(
               figures.map((figure, index) => {
-                const value = row[`nsm_table_figure_${String(index)}`] as
-                  unknown;
+                const value = row[
+                  `nsm_table_figure_${String(index)}`
+                ] as unknown;
                 return [
                   figure.figureId,
                   value === null || value === undefined

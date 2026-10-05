@@ -212,7 +212,9 @@ function figuresArgument(
   const figures = list.figures;
   if (!figures) return undefined;
   const within = (
-    value: NonNullable<NonNullable<SurfaceList['figures']>['latest']>[number]['within'],
+    value: NonNullable<
+      NonNullable<SurfaceList['figures']>['latest']
+    >[number]['within'],
   ) =>
     Object.freeze({
       fieldId: value.field,
