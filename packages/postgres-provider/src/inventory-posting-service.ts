@@ -8788,7 +8788,7 @@ async function assertCountExpectedIsLedger(
       WHERE tenant_id = $1 AND environment_id = $2
         AND ${quoted(binding.movement.legalEntityColumn!)} = $3
         AND ${column('inventory_movement_location_id')} = $4
-        AND ${itemColumn} = ANY($5::text[])
+        AND ${itemColumn}::text = ANY($5::text[])
         AND ${column('inventory_movement_effective_at')} <= $6::timestamptz
         AND ${quoted(binding.movement.archiveColumn)} IS NULL
       GROUP BY ${itemColumn}`,

@@ -640,7 +640,7 @@ async function reviewCountedLines(
       WHERE tenant_id = $1 AND environment_id = $2
         AND ${quoted(binding.legalEntityColumn)} = $3
         AND ${quoted(m.locationId)} = $4
-        AND ${quoted(m.itemId)} = ANY($5::text[])
+        AND ${quoted(m.itemId)}::text = ANY($5::text[])
         AND ${quoted(m.effectiveAt)} <= $6::timestamptz
         AND ${quoted(binding.movement.archive.archivedAtColumn)} IS NULL
       GROUP BY ${quoted(m.itemId)}`,
