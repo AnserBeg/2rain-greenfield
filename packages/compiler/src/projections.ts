@@ -4,6 +4,7 @@ import {
   languageHasMaterializedStateFields,
   type NormalizedApplicationPackage,
   type SurfaceDocumentEditor,
+  type SurfaceComposition,
   type SurfaceList,
   type FieldNumbering,
   type VersionedNormalizedApplicationPackage,
@@ -198,6 +199,7 @@ export function lowerBaseProjectionPayloads(
         packageRevision,
         currentStorageTarget,
         compilerSemanticProfileVersion,
+        verificationPackageRevision,
       ),
     ),
     plan(
@@ -522,7 +524,31 @@ function operationCatalogPayload(
   packageRevision: NormalizedApplicationPackage,
   storageTarget: StorageTargetPayloadV1 | null,
   compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
+  original: VersionedNormalizedApplicationPackage,
 ): unknown {
+  // Only authored capability Task bindings introduce this envelope. Existing
+  // record/revision-only commands retain their exact closed contracts and bytes.
+  // The registered executor owns the closed scalar vocabulary inside it.
+  const argumentOperations = new Set(
+    original.surfaces
+      .filter((surface) => surface.lifecycle === 'active')
+      .flatMap((surface) => {
+        const composition = (
+          'composition' in surface ? surface.composition : undefined
+        ) as SurfaceComposition | undefined;
+        return composition
+          ? composition.actions.flatMap((action) =>
+              action.steps
+                .filter((step) =>
+                  step.bindings.some(
+                    (binding) => binding.path[0] === 'arguments',
+                  ),
+                )
+                .map((step) => step.operation.targetId),
+            )
+          : [];
+      }),
+  );
   const fieldsByEntity = groupBy(
     packageRevision.fields.filter((field) => field.lifecycle === 'active'),
     (field) => field.entity.targetId,
@@ -578,6 +604,7 @@ function operationCatalogPayload(
                 ? storageByEntity.get(operation.effect.entity.targetId)
                 : undefined,
               compilerSemanticProfileVersion,
+              argumentOperations.has(operation.operationId),
             ),
             infrastructure: {
               archiveRepresentation: 'nullableArchivedAt',
@@ -1396,6 +1423,7 @@ function operationInputContract(
   relations: NormalizedApplicationPackage['relations'],
   storageEntity: StorageTargetPayloadV1['entities'][number] | undefined,
   compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
+  capabilityArguments: boolean,
 ): unknown {
   const effectKind = operation.effect.kind;
   const capabilityRecordScope = effectKind === 'registeredCapabilityEffect';
@@ -1456,9 +1484,13 @@ function operationInputContract(
       : effectKind === 'updateRecordEffect'
         ? ['expectedRevision', 'patch', 'recordId']
         : capabilityRecordScope
-          ? // ADR-0038's O1 command carries only its record/revision pin;
-            // business content is hydrated from the staged draft.
-            ['expectedRevision', 'recordId']
+          ? // Posting commands hydrate content from their staged draft. A
+            // declared capability Task may additionally carry scalar arguments.
+            [
+              ...(capabilityArguments ? ['arguments'] : []),
+              'expectedRevision',
+              'recordId',
+            ]
           : ['expectedRevision', 'recordId'];
   return {
     closedArgumentKeys,

@@ -34,8 +34,249 @@ import {
 } from '../../packages/domain/src/purchasing/index.js';
 import { evaluateRegisteredOperationPrecondition } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/definition.js';
+import {
+  purchaseOrderRevisionDigest,
+  purchaseOrderAmendmentRevisionDigest,
+  currentPurchaseOrderApproval,
+} from '../../packages/postgres-provider/src/purchase-order-approval.js';
+import { purchaseOrderApprovalInput } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
+import { localDemoActor } from '../../packages/runtime/src/local-demo-actor.js';
+
+test('approval revision identity changes for a header edit, line edit, addition or removal, never for query order', () => {
+  const lines = [
+    { recordId: 'b', revision: 1 },
+    { recordId: 'a', revision: 2 },
+  ];
+  const digest = purchaseOrderRevisionDigest(1, lines);
+  assert.equal(purchaseOrderRevisionDigest(1, [...lines].reverse()), digest);
+  for (const changed of [
+    purchaseOrderRevisionDigest(2, lines),
+    purchaseOrderRevisionDigest(1, [{ recordId: 'a', revision: 3 }, lines[0]!]),
+    purchaseOrderRevisionDigest(1, lines.slice(1)),
+    purchaseOrderRevisionDigest(1, [...lines, { recordId: 'c', revision: 1 }]),
+  ])
+    assert.notEqual(changed, digest);
+  assert.equal(
+    currentPurchaseOrderApproval(digest, [
+      { digest, state: 'approved', kind: 'order' },
+    ]),
+    'Approved',
+  );
+  assert.equal(
+    currentPurchaseOrderApproval(digest, [
+      { digest: 'prior', state: 'approved', kind: 'order' },
+    ]),
+    'Not requested',
+  );
+  assert.equal(
+    currentPurchaseOrderApproval(digest, [
+      { digest, state: 'approved', kind: 'amendment' },
+    ]),
+    'Not requested',
+  );
+  assert.equal(
+    currentPurchaseOrderApproval(digest, [
+      { digest, state: 'consumed', kind: 'order' },
+    ]),
+    'Not requested',
+  );
+});
+
+test('amendment approval binds the proposal identity and revision as well as the order image', () => {
+  const order = purchaseOrderRevisionDigest(1, [
+    { recordId: 'line', revision: 1 },
+  ]);
+  const proposal = { recordId: 'proposal', revision: 1 };
+  const digest = purchaseOrderAmendmentRevisionDigest(order, proposal);
+  assert.equal(
+    purchaseOrderAmendmentRevisionDigest(order, { ...proposal }),
+    digest,
+  );
+  assert.notEqual(
+    purchaseOrderAmendmentRevisionDigest(order, { ...proposal, revision: 2 }),
+    digest,
+  );
+  assert.notEqual(
+    purchaseOrderAmendmentRevisionDigest(order, {
+      ...proposal,
+      recordId: 'another',
+    }),
+    digest,
+  );
+  assert.notEqual(
+    purchaseOrderAmendmentRevisionDigest(
+      purchaseOrderRevisionDigest(2, []),
+      proposal,
+    ),
+    digest,
+  );
+});
+
+test('approval inputs refuse forged actors, unknown arguments, missing decision reasons and inexact quantities', () => {
+  const base = { recordId: 'record', expectedRevision: 1 };
+  assert.equal(
+    purchaseOrderApprovalInput(
+      { ...base, arguments: { reason: 'Checked supplier terms' } },
+      'approve',
+    ).reason,
+    'Checked supplier terms',
+  );
+  assert.equal(
+    purchaseOrderApprovalInput(
+      { ...base, arguments: { supplierReference: null } },
+      'release',
+    ).supplierReference,
+    null,
+  );
+  for (const input of [
+    { ...base, principalId: 'manager' },
+    { ...base, arguments: { decidedBy: 'manager', reason: 'x' } },
+    { ...base, arguments: { reason: '  ' } },
+    { ...base, expectedRevision: 1.5 },
+    { ...base, arguments: { reason: 'x'.repeat(1001) } },
+  ])
+    assert.throws(() => purchaseOrderApprovalInput(input, 'approve'));
+  for (const quantity of ['-1', '1e3', '1.0000000000000000001', 1])
+    assert.throws(() =>
+      purchaseOrderApprovalInput(
+        { ...base, arguments: { quantity, reason: 'Changed demand' } },
+        'amend',
+      ),
+    );
+  assert.equal(localDemoActor(undefined), 'buyer');
+  assert.equal(
+    localDemoActor('irrelevant=yes; northstar-demo-actor=manager'),
+    'manager',
+  );
+  assert.equal(localDemoActor('northstar-demo-actor=administrator'), 'buyer');
+});
+
+test('the approval inbox is a declared List and requests have no generic write path or new PO state', () => {
+  const model = normalizeApplicationPackage(composedApplicationDefinition());
+  const request = 'northstar.app:entity.purchase_order_approval';
+  const inbox = model.surfaces.find(
+    (surface) =>
+      surface.surfaceId ===
+      'northstar.app:surface.purchase_order_approval_list',
+  );
+  assert.ok(inbox && 'list' in inbox && inbox.list);
+  assert.equal(
+    model.operations.some(
+      (operation) =>
+        'entity' in operation.effect &&
+        operation.effect.entity.targetId === request,
+    ),
+    false,
+  );
+  assert.equal(
+    model.stateMachines.find(
+      (machine) =>
+        machine.machineId === 'northstar.app:machine.purchase_order_lifecycle',
+    )?.states.length,
+    4,
+  );
+  const placeOrder = model.operations.find(
+    (operation) =>
+      operation.operationId ===
+      'northstar.app:operation.purchase_order_release',
+  );
+  assert.ok(placeOrder && 'label' in placeOrder);
+  assert.equal(placeOrder.label, 'Place order');
+  const supplierReference = model.fields.find(
+    (field) =>
+      field.fieldId === 'northstar.app:field.purchase_order_supplier_reference',
+  );
+  assert.equal(supplierReference?.presence, 'optional');
+  assert.equal(supplierReference?.searchable, false);
+  for (const local of ['approve', 'reject'])
+    assert.equal(
+      model.operations.find(
+        (operation) =>
+          operation.operationId ===
+          `northstar.app:operation.purchase_order_approval_${local}`,
+      )?.permission.targetId,
+      'northstar.app:permission.purchase_order_approve',
+    );
+});
 
 const namespace = PURCHASING_IDS.namespace;
+test('only declared capability argument bindings extend a compiled command input contract', () => {
+  const compiled = mustCompile(compilerInput(composedApplicationDefinition()));
+  const catalog = projectionPayload<{ operations: CompiledOperation[] }>(
+    compiled,
+    PROJECTION_FAMILY_IDS.operationCatalog,
+  );
+  for (const local of [
+    'purchase_order_release',
+    'purchase_order_line_amend',
+    'purchase_order_approval_approve',
+    'purchase_order_approval_reject',
+  ]) {
+    assert.deepEqual(
+      catalog.operations.find(
+        (o) => o.operationId === `northstar.app:operation.${local}`,
+      )?.inputContract?.closedArgumentKeys,
+      ['arguments', 'expectedRevision', 'recordId'],
+    );
+  }
+  for (const local of [
+    'purchase_order_submit',
+    'goods_receipt_post',
+    'sales_order_release',
+    'vendor_bill_post',
+  ]) {
+    assert.deepEqual(
+      catalog.operations.find(
+        (o) => o.operationId === `northstar.app:operation.${local}`,
+      )?.inputContract?.closedArgumentKeys,
+      ['expectedRevision', 'recordId'],
+    );
+  }
+});
+
+test('capability-owned approval storage compiles without generic CRUD, but a partial generic path does not earn that exception', () => {
+  const definition = composedApplicationDefinition() as Record<string, unknown>;
+  assert.equal(
+    compileApplication(compilerInput(definition)).status,
+    'compiled',
+  );
+  const mixed = structuredClone(definition);
+  const operations = mixed.operations as Record<string, unknown>[];
+  const template = operations.find(
+    (entry) =>
+      entry.operationId ===
+      'northstar.app:operation.purchasing_settings_update',
+  )!;
+  operations.push({
+    ...template,
+    operationId: 'northstar.app:operation.purchase_order_approval_update_probe',
+    effect: {
+      kind: 'updateRecordEffect',
+      schemaVersion: 'v6',
+      entity: {
+        kind: 'entityReference',
+        schemaVersion: 'v6',
+        targetId: 'northstar.app:entity.purchase_order_approval',
+      },
+    },
+    readBack: {
+      kind: 'queryReference',
+      schemaVersion: 'v6',
+      targetId: 'northstar.app:query.purchase_order_approval_get',
+    },
+  });
+  const result = compileApplication(compilerInput(mixed));
+  assert.equal(result.status, 'failed');
+  if (result.status === 'failed')
+    assert.ok(
+      result.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === 'COMPILER_ENTITY_PROJECTION_MISSING' &&
+          diagnostic.subjectId ===
+            'northstar.app:entity.purchase_order_approval',
+      ),
+    );
+});
 const stateFieldId = PURCHASING_IDS.stateFieldId;
 const orderEntityId = PURCHASING_IDS.entityIds.purchaseOrder;
 const lineEntityId = PURCHASING_IDS.entityIds.purchaseOrderLine;

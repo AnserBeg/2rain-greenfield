@@ -12,6 +12,7 @@ import { FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-pr
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/receiving-capability-executor';
 import { RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/receivables-capability-executor';
 import { PAYABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/payables-capability-executor';
+import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '@north-star/postgres-provider/purchase-order-approval-executor';
 import { createSurfaceRuntimeServer } from '@north-star/web/app-server';
 import { COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/sales-section';
 
@@ -38,6 +39,8 @@ export interface ComposedApplicationServerOptions {
    */
   readonly seedProfile?: ComposedApplicationSeedProfile;
   readonly tenantSlug?: string;
+  /** The approval demo fixture opts in; tenant absence/default remains off. */
+  readonly purchaseOrdersRequireApproval?: true;
 }
 
 export interface RunningComposedApplication {
@@ -103,6 +106,7 @@ export async function startComposedApplication(
       FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY,
       RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY,
       PAYABLES_CAPABILITY_EXECUTOR_FACTORY,
+      PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY,
     ],
     compiledApplication,
     databaseUrl: options.databaseUrl,
@@ -132,12 +136,41 @@ export async function startComposedApplication(
       runtime,
       options.seedProfile ?? 'demo',
     );
-    server = createSurfaceRuntimeServer(runtime.entry, {
-      applicationExtension: COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION,
-      operationGateway: runtime.operationGateway,
-      operationMediation: runtime.operationMediation,
-      queryGateway: runtime.queryGateway,
-    });
+    if (options.purchaseOrdersRequireApproval) {
+      await runtime.entry.run(
+        { headers: { cookie: 'northstar-demo-actor=manager' } },
+        async (view) => {
+          await runtime.operationGateway.invoke(
+            view,
+            {
+              schemaVersion: 'northstar.semantic-operation-request/v1',
+              operationId: 'northstar.app:operation.purchasing_settings_create',
+              idempotencyKey: '74000000-0000-4000-8000-000000000098',
+              confirmationGrant: null,
+              input: {
+                recordId: '74000000-0000-4000-8000-000000000099',
+                values: {
+                  'northstar.app:field.purchasing_settings_key':
+                    'purchase-orders',
+                  'northstar.app:field.purchasing_settings_require_approval': true,
+                },
+              },
+            },
+            runtime.operationMediation.issueInvocation(view, 'UI'),
+          );
+        },
+      );
+    }
+    server = createSurfaceRuntimeServer(
+      runtime.entry,
+      {
+        applicationExtension: COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION,
+        operationGateway: runtime.operationGateway,
+        operationMediation: runtime.operationMediation,
+        queryGateway: runtime.queryGateway,
+      },
+      runtime.identityMode === 'LOCAL_DEMO' ? runtime.localDemoActors : null,
+    );
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
       server.listen(options.port ?? 4174, host, () => {

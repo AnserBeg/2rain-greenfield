@@ -47,6 +47,7 @@ import {
 } from '../../packages/domain/src/index.js';
 import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/index.js';
 import { purchasingModuleDefinition } from '../../packages/domain/src/purchasing/index.js';
+import { withPurchaseOrderApprovals } from '../../packages/domain/src/purchasing/approvals.js';
 import { salesModuleDefinition } from '../../packages/domain/src/sales/index.js';
 import { PRODUCT_SURFACE_GRAMMAR_BASELINE } from './surface-grammar-conformance.baseline.js';
 import {
@@ -273,7 +274,7 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // (SALES-PARITY), + the invoice, its lines, payments and credits (twelve),
   // + PURCHASING-PARITY's Expected receipts List, + PAYABLES' vendor bill,
   // its lines, payments and credits (twelve).
-  assert.equal(groupedManifest.surfaces.length, 101);
+  assert.equal(groupedManifest.surfaces.length, 106);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -303,7 +304,7 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // the Invoices list joins Sales beside its orders. PURCHASING-PARITY:
   // Expected receipts joins Purchasing beside its orders; PAYABLES: so does
   // the Bills list.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 16);
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 18);
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
@@ -938,10 +939,13 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
     composed,
     // As the product composes it: with its commercial terms (PURCHASING-PARITY)
     // and its payables (PAYABLES).
-    purchasingModuleDefinition('northstar.app', {
-      commercialTerms: true,
-      payables: true,
-    }),
+    withPurchaseOrderApprovals(
+      purchasingModuleDefinition('northstar.app', {
+        commercialTerms: true,
+        payables: true,
+      }),
+      'northstar.app',
+    ),
     'purchasing',
   );
   composed = withoutModule(

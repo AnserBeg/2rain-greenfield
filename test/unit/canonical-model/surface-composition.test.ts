@@ -64,6 +64,52 @@ const selected = (field: string, datasetId?: string) => ({
   ...(datasetId ? { datasetId } : {}),
 });
 
+test('APPROVAL-PO arguments are scalar capability members, never a generic record mutation or nested object', () => {
+  const purchase = composition(normalized, 'purchase_order_detail');
+  const place = action(purchase, 'place_order');
+  assert.ok(
+    (place.steps[0].bindings as Json[]).some(
+      (binding) => binding.path.join('.') === 'arguments.supplierReference',
+    ),
+  );
+  validateSurfaceCompositions(structuredClone(normalized) as never);
+  for (const path of [
+    ['arguments'],
+    ['arguments', 'supplierReference', 'nested'],
+  ])
+    assert.match(
+      refused('purchase_order_detail', (value) => {
+        const step = action(value, 'place_order').steps[0];
+        (step.bindings as Json[]).find(
+          (binding) => binding.path[0] === 'arguments',
+        )!.path = path;
+      }),
+      /capability arguments require a registered effect and one scalar member/u,
+    );
+  assert.match(
+    refused('purchase_order_detail', (value) => {
+      action(value, 'place_order').steps[0].operation.targetId = id(
+        'operation',
+        'purchase_order_update',
+      );
+    }),
+    /capability arguments require a registered effect and one scalar member/u,
+  );
+});
+
+test('APPROVAL-PO stays inside the existing twelve-action composition bound', () => {
+  const purchase = composition(normalized, 'purchase_order_detail');
+  assert.equal(purchase.actions.length, 12);
+  assert.equal(SurfaceCompositionSchema.safeParse(purchase).success, true);
+  assert.equal(
+    SurfaceCompositionSchema.safeParse({
+      ...purchase,
+      actions: [...purchase.actions, purchase.actions[0]],
+    }).success,
+    false,
+  );
+});
+
 test('the composed pages declare alerts, progression, multi-row Tasks and a related order, and validate', () => {
   validateSurfaceCompositions(structuredClone(normalized) as never);
   const sales = composition(normalized, 'sales_order_detail');
@@ -95,13 +141,8 @@ test('the composed pages declare alerts, progression, multi-row Tasks and a rela
     ['Draft', 'Released', 'Receiving', 'Billing', 'Closed'],
   );
   assert.deepEqual(purchase.presentation.progression.next, [
-    {
-      operation: {
-        kind: 'operationReference',
-        schemaVersion: 'v6',
-        targetId: id('operation', 'purchase_order_release'),
-      },
-    },
+    { action: id('action', 'submit_approval') },
+    { action: id('action', 'place_order') },
     { action: id('action', 'receive_lines_known') },
     { action: id('action', 'bill_received') },
     {
