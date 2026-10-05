@@ -24,8 +24,8 @@
       "name": "relation-install-foreign-company-target",
       "claim": "Claim 2: the installed foreign key retains tenant, environment and company scope and refuses a foreign-company target.",
       "file": "packages/postgres-provider/src/module-storage-materializer.ts",
-      "original": "    const relation = relations[0]!;\n",
-      "replacement": "    const relation = relations[0]!;\n    relation.foreignKey.sourceColumns = relation.foreignKey.sourceColumns.filter((column) => column !== 'legal_entity_id');\n    relation.foreignKey.targetColumns = relation.foreignKey.targetColumns.filter((column) => column !== 'legal_entity_id');\n",
+      "original": "    case 'addForeignKey': {\n      const relation = target.relations.find(\n        (item) => item.foreignKey.physicalName === element.physicalObjectName,\n      );\n",
+      "replacement": "    case 'addForeignKey': {\n      let relation = target.relations.find(\n        (item) => item.foreignKey.physicalName === element.physicalObjectName,\n      );\n      if (relation?.relationId === 'northstar.app:relation.purchase_order_line_installed_reference') {\n        relation = { ...relation, foreignKey: { ...relation.foreignKey, sourceColumns: relation.foreignKey.sourceColumns.filter((column) => column !== 'legal_entity_id'), targetColumns: relation.foreignKey.targetColumns.filter((column) => column !== 'legal_entity_id') } };\n      }\n",
       "test": {
         "files": ["test/postgres/composed-application.test.ts"],
         "namePattern": "^relation install advances"
