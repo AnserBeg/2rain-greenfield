@@ -1,6 +1,6 @@
 # VALUATION — derived moving average, shipment cost and landed cost
 
-Status: active — resumed by the owner. Slice 1 CI green; slice 2 implemented, validation in progress. Slice 3 awaits slice 2 CI. [Draft PR #12](https://github.com/AnserBeg/2rain-greenfield/pull/12) open; no integration or deployment.
+Status: active — resumed by the owner. Slices 1 and 2 full CI green; slice 3 implemented, hosted validation pending. [Draft PR #12](https://github.com/AnserBeg/2rain-greenfield/pull/12) open; no integration or deployment.
 Critical paths touched: none. Review: not owed — outside the Critical set.
 Base: `681f4675` on `packet/VALUATION`, stacked on `packet/PAYABLES`.
 
@@ -13,6 +13,8 @@ Base: `681f4675` on `packet/VALUATION`, stacked on `packet/PAYABLES`.
 
 5. Posted shipment-line relief includes original-effect corrections; orders sum it and show shipped product margin; live partial invoices take proportional net-shipment coverage, withholding excess/unknown/foreign-currency margin. Internal figures stay off the customer invoice print.
 
+6. Live vendor bill freight and fees allocate by actual billed receipt value; exact shares re-derive stock and shipment cost. Missing/foreign/zero allocation bases withhold money and state landed coverage; zero-charge bills still consume quantity provenance.
+
 ## Decisions
 
 - Owner rulings are recorded in ADR-0067: derived moving average, unvalued quantities, no FX, separate currencies, landed cost after payables; it amends the plan's reserved valuation seam and ADR-0017, retaining quantity-only movements and the accounting exclusion.
@@ -20,13 +22,14 @@ Base: `681f4675` on `packet/VALUATION`, stacked on `packet/PAYABLES`.
 - Known value is labelled as such; unknown stock never receives the PO or selling price, and no cross-currency total is claimed. Existing selling prices remain visible beside item costs; the fixture deliberately uses a PO estimate of 99 against actual costs of 5 and 15.
 - Original shipment/invoice gets remain plain for release admission and its named probes; separate valuation gets serve documents using the existing company URL operands.
 - Replay groups native transfer source lines by their shared origin before `:in`/`:out`, requiring opposite signed sides; the unit fixture now matches retained kernel facts.
+- Bill quantities match net receipt portions by PO-line lineage; receipt compensations retain exactly the surviving allocation. Taxes, payments and credits do not become landed product cost.
 - Shared item storage remains tenant-level; valuation adds a company query operand for its company-owned dependencies, without adding a column or changing identity.
 
 ## Slices
 
 1. Item cost, Inventory value and item facts: [checkpoint](VALUATION-test-it-yourself.md#1-stock-value).
-2. Shipment relief, order/invoice cost and read-only margin: [checkpoint](VALUATION-test-it-yourself.md#2-shipment-cost-and-margin), CI pending.
-3. Bill charges allocated by actual billed receipt value: pending slice 2 CI.
+2. Shipment relief, order/invoice cost and read-only margin: [checkpoint](VALUATION-test-it-yourself.md#2-shipment-cost-and-margin).
+3. Bill charges allocated by actual billed receipt value: [checkpoint](VALUATION-test-it-yourself.md#3-vendor-landed-cost), hosted CI pending.
 
 ## Controls
 
@@ -34,16 +37,17 @@ None owed: no Critical-set path changes.
 
 ## Gates
 
-- Focused moving-average/shipment/invoice unit cases 9/9; scoped/paged/current-policy and shipment lineage integration 4/4; web metadata/print contracts 2/2; release freshness `--check` PASS.
+- Focused moving-average/shipment/invoice/landed unit cases 12/12; scoped/paged/current-policy and source-lineage integration 3/3; web metadata/print contracts 2/2; release freshness `--check` PASS.
 - Compiled from the PAYABLES base envelope: one added lineage entry (6 total), 102 surfaces, 17 navigation destinations, 573 verification scenarios; coverage re-derived: 2654 obligations / 811 observed, unchanged.
 - Local typecheck, lint and formatting PASS after merging `681f4675`; focused unit/workspace/surface grammar 44/44, compiler/integration/web contracts 237/237, List 6/6, numbering PostgreSQL 2/2, item contract 1/1 and suite inventory 1/1 pass. Stored-row oracle and valuation browser passed locally and in hosted CI.
-- Slice 1 full CI [36801057149](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36801057149) green at `45b03f7f62103c5824b099c16dd4a2409de991a3`, all ten jobs including reachability. Slice 2 CI [36841431777](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36841431777) passed quality/security/performance but refused release admission because costing replaced the only plain shipment/invoice gets. An initial plain-clone fix still failed named probes in [37254770727](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37254770727). Original plain IDs are now preserved and the compiled contract asserts them. Run [37255164570](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37255164570) found a stale invoice-display query assertion, corrected to follow the compiled source. All three PostgreSQL jobs, both browsers, performance, security and observability passed; reachability was skipped with quality red. Refreshed full CI pending.
-- Slice 2 local typecheck, lint, format and surface grammar (25/25) PASS. Its independent stored-row oracle and browser journey are registered for hosted PostgreSQL/operations jobs. The earlier local PostgreSQL attempt exited 75 before launch because the lock stayed busy; Docker is now unavailable in WSL, so those gates run in hosted CI. Standalone coverage check lacks a reachability run token; the full CI run supplies it. The hosted performance gate was indeterminate at 74.2% CPU idle against required 90%; no readiness, timing or CPU bound changed.
+- Slice 1 full CI [36801057149](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36801057149) green at `45b03f7f62103c5824b099c16dd4a2409de991a3`, all ten jobs including reachability. Slice 2 full CI [37256436112](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37256436112) green at `ea3898d6b0660ccb196a7e820f00ba81ec762c9b`, all ten jobs, before starting slice 3.
+- Earlier slice 2 runs exposed release-admission dependencies on original plain get IDs and one stale display-query contract; both corrected. A performance run was indeterminate at 74.2% CPU idle against required 90%, then passed without changing any bound.
+- Slice 3 local allocation/replay unit cases 12/12, declared-lineage/policy integration 3/3, typecheck and lint PASS; PostgreSQL oracle and operations browser include landed-cost witnesses. Docker recovered during slice 3; its local PostgreSQL witness is running under the exclusive lock after the schema generator released it. Earlier attempts had no Docker or exited 75 while the lock stayed busy. No timeout, threshold or readiness bound changed.
 - Small bridges: PAYABLES numbering and composed navigation inventories measured from compilation; fixtures that remove Inventory also remove composed Catalog cost reads; navigation/composed counts are pinned to the compiled output, and the new unit/PostgreSQL files enter the suite inventories.
 
 ## Test it yourself
 
-[VALUATION-test-it-yourself.md](VALUATION-test-it-yourself.md); isolated fixture, two known receipts and explicitly unvalued opening stock; under ten minutes.
+[VALUATION-test-it-yourself.md](VALUATION-test-it-yourself.md); isolated fixtures for stock value, shipment cost and vendor charges; under ten minutes per slice.
 
 ## Filed
 
@@ -54,7 +58,7 @@ None owed: no Critical-set path changes.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "VALUATION",
   "base": "681f46751b2a4c3cc9027956534b741c35dd4a03",
-  "head": "4cef6686ed83e0041ea7f247d185a277f9197f23",
+  "head": "2b6ab6ea8179caded5f87b2171e1e26df6ff499c",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
@@ -69,6 +73,7 @@ None owed: no Critical-set path changes.
     "packages/domain/src/inventory/contracts.ts",
     "packages/domain/src/inventory/valuation.ts",
     "packages/postgres-provider/src/composed-application-runtime.ts",
+    "packages/postgres-provider/src/inventory-landed-cost.ts",
     "packages/postgres-provider/src/inventory-shipment-cost.ts",
     "packages/postgres-provider/src/inventory-valuation-read-model.ts",
     "packages/postgres-provider/src/inventory-valuation.ts",
@@ -102,6 +107,10 @@ None owed: no Critical-set path changes.
     {
       "path": "packages/postgres-provider/src/inventory-shipment-cost.ts",
       "name": "deriveShipmentCosts"
+    },
+    {
+      "path": "packages/postgres-provider/src/inventory-landed-cost.ts",
+      "name": "allocateLandedCharges"
     }
   ]
 }
