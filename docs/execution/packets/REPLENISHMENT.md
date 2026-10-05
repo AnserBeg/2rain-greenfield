@@ -8,7 +8,7 @@ Base: `packet/INVENTORY-PARITY` at `e3da0a39` (merged at `14c8c74a` in `445d87ae
 
 - Reorder point, reorder-up-to level and the worklist are pulled forward; levels are per item now, per location later.
 - No value or cost column on the Lists (ADR-0017): Last supplier stands in.
-- Projected = on hand + incoming − open demand, not available: open demand already holds the reserved units (PaneFlow `rep.ts:175-177`); subtracting both double-counts.
+- Projected = on hand + incoming − open demand, not available: open demand already holds the reserved units (PaneFlow `lib/server/reports.ts:175-177`); subtracting both double-counts.
 - An item with no reorder point is never on the worklist; a missing Reorder up to leaves Suggested "—"; figures are unsortable.
 - A denied figure query refuses the List by that query's name (no `whenDenied`): the figures are the Lists' purpose.
 - PC: a purchase order line's Unit cost defaults from the item's standard cost in the order currency (`sourceByHeader`, as a sales line's price).
