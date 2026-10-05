@@ -19,6 +19,7 @@ Base: `681f4675` on `packet/VALUATION`, stacked on `packet/PAYABLES`.
 - Inventory value lives beside Items in Catalog because the existing canonical grammar keeps a surface, query and source entity in one module; one item/company row labels each currency's independent figures.
 - Known value is labelled as such; unknown stock never receives the PO or selling price, and no cross-currency total is claimed. Existing selling prices remain visible beside item costs; the fixture deliberately uses a PO estimate of 99 against actual costs of 5 and 15.
 - Original shipment/invoice gets remain plain for release admission and its named probes; separate valuation gets serve documents using the existing company URL operands.
+- Replay groups native transfer source lines by their shared origin before `:in`/`:out`, requiring opposite signed sides; the unit fixture now matches retained kernel facts.
 - Shared item storage remains tenant-level; valuation adds a company query operand for its company-owned dependencies, without adding a column or changing identity.
 
 ## Slices
@@ -36,7 +37,7 @@ None owed: no Critical-set path changes.
 - Focused moving-average/shipment/invoice unit cases 9/9; scoped/paged/current-policy and shipment lineage integration 4/4; web metadata/print contracts 2/2; release freshness `--check` PASS.
 - Compiled from the PAYABLES base envelope: one added lineage entry (6 total), 102 surfaces, 17 navigation destinations, 573 verification scenarios; coverage re-derived: 2654 obligations / 811 observed, unchanged.
 - Local typecheck, lint and formatting PASS after merging `681f4675`; focused unit/workspace/surface grammar 44/44, compiler/integration/web contracts 237/237, List 6/6, numbering PostgreSQL 2/2, item contract 1/1 and suite inventory 1/1 pass. Stored-row oracle and valuation browser passed locally and in hosted CI.
-- Slice 1 full CI [36801057149](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36801057149) green at `45b03f7f62103c5824b099c16dd4a2409de991a3`, all ten jobs including reachability. Slice 2 CI [36841431777](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36841431777) passed quality/security/performance but refused release admission because costing replaced the only plain shipment/invoice gets. An initial plain-clone fix still failed named probes in [37254770727](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37254770727). Original plain IDs are now preserved and the compiled contract asserts them; refreshed full CI pending.
+- Slice 1 full CI [36801057149](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36801057149) green at `45b03f7f62103c5824b099c16dd4a2409de991a3`, all ten jobs including reachability. Slice 2 CI [36841431777](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36841431777) passed quality/security/performance but refused release admission because costing replaced the only plain shipment/invoice gets. An initial plain-clone fix still failed named probes in [37254770727](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37254770727). Original plain IDs are now preserved and the compiled contract asserts them. Run [37255164570](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37255164570) found a stale invoice-display query assertion, corrected to follow the compiled source; remaining jobs run before the next push.
 - Slice 2 local typecheck, lint, format and surface grammar (25/25) PASS. Its independent stored-row oracle and browser journey are registered for hosted PostgreSQL/operations jobs. The earlier local PostgreSQL attempt exited 75 before launch because the lock stayed busy; Docker is now unavailable in WSL, so those gates run in hosted CI. Standalone coverage check lacks a reachability run token; the full CI run supplies it. The hosted performance gate was indeterminate at 74.2% CPU idle against required 90%; no readiness, timing or CPU bound changed.
 - Small bridges: PAYABLES numbering and composed navigation inventories measured from compilation; fixtures that remove Inventory also remove composed Catalog cost reads; navigation/composed counts are pinned to the compiled output, and the new unit/PostgreSQL files enter the suite inventories.
 
@@ -53,7 +54,7 @@ None owed: no Critical-set path changes.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "VALUATION",
   "base": "681f46751b2a4c3cc9027956534b741c35dd4a03",
-  "head": "a8073c31dbc457a1e412a1916cc6081a3262eaba",
+  "head": "4cef6686ed83e0041ea7f247d185a277f9197f23",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
