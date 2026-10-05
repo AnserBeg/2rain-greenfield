@@ -31,7 +31,9 @@ Base: `packet/INVENTORY-PARITY` at `e3da0a39`. Reference: PaneFlow `d057daff` (`
 - Put away opens the Transfers view, where New starts a transfer document; opening the editor preset to Transfer would need an editor preset key (filed).
 - Navigation keeps module groups: Warehouse is an Inventory leaf (top-level entries stay five).
 - The launcher module (`apps/web/src/surface-launcher.ts`) joins the SurfaceRuntime seam allowlists as a generic interpreter delegated only by SurfaceRuntime and its registry.
-- Test fixtures that strip Sales (compiler) or a resolve query (compiler) drop the launcher's dependent tiles and targets; the composed-inventory helper pins the period lock's composition.
+- Test fixtures that strip Sales (compiler) or a resolve query (compiler) drop the launcher's dependent tiles and targets; the declared-List variation (PostgreSQL), which drops the To ship view, points Pick and ship at Released; the composed-inventory helper pins the period lock's composition.
+- The focus-ring coverage visits the Warehouse, so `.launcher-tile:focus-visible` is measured where it lands; its unreached set stays `.list-page-link` alone.
+- The two browser journeys share one served fixture: the operations browser job runs about 17.5 of its 20 minutes on INVENTORY-PARITY, and a second fixture start cost about one of them.
 
 ## Gates
 
@@ -39,6 +41,7 @@ Base: `packet/INVENTORY-PARITY` at `e3da0a39`. Reference: PaneFlow `d057daff` (`
 - Container runs, one at a time under the exclusive lock: PostgreSQL `period-lock-commands` 1/1 (152 s); browser `inventory-warehouse-mode` 2/2 (Warehouse 3.6 min; period lock 2.8 min after `a2e82357`, a filtered run exiting 1 by the reachability reporter's own rule).
 - Pins from the compile: surfaces 101 -> 102, navigation leaves 16 -> 17 (Inventory adds Warehouse), surface floor 16 -> 18, runtime support 16 -> 18, message catalog 48 -> 50; verification plan 573 scenarios, unchanged; no storage change, so the full-replay schema snapshot is not regenerated.
 - CI on PR #18, run 3 (`659c4cab`): Browser runner and scans green; red on the language-coverage argv check (the unit producer lacked the new file, fixed in `bc4c6eeb`), the period-lock journey (a zero seconds field, fixed in `a2e82357`; the Warehouse journey passed) and the compile budget (`COMPILE_BUDGET_INDETERMINATE`, CPU idle 73.3%); its PostgreSQL jobs were superseded by the next push.
+- CI run 5 (`4bf10b01`): quality, scans, compile budget, Browser runner, PostgreSQL composed and commercial green; PostgreSQL schema 229/230 (`period-lock-commands` passed; the declared-List variation's dropped view refused by the launcher validator) and the operations browser job cancelled at its 20-minute bound (both Warehouse journeys passed; the focus-ring coverage found the tile ring unreached, light and dark, each failure restarting the composed worker). Both fixed in `2aacb361`, no bound relaxed.
 
 ## Test it yourself
 
@@ -62,7 +65,7 @@ Base: `packet/INVENTORY-PARITY` at `e3da0a39`. Reference: PaneFlow `d057daff` (`
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WAREHOUSE-MODE",
   "base": "e3da0a3918620c5ce3e494eba3fdf1b3f8c91c4a",
-  "head": "78df7c7e5b4c5848db5e78de0a5efbd1a9164bdf",
+  "head": "2aacb3618a914f81b2f8750a476fad923be423f5",
   "changedPaths": [
     "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts",
     "apps/web/src/message-catalog.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-contract.ts",
@@ -76,7 +79,8 @@ Base: `packet/INVENTORY-PARITY` at `e3da0a39`. Reference: PaneFlow `d057daff` (`
     "test/architecture/surface-grammar-conformance.test.ts", "test/compiler/g2-module-conformance.test.ts", "test/compiler/g2-module-storage.test.ts",
     "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/assert-composed-inventory.ts", "test/helpers/order-entry-fixture.ts",
     "test/helpers/reachability-producers.ts", "test/integration/surface-data-binding.test.ts", "test/postgres/composed-application.test.ts",
-    "test/postgres/period-lock-commands.test.ts", "test/postgres/request-runtime-view.test.ts", "test/unit/canonical-model/surface-launcher.test.ts"
+    "test/postgres/declared-list.test.ts", "test/postgres/period-lock-commands.test.ts", "test/postgres/request-runtime-view.test.ts",
+    "test/unit/canonical-model/surface-launcher.test.ts"
   ],
   "symbols": [
     {"path": "apps/web/src/surface-composition.ts", "name": "canonicalUtcInstant"},
