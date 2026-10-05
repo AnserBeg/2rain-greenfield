@@ -4,7 +4,11 @@
  * stock held here may be used for -- only a usable location's stock counts as
  * usable or available -- and it changes only through "Change status", which
  * requires a reason and records it with the status in one update. The generic
- * Record form leaves the three status fields out (`surface.form.omit`).
+ * Record form leaves the three status fields out (`surface.form.omit`). A
+ * location may sit inside another -- a bin in its warehouse -- chosen when it
+ * is created and locked after, as every relation is: a location can only name
+ * one that already exists, so containment never loops. A location's page
+ * lists the locations inside it.
  */
 export function locationWorkspace(namespace: string): Record<string, unknown> {
   const id = (kind: string, name: string) => `${namespace}:${kind}.${name}`;
@@ -14,11 +18,30 @@ export function locationWorkspace(namespace: string): Record<string, unknown> {
     targetId,
   });
   const field = (name: string) => id('field', `location_${name}`);
-  const column = (name: string, label: string, orderKey: number) => ({
+  const column = (
+    name: string,
+    label: string,
+    orderKey: number,
+    value: string = field(name),
+    declared: Record<string, unknown> = {},
+  ) => ({
     columnId: id('column', `location_${name}`),
     label,
     orderKey,
-    field: field(name),
+    field: value,
+    ...declared,
+  });
+  // The location that contains this one (slice 2): a relation chosen when
+  // the location is created, named through the location get.
+  const parent = id('relation', 'location_parent');
+  const named = {
+    reference: {
+      query: ref('queryReference', id('query', 'location_get')),
+      labelField: ref('fieldReference', field('name')),
+    },
+  };
+  const role = (kind: string, priority: number) => ({
+    presentation: { role: kind, priority },
   });
   const input = (name: string) => ({
     source: 'input',
@@ -42,6 +65,7 @@ export function locationWorkspace(namespace: string): Record<string, unknown> {
         status: id('column', 'location_status'),
         facts: [
           id('column', 'location_type'),
+          id('column', 'location_parent'),
           id('column', 'location_status_reason'),
           id('column', 'location_status_changed_at'),
         ],
@@ -59,11 +83,38 @@ export function locationWorkspace(namespace: string): Record<string, unknown> {
       column('code', 'Code', 10),
       column('name', 'Name', 20),
       column('type', 'Type', 30),
+      column('parent', 'Inside', 35, parent, named),
       column('status', 'Inventory status', 40),
       column('status_reason', 'Status reason', 50),
       column('status_changed_at', 'Status changed', 60),
     ],
-    children: [],
+    children: [
+      {
+        // A warehouse's bins and rooms: every location naming this one as
+        // the location that contains it.
+        datasetId: id('dataset', 'location_children'),
+        presentation: {
+          selection: 'none',
+          description:
+            'Locations inside this one. A location is placed inside another when it is created.',
+        },
+        label: 'Locations inside',
+        orderKey: 10,
+        query: ref('queryReference', id('query', 'location_list')),
+        parent: {
+          relationId: parent,
+          value: { source: 'record', field: 'recordId' },
+          ownership: 'reference',
+        },
+        sort: [{ fieldId: field('code'), direction: 'ascending' }],
+        columns: [
+          column('child_code', 'Code', 10, field('code'), role('primary', 10)),
+          column('child_name', 'Name', 20, field('name')),
+          column('child_type', 'Type', 30, field('type')),
+          column('child_status', 'Inventory status', 40, field('status')),
+        ],
+      },
+    ],
     actions: [
       {
         actionId: id('action', 'location_change_status'),

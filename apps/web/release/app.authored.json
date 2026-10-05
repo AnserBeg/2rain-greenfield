@@ -39412,6 +39412,32 @@
         "schemaVersion": "v6",
         "targetId": "northstar.app:entity.party"
       }
+    },
+    {
+      "archiveBehavior": "restrict",
+      "cardinality": "manyToOne",
+      "foreignKeyActions": {
+        "onDelete": "restrict",
+        "onUpdate": "restrict",
+        "schemaVersion": "v6"
+      },
+      "joinEligibility": "query",
+      "kind": "relationDefinition",
+      "orderKey": 10,
+      "ownership": "reference",
+      "relationId": "northstar.app:relation.location_parent",
+      "required": false,
+      "schemaVersion": "v6",
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.location"
+      },
+      "targetEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.location"
+      }
     }
   ],
   "schemaVersion": "v6",
@@ -58673,6 +58699,7 @@
             "status": "northstar.app:column.location_status",
             "facts": [
               "northstar.app:column.location_type",
+              "northstar.app:column.location_parent",
               "northstar.app:column.location_status_reason",
               "northstar.app:column.location_status_changed_at"
             ]
@@ -58705,6 +58732,24 @@
             "field": "northstar.app:field.location_type"
           },
           {
+            "columnId": "northstar.app:column.location_parent",
+            "label": "Inside",
+            "orderKey": 35,
+            "field": "northstar.app:relation.location_parent",
+            "reference": {
+              "query": {
+                "kind": "queryReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:query.location_get"
+              },
+              "labelField": {
+                "kind": "fieldReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:field.location_name"
+              }
+            }
+          },
+          {
             "columnId": "northstar.app:column.location_status",
             "label": "Inventory status",
             "orderKey": 40,
@@ -58723,7 +58768,60 @@
             "field": "northstar.app:field.location_status_changed_at"
           }
         ],
-        "children": [],
+        "children": [
+          {
+            "datasetId": "northstar.app:dataset.location_children",
+            "presentation": {
+              "selection": "none",
+              "description": "Locations inside this one. A location is placed inside another when it is created."
+            },
+            "label": "Locations inside",
+            "orderKey": 10,
+            "query": {
+              "kind": "queryReference",
+              "schemaVersion": "v6",
+              "targetId": "northstar.app:query.location_list"
+            },
+            "parent": {
+              "relationId": "northstar.app:relation.location_parent",
+              "value": { "source": "record", "field": "recordId" },
+              "ownership": "reference"
+            },
+            "sort": [
+              {
+                "fieldId": "northstar.app:field.location_code",
+                "direction": "ascending"
+              }
+            ],
+            "columns": [
+              {
+                "columnId": "northstar.app:column.location_child_code",
+                "label": "Code",
+                "orderKey": 10,
+                "field": "northstar.app:field.location_code",
+                "presentation": { "role": "primary", "priority": 10 }
+              },
+              {
+                "columnId": "northstar.app:column.location_child_name",
+                "label": "Name",
+                "orderKey": 20,
+                "field": "northstar.app:field.location_name"
+              },
+              {
+                "columnId": "northstar.app:column.location_child_type",
+                "label": "Type",
+                "orderKey": 30,
+                "field": "northstar.app:field.location_type"
+              },
+              {
+                "columnId": "northstar.app:column.location_child_status",
+                "label": "Inventory status",
+                "orderKey": 40,
+                "field": "northstar.app:field.location_status"
+              }
+            ]
+          }
+        ],
         "actions": [
           {
             "actionId": "northstar.app:action.location_change_status",

@@ -386,6 +386,13 @@ export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
     sourceFamilyId: 'stock_count_line',
     targetFamilyId: 'inventory_transaction_line',
   },
+  // LOCATIONS: a location inside another, such as a bin in its warehouse;
+  // both are shared by every company.
+  {
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'location',
+    targetFamilyId: 'location',
+  },
 ] as const satisfies readonly LegalEntityRelationRuleV1[]);
 
 export interface InventoryAuthoritativeDependencyV1 {

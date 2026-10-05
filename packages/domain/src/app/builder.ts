@@ -92,7 +92,10 @@ const MODULE_REGISTRY = Object.freeze([
   Object.freeze({
     // An inventory status with its reason, and the widened types (LOCATIONS).
     create: (namespace: string) =>
-      locationModuleDefinition(namespace, { inventoryStatus: true }),
+      locationModuleDefinition(namespace, {
+        hierarchy: true,
+        inventoryStatus: true,
+      }),
     moduleName: 'location',
   }),
 ] as const);

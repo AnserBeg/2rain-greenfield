@@ -28,6 +28,11 @@ function ids(namespace: string) {
     moduleId: `${namespace}:module.location`,
     namespace,
     packageId: `${namespace}:package.location`,
+    relationIds: {
+      // The location that contains this one, such as a warehouse holding its
+      // bins (LOCATIONS slice 2).
+      parent: `${namespace}:relation.location_parent`,
+    },
     statusOptionIds: {
       damaged: `${namespace}:option.location_status_damaged`,
       inTransit: `${namespace}:option.location_status_in_transit`,
@@ -87,12 +92,19 @@ export function locationModuleDefinition(
      * has always compiled.
      */
     readonly inventoryStatus?: boolean;
+    /**
+     * The location that contains this one -- a warehouse holding its bins
+     * (LOCATIONS slice 2). Chosen when the location is created; a location
+     * can only name one that already exists, so the containment never loops.
+     */
+    readonly hierarchy?: boolean;
   } = {},
 ): Record<string, unknown> {
   const definitionIds = ids(namespace);
   const { contentCapabilityId, entityIds, fieldIds, moduleId, packageId } =
     definitionIds;
   const inventoryStatus = options.inventoryStatus === true;
+  const hierarchy = options.hierarchy === true;
   const locationFields = [
     fieldIds.code,
     fieldIds.name,
@@ -271,7 +283,29 @@ export function locationModuleDefinition(
         ],
       ),
     ],
-    relations: [],
+    relations: hierarchy
+      ? [
+          {
+            // A parent with locations inside it cannot be archived first.
+            archiveBehavior: 'restrict',
+            cardinality: 'manyToOne',
+            foreignKeyActions: {
+              onDelete: 'restrict',
+              onUpdate: 'restrict',
+              schemaVersion: version,
+            },
+            joinEligibility: 'query',
+            kind: 'relationDefinition',
+            orderKey: 10,
+            ownership: 'reference',
+            relationId: definitionIds.relationIds.parent,
+            required: false,
+            schemaVersion: version,
+            sourceEntity: reference('entityReference', entityIds.location),
+            targetEntity: reference('entityReference', entityIds.location),
+          },
+        ]
+      : [],
     schemaVersion: version,
     stateMachines: [],
     storageMappings: [
