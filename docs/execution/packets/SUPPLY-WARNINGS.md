@@ -32,7 +32,7 @@ Base: `packet/LOCATIONS` at `be722966`. Reference: PaneFlow `d057daff` (`lib/ser
 
 ## Gates
 
-- Local (no container; Windows free memory 1.0 GB, under the 1.2 GB bound): typecheck, prettier and eslint clean on every changed file; unit 218/218; compiler 175/175; web contract 40/40; architecture and agent (grammar, purity, seam, press law, UX, runtime-view boundary, surface data binding, hermeticity, activation and persistence boundaries, evidence, record fidelity, hygiene, reachability) 153/153; integration surface-data-binding 130/130.
+- Local (no container; Windows free memory 1.0 GB, under the 1.2 GB bound): typecheck, prettier and eslint clean on every changed file; unit 218/218; compiler 175/175; web contract 40/40; architecture and agent (grammar, purity, seam, press law, UX, runtime-view boundary, surface data binding, hermeticity, activation and persistence boundaries, evidence, record fidelity, hygiene, reachability) 153/153; integration, the whole directory, 248/248; expected-red live text 165 entries in 14 manifests and its self-test (38 controls) OK; demo release `--check` PASS; build clean.
 - The executor's statement and the PostgreSQL test's independent oracle were run against a throwaway local PostgreSQL 16 holding just the tables they read (outside the test harness): the statement's covered and short equal the hand-worked scenario and the oracle's line-order allocation.
 - Release: lineage entry 9 rebuilt from LOCATIONS' eight (39.6 -> 45.0 MB), `--check` PASS; storage target, query catalog and verification plan unchanged, so no schema snapshot and no scenario pins move.
 - Pins from the compile: surface floor 19 -> 21 (grouped and runtime; the flat fixture holds no Sales List and stays 19).
