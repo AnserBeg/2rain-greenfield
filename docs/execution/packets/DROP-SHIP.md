@@ -1,6 +1,6 @@
 # DROP-SHIP — supplier delivery directly to the customer
 
-Status: unfinished BUILD on `packet/DROP-SHIP`, PAYABLES `b91c5284` and RELATION-INSTALL `66cf178a` merged. Bridge draft [PR #20](https://github.com/AnserBeg/2rain-greenfield/pull/20) has full green CI; its controls and owner review remain owed. DROP-SHIP draft [PR #19](https://github.com/AnserBeg/2rain-greenfield/pull/19) awaits post-bridge validation. No main merge or deployment; own Critical set unchanged.
+Status: unfinished BUILD on `packet/DROP-SHIP`, PAYABLES `96ac2341` and RELATION-INSTALL `b318205c` merged. Bridge draft [PR #20](https://github.com/AnserBeg/2rain-greenfield/pull/20) awaits refreshed controls/CI and owner review. DROP-SHIP draft [PR #19](https://github.com/AnserBeg/2rain-greenfield/pull/19) awaits post-bridge validation. No main merge or deployment; own Critical set unchanged.
 
 ## Design (written before implementation)
 
@@ -15,6 +15,8 @@ Status: unfinished BUILD on `packet/DROP-SHIP`, PAYABLES `b91c5284` and RELATION
 - PaneFlow export `paneflow-sales-parity-d057daff` is a read-only behavioral REFERENCE (`inventory-records.ts`, `advanced-domain.ts`, `db/schema.ts`); no code/database architecture is ported. The export has no Git metadata.
 - RETURNS reconciliation: when #15 lands, reconcile net shipped/returned eligibility in settlement and read models, reversal floors against live invoices/bills, and closure/Cancel routing. Do not change its shipped-quantity neighbours here.
 - Demand/supply line references use `retainReference` for historical document identity; confirmed-line and linked-purchase mutation guards retain edit control. Delivery-document links remain `restrict`; scoped FKs are unchanged.
+- Create drop-ship PO is a selected-line Task on confirmed drop-ship demand; it still creates/reuses links for all eligible lines of that order. Linked-order navigation uses declared selection actions.
+- The composed PostgreSQL test checkpoints between repeated installs to recycle WAL within its unchanged 256 MB fixture; every lineage install and verifier still runs. No capacity, timeout or readiness increase.
 
 ## Gates
 
@@ -27,6 +29,8 @@ Status: unfinished BUILD on `packet/DROP-SHIP`, PAYABLES `b91c5284` and RELATION
 - New commercial PostgreSQL journey is registered in package scripts, reachability and hygiene; its first local attempt never started (lock busy). New `purchase-drop-ship.spec.ts` is operations-browser reachable; browser not run. Full DROP-SHIP CI acceptance remains unmet.
 - Post-bridge correction: two existing unit files now account for DSD numbering, the exact sales-line/order relation and the fourth registered sales-order operation. Focused 14/14 PASS; formatting, typecheck and release `--check` PASS. Coverage re-derived again from unchanged declarations.
 - Hosted run `37271614092` is red: compiler input/fixture pins, browser backend-loader failure and opaque generic guard refusal. Corrected at `e9751adc`: Sales command module, retained references, typed refusal, scoped browser loader and fixture closure. Four changed compiler/unit files PASS 93/93; lint/format/typecheck PASS. Full new CI remains pending.
+- [Hosted run `37274390870`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37274390870) is red: padded stored quantities rejected by governed PO creation, undeclared navigation placement, stale progress/CSV/fixture pins, stale schema snapshot and repeated-install WAL capacity. `14116111` canonicalizes copied quantity/date inputs, declares contextual actions, fixes browser selection and affected fixtures/pins, and checkpoints the composed test. Snapshot regeneration and fresh full CI remain pending.
+- After those fixes: typecheck, focused lint/format, exact-base compile/check and coverage re-derivation PASS; commercial decimal unit tests 6/6 PASS; the two affected surface-binding cases 2/2 PASS. Static expected-red validates 165 entries / 14 manifests after upstream merge; no empty filtered test is counted.
 - Local container work checks Windows free memory before locking, uses one container at a time; no timeout, readiness or budget change. Static expected-red validation and record fidelity run on the frozen tree before push.
 
 ## Test it yourself
@@ -45,8 +49,8 @@ Review: no separate DROP-SHIP arm; inherited Critical bridge owner-run review is
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "DROP-SHIP",
-  "base": "b91c5284e163d19a834802479dd2dc1e3a1201d1",
-  "head": "e9751adcc60e42e8ea23dc71092fc8c504796c28",
+  "base": "96ac234122322b2cbe18349299664f56c8f5190a",
+  "head": "d3a119c07249503b936d67ff8f822b1370c33eb8",
   "changedPaths": [
     "apps/api/src/composition-root.ts",
     "apps/web/release/app.authored.json",
@@ -54,6 +58,8 @@ Review: no separate DROP-SHIP arm; inherited Critical bridge owner-run review is
     "apps/web/release/current-policy-bindings.json",
     "apps/web/src/component-registry.ts",
     "apps/web/src/list-declaration.ts",
+    "apps/web/test/browser/declared-list.spec.ts",
+    "apps/web/test/browser/expected-receipts.spec.ts",
     "apps/web/test/browser/purchase-drop-ship.spec.ts",
     "apps/web/test/surface-runtime-contract.test.ts",
     "package.json",
@@ -93,10 +99,16 @@ Review: no separate DROP-SHIP arm; inherited Critical bridge owner-run review is
     "test/helpers/generate-fresh-tenant-full-replay-schema.ts",
     "test/helpers/reachability-producers.ts",
     "test/helpers/rederive-language-coverage.ts",
+    "test/integration/surface-data-binding.test.ts",
     "test/integration/table-behavior.test.ts",
     "test/postgres/composed-application.test.ts",
+    "test/postgres/declared-list.test.ts",
     "test/postgres/document-numbering.test.ts",
     "test/postgres/drop-ship.test.ts",
+    "test/postgres/expected-receipts.test.ts",
+    "test/postgres/inventory-posting.test.ts",
+    "test/postgres/module-storage-transition.test.ts",
+    "test/postgres/order-lists.test.ts",
     "test/postgres/request-runtime-view.test.ts",
     "test/unit/canonical-model/surface-composition.test.ts",
     "test/unit/canonical-model/field-numbering.test.ts",
