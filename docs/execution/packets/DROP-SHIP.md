@@ -31,6 +31,7 @@ Status: unfinished BUILD on `packet/DROP-SHIP`, PAYABLES `96ac2341` and RELATION
 - Hosted run `37271614092` is red: compiler input/fixture pins, browser backend-loader failure and opaque generic guard refusal. Corrected at `e9751adc`: Sales command module, retained references, typed refusal, scoped browser loader and fixture closure. Four changed compiler/unit files PASS 93/93; lint/format/typecheck PASS. Full new CI remains pending.
 - [Hosted run `37274390870`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37274390870) is red: padded stored quantities rejected by governed PO creation, undeclared navigation placement, stale progress/CSV/fixture pins, stale schema snapshot and repeated-install WAL capacity. `14116111` canonicalizes copied quantity/date inputs, declares contextual actions, fixes browser selection and affected fixtures/pins, and checkpoints the composed test. Snapshot regeneration and fresh full CI remain pending.
 - After those fixes: typecheck, focused lint/format, exact-base compile/check and coverage re-derivation PASS; commercial decimal unit tests 6/6 PASS; the two affected surface-binding cases 2/2 PASS. Static expected-red validates 165 entries / 14 manifests after upstream merge; no empty filtered test is counted.
+- Local exclusive PostgreSQL run at `5d2d9027` reached Create drop-ship PO but failed with an opaque operation error; its container was removed. The stored revision is SQL `bigint`, the actual driver returns a string, and trust requires a number. `d9f40670` normalizes and validates this boundary outside trust; focused unit tests 7/7, lint/format and typecheck PASS. Fresh PostgreSQL/browser/full CI remain owed; schema/release bytes are unchanged.
 - Local container work checks Windows free memory before locking, uses one container at a time; no timeout, readiness or budget change. Static expected-red validation and record fidelity run on the frozen tree before push.
 
 ## Test it yourself
@@ -50,7 +51,7 @@ Review: no separate DROP-SHIP arm; inherited Critical bridge owner-run review is
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "DROP-SHIP",
   "base": "96ac234122322b2cbe18349299664f56c8f5190a",
-  "head": "88ce5ce6c1f64ba4878ac48429dca4048870b993",
+  "head": "d9f40670693c1592383aef0eb3d5016d9ee9752e",
   "changedPaths": [
     "apps/api/src/composition-root.ts",
     "apps/web/release/app.authored.json",
@@ -124,6 +125,7 @@ Review: no separate DROP-SHIP arm; inherited Critical bridge owner-run review is
     { "path": "packages/domain/src/app/drop-ship.ts", "name": "withDropShip" },
     { "path": "packages/postgres-provider/src/drop-ship-executor.ts", "name": "DROP_SHIP_CAPABILITY_EXECUTOR_FACTORY" },
     { "path": "packages/postgres-provider/src/drop-ship-support.ts", "name": "dropShipBound" },
+    { "path": "packages/postgres-provider/src/drop-ship-support.ts", "name": "dropShipRevision" },
     { "path": "packages/postgres-provider/src/list-progress-read-model.ts", "name": "additionalListProgressSql" }
   ]
 }
