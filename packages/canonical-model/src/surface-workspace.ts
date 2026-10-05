@@ -639,5 +639,43 @@ export function validateSurfaceWorkspaces(
           'a create value is a header field no editor field offers, holding a value it admits',
         );
     }
+    // What every new line's first create also writes: line fields the editor
+    // does not offer, each once, with a literal the field admits -- text that
+    // fits, an option of its enumeration, or a canonical decimal.
+    const lineEntity = lineQuery!.sourceEntity.targetId;
+    const lineCreateValues = editor.lineCreateValues ?? [];
+    const createsLine = model.operations.some(
+      (operation) =>
+        operation.effect.kind === 'createRecordEffect' &&
+        'entity' in operation.effect &&
+        operation.effect.entity.targetId === lineEntity,
+    );
+    if (
+      new Set(lineCreateValues.map((value) => value.fieldId)).size !==
+      lineCreateValues.length
+    )
+      fail(surface.surfaceId, 'a line create value names each field once');
+    for (const entry of lineCreateValues) {
+      const type = fields.get(entry.fieldId)?.fieldType;
+      const value = entry.value.value;
+      const admissible =
+        type?.kind === 'textFieldType'
+          ? [...value].length <= type.maximumLength
+          : type?.kind === 'enumFieldType'
+            ? type.options.some((option) => option.optionId === value)
+            : type?.kind === 'exactDecimalFieldType' &&
+              /^(?:0|-?[1-9][0-9]*)(?:\.[0-9]*[1-9])?$/u.test(value);
+      if (
+        !createsLine ||
+        fields.get(entry.fieldId)?.entity.targetId !== lineEntity ||
+        entry.fieldId === editor.lineNumberFieldId ||
+        offered.has(String(entry.fieldId)) ||
+        !admissible
+      )
+        fail(
+          surface.surfaceId,
+          'a line create value is a line field no editor field offers, holding a literal it admits',
+        );
+    }
   }
 }

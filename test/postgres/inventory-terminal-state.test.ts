@@ -568,7 +568,7 @@ test('draft transaction and terminal stock-count evidence is enforced by the rea
           invokeOperation(gateway, mediation, view, 'stock_count_update', {
             expectedRevision: 1,
             patch: {
-              [fieldId('stock_count_number')]: 'POSTED-REWRITE',
+              [fieldId('stock_count_reason_narrative')]: 'POSTED-REWRITE',
               [fieldId('stock_count_state')]: optionId(
                 'stock_count_state_draft',
               ),
@@ -585,7 +585,9 @@ test('draft transaction and terminal stock-count evidence is enforced by the rea
           'stock_count_update',
           {
             expectedRevision: 1,
-            patch: { [fieldId('stock_count_number')]: 'COUNTING-REWRITE' },
+            patch: {
+              [fieldId('stock_count_reason_narrative')]: 'COUNTING-REWRITE',
+            },
             recordId: countingSessionId,
           },
         );
@@ -608,12 +610,9 @@ test('draft transaction and terminal stock-count evidence is enforced by the rea
           invokeOperation(gateway, mediation, view, 'stock_count_create', {
             legalEntityId,
             recordId: randomUUID(),
-            relations: {
-              [relationId('stock_count_transaction')]: transactionId,
-            },
+            relations: {},
             values: requiredOperationValues(stockCount, {
               [fieldId('stock_count_location_id')]: locationId,
-              [fieldId('stock_count_number')]: 'FORGED-POSTED',
               [fieldId('stock_count_state')]: optionId(
                 'stock_count_state_posted',
               ),
@@ -645,8 +644,6 @@ test('draft transaction and terminal stock-count evidence is enforced by the rea
             recordId: randomUUID(),
             relations: {
               [relationId('stock_count_line_session')]: postedSessionId,
-              [relationId('stock_count_line_transaction_line')]:
-                transactionLineId,
             },
             values: requiredOperationValues(stockCountLine, {
               [fieldId('stock_count_line_item_id')]: itemId,
@@ -684,12 +681,107 @@ test('draft transaction and terminal stock-count evidence is enforced by the rea
           'stock_count_update',
           {
             expectedRevision: 1,
-            patch: { [fieldId('stock_count_number')]: 'CORRECTION-REWRITE' },
+            patch: {
+              [fieldId('stock_count_reason_narrative')]: 'CORRECTION-REWRITE',
+            },
             recordId: correctionSessionId,
           },
         );
         assert.equal(correctionUpdate.outcome, 'succeeded');
         assert.equal(correctionUpdate.readBack?.revision, 2);
+
+        // C10 (STOCK-COUNTS C4): reviewed evidence is frozen. The patch sends
+        // the count back to counting, so the PROJECTED image passes the guard
+        // and only the prior image -- reviewed -- can refuse it.
+        await assertOperationRefused(
+          invokeOperation(gateway, mediation, view, 'stock_count_update', {
+            expectedRevision: 1,
+            patch: {
+              [fieldId('stock_count_state')]: optionId(
+                'stock_count_state_counting',
+              ),
+            },
+            recordId: reviewedSessionId,
+          }),
+          'restoring the not-posted guard must let a reviewed count be sent back to counting generically',
+        );
+        // ...and so are its lines, through the parent guard.
+        await assertOperationRefused(
+          invokeOperation(gateway, mediation, view, 'stock_count_line_create', {
+            legalEntityId,
+            recordId: randomUUID(),
+            relations: {
+              [relationId('stock_count_line_session')]: reviewedSessionId,
+            },
+            values: requiredOperationValues(stockCountLine, {
+              [fieldId('stock_count_line_item_id')]: itemId,
+              [fieldId('stock_count_line_line_number')]: '4',
+            }),
+          }),
+          'restoring the not-posted guard must let a line join a reviewed count',
+        );
+        // A count cannot be created already reviewed.
+        await assertOperationRefused(
+          invokeOperation(gateway, mediation, view, 'stock_count_create', {
+            legalEntityId,
+            recordId: randomUUID(),
+            relations: {},
+            values: requiredOperationValues(stockCount, {
+              [fieldId('stock_count_location_id')]: locationId,
+              [fieldId('stock_count_state')]: optionId(
+                'stock_count_state_reviewed',
+              ),
+            }),
+          }),
+          'restoring the not-posted guard must let a count be created reviewed',
+        );
+
+        // C11 (STOCK-COUNTS C4): the posting kernel's companions are no
+        // generic input. Naming one is refused as an unknown relation before
+        // anything is written.
+        for (const [operation, relation, values, extra] of [
+          [
+            'stock_count_create',
+            'stock_count_transaction',
+            requiredOperationValues(stockCount, {
+              [fieldId('stock_count_location_id')]: locationId,
+            }),
+            {},
+          ],
+          [
+            'stock_count_line_create',
+            'stock_count_line_transaction_line',
+            requiredOperationValues(stockCountLine, {
+              [fieldId('stock_count_line_item_id')]: itemId,
+              [fieldId('stock_count_line_line_number')]: '5',
+            }),
+            {
+              [relationId('stock_count_line_session')]: countingSessionId,
+            },
+          ],
+        ] as const) {
+          await assert.rejects(
+            invokeOperation(gateway, mediation, view, operation, {
+              legalEntityId,
+              recordId: randomUUID(),
+              relations: {
+                ...extra,
+                [relationId(relation)]:
+                  relation === 'stock_count_transaction'
+                    ? transactionId
+                    : transactionLineId,
+              },
+              values,
+            }),
+            (error: unknown) => {
+              assert.ok(error instanceof ModuleRuntimeInterpreterError);
+              assert.equal(error.code, 'MODULE_RELATION_UNSUPPORTED');
+              assert.equal(error.subjectId, relationId(relation));
+              return true;
+            },
+            `the ${relation} companion relation must be no generic input`,
+          );
+        }
       } finally {
         await Promise.all([
           runtimePool.end(),
@@ -724,11 +816,30 @@ test('C8 compiler ratchets the exact stock-count terminal guard and required sta
         {
           label: `wrong terminal option on stock_count_${action}`,
           mutate(definition: Record<string, unknown>) {
+            // STOCK-COUNTS: the guard refuses reviewed and posted as two
+            // conjuncts; the posted one is the terminal arm.
             const guard = operation(definition, `stock_count_${action}`)
               .precondition as {
-              term: { value: { value: string } };
+              terms: Array<{ term: { value: { value: string } } }>;
             };
-            guard.term.value.value = optionId('stock_count_state_draft');
+            const posted = guard.terms.find(
+              (term) =>
+                term.term.value.value === optionId('stock_count_state_posted'),
+            );
+            assert.ok(posted, `stock_count_${action} refuses posted`);
+            posted.term.value.value = optionId('stock_count_state_draft');
+          },
+        },
+        {
+          label: `a non-state conjunct on stock_count_${action}`,
+          mutate(definition: Record<string, unknown>) {
+            const guard = operation(definition, `stock_count_${action}`)
+              .precondition as { terms: unknown[] };
+            guard.terms.push({
+              kind: 'booleanPredicate',
+              schemaVersion: 'v6',
+              value: true,
+            });
           },
         },
       ],
@@ -884,16 +995,23 @@ function assertJsonObject(
 
 async function assertOperationRefused(
   operationResult: Promise<SemanticOperationResultEnvelope>,
+  // The victim is also the third argument: a control that removes the guard
+  // makes the operation succeed, and then no validator runs.
+  victim?: string,
 ): Promise<void> {
-  await assert.rejects(operationResult, (error: unknown) => {
-    assert.ok(error instanceof ModuleRuntimeInterpreterError);
-    assert.equal(
-      error.code,
-      'MODULE_OPERATION_PRECONDITION_REFUSED',
-      error.subjectId ?? undefined,
-    );
-    return true;
-  });
+  await assert.rejects(
+    operationResult,
+    (error: unknown) => {
+      assert.ok(error instanceof ModuleRuntimeInterpreterError, victim);
+      assert.equal(
+        error.code,
+        'MODULE_OPERATION_PRECONDITION_REFUSED',
+        victim ?? error.subjectId ?? undefined,
+      );
+      return true;
+    },
+    ...(victim === undefined ? [] : [victim]),
+  );
 }
 
 async function invokeOperation(
@@ -1042,9 +1160,10 @@ function requiredOperationValues(
       .filter(
         (column) =>
           column.fieldContract.required &&
-          // The server assigns a transaction's number (INVENTORY-PARITY); no
-          // request supplies it.
-          column.canonicalFieldId !== fieldId('inventory_transaction_number'),
+          // The server assigns a transaction's number (INVENTORY-PARITY) and
+          // a count's (STOCK-COUNTS); no request supplies either.
+          column.canonicalFieldId !== fieldId('inventory_transaction_number') &&
+          column.canonicalFieldId !== fieldId('stock_count_number'),
       )
       .map((column) => [
         column.canonicalFieldId,

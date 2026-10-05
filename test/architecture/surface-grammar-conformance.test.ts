@@ -297,8 +297,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // record alerts and progression, multi-row Tasks and record columns naming
   // a relation (ORDER-PARITY increment B) require 14; the item page's
   // field-scoped stock and movements (INVENTORY-PARITY) require 15; a stock
-  // document's create values require 16.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 16);
+  // document's create values require 16; a stock count line's create values
+  // (STOCK-COUNTS) require 17.
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 17);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.

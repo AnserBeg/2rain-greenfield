@@ -5,6 +5,7 @@ const DOCUMENT_LIST_LABELS: Readonly<Record<string, string>> = {
   sales_order: 'Sales orders',
   purchase_order: 'Purchase orders',
   inventory_transaction: 'Inventory transactions',
+  stock_count: 'Stock counts',
 };
 
 /** Product declarations for the shared draft document renderer. */
@@ -629,8 +630,120 @@ export function orderEntrySurfaces(
       ],
     };
   };
+  /**
+   * A stock count (STOCK-COUNTS): one location, entered like a document. The
+   * server numbers it CNT-000001 on its first save, which also writes its
+   * draft state, its kind and a provisional counted instant. Start counting
+   * adds a line for every product posted at the location; the counter enters
+   * what was found, adding products found there. Review sets the counted
+   * instant and reads each line's expected from posted stock as of it, so
+   * expected, counted and variance are never typed: a new line starts them at
+   * zero for Review to replace.
+   */
+  const stockCount = () => {
+    const field = (
+      name: string,
+      label: string,
+      declared: Record<string, unknown> = {},
+    ) => ({ fieldId: id('field', name), label, ...declared });
+    const option = (name: string) => id('option', `stock_count_${name}`);
+    const zero = (name: string) => ({
+      fieldId: id('field', `stock_count_line_${name}`),
+      value: { source: 'literal', value: '0' },
+    });
+    return {
+      kind: 'draftDocumentEditor',
+      headerLabel: 'Stock count',
+      linesLabel: 'Count lines',
+      saveDescription:
+        'Save commits the count and each line. Start counting adds every product posted at the location; enter what you find and add anything found that is not listed. Review reads what is expected from posted stock, and Post is a separate, confirmed action: nothing changes stock until then.',
+      saveMode: 'sequential',
+      headerFormSurfaceId: id('surface', 'stock_count_form'),
+      recordSurfaceId: id('surface', 'stock_count_detail'),
+      lineFormSurfaceId: id('surface', 'stock_count_line_form'),
+      lineQueryId: id('query', 'stock_count_line_list'),
+      parentRelationId: id('relation', 'stock_count_line_session'),
+      stateFieldId: id('field', 'stock_count_state'),
+      editableStateIds: [option('state_draft'), option('state_counting')],
+      lineNumberFieldId: id('field', 'stock_count_line_line_number'),
+      headerFields: [
+        // One location per count (ruling SC-1).
+        field('stock_count_location_id', 'Location', {
+          reference: {
+            queryId: id('query', 'location_list'),
+            getQueryId: id('query', 'location_get'),
+            labelFieldIds: [id('field', 'location_name')],
+            detailFieldIds: [id('field', 'location_code')],
+          },
+        }),
+        field('stock_count_reason_code', 'Reason', {
+          presentation: {
+            kind: 'choice',
+            options: [
+              { value: 'PHYSICAL_COUNT', label: 'Physical count' },
+              { value: 'FOUND', label: 'Found in an adjacent bay' },
+              { value: 'DAMAGE', label: 'Unrecorded damage' },
+              { value: 'COUNT_ERROR', label: 'Counting error confirmed' },
+              { value: 'SCRAP', label: 'Unrecorded scrap' },
+              { value: 'RECEIVED', label: 'Received but not posted' },
+              { value: 'SHIPPED', label: 'Shipped but not posted' },
+              { value: 'LOSS', label: 'Theft or loss under investigation' },
+            ],
+            defaultValue: 'PHYSICAL_COUNT',
+          },
+        }),
+        field('stock_count_reason_narrative', 'Narrative', {
+          presentation: { kind: 'multiline' },
+        }),
+      ],
+      createValues: [
+        {
+          fieldId: id('field', 'stock_count_state'),
+          value: { source: 'literal', value: option('state_draft') },
+        },
+        {
+          fieldId: id('field', 'stock_count_kind'),
+          value: { source: 'literal', value: option('kind_initial') },
+        },
+        // Provisional: Review sets the instant the count speaks for.
+        {
+          fieldId: id('field', 'stock_count_counted_at'),
+          value: { source: 'generated', value: 'instant' },
+        },
+      ],
+      lineCreateValues: [
+        zero('expected_quantity'),
+        zero('counted_quantity'),
+        zero('variance_quantity'),
+      ],
+      lineFields: [
+        // Products are chosen, never created here.
+        field('stock_count_line_item_id', 'Product', {
+          reference: {
+            queryId: id('query', 'item_list'),
+            getQueryId: id('query', 'item_get'),
+            labelFieldIds: [id('field', 'item_name')],
+            detailFieldIds: [
+              id('field', 'item_sku'),
+              id('field', 'item_base_unit'),
+            ],
+          },
+        }),
+        field('stock_count_line_physical_quantity', 'Physical count'),
+        // The posting kernel takes the product's base unit and no other.
+        field('stock_count_line_unit_id', 'Unit', {
+          presentation: {
+            kind: 'derived',
+            referenceFieldId: id('field', 'stock_count_line_item_id'),
+            sourceFieldId: id('field', 'item_base_unit'),
+          },
+        }),
+      ],
+    };
+  };
   const documents = new Map<string, Record<string, unknown>>([
     ['inventory_transaction', stockDocument()],
+    ['stock_count', stockCount()],
     [
       'sales_order',
       document('sales_order', 'customer', 'requested_date', true),

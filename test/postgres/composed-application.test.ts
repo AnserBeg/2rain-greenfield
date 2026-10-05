@@ -3603,11 +3603,14 @@ async function assertBoundedFreshTenantInstallEvidence(
   // vendor credit (15) -- the receivables documents' shapes; the supplier's
   // invoice number is searchable, so it adds no search exclusion. RETURNS
   // adds 58, measured from the compiled plan: the customer return (18) and
-  // its lines (13), the vendor return (15) and its lines (12).
+  // its lines (13), the vendor return (15) and its lines (12). STOCK-COUNTS
+  // takes 1 net, measured the same way: retiring the two companion relations
+  // from the generic contract drops their archive-restrict probes (2), and
+  // the line's physical count adds a search exclusion (1).
   assert.equal(
     servingScenarioCount,
-    631,
-    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, and 58 for returns',
+    630,
+    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, 58 for returns, and 1 fewer for stock counts',
   );
   await assertFreshInstallLineageEvidence(
     pool,
@@ -5959,11 +5962,12 @@ async function assertExactPartitionEvidence(
   // request, each with a generic create: 501, 424. PAYABLES' 72 execute too
   // (each vendor document has a generic create, replayed by this oracle over
   // the compiled head): 573, 496. RETURNS' 58 execute as well (each return
-  // and each return line has a generic create): 631, 554.
+  // and each return line has a generic create): 631, 554. STOCK-COUNTS'
+  // change is on a count and its line, both with a generic create: 630, 553.
   assert.equal(
     evidence.results.length,
-    554,
-    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72, and returns 58',
+    553,
+    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72, returns 58, and stock counts 1 fewer',
   );
   assert.equal(
     derivations.length,

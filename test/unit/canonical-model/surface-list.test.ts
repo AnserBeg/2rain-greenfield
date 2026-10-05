@@ -65,6 +65,8 @@ test('the composed application declares its Lists and they normalize unchanged',
     `${ns}:surface.posted_stock_balance_list`,
     `${ns}:surface.purchase_order_list`,
     salesList,
+    // STOCK-COUNTS: the stock counts List, by state.
+    `${ns}:surface.stock_count_list`,
     // PAYABLES: the Bills List, by bill state.
     `${ns}:surface.vendor_bill_list`,
   ]);

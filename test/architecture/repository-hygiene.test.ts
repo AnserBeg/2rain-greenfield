@@ -155,6 +155,8 @@ const suiteDefinitions = [
       'test/postgres/inventory-posting.test.ts',
       'test/postgres/inventory-reconciliation.test.ts',
       'test/postgres/inventory-stock-count.test.ts',
+      // STOCK-COUNTS: the count route over the composed application.
+      'test/postgres/inventory-stock-counts.test.ts',
       'test/postgres/inventory-storage.test.ts',
       'test/postgres/inventory-terminal-state.test.ts',
       'test/postgres/item-stock.test.ts',

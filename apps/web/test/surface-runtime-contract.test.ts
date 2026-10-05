@@ -2651,3 +2651,70 @@ test('a document editor writes its declared create values on the header first cr
   void _declared;
   assert.deepEqual(createValuesFor(plain, header, true, save), {});
 });
+
+test('STOCK-COUNTS: a document editor writes its declared line create values on each new line, never an update or a removal', () => {
+  const ns = 'northstar.fixture';
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const definition = SurfaceDocumentEditorSchema.parse({
+    kind: 'draftDocumentEditor',
+    headerFormSurfaceId: id('surface', 'tally_form'),
+    recordSurfaceId: id('surface', 'tally_detail'),
+    lineFormSurfaceId: id('surface', 'tally_line_form'),
+    lineQueryId: id('query', 'tally_line_list'),
+    parentRelationId: id('relation', 'tally_line_tally'),
+    stateFieldId: id('field', 'tally_state'),
+    editableStateIds: [id('option', 'tally_state_draft')],
+    headerFields: [{ fieldId: id('field', 'tally_reason'), label: 'Reason' }],
+    lineFields: [{ fieldId: id('field', 'tally_line_item'), label: 'Item' }],
+    lineNumberFieldId: id('field', 'tally_line_number'),
+    saveMode: 'sequential',
+    createValues: [
+      {
+        fieldId: id('field', 'tally_state'),
+        value: { source: 'literal', value: id('option', 'tally_state_draft') },
+      },
+    ],
+    lineCreateValues: [
+      {
+        fieldId: id('field', 'tally_line_expected'),
+        value: { source: 'literal', value: '0' },
+      },
+      {
+        fieldId: id('field', 'tally_line_variance'),
+        value: { source: 'literal', value: '0' },
+      },
+    ],
+  });
+  const line = {
+    id: '00000000-0000-4000-8000-0000000000c3',
+    record: null,
+    removed: false,
+  };
+  const save = {
+    instant: '2026-10-05T14:05:09.123Z',
+    principalId: '00000000-0000-4000-8000-0000000000b2',
+  };
+  // A new line's first create: each literal as declared.
+  assert.deepEqual(createValuesFor(definition, line, false, save), {
+    [id('field', 'tally_line_expected')]: '0',
+    [id('field', 'tally_line_variance')]: '0',
+  });
+  // Never a saved line's update, nor a removal.
+  assert.deepEqual(
+    createValuesFor(
+      definition,
+      { ...line, record: { recordId: line.id } },
+      false,
+      save,
+    ),
+    {},
+  );
+  assert.deepEqual(
+    createValuesFor(definition, { ...line, removed: true }, false, save),
+    {},
+  );
+  // The header's create writes its own values, not the lines'.
+  assert.deepEqual(createValuesFor(definition, line, true, save), {
+    [id('field', 'tally_state')]: id('option', 'tally_state_draft'),
+  });
+});

@@ -62,7 +62,8 @@ test('INVENTORY-PARITY: the standalone kernel harness keeps the module it has al
   assert.deepEqual(inventoryModuleDefinition(ns, {}), standalone);
   const declared = fields(standalone);
   assert.equal(declared.get(transaction('number'))!.numbering, undefined);
-  // Only the transaction's number differs between the two.
+  // Only the two documents' numbers differ between the two: the stock
+  // document's STK- and the stock count's CNT- (STOCK-COUNTS).
   const composed = fields(
     inventoryModuleDefinition(ns, { documentEntry: true }),
   );
@@ -71,5 +72,109 @@ test('INVENTORY-PARITY: the standalone kernel harness keeps the module it has al
       JSON.stringify(composed.get(fieldId)) !==
       JSON.stringify(declared.get(fieldId)),
   );
-  assert.deepEqual(differing, [transaction('number')]);
+  assert.deepEqual(differing, [
+    transaction('number'),
+    `${ns}:field.stock_count_number`,
+  ]);
+});
+
+test('STOCK-COUNTS: the product mounts stock counts numbered CNT-000001 with Start counting, Review and Post on the posting route; a reviewed count is frozen and the companion relations are retired', () => {
+  type Operation = Record<string, unknown> & {
+    operationId: string;
+    label?: string;
+    tier: string;
+    confirmation: string;
+    effect: { kind: string; capability?: { targetId: string } };
+    precondition?: Record<string, unknown>;
+  };
+  const composed = inventoryModuleDefinition(ns, { documentEntry: true });
+  assert.doesNotThrow(() => normalizeApplicationPackage(composed));
+  assert.deepEqual(
+    fields(composed).get(`${ns}:field.stock_count_number`)!.numbering,
+    {
+      kind: 'documentSequence',
+      sequenceId: `${ns}:document_sequence.stock_count`,
+      prefix: 'CNT',
+      minimumDigits: 6,
+      start: 1,
+    },
+  );
+  const state = (local: string) => ({
+    field: {
+      kind: 'fieldReference',
+      schemaVersion: 'v6',
+      targetId: `${ns}:field.stock_count_state`,
+    },
+    kind: 'fieldComparisonPredicate',
+    operator: 'equals',
+    schemaVersion: 'v6',
+    value: {
+      kind: 'textValue',
+      schemaVersion: 'v6',
+      value: `${ns}:option.stock_count_state_${local}`,
+    },
+  });
+  const operations = composed.operations as Operation[];
+  const operation = (local: string) =>
+    operations.find(
+      (value) => value.operationId === `${ns}:operation.${local}`,
+    );
+  // Each command acts in one state, on the posting capability's route.
+  assert.deepEqual(
+    ['start', 'review', 'post'].map((action) => {
+      const value = operation(`stock_count_${action}`)!;
+      return [
+        value.label,
+        value.tier,
+        value.effect.kind,
+        value.effect.capability?.targetId,
+        value.confirmation,
+        value.precondition,
+      ];
+    }),
+    [
+      ['Start counting', 'draft', 'none'],
+      ['Review', 'counting', 'none'],
+      ['Post', 'reviewed', 'humanRequired'],
+    ].map(([label, local, confirmation]) => [
+      label,
+      'o1',
+      'registeredCapabilityEffect',
+      'northstar.inventory:capability.posting',
+      confirmation,
+      state(local!),
+    ]),
+  );
+  // The standalone kernel harness has no count route.
+  assert.equal(
+    (inventoryModuleDefinition(ns).operations as Operation[]).some((value) =>
+      /:operation\.stock_count_(start|review|post)$/u.test(value.operationId),
+    ),
+    false,
+  );
+  // A count and its lines change generically only while a draft or counting.
+  for (const action of ['create', 'update', 'archive', 'restore'])
+    assert.deepEqual(operation(`stock_count_${action}`)!.precondition, {
+      kind: 'allPredicate',
+      schemaVersion: 'v6',
+      terms: ['reviewed', 'posted'].map((local) => ({
+        kind: 'notPredicate',
+        schemaVersion: 'v6',
+        term: state(local),
+      })),
+    });
+  // The posting kernel's companions are retired from every generic input.
+  const relations = composed.relations as (Record<string, unknown> & {
+    relationId: string;
+  })[];
+  for (const local of [
+    'stock_count_transaction',
+    'stock_count_line_transaction_line',
+  ])
+    assert.equal(
+      relations.find((value) => value.relationId === `${ns}:relation.${local}`)!
+        .lifecycle,
+      'retired',
+      local,
+    );
 });

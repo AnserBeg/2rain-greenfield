@@ -968,6 +968,11 @@
         "resource": "northstar.app:entity.stock_count_line"
       },
       {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.stock_count_post",
+        "resource": "northstar.app:entity.stock_count"
+      },
+      {
         "action": "read",
         "permissionId": "northstar.app:permission.stock_count_read",
         "resource": "northstar.app:entity.stock_count"
@@ -975,6 +980,16 @@
       {
         "action": "restore",
         "permissionId": "northstar.app:permission.stock_count_restore",
+        "resource": "northstar.app:entity.stock_count"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.stock_count_review",
+        "resource": "northstar.app:entity.stock_count"
+      },
+      {
+        "action": "transition",
+        "permissionId": "northstar.app:permission.stock_count_start",
         "resource": "northstar.app:entity.stock_count"
       },
       {

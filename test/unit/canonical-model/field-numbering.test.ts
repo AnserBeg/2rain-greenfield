@@ -94,6 +94,12 @@ test('Sales, Purchase and shipment numbers are declared server-assigned sequence
         'SHP',
         `${ns}:document_sequence.shipment`,
       ],
+      // STOCK-COUNTS: a stock count's number, CNT-000001.
+      [
+        `${ns}:field.stock_count_number`,
+        'CNT',
+        `${ns}:document_sequence.stock_count`,
+      ],
       // PAYABLES (PY-E): the bill, vendor credit and vendor payment numbers,
       // each its own sequence, so PAY- and CM- stay receivables' own.
       [

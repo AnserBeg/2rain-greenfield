@@ -23,7 +23,10 @@ import {
   purchasingWorkspace,
   receivingWorkspaceQueries,
 } from '../purchasing/workspace.js';
-import { inventoryDocumentWorkspace } from '../inventory/workspace.js';
+import {
+  inventoryDocumentWorkspace,
+  stockCountWorkspaceQueries,
+} from '../inventory/workspace.js';
 import { itemStockWorkspace } from '../inventory/item-stock-workspace.js';
 
 const version = 'v6' as const;
@@ -133,6 +136,8 @@ const RECORD_DATA_SOURCES: Readonly<Record<string, string>> = Object.freeze({
  */
 const LIST_DATA_SOURCES: Readonly<Record<string, string>> = Object.freeze({
   purchase_order_list: 'commercial_purchase_order_list',
+  // Only adjustments and transfers: no posting companion (STOCK-COUNTS).
+  inventory_transaction_list: 'inventory_document_list',
 });
 
 /** The mounted module names, in composition order, for callers that assert on the set. */
@@ -234,6 +239,11 @@ export function composedApplicationDefinition(): Record<string, unknown> {
       ),
       // A receipt's lines with what each can still reverse (ORDER-PARITY).
       ...receivingWorkspaceQueries(
+        APPLICATION_NAMESPACE,
+        merged(definitions, 'queries') as Record<string, unknown>[],
+      ),
+      // A count's lines with what each expects and differs by (STOCK-COUNTS).
+      ...stockCountWorkspaceQueries(
         APPLICATION_NAMESPACE,
         merged(definitions, 'queries') as Record<string, unknown>[],
       ),

@@ -90,6 +90,7 @@ function ids(namespace: string) {
         expectedQuantity: field('stock_count_line', 'expected_quantity'),
         itemId: field('stock_count_line', 'item_id'),
         lineNumber: field('stock_count_line', 'line_number'),
+        physicalQuantity: field('stock_count_line', 'physical_quantity'),
         reversalOfMovementId: field(
           'stock_count_line',
           'reversal_of_movement_id',
@@ -123,6 +124,12 @@ function ids(namespace: string) {
     operationIds: {
       postAdjustment: `${namespace}:operation.inventory_transaction_post`,
     },
+    /**
+     * STOCK-COUNTS: a count's own commands, each one capability operation on
+     * the posting route: start counting (lines from posted stock), review
+     * (the server reads expected), post (the posting kernel).
+     */
+    countCommands: ['start', 'review', 'post'] as const,
     packageId: `${namespace}:package.inventory`,
     queryIds: {
       onHand: `${namespace}:query.inventory_movement_on_hand`,
@@ -186,6 +193,9 @@ export function inventoryModuleDefinition(
      */
     readonly documentEntry?: boolean;
   } = {},
+  // STOCK-COUNTS: with `documentEntry` a stock count is entered the same way:
+  // numbered CNT-000001 on its first save, started, reviewed and posted
+  // through its own commands on the posting route.
 ): Record<string, unknown> {
   const definitionIds = ids(namespace);
   const { entityIds, fieldIds, moduleId, packageId } = definitionIds;
@@ -483,7 +493,13 @@ export function inventoryModuleDefinition(
         'Count number',
         10,
         text(60),
-        { businessKey: true, searchable: true },
+        {
+          businessKey: true,
+          searchable: true,
+          // STOCK-COUNTS: unlike the kernel's companion numbers (SC- followed
+          // by a uuid) and every other sequence.
+          ...(documentEntry ? { numberedAs: 'CNT' } : {}),
+        },
       ),
       field(
         definitionIds,
@@ -619,6 +635,19 @@ export function inventoryModuleDefinition(
         'Reversal of movement id',
         70,
         text(80),
+        { optional: true },
+      ),
+      // STOCK-COUNTS: what the counter found, entered while counting; empty
+      // until the line is counted. Review copies it into the counted quantity
+      // and reads expected from the ledger, so nobody types expected or
+      // variance.
+      field(
+        definitionIds,
+        entityIds.stockCountLine,
+        fieldIds.stockCountLine.physicalQuantity,
+        'Physical count',
+        80,
+        decimal(),
         { optional: true },
       ),
 
@@ -833,6 +862,7 @@ export function inventoryModuleDefinition(
             ),
       ),
       postingOperation(definitionIds),
+      ...(documentEntry ? countOperations(definitionIds) : []),
     ],
     package: {
       kind: 'packageDefinition',
@@ -868,6 +898,16 @@ export function inventoryModuleDefinition(
         resource: reference('entityReference', entityIds.transaction),
         schemaVersion: version,
       },
+      ...(documentEntry
+        ? definitionIds.countCommands.map((action) => ({
+            action: 'transition',
+            kind: 'permissionDefinition',
+            label: `stock_count ${action}`,
+            permissionId: `${namespace}:permission.stock_count_${action}`,
+            resource: reference('entityReference', entityIds.stockCount),
+            schemaVersion: version,
+          }))
+        : []),
     ],
     queries: [
       ...standardEntities.flatMap(([local, , entityId]) => {
@@ -896,6 +936,7 @@ export function inventoryModuleDefinition(
         fieldIds.postedStockBalance.itemId,
       ),
       onHandQuery(definitionIds),
+      ...(documentEntry ? [stockDocumentListQuery(definitionIds)] : []),
     ],
     relations: [
       relation(
@@ -928,6 +969,10 @@ export function inventoryModuleDefinition(
         40,
         'reference',
         false,
+        // STOCK-COUNTS (`companion-writers-not-closed`): retired from every
+        // generic create input and form. The column stays in storage and the
+        // posting kernel stays its only writer.
+        'retired',
       ),
       relation(
         definitionIds.relationIds.stockCountSupersedes,
@@ -952,6 +997,8 @@ export function inventoryModuleDefinition(
         70,
         'reference',
         false,
+        // STOCK-COUNTS: retired from every generic input, as above.
+        'retired',
       ),
     ],
     schemaVersion: version,
@@ -974,7 +1021,8 @@ export function inventoryModuleDefinition(
           local,
           label,
           local === 'inventory_period_lock',
-          local === 'inventory_transaction',
+          local === 'inventory_transaction' ||
+            (documentEntry && local === 'stock_count'),
         ),
       ),
       ...surfaces(
@@ -999,7 +1047,11 @@ function standardOperationPreconditions(
   ids: InventoryIds,
   local: string,
 ): StandardOperationPreconditions | undefined {
-  const stockCountMutable = (): Record<string, unknown> => ({
+  // ADR-0034's terminal guard, and STOCK-COUNTS' freeze: a count and its
+  // lines (through the parent guard) are editable while draft or counting.
+  // Reviewed evidence changes only through Post, or Return to counting; posted
+  // is terminal. Spelled negatively, so a create's candidate passes it.
+  const notInState = (state: string): Record<string, unknown> => ({
     kind: 'notPredicate',
     schemaVersion: version,
     term: {
@@ -1010,9 +1062,14 @@ function standardOperationPreconditions(
       value: {
         kind: 'textValue',
         schemaVersion: version,
-        value: `${ids.namespace}:option.stock_count_state_posted`,
+        value: `${ids.namespace}:option.stock_count_state_${state}`,
       },
     },
+  });
+  const stockCountMutable = (): Record<string, unknown> => ({
+    kind: 'allPredicate',
+    schemaVersion: version,
+    terms: [notInState('reviewed'), notInState('posted')],
   });
   if (local === 'stock_count') {
     return {
@@ -1454,6 +1511,100 @@ function postingOperation(ids: InventoryIds): Record<string, unknown> {
   };
 }
 
+/**
+ * STOCK-COUNTS: a count's commands on the posting capability's route, each
+ * guarded by the state it acts on and read back as the count. Start counting
+ * fills the lines from posted stock; Review freezes the evidence -- the
+ * counted instant, expected from the ledger as of it, counted from what was
+ * entered, and their variance; Post hands the reviewed count to the kernel.
+ */
+function countOperations(ids: InventoryIds): Array<Record<string, unknown>> {
+  const inState = (state: string) =>
+    fieldComparison(ids.fieldIds.stockCount.state, 'equals', {
+      kind: 'textValue',
+      schemaVersion: version,
+      value: `${ids.namespace}:option.stock_count_state_${state}`,
+    });
+  const commands: Record<
+    (typeof ids.countCommands)[number],
+    readonly [label: string, state: string, confirmed: boolean]
+  > = {
+    start: ['Start counting', 'draft', false],
+    review: ['Review', 'counting', false],
+    post: ['Post', 'reviewed', true],
+  };
+  return ids.countCommands.map((action) => {
+    const [label, state, confirmed] = commands[action];
+    return {
+      confirmation: confirmed ? 'humanRequired' : 'none',
+      effect: {
+        capability: reference('capabilityReference', ids.postingCapabilityId),
+        kind: 'registeredCapabilityEffect',
+        schemaVersion: version,
+      },
+      kind: 'operationDefinition',
+      label,
+      module: reference('moduleReference', ids.moduleId),
+      operationId: `${ids.namespace}:operation.stock_count_${action}`,
+      permission: reference(
+        'permissionReference',
+        `${ids.namespace}:permission.stock_count_${action}`,
+      ),
+      precondition: inState(state),
+      readBack: reference(
+        'queryReference',
+        `${ids.namespace}:query.stock_count_get`,
+      ),
+      schemaVersion: version,
+      tier: 'o1',
+    };
+  });
+}
+
+/**
+ * STOCK-COUNTS (ADR-0049 condition 3): the stock documents List reads only
+ * the documents a person records -- adjustments and transfers -- so no
+ * companion the posting kernel writes for a receipt, shipment, return or
+ * count is listed beside them. The entity's own list query is unchanged.
+ */
+function stockDocumentListQuery(ids: InventoryIds): Record<string, unknown> {
+  const [list] = queries(
+    ids,
+    'inventory_transaction',
+    ids.entityIds.transaction,
+    fieldsForEntity(ids.fieldIds, 'inventory_transaction'),
+    null,
+    false,
+  ).filter((query) => query.queryType === 'list');
+  const name = 'inventory_document_list';
+  const clone = JSON.parse(
+    JSON.stringify(list)
+      .replaceAll(
+        `${ids.namespace}:query.inventory_transaction_list`,
+        `${ids.namespace}:query.${name}`,
+      )
+      .replaceAll('selection.inventory_transaction_list_', `selection.${name}_`)
+      .replaceAll(
+        'parameter.inventory_transaction_list_',
+        `parameter.${name}_`,
+      ),
+  ) as Record<string, unknown>;
+  const typed = (type: string) =>
+    fieldComparison(ids.fieldIds.transaction.type, 'equals', {
+      kind: 'textValue',
+      schemaVersion: version,
+      value: `${ids.namespace}:option.inventory_transaction_type_${type}`,
+    });
+  return {
+    ...clone,
+    filter: {
+      kind: 'anyPredicate',
+      schemaVersion: version,
+      terms: [typed('adjustment'), typed('transfer')],
+    },
+  };
+}
+
 function periodLockOperations(
   ids: InventoryIds,
   entityId: string,
@@ -1512,8 +1663,10 @@ function relation(
   orderKey: number,
   ownership: 'parentScopedChild' | 'reference' = 'parentScopedChild',
   required = true,
+  lifecycle: 'active' | 'retired' = 'active',
 ): Record<string, unknown> {
   return {
+    ...(lifecycle === 'retired' ? { lifecycle } : {}),
     archiveBehavior: 'restrict',
     cardinality: 'manyToOne',
     foreignKeyActions: {

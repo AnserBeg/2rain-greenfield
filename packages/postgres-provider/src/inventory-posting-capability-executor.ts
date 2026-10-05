@@ -32,6 +32,16 @@ import {
 } from './inventory-posting-service.js';
 import { withModuleRuntimeRole } from './module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from './request-context.js';
+import {
+  executeStockCountChange,
+  hydrateStockCount,
+  stockCountBinding,
+  stockCountCommandOf,
+  stockCountPostingCommand,
+  type HydratedStockCount,
+  type StockCountBinding,
+  type StockCountCommand,
+} from './stock-count-route.js';
 
 const identifierPattern = /^[a-z][a-z0-9_]{0,62}$/u;
 const INVENTORY_POSTING_VERIFICATION_REFUSAL = Object.freeze({
@@ -91,7 +101,12 @@ interface HydratedAdjustmentDraft {
 
 interface PreparedInventoryPosting {
   readonly definition: RegisteredCapabilityOperationAuthorizationRequest['definition'];
-  readonly draft: HydratedAdjustmentDraft;
+  /** STOCK-COUNTS: a count's command and the count it acts on. */
+  readonly count?: {
+    readonly command: StockCountCommand;
+    readonly hydrated: HydratedStockCount;
+  };
+  readonly draft: HydratedAdjustmentDraft | null;
   readonly input: {
     readonly expectedRevision: number;
     readonly recordId: string;
@@ -104,6 +119,7 @@ interface PreparedInventoryPosting {
 class InventoryPostingCapabilityExecutor implements RegisteredCapabilityOperationExecutor {
   readonly capabilityId = INVENTORY_POSTING_CAPABILITY_ID;
   readonly #binding: InventoryDraftBinding;
+  readonly #count: StockCountBinding | null;
   readonly #posting: PostgresInventoryPostingService;
   readonly #prepared = new WeakMap<object, PreparedInventoryPosting>();
 
@@ -113,6 +129,7 @@ class InventoryPostingCapabilityExecutor implements RegisteredCapabilityOperatio
     storageContentHash: string,
   ) {
     this.#binding = inventoryDraftBinding(storage);
+    this.#count = stockCountBinding(storage);
     this.#posting = new PostgresInventoryPostingService(
       context.pool,
       Object.freeze({
@@ -131,7 +148,8 @@ class InventoryPostingCapabilityExecutor implements RegisteredCapabilityOperatio
   async prepareAuthorization(
     request: RegisteredCapabilityOperationAuthorizationRequest,
   ): Promise<RegisteredCapabilityOperationAuthorization> {
-    assertPostingOperation(request, this.#binding);
+    const route = postingRoute(request, this.#binding, this.#count);
+    if (route !== 'document') return this.#prepareCount(request, route);
     const input = postingInput(request.input);
     const draft = await hydrateInventoryDraft(
       this.context,
@@ -196,10 +214,70 @@ class InventoryPostingCapabilityExecutor implements RegisteredCapabilityOperatio
     return authorization;
   }
 
+  /**
+   * STOCK-COUNTS: a count's command is judged on the count as stored --
+   * current revision (or the one after it, a replay), its state against the
+   * command's precondition, its legal entity as the read-back scope.
+   */
+  async #prepareCount(
+    request: RegisteredCapabilityOperationAuthorizationRequest,
+    command: StockCountCommand,
+  ): Promise<RegisteredCapabilityOperationAuthorization> {
+    const input = postingInput(request.input);
+    const hydrated = await hydrateStockCount(
+      this.context,
+      this.#count!,
+      request.context,
+      input.recordId,
+    );
+    const replay = hydrated.currentRevision === input.expectedRevision + 1;
+    if (!replay && hydrated.currentRevision !== input.expectedRevision) {
+      throw inputError('the rendered command revision is no longer current');
+    }
+    if (!replay) {
+      const precondition = evaluateRegisteredOperationPrecondition(
+        request.definition.precondition,
+        hydrated.values,
+      );
+      if (precondition.outcome !== 'holds') {
+        throw inputError(
+          precondition.outcome === 'unsupported'
+            ? 'the count precondition is not executable'
+            : 'the count precondition does not hold',
+        );
+      }
+    }
+    const scope = request.readBackDefinition.legalEntityScope;
+    if (!scope || scope.cardinality !== 'exactlyOne') {
+      throw inputError('the count read-back lacks exact legal-entity scope');
+    }
+    const authorization = Object.freeze({
+      decisionInput: Object.freeze({ legalEntityId: hydrated.legalEntityId }),
+      legalEntityReadScopeIds: Object.freeze([hydrated.legalEntityId]),
+      readBackArguments: Object.freeze({
+        [scope.operand.parameterId]: hydrated.legalEntityId,
+        recordId: input.recordId,
+      }),
+    });
+    this.#prepared.set(
+      authorization,
+      Object.freeze({
+        count: Object.freeze({ command, hydrated }),
+        definition: request.definition,
+        draft: null,
+        input,
+        inputDigest: request.inputDigest,
+        readBackDefinition: request.readBackDefinition,
+        view: request.view,
+      }),
+    );
+    return authorization;
+  }
+
   async execute(
     request: RegisteredCapabilityOperationExecutionRequest,
   ): Promise<SemanticOperationResultEnvelope> {
-    assertPostingOperation(request, this.#binding);
+    const route = postingRoute(request, this.#binding, this.#count);
     const prepared = this.#prepared.get(request.authorization);
     this.#prepared.delete(request.authorization);
     if (
@@ -213,7 +291,14 @@ class InventoryPostingCapabilityExecutor implements RegisteredCapabilityOperatio
         'the posting authorization is not bound to this execution',
       );
     }
-    const { draft, input } = prepared;
+    if (route !== 'document') return this.#executeCount(request, prepared);
+    const { input } = prepared;
+    const draft = prepared.draft;
+    if (!draft || prepared.count) {
+      throw inputError(
+        'the posting authorization is not bound to this execution',
+      );
+    }
     // One route, two kernel commands: the stored type decides which (ADR-0027
     // amendment 2026-09-30). The kernel keeps every transfer rule.
     const command =
@@ -260,13 +345,76 @@ class InventoryPostingCapabilityExecutor implements RegisteredCapabilityOperatio
     }
     return postingResult(request, posted, record);
   }
+
+  /**
+   * STOCK-COUNTS: Start and Review change the count as accepted mutations;
+   * Post hands the reviewed count, exactly as stored, to the posting kernel.
+   * Each reads the count back under current policy.
+   */
+  async #executeCount(
+    request: RegisteredCapabilityOperationExecutionRequest,
+    prepared: PreparedInventoryPosting,
+  ): Promise<SemanticOperationResultEnvelope> {
+    const count = prepared.count;
+    if (
+      !count ||
+      count.command !== postingRoute(request, this.#binding, this.#count)
+    ) {
+      throw inputError(
+        'the count authorization is not bound to this execution',
+      );
+    }
+    const { input } = prepared;
+    const trust =
+      count.command === 'post'
+        ? (
+            await this.#posting.postStockCount(
+              request.context,
+              await this.context.actorIssuer.issue(request.context),
+              stockCountPostingCommand(request, input, count.hydrated),
+            )
+          ).trust
+        : await executeStockCountChange(
+            this.context,
+            this.#count!,
+            request,
+            count.command,
+            input,
+            count.hydrated.legalEntityId,
+          );
+    let readBack;
+    try {
+      readBack = await this.context.queryGateway.invoke(request.view, {
+        arguments: request.authorization.readBackArguments,
+        queryId: request.readBackDefinition.queryId,
+        schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      });
+    } catch (error) {
+      if (error instanceof SemanticQueryPolicyDeniedError) {
+        return postingResult(request, { trust }, null);
+      }
+      throw error;
+    }
+    const record = readBack.records.find(
+      (candidate) => candidate.recordId === input.recordId,
+    );
+    if (readBack.outcome !== 'exact' || !record) {
+      throw inputError('the stock count did not read back exactly');
+    }
+    return postingResult(request, { trust }, record);
+  }
 }
 
 function postingResult(
   request: RegisteredCapabilityOperationExecutionRequest,
-  posted:
-    | Awaited<ReturnType<PostgresInventoryPostingService['postAdjustment']>>
-    | Awaited<ReturnType<PostgresInventoryPostingService['postTransfer']>>,
+  posted: {
+    readonly trust: {
+      readonly changeDocumentId: string;
+      readonly domainEventId: string;
+      readonly invocationId: string;
+      readonly outboxId: string;
+    };
+  },
   readBack: SemanticOperationResultEnvelope['readBack'],
 ): SemanticOperationResultEnvelope {
   return Object.freeze({
@@ -299,21 +447,38 @@ export const INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY = Object.freeze({
   },
 } satisfies PostgresCapabilityOperationExecutorFactory);
 
-function assertPostingOperation(
+/**
+ * Which route an operation of the posting capability takes: a stock document
+ * reads back as its transaction (`inventory_transaction_post`); a stock
+ * count's command (STOCK-COUNTS) reads back as the count. Anything else is
+ * not an admitted operation.
+ */
+function postingRoute(
   request:
     | RegisteredCapabilityOperationAuthorizationRequest
     | RegisteredCapabilityOperationExecutionRequest,
   binding: InventoryDraftBinding,
-): void {
+  count: StockCountBinding | null,
+): 'document' | StockCountCommand {
   if (
-    request.definition.effect.capability.targetId !==
-      INVENTORY_POSTING_CAPABILITY_ID ||
-    request.readBackDefinition.sourceEntityId !== binding.transaction.entityId
+    request.definition.effect.capability.targetId ===
+    INVENTORY_POSTING_CAPABILITY_ID
   ) {
-    throw inputError(
-      'the posting capability route is not the admitted operation',
-    );
+    if (
+      request.readBackDefinition.sourceEntityId === binding.transaction.entityId
+    )
+      return 'document';
+    const command = stockCountCommandOf(request.definition.operationId);
+    if (
+      count &&
+      command &&
+      request.readBackDefinition.sourceEntityId === count.count.entityId
+    )
+      return command;
   }
+  throw inputError(
+    'the posting capability route is not the admitted operation',
+  );
 }
 
 /**
