@@ -12370,14 +12370,14 @@ test('REPLENISHMENT: the item form chooses its preferred location from the locat
       'u',
     ),
   );
-  // Withheld, the location reads "—" and the page still reads.
+  // Withheld, the item's details are refused, as any field read through a
+  // get current policy withholds is; nothing of the location is disclosed.
   const withheld = await itemPage();
-  assert.match(withheld.html, /<h1>Valve<\/h1>/u);
-  assert.equal(preferred(withheld.html), '—');
+  assert.match(withheld.html, /data-message="COMPOSITION_CHILD_FAILED"/u);
   assert.doesNotMatch(withheld.html, /Vancouver warehouse/u);
   f.deniedReads.delete(id('permission', 'location_read'));
-  // An archived location is gone from the choice and from the page alike;
-  // the item keeps its id.
+  // An archived location is gone from the choice and from the page alike:
+  // the page still reads, the field "—"; the item keeps its id.
   f.executor.rows.set(vancouver, {
     ...f.executor.rows.get(vancouver)!,
     archived: true,
