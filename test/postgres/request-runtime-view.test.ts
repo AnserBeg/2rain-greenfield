@@ -863,7 +863,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                   versionContext,
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
-              /requires version 999 and this runtime supports 15/,
+              /requires version 999 and this runtime supports 16/,
             );
           },
         );
