@@ -494,8 +494,30 @@ test(
         'SKU,Item,Unit,On hand,Reserved,Available,Incoming,Open demand,Projected,Reorder point,Status',
       );
       assert.equal(lines.length - 1, expected.size);
-      assert.ok(
-        lines.includes('OFF-100,Field notebook,EA,12,3,9,9,5,16,20,Reorder'),
+      // Figures as the canonical decimals the statement states; a stored
+      // field as the exact decimal it is stored as, whatever its scale.
+      const notebookLine = lines
+        .find((line) => line.startsWith('OFF-100,'))!
+        .split(',');
+      assert.deepEqual(
+        [
+          ...notebookLine.slice(0, 9),
+          decimal(units(notebookLine[9])),
+          notebookLine[10],
+        ],
+        [
+          'OFF-100',
+          'Field notebook',
+          'EA',
+          '12',
+          '3',
+          '9',
+          '9',
+          '5',
+          '16',
+          '20',
+          'Reorder',
+        ],
       );
 
       // A second company with its own stock of the notebook: neither List
