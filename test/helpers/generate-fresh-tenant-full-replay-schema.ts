@@ -13,7 +13,7 @@ import { RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres
 import { PAYABLES_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/payables-capability-executor.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import { captureSchemaSnapshot } from '../../packages/postgres-provider/src/migrations.js';
-import { withEphemeralPostgres } from './postgres.js';
+import { LINEAGE_INSTALL_VOLUME, withEphemeralPostgres } from './postgres.js';
 
 const compiledArtifactPath = resolve('apps/web/release/app.compiled.json');
 const migrationsDirectory = resolve('db/migrations');
@@ -81,7 +81,7 @@ async function main(): Promise<void> {
     },
     // Every lineage entry's install keeps its release artifacts and their
     // write-ahead log; nineteen entries overflow the default 256 MB.
-    { dataSizeMegabytes: 1024 },
+    LINEAGE_INSTALL_VOLUME,
   );
 }
 
