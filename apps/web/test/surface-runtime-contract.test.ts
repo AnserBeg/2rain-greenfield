@@ -2709,9 +2709,11 @@ test('compiled unit setup offers shared forms with bounded precision choices and
       operation.operationId ===
       'northstar.app:operation.unit_conversion_create',
   )!;
-  const denominator = conversions.inputContract?.fields.find((field) =>
+  assert.ok(conversions.inputContract);
+  const denominator = conversions.inputContract.fields.find((field) =>
     field.fieldId.endsWith('unit_conversion_denominator'),
-  )!;
+  );
+  assert.ok(denominator);
   assert.equal(denominator.fieldKind, 'exactDecimalFieldType');
   assert.equal(denominator.bounds.scale, 0);
   assert.equal(denominator.bounds.precision, 38);
