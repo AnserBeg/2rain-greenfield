@@ -520,6 +520,25 @@ test(
         ].sort(byItem),
       );
 
+      // The counts List names each count's location, read through a
+      // reference label over a location id the storage keeps as a uuid.
+      const countList = await listed(fixture, 'stock_count_list', {
+        referenceLabels: [
+          {
+            fieldId: `${ns}:field.location_name`,
+            queryId: `${ns}:query.location_list`,
+            referenceId: `${ns}:list_column.stock_count_list_location`,
+            sourceFieldId: countField('location_id'),
+          },
+        ],
+      });
+      assert.equal(
+        countList.records.find((record) => record.recordId === countId)
+          ?.relationLabels?.[`${ns}:list_column.stock_count_list_location`]
+          ?.label,
+        'Calgary warehouse',
+      );
+
       // ADR-0049 condition 3, proven by the List's query: the count's
       // companion is written, and the stock documents List does not show it.
       const [companion] = (await read.companions()).filter(Boolean);

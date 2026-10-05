@@ -2819,7 +2819,11 @@ function listReferencePlan(
     labelId: reference.referenceId,
     recordAlias: `nsm_table_relation_${String(index)}_record`,
     sourceColumn: sourceColumn.physicalName,
-    sourceIsText: true,
+    // STOCK-COUNTS. A pinned inventory reference -- a count's location, say --
+    // is a text field the storage target lowers to a uuid column, so it joins
+    // the target's record id as a uuid; any other text field reads that id as
+    // text. Comparing a uuid column with text has no operator (42883).
+    sourceIsText: sourceColumn.postgresqlType !== 'uuid',
     tableAlias: `table_relation_${String(index)}`,
     target,
   });
