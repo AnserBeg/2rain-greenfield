@@ -278,6 +278,8 @@ composedTest.describe('composed application journeys', () => {
  * all ten derived selectors have real elements.
  */
 const FOCUS_RING_MINIMUM_CONTRAST = 3;
+/** The tax code the focus-ring journey reads a plain record page on. */
+const focusRingTaxCodeId = '74000000-0000-4000-8000-0000000000f1';
 
 interface FocusRingMeasurement {
   readonly declaredRing: string;
@@ -663,23 +665,33 @@ async function readFocusRingCoverage(
       label: 'declared list with rows',
     },
     {
-      // A plain record page with its field sections: a posted balance's, read
-      // from the Posted stock List. A party's page is its customer workspace
-      // and a location's its own (LOCATIONS), so neither renders them.
+      // A plain record page with its field sections: a tax code's. A party's
+      // page is its customer workspace and a location's its own (LOCATIONS),
+      // and no other plain page with sections is seeded, so the state saves
+      // one tax code through its generic form -- one fixed record and request
+      // key, so every later visit replays the same create -- and reads it.
       go: async () => {
-        await page.goto(
-          scopedSurfaceUrl(
-            baseUrl,
-            'posted_stock_balance_list',
-            await loadSurfaceScopeParameterId('posted_stock_balance_list'),
-            browserLegalEntityId,
-          ),
+        const created = await page.request.post(
+          surfaceUrl(baseUrl, 'tax_code_form'),
+          {
+            form: {
+              idempotencyKey: '74000000-0000-4000-8000-0000000000f2',
+              operationId: 'northstar.app:operation.tax_code_create',
+              recordId: focusRingTaxCodeId,
+              'value:northstar.app:field.tax_code_code': 'FOCUS-RING',
+              'value:northstar.app:field.tax_code_name':
+                'Focus ring measurement',
+              'value:northstar.app:field.tax_code_rate_percent': '5',
+            },
+          },
         );
-        const href = await page
-          .locator('.record-link')
-          .first()
-          .getAttribute('href');
-        if (href) await page.goto(new URL(href, baseUrl).href);
+        expect(created.status()).toBe(200);
+        await page.goto(
+          `${surfaceUrl(baseUrl, 'tax_code_detail')}&record=${focusRingTaxCodeId}`,
+        );
+        await expect(
+          page.locator('details.record-section-group summary'),
+        ).toHaveCount(1);
       },
       label: 'plain record',
     },
