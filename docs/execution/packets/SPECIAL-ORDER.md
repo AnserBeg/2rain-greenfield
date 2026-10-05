@@ -1,6 +1,6 @@
 # SPECIAL-ORDER — dedicated purchase supply received into stock
 
-Status: BUILD active on `packet/SPECIAL-ORDER`, based on DROP-SHIP `1b16c746`. No integration or deployment.
+Status: BUILD active on `packet/SPECIAL-ORDER`, based on DROP-SHIP `1b16c746`; [draft PR #28](https://github.com/AnserBeg/2rain-greenfield/pull/28), executable freeze `5cc804d5`. No integration or deployment.
 
 ## Design (before implementation)
 
@@ -20,7 +20,7 @@ Status: BUILD active on `packet/SPECIAL-ORDER`, based on DROP-SHIP `1b16c746`. N
 
 ## Gates
 
-Pending: focused unit/integration/web contracts; full hosted CI, commercial PostgreSQL and operations browser; hosted full-replay snapshot regeneration; compiled pins and language coverage; record fidelity.
+Focused unit/integration/web contracts, typecheck, lint, compile/check and record fidelity pass. Full hosted CI, commercial PostgreSQL and operations browser are pending.
 
 Review: not owed — intended diff is outside the Critical set.
 
@@ -29,15 +29,17 @@ Review: not owed — intended diff is outside the Critical set.
 - Local focused tests PASS: special-order unit/integration, purchasing definition (47 tests); shared web contracts and new unit/integration tests (42 tests). Typecheck, focused lint, release `--check` and whitespace check PASS.
 - Compile measurement: 7 release entries (6 inherited + 1), 104 surfaces, 16 navigation destinations, 604 verification scenarios and 11 numbered fields. Existing count/navigation pins remain unchanged; executed/derived split remains asserted by hosted composed PostgreSQL.
 - Surface floor 16 is the next free value above base 15, for receipt-backed reservation figures. Language inventory re-derived: 2658 obligations / 823 observed declarations; no invented execution receipts.
-- Local container tests were not run: Windows memory below 1.2 GB and another lane's container present. Commercial PostgreSQL, operations browser, full replay and snapshot regeneration are pending on CI.
+- Local container tests were not run: Windows memory below 1.2 GB and another lane's container present. Commercial PostgreSQL, operations browser and full replay acceptance are pending on CI; hosted snapshot regeneration passed below.
 - Shared supplier field retains its canonical ID; its label now covers both supplier routes. Special-order PO ship-to is not copied from the customer: goods use the ordinary receiving location.
+- [Hosted snapshot regeneration](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37341036343) PASS at `6f9aa31a`; its downloaded artifact expands the route check and is committed at `5cc804d5`. Definition/storage bytes are unchanged since generation; label removed.
+- Initial CI exposed two stale unit pins (five Sales order commands and Arrived declarations); corrected, with 31 focused tests PASS. Borrowed writer rejection now destroys its connection, with a focused cleanup test. No Critical path or readiness/timeout/budget change.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SPECIAL-ORDER",
   "base": "1b16c74678f17950055b536478988c2ef7ad6141",
-  "head": "ec73b119374873a548ac8e37a23a90d3b4e27e16",
+  "head": "5cc804d5645ca635b038f0c91b6aa34424d249c3",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
@@ -65,10 +67,13 @@ Review: not owed — intended diff is outside the Critical set.
     "test/helpers/reachability-producers.ts",
     "test/integration/special-order.test.ts",
     "test/postgres/composed-application.test.ts",
+    "test/postgres/fresh-tenant-full-replay-schema.snapshot.json",
     "test/postgres/request-runtime-view.test.ts",
     "test/postgres/special-order.test.ts",
     "test/unit/purchasing-definition.test.ts",
+    "test/unit/sales-definition.test.ts",
     "test/unit/special-order.test.ts"
+    ,"test/unit/workspace-contract.test.ts"
   ],
   "symbols": [
     {
