@@ -21,7 +21,7 @@ verification would prove a different mutation path. UNITS must not edit verifica
 
 ## Proposed discriminating controls (not executed)
 
-- Claim 1: replace the arranged factor with a different numerator; the stored-base witness must fail.
+- Claim 1: invert the factor in production normalization; an independent stored-base witness using the persisted configuration rows must fail.
 - Claim 2: omit the legacy-line arrangement; an executed legacy mutation counter must fail.
 - Claim 3: permit rounding for a non-exact factor; the expected refusal assertion must fail.
 - Claim 4: run normalization before receipt lookup; replay after archiving its factor must fail.
