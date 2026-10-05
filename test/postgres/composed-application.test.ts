@@ -845,9 +845,9 @@ test(
     await withEphemeralPostgres(
       'relation-install',
       async ({ connection, pool }) => {
-        const base = JSON.parse(
-          await readFile(compiledArtifactPath, 'utf8'),
-        ) as unknown;
+        const base = relationInstallBase(
+          JSON.parse(await readFile(compiledArtifactPath, 'utf8')) as unknown,
+        );
         const head = appendRelationSuccessor(base);
         const storage = storageTarget(
           parseCompiledApplication(head).application.compiled,
@@ -963,7 +963,18 @@ test(
             'the released base must not already contain the new relation column',
           );
           await runtime.close();
-          runtime = await createRuntime(head, databaseUrl, 'relation-install');
+          try {
+            runtime = await createRuntime(
+              head,
+              databaseUrl,
+              'relation-install',
+            );
+          } catch (error) {
+            const code = (error as { code?: unknown } | null)?.code;
+            if (error instanceof Error && typeof code === 'string')
+              throw new Error(`${code}: ${error.message}`, { cause: error });
+            throw error;
+          }
           const columns = await pool.query<{
             data_type: string;
             is_nullable: string;
@@ -1137,6 +1148,31 @@ test(
 
 const installedRelationId =
   'northstar.app:relation.purchase_order_line_installed_reference';
+
+function relationInstallBase(compiledApplication: unknown): unknown {
+  const previous = parseCompiledApplication(compiledApplication);
+  const bytes = previous.application.normalizedDefinitionBytes;
+  // Isolate this transition from unrelated historical installs. The fixture
+  // still releases the base, persists rows, then upgrades the same tenant.
+  // No checked-in application release or lineage is changed.
+  const initial = compileApplication({
+    dependencies: [],
+    expectedActiveRelease: null,
+    kind: 'compilerInput',
+    limits: { ...DEFAULT_COMPILER_LIMITS },
+    normalizedDefinitionBytes: bytes,
+    profile: profileForNormalizedBytes(bytes),
+  });
+  assert.equal(initial.status, 'compiled');
+  return {
+    applications: [serializedRelease(bytes, initial as CompileSuccess)],
+    bootstrap: serializedRelease(
+      previous.bootstrap.normalizedDefinitionBytes,
+      previous.bootstrap.compiled,
+    ),
+    schemaVersion: 'northstar.web:compiled-application-release/v2',
+  };
+}
 
 function appendRelationSuccessor(compiledApplication: unknown): unknown {
   const previous = parseCompiledApplication(compiledApplication);
