@@ -215,9 +215,14 @@ class InventoryPostingCapabilityExecutor implements RegisteredCapabilityOperatio
   }
 
   /**
-   * STOCK-COUNTS: a count's command is judged on the count as stored --
-   * current revision (or the one after it, a replay), its state against the
-   * command's precondition, its legal entity as the read-back scope.
+   * STOCK-COUNTS: a count's command is authorized on the count as stored: its
+   * legal entity is the read-back scope. Whether the command is a replay is
+   * the receipt's to decide, never the count's revision: a command that
+   * committed and is retried under its key replays after any later
+   * transition (review round 1). So preparation refuses only a revision the
+   * count never had; the current revision, state and precondition are judged
+   * where a new execution runs -- under the count's row lock in the route,
+   * and by the kernel for Post.
    */
   async #prepareCount(
     request: RegisteredCapabilityOperationAuthorizationRequest,
@@ -230,22 +235,8 @@ class InventoryPostingCapabilityExecutor implements RegisteredCapabilityOperatio
       request.context,
       input.recordId,
     );
-    const replay = hydrated.currentRevision === input.expectedRevision + 1;
-    if (!replay && hydrated.currentRevision !== input.expectedRevision) {
+    if (input.expectedRevision > hydrated.currentRevision) {
       throw inputError('the rendered command revision is no longer current');
-    }
-    if (!replay) {
-      const precondition = evaluateRegisteredOperationPrecondition(
-        request.definition.precondition,
-        hydrated.values,
-      );
-      if (precondition.outcome !== 'holds') {
-        throw inputError(
-          precondition.outcome === 'unsupported'
-            ? 'the count precondition is not executable'
-            : 'the count precondition does not hold',
-        );
-      }
     }
     const scope = request.readBackDefinition.legalEntityScope;
     if (!scope || scope.cardinality !== 'exactlyOne') {

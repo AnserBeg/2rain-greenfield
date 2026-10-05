@@ -4,7 +4,10 @@ import type { StorageTargetPayloadV1 } from '@north-star/compiler';
 import type { PoolClient } from 'pg';
 import type { ImmutableJsonValue } from '@north-star/runtime/request-runtime-view';
 
-import type { RegisteredCapabilityOperationExecutionRequest } from '../../runtime/src/semantic-operation-gateway.js';
+import {
+  evaluateRegisteredOperationPrecondition,
+  type RegisteredCapabilityOperationExecutionRequest,
+} from '../../runtime/src/semantic-operation-gateway.js';
 import { POLICY_DECISION_EVIDENCE_VERSION } from '../../platform-runtime/src/trust/contracts.js';
 import type { PostgresCapabilityOperationExecutorContext } from './capability-operation-executor-factory.js';
 import {
@@ -366,11 +369,39 @@ export async function executeStockCountChange(
         if (count.legalEntityId !== authorizedLegalEntityId) {
           throw inputError('the count scope changed after authorization');
         }
+        // A new execution: the key has no receipt (the trust service replays
+        // one before this runs), so the count must still be as it was shown,
+        // and the operation's declared precondition must hold on it now.
+        if (count.currentRevision !== input.expectedRevision) {
+          throw new InventoryPostingError(
+            'INVENTORY_TRANSACTION_STATE_CONFLICT',
+            'the count changed since it was shown',
+          );
+        }
+        const precondition = evaluateRegisteredOperationPrecondition(
+          request.definition.precondition,
+          count.values,
+        );
+        if (precondition.outcome !== 'holds') {
+          throw inputError(
+            precondition.outcome === 'unsupported'
+              ? 'the count precondition is not executable'
+              : 'the count precondition does not hold',
+          );
+        }
+        // A reversal's lines are derived from the count it reverses, never
+        // counted, so it is not returned to counting: a reviewed reversal is
+        // posted or cancelled (review round 1, ruling SC-6).
+        if (command === 'reopen' && count.kind === 'reversal') {
+          throw inputError(
+            'a reversal is not counted, so it is not returned to counting; post or cancel it',
+          );
+        }
         const [states, to] = TRANSITIONS[command];
         const from = states.find(
           (state) => count.state === binding.states[state],
         );
-        if (count.currentRevision !== input.expectedRevision || !from) {
+        if (!from) {
           throw new InventoryPostingError(
             'INVENTORY_TRANSACTION_STATE_CONFLICT',
             'the count changed since it was shown',
