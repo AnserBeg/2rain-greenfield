@@ -1140,12 +1140,15 @@ const installedRelationId =
 
 function appendRelationSuccessor(compiledApplication: unknown): unknown {
   const previous = parseCompiledApplication(compiledApplication);
-  const definition = JSON.parse(
-    new TextDecoder().decode(previous.application.normalizedDefinitionBytes),
-  ) as {
+  const definition = structuredClone(composedApplicationDefinition()) as {
     relations: Record<string, unknown>[];
     package: { version: string };
   };
+  assert.equal(
+    canonicalize(normalizeApplicationPackage(definition)),
+    new TextDecoder().decode(previous.application.normalizedDefinitionBytes),
+    'the synthetic relation successor starts from the exact recorded head definition',
+  );
   const original = definition.relations.find(
     (relation) =>
       relation.relationId === APPLICATION_IDS.purchasing.lineRelationId,
