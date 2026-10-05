@@ -326,4 +326,3 @@ receipts are released data.
   tenant holds released data. `STOCK-COUNTS` also retires both relations from
   every generic input and form, so no generic writer can name a companion; the
   kernel's must-be-null fence stays as the backstop.
-
