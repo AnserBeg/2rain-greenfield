@@ -34,6 +34,7 @@ Status: unfinished BUILD on `packet/DROP-SHIP`, PAYABLES `96ac2341` and RELATION
 - Local exclusive PostgreSQL run at `5d2d9027` reached Create drop-ship PO but failed with an opaque operation error; its container was removed. The stored revision is SQL `bigint`, the actual driver returns a string, and trust requires a number. `d9f40670` normalizes and validates this boundary outside trust; focused unit tests 7/7, lint/format and typecheck PASS. Fresh PostgreSQL/browser/full CI remain owed; schema/release bytes are unchanged.
 - [Hosted run `37282097610`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37282097610) is red. `ee982127` binds canonical delivery-state values rather than formatted labels, derives guard fields from storage metadata, registers its unit file, closes the removed-module fixture, defers test CHECKPOINT connections, pins measured Sales scenarios at 48, and reads browser dialog diagnostics before confirmation closes it. Focused guard unit 3/3 and architecture 3/3, lint/format/typecheck PASS; persisted/browser outcomes remain owed.
 - [Hosted run `37287028810`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37287028810) attempt 1 is red: collapsed Release control, the Reserve rejection fixture's unused draft at final Close, successor-test timeout, and `COMPILE_BUDGET_INDETERMINATE`. `178d6946` opens Record actions, observes Released and archives that unused draft through the gateway; `6f4cbfd5` isolates only the successor fixture. Focused lint/format/typecheck and exact normalized-source check PASS. One whole-workflow retry started; its performance gate PASS. Fresh full CI remains owed.
+- [Hosted run `37290557084`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37290557084): commercial PostgreSQL PASS, operations browser 8/8 PASS (new case 2.4 min), quality and performance PASS. Composed PostgreSQL 21/22: the empty-rollback helper still loaded the real envelope instead of the isolated fixture. `9c349098` passes the matching base envelope, retaining the exact refusal/pointer/approval assertions. Focused lint/format PASS; refreshed full CI remains owed.
 - Local container work checks Windows free memory before locking, uses one container at a time; no timeout, readiness or budget change. Static expected-red validation and record fidelity run on the frozen tree before push.
 
 ## Test it yourself
@@ -53,7 +54,7 @@ Review: no separate DROP-SHIP arm; inherited Critical bridge owner-run review is
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "DROP-SHIP",
   "base": "96ac234122322b2cbe18349299664f56c8f5190a",
-  "head": "6f4cbfd5376b6197e3d7453fc70fcc85c195f91f",
+  "head": "9c349098f62c25e627570315533b08d85677d4ce",
   "changedPaths": [
     "apps/api/src/composition-root.ts",
     "apps/web/release/app.authored.json",

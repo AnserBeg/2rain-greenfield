@@ -1,6 +1,6 @@
 # DROP-SHIP — Test it yourself
 
-Draft checkpoint: the [Critical relation-install bridge](DROP-SHIP-RELATION-INSTALL-design.md) is merged. Post-bridge PostgreSQL/browser tests and full DROP-SHIP CI are still pending; the steps below are not a claim of successful browser evidence.
+Draft checkpoint: the [Critical relation-install bridge](DROP-SHIP-RELATION-INSTALL-design.md) is merged. The supplier-delivery PostgreSQL journey and new operations-browser spec passed in hosted run `37290557084`. Full DROP-SHIP CI is still pending after a separate rollback-test fixture correction; owner review of the bridge remains owed.
 
 From `/home/rvham/2rain-greenfield-drop-ship`, first check Windows free memory:
 `powershell.exe -NoProfile -Command "(Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory"`.
