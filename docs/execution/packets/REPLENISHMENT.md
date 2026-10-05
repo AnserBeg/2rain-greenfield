@@ -29,6 +29,7 @@ Base: `packet/INVENTORY-PARITY` at `e3da0a39` (merged at `14c8c74a` in `445d87ae
 - Reserved reads `workspace_stock_reservations` with their balances; open demand reads `commercial_lines` (the line list carries the fulfillment read model, which figures may not read).
 - The Inventory group lists leaves by surface id: Buying worklist and Stock by item follow Inventory transactions.
 - The PO unit-cost default and the form reference apply only where the item's get selects the fields, so other compositions are unchanged.
+- A record's own field holding another record's id (the preferred location) reads "—" when that record is gone (archived); a withheld read still fails the record's details, as a Task's context re-check requires (`surface-composition.ts`, a small bridge; dataset rows unchanged). The first, broader version also tolerated a withheld read and reddened "P1 task response rechecks … label reads"; narrowed in `6457222a`.
 
 ## Gates
 
@@ -52,6 +53,7 @@ Base: `packet/INVENTORY-PARITY` at `e3da0a39` (merged at `14c8c74a` in `445d87ae
 
 - A CSV cell starting with `-` is guarded as a formula, so a negative Projected exports as `'-4`.
 - The generic Record form clears an optional field through "When … is blank" → Clear stored value; choosing None alone leaves the location unchanged on update.
+- The generic Record form labels a field from its id ("Standard cost cad", as "Price cad"), not its declared label, and shows a stored decimal at scale 18.
 
 ```record-claim
 {

@@ -13,7 +13,8 @@ levels for Task lamp (reorder point 5) and **Shipping labels** (reorder point 0,
 
 1. More → Catalog → **Item** → **Field notebook** → Record actions → **Edit**.
 2. Reorder point **20**, Reorder up to **30**, Preferred location: a list of the four locations by name — pick
-   **Calgary warehouse** — Standard cost (CAD) **4.5** → **Save**: "Update complete".
+   **Calgary warehouse** — Standard cost cad **4.5** (the generic form names fields by their ids, as it does Price cad)
+   → **Save**: "Update complete".
 3. Back on the item page: Reorder point 20, Reorder up to 30, Preferred location **Calgary warehouse** (a name, not an
    id), Standard cost (CAD) **4.50**.
 
