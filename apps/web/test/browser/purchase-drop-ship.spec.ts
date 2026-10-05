@@ -137,12 +137,18 @@ test('a supplier delivery appears on both linked orders and reverses with its re
       .getByRole('link', { name: 'Open purchase order', exact: true })
       .click();
     const purchaseUrl = page.url();
-    await page
-      .getByRole('button', { name: /^(Release|Place order)$/u })
-      .click();
-    // Bare confirmed commands use the shared confirmation route.
-    const confirmation = page.getByRole('button', { name: /Confirm/u });
-    if (await confirmation.count()) await confirmation.first().click();
+    const recordActions = page.locator(
+      '.composition-record-actions:not([open]) > summary',
+    );
+    if (await recordActions.count()) await recordActions.click();
+    const release = page.getByRole('button', {
+      name: /^(Release|Place order)$/u,
+    });
+    await expect(release).toBeVisible();
+    await release.click();
+    await expect(page.locator('.composition-business-status')).toHaveText(
+      'Released',
+    );
     await page.goto(purchaseUrl);
     const purchaseRow = dataset('purchasing_lines').locator('tbody tr').first();
     await expect(purchaseRow).toContainText('Drop ship');

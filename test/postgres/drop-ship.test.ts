@@ -308,6 +308,21 @@ test('D-A/B/C: linked supplier delivery settles both orders without stock and re
       () => command('reservation_reserve', reservation),
       /never reserve/u,
     );
+    assert.equal(
+      (await get('reservation', reservation.recordId)).values[
+        field('reservation_state')
+      ],
+      option('reservation_state_draft'),
+      'The refused stock path leaves its draft unposted',
+    );
+    // Preserve the existing close precondition: retire this unused negative
+    // fixture through the governed archive, rather than relaxing stock rules.
+    const archivedReservation = await fixture.invoke('reservation_archive', {
+      recordId: reservation.recordId,
+      expectedRevision: reservation.revision,
+    });
+    assert.equal(archivedReservation.outcome, 'succeeded');
+    assert.equal(archivedReservation.readBack!.archived, true);
     await assert.rejects(
       () =>
         command('purchase_order_record_delivery', purchaseOrder, {
