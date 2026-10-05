@@ -10820,6 +10820,13 @@ test('INVENTORY-PARITY: the item page lists the stock and movements of one compa
     [field('item_price_cad')]: '24.5',
     [field('item_price_usd')]: null,
     [field('item_price_eur')]: null,
+    // REPLENISHMENT: unset, as an item saved before them reads.
+    [field('item_reorder_point')]: null,
+    [field('item_reorder_up_to')]: null,
+    [field('item_preferred_location_id')]: null,
+    [field('item_standard_cost_cad')]: null,
+    [field('item_standard_cost_usd')]: null,
+    [field('item_standard_cost_eur')]: null,
   });
   const location = (code: string) =>
     f.executor.seed('location', {
