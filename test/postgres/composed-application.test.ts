@@ -838,6 +838,88 @@ test(
   },
 );
 
+// The trigger and approval refusals have their own database lifecycle. Keeping
+// them with forward/reverse activation exceeded the existing 300-second bound.
+// Both cases retain that bound and execute the same production release services.
+test(
+  'composed product refuses advancement with a disabled swap trigger or revoked approver',
+  { timeout: 300_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'g2-release-advancement-refusals',
+      async ({ connection, pool }) => {
+        const compiledApplication = JSON.parse(
+          await readFile(compiledArtifactPath, 'utf8'),
+        ) as unknown;
+        const authoredApplication = JSON.parse(
+          await readFile(authoredArtifactPath, 'utf8'),
+        ) as Record<string, unknown>;
+        const databaseUrl = connectionUrl(connection);
+        const runtime = await createRuntime(
+          compiledApplication,
+          databaseUrl,
+          'advancing-tenant',
+        );
+        try {
+          await assertExactSwapTriggerEnabled(pool);
+          const sourceReleaseId = runtime.activeReleaseId;
+          const approvalCandidate = await compileCandidateEnvelope(
+            compiledApplication,
+            authoredApplication,
+            false,
+          );
+          const mismatched = compileMismatchedEnvelope(
+            compiledApplication,
+            authoredApplication,
+          );
+          await runtime.close();
+          await assert.rejects(
+            createRuntime(mismatched, databaseUrl, 'advancing-tenant'),
+            /transition does not match its declared previous release/,
+          );
+          assert.equal(
+            await activeReleaseId(pool, runtime.identity),
+            sourceReleaseId,
+          );
+          await pool.query(
+            `ALTER TABLE platform.active_release_pointers
+               DISABLE TRIGGER active_release_pointer_exact_swap`,
+          );
+          try {
+            await assert.rejects(
+              createRuntime(approvalCandidate, databaseUrl, 'advancing-tenant'),
+              /active_release_pointer_exact_swap is not enabled/,
+            );
+          } finally {
+            await pool.query(
+              `ALTER TABLE platform.active_release_pointers
+                 ENABLE TRIGGER active_release_pointer_exact_swap`,
+            );
+          }
+          await assertExactSwapTriggerEnabled(pool);
+          assert.equal(
+            await activeReleaseId(pool, runtime.identity),
+            sourceReleaseId,
+          );
+          await assertApprovalRequiredForAdvancement(
+            runtime,
+            approvalCandidate,
+            connection,
+            pool,
+          );
+          assert.equal(
+            await activeReleaseId(pool, runtime.identity),
+            sourceReleaseId,
+          );
+          await assertExactSwapTriggerEnabled(pool);
+        } finally {
+          await runtime.close();
+        }
+      },
+    );
+  },
+);
+
 // Same harness limit: this parent performs one bounded fresh install and then
 // verifies and activates compiled successors through the normal upgrade path.
 test(
@@ -871,63 +953,12 @@ test(
             compiledApplication,
             recordId,
           );
-          const approvalCandidate = await compileCandidateEnvelope(
-            compiledApplication,
-            authoredApplication,
-            false,
-          );
           const candidate = await compileCandidateEnvelope(
             compiledApplication,
             authoredApplication,
             true,
           );
-          const mismatched = compileMismatchedEnvelope(
-            compiledApplication,
-            authoredApplication,
-          );
           await runtime.close();
-
-          await assert.rejects(
-            createRuntime(mismatched, databaseUrl, 'advancing-tenant'),
-            /transition does not match its declared previous release/,
-          );
-          assert.equal(
-            await activeReleaseId(pool, runtime.identity),
-            sourceReleaseId,
-          );
-
-          await pool.query(
-            `ALTER TABLE platform.active_release_pointers
-               DISABLE TRIGGER active_release_pointer_exact_swap`,
-          );
-          try {
-            await assert.rejects(
-              createRuntime(approvalCandidate, databaseUrl, 'advancing-tenant'),
-              /active_release_pointer_exact_swap is not enabled/,
-            );
-          } finally {
-            await pool.query(
-              `ALTER TABLE platform.active_release_pointers
-                 ENABLE TRIGGER active_release_pointer_exact_swap`,
-            );
-          }
-          await assertExactSwapTriggerEnabled(pool);
-          assert.equal(
-            await activeReleaseId(pool, runtime.identity),
-            sourceReleaseId,
-          );
-
-          await assertApprovalRequiredForAdvancement(
-            runtime,
-            approvalCandidate,
-            connection,
-            pool,
-          );
-          assert.equal(
-            await activeReleaseId(pool, runtime.identity),
-            sourceReleaseId,
-          );
-          await assertExactSwapTriggerEnabled(pool);
 
           runtime = await createRuntime(
             candidate,
@@ -3930,21 +3961,11 @@ async function reopenServingRuntime(
 //   "If this ever reds on timing, the fix is to split the `-source-edge` tenant
 //    into its own test with its own lifecycle. It is NOT to raise the bound."
 //
-// BOTH ADR-0047 §6 rollback directions now live here, and it took two rounds to
-// get there. Adoption made the artifact's head source-changing rather than a
-// profile sibling, which swapped which direction could borrow the real head:
-// the profile-only one suddenly needed a served tenant of its own. Moving only
-// the source-changing direction out left the parent driving three tenants; that
-// measured 251.1s standalone and then TIMED OUT at 300s IN-MATRIX, where the
-// parent's own comment records a 1.79x load factor over standalone. So the
-// second direction followed the first, the parent is back to its two
-// gateway-persistence tenants, and each direction has its own budget.
-//
-// They belong together anyway: each is the other's discriminating half. Direction
-// 1 alone is satisfied by a refusal that fires on every edge; direction 2 alone
-// is satisfied by one that fires on none.
+// UNITS: split the two directions into independent database lifecycles after
+// the combined fixture failed during probe cleanup. The refusal and successful
+// reverse transition still discriminate deny-every-edge and admit-every-edge.
 test(
-  'ADR-0047 §6 refuses a profile-only rollback edge by name and leaves a source-changing one eligible',
+  'ADR-0047 §6 refuses a profile-only rollback edge by name',
   { timeout: 300_000 },
   async () => {
     await withEphemeralPostgres(
@@ -4001,7 +4022,25 @@ test(
           },
           'ADR-0047 §6: a profile-only edge refuses by its own name, not as a wrong predecessor',
         );
+      },
+    );
+  },
+);
 
+// Each rollback direction gets a fresh database and the same 300-second bound.
+// This keeps the positive direction independent of the refusal's probe state.
+test(
+  'ADR-0047 §6 permits and verifies a source-changing rollback edge',
+  { timeout: 300_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'source-changing-rollback-edge',
+      async ({ connection }) => {
+        const compiledApplication = JSON.parse(
+          await readFile(compiledArtifactPath, 'utf8'),
+        ) as unknown;
+        const databaseUrl = connectionUrl(connection);
+        const tenantSlug = 'composed-tenant-b';
         // ADR-0066: the source-changing synthetic edge has a usable target.
         // Actual successful rollback discriminates this from deny-every-edge.
         // The obsolete pre-search first-party target is no longer retained.

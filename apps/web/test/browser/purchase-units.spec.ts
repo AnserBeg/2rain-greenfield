@@ -40,12 +40,11 @@ test('code-keyed units and company conversions use the shared setup forms', asyn
     await page.getByRole('link', { name: 'New', exact: true }).click();
     await page.getByLabel('Code', { exact: true }).fill('BOX');
     await page.getByLabel('Name', { exact: true }).fill('Box of twelve');
+    // The shared renderer uses a datalist for enums with more than five choices.
     await page
-      .getByLabel('Decimals', { exact: true })
-      .selectOption('northstar.app:option.unit_decimals_0');
-    await expect(
-      page.getByLabel('Decimals', { exact: true }).locator('option'),
-    ).toHaveCount(20); // empty choice plus 0–18
+      .getByLabel('Decimals')
+      .fill('northstar.app:option.unit_decimals_0');
+    await expect(page.locator('datalist option')).toHaveCount(19);
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page.getByRole('status')).toContainText(
       /saved|created|complete/i,

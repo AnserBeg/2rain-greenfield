@@ -1,6 +1,6 @@
 # UNITS — enter document quantities in another unit without changing the ledger
 
-Status: draft setup checkpoint, [PR #17](https://github.com/AnserBeg/2rain-greenfield/pull/17); document slice stopped on UNITS-VERIFICATION. Branch `packet/UNITS`, based on INVENTORY-PARITY `e3da0a39`.
+Status: paused for the owner's Windows restart; draft setup checkpoint, [PR #17](https://github.com/AnserBeg/2rain-greenfield/pull/17); document slice stopped on UNITS-VERIFICATION. Branch `packet/UNITS`, based on INVENTORY-PARITY `e3da0a39`.
 Review: not owed — the implemented diff excludes the Critical set. Draft PR only; no integration or deployment.
 
 ## Design before implementation
@@ -65,6 +65,12 @@ Local container work requires at least 1.2 GB Windows free memory before taking 
 See [UNITS-test-it-yourself.md](UNITS-test-it-yourself.md), completed with the implemented slices.
 
 Program review: no stabilized new correctness domain or stage boundary at this setup checkpoint; none launched.
+
+## Restart handoff
+
+Latest pushed tip: `9ff7115f`; run 37265336413 finished red. Commercial PostgreSQL, main browser, performance and security passed; the new stored-row unit witness passed in the main PostgreSQL job.
+Unpushed fixes: compiled inventory golden (`3303be16`), browser datalist assertion, Inventory-free transition fixture stripping unit setup, and split composed refusal/rollback lifecycles with every existing 300-second bound retained. Focused golden case, formatting and changed-file lint passed; typecheck and hosted CI have not run after the latest fixture edits.
+Resume only in the UNITS worktree: refresh the record claim to the checkpoint commit, validate changed files, obey the memory/exclusive-lock guards for any local container test, then push the existing draft and await its full CI. Never change Critical production files or increase bounds. No lane-owned test process or container was left running; the other lane's running container was left alone.
 
 ## Claims at the setup boundary
 
