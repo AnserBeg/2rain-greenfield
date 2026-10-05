@@ -1579,6 +1579,15 @@ function countOperations(ids: InventoryIds): Array<Record<string, unknown>> {
       ? { kind: 'anyPredicate', schemaVersion: version, terms: [only, ...more] }
       : only!;
   };
+  const notReversal = {
+    kind: 'notPredicate',
+    schemaVersion: version,
+    term: fieldComparison(ids.fieldIds.stockCount.kind, 'equals', {
+      kind: 'textValue',
+      schemaVersion: version,
+      value: `${ids.namespace}:option.stock_count_kind_reversal`,
+    }),
+  };
   const commands: Record<
     (typeof ids.countCommands)[number],
     readonly [label: string, states: readonly string[], confirmed: boolean]
@@ -1587,6 +1596,7 @@ function countOperations(ids: InventoryIds): Array<Record<string, unknown>> {
     review: ['Review', ['counting'], false],
     post: ['Post', ['reviewed'], true],
     // Back to counting, as it was: what was entered stays, Review reads again.
+    // Never a reversal, whose lines are derived (review round 1, SC-6).
     reopen: ['Return to counting', ['reviewed'], false],
     // A count not posted can be cancelled; a cancelled count stays cancelled.
     cancel: ['Cancel count', ['draft', 'counting', 'reviewed'], true],
@@ -1608,7 +1618,14 @@ function countOperations(ids: InventoryIds): Array<Record<string, unknown>> {
         'permissionReference',
         `${ids.namespace}:permission.stock_count_${action}`,
       ),
-      precondition: inState(...states),
+      precondition:
+        action === 'reopen'
+          ? {
+              kind: 'allPredicate',
+              schemaVersion: version,
+              terms: [inState(...states), notReversal],
+            }
+          : inState(...states),
       readBack: reference(
         'queryReference',
         `${ids.namespace}:query.stock_count_get`,
