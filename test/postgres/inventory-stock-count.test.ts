@@ -536,8 +536,9 @@ test('stock-count expected: a stale expected is refused and posts nothing, and a
       );
 
       // Each line's expected is the whole ledger for its item, so a second
-      // line for the same item would post its variance twice.
-      const once = countCommand({
+      // line for the same item would post its variance twice. Reviewed and
+      // stored like any count, so only the rule stands between it and Post.
+      const single = countCommand({
         countedQuantity: '3',
         expectedQuantity: '3',
         kind: 'initial',
@@ -545,24 +546,30 @@ test('stock-count expected: a stale expected is refused and posts nothing, and a
         supersedesStockCountId: null,
         varianceQuantity: '0',
       });
+      const twice = {
+        ...single,
+        lines: [
+          single.lines[0]!,
+          {
+            ...single.lines[0]!,
+            countedQuantity: '4',
+            sourceLine: '35',
+            stockCountLineId: '63000000-0000-4000-8000-000000000035',
+            varianceQuantity: '1',
+          },
+        ],
+      };
+      await seedReviewedCount(runtimePool, context, binding, twice);
       await assertCountPostingRejected(
-        () =>
-          service.postStockCount(context, actor, {
-            ...once,
-            lines: [
-              once.lines[0]!,
-              {
-                ...once.lines[0]!,
-                countedQuantity: '4',
-                sourceLine: '35',
-                stockCountLineId: '63000000-0000-4000-8000-000000000035',
-                varianceQuantity: '1',
-              },
-            ],
-          }),
+        () => service.postStockCount(context, actor, twice),
         'INVENTORY_POSTING_INPUT_INVALID',
         /a stock count names each item once/u,
         'deleting the one-line-per-item rule must let one item be counted twice',
+      );
+      assert.equal(
+        await readPostedStockQuantity(runtimePool, context, binding),
+        '3.000000000000000000',
+        'a count naming one item twice posts nothing',
       );
     },
   );
