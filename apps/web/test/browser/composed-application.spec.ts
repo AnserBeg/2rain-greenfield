@@ -663,10 +663,18 @@ async function readFocusRingCoverage(
       label: 'declared list with rows',
     },
     {
-      // A record page with its own workspace and no datasets: a location's
-      // (LOCATIONS), its status in the header.
+      // A plain record page with its field sections: a posted balance's, read
+      // from the Posted stock List. A party's page is its customer workspace
+      // and a location's its own (LOCATIONS), so neither renders them.
       go: async () => {
-        await page.goto(surfaceUrl(baseUrl, 'location_list'));
+        await page.goto(
+          scopedSurfaceUrl(
+            baseUrl,
+            'posted_stock_balance_list',
+            await loadSurfaceScopeParameterId('posted_stock_balance_list'),
+            browserLegalEntityId,
+          ),
+        );
         const href = await page
           .locator('.record-link')
           .first()
