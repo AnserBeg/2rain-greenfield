@@ -14,17 +14,19 @@ Status: unfinished BUILD on `packet/DROP-SHIP`, PAYABLES `b91c5284` and RELATION
 - `special_order` is filed as the next increment: the same demand/supply link is useful, but its receipt-into-stock and later reservation path is not a small off-ledger addition.
 - PaneFlow export `paneflow-sales-parity-d057daff` is a read-only behavioral REFERENCE (`inventory-records.ts`, `advanced-domain.ts`, `db/schema.ts`); no code/database architecture is ported. The export has no Git metadata.
 - RETURNS reconciliation: when #15 lands, reconcile net shipped/returned eligibility in settlement and read models, reversal floors against live invoices/bills, and closure/Cancel routing. Do not change its shipped-quantity neighbours here.
+- Demand/supply line references use `retainReference` for historical document identity; confirmed-line and linked-purchase mutation guards retain edit control. Delivery-document links remain `restrict`; scoped FKs are unchanged.
 
 ## Gates
 
 - Implemented: route/supplier entry, linked PO creation/reuse and customer ship-to, bounded numbered delivery/reversal, physical-vs-delivered read models/settlement/closure, declared Lists, both order sections and delivery Record/Tasks. These are code/declaration claims, not successful PostgreSQL/browser execution claims.
 - Changed unit, integration and web-contract files: 119/119 pass. Canonical route/bounds checks 2/2 and full tsc pass again after removing the alternative link-record experiment. Focused inventory-contract golden 1/1 and test registration 2/2 pass; surface grammar 25/25 pass.
 - Combined hygiene/grammar run: 35/36; one lock-control test was refused by its live-container contamination guard during this packet's exclusive schema replay. Registration checks independently pass. Lint has no errors; formatting and diff whitespace checked.
-- Exact-base release rebuild/check passes: five inherited entries plus one; 104 surfaces, 16 navigation leaves, 606 scenarios, 529 constructible candidates / 77 without a create operation. PostgreSQL has NOT observed those execution pins yet. Both numbering pin lists include DSD: 11 fields, 11 uniqueness probes, measured from compiled assigned fields.
-- Coverage declaration inventory re-derived: 2658 obligations / 822 observed declarations. Local coverage gate refused missing reachability receipts; no execution receipts were invented.
+- Exact-base release rebuild/check passes: five inherited entries plus one; 104 surfaces, 16 navigation leaves, 604 scenarios, 527 constructible candidates / 77 without a create operation. PostgreSQL has NOT observed those execution pins yet. Both numbering pin lists include DSD: 11 fields, 11 uniqueness probes, measured from compiled assigned fields.
+- Coverage declaration inventory re-derived: 2658 obligations / 824 observed declarations. Local coverage gate refused missing reachability receipts; no execution receipts were invented.
 - Prior full-replay generation and CI failed with `ELEMENT_TARGET_MISSING` on `purchase_order_line_sales_line`; the failed generator cleaned its container and did not rewrite the snapshot. RELATION-INSTALL is now merged; post-bridge regeneration remains pending.
 - New commercial PostgreSQL journey is registered in package scripts, reachability and hygiene; its first local attempt never started (lock busy). New `purchase-drop-ship.spec.ts` is operations-browser reachable; browser not run. Full DROP-SHIP CI acceptance remains unmet.
 - Post-bridge correction: two existing unit files now account for DSD numbering, the exact sales-line/order relation and the fourth registered sales-order operation. Focused 14/14 PASS; formatting, typecheck and release `--check` PASS. Coverage re-derived again from unchanged declarations.
+- Hosted run `37271614092` is red: compiler input/fixture pins, browser backend-loader failure and opaque generic guard refusal. Corrected at `e9751adc`: Sales command module, retained references, typed refusal, scoped browser loader and fixture closure. Four changed compiler/unit files PASS 93/93; lint/format/typecheck PASS. Full new CI remains pending.
 - Local container work checks Windows free memory before locking, uses one container at a time; no timeout, readiness or budget change. Static expected-red validation and record fidelity run on the frozen tree before push.
 
 ## Test it yourself
@@ -44,7 +46,7 @@ Review: no separate DROP-SHIP arm; inherited Critical bridge owner-run review is
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "DROP-SHIP",
   "base": "b91c5284e163d19a834802479dd2dc1e3a1201d1",
-  "head": "374a69c245daa808393fdb0407b673c27496fd15",
+  "head": "e9751adcc60e42e8ea23dc71092fc8c504796c28",
   "changedPaths": [
     "apps/api/src/composition-root.ts",
     "apps/web/release/app.authored.json",
@@ -85,6 +87,7 @@ Review: no separate DROP-SHIP arm; inherited Critical bridge owner-run review is
     "test/architecture/repository-hygiene.test.ts",
     "test/architecture/surface-grammar-conformance.test.ts",
     "test/compiler/inventory-contract.release.golden.json",
+    "test/compiler/g2-module-conformance.test.ts",
     "test/evidence/RELATION-INSTALL.expected-red.json",
     "test/fixtures/g2/language-conformance/coverage-decisions.json",
     "test/helpers/generate-fresh-tenant-full-replay-schema.ts",
@@ -99,6 +102,7 @@ Review: no separate DROP-SHIP arm; inherited Critical bridge owner-run review is
     "test/unit/canonical-model/field-numbering.test.ts",
     "test/unit/canonical-model/surface-list.test.ts",
     "test/unit/commercial-amounts.test.ts",
+    "test/unit/drop-ship-mutation-guards.test.ts",
     "test/unit/purchasing-definition.test.ts",
     "test/unit/sales-definition.test.ts",
     "test/unit/workspace-contract.test.ts"
