@@ -1,4 +1,8 @@
 import {
+  allocateLandedCharges,
+  type BilledReceiptSource,
+} from './inventory-landed-cost.js';
+import {
   VALUATION_ITEM_BINDING,
   VALUATION_SHIPMENT_BINDING,
   VALUATION_SHIPMENT_LINE_BINDING,
@@ -19,6 +23,8 @@ import {
 } from '../../runtime/src/list-behavior/index.js';
 import type { ImmutableJsonValue } from '../../runtime/src/request-runtime-view.js';
 import {
+  zero,
+  exact,
   itemCostFigures,
   replayInventoryValue,
   type CostMovement,
@@ -193,6 +199,152 @@ async function valuationHistory(reader: ReturnType<typeof valuationReader>) {
   return { history, costs, replay: replayInventoryValue(history, costs) };
 }
 
+async function landedReplay(
+  reader: ReturnType<typeof valuationReader>,
+  input: Awaited<ReturnType<typeof valuationHistory>>,
+) {
+  const { ns, value, text, listAll, relation } = reader;
+  const live = (row: SemanticRecordDto) =>
+    ['open', 'partially_paid', 'paid'].some(
+      (state) =>
+        value(row, 'vendor_bill', 'state') ===
+        `${ns}:option.vendor_bill_state_${state}`,
+    );
+  const bills = (
+    await listAll('vendor_bill', [
+      ['vendor_bill_order', 'purchase_order', 'purchase_order_number'],
+    ])
+  ).filter(live);
+  if (!bills.some((row) => exact(text(row, 'vendor_bill', 'charges')).n !== 0n))
+    return input.replay;
+  const headers = new Map(bills.map((row) => [row.recordId, row]));
+  const purchaseLines = new Map(
+    (
+      await listAll('purchase_order_line', [
+        [
+          'purchase_order_line_order',
+          'purchase_order',
+          'purchase_order_number',
+        ],
+      ])
+    ).map((row) => [row.recordId, row]),
+  );
+  const billed = [];
+  for (const row of await listAll('vendor_bill_line', [
+    ['vendor_bill_line_bill', 'vendor_bill', 'vendor_bill_number'],
+    [
+      'vendor_bill_line_order_line',
+      'purchase_order_line',
+      'purchase_order_line_line_number',
+    ],
+  ])) {
+    const bill = relation(row, 'vendor_bill_line_bill');
+    const header = headers.get(bill);
+    if (!header) continue;
+    const orderLine = relation(row, 'vendor_bill_line_order_line');
+    const ordered = purchaseLines.get(orderLine);
+    if (
+      !ordered ||
+      relation(ordered, 'purchase_order_line_order') !==
+        relation(header, 'vendor_bill_order') ||
+      value(ordered, 'purchase_order_line', 'item_id') !==
+        value(row, 'vendor_bill_line', 'item_id')
+    )
+      throw new Error('Landed bill order lineage is incomplete');
+    billed.push({
+      bill,
+      orderLine,
+      item: text(row, 'vendor_bill_line', 'item_id'),
+      unit: text(row, 'vendor_bill_line', 'unit_id'),
+      quantity: text(row, 'vendor_bill_line', 'quantity'),
+    });
+  }
+  const receipts = new Map(
+    (
+      await listAll('goods_receipt', [
+        ['goods_receipt_order', 'purchase_order', 'purchase_order_number'],
+      ])
+    ).map((row) => [row.recordId, row]),
+  );
+  const lines = new Map(
+    (
+      await listAll('goods_receipt_line', [
+        ['goods_receipt_line_receipt', 'goods_receipt', 'goods_receipt_number'],
+        [
+          'goods_receipt_line_order_line',
+          'purchase_order_line',
+          'purchase_order_line_line_number',
+        ],
+      ])
+    ).map((row) => [row.recordId, row]),
+  );
+  const sources = new Map<string, BilledReceiptSource>();
+  for (const m of input.history) {
+    if (m.sourceType !== 'goodsReceipt' || m.reversal) continue;
+    const line = lines.get(m.sourceLine);
+    const header = receipts.get(m.sourceId);
+    if (
+      !line ||
+      !header ||
+      relation(line, 'goods_receipt_line_receipt') !== m.sourceId
+    )
+      throw new Error('Landed receipt parent is incomplete');
+    const orderLine = relation(line, 'goods_receipt_line_order_line');
+    const ordered = purchaseLines.get(orderLine);
+    if (
+      !ordered ||
+      relation(ordered, 'purchase_order_line_order') !==
+        relation(header, 'goods_receipt_order')
+    )
+      throw new Error('Landed receipt order lineage is incomplete');
+    sources.set(m.sourceLine, {
+      orderLine,
+      item: text(line, 'goods_receipt_line', 'item_id'),
+      unit: text(line, 'goods_receipt_line', 'unit_id'),
+    });
+  }
+  const allocation = allocateLandedCharges(
+    input.history,
+    input.costs,
+    sources,
+    bills.map((row) => ({
+      id: row.recordId,
+      date: text(row, 'vendor_bill', 'bill_date'),
+      currency: text(row, 'vendor_bill', 'currency'),
+      charges: text(row, 'vendor_bill', 'charges'),
+      live: true,
+    })),
+    billed,
+  );
+  const replay = replayInventoryValue(
+    input.history,
+    input.costs,
+    allocation.grossCharges,
+  );
+  const items = new Map(replay.items);
+  for (const item of new Set([
+    ...items.keys(),
+    ...allocation.invalidItems.keys(),
+  ])) {
+    const reason = allocation.invalidItems.get(item);
+    items.set(item, {
+      ...(items.get(item) ?? {
+        quantity: zero,
+        unvalued: zero,
+        pools: new Map(),
+        complete: true,
+      }),
+      landedComplete: !reason,
+      landedCoverage: reason
+        ? `Unstated: ${reason}`
+        : allocation.chargedItems.has(item)
+          ? 'Allocated by actual receipt value'
+          : 'No billed charges',
+    });
+  }
+  return { ...replay, items };
+}
+
 export const inventoryValuationReadModel: SemanticQueryReadModelExecutor =
   async (context) => {
     const { definition, result } = context;
@@ -223,7 +375,9 @@ export const inventoryValuationReadModel: SemanticQueryReadModelExecutor =
       }),
     });
     try {
-      const { history, replay } = await valuationHistory(reader);
+      const input = await valuationHistory(reader);
+      const { history } = input;
+      const replay = await landedReplay(reader, input);
       if (model.binding === VALUATION_ITEM_BINDING)
         return emit((row) => itemCostFigures(replay.items.get(row.recordId)));
       if (

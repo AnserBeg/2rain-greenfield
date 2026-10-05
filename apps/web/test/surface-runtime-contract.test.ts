@@ -2382,7 +2382,14 @@ test('inventory value is a declared List and item cost is a compiled record comp
   const declaration = SurfaceListSchema.parse(list.list);
   assert.deepEqual(
     declaration.columns.map((column) => column.label),
-    ['Item', 'On hand', 'Average cost', 'Known value', 'Unvalued quantity'],
+    [
+      'Item',
+      'On hand',
+      'Average cost',
+      'Known value',
+      'Unvalued quantity',
+      'Landed cost coverage',
+    ],
   );
   assert.ok(declaration.columns.slice(1).every((column) => !column.sortable));
   const item = surfaces.find(

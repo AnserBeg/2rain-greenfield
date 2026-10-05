@@ -73,6 +73,8 @@ export interface ReceiptCost {
 }
 export interface ItemValuation extends ValuationEffect {
   readonly complete: boolean;
+  readonly landedComplete?: boolean;
+  readonly landedCoverage?: string;
 }
 export interface ValuationReplay {
   readonly items: ReadonlyMap<string, ItemValuation>;
@@ -120,6 +122,7 @@ const scaledEffect = (
 export function replayInventoryValue(
   movements: readonly CostMovement[],
   receipts: ReadonlyMap<string, ReceiptCost>,
+  landedCharges: ReadonlyMap<string, Fraction> = new Map(),
 ): ValuationReplay {
   const items = new Map<string, ItemValuation>();
   const effects = new Map<string, ValuationEffect>();
@@ -208,7 +211,16 @@ export function replayInventoryValue(
           quantity,
           unvalued: zero,
           pools: new Map([
-            [receipt.currency, { quantity, value: multiply(quantity, cost) }],
+            [
+              receipt.currency,
+              {
+                quantity,
+                value: add(
+                  multiply(quantity, cost),
+                  landedCharges.get(movement.id) ?? zero,
+                ),
+              },
+            ],
           ]),
         };
       } else effect = { ...emptyEffect(quantity), unvalued: quantity };
@@ -250,25 +262,29 @@ export function itemCostFigures(
       average_cost: null,
       inventory_value: '0.00',
       unvalued_quantity: '0',
+      landed_cost_coverage: 'No billed charges',
     };
   const currencies = [...state.pools].sort(([a], [b]) => compare(a, b));
   return {
     on_hand: display(state.quantity, 18, true),
-    average_cost: state.complete
-      ? currencies
-          .filter(([, pool]) => positive(pool.quantity))
-          .map(
-            ([currency, pool]) =>
-              `${currency} ${display(divide(pool.value, pool.quantity), 6, true)}`,
-          )
-          .join(' · ') || null
-      : null,
-    inventory_value: state.complete
-      ? currencies
-          .filter(([, pool]) => positive(pool.quantity))
-          .map(([currency, pool]) => `${currency} ${display(pool.value, 2)}`)
-          .join(' · ') || '0.00'
-      : null,
+    average_cost:
+      state.complete && state.landedComplete !== false
+        ? currencies
+            .filter(([, pool]) => positive(pool.quantity))
+            .map(
+              ([currency, pool]) =>
+                `${currency} ${display(divide(pool.value, pool.quantity), 6, true)}`,
+            )
+            .join(' · ') || null
+        : null,
+    inventory_value:
+      state.complete && state.landedComplete !== false
+        ? currencies
+            .filter(([, pool]) => positive(pool.quantity))
+            .map(([currency, pool]) => `${currency} ${display(pool.value, 2)}`)
+            .join(' · ') || '0.00'
+        : null,
+    landed_cost_coverage: state.landedCoverage ?? 'No billed charges',
     unvalued_quantity: state.complete
       ? display(state.unvalued, 18, true)
       : 'Unstated: incomplete cost coverage',

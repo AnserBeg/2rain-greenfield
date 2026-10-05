@@ -17333,6 +17333,26 @@
             "kind": "queryReference",
             "schemaVersion": "v6",
             "targetId": "northstar.app:query.customer_invoice_line_list"
+          },
+          "vendor_bill": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_list"
+          },
+          "vendor_bill_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_line_list"
+          },
+          "purchase_order": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.purchase_order_list"
+          },
+          "purchase_order_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_purchase_lines"
           }
         },
         "resultFields": {
@@ -17590,6 +17610,26 @@
             "kind": "queryReference",
             "schemaVersion": "v6",
             "targetId": "northstar.app:query.customer_invoice_line_list"
+          },
+          "vendor_bill": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_list"
+          },
+          "vendor_bill_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_line_list"
+          },
+          "purchase_order": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.purchase_order_list"
+          },
+          "purchase_order_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_purchase_lines"
           }
         },
         "resultFields": {
@@ -17742,13 +17782,34 @@
             "kind": "queryReference",
             "schemaVersion": "v6",
             "targetId": "northstar.app:query.goods_receipt_line_list"
+          },
+          "vendor_bill": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_list"
+          },
+          "vendor_bill_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_line_list"
+          },
+          "purchase_order": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.purchase_order_list"
+          },
+          "purchase_order_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_purchase_lines"
           }
         },
         "resultFields": {
           "on_hand": "northstar.app:metric.on_hand",
           "average_cost": "northstar.app:metric.average_cost",
           "inventory_value": "northstar.app:metric.inventory_value",
-          "unvalued_quantity": "northstar.app:metric.unvalued_quantity"
+          "unvalued_quantity": "northstar.app:metric.unvalued_quantity",
+          "landed_cost_coverage": "northstar.app:metric.landed_cost_coverage"
         }
       }
     },
@@ -17893,13 +17954,34 @@
             "kind": "queryReference",
             "schemaVersion": "v6",
             "targetId": "northstar.app:query.goods_receipt_line_list"
+          },
+          "vendor_bill": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_list"
+          },
+          "vendor_bill_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_line_list"
+          },
+          "purchase_order": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.purchase_order_list"
+          },
+          "purchase_order_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_purchase_lines"
           }
         },
         "resultFields": {
           "on_hand": "northstar.app:metric.on_hand",
           "average_cost": "northstar.app:metric.average_cost",
           "inventory_value": "northstar.app:metric.inventory_value",
-          "unvalued_quantity": "northstar.app:metric.unvalued_quantity"
+          "unvalued_quantity": "northstar.app:metric.unvalued_quantity",
+          "landed_cost_coverage": "northstar.app:metric.landed_cost_coverage"
         }
       }
     },
@@ -36836,6 +36918,26 @@
             "kind": "queryReference",
             "schemaVersion": "v6",
             "targetId": "northstar.app:query.customer_invoice_line_list"
+          },
+          "vendor_bill": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_list"
+          },
+          "vendor_bill_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_line_list"
+          },
+          "purchase_order": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.purchase_order_list"
+          },
+          "purchase_order_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_purchase_lines"
           }
         },
         "resultFields": {
@@ -38347,6 +38449,26 @@
             "kind": "queryReference",
             "schemaVersion": "v6",
             "targetId": "northstar.app:query.customer_invoice_line_list"
+          },
+          "vendor_bill": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_list"
+          },
+          "vendor_bill_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.vendor_bill_line_list"
+          },
+          "purchase_order": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.purchase_order_list"
+          },
+          "purchase_order_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_purchase_lines"
           }
         },
         "resultFields": {
@@ -57246,7 +57368,8 @@
               "northstar.app:column.item_cost_on_hand",
               "northstar.app:column.item_cost_average_cost",
               "northstar.app:column.item_cost_inventory_value",
-              "northstar.app:column.item_cost_unvalued_quantity"
+              "northstar.app:column.item_cost_unvalued_quantity",
+              "northstar.app:column.item_cost_landed_cost_coverage"
             ]
           },
           "recordActions": "progressive",
@@ -57302,25 +57425,31 @@
             "orderKey": 80
           },
           {
+            "columnId": "northstar.app:column.item_cost_landed_cost_coverage",
+            "label": "Landed cost coverage",
+            "field": "northstar.app:metric.landed_cost_coverage",
+            "orderKey": 90
+          },
+          {
             "columnId": "northstar.app:column.item_cost_price_cad",
             "label": "Selling price (CAD)",
             "field": "northstar.app:field.item_price_cad",
             "format": "money",
-            "orderKey": 90
+            "orderKey": 100
           },
           {
             "columnId": "northstar.app:column.item_cost_price_usd",
             "label": "Selling price (USD)",
             "field": "northstar.app:field.item_price_usd",
             "format": "money",
-            "orderKey": 100
+            "orderKey": 110
           },
           {
             "columnId": "northstar.app:column.item_cost_price_eur",
             "label": "Selling price (EUR)",
             "field": "northstar.app:field.item_price_eur",
             "format": "money",
-            "orderKey": 110
+            "orderKey": 120
           }
         ],
         "children": [],
@@ -57991,6 +58120,15 @@
             "field": "northstar.app:metric.unvalued_quantity",
             "role": "value",
             "priority": 4,
+            "sortable": false
+          },
+          {
+            "columnId": "northstar.app:list_column.inventory_value_list_landed_cost_coverage",
+            "label": "Landed cost coverage",
+            "orderKey": 60,
+            "field": "northstar.app:metric.landed_cost_coverage",
+            "role": "value",
+            "priority": 5,
             "sortable": false
           }
         ],

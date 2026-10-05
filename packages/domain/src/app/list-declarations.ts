@@ -668,6 +668,7 @@ export function composedListSpecs(
           ['average_cost', 'Average cost'],
           ['inventory_value', 'Known value'],
           ['unvalued_quantity', 'Unvalued quantity'],
+          ['landed_cost_coverage', 'Landed cost coverage'],
         ].map(([local, label]) => ({
           local: local!,
           label: label!,

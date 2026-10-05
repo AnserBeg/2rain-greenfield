@@ -19,6 +19,7 @@ export const VALUATION_ITEM_OUTPUTS = [
   'average_cost',
   'inventory_value',
   'unvalued_quantity',
+  'landed_cost_coverage',
 ] as const;
 
 const ref = (kind: string, targetId: string) => ({
@@ -71,12 +72,21 @@ export function valuationQueries(
         capability: ref('capabilityReference', VALUATION_CAPABILITY_ID),
         binding: VALUATION_ITEM_BINDING,
         queries: Object.fromEntries(
-          ['inventory_movement', 'goods_receipt', 'goods_receipt_line'].map(
-            (local) => [
-              local,
-              ref('queryReference', `${namespace}:query.${local}_list`),
-            ],
-          ),
+          [
+            'inventory_movement',
+            'goods_receipt',
+            'goods_receipt_line',
+            'vendor_bill',
+            'vendor_bill_line',
+            'purchase_order',
+            'purchase_order_line',
+          ].map((local) => [
+            local,
+            ref(
+              'queryReference',
+              `${namespace}:query.${local === 'purchase_order_line' ? 'commercial_purchase_lines' : `${local}_list`}`,
+            ),
+          ]),
         ),
         resultFields: Object.fromEntries(
           VALUATION_ITEM_OUTPUTS.map((key) => [
@@ -150,6 +160,7 @@ export function itemCostWorkspace(namespace: string): Record<string, unknown> {
           average_cost: 'Average cost',
           inventory_value: 'Known value',
           unvalued_quantity: 'Unvalued quantity',
+          landed_cost_coverage: 'Landed cost coverage',
         }[key],
         field: `${namespace}:metric.${key}`,
         orderKey: (index + 5) * 10,
@@ -159,7 +170,7 @@ export function itemCostWorkspace(namespace: string): Record<string, unknown> {
         label: `Selling price (${currency.toUpperCase()})`,
         field: field(`price_${currency}`),
         format: 'money',
-        orderKey: (index + 9) * 10,
+        orderKey: (index + 10) * 10,
       })),
     ],
     children: [],
@@ -185,11 +196,15 @@ export function withShipmentValuation<
       'sales_order_line',
       'customer_invoice',
       'customer_invoice_line',
+      'vendor_bill',
+      'vendor_bill_line',
+      'purchase_order',
+      'purchase_order_line',
     ].map((local) => [
       local,
       ref(
         'queryReference',
-        `${namespace}:query.${local === 'sales_order_line' ? 'commercial_lines' : `${local}_list`}`,
+        `${namespace}:query.${local === 'sales_order_line' ? 'commercial_lines' : local === 'purchase_order_line' ? 'commercial_purchase_lines' : `${local}_list`}`,
       ),
     ]),
   );

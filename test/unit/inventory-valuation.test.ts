@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { allocateLandedCharges } from '../../packages/postgres-provider/src/inventory-landed-cost.js';
 import {
   deriveShipmentCosts,
   deriveInvoiceCosts,
@@ -47,6 +48,226 @@ const costs = (entries: readonly [string, string | null, string?][]) =>
       },
     ]),
   );
+
+test('landed charges use actual billed receipt value, conserving exact fractional fees across items', () => {
+  const rows = [movement('1', '10'), movement('2', '10', { item: 'other' })];
+  const actual = costs([
+    ['1', '5'],
+    ['2', '15'],
+  ]);
+  actual.set(JSON.stringify(['2', '2']), {
+    ...actual.get(JSON.stringify(['2', '2']))!,
+    item: 'other',
+  });
+  const sources = new Map([
+    ['1', { orderLine: 'a', item: 'item', unit: 'EA' }],
+    ['2', { orderLine: 'b', item: 'other', unit: 'EA' }],
+  ]);
+  const lines = [
+    { bill: 'bill', orderLine: 'a', item: 'item', unit: 'EA', quantity: '10' },
+    { bill: 'bill', orderLine: 'b', item: 'other', unit: 'EA', quantity: '10' },
+  ];
+  const original = structuredClone({ rows, actual, sources, lines });
+  const bill = {
+    id: 'bill',
+    date: '2026-09-30',
+    currency: 'CAD',
+    charges: '20',
+    live: true,
+  };
+  const allocation = allocateLandedCharges(
+    rows,
+    actual,
+    sources,
+    [bill],
+    lines,
+  );
+  assert.equal(allocation.invalidItems.size, 0);
+  assert.deepEqual(
+    [...allocation.grossCharges.values()],
+    [
+      { n: 5n, d: 1n },
+      { n: 15n, d: 1n },
+    ],
+  );
+  const replay = replayInventoryValue(rows, actual, allocation.grossCharges);
+  assert.equal(
+    itemCostFigures(replay.items.get('item')).inventory_value,
+    'CAD 55.00',
+  );
+  assert.equal(
+    itemCostFigures(replay.items.get('other')).average_cost,
+    'CAD 16.5',
+  );
+  const penny = allocateLandedCharges(
+    rows,
+    actual,
+    sources,
+    [{ ...bill, charges: '0.01' }],
+    lines,
+  );
+  assert.deepEqual(
+    [...penny.grossCharges.values()],
+    [
+      { n: 1n, d: 400n },
+      { n: 3n, d: 400n },
+    ],
+  );
+  assert.deepEqual({ rows, actual, sources, lines }, original);
+  const incomplete = new Map(actual);
+  incomplete.set(JSON.stringify(['1', '1']), {
+    item: 'item',
+    unit: 'EA',
+    known: false,
+    unitCost: null,
+    currency: null,
+  });
+  const withheld = allocateLandedCharges(
+    rows,
+    incomplete,
+    sources,
+    [bill],
+    lines,
+  );
+  assert.equal(withheld.grossCharges.size, 0);
+  assert.deepEqual([...withheld.invalidItems.keys()], ['item', 'other']);
+});
+
+test('net receipt corrections retain exactly the allocated fee and re-derive previously shipped relief', () => {
+  const rows = [
+    movement('1', '10'),
+    movement('2', '-2', { sourceType: 'shipment', role: 'shipment' }),
+    movement('3', '-5', { reversal: '1' }),
+  ];
+  const actual = costs([['1', '5']]);
+  const allocation = allocateLandedCharges(
+    rows,
+    actual,
+    new Map([['1', { orderLine: 'a', item: 'item', unit: 'EA' }]]),
+    [
+      {
+        id: 'bill',
+        date: '2026-09-30',
+        currency: 'CAD',
+        charges: '5',
+        live: true,
+      },
+    ],
+    [{ bill: 'bill', orderLine: 'a', item: 'item', unit: 'EA', quantity: '5' }],
+  );
+  assert.deepEqual(allocation.grossCharges.get('1'), { n: 10n, d: 1n });
+  const replay = replayInventoryValue(rows, actual, allocation.grossCharges);
+  assert.equal(
+    itemCostFigures(replay.items.get('item')).inventory_value,
+    'CAD 18.00',
+  );
+  assert.equal(
+    display(replay.effects.get('2')!.pools.get('CAD')!.value, 2),
+    '-12.00',
+  );
+  assert.equal(
+    display(replay.effects.get('3')!.pools.get('CAD')!.value, 2),
+    '-30.00',
+  );
+});
+
+test('uncovered, absent, foreign or zero receipt bases withhold allocation; zero-charge bills consume only provenance', () => {
+  const rows = [movement('1', '10'), movement('2', '10')];
+  const sources = new Map(
+    rows.map((m) => [
+      m.sourceLine,
+      { orderLine: 'a', item: 'item', unit: 'EA' },
+    ]),
+  );
+  const bill = {
+    id: 'bill',
+    date: '2026-09-30',
+    currency: 'CAD',
+    charges: '5',
+    live: true,
+  };
+  const line = {
+    bill: 'bill',
+    orderLine: 'a',
+    item: 'item',
+    unit: 'EA',
+    quantity: '10',
+  };
+  for (const [actual, quantity, reason] of [
+    [
+      costs([
+        ['1', null],
+        ['2', '15'],
+      ]),
+      '10',
+      'absent',
+    ],
+    [
+      costs([
+        ['1', '5', 'USD'],
+        ['2', '15'],
+      ]),
+      '10',
+      'currency',
+    ],
+    [
+      costs([
+        ['1', '0'],
+        ['2', '15'],
+      ]),
+      '10',
+      'zero',
+    ],
+    [
+      costs([
+        ['1', '5'],
+        ['2', '15'],
+      ]),
+      '21',
+      'uncovered',
+    ],
+  ] as const) {
+    const result = allocateLandedCharges(
+      rows,
+      actual,
+      sources,
+      [bill],
+      [{ ...line, quantity }],
+    );
+    assert.equal(result.grossCharges.size, 0);
+    assert.match(result.invalidItems.get('item')!, new RegExp(reason, 'u'));
+  }
+  const actual = costs([
+    ['1', '5'],
+    ['2', '15'],
+  ]);
+  const result = allocateLandedCharges(
+    rows,
+    actual,
+    sources,
+    [
+      { ...bill, id: 'first', date: '2026-09-29', charges: '0' },
+      bill,
+      { ...bill, id: 'draft', live: false },
+    ],
+    [
+      { ...line, bill: 'first' },
+      { ...line, quantity: '5' },
+      { ...line, bill: 'draft' },
+    ],
+  );
+  assert.equal(result.grossCharges.has('1'), false);
+  assert.deepEqual(result.grossCharges.get('2'), { n: 5n, d: 1n });
+  const remaining = itemCostFigures({
+    ...replayInventoryValue(rows, actual).items.get('item')!,
+    landedComplete: false,
+    landedCoverage: 'Unstated: receipt cost is absent',
+  });
+  assert.equal(remaining.average_cost, null);
+  assert.equal(remaining.inventory_value, null);
+  assert.equal(remaining.unvalued_quantity, '0');
+  assert.match(remaining.landed_cost_coverage!, /Unstated/u);
+});
 
 test('shipment relief and compensation use original cost; partial live invoices share net line cost and never overclaim it', () => {
   const rows = [
@@ -291,6 +512,7 @@ test('moving average uses remaining stock and exact effective ordering; inputs a
     average_cost: 'CAD 6',
     inventory_value: 'CAD 48.00',
     unvalued_quantity: '0',
+    landed_cost_coverage: 'No billed charges',
   });
   assert.equal(
     display(replay.effects.get('2')!.pools.get('CAD')!.value, 2),
@@ -319,6 +541,7 @@ test('unknown costs remain unvalued and each currency has its own average and pr
     average_cost: 'CAD 10 · USD 20',
     inventory_value: 'CAD 10.00 · USD 20.00',
     unvalued_quantity: '1',
+    landed_cost_coverage: 'No billed charges',
   });
   assert.equal(display(replay.effects.get('4')!.unvalued, 18, true), '-1');
   assert.equal(replay.effects.get('4')!.pools.size, 2);
@@ -391,6 +614,7 @@ test('compensation restores original relief after the average changed; paired tr
     average_cost: 'CAD 5.8',
     inventory_value: 'CAD 58.00',
     unvalued_quantity: '0',
+    landed_cost_coverage: 'No billed charges',
   });
   assert.equal(
     display(replay.effects.get('4')!.pools.get('CAD')!.value, 2),
@@ -431,6 +655,7 @@ test('receipt compensation with residual value at zero quantity withholds money 
     average_cost: null,
     inventory_value: null,
     unvalued_quantity: 'Unstated: incomplete cost coverage',
+    landed_cost_coverage: 'No billed charges',
   });
 });
 

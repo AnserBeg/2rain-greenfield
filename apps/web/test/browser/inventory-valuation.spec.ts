@@ -8,6 +8,7 @@ interface Seeded {
   readonly shipment?: string;
   readonly order?: string;
   readonly invoice?: string;
+  readonly items?: readonly { id: string; name: string }[];
 }
 
 test('inventory value and item page show actual moving average and unvalued opening quantities', async ({
@@ -95,6 +96,41 @@ test('inventory shipment relief and order/invoice margin remain at shipment cost
     await expect(printed).toBeVisible();
     await expect(printed).not.toContainText('cost of goods');
     await expect(printed).not.toContainText('margin');
+  });
+});
+
+test('inventory value includes vendor freight and fees allocated by actual receipt value', async ({
+  page,
+}) => {
+  test.setTimeout(480_000);
+  await fixture(async (url, seed) => {
+    const data = await seed('valuation-landed');
+    const destination = new URL(url);
+    destination.search = '';
+    destination.searchParams.set(
+      'surface',
+      'northstar.app:surface.inventory_value_list',
+    );
+    await page.goto(destination.toString());
+    await expect(
+      page.getByRole('heading', { name: 'Inventory value', level: 1 }),
+    ).toBeVisible();
+    for (const [index, item] of data.items!.entries()) {
+      const row = page.locator('main tbody tr').filter({ hasText: item.name });
+      await expect(row).toHaveCount(1);
+      await expect(
+        row.locator('td[data-column-label="Average cost"]'),
+      ).toHaveText(index === 0 ? 'CAD 5.5' : 'CAD 16.5');
+      await expect(
+        row.locator('td[data-column-label="Known value"]'),
+      ).toHaveText(index === 0 ? 'CAD 55.00' : 'CAD 165.00');
+      await expect(
+        row.locator('td[data-column-label="Unvalued quantity"]'),
+      ).toHaveText('0');
+      await expect(
+        row.locator('td[data-column-label="Landed cost coverage"]'),
+      ).toHaveText('Allocated by actual receipt value');
+    }
   });
 });
 

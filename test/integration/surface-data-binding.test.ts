@@ -11113,3 +11113,197 @@ test('VALUATION: shipment and invoice costs follow declared line references; pol
     SemanticQueryPolicyDeniedError,
   );
 });
+
+test('VALUATION: landed bill charges follow authorized bill/receipt/order lineage and refuse denied bill reads', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const seed = (
+    local: string,
+    values: Record<string, ImmutableJsonValue>,
+    relations: Record<string, string> = {},
+  ) =>
+    f.executor.seed(
+      local,
+      {
+        ...Object.fromEntries(
+          Object.entries(values).map(([key, value]) => [
+            `${ns}:field.${local}_${key}`,
+            value,
+          ]),
+        ),
+        ...Object.fromEntries(
+          Object.entries(relations).map(([key, value]) => [
+            `${ns}:relation.${local}_${key}`,
+            value,
+          ]),
+        ),
+      },
+      scope,
+    );
+
+  const order = seed('purchase_order', { number: 'PO-LAND' });
+  const ordered = seed(
+    'purchase_order_line',
+    { line_number: '1', item_id: f.item, unit_id: 'EA' },
+    { order },
+  );
+  const receipt = seed(
+    'goods_receipt',
+    { number: 'GR-LAND', state: `${ns}:option.goods_receipt_state_posted` },
+    { order },
+  );
+  const receiptLine = seed(
+    'goods_receipt_line',
+    {
+      item_id: f.item,
+      unit_id: 'EA',
+      cost_status: `${ns}:option.goods_receipt_line_cost_status_known`,
+      unit_cost: '5',
+      currency: 'CAD',
+    },
+    { receipt, order_line: ordered },
+  );
+  seed('inventory_movement', {
+    item_id: f.item,
+    unit_id: 'EA',
+    quantity_delta: '10',
+    effective_at: '2026-09-30T10:00:01.000Z',
+    recorded_at: '2026-09-30T10:00:01.000Z',
+    source_type: 'goodsReceipt',
+    source_id: receipt,
+    source_line: receiptLine,
+    posting_role: `${ns}:option.inventory_posting_role_receipt`,
+    reversal_of_movement_id: null,
+  });
+  const bill = seed(
+    'vendor_bill',
+    {
+      number: 'BILL-LAND',
+      state: `${ns}:option.vendor_bill_state_open`,
+      currency: 'CAD',
+      charges: '20',
+      bill_date: '2026-09-30T10:00:02.000Z',
+    },
+    { order },
+  );
+  seed(
+    'vendor_bill_line',
+    { item_id: f.item, unit_id: 'EA', quantity: '10' },
+    { bill, order_line: ordered },
+  );
+  const executor: SemanticQueryExecutor = {
+    async execute(request) {
+      const result = await f.executor.execute(request);
+      // Like the provider, the declared/authorized relation labels expose the
+      // persisted reference identity separately from its human-readable label.
+      return {
+        ...result,
+        records: result.records.map((row) => ({
+          ...row,
+          relationLabels: Object.fromEntries(
+            (request.list?.relationLabels ?? []).map((label) => [
+              label.relationId,
+              {
+                recordId:
+                  typeof row.values[label.relationId] === 'string'
+                    ? String(row.values[label.relationId])
+                    : null,
+                label: null,
+              },
+            ]),
+          ),
+        })),
+      };
+    },
+  };
+
+  const gateway = new SemanticQueryGateway(
+    f.policy,
+    executor,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { 'northstar.inventory:capability.valuation': inventoryValuationReadModel },
+  );
+  const read = async (local: string, recordId: string) => {
+    const query = registeredSemanticQueryFromPinnedView(
+      f.view,
+      `${ns}:query.${local}`,
+    )!;
+    return gateway.invoke(f.view, {
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      queryId: query.queryId,
+      arguments: {
+        recordId,
+        includeArchived: false,
+        [query.legalEntityScope!.operand.parameterId]: scope,
+      },
+    });
+  };
+
+  const row = (await read('inventory_value_get', f.item)).records[0]!;
+  assert.equal(row.values[`${ns}:metric.inventory_value`], 'CAD 70.00');
+  assert.equal(row.values[`${ns}:metric.average_cost`], 'CAD 7');
+  assert.equal(
+    row.values[`${ns}:metric.landed_cost_coverage`],
+    'Allocated by actual receipt value',
+  );
+  const sale = seed('sales_order', { currency: 'CAD' });
+  const sold = seed(
+    'sales_order_line',
+    {
+      item_id: f.item,
+      unit_id: 'EA',
+      unit_price: '25',
+      discount_percent: null,
+    },
+    { order: sale },
+  );
+  const shipment = seed(
+    'shipment',
+    { state: `${ns}:option.shipment_state_posted` },
+    { order: sale },
+  );
+  const packed = seed(
+    'shipment_line',
+    { item_id: f.item, unit_id: 'EA', quantity: '2' },
+    { shipment, order_line: sold },
+  );
+  seed('inventory_movement', {
+    item_id: f.item,
+    unit_id: 'EA',
+    quantity_delta: '-2',
+    effective_at: '2026-09-30T10:00:03.000Z',
+    recorded_at: '2026-09-30T10:00:03.000Z',
+    source_type: 'shipment',
+    source_id: shipment,
+    source_line: packed,
+    posting_role: `${ns}:option.inventory_posting_role_shipment`,
+    reversal_of_movement_id: null,
+  });
+  assert.equal(
+    (await read('valuation_shipment_get', shipment)).records[0]!.values[
+      `${ns}:metric.cost_of_goods`
+    ],
+    'CAD 14.00',
+  );
+  assert.equal(
+    (await read('inventory_value_get', f.item)).records[0]!.values[
+      `${ns}:metric.inventory_value`
+    ],
+    'CAD 56.00',
+  );
+  f.deniedReads.add(`${ns}:permission.vendor_bill_read`);
+  assert.equal(
+    (await read('valuation_shipment_get', shipment)).records[0]!.values[
+      `${ns}:metric.cost_coverage`
+    ],
+    'Withheld by current policy',
+  );
+  await assert.rejects(
+    read('inventory_value_get', f.item),
+    SemanticQueryPolicyDeniedError,
+  );
+});

@@ -51,3 +51,27 @@ Open Costed notebook in Catalog. A subsequent 10-unit receipt at CAD 30 means
 current on hand is **26**, known value **CAD 460.00**, average cost
 **CAD 17.692308** and unvalued quantity **0**. The earlier shipment still relieves
 40.00; it does not use that later average. These are derived operational figures.
+
+## 3. Vendor landed cost
+
+In the fixture terminal, paste:
+
+```json
+{"phase":"valuation-landed"}
+```
+
+Open Catalog -> Inventory value. Landed notebook has **10** units, average
+**CAD 5.5**, known value **CAD 55.00** and **0** unvalued quantity. Landed binder
+has **10** units, average **CAD 16.5**, known value **CAD 165.00** and **0**
+unvalued quantity. Both show **Allocated by actual receipt value**; their item
+pages show the same figures and landed-cost coverage.
+
+Open the printed bill ID under Purchasing -> Vendor bills. Its freight and fee
+snapshot totals **CAD 20.00**. The receipts captured actual unit costs of 5 and
+15: their values of 50 and 150 allocate that charge as **5** and **15**. Together
+the stock values are **220.00**. The PO price of 99 never enters the allocation.
+These derived charges leave the posted receipt and quantity movements unchanged.
+
+Absent receipt costs remain unvalued. Uncovered billed quantities, a foreign
+currency or a zero actual value basis state incomplete landed-cost coverage and
+withhold monetary figures instead of estimating them. There is no FX conversion.

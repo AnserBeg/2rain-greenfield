@@ -1,6 +1,7 @@
 import {
   seedInventoryValuation,
   seedInventoryShipmentValuation,
+  seedInventoryLandedValuation,
 } from './inventory-valuation-fixture.js';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -537,6 +538,19 @@ async function seed(
       return {
         phase,
         ...(await seedInventoryShipmentValuation({
+          invoke,
+          create,
+          scope,
+          item,
+          location,
+          customer,
+        })),
+        observed: true,
+      };
+    if (phase === 'valuation-landed')
+      return {
+        phase,
+        ...(await seedInventoryLandedValuation({
           invoke,
           create,
           scope,

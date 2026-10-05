@@ -14,9 +14,105 @@ import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
 import {
   seedInventoryValuation,
   seedInventoryShipmentValuation,
+  seedInventoryLandedValuation,
 } from '../helpers/inventory-valuation-fixture.js';
 
 const ns = 'northstar.app';
+test(
+  'landed stock values equal an independent allocation computed from stored bill charges and actual receipt rows',
+  { timeout: 300_000 },
+  async () => {
+    await withOrderEntryFixture(async (f) => {
+      const seed = await seedInventoryLandedValuation(f);
+      const target = await governedStorageTarget();
+      const entity = (local: string) =>
+        target.entities.find((e) => e.entityId === `${ns}:entity.${local}`)!;
+      const movement = entity('inventory_movement');
+      const receipt = entity('goods_receipt_line');
+      const bill = entity('vendor_bill');
+      const m = (key: string) =>
+        `m.${q(fulfillmentColumn(movement, `inventory_movement_${key}`))}`;
+      const r = (key: string) =>
+        `r.${q(fulfillmentColumn(receipt, `goods_receipt_line_${key}`))}`;
+      // This fixture has two receipt lines and one bill. The oracle uses SQL's
+      // independent arithmetic over persisted quantities, costs and charges.
+      const { rows } = await f.pool.query(
+        `
+      WITH received AS (
+        SELECT ${m('item_id')} AS item, sum(${m('quantity_delta')}) AS quantity,
+          sum(${m('quantity_delta')} * ${r('unit_cost')}) AS basis
+        FROM ${fulfillmentTable(movement)} m JOIN ${fulfillmentTable(receipt)} r
+          ON r.record_id::text=${m('source_line')} AND r.tenant_id=m.tenant_id
+          AND r.environment_id=m.environment_id AND r.legal_entity_id=m.legal_entity_id
+        WHERE m.tenant_id=$1 AND m.environment_id=$2 AND m.legal_entity_id=$3
+          AND ${m('source_type')}='goodsReceipt' AND ${m('item_id')} IN ($4,$5)
+          AND m.archived_at IS NULL GROUP BY ${m('item_id')}
+      ), charged AS (
+        SELECT ${q(fulfillmentColumn(bill, 'vendor_bill_charges'))} AS charges
+        FROM ${fulfillmentTable(bill)} WHERE tenant_id=$1 AND environment_id=$2
+          AND legal_entity_id=$3 AND record_id=$6 AND archived_at IS NULL
+      ) SELECT item, quantity::text, basis::numeric(38,2)::text,
+        charges::numeric(38,2)::text,
+        (basis + charges * basis / sum(basis) OVER())::numeric(38,2)::text AS value,
+        ((basis + charges * basis / sum(basis) OVER()) / quantity)::numeric(38,6)::text AS average
+      FROM received CROSS JOIN charged`,
+        [
+          f.app.runtime.identity.tenantId,
+          f.app.runtime.identity.environmentId,
+          f.scope,
+          seed.items[0]!.id,
+          seed.items[1]!.id,
+          seed.bill,
+        ],
+      );
+      assert.equal(rows.length, 2);
+      assert.equal(
+        rows.reduce((sum, row) => sum + Number(row.basis), 0),
+        200,
+      );
+      assert.equal(rows[0]!.charges, '20.00');
+      assert.equal(
+        rows.reduce((sum, row) => sum + Number(row.value), 0),
+        220,
+      );
+      for (const oracle of rows) {
+        const read = await f.app.runtime.entry.run({ headers: {} }, (view) => {
+          const query = registeredSemanticQueryFromPinnedView(
+            view,
+            `${ns}:query.inventory_value_get`,
+          )!;
+          return f.app.runtime.queryGateway.invoke(view, {
+            schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+            queryId: query.queryId,
+            arguments: {
+              recordId: oracle.item,
+              includeArchived: false,
+              [query.legalEntityScope!.operand.parameterId]: f.scope,
+            },
+          });
+        });
+        const values = read.records[0]!.values;
+        assert.equal(
+          values[`${ns}:metric.on_hand`],
+          String(Number(oracle.quantity)),
+        );
+        assert.equal(
+          values[`${ns}:metric.average_cost`],
+          `CAD ${Number(oracle.average)}`,
+        );
+        assert.equal(
+          values[`${ns}:metric.inventory_value`],
+          `CAD ${oracle.value}`,
+        );
+        assert.equal(values[`${ns}:metric.unvalued_quantity`], '0');
+        assert.equal(
+          values[`${ns}:metric.landed_cost_coverage`],
+          'Allocated by actual receipt value',
+        );
+      }
+    });
+  },
+);
 test(
   'inventory value equals an independent SQL computation from posted rows and immutable actual receipt costs',
   { timeout: 300_000 },

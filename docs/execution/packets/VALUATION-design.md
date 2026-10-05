@@ -67,7 +67,7 @@ registered item binding are authored in canonical metadata, projected by the
 compiler and registered in the shared composed runtime. Catalog -> Inventory
 value is a List of catalog items in the selected company. One item occupies one
 row, preserving the ordinary List's paging/count/search/export semantics.
-Columns: item, on hand, average cost, value, unvalued quantity. Average cost and
+Columns: item, on hand, average cost, value, unvalued quantity and landed-cost coverage. Average cost and
 value display currency-labelled summaries, one independent figure per currency;
 there is no cross-currency total. With unknown quantity, value explicitly reads
 as the known value and U remains visible. No-stock is zero quantity/value and
@@ -118,6 +118,13 @@ fractional cents; rounding is presentation only. Attribute shares back to their
 original receipt inflows and replay, so remaining value and prior shipment
 relief both re-derive. Missing captured receipt cost remains unvalued: a bill's
 order price cannot cure it. No source fact is updated by this read.
+For an original receipt of q units with net n after compensation, a charge A
+on surviving billed portions contributes A*q/n to that original inflow;
+original-effect compensation then leaves exactly A across the net units.
+Landed-cost coverage is explicit on the List and item. An uncertain charge
+withholds their monetary figures and shipment margin, while actual unvalued
+quantity retains its separate meaning. Zero-charge bills still consume billed
+quantity provenance.
 
 ## Delivery and gates
 

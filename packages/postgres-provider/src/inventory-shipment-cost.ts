@@ -106,7 +106,9 @@ export function deriveShipmentCosts(
     const relieved = scaleRelief(
       {
         ...effect,
-        complete: replay.items.get(movement.item)?.complete === true,
+        complete:
+          replay.items.get(movement.item)?.complete === true &&
+          replay.items.get(movement.item)?.landedComplete !== false,
       },
       fraction(-1n),
     );

@@ -246,3 +246,125 @@ export async function seedInventoryShipmentValuation(f: Fixture) {
     receipts: [...received.receipts, ...later.receipts],
   };
 }
+
+/** A bill's 20 CAD charges allocate 5/15 against actual values 50/150, not its PO prices. */
+export async function seedInventoryLandedValuation(f: Fixture) {
+  const ns = 'northstar.app';
+  const items = [];
+  for (const name of ['Landed notebook', 'Landed binder']) {
+    const item = await f.create(
+      'item',
+      {
+        sku: `VAL-LAND-${randomUUID().slice(0, 8)}`,
+        name,
+        description: null,
+        base_unit: 'EA',
+      },
+      {},
+      false,
+    );
+    items.push({ id: item.recordId, name });
+  }
+  const order = await f.create('purchase_order', {
+    supplier_party_id: f.customer,
+    order_date: new Date().toISOString(),
+    expected_date: null,
+    currency: 'CAD',
+    notes: null,
+    payment_terms: `${ns}:option.purchase_order_payment_terms_net_30`,
+    freight_amount: '10',
+    freight_tax_code_id: null,
+    freight_tax_rate_percent: null,
+    other_fee_amount: '10',
+    other_fee_tax_code_id: null,
+    other_fee_tax_rate_percent: null,
+  });
+  const ordered = [];
+  for (const [index, item] of items.entries())
+    ordered.push(
+      await f.create(
+        'purchase_order_line',
+        {
+          line_number: String(index + 1),
+          item_id: item.id,
+          ordered_quantity: '10',
+          unit_price: '99',
+          discount_percent: null,
+          tax_code_id: null,
+          tax_rate_percent: null,
+        },
+        { order: order.recordId },
+      ),
+    );
+  assert.equal(
+    (
+      await f.invoke('purchase_order_release', {
+        recordId: order.recordId,
+        expectedRevision: order.revision,
+      })
+    ).outcome,
+    'succeeded',
+  );
+  const receipt = await f.create(
+    'goods_receipt',
+    {
+      state: `${ns}:option.goods_receipt_state_draft`,
+      kind: `${ns}:option.goods_receipt_kind_initial`,
+      effective_at: new Date().toISOString(),
+      location_id: f.location,
+      reason_code: 'RECEIVE',
+      reason_narrative: 'Landed allocation proof',
+    },
+    { order: order.recordId },
+  );
+  for (const [index, item] of items.entries())
+    await f.create(
+      'goods_receipt_line',
+      {
+        line_number: String(index + 1),
+        item_id: item.id,
+        quantity: '10',
+        unit_id: 'EA',
+        cost_status: `${ns}:option.goods_receipt_line_cost_status_known`,
+        unit_cost: index === 0 ? '5' : '15',
+        currency: 'CAD',
+        reversal_of_movement_id: null,
+      },
+      { receipt: receipt.recordId, order_line: ordered[index]!.recordId },
+    );
+  assert.equal(
+    (
+      await f.invoke('goods_receipt_post', {
+        recordId: receipt.recordId,
+        expectedRevision: receipt.revision,
+      })
+    ).outcome,
+    'succeeded',
+  );
+  const bill = await f.create(
+    'vendor_bill',
+    {
+      state: `${ns}:option.vendor_bill_state_draft`,
+      bill_date: new Date().toISOString(),
+      supplier_invoice_number: `LAND-${randomUUID()}`,
+    },
+    { order: order.recordId },
+  );
+  assert.equal(
+    (
+      await f.invoke('vendor_bill_post', {
+        recordId: bill.recordId,
+        expectedRevision: bill.revision,
+      })
+    ).outcome,
+    'succeeded',
+  );
+  return {
+    item: items[0]!.id,
+    items,
+    company: f.scope,
+    order: order.recordId,
+    receipt: receipt.recordId,
+    bill: bill.recordId,
+  };
+}
