@@ -1,6 +1,6 @@
 # SPECIAL-ORDER — dedicated purchase supply received into stock
 
-Status: BUILD active on `packet/SPECIAL-ORDER`, based on DROP-SHIP `1b16c746`; [draft PR #28](https://github.com/AnserBeg/2rain-greenfield/pull/28), executable freeze `c57c7b1b`. No integration or deployment.
+Status: BUILD active on `packet/SPECIAL-ORDER`, based on DROP-SHIP `1b16c746`; [draft PR #28](https://github.com/AnserBeg/2rain-greenfield/pull/28), executable freeze `c47524cb`. No integration or deployment.
 
 ## Design (before implementation)
 
@@ -27,21 +27,22 @@ Review: not owed — intended diff is outside the Critical set.
 ## Checkpoint evidence
 
 - Local focused tests PASS: special-order unit/integration, purchasing definition (47 tests); shared web contracts and new unit/integration tests (42 tests). Typecheck, focused lint, release `--check` and whitespace check PASS.
-- Compile measurement: 7 release entries (6 inherited + 1), 104 surfaces, 16 navigation destinations, 604 verification scenarios and 11 numbered fields. Existing count/navigation pins remain unchanged; executed/derived split remains asserted by hosted composed PostgreSQL.
+- Compile measurement: 7 release entries (6 inherited + 1), 104 surfaces, 16 navigation destinations, 604 verification scenarios and 11 numbered fields. Hosted composed PostgreSQL passes the 527 executed / 77 derived split and full replay snapshot.
 - Surface floor 16 is the next free value above base 15, for receipt-backed reservation figures. Language inventory re-derived: 2658 obligations / 823 observed declarations; no invented execution receipts.
 - Local container tests were not run: Windows memory below 1.2 GB and another lane's container present. Commercial PostgreSQL, operations browser and full replay acceptance are pending on CI; hosted snapshot regeneration passed below.
 - Shared supplier field retains its canonical ID; its label now covers both supplier routes. Special-order PO ship-to is not copied from the customer: goods use the ordinary receiving location.
 - [Hosted snapshot regeneration](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37341036343) PASS at `6f9aa31a`; its downloaded artifact expands the route check and is committed at `5cc804d5`. Definition/storage bytes are unchanged since generation; label removed.
 - Initial CI exposed two stale unit pins (five Sales order commands and Arrived declarations); corrected, with 31 focused tests PASS. Borrowed writer rejection now destroys its connection, with a focused cleanup test. No Critical path or readiness/timeout/budget change.
 - Commercial PostgreSQL also asserts the named refusal for a shipment above linked arrivals and observes zero movements for its source. Focused lint/typecheck PASS; hosted execution pending.
-- CI architecture exposed sorted inventory omissions and a stale surface floor; fixed, with both affected assertions PASS locally. The broader local hygiene run also hit another lane's container-contamination control; its container was left untouched. Hosted database/browser jobs continue before the next push.
+- CI architecture exposed sorted inventory omissions and a stale surface floor; fixed, with both affected assertions PASS locally. The broader local hygiene run also hit another lane's container-contamination control; its container was left untouched.
+- [CI attempt](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37342757490) passes composed PostgreSQL, general/composed browsers, security and performance. Remaining reds: the corrected inventory/floor pins, the reservation fixture's missing existing number (supplied), and a browser selector deadline (phase diagnostics and a five-second selector bound added, overall deadline unchanged). Latest full matrix remains pending.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SPECIAL-ORDER",
   "base": "1b16c74678f17950055b536478988c2ef7ad6141",
-  "head": "c57c7b1bd126534c5663fa83e64ee45967a6e9f9",
+  "head": "c47524cb64f1db3bef3d01dcb3b530f3e638d3bb",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
