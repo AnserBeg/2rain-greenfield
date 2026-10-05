@@ -61,6 +61,12 @@ test('Sales, Purchase and shipment numbers are declared server-assigned sequence
         'PAY',
         `${ns}:document_sequence.customer_payment`,
       ],
+      // DROP-SHIP: the off-ledger supplier delivery document.
+      [
+        `${ns}:field.drop_ship_delivery_number`,
+        'DSD',
+        `${ns}:document_sequence.drop_ship_delivery`,
+      ],
       // PURCHASING-PARITY: a goods receipt's number, RCV-000001.
       [
         `${ns}:field.goods_receipt_number`,
