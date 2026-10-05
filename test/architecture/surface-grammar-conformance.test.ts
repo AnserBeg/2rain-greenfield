@@ -295,7 +295,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // List row actions and supplementary progress (ORDER-PARITY) require 13;
   // record alerts and progression, multi-row Tasks and record columns naming
   // a relation (ORDER-PARITY increment B) require 14.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 15);
+  // Linked supply reads require 15; receipt-backed reservation figures require 16.
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 16);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.
