@@ -35,6 +35,14 @@ function ids(namespace: string) {
       transactionLine: entity('inventory_transaction_line'),
     },
     fieldIds: {
+      // The company's reorder rule (CATALOG-EXTRAS): an item that follows it
+      // reorders at this percentage of its reorder-up-to level, in this
+      // company. Kept apart from `legalEntity`, whose members every legal
+      // entity query selects in the standalone module too.
+      companyReorderPointPercent: field(
+        'legal_entity',
+        'reorder_point_percent',
+      ),
       legalEntity: {
         code: field('legal_entity', 'code'),
         isDefault: field('legal_entity', 'is_default'),
@@ -185,11 +193,19 @@ export function inventoryModuleDefinition(
      * compiled.
      */
     readonly documentEntry?: boolean;
+    /**
+     * A company's reorder rule (CATALOG-EXTRAS): the percentage of an item's
+     * reorder-up-to level at which an item following the rule reorders in
+     * that company, on the legal entity's own record. Only the product
+     * application mounts it.
+     */
+    readonly companyReorderRule?: boolean;
   } = {},
 ): Record<string, unknown> {
   const definitionIds = ids(namespace);
   const { entityIds, fieldIds, moduleId, packageId } = definitionIds;
   const documentEntry = options.documentEntry === true;
+  const companyReorderRule = options.companyReorderRule === true;
   const standardEntities = [
     ['legal_entity', 'Legal entity', entityIds.legalEntity],
     ['inventory_transaction', 'Inventory transaction', entityIds.transaction],
@@ -308,6 +324,21 @@ export function inventoryModuleDefinition(
         40,
         boolean(),
       ),
+      // Unset: the company has no rule, and an item that follows it has no
+      // reorder point there.
+      ...(companyReorderRule
+        ? [
+            field(
+              definitionIds,
+              entityIds.legalEntity,
+              fieldIds.companyReorderPointPercent,
+              'Reorder point % of reorder up to',
+              50,
+              decimal(),
+              { optional: true },
+            ),
+          ]
+        : []),
 
       field(
         definitionIds,
@@ -865,7 +896,12 @@ export function inventoryModuleDefinition(
     ],
     queries: [
       ...standardEntities.flatMap(([local, , entityId]) => {
-        const entityFields = fieldsForEntity(fieldIds, local);
+        const entityFields = [
+          ...fieldsForEntity(fieldIds, local),
+          ...(companyReorderRule && local === 'legal_entity'
+            ? [fieldIds.companyReorderPointPercent]
+            : []),
+        ];
         return queries(
           definitionIds,
           local,

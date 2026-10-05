@@ -707,6 +707,18 @@ export function validateSurfaceCompositions(
             surface.surfaceId,
             'only reference inputs declare lookup queries',
           );
+        // CATALOG-EXTRAS: a reference over the record's own entity may leave
+        // the record itself out -- what a duplicate is merged into.
+        if (
+          input.excludeRecord &&
+          (input.type !== 'reference' ||
+            !recordQuery ||
+            query?.sourceEntity.targetId !== recordQuery.sourceEntity.targetId)
+        )
+          fail(
+            surface.surfaceId,
+            "only a reference input over the record's own entity leaves the record out",
+          );
         // A reference input may start from a value the record itself stores,
         // read from a field the surface's record query selects.
         if (

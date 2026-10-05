@@ -1,6 +1,9 @@
 import type { VersionedNormalizedApplicationPackage } from './schemas.js';
 import { CanonicalModelError, diagnostic } from './diagnostics.js';
-import { pickerEligibilityProblem } from './picker-eligibility.js';
+import {
+  pickerEligibilityProblem,
+  searchChildProblem,
+} from './picker-eligibility.js';
 
 /** Typed declarations also prove their cross-entity and contextual references. */
 export function validateSurfaceWorkspaces(
@@ -473,6 +476,27 @@ export function validateSurfaceWorkspaces(
               ),
             );
           if (field.reference.within) checkWithin(field, declared);
+          // CATALOG-EXTRAS: the search also finds a record through its
+          // children, each through its own relation once.
+          const searched = field.reference.searchChildren ?? [];
+          if (
+            new Set(searched.map((child) => child.relationId)).size !==
+            searched.length
+          )
+            fail(
+              surface.surfaceId,
+              'a picker searches each child relation once',
+            );
+          for (const child of searched) {
+            const problem = searchChildProblem(
+              model,
+              child,
+              String(
+                queries.get(field.reference.queryId)!.sourceEntity.targetId,
+              ),
+            );
+            if (problem) fail(surface.surfaceId, problem);
+          }
           if (field.reference.create)
             checkCreate(
               field.reference.create,

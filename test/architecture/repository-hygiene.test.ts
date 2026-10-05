@@ -31,6 +31,7 @@ const suiteDefinitions = [
       'test/unit/canonical-model/surface-composition.test.ts',
       'test/unit/canonical-model/surface-list.test.ts',
       'test/unit/catalog-definition.test.ts',
+      'test/unit/catalog-extras.test.ts',
       'test/unit/commercial-amounts.test.ts',
       'test/unit/dev-environment.test.ts',
       'test/unit/inventory-definition.test.ts',
@@ -142,6 +143,7 @@ const suiteDefinitions = [
       'test/postgres/receiving-authorization.test.ts',
     ],
     expectedFiles: [
+      'test/postgres/catalog-extras.test.ts',
       'test/postgres/catalog-runtime.test.ts',
       'test/postgres/current-policy.test.ts',
       'test/postgres/declared-list.test.ts',

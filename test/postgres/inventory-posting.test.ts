@@ -6946,13 +6946,20 @@ async function loadInventoryDefinition(): Promise<Record<string, unknown>> {
   const definition = (
     applicationBuilder.composedApplicationDefinition as () => unknown
   )();
-  // As the product mounts it: with stock documents (INVENTORY-PARITY).
+  // As the product mounts it: with stock documents (INVENTORY-PARITY)
+  // and a company's reorder rule (CATALOG-EXTRAS).
   const inventory = (
     loaded.inventoryModuleDefinition as (
       namespace: string,
-      options: { readonly documentEntry: boolean },
+      options: {
+        readonly companyReorderRule: boolean;
+        readonly documentEntry: boolean;
+      },
     ) => unknown
-  )(String(applicationBuilder.APPLICATION_NAMESPACE), { documentEntry: true });
+  )(String(applicationBuilder.APPLICATION_NAMESPACE), {
+    companyReorderRule: true,
+    documentEntry: true,
+  });
   assert.ok(isRecord(definition));
   assert.ok(isRecord(inventory));
   for (const collection of [

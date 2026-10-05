@@ -222,8 +222,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   );
   // Party, Catalog and Location; SALES-PARITY adds Party's ship-to address
   // book, contextual to the Party list, and Catalog's tax codes (list,
-  // detail, form each).
-  assert.equal(flatManifest.surfaces.length, 18);
+  // detail, form each); CATALOG-EXTRAS an item's aliases, contextual to the
+  // Items List (list, detail, form).
+  assert.equal(flatManifest.surfaces.length, 21);
   assert.equal(flatManifest.navigation, null);
   assert.equal(
     flatManifest.payloadSchemaVersion,
@@ -250,10 +251,11 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // salesperson Task input with declared eligibility, which requires 11,
   // Catalog, whose item form chooses the preferred location from the
   // location list (a Record form reference, REPLENISHMENT), which requires 17,
-  // and Location, whose form leaves the inventory status to its page's
-  // "Change status" (a Record form's omitted fields, LOCATIONS), which
-  // requires 19.
-  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 19);
+  // Location, whose form leaves the inventory status to its page's "Change
+  // status" (a Record form's omitted fields, LOCATIONS), which requires 19,
+  // and whose Items List also searches the items' aliases (CATALOG-EXTRAS),
+  // which requires 20.
+  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 20);
   // SALES-PARITY: Catalog's tax codes are a fifth setup List, still flat.
   assert.equal(flatCompact.navigationEntryIds.length, 5);
   assert.deepEqual(
@@ -278,8 +280,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // (SALES-PARITY), + the invoice, its lines, payments and credits (twelve),
   // + PURCHASING-PARITY's Expected receipts List, + PAYABLES' vendor bill,
   // its lines, payments and credits (twelve), + REPLENISHMENT's Stock by item
-  // and Buying worklist.
-  assert.equal(groupedManifest.surfaces.length, 103);
+  // and Buying worklist, + CATALOG-EXTRAS' item aliases (three).
+  assert.equal(groupedManifest.surfaces.length, 106);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -306,9 +308,11 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // and the item form's location choice (REPLENISHMENT) require 17; the
   // location form's omitted status and the usable figures' parent reached
   // through a reference field (LOCATIONS) require 19 (18 is WAREHOUSE-MODE's);
-  // the Sales orders List's supply, its Blocked by supply and Reserved views
-  // and its "Post shipment" (SUPPLY-WARNINGS) require 21 (20 is
-  // CATALOG-EXTRAS').
+  // searches through an item's aliases, the reorder point chosen by an item's
+  // rule, bands by an item's inventory policy and the merge Task's choice that
+  // leaves the item out (CATALOG-EXTRAS) require 20; the Sales orders List's
+  // supply, its Blocked by supply and Reserved views and its "Post shipment"
+  // (SUPPLY-WARNINGS) require 21.
   assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 21);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
@@ -878,8 +882,10 @@ function compileDefinition(
 
 function composedApplicationWithInventory(): Record<string, unknown> {
   const composed = structuredClone(composedApplicationDefinition());
-  // As the product mounts it: with stock documents (INVENTORY-PARITY).
+  // As the product mounts it: with stock documents (INVENTORY-PARITY)
+  // and a company's reorder rule (CATALOG-EXTRAS).
   const inventory = inventoryModuleDefinition('northstar.app', {
+    companyReorderRule: true,
     documentEntry: true,
   });
   for (const collectionName of [
@@ -951,7 +957,10 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
   let composed = composedApplicationWithInventory();
   composed = withoutModule(
     composed,
-    inventoryModuleDefinition('northstar.app', { documentEntry: true }),
+    inventoryModuleDefinition('northstar.app', {
+      companyReorderRule: true,
+      documentEntry: true,
+    }),
     'inventory',
   );
   composed = withoutModule(

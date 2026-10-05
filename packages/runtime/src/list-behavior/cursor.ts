@@ -103,6 +103,7 @@ export function sharedListBindingDigest(
     | 'relationLabels'
     | 'referenceLabels'
     | 'search'
+    | 'searchChildren'
     | 'sort'
   >,
 ): string {
@@ -130,6 +131,8 @@ export function sharedListBindingDigest(
       ? { referenceLabels: query.referenceLabels }
       : {}),
     search: query.search,
+    // A window of items found by their aliases is not one found without them.
+    ...(query.searchChildren ? { searchChildren: query.searchChildren } : {}),
     sort: query.sort,
   });
 }

@@ -37,6 +37,22 @@ export function orderEntrySurfaces(
       (locationGet?.selections ?? []) as { field?: { targetId?: unknown } }[]
     ).some((selection) => selection.field?.targetId === id('field', name)),
   );
+  // A product picker also finds an item by an alias -- another SKU, a
+  // barcode or a supplier's code -- where Catalog is mounted with them
+  // (CATALOG-EXTRAS).
+  const aliasSearch = queries.some(
+    (query) => query.queryId === id('query', 'item_alias_list'),
+  )
+    ? {
+        searchChildren: [
+          {
+            queryId: id('query', 'item_alias_list'),
+            relationId: id('relation', 'item_alias_item'),
+            fieldId: id('field', 'item_alias_value'),
+          },
+        ],
+      }
+    : {};
   const company = {
     companyQueryId: id('query', 'legal_entity_list'),
     companyNameFieldId: id('field', 'legal_entity_name'),
@@ -130,6 +146,7 @@ export function orderEntrySurfaces(
           id('field', 'item_sku'),
           id('field', 'item_base_unit'),
         ],
+        ...aliasSearch,
         create: {
           label: 'New product',
           explanation:
@@ -650,6 +667,7 @@ export function orderEntrySurfaces(
               id('field', 'item_sku'),
               id('field', 'item_base_unit'),
             ],
+            ...aliasSearch,
           },
         }),
         // A negative adjustment takes stock from its From location, a
@@ -713,8 +731,10 @@ export function orderEntrySurfaces(
     vendor_credit: 'vendor_bill',
   };
   // A tenant-level child belongs to its master's workspace, such as a
-  // customer's ship-to addresses; it has no company entry to resolve.
+  // customer's ship-to addresses or an item's aliases (CATALOG-EXTRAS); it
+  // has no company entry to resolve.
   const masterOwners: Readonly<Record<string, string>> = {
+    item_alias: 'item',
     party_address: 'party',
   };
   return surfaces.map((surface) => {

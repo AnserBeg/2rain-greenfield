@@ -1226,10 +1226,21 @@ test('INVENTORY-PARITY: the item page lists its stock and movements by a field o
   assert.doesNotThrow(() =>
     normalizeApplicationPackage(structuredClone(source)),
   );
-  // The shipped declaration: the item's own page, read-only, entered like the
-  // Posted stock List, each dataset scoped by the item field of its entity.
+  // The shipped declaration: the item's own page, entered like the Posted
+  // stock List, each stock dataset scoped by the item field of its entity.
+  // Its only tasks are its aliases' (CATALOG-EXTRAS): no stock is written
+  // from here.
   const page = surface(source, 'item_detail');
-  assert.deepEqual(page.composition!.actions, []);
+  assert.deepEqual(
+    (page.composition!.actions as { actionId: string }[]).map(
+      (value) => value.actionId,
+    ),
+    [
+      `${ns}:action.item_add_alias`,
+      `${ns}:action.item_remove_alias`,
+      `${ns}:action.item_merge`,
+    ],
+  );
   assert.equal(page.workspace!.membership, 'contextual');
   assert.equal(
     page.workspace!.entry!.authorizationQueryId,
@@ -1251,6 +1262,15 @@ test('INVENTORY-PARITY: the item page lists its stock and movements by a field o
         `${ns}:query.inventory_movement_list`,
         `${ns}:field.inventory_movement_item_id`,
         undefined,
+      ],
+      [
+        `${ns}:query.item_alias_list`,
+        undefined,
+        {
+          relationId: `${ns}:relation.item_alias_item`,
+          value: { source: 'record', field: 'recordId' },
+          ownership: 'parentScopedChild',
+        },
       ],
     ],
   );

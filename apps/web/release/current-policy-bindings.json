@@ -179,6 +179,31 @@
       },
       {
         "action": "archive",
+        "permissionId": "northstar.app:permission.item_alias_archive",
+        "resource": "northstar.app:entity.item_alias"
+      },
+      {
+        "action": "create",
+        "permissionId": "northstar.app:permission.item_alias_create",
+        "resource": "northstar.app:entity.item_alias"
+      },
+      {
+        "action": "read",
+        "permissionId": "northstar.app:permission.item_alias_read",
+        "resource": "northstar.app:entity.item_alias"
+      },
+      {
+        "action": "restore",
+        "permissionId": "northstar.app:permission.item_alias_restore",
+        "resource": "northstar.app:entity.item_alias"
+      },
+      {
+        "action": "update",
+        "permissionId": "northstar.app:permission.item_alias_update",
+        "resource": "northstar.app:entity.item_alias"
+      },
+      {
+        "action": "archive",
         "permissionId": "northstar.app:permission.tax_code_archive",
         "resource": "northstar.app:entity.tax_code"
       },

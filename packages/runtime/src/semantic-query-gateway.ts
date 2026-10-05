@@ -50,6 +50,7 @@ import {
   type AuthorizedSharedListFigures,
   type AuthorizedSharedListProgress,
   type AuthorizedSharedListRelatedFilter,
+  type AuthorizedSharedListSearchChild,
   type AuthorizedSharedListReferenceLabel,
   type AuthorizedSharedListRequest,
   type SharedListCoverage,
@@ -1040,6 +1041,20 @@ async function authorizeSharedListProjection(
       if (sum.related)
         use(sum.related.queryId, [sum.related.fieldId], sum.related.relationId);
     }
+    // A choice's company percentage reads the List's own company through a
+    // list of the companies, joined without a company as a label is.
+    for (const choice of query.figures.choices ?? [])
+      for (const value of [
+        ...choice.cases.map((entry) => entry.value),
+        choice.otherwise,
+      ])
+        if (value && 'percent' in value)
+          use(
+            value.percent.company.queryId,
+            [value.percent.company.fieldId],
+            undefined,
+            true,
+          );
     for (const latest of query.figures.latest ?? []) {
       use(latest.rows.queryId, [
         latest.rows.matchFieldId,
@@ -1271,6 +1286,64 @@ async function authorizeSharedListProjection(
       relatedEntityId: relatedDefinition.sourceEntityId,
     });
   }
+  // CATALOG-EXTRAS: children whose text also answers the search. The match
+  // reads the child entity whole, so its list must show the whole entity:
+  // an admitted Q0 predicate, no company scope and no read model. Read only
+  // when there is text to search: an unsearched List reads no child, so a
+  // withheld child read refuses the search, never the List.
+  const searchChildren: AuthorizedSharedListSearchChild[] = [];
+  for (const child of query.search.trim() === ''
+    ? []
+    : (query.searchChildren ?? [])) {
+    const childDefinition = registeredQueryFromPinnedView(view, child.queryId);
+    if (
+      !childDefinition ||
+      childDefinition.lifecycle !== 'active' ||
+      childDefinition.tier !== 'q0' ||
+      childDefinition.queryType !== 'list' ||
+      childDefinition.legalEntityScope !== undefined ||
+      childDefinition.readModel !== undefined ||
+      !childDefinition.selections.some(
+        (selection) => selection.fieldId === child.fieldId,
+      )
+    ) {
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        'a searched child must use a selected field of an active, unscoped pinned list query',
+        child.queryId,
+      );
+    }
+    const decision = await authorizeCurrentPolicy(
+      currentPolicy,
+      view,
+      childDefinition.permissionId,
+      Object.freeze({
+        arguments: Object.freeze({
+          fieldId: child.fieldId,
+          relationId: child.relationId,
+        }),
+        kind: 'registeredSemanticListSearchChildPolicyInput',
+        queryId: childDefinition.queryId,
+        requestId: view.requestId,
+        schemaVersion: QUERY_POLICY_INPUT_VERSION,
+      }),
+    );
+    if (decision.decision === 'DENY') {
+      await recordDenied(childDefinition.queryId, decision.policyVersion);
+      throw new SemanticQueryPolicyDeniedError(childDefinition.queryId, view);
+    }
+    const predicateReceipt = inspectPredicateForExecution(
+      childDefinition.filter,
+    );
+    observePredicateReceiptSafely(observePredicateReceipt, predicateReceipt);
+    if (predicateReceipt.outcome !== 'accepted') return null;
+    searchChildren.push(
+      Object.freeze({
+        ...child,
+        childEntityId: childDefinition.sourceEntityId,
+      }),
+    );
+  }
   return Object.freeze({
     query,
     relationLabels: Object.freeze(relationLabels),
@@ -1280,6 +1353,9 @@ async function authorizeSharedListProjection(
     ...(relatedFilter ? { relatedFilter } : {}),
     ...(progress ? { progress } : {}),
     ...(figures ? { figures } : {}),
+    ...(query.searchChildren
+      ? { searchChildren: Object.freeze(searchChildren) }
+      : {}),
   });
 }
 

@@ -1607,8 +1607,10 @@ function mustCompile(bytes: Uint8Array): CompileSuccess {
 
 function groupedNavigationDefinitionBytes(): Uint8Array {
   const definition = structuredClone(composedApplicationDefinition());
-  // As the product mounts it: with stock documents (INVENTORY-PARITY).
+  // As the product mounts it: with stock documents (INVENTORY-PARITY)
+  // and a company's reorder rule (CATALOG-EXTRAS).
   const inventory = inventoryModuleDefinition('northstar.app', {
+    companyReorderRule: true,
     documentEntry: true,
   });
   for (const collectionName of [

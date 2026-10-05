@@ -3198,3 +3198,130 @@ test('a document editor writes its declared create values on the header first cr
   void _declared;
   assert.deepEqual(createValuesFor(plain, header, true, save), {});
 });
+
+/**
+ * CATALOG-EXTRAS: the Items List, as the product declares it, sends its
+ * searched children -- an item's aliases -- with every page, count and
+ * export request, and the gateway's own contract binds them into the cursor;
+ * Stock by item sends its reorder-point choice and its non-stocked band case,
+ * and shows that band by its label.
+ */
+test('the Items List sends its searched children with every request and Stock by item its reorder-point choice and not-stocked band', () => {
+  const ns = 'northstar.app';
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const declared = (local: string) =>
+    SurfaceListSchema.parse(
+      (
+        composedApplicationDefinition().surfaces as Array<
+          Record<string, unknown>
+        >
+      ).find((value) => value.surfaceId === id('surface', local))!.list,
+    );
+  const now = new Date('2026-10-05T12:00:00.000Z');
+  type Sent = {
+    list: {
+      cursor: string | null;
+      searchChildren?: unknown;
+      figures?: {
+        choices?: unknown;
+        bands?: Array<{ cases: unknown[]; figureId: string }>;
+      };
+    };
+  };
+  const items = declared('item_list');
+  const queryId = id('query', 'item_list');
+  const children = [
+    {
+      fieldId: id('field', 'item_alias_value'),
+      queryId: id('query', 'item_alias_list'),
+      relationId: id('relation', 'item_alias_item'),
+    },
+  ];
+  const sent = (
+    list: ReturnType<typeof declared>,
+    url: string,
+    options: Partial<Parameters<typeof declaredListArguments>[2]> = {},
+  ) =>
+    declaredListArguments(list, readDeclaredListState(list, new URL(url)), {
+      mode: 'page',
+      now,
+      queryId,
+      scopeArguments: {},
+      ...options,
+    }) as unknown as Sent;
+  const page = sent(items, 'http://list.local/?q=bc-0042&page=2', {
+    pageOffset: 50,
+  });
+  assert.deepEqual(page.list.searchChildren, children);
+  assert.deepEqual(
+    sent(items, 'http://list.local/', { mode: 'count' }).list.searchChildren,
+    children,
+  );
+  const parse = (value: Sent) =>
+    listBehavior.parseSharedListArguments(
+      value as unknown as Parameters<
+        typeof listBehavior.parseSharedListArguments
+      >[0],
+      { declaredParameterIds: [], maximumResultCount: 100, queryId },
+    );
+  assert.deepEqual(parse(page)?.searchChildren, children);
+  assert.equal(parse(page)?.pageOffset, 50);
+  // A cursor minted for a search through the aliases never pages one without.
+  const { searchChildren: _children, ...without } = page.list;
+  void _children;
+  assert.throws(
+    () => parse({ list: without }),
+    (error: unknown) =>
+      error instanceof listBehavior.SharedListContractError &&
+      error.code === 'LIST_CURSOR_INVALID',
+  );
+
+  const stock = declared('item_stock_list');
+  const all = sent(stock, 'http://list.local/', {
+    queryId: id('query', 'item_stock_list'),
+  });
+  assert.deepEqual(all.list.figures?.choices, [
+    {
+      byFieldId: id('field', 'item_reorder_rule'),
+      cases: [
+        {
+          value: {
+            percent: {
+              company: {
+                fieldId: id('field', 'legal_entity_reorder_point_percent'),
+                queryId: id('query', 'legal_entity_list'),
+              },
+              of: { fieldId: id('field', 'item_reorder_up_to') },
+            },
+          },
+          values: [id('option', 'item_reorder_rule_company')],
+        },
+      ],
+      figureId: id('list_figure', 'item_stock_list_reorder_point'),
+      otherwise: { fieldId: id('field', 'item_reorder_point') },
+    },
+  ]);
+  const status = id('list_figure', 'item_stock_list_status');
+  const band = all.list.figures?.bands?.find(
+    (value) => value.figureId === status,
+  );
+  assert.deepEqual(band?.cases[0], {
+    value: id('list_band', 'item_stock_list_not_stocked'),
+    when: {
+      fieldId: id('field', 'item_inventory_policy'),
+      values: [id('option', 'item_inventory_policy_non_stocked')],
+    },
+  });
+  assert.deepEqual(band?.cases.at(-1), {
+    value: id('list_band', 'item_stock_list_reorder'),
+    atMost: { figureId: id('list_figure', 'item_stock_list_reorder_point') },
+  });
+  assert.equal(
+    figureBandLabel(
+      stock,
+      status,
+      id('list_band', 'item_stock_list_not_stocked'),
+    ),
+    'Not stocked',
+  );
+});

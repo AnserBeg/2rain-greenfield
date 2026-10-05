@@ -178,7 +178,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 18 is WAREHOUSE-MODE's, taken in parallel.
     // 19 adds a Record form's omitted fields and a figure's parent reached
     // through a reference field (LOCATIONS).
-    // 20 is CATALOG-EXTRAS', taken in parallel.
+    // 20 adds searches through children, figure choices, band cases by an
+    // enumeration or against a figure, and Task inputs leaving the record out
+    // (CATALOG-EXTRAS).
     // 21 adds a List progress's supply and the views and row actions that
     // keep covered or short rows (SUPPLY-WARNINGS).
     maximumSupportedVersion: 21,

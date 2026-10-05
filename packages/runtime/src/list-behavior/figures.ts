@@ -65,14 +65,57 @@ export interface SharedListFigureTotal {
   readonly plus: readonly SharedListFigureOperand[];
 }
 
-/** A listed row's exact decimal, or a canonical decimal, compared with. */
+/**
+ * A listed row's exact decimal, a canonical decimal, or a number figure
+ * computed before the band (CATALOG-EXTRAS), compared with.
+ */
 export type SharedListFigureThreshold =
-  { readonly fieldId: string } | { readonly value: string };
+  | { readonly fieldId: string }
+  | { readonly figureId: string }
+  | { readonly value: string };
+
+/** The listed row's own value of an enumeration is one of these. */
+export interface SharedListFigureWhen {
+  readonly fieldId: string;
+  readonly values: readonly string[];
+}
 
 export interface SharedListFigureBandCase {
   readonly atMost?: SharedListFigureThreshold;
   readonly below?: SharedListFigureThreshold;
   readonly value: string;
+  readonly when?: SharedListFigureWhen;
+}
+
+/**
+ * What a choice takes (CATALOG-EXTRAS): an operand, or a percentage of one
+ * by the List's own company's exact decimal, read through a list query of
+ * the companies.
+ */
+export type SharedListFigureChoiceValue =
+  | SharedListFigureOperand
+  | {
+      readonly percent: {
+        readonly company: {
+          readonly fieldId: string;
+          readonly queryId: string;
+        };
+        readonly of: SharedListFigureOperand;
+      };
+    };
+
+/**
+ * Per row, the first case whose values hold the row's own value of an
+ * enumeration (`byFieldId`), else `otherwise`; a missing value is unstated.
+ */
+export interface SharedListFigureChoice {
+  readonly byFieldId: string;
+  readonly cases: readonly {
+    readonly value?: SharedListFigureChoiceValue;
+    readonly values: readonly string[];
+  }[];
+  readonly figureId: string;
+  readonly otherwise?: SharedListFigureChoiceValue;
 }
 
 export interface SharedListFigureBand {
@@ -93,6 +136,7 @@ export interface SharedListFigureLatest {
 
 export interface SharedListFigures {
   readonly bands?: readonly SharedListFigureBand[];
+  readonly choices?: readonly SharedListFigureChoice[];
   readonly keep?: {
     readonly figureId: string;
     readonly values: readonly string[];
@@ -115,6 +159,9 @@ export function sharedListFigureKinds(
 ): ReadonlyMap<string, 'band' | 'latest' | 'number'> {
   return new Map<string, 'band' | 'latest' | 'number'>([
     ...figures.sums.map((sum) => [sum.figureId, 'number'] as const),
+    ...(figures.choices ?? []).map(
+      (choice) => [choice.figureId, 'number'] as const,
+    ),
     ...(figures.totals ?? []).map(
       (total) => [total.figureId, 'number'] as const,
     ),
@@ -134,12 +181,27 @@ export function sharedListFigureRowFields(
 ): readonly string[] {
   const field = (value: SharedListFigureOperand | SharedListFigureThreshold) =>
     'fieldId' in value ? [value.fieldId] : [];
+  const taken = (value: SharedListFigureChoiceValue | undefined) =>
+    value === undefined
+      ? []
+      : 'percent' in value
+        ? field(value.percent.of)
+        : field(value);
   return [
+    ...(figures.choices ?? []).flatMap((choice) => [
+      choice.byFieldId,
+      ...choice.cases.flatMap((entry) => taken(entry.value)),
+      ...taken(choice.otherwise),
+    ]),
     ...(figures.totals ?? []).flatMap((total) =>
       [...total.plus, ...total.minus].flatMap(field),
     ),
     ...(figures.bands ?? []).flatMap((band) =>
-      band.cases.flatMap((entry) => field(entry.below ?? entry.atMost!)),
+      band.cases.flatMap((entry) =>
+        entry.when
+          ? [entry.when.fieldId]
+          : field((entry.below ?? entry.atMost)!),
+      ),
     ),
   ];
 }
@@ -252,8 +314,16 @@ function parseOperand(value: ImmutableJsonValue): SharedListFigureOperand {
 
 function parseThreshold(
   value: ImmutableJsonValue | undefined,
+  numbers: ReadonlySet<string>,
 ): SharedListFigureThreshold {
   if (!isRecord(value)) throw malformed('list figures threshold is an object');
+  if (Object.hasOwn(value, 'figureId')) {
+    assertExactKeys(value, ['figureId']);
+    const figureId = canonicalId(value.figureId, 'threshold figureId');
+    if (!numbers.has(figureId))
+      throw malformed('list figures threshold names a figure before it');
+    return Object.freeze({ figureId });
+  }
   if (Object.hasOwn(value, 'value')) {
     assertExactKeys(value, ['value']);
     if (
@@ -267,6 +337,47 @@ function parseThreshold(
   return Object.freeze({
     fieldId: canonicalId(value.fieldId, 'threshold fieldId'),
   });
+}
+
+function parseWhen(value: ImmutableJsonValue | undefined) {
+  const when = record(value, 'when', ['fieldId', 'values']);
+  return Object.freeze({
+    fieldId: canonicalId(when.fieldId, 'when fieldId'),
+    values: strings(when.values, 'when values', 8, false),
+  });
+}
+
+/** A choice's value: an operand, or a percentage of one by the company's. */
+function parseChoiceValue(
+  value: ImmutableJsonValue | undefined,
+  numbers: ReadonlySet<string>,
+): SharedListFigureChoiceValue {
+  const operand = (entry: ImmutableJsonValue) => {
+    const parsed = parseOperand(entry);
+    if ('figureId' in parsed && !numbers.has(parsed.figureId))
+      throw malformed('list figures choice takes figures declared before it');
+    return parsed;
+  };
+  if (isRecord(value) && Object.hasOwn(value, 'percent')) {
+    assertExactKeys(value, ['percent']);
+    const percent = record(value.percent, 'choice percent', ['company', 'of']);
+    const company = record(percent.company, 'choice company', [
+      'fieldId',
+      'queryId',
+    ]);
+    return Object.freeze({
+      percent: Object.freeze({
+        company: Object.freeze({
+          fieldId: canonicalId(company.fieldId, 'company fieldId'),
+          queryId: canonicalId(company.queryId, 'company queryId'),
+        }),
+        of: operand(percent.of as ImmutableJsonValue),
+      }),
+    });
+  }
+  if (value === undefined)
+    throw malformed('list figures choice value is an object');
+  return operand(value);
 }
 
 /**
@@ -346,8 +457,9 @@ export function parseSharedListSupplySum(
 /**
  * The closed request contract. Beyond each member's shape it proves what the
  * statement relies on: unique figure ids, a sum naming exactly the parts it
- * adds, totals and bands over figures declared before them, and a `keep` of
- * values its band declares -- so the executor never meets a dangling id.
+ * adds, choices, totals and bands over figures declared before them, and a
+ * `keep` of values its band declares -- so the executor never meets a
+ * dangling id.
  */
 export function parseSharedListFigures(
   value: ImmutableJsonValue,
@@ -356,7 +468,7 @@ export function parseSharedListFigures(
     value,
     'argument',
     ['sums'],
-    ['bands', 'keep', 'latest', 'totals'],
+    ['bands', 'choices', 'keep', 'latest', 'totals'],
   );
   const ids = new Set<string>();
   const declare = (figureId: unknown) => {
@@ -380,6 +492,63 @@ export function parseSharedListFigures(
       return Object.freeze({ figureId, ...parts });
     },
   );
+  // CATALOG-EXTRAS: computed after the sums and before the totals, so a
+  // total may add a choice and a choice may take a sum.
+  const choices =
+    figures.choices === undefined
+      ? undefined
+      : list(figures.choices, 'choices', 1, 2).map(
+          (entry): SharedListFigureChoice => {
+            const choice = record(
+              entry,
+              'choice',
+              ['byFieldId', 'cases', 'figureId'],
+              ['otherwise'],
+            );
+            const figureId = declare(choice.figureId);
+            const taken = new Set<string>();
+            const cases = list(choice.cases, 'choice cases', 1, 4).map(
+              (candidate) => {
+                const entry = record(
+                  candidate,
+                  'choice case',
+                  ['values'],
+                  ['value'],
+                );
+                const values = strings(
+                  entry.values,
+                  'choice case values',
+                  8,
+                  false,
+                );
+                for (const option of values) {
+                  if (taken.has(option))
+                    throw malformed(
+                      'list figures choice values must be unique',
+                    );
+                  taken.add(option);
+                }
+                return Object.freeze({
+                  ...(entry.value === undefined
+                    ? {}
+                    : { value: parseChoiceValue(entry.value, numbers) }),
+                  values,
+                });
+              },
+            );
+            const otherwise =
+              choice.otherwise === undefined
+                ? undefined
+                : parseChoiceValue(choice.otherwise, numbers);
+            numbers.add(figureId);
+            return Object.freeze({
+              byFieldId: canonicalId(choice.byFieldId, 'choice byFieldId'),
+              cases: Object.freeze(cases),
+              figureId,
+              ...(otherwise ? { otherwise } : {}),
+            });
+          },
+        );
   const totals =
     figures.totals === undefined
       ? undefined
@@ -438,23 +607,27 @@ export function parseSharedListFigures(
                   candidate,
                   'band case',
                   ['value'],
-                  ['atMost', 'below'],
+                  ['atMost', 'below', 'when'],
                 );
                 if (
-                  (entry.below === undefined) ===
-                  (entry.atMost === undefined)
+                  [entry.below, entry.atMost, entry.when].filter(
+                    (test) => test !== undefined,
+                  ).length !== 1
                 )
                   throw malformed(
-                    'list figures band case compares with exactly one threshold',
+                    'list figures band case holds exactly one test',
                   );
                 return Object.freeze({
                   value: canonicalId(entry.value, 'band case value'),
                   ...(entry.below === undefined
                     ? {}
-                    : { below: parseThreshold(entry.below) }),
+                    : { below: parseThreshold(entry.below, numbers) }),
                   ...(entry.atMost === undefined
                     ? {}
-                    : { atMost: parseThreshold(entry.atMost) }),
+                    : { atMost: parseThreshold(entry.atMost, numbers) }),
+                  ...(entry.when === undefined
+                    ? {}
+                    : { when: parseWhen(entry.when) }),
                 });
               },
             );
@@ -532,6 +705,7 @@ export function parseSharedListFigures(
         })();
   return Object.freeze({
     ...(bands ? { bands: Object.freeze(bands) } : {}),
+    ...(choices ? { choices: Object.freeze(choices) } : {}),
     ...(keep ? { keep } : {}),
     ...(latest ? { latest: Object.freeze(latest) } : {}),
     sums: Object.freeze(sums),

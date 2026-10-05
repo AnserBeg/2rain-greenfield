@@ -14,11 +14,19 @@ function ids(namespace: string) {
     contentCapabilityId: `${namespace}:capability.standard_surface_content`,
     entityIds: {
       item: `${namespace}:entity.item`,
+      // Another number or code the item is known by (CATALOG-EXTRAS).
+      itemAlias: `${namespace}:entity.item_alias`,
       taxCode: `${namespace}:entity.tax_code`,
     },
     fieldIds: {
+      aliasKind: `${namespace}:field.item_alias_kind`,
+      aliasValue: `${namespace}:field.item_alias_value`,
       baseUnit: `${namespace}:field.item_base_unit`,
       description: `${namespace}:field.item_description`,
+      // Whether the item is kept in stock, and whether its reorder point is
+      // its own or the company's percentage of its reorder-up-to level
+      // (CATALOG-EXTRAS).
+      inventoryPolicy: `${namespace}:field.item_inventory_policy`,
       name: `${namespace}:field.item_name`,
       // Where to keep it and how much (REPLENISHMENT): the reorder point the
       // worklists judge projected stock against, the level a suggestion
@@ -30,6 +38,7 @@ function ids(namespace: string) {
       priceEur: `${namespace}:field.item_price_eur`,
       priceUsd: `${namespace}:field.item_price_usd`,
       reorderPoint: `${namespace}:field.item_reorder_point`,
+      reorderRule: `${namespace}:field.item_reorder_rule`,
       reorderUpTo: `${namespace}:field.item_reorder_up_to`,
       sku: `${namespace}:field.item_sku`,
       standardCostCad: `${namespace}:field.item_standard_cost_cad`,
@@ -41,7 +50,20 @@ function ids(namespace: string) {
     },
     moduleId: `${namespace}:module.catalog`,
     namespace,
+    optionIds: {
+      aliasAlternateSku: `${namespace}:option.item_alias_kind_alternate_sku`,
+      aliasBarcode: `${namespace}:option.item_alias_kind_barcode`,
+      aliasMergedSku: `${namespace}:option.item_alias_kind_merged_sku`,
+      aliasSupplierCode: `${namespace}:option.item_alias_kind_supplier_code`,
+      nonStocked: `${namespace}:option.item_inventory_policy_non_stocked`,
+      reorderCompany: `${namespace}:option.item_reorder_rule_company`,
+      reorderManual: `${namespace}:option.item_reorder_rule_manual`,
+      stocked: `${namespace}:option.item_inventory_policy_stocked`,
+    },
     packageId: `${namespace}:package.catalog`,
+    relationIds: {
+      aliasItem: `${namespace}:relation.item_alias_item`,
+    },
   } as const;
 }
 
@@ -71,13 +93,30 @@ export function catalogModuleDefinition(
      * Only the product application mounts them.
      */
     readonly replenishment?: boolean;
+    /**
+     * An item's aliases -- alternate SKUs, barcodes and supplier codes, each
+     * unique across the business as a SKU is -- its inventory policy and its
+     * reorder rule (CATALOG-EXTRAS). Only the product application mounts
+     * them, beside its replenishment fields.
+     */
+    readonly catalogExtras?: boolean;
   } = {},
 ): Record<string, unknown> {
   const definitionIds = ids(namespace);
-  const { contentCapabilityId, entityIds, fieldIds, moduleId, packageId } =
-    definitionIds;
+  const {
+    contentCapabilityId,
+    entityIds,
+    fieldIds,
+    moduleId,
+    optionIds,
+    packageId,
+    relationIds,
+  } = definitionIds;
   const prices = options.sellingPrices === true;
   const replenishment = options.replenishment === true;
+  const extras = options.catalogExtras === true;
+  const withExtras = <T>(values: readonly T[]): readonly T[] =>
+    extras ? values : [];
   const priceFields = [
     [fieldIds.priceCad, 'Price (CAD)', 50],
     [fieldIds.priceUsd, 'Price (USD)', 60],
@@ -107,6 +146,7 @@ export function catalogModuleDefinition(
           fieldIds.standardCostEur,
         ]
       : []),
+    ...withExtras([fieldIds.inventoryPolicy, fieldIds.reorderRule]),
   ];
   const when = <T>(values: readonly T[]): readonly T[] =>
     prices ? values : [];
@@ -115,6 +155,7 @@ export function catalogModuleDefinition(
     fieldIds.taxName,
     fieldIds.taxRatePercent,
   ];
+  const aliasFields = [fieldIds.aliasValue, fieldIds.aliasKind];
   return {
     assertions: [
       conformanceAssertion(
@@ -127,6 +168,13 @@ export function catalogModuleDefinition(
           definitionIds,
           'tax_code',
           `${namespace}:query.tax_code_get`,
+        ),
+      ]),
+      ...withExtras([
+        conformanceAssertion(
+          definitionIds,
+          'item_alias',
+          `${namespace}:query.item_alias_get`,
         ),
       ]),
     ],
@@ -154,6 +202,15 @@ export function catalogModuleDefinition(
       entity(definitionIds, 'item', 'Item', entityIds.item, 10),
       ...when([
         entity(definitionIds, 'tax_code', 'Tax code', entityIds.taxCode, 20),
+      ]),
+      ...withExtras([
+        entity(
+          definitionIds,
+          'item_alias',
+          'Item alias',
+          entityIds.itemAlias,
+          30,
+        ),
       ]),
     ],
     fields: [
@@ -218,6 +275,54 @@ export function catalogModuleDefinition(
             }),
           ]
         : []),
+      ...withExtras([
+        // A non-stocked item is bought or sold as needed, never kept: the
+        // stock Lists never judge it short or due. Unset reads as stocked.
+        enumField(
+          entityIds.item,
+          fieldIds.inventoryPolicy,
+          'Inventory policy',
+          140,
+          [
+            [optionIds.stocked, 'Stocked'],
+            [optionIds.nonStocked, 'Non-stocked'],
+          ],
+          optionIds.stocked,
+        ),
+        // Manual keeps the item's own reorder point; the company rule takes
+        // the company's percentage of its reorder-up-to level instead, worked
+        // out whenever a List is read in that company -- nothing is rewritten.
+        enumField(
+          entityIds.item,
+          fieldIds.reorderRule,
+          'Reorder rule',
+          150,
+          [
+            [optionIds.reorderManual, 'Manual'],
+            [optionIds.reorderCompany, 'Company rule'],
+          ],
+          optionIds.reorderManual,
+        ),
+        // Unique across the business, as a SKU is: a scan or a search that
+        // names it finds one item.
+        textField({
+          businessKey: 'tenantEnvironmentCaseInsensitiveUnique',
+          entityId: entityIds.itemAlias,
+          fieldId: fieldIds.aliasValue,
+          label: 'Alias',
+          maximumLength: 80,
+          orderKey: 10,
+          presence: 'required',
+          searchable: true,
+        }),
+        enumField(entityIds.itemAlias, fieldIds.aliasKind, 'Kind', 20, [
+          [optionIds.aliasAlternateSku, 'Alternate SKU'],
+          [optionIds.aliasBarcode, 'Barcode'],
+          [optionIds.aliasSupplierCode, 'Supplier code'],
+          // The SKU of a duplicate merged into this item.
+          [optionIds.aliasMergedSku, 'Merged SKU'],
+        ]),
+      ]),
       // A tax code's rate; a line or charge freezes it when choosing the code.
       ...when([
         textField({
@@ -274,6 +379,9 @@ export function catalogModuleDefinition(
     operations: [
       ...entityOperations(definitionIds, 'item', entityIds.item),
       ...when(entityOperations(definitionIds, 'tax_code', entityIds.taxCode)),
+      ...withExtras(
+        entityOperations(definitionIds, 'item_alias', entityIds.itemAlias),
+      ),
     ],
     package: {
       kind: 'packageDefinition',
@@ -286,6 +394,9 @@ export function catalogModuleDefinition(
     permissions: [
       ...entityPermissions(definitionIds, 'item', entityIds.item),
       ...when(entityPermissions(definitionIds, 'tax_code', entityIds.taxCode)),
+      ...withExtras(
+        entityPermissions(definitionIds, 'item_alias', entityIds.itemAlias),
+      ),
     ],
     queries: [
       ...entityQueries(definitionIds, 'item', entityIds.item, itemFields, [
@@ -311,17 +422,58 @@ export function catalogModuleDefinition(
           ],
         ),
       ),
+      ...withExtras(
+        entityQueries(
+          definitionIds,
+          'item_alias',
+          entityIds.itemAlias,
+          aliasFields,
+          [
+            {
+              authority: 'identifier',
+              fieldId: fieldIds.aliasValue,
+              localId: 'value',
+            },
+          ],
+        ),
+      ),
     ],
-    relations: [],
+    // An alias belongs to its item. `restrict`: an item is archived only once
+    // it names no active alias, so an alias never leads to an archived item,
+    // and no alias is added to an archived one.
+    relations: withExtras([
+      {
+        archiveBehavior: 'restrict',
+        cardinality: 'manyToOne',
+        foreignKeyActions: {
+          onDelete: 'restrict',
+          onUpdate: 'restrict',
+          schemaVersion: version,
+        },
+        joinEligibility: 'query',
+        kind: 'relationDefinition',
+        orderKey: 10,
+        ownership: 'parentScopedChild',
+        relationId: relationIds.aliasItem,
+        required: true,
+        schemaVersion: version,
+        sourceEntity: reference('entityReference', entityIds.itemAlias),
+        targetEntity: reference('entityReference', entityIds.item),
+      },
+    ]),
     schemaVersion: version,
     stateMachines: [],
     storageMappings: [
       storageMapping(definitionIds, 'item', entityIds.item),
       ...when([storageMapping(definitionIds, 'tax_code', entityIds.taxCode)]),
+      ...withExtras([
+        storageMapping(definitionIds, 'item_alias', entityIds.itemAlias),
+      ]),
     ],
     surfaces: [
       ...entitySurfaces(definitionIds, 'item', 'Item'),
       ...when(entitySurfaces(definitionIds, 'tax_code', 'Tax code')),
+      ...withExtras(entitySurfaces(definitionIds, 'item_alias', 'Item alias')),
     ],
   };
 }
@@ -333,6 +485,55 @@ export const CATALOG_IDS = Object.freeze({
   moduleId,
   namespace: CATALOG_NAMESPACE,
 });
+
+/**
+ * An enumeration of the item's, or its alias's. With a default option it is
+ * optional and an unset value is stored as that option; without one it is
+ * required.
+ */
+function enumField(
+  entityId: string,
+  fieldId: string,
+  label: string,
+  orderKey: number,
+  options: ReadonlyArray<readonly [optionId: string, label: string]>,
+  defaultOptionId?: string,
+): Record<string, unknown> {
+  return {
+    classification: 'internal',
+    collation: 'binary',
+    defaultSemantics: defaultOptionId ? 'declaredDefault' : 'none',
+    ...(defaultOptionId
+      ? {
+          defaultValue: {
+            kind: 'textValue',
+            schemaVersion: version,
+            value: defaultOptionId,
+          },
+        }
+      : {}),
+    entity: reference('entityReference', entityId),
+    fieldId,
+    fieldType: {
+      kind: 'enumFieldType',
+      options: options.map(([optionId, optionLabel], index) => ({
+        kind: 'enumOption',
+        label: optionLabel,
+        optionId,
+        orderKey: (index + 1) * 10,
+        schemaVersion: version,
+      })),
+      schemaVersion: version,
+    },
+    kind: 'fieldDefinition',
+    label,
+    orderKey,
+    presence: defaultOptionId ? 'optional' : 'required',
+    reportable: true,
+    schemaVersion: version,
+    searchable: false,
+  };
+}
 
 function entity(
   ids: CatalogIds,

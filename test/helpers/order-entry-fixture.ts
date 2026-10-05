@@ -1707,6 +1707,83 @@ async function seed(
         observed: true,
       };
     }
+    if (phase === 'catalog_extras') {
+      // CATALOG-EXTRAS, over the replenishment scenario: the Field notebook
+      // known by a barcode and by Alpine's own code, Shipping labels made
+      // non-stocked, the Fine-point pen set on the company rule with a level
+      // of 50, the company reordering at 40% of an item's level, and a
+      // duplicate of the notebook to merge. Each through its governed
+      // operation.
+      const option = (name: string) => `${ns}:option.${name}`;
+      const pens = '71000000-0000-4000-8000-000000000012';
+      const labels = '71000000-0000-4000-8000-000000000014';
+      const revision = async (local: string, recordId: string) =>
+        Number(
+          (await stored(local)).find((row) => row.record_id === recordId)!
+            .revision,
+        );
+      const alias = (value: string, kind: string) =>
+        create(
+          'item_alias',
+          { value, kind: option(`item_alias_kind_${kind}`) },
+          { item },
+          false,
+        );
+      const barcode = await alias('0012345678905', 'barcode');
+      const supplierCode = await alias('ALP-NB-80', 'supplier_code');
+      for (const [recordId, patch] of [
+        [
+          labels,
+          { inventory_policy: option('item_inventory_policy_non_stocked') },
+        ],
+        [
+          pens,
+          {
+            reorder_rule: option('item_reorder_rule_company'),
+            reorder_up_to: '50',
+          },
+        ],
+      ] as const) {
+        const updated = await invoke('item_update', {
+          recordId,
+          expectedRevision: await revision('item', recordId),
+          patch: Object.fromEntries(
+            Object.entries(patch).map(([name, value]) => [
+              `${ns}:field.item_${name}`,
+              value,
+            ]),
+          ),
+        });
+        assert.equal(updated.outcome, 'succeeded');
+      }
+      const company = await invoke('legal_entity_update', {
+        recordId: scope,
+        expectedRevision: await revision('legal_entity', scope),
+        patch: { [`${ns}:field.legal_entity_reorder_point_percent`]: '40' },
+      });
+      assert.equal(company.outcome, 'succeeded');
+      const duplicate = await create(
+        'item',
+        {
+          sku: 'OFF-100-DUP',
+          name: 'Field notebook (duplicate)',
+          description: 'Entered twice by mistake',
+          base_unit: 'EA',
+        },
+        {},
+        false,
+      );
+      return {
+        phase,
+        notebook: item,
+        pens,
+        labels,
+        duplicate: duplicate.recordId,
+        barcode: barcode.recordId,
+        supplierCode: supplierCode.recordId,
+        observed: true,
+      };
+    }
     if (phase === 'second_company') {
       const company = await create(
         'legal_entity',
