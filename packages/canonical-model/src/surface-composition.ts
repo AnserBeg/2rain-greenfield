@@ -3,6 +3,7 @@ import type {
   VersionedNormalizedApplicationPackage,
 } from './schemas.js';
 import { CanonicalModelError, diagnostic } from './diagnostics.js';
+import { pickerEligibilityProblem } from './picker-eligibility.js';
 
 /** Closed, cross-reference checked composition. No expression or arbitrary property path executes. */
 export function validateSurfaceCompositions(
@@ -119,6 +120,18 @@ export function validateSurfaceCompositions(
       for (const column of values) {
         if (!fields.has(column.field))
           fail(surface.surfaceId, 'column is not a declared query result');
+        // A read model states its figures as exact decimals; a declared field
+        // must be one to be shown as money.
+        if (
+          column.format === 'money' &&
+          (column.reference ||
+            model.fields.some(
+              (field) =>
+                field.fieldId === column.field &&
+                field.fieldType.kind !== 'exactDecimalFieldType',
+            ))
+        )
+          fail(surface.surfaceId, 'a money column reads an exact decimal');
         if (column.reference) {
           const target = queries.get(column.reference.query.targetId);
           if (
@@ -160,6 +173,49 @@ export function validateSurfaceCompositions(
         );
       if (!surface.slots.some((slot) => slot.slot === 'titleStatus'))
         fail(surface.surfaceId, 'header presentation requires titleStatus');
+      const print = presentation.print;
+      if (print) {
+        unique(print.datasets, surface.surfaceId);
+        if (
+          print.datasets.some(
+            (id) =>
+              !composition.children.some((child) => child.datasetId === id),
+          )
+        )
+          fail(surface.surfaceId, 'a printed dataset is a declared child');
+        if (
+          print.note &&
+          !composition.fields.some((column) => column.columnId === print.note)
+        )
+          fail(surface.surfaceId, 'a printed note is a declared column');
+        if (print.totals) {
+          unique(print.totals, surface.surfaceId);
+          if (
+            print.totals.some(
+              (id) =>
+                !composition.fields.some((column) => column.columnId === id),
+            )
+          )
+            fail(surface.surfaceId, 'printed totals are declared columns');
+        }
+      }
+      // A block reads declared columns the header does not already show, each
+      // in one block.
+      const blocked = (presentation.blocks ?? []).flatMap(
+        (block) => block.columns,
+      );
+      unique(blocked, surface.surfaceId);
+      if (
+        blocked.some(
+          (id) =>
+            ids.includes(id) ||
+            !composition.fields.some((column) => column.columnId === id),
+        )
+      )
+        fail(
+          surface.surfaceId,
+          'a block lists declared columns the header does not show',
+        );
     }
     for (const child of composition.children) {
       if (
@@ -344,7 +400,15 @@ export function validateSurfaceCompositions(
               surface.surfaceId,
               'reference input requires a declared list and label',
             );
-        } else if (input.query || input.labelField)
+          const problem = input.eligibility
+            ? pickerEligibilityProblem(
+                model,
+                input.eligibility,
+                String(query!.sourceEntity.targetId),
+              )
+            : null;
+          if (problem) fail(surface.surfaceId, problem);
+        } else if (input.query || input.labelField || input.eligibility)
           fail(
             surface.surfaceId,
             'only reference inputs declare lookup queries',

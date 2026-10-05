@@ -299,13 +299,30 @@ test('the state field is machine-owned: no caller-writable contract admits it', 
     );
   }
 
-  // The two creates write their authored fields and only those.
+  // The two creates write their authored fields and only those -- except the
+  // order number, which the server assigns (SALES-PARITY numbering) and the
+  // create contract names as an assignment instead of an input.
+  const numberFieldId = PURCHASING_IDS.fieldIds.purchaseOrder.number;
   assert.deepEqual(
     writableFieldIds(
       operations,
       `${namespace}:operation.purchase_order_create`,
     ),
-    Object.values(PURCHASING_IDS.fieldIds.purchaseOrder).toSorted(),
+    Object.values(PURCHASING_IDS.fieldIds.purchaseOrder)
+      .filter((fieldId) => fieldId !== numberFieldId)
+      .toSorted(),
+  );
+  const createContract = operations.find(
+    (operation) =>
+      operation.operationId === `${namespace}:operation.purchase_order_create`,
+  )?.inputContract as
+    { assignedFields?: Array<{ fieldId: string; prefix: string }> } | undefined;
+  assert.deepEqual(
+    createContract?.assignedFields?.map((field) => [
+      field.fieldId,
+      field.prefix,
+    ]),
+    [[numberFieldId, 'PO']],
   );
   assert.deepEqual(
     writableFieldIds(

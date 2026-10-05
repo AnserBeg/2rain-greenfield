@@ -615,6 +615,33 @@ test('sales compiler scenarios execute input refinements and operation/storage e
         38,
         18,
       ),
+      // SALES-PARITY (ruling B): the list price, discount, tax code and the
+      // rate frozen from it -- optional inputs of the line.
+      salesInputField(
+        'list_price',
+        'exactDecimalFieldType',
+        false,
+        null,
+        38,
+        18,
+      ),
+      salesInputField(
+        'discount_percent',
+        'exactDecimalFieldType',
+        false,
+        null,
+        38,
+        18,
+      ),
+      salesInputField('tax_code_id', 'textFieldType', false, 80, null, null),
+      salesInputField(
+        'tax_rate_percent',
+        'exactDecimalFieldType',
+        false,
+        null,
+        38,
+        18,
+      ),
     ],
   );
   assert.deepEqual(lineCreate.inputContract.relationInputs, [

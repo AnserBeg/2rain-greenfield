@@ -13,29 +13,70 @@ function ids(namespace: string) {
   return {
     contentCapabilityId: `${namespace}:capability.standard_surface_content`,
     entityIds: {
+      address: `${namespace}:entity.party_address`,
       party: `${namespace}:entity.party`,
       role: `${namespace}:entity.party_role`,
     },
     fieldIds: {
       contactSummary: `${namespace}:field.party_contact_summary`,
+      // Customer defaults a sales order takes when this party is chosen
+      // (owner ruling E): currency, payment terms, salesperson, ship-to.
+      defaultCurrency: `${namespace}:field.party_default_currency`,
+      defaultSalespersonPartyId: `${namespace}:field.party_default_salesperson_party_id`,
+      defaultShipToAddressId: `${namespace}:field.party_default_ship_to_address_id`,
+      defaultTaxCodeId: `${namespace}:field.party_default_tax_code_id`,
       name: `${namespace}:field.party_name`,
       number: `${namespace}:field.party_number`,
+      paymentTerms: `${namespace}:field.party_payment_terms`,
       roleKind: `${namespace}:field.party_role_kind`,
       roleStatus: `${namespace}:field.party_role_status`,
     },
+    addressFieldIds: Object.fromEntries(
+      ADDRESS_FIELDS.map(([name]) => [
+        name,
+        `${namespace}:field.party_address_${name}`,
+      ]),
+    ) as Record<(typeof ADDRESS_FIELDS)[number][0], string>,
     moduleId: `${namespace}:module.party`,
     namespace,
     packageId: `${namespace}:package.party`,
     relationIds: {
+      addressParty: `${namespace}:relation.party_address_party`,
       roleParty: `${namespace}:relation.party_role_party`,
     },
   } as const;
 }
 
+/** A ship-to address: its label in the book, then the lines it prints. */
+const ADDRESS_FIELDS = [
+  ['label', 'Address label', 80, true],
+  ['recipient', 'Recipient', 240, false],
+  ['street', 'Street address', 500, true],
+  ['city', 'City', 120, true],
+  ['region', 'Province or state', 120, false],
+  ['postal_code', 'Postal code', 20, true],
+  ['country', 'Country', 60, true],
+] as const;
+
+/** Payment terms (owner ruling B); an invoice is due this many days after its date. */
+export const PAYMENT_TERMS = [
+  ['due_on_receipt', 'Due on receipt'],
+  ['net_15', 'Net 15'],
+  ['net_30', 'Net 30'],
+  ['net_45', 'Net 45'],
+  ['net_60', 'Net 60'],
+] as const;
+
 type PartyIds = ReturnType<typeof ids>;
 
-const { contentCapabilityId, entityIds, fieldIds, moduleId, relationIds } =
-  ids(PARTY_NAMESPACE);
+const {
+  addressFieldIds,
+  contentCapabilityId,
+  entityIds,
+  fieldIds,
+  moduleId,
+  relationIds,
+} = ids(PARTY_NAMESPACE);
 
 /**
  * The complete Party module is definition data. Compiler projections and the
@@ -44,9 +85,21 @@ const { contentCapabilityId, entityIds, fieldIds, moduleId, relationIds } =
  */
 export function partyModuleDefinition(
   namespace: string = PARTY_NAMESPACE,
+  options: {
+    /**
+     * Sales master data (owner ruling E): the salesperson role, customer
+     * order defaults and the ship-to address book. The product application
+     * mounts Party with it; the standalone reference harness keeps the Party
+     * it has always compiled.
+     */
+    readonly salesMasterData?: boolean;
+  } = {},
 ): Record<string, unknown> {
   const definitionIds = ids(namespace);
+  const sales = options.salesMasterData === true;
+  const when = <T>(values: readonly T[]): readonly T[] => (sales ? values : []);
   const {
+    addressFieldIds,
     contentCapabilityId,
     entityIds,
     fieldIds,
@@ -54,8 +107,20 @@ export function partyModuleDefinition(
     packageId,
     relationIds,
   } = definitionIds;
-  const partyFields = [fieldIds.number, fieldIds.name, fieldIds.contactSummary];
+  const partyFields = [
+    fieldIds.number,
+    fieldIds.name,
+    fieldIds.contactSummary,
+    ...when([
+      fieldIds.defaultCurrency,
+      fieldIds.paymentTerms,
+      fieldIds.defaultSalespersonPartyId,
+      fieldIds.defaultShipToAddressId,
+      fieldIds.defaultTaxCodeId,
+    ]),
+  ];
   const roleFields = [fieldIds.roleKind, fieldIds.roleStatus];
+  const addressFields = Object.values(addressFieldIds);
   return {
     assertions: [
       conformanceAssertion(
@@ -68,6 +133,13 @@ export function partyModuleDefinition(
         'party_role',
         `${namespace}:query.party_role_get`,
       ),
+      ...when([
+        conformanceAssertion(
+          definitionIds,
+          'party_address',
+          `${namespace}:query.party_address_get`,
+        ),
+      ]),
     ],
     capabilityRequirements: [
       {
@@ -92,6 +164,15 @@ export function partyModuleDefinition(
     entities: [
       entity(definitionIds, 'party', 'Party', entityIds.party, 10),
       entity(definitionIds, 'party_role', 'Party role', entityIds.role, 20),
+      ...when([
+        entity(
+          definitionIds,
+          'party_address',
+          'Ship-to address',
+          entityIds.address,
+          30,
+        ),
+      ]),
     ],
     fields: [
       textField({
@@ -132,6 +213,8 @@ export function partyModuleDefinition(
         [
           ['supplier', 'Supplier'],
           ['customer', 'Customer'],
+          // Owner ruling E: a salesperson is a Party holding this role.
+          ...when([['salesperson', 'Salesperson'] as const]),
         ],
         true,
       ),
@@ -146,6 +229,76 @@ export function partyModuleDefinition(
           ['inactive', 'Inactive'],
         ],
       ),
+      ...when([
+        // The currencies an order may be in (ruling B), offered as a choice;
+        // an order copies the chosen code, which is the option's label.
+        enumField(
+          definitionIds,
+          entityIds.party,
+          fieldIds.defaultCurrency,
+          'Default currency',
+          110,
+          [
+            ['party_default_currency_cad', 'CAD'],
+            ['party_default_currency_usd', 'USD'],
+            ['party_default_currency_eur', 'EUR'],
+          ],
+          false,
+          true,
+        ),
+        enumField(
+          definitionIds,
+          entityIds.party,
+          fieldIds.paymentTerms,
+          'Payment terms',
+          120,
+          PAYMENT_TERMS.map(([local, label]) => [
+            `party_payment_terms_${local}`,
+            label,
+          ]),
+          false,
+          true,
+        ),
+        textField({
+          entityId: entityIds.party,
+          fieldId: fieldIds.defaultSalespersonPartyId,
+          label: 'Default salesperson',
+          maximumLength: 80,
+          orderKey: 130,
+          presence: 'optional',
+          searchable: false,
+        }),
+        textField({
+          entityId: entityIds.party,
+          fieldId: fieldIds.defaultShipToAddressId,
+          label: 'Default ship-to address',
+          maximumLength: 80,
+          orderKey: 140,
+          presence: 'optional',
+          searchable: false,
+        }),
+        // The tax code a customer's orders are taxed by (ruling B).
+        textField({
+          entityId: entityIds.party,
+          fieldId: fieldIds.defaultTaxCodeId,
+          label: 'Default tax code',
+          maximumLength: 80,
+          orderKey: 150,
+          presence: 'optional',
+          searchable: false,
+        }),
+        ...ADDRESS_FIELDS.map(([name, label, maximumLength, required], index) =>
+          textField({
+            entityId: entityIds.address,
+            fieldId: addressFieldIds[name],
+            label,
+            maximumLength,
+            orderKey: (index + 1) * 10,
+            presence: required ? 'required' : 'optional',
+            searchable: name === 'label' || name === 'city',
+          }),
+        ),
+      ]),
     ],
     hashAlgorithm: 'sha256',
     impactAnalyses: [],
@@ -170,6 +323,9 @@ export function partyModuleDefinition(
     operations: [
       ...entityOperations(definitionIds, 'party', entityIds.party),
       ...entityOperations(definitionIds, 'party_role', entityIds.role),
+      ...when(
+        entityOperations(definitionIds, 'party_address', entityIds.address),
+      ),
     ],
     package: {
       kind: 'packageDefinition',
@@ -182,6 +338,9 @@ export function partyModuleDefinition(
     permissions: [
       ...entityPermissions(definitionIds, 'party', entityIds.party),
       ...entityPermissions(definitionIds, 'party_role', entityIds.role),
+      ...when(
+        entityPermissions(definitionIds, 'party_address', entityIds.address),
+      ),
     ],
     queries: [
       ...entityQueries(definitionIds, 'party', entityIds.party, partyFields, [
@@ -205,6 +364,21 @@ export function partyModuleDefinition(
           },
         ],
       ),
+      ...when(
+        entityQueries(
+          definitionIds,
+          'party_address',
+          entityIds.address,
+          addressFields,
+          [
+            {
+              authority: 'advisory',
+              fieldId: addressFieldIds.label,
+              localId: 'label',
+            },
+          ],
+        ),
+      ),
     ],
     relations: [
       {
@@ -225,21 +399,48 @@ export function partyModuleDefinition(
         sourceEntity: reference('entityReference', entityIds.role),
         targetEntity: reference('entityReference', entityIds.party),
       },
+      ...when([
+        {
+          archiveBehavior: 'restrict',
+          cardinality: 'manyToOne',
+          foreignKeyActions: {
+            onDelete: 'restrict',
+            onUpdate: 'restrict',
+            schemaVersion: version,
+          },
+          joinEligibility: 'query',
+          kind: 'relationDefinition',
+          orderKey: 20,
+          ownership: 'parentScopedChild',
+          relationId: relationIds.addressParty,
+          required: true,
+          schemaVersion: version,
+          sourceEntity: reference('entityReference', entityIds.address),
+          targetEntity: reference('entityReference', entityIds.party),
+        },
+      ]),
     ],
     schemaVersion: version,
     stateMachines: [],
     storageMappings: [
       storageMapping(definitionIds, 'party', entityIds.party),
       storageMapping(definitionIds, 'party_role', entityIds.role),
+      ...when([
+        storageMapping(definitionIds, 'party_address', entityIds.address),
+      ]),
     ],
     surfaces: [
       ...entitySurfaces(definitionIds, 'party', 'Party'),
       ...entitySurfaces(definitionIds, 'party_role', 'Party role'),
+      ...when(
+        entitySurfaces(definitionIds, 'party_address', 'Ship-to address'),
+      ),
     ],
   };
 }
 
 export const PARTY_IDS = Object.freeze({
+  addressFieldIds,
   contentCapabilityId,
   entityIds,
   fieldIds,
@@ -310,11 +511,12 @@ function enumField(
   orderKey: number,
   options: ReadonlyArray<readonly [string, string]>,
   searchable = false,
+  optional = false,
 ): Record<string, unknown> {
   return {
     classification: 'internal',
     collation: 'binary',
-    defaultSemantics: 'none',
+    defaultSemantics: optional ? 'nullable' : 'none',
     entity: reference('entityReference', entityId),
     fieldId,
     fieldType: {
@@ -331,7 +533,7 @@ function enumField(
     kind: 'fieldDefinition',
     label,
     orderKey,
-    presence: 'required',
+    presence: optional ? 'optional' : 'required',
     reportable: true,
     schemaVersion: version,
     searchable,

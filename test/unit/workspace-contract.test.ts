@@ -13,6 +13,8 @@ import {
 } from '../../packages/canonical-model/src/index.js';
 import type { StorageTargetPayloadV1 } from '../../packages/compiler/src/index.js';
 import { legalEntityReadScopeRequirement } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import { moneyText } from '../../apps/web/src/list-declaration.js';
+import { declaredDefault } from '../../apps/web/src/control-semantics.js';
 
 test('the scaffold exposes a canonical workspace contract', () => {
   assert.deepEqual(platformContract, {
@@ -310,13 +312,31 @@ test('FORM-4: every supplied exact get is validated, whether or not the picker c
   assert.doesNotThrow(() =>
     normalizeApplicationPackage(addedGet(variant(numberGet), true)),
   );
-  // A legacy picker with no exact get keeps its admitted behaviour.
-  assert.doesNotThrow(() =>
-    normalizeApplicationPackage(
-      variant((reference) => {
-        delete reference.getQueryId;
-      }),
-    ),
+  // A legacy picker with no exact get keeps its admitted behaviour, in a
+  // legacy header where nothing is defaulted or scoped through it.
+  const legacy = variant((reference) => {
+    delete reference.getQueryId;
+  });
+  for (const field of (
+    (legacy.surfaces as Record<string, unknown>[]).find((value) =>
+      String(value.surfaceId).endsWith(':surface.sales_order_form'),
+    )!.documentEditor as {
+      headerFields: {
+        defaultFrom?: unknown;
+        reference?: { within?: unknown };
+      }[];
+    }
+  ).headerFields) {
+    delete field.defaultFrom;
+    delete field.reference?.within;
+  }
+  assert.doesNotThrow(() => normalizeApplicationPackage(legacy));
+  // Once a default reads through it, the picker needs its exact get.
+  refusedWith(
+    variant((reference) => {
+      delete reference.getQueryId;
+    }),
+    'an editor default requires a sibling reference whose record holds a compatible selected source',
   );
 });
 
@@ -412,4 +432,355 @@ test('picker eligibility and Task input presentation are closed, typed declarati
     receiveInput(candidate, 'unit').presentation!.column!.columnId =
       'northstar.app:column.purchasing_receipt';
   }, /derived inputs require/);
+});
+
+test('editor defaults, scoped pickers, Task input eligibility and print blocks are closed, typed declarations', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type EditorField = {
+    fieldId: string;
+    presentation?: Loose;
+    defaultFrom?: { referenceFieldId: string; sourceFieldId: string };
+    reference?: Loose & {
+      within?: { referenceFieldId: string; relationId: string };
+      create?: unknown;
+    };
+    [key: string]: unknown;
+  };
+  const surface = (candidate: Loose, suffix: string) =>
+    (candidate.surfaces as Loose[]).find((value) =>
+      String(value.surfaceId).endsWith(suffix),
+    )!;
+  const editor = (candidate: Loose) =>
+    surface(candidate, ':surface.sales_order_form').documentEditor as {
+      headerFields: EditorField[];
+      lineFields: EditorField[];
+    };
+  const header = (candidate: Loose, name: string) =>
+    editor(candidate).headerFields.find((field) =>
+      field.fieldId.endsWith(`:field.sales_order_${name}`),
+    )!;
+  const customerWorkspace = (candidate: Loose) =>
+    surface(candidate, ':surface.party_detail').composition as {
+      actions: { actionId: string; inputs: Loose[] }[];
+      presentation: { print?: Loose };
+    };
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  // A default reads a selected field of a sibling picker's record.
+  refuse((candidate) => {
+    header(candidate, 'currency').defaultFrom!.referenceFieldId =
+      'northstar.app:field.sales_order_order_date';
+  }, /an editor default requires a sibling reference/);
+  refuse((candidate) => {
+    header(candidate, 'currency').defaultFrom!.sourceFieldId =
+      'northstar.app:field.party_role_kind';
+  }, /an editor default requires a sibling reference/);
+  // ...into a field that can hold it: text no shorter than the source.
+  refuse((candidate) => {
+    header(candidate, 'currency').defaultFrom!.sourceFieldId =
+      'northstar.app:field.party_name';
+  }, /an editor default requires a sibling reference/);
+  // ...or an enumeration whose every label fits the text (a currency code).
+  refuse((candidate) => {
+    header(candidate, 'currency').defaultFrom!.sourceFieldId =
+      'northstar.app:field.party_payment_terms';
+  }, /an editor default requires a sibling reference/);
+  // ...an enumeration offering each source label exactly once.
+  refuse((candidate) => {
+    const terms = (candidate.fields as Loose[]).find(
+      (field) =>
+        field.fieldId === 'northstar.app:field.sales_order_payment_terms',
+    )!.fieldType as { options: { label: string }[] };
+    terms.options[2]!.label = 'Thirty days';
+  }, /an editor default requires a sibling reference/);
+  // ...never a read-only derived field.
+  refuse((candidate) => {
+    editor(candidate).lineFields.find((field) =>
+      field.fieldId.endsWith(':field.sales_order_line_unit_id'),
+    )!.defaultFrom = {
+      referenceFieldId: 'northstar.app:field.sales_order_line_item_id',
+      sourceFieldId: 'northstar.app:field.item_base_unit',
+    };
+  }, /an editor default requires a sibling reference/);
+  // Defaults cascade, so they must settle.
+  refuse((candidate) => {
+    header(candidate, 'customer_party_id').defaultFrom = {
+      referenceFieldId: 'northstar.app:field.sales_order_ship_to_address_id',
+      sourceFieldId: 'northstar.app:field.party_address_label',
+    };
+  }, /editor defaults must not form a cycle/);
+  refuse((candidate) => {
+    (header(candidate, 'currency').defaultFrom as Loose).fallback = 'CAD';
+  }, /CANON_SCHEMA_INVALID/);
+  // A scoped picker lists the records an owned relation ties to its sibling.
+  refuse((candidate) => {
+    header(candidate, 'ship_to_address_id').reference!.within!.relationId =
+      'northstar.app:relation.party_role_party';
+  }, /a scoped picker requires/);
+  refuse((candidate) => {
+    header(
+      candidate,
+      'ship_to_address_id',
+    ).reference!.within!.referenceFieldId =
+      'northstar.app:field.sales_order_order_date';
+  }, /a scoped picker requires/);
+  refuse((candidate) => {
+    header(candidate, 'ship_to_address_id').reference!.create = structuredClone(
+      header(candidate, 'customer_party_id').reference!.create,
+    );
+  }, /a scoped picker requires/);
+  // Task input eligibility: a reference input's, with the picker's rules.
+  refuse((candidate) => {
+    const inputs = customerWorkspace(candidate).actions.find((action) =>
+      action.actionId.endsWith(':action.party_set_salesperson'),
+    )!.inputs;
+    (
+      inputs[0]!.eligibility as { filters: { value: string }[] }
+    ).filters[0]!.value = 'northstar.app:option.not_a_role';
+  }, /picker eligibility filters require/);
+  refuse((candidate) => {
+    const action = customerWorkspace(candidate).actions.find((value) =>
+      value.actionId.endsWith(':action.party_set_salesperson'),
+    )!;
+    const eligibility = action.inputs[0]!.eligibility;
+    customerWorkspace(candidate).actions.find((value) =>
+      value.actionId.endsWith(':action.party_add_address'),
+    )!.inputs[0]!.eligibility = eligibility;
+  }, /only reference inputs declare lookup queries/);
+  // A block names declared columns the header does not already show.
+  refuse((candidate) => {
+    (
+      surface(candidate, ':surface.sales_order_detail').composition as {
+        presentation: { blocks: { columns: string[] }[] };
+      }
+    ).presentation.blocks[0]!.columns.push('northstar.app:column.not_declared');
+  }, /a block lists declared columns the header does not show/);
+  refuse((candidate) => {
+    (
+      surface(candidate, ':surface.sales_order_detail').composition as {
+        presentation: { blocks: { columns: string[] }[] };
+      }
+    ).presentation.blocks[0]!.columns.push('northstar.app:column.currency');
+  }, /a block lists declared columns the header does not show/);
+});
+
+test('ruling B declarations: prices chosen by the order currency, a line tax code from the order, frozen rates and printed totals', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type EditorField = {
+    fieldId: string;
+    presentation?: Loose & {
+      sourceByHeader?: {
+        headerFieldId: string;
+        cases: { value: string; sourceFieldId: string }[];
+      };
+    };
+    defaultFrom?: Loose & {
+      headerFieldId?: string;
+      sourceByHeader?: {
+        headerFieldId: string;
+        cases: { value: string; sourceFieldId: string }[];
+      };
+    };
+    [key: string]: unknown;
+  };
+  const editor = (candidate: Loose) =>
+    (candidate.surfaces as Loose[]).find((value) =>
+      String(value.surfaceId).endsWith(':surface.sales_order_form'),
+    )!.documentEditor as { lineFields: EditorField[] };
+  const line = (candidate: Loose, name: string) =>
+    editor(candidate).lineFields.find((field) =>
+      field.fieldId.endsWith(`:field.sales_order_line_${name}`),
+    )!;
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  // The chooser is a declared header field, and each value is one it holds.
+  refuse((candidate) => {
+    line(candidate, 'unit_price').defaultFrom!.sourceByHeader!.headerFieldId =
+      'northstar.app:field.sales_order_line_line_number';
+  }, /an editor default requires a sibling reference/);
+  refuse((candidate) => {
+    line(candidate, 'unit_price').defaultFrom!.sourceByHeader!.cases[0]!.value =
+      'CADX';
+  }, /an editor default requires a sibling reference/);
+  refuse((candidate) => {
+    const cases = line(candidate, 'unit_price').defaultFrom!.sourceByHeader!
+      .cases;
+    cases[1]!.value = cases[0]!.value;
+  }, /an editor default requires a sibling reference/);
+  // A price chosen by currency is a decimal the line can hold.
+  refuse((candidate) => {
+    line(
+      candidate,
+      'unit_price',
+    ).defaultFrom!.sourceByHeader!.cases[0]!.sourceFieldId =
+      'northstar.app:field.item_name';
+  }, /an editor default requires a sibling reference/);
+  // A derived decimal (the list price) reads a decimal.
+  refuse((candidate) => {
+    line(candidate, 'list_price').presentation!.sourceFieldId =
+      'northstar.app:field.item_sku';
+  }, /derived presentation requires a text or decimal field/);
+  // A line copying a header value copies one it can hold.
+  refuse((candidate) => {
+    line(candidate, 'tax_code_id').defaultFrom!.headerFieldId =
+      'northstar.app:field.sales_order_freight_amount';
+  }, /an editor default requires a sibling reference/);
+  // A header copy names no record source as well.
+  refuse((candidate) => {
+    line(candidate, 'tax_code_id').defaultFrom!.sourceFieldId =
+      'northstar.app:field.item_name';
+  }, /an editor default requires a sibling reference/);
+  // Printed totals are declared columns.
+  refuse((candidate) => {
+    (
+      (candidate.surfaces as Loose[]).find((value) =>
+        String(value.surfaceId).endsWith(':surface.sales_order_detail'),
+      )!.composition as {
+        presentation: { print: { totals: string[] } };
+      }
+    ).presentation.print.totals.push('northstar.app:column.not_declared');
+  }, /printed totals are declared columns/);
+});
+
+test('money columns read exact decimals and show grouped digits with two decimals, never rounded', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type Column = Loose & { columnId: string; format?: string; role?: string };
+  const surface = (candidate: Loose, local: string) =>
+    (candidate.surfaces as Loose[]).find((value) =>
+      String(value.surfaceId).endsWith(`:surface.${local}`),
+    ) as Loose & {
+      composition?: { fields: Column[] };
+      list?: { columns: Column[] };
+    };
+  const invoiceColumn = (candidate: Loose, local: string) =>
+    surface(candidate, 'customer_invoice_detail').composition!.fields.find(
+      (value) => value.columnId.endsWith(`:column.invoice_${local}`),
+    )!;
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  // The shipped declarations: an invoice's figures and the Invoices List.
+  assert.equal(invoiceColumn(source, 'balance').format, 'money');
+  assert.deepEqual(
+    surface(source, 'customer_invoice_list')
+      .list!.columns.filter((value) => value.format === 'money')
+      .map((value) => value.columnId.split('.').pop()),
+    ['customer_invoice_list_total', 'customer_invoice_list_balance'],
+  );
+  // A money column reads an exact decimal: not text, not a referenced label.
+  refuse((candidate) => {
+    invoiceColumn(candidate, 'number').format = 'money';
+  }, /a money column reads an exact decimal/);
+  refuse((candidate) => {
+    invoiceColumn(candidate, 'customer').format = 'money';
+  }, /a money column reads an exact decimal/);
+  refuse((candidate) => {
+    surface(candidate, 'customer_invoice_list').list!.columns.find(
+      (value) => value.role === 'title',
+    )!.format = 'money';
+  }, /a money column reads an exact decimal field/);
+  // Shown with grouped digits and at least two decimals; never rounded.
+  for (const [stored, shown] of [
+    ['1234.5', '1,234.50'],
+    ['25', '25.00'],
+    ['0.1', '0.10'],
+    ['12.345', '12.345'],
+    ['12.500', '12.50'],
+    ['-1000000', '-1,000,000.00'],
+    ['not a number', 'not a number'],
+  ] as const)
+    assert.equal(moneyText(stored), shown, stored);
+});
+
+test('a new order starts its requested date three weeks out, a default counted from today', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type EditorField = Loose & {
+    fieldId: string;
+    defaultDaysFromToday?: number;
+    defaultFrom?: Loose;
+  };
+  const header = (candidate: Loose) =>
+    (
+      (candidate.surfaces as Loose[]).find((value) =>
+        String(value.surfaceId).endsWith(':surface.sales_order_form'),
+      )!.documentEditor as { headerFields: EditorField[] }
+    ).headerFields;
+  const headerField = (candidate: Loose, name: string) =>
+    header(candidate).find((field) =>
+      field.fieldId.endsWith(`:field.sales_order_${name}`),
+    )!;
+  const refuse = (change: (candidate: Loose) => void) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) =>
+          /a default counted from today is a UTC date-time field with no other default/.test(
+            JSON.stringify(value),
+          ),
+        ),
+    );
+  };
+  assert.equal(headerField(source, 'requested_date').defaultDaysFromToday, 21);
+  // Only a UTC date-time field, and never beside another default.
+  refuse((candidate) => {
+    headerField(candidate, 'freight_amount').defaultDaysFromToday = 21;
+  });
+  refuse((candidate) => {
+    headerField(candidate, 'ship_to_city').defaultDaysFromToday = 21;
+  });
+  // Midnight UTC of the day 21 days after the draft opens.
+  assert.equal(
+    declaredDefault(
+      { defaultDaysFromToday: 21 },
+      new Date('2026-09-29T23:30:00.000Z'),
+    ),
+    '2026-10-20T00:00:00.000Z',
+  );
+  assert.equal(
+    declaredDefault(
+      { defaultDaysFromToday: 0 },
+      new Date('2026-12-31T05:00:00Z'),
+    ),
+    '2026-12-31T00:00:00.000Z',
+  );
 });

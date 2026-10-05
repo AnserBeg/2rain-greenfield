@@ -35,16 +35,26 @@ export async function withOrderEntryFixture(
    * than it displays. Masters only; zero by default.
    */
   lookupVolume = 0,
+  /**
+   * Prerequisite Sales orders for judging a List (views, counts, paging, sort,
+   * search by customer name, export), created through the governed create,
+   * release and cancel operations after the no-orders assertion. The order a
+   * browser proof is about is still created in the browser; zero by default.
+   */
+  orderVolume = 0,
+  /** A compiled release to serve instead of the checked-in one. */
+  compiledApplication?: unknown,
 ) {
   await withEphemeralPostgres('order-entry', async ({ connection, pool }) => {
     const app = await startComposedApplication({
+      ...(compiledApplication === undefined ? {} : { compiledApplication }),
       databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
       port: 0,
       seedProfile,
       tenantSlug: 'order-entry',
     });
     try {
-      await run(await seed(app, pool, lookupVolume));
+      await run(await seed(app, pool, lookupVolume, orderVolume));
     } finally {
       await app.close();
     }
@@ -54,6 +64,7 @@ async function seed(
   app: Awaited<ReturnType<typeof startComposedApplication>>,
   pool: Pool,
   lookupVolume = 0,
+  orderVolume = 0,
 ) {
   const ns = 'northstar.app';
   const scope = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
@@ -131,6 +142,79 @@ async function seed(
       {},
       false,
     );
+  // Ruling E: the demo customer carries order defaults -- a salesperson, Net
+  // 30, CAD and a default ship-to from its address book -- so choosing it in
+  // the editor fills them, and Confirm finds a complete ship-to.
+  const salesperson = await create(
+    'party',
+    {
+      number: 'SP-TEST',
+      name: 'Morgan Lee',
+      contact_summary: 'Salesperson · morgan@rain-distribution.example',
+    },
+    {},
+    false,
+  );
+  await create(
+    'party_role',
+    { kind: `${ns}:option.salesperson`, status: `${ns}:option.active` },
+    { party: salesperson.recordId },
+    false,
+  );
+  const shipToAddress = await create(
+    'party_address',
+    {
+      label: 'Main delivery',
+      recipient: 'Alpine receiving',
+      street: '100 Industrial Way',
+      city: 'Calgary',
+      region: 'AB',
+      postal_code: 'T2P 0A1',
+      country: 'Canada',
+    },
+    { party: customer },
+    false,
+  );
+  // Ruling B: a fixed-rate tax code the customer's orders are taxed by, and
+  // the product's selling price in each order currency.
+  const taxCode = await create(
+    'tax_code',
+    { code: 'GST-AB', name: 'GST 5% (Alberta)', rate_percent: '5' },
+    {},
+    false,
+  );
+  const priced = await invoke('item_update', {
+    recordId: item,
+    expectedRevision: 1,
+    patch: {
+      // Exact decimals are canonical: no trailing zeros.
+      [`${ns}:field.item_price_cad`]: '12.5',
+      [`${ns}:field.item_price_usd`]: '9.25',
+      [`${ns}:field.item_price_eur`]: '8.5',
+    },
+  });
+  assert.equal(priced.outcome, 'succeeded');
+  const defaulted = await invoke('party_update', {
+    recordId: customer,
+    expectedRevision: 1,
+    patch: {
+      [`${ns}:field.party_default_tax_code_id`]: taxCode.recordId,
+      [`${ns}:field.party_default_currency`]: `${ns}:option.party_default_currency_cad`,
+      [`${ns}:field.party_payment_terms`]: `${ns}:option.party_payment_terms_net_30`,
+      [`${ns}:field.party_default_salesperson_party_id`]: salesperson.recordId,
+      [`${ns}:field.party_default_ship_to_address_id`]: shipToAddress.recordId,
+    },
+  });
+  assert.equal(defaulted.outcome, 'succeeded');
+  /** A complete ship-to, which Confirm requires (ruling E). */
+  const shipTo = {
+    ship_to_name: 'Receiving dock',
+    ship_to_street: '100 Industrial Way',
+    ship_to_city: 'Calgary',
+    ship_to_region: 'AB',
+    ship_to_postal_code: 'T2P 0A1',
+    ship_to_country: 'Canada',
+  };
   const now = new Date().toISOString();
   const stock = await create('inventory_transaction', {
     actor_id: 'order-entry-fixture',
@@ -184,6 +268,47 @@ async function seed(
   const initialStock = await stockSnapshot();
   assert.equal((await stored('sales_order')).length, 0);
   assert.equal((await stored('purchase_order')).length, 0);
+  const listOrders = await createListOrders(orderVolume);
+  async function createListOrders(count: number) {
+    if (count === 0) return [];
+    const kind = entity('party_role').columns.find((column) =>
+      column.canonicalFieldId.endsWith('party_role_kind'),
+    )!.physicalName;
+    const partyColumn = target.relations.find(
+      (relation) => relation.relationId === `${ns}:relation.party_role_party`,
+    )!.relationColumn.physicalName;
+    const customers = [
+      ...new Set(
+        (await stored('party_role'))
+          .filter((row) => row[kind] === `${ns}:option.customer`)
+          .map((row) => String(row[partyColumn])),
+      ),
+    ].sort();
+    const created = [];
+    for (let index = 1; index <= count; index++) {
+      const day = new Date(Date.UTC(2026, 8, 1 + (index % 27), 12));
+      const order = await create('sales_order', {
+        customer_party_id: customers[index % customers.length]!,
+        order_date: day.toISOString(),
+        requested_date: new Date(day.getTime() + 21 * 86_400_000).toISOString(),
+        currency: index % 5 === 0 ? 'EUR' : index % 4 === 0 ? 'USD' : 'CAD',
+        notes: null,
+        ...shipTo,
+      });
+      if (index % 3 === 0)
+        await invoke('sales_order_release', {
+          recordId: order.recordId,
+          expectedRevision: order.revision,
+        });
+      else if (index % 7 === 0)
+        await invoke('sales_order_draft_cancel', {
+          recordId: order.recordId,
+          expectedRevision: order.revision,
+        });
+      created.push(order.recordId);
+    }
+    return created;
+  }
   let catalogConflict: Awaited<ReturnType<typeof create>> | null = null;
   const measure = async (
     phase: string,
@@ -239,17 +364,18 @@ async function seed(
     }
     if (phase === 'catalog_setup') {
       const now = new Date().toISOString();
-      const order = (number: string) =>
+      // Order numbers are assigned by the server on create.
+      const order = () =>
         create('sales_order', {
           customer_party_id: customer,
           order_date: now,
           requested_date: now,
           currency: 'CAD',
           notes: 'Catalog real-path fixture',
-          number,
+          ...shipTo,
         });
-      catalogConflict = await order('SO-CATALOG-CONFLICT');
-      const locked = await order('SO-CATALOG-LOCKED');
+      catalogConflict = await order();
+      const locked = await order();
       const released = await invoke('sales_order_release', {
         recordId: locked.recordId,
         expectedRevision: locked.revision,
@@ -474,7 +600,9 @@ async function seed(
     item,
     location,
     customer,
+    listOrders,
     measure,
+    taxCode: taxCode.recordId,
   };
 }
 if (process.argv.includes('--serve')) {
@@ -544,6 +672,11 @@ if (process.argv.includes('--serve')) {
       process.argv
         .find((value) => value.startsWith('--lookup-volume='))
         ?.slice('--lookup-volume='.length) ?? 0,
+    ),
+    Number(
+      process.argv
+        .find((value) => value.startsWith('--order-volume='))
+        ?.slice('--order-volume='.length) ?? 0,
     ),
   );
 }

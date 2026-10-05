@@ -166,7 +166,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     capabilityId: 'northstar.runtime:capability.surface-manifest',
     // 8 adds declared workspaces and the shared scoped draft document editor.
     // 9 adds picker eligibility and typed Task input presentation.
-    maximumSupportedVersion: 9,
+    // 10 adds declared Lists: columns, saved views, filters, sort and export.
+    // 11 adds editor defaults and scoped pickers.
+    maximumSupportedVersion: 11,
   },
 });
 

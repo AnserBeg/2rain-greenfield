@@ -57,8 +57,11 @@ for (const javaScriptEnabled of [true, false]) {
         await expect(
           page.getByText('Alpine Office Supply', { exact: true }),
         ).toBeVisible();
+        // The priced lines name the product too; this is the fulfillment line.
         await expect(
-          page.getByText('Field notebook', { exact: true }),
+          page
+            .locator('[data-composition-dataset$="dataset.fulfillment_lines"]')
+            .getByText('Field notebook', { exact: true }),
         ).toBeVisible();
         const lines = () =>
           page.locator(
@@ -74,7 +77,11 @@ for (const javaScriptEnabled of [true, false]) {
           'unreserved',
           'Released; ordered 10 EA, reserved 0, shipped 0, open 10',
         );
-        const lineTop = await lines().boundingBox();
+        // The order's lines lead the document on the first screen: its priced
+        // lines (ruling B), with fulfillment by line below them.
+        const lineTop = await page
+          .locator('[data-composition-dataset$="dataset.order_lines"]')
+          .boundingBox();
         expect(lineTop!.y).toBeLessThan(650);
         await expect(page.locator('.composition-header')).toContainText(
           'Released',
@@ -250,6 +257,10 @@ for (const javaScriptEnabled of [true, false]) {
           .getByRole('button', { name: 'Ship reserved stock', exact: true })
           .click();
         await page.getByLabel(/^Quantity to (?:reserve|ship)$/).fill('5');
+        await page.getByLabel('Carrier', { exact: true }).fill('Purolator');
+        await page
+          .getByLabel('Tracking or BOL number', { exact: true })
+          .fill('PUR-META-5');
         await page
           .getByRole('button', {
             name: 'Review shipment',
@@ -288,6 +299,10 @@ for (const javaScriptEnabled of [true, false]) {
           task().locator('.composition-task-summary'),
         ).not.toContainText('Ordered');
         await page.getByLabel('Quantity to ship', { exact: true }).fill('2');
+        await page.getByLabel('Carrier', { exact: true }).fill('Purolator');
+        await page
+          .getByLabel('Tracking or BOL number', { exact: true })
+          .fill('PUR-META-2');
         await capture(
           'partial-ship-entry',
           'Entry ship 2 EA; selected reservation remaining 3 EA; not dispatched',

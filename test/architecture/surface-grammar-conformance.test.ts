@@ -220,7 +220,10 @@ test('compiled navigation stays flat within budget and groups mounted modules be
     flatManifest.surfaces,
     flatManifest.navigation,
   );
-  assert.equal(flatManifest.surfaces.length, 12);
+  // Party, Catalog and Location; SALES-PARITY adds Party's ship-to address
+  // book, contextual to the Party list, and Catalog's tax codes (list,
+  // detail, form each).
+  assert.equal(flatManifest.surfaces.length, 18);
   assert.equal(flatManifest.navigation, null);
   assert.equal(
     flatManifest.payloadSchemaVersion,
@@ -242,11 +245,12 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // the provider persists the value and the web reader passes it through, and
   // no consumer refuses a manifest whose floor exceeds what it supports. So the
   // number is currently a declaration, not a gate. Filed, not fixed -- see
-  // `current-plan.md`, `runtime-capability-floor-unenforced`. Draft document
-  // editing and workspace entry require reader 8 even in this flat fixture,
-  // which declares no picker eligibility or typed Task input (those need 9).
-  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 8);
-  assert.equal(flatCompact.navigationEntryIds.length, 4);
+  // `current-plan.md`, `runtime-capability-floor-unenforced`. This flat
+  // fixture keeps Party, whose customer workspace (SALES-PARITY) offers a
+  // salesperson Task input with declared eligibility, so it requires 11.
+  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 11);
+  // SALES-PARITY: Catalog's tax codes are a fifth setup List, still flat.
+  assert.equal(flatCompact.navigationEntryIds.length, 5);
   assert.deepEqual(
     navigationRuleIds(
       checkSurfaceGrammarConformance(
@@ -264,8 +268,10 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   const grouped = groupedManifest.navigation;
   assert.ok(grouped);
   const compact = projectCompactSurfaces(groupedManifest.surfaces, grouped);
-  // 34 + RECEIPT's seventeen Purchasing surfaces + Sales' nineteen surfaces.
-  assert.equal(groupedManifest.surfaces.length, 70);
+  // 34 + RECEIPT's seventeen Purchasing surfaces + Sales' nineteen surfaces,
+  // + Party's three ship-to address and Catalog's three tax code surfaces
+  // (SALES-PARITY), + the invoice, its lines, payments and credits (twelve).
+  assert.equal(groupedManifest.surfaces.length, 88);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -281,12 +287,15 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // above and by `navigationSurfaceIds` immediately below -- so no property is
   // left unguarded, but this particular assertion is now weaker than it reads.
   // Draft document editing and workspace entry require reader 8; picker
-  // eligibility and typed Task inputs require 9.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 9);
+  // eligibility and typed Task inputs require 9; declared Lists require 10;
+  // editor defaults, scoped pickers and Task input eligibility require 11.
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 11);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 12);
+  // SALES-PARITY: Catalog's tax codes list joins the supporting masters, and
+  // the Invoices list joins Sales beside its orders.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 14);
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),

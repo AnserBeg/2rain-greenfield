@@ -121,11 +121,19 @@
       },
       {
         "classification": "tenantShared",
+        "familyId": "party_address"
+      },
+      {
+        "classification": "tenantShared",
         "familyId": "item"
       },
       {
         "classification": "tenantShared",
         "familyId": "location"
+      },
+      {
+        "classification": "tenantShared",
+        "familyId": "tax_code"
       },
       {
         "classification": "entityOwned",
@@ -201,6 +209,22 @@
       },
       {
         "classification": "entityOwned",
+        "familyId": "customer_invoice"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "customer_invoice_line"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "customer_payment"
+      },
+      {
+        "classification": "entityOwned",
+        "familyId": "customer_credit"
+      },
+      {
+        "classification": "entityOwned",
         "familyId": "stock_count"
       },
       {
@@ -232,6 +256,11 @@
       {
         "semantics": "crossEntityAllowed",
         "sourceFamilyId": "party_role",
+        "targetFamilyId": "party"
+      },
+      {
+        "semantics": "crossEntityAllowed",
+        "sourceFamilyId": "party_address",
         "targetFamilyId": "party"
       },
       {
@@ -313,6 +342,31 @@
         "semantics": "sameEntity",
         "sourceFamilyId": "sales_order_shipped",
         "targetFamilyId": "sales_order_line"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "customer_invoice",
+        "targetFamilyId": "sales_order"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "customer_invoice_line",
+        "targetFamilyId": "customer_invoice"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "customer_invoice_line",
+        "targetFamilyId": "sales_order_line"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "customer_payment",
+        "targetFamilyId": "customer_invoice"
+      },
+      {
+        "semantics": "sameEntity",
+        "sourceFamilyId": "customer_credit",
+        "targetFamilyId": "customer_invoice"
       },
       {
         "semantics": "sameEntity",
@@ -420,7 +474,7 @@
     ],
     "kind": "quantityOnlyMovement"
   },
-  "releaseRoot": "566a4a3df7e6469af4a66fae766a5bc688af1ca7be3391a0609ead68b86fd981",
+  "releaseRoot": "52e84aedc56f3a978b1763b5b60b80e99b11d94e8165ed72393cf63ca133227d",
   "storageTargetPayloadVersions": {
     "entityOwned": "northstar.storage-target-payload/v3",
     "tenantShared": "northstar.storage-target-payload/v1"

@@ -25,10 +25,10 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
           ),
         ).toBe(true);
         if (name.endsWith('draft-editor')) {
+          // Sales confirms (ruling F) once a ship-to is complete; Purchasing releases.
           const boundary = await page
             .getByText(
-              'Save commits the header and each line in sequence. Drafts do not change stock. Release is a separate action.',
-              { exact: true },
+              /^Save commits the header and each line in sequence\. Drafts do not change stock\. (Confirm is a separate action, offered once the order has a complete ship-to address \(street, city, postal code and country\)|Release is a separate action)\.$/u,
             )
             .boundingBox();
           const save = await page
@@ -48,11 +48,12 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
           width,
           height,
           url: page.url(),
+          // A printable document names its release on its own shell.
           releaseId: await page
-            .locator('.app-shell')
+            .locator('.app-shell, .print-shell')
             .getAttribute('data-release-id'),
           releaseRoot: await page
-            .locator('.app-shell')
+            .locator('.app-shell, .print-shell')
             .getAttribute('data-release-content-hash'),
         });
       }
@@ -84,20 +85,41 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     await capture('sales-draft-editor');
     await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await expect(page).toHaveURL(/sales_order_detail/);
-    await expect(page.locator('.composition-header')).toContainText(
-      'SO-ENTRY-BROWSER',
-    );
+    // Assigned by the server on first save, never typed.
+    const salesNumber = (
+      await page.locator('.composition-header h1').innerText()
+    ).trim();
+    expect(salesNumber).toMatch(/^SO-\d{6}$/u);
     const orderId = new URL(page.url()).searchParams.get('record');
-    await page.getByRole('link', { name: 'Sales', exact: true }).click();
+    // Sales is a group of its orders and invoices; open it, then its orders.
+    const navigation = page.getByRole('navigation', {
+      name: 'Release navigation',
+    });
+    await navigation.getByText('Sales', { exact: true }).click();
+    await navigation
+      .getByRole('link', { name: 'Sales orders', exact: true })
+      .click();
     await page
       .getByRole('link', {
-        name: 'Open Sales orders SO-ENTRY-BROWSER',
+        name: `Open Sales orders ${salesNumber}`,
         exact: true,
       })
       .click();
     expect(new URL(page.url()).searchParams.get('record')).toBe(orderId);
     await capture('sales-saved-reopened');
     const salesUrl = page.url();
+    // Ruling G: the printable order is the same governed record, every line.
+    await page
+      .getByRole('link', { name: 'Print sales order', exact: true })
+      .click();
+    await expect(page.locator('[data-print-document]')).toBeVisible();
+    await expect(page.locator('.print-document h1')).toHaveText(salesNumber);
+    await expect(page.locator('.print-document')).toContainText('2 lines');
+    await expect(page.locator('.print-document .print-note')).toHaveText(
+      'SO-ENTRY-BROWSER',
+    );
+    await capture('sales-print-document');
+    await page.goto(salesUrl);
     await page.locator('.composition-record-actions > summary').click();
     await page.getByRole('link', { name: 'Edit', exact: true }).click();
     await expect(
@@ -123,11 +145,23 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     await capture('purchase-draft-editor');
     await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await expect(page).toHaveURL(/purchase_order_detail/);
+    const purchaseNumber = (
+      await page.locator('.composition-header h1').innerText()
+    ).trim();
+    expect(purchaseNumber).toMatch(/^PO-\d{6}$/u);
     const purchaseId = new URL(page.url()).searchParams.get('record');
     await page.getByRole('link', { name: 'Purchasing', exact: true }).click();
-    await page.getByRole('link', { name: /Open .*PO-ENTRY-BROWSER$/ }).click();
+    await page
+      .getByRole('link', { name: new RegExp(`Open .*${purchaseNumber}$`, 'u') })
+      .click();
     expect(new URL(page.url()).searchParams.get('record')).toBe(purchaseId);
     await capture('purchase-saved-reopened');
+    await page
+      .getByRole('link', { name: 'Print purchase order', exact: true })
+      .click();
+    await expect(page.locator('.print-document h1')).toHaveText(purchaseNumber);
+    await expect(page.locator('.print-document')).toContainText('2 lines');
+    await page.goBack();
     const purchaseUrl = page.url();
     await page.locator('.composition-record-actions > summary').click();
     await page.getByRole('link', { name: 'Edit', exact: true }).click();
@@ -136,9 +170,6 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     ).toHaveValue('3');
     await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await measure('drafts', orderId!, purchaseId!);
-    const navigation = page.getByRole('navigation', {
-      name: 'Release navigation',
-    });
     for (const local of [
       'reservation',
       'reservation_balance',
@@ -154,8 +185,9 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
       ).toHaveCount(0);
     await page.goto(salesUrl);
     await page.locator('.composition-record-actions > summary').click();
-    await page.getByRole('button', { name: 'Release', exact: true }).click();
-    await expect(page.getByRole('status')).toContainText('Release complete');
+    // Ruling F: a Sales order's release command reads "Confirm".
+    await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+    await expect(page.getByRole('status')).toContainText('Confirm complete');
     await expect(
       page.getByRole('link', { name: 'Edit', exact: true }),
     ).toHaveCount(0);
@@ -206,11 +238,13 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
         'northstar.app:parameter.sales_order_list_legal_entity_scope',
       ),
     ).toBe(second.companyId);
-    expect(
-      new URL(page.url()).searchParams.get(
-        'northstar.app:parameter.sales_order_get_legal_entity_scope',
-      ),
-    ).not.toBe(second.companyId);
+    // The order workspace reads through the commercial order query, so its
+    // scope is that query's operand: present, and still the first company.
+    const orderScope = new URL(page.url()).searchParams.get(
+      'northstar.app:parameter.commercial_order_get_legal_entity_scope',
+    );
+    expect(orderScope).toBeTruthy();
+    expect(orderScope).not.toBe(second.companyId);
     expect(await task().locator('[name=taskToken]').inputValue()).toBe(token);
     expect(await task().locator('[name=preparedId]').inputValue()).toBe(
       prepared,
@@ -232,6 +266,16 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
       .getByRole('button', { name: 'Ship reserved stock', exact: true })
       .click();
     await page.getByLabel('Quantity to ship', { exact: true }).fill('5');
+    // The carrier and its tracking number are required on a shipment.
+    await page.getByLabel('Carrier', { exact: true }).fill('Purolator');
+    // A choice renders as a select inside its label, so its accessible name
+    // also carries the selected option ("Reference type Tracking number").
+    await expect(page.getByLabel('Reference type')).toHaveValue(
+      'northstar.app:option.shipment_shipping_reference_kind_tracking',
+    );
+    await page
+      .getByLabel('Tracking or BOL number', { exact: true })
+      .fill('PUR-4422-19');
     await page
       .getByRole('button', { name: 'Review shipment', exact: true })
       .click();
@@ -242,6 +286,7 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     await page
       .getByRole('link', { name: 'Back to order', exact: true })
       .click();
+    await expect(page.getByText('PUR-4422-19').first()).toBeVisible();
     await measure('shipped');
     await capture('sales-partial-shipment');
     await page.locator('.composition-context-overflow summary').click();
@@ -330,7 +375,7 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     // replay contract retains the completion receipt and withholds record DTOs.
     expect(redacted).toContain('COMPOSITION_COMPLETE');
     expect(redacted).not.toContain('Field notebook');
-    expect(redacted).not.toContain('SO-ENTRY-BROWSER');
+    expect(redacted).not.toContain(salesNumber);
     await measure('received');
     await writeFile(
       testInfo.outputPath('captures.json'),
@@ -380,12 +425,15 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
     });
     await page.goto(url);
     await page.getByRole('link', { name: 'New', exact: true }).click();
-    await page.getByLabel('Order number *').fill('SO-PICKER');
     await page.getByLabel('Currency *').selectOption('USD');
     await page.getByLabel('Notes').fill('Dock 4\nCall ahead');
+    // Notes typed before the pickers survive every round trip. Currency is a
+    // customer default (ruling E): USD as typed until a customer is chosen,
+    // then that customer's default -- CAD for each customer chosen here, and
+    // the declared CAD for a new customer that has none.
+    let expectedCurrency = 'USD';
     const kept = async () => {
-      await expect(page.getByLabel('Order number *')).toHaveValue('SO-PICKER');
-      await expect(page.getByLabel('Currency *')).toHaveValue('USD');
+      await expect(page.getByLabel('Currency *')).toHaveValue(expectedCurrency);
       await expect(page.getByLabel('Notes')).toHaveValue('Dock 4\nCall ahead');
     };
     const loaded = documents;
@@ -467,6 +515,21 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
     );
     await expect(customer).toBeFocused();
     expect(new URL(page.url()).searchParams.get('record')).toBeNull();
+    // The customer's defaults land in place with it: salesperson, terms and
+    // its default ship-to address, whose lines fill the order's own copy.
+    expectedCurrency = 'CAD';
+    await expect(
+      page.getByRole('combobox', { name: 'Salesperson', exact: true }),
+    ).toHaveAttribute('data-selected-label', 'Jordan Blake');
+    await expect(page.getByLabel('Payment terms')).toHaveValue(
+      'northstar.app:option.sales_order_payment_terms_net_30',
+    );
+    await expect(
+      page.getByRole('combobox', { name: 'Ship-to address', exact: true }),
+    ).toHaveAttribute('data-selected-label', 'Main delivery');
+    await expect(page.getByLabel('City', { exact: true })).toHaveValue(
+      'Whitecourt',
+    );
     await kept();
     // Escape closes the popup first and leaves the selection as it was.
     await customer.fill('Alp');
@@ -493,7 +556,9 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
       'data-selected-label',
       'Field notebook',
     );
-    await expect(page.locator('output.derived-value').first()).toHaveText('EA');
+    await expect(
+      page.getByRole('status', { name: 'Line 1 unit', exact: true }),
+    ).toHaveText('EA');
     await slowCustomer.release();
     await page.waitForTimeout(300);
     await expect(product).toHaveAttribute(
@@ -631,7 +696,11 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
       (await measure('masters', undefined, undefined, 'Blank Glazing')).parties,
     ).toBe(0);
 
-    // Create and use: governed Party + active customer role, selected in place.
+    // Create and use: governed Party + active customer role, then selected.
+    // The new customer has no currency of its own, so the order's returns to
+    // its default CAD from USD and the chosen line must be re-priced (ruling
+    // B): this one create is answered by the page, and nothing typed is lost.
+    const beforeCreateUse = documents;
     await customer.fill('Enter Glazing');
     await field(page, 'Customer')
       .getByRole('option', { name: '+ New customer' })
@@ -651,6 +720,9 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
       'Field notebook',
     );
     await kept();
+    expect(documents, 'a create that re-prices a chosen line is one page').toBe(
+      beforeCreateUse + 1,
+    );
     await shot('create-returned');
     expect(
       await measure('masters', undefined, undefined, 'Enter Glazing'),
@@ -766,9 +838,9 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
       'Thermal Roll',
     );
     await expect(product).toBeFocused();
-    await expect(page.locator('output.derived-value').first()).toHaveText(
-      'ROLL',
-    );
+    await expect(
+      page.getByRole('status', { name: 'Line 1 unit', exact: true }),
+    ).toHaveText('ROLL');
     await expect(
       page.getByLabel('Line 1 quantity', { exact: true }),
     ).toHaveValue('2.50');
@@ -777,7 +849,11 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
     ).toBe(1);
     await kept();
     await shot('line-product-created');
-    expect(documents, 'create and return reloaded nothing').toBe(afterFallback);
+    // Cancels, refusals, a withheld selection and a line's product create
+    // answer in place; only the create that re-priced the line was a page.
+    expect(documents, 'create and return reloaded nothing else').toBe(
+      afterFallback + 1,
+    );
 
     // A quick create names existing records with the same name first: a
     // supplier-only party is not offered as a customer, so creating here would
@@ -853,7 +929,10 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
     await expect(page.locator('.composition-header')).toContainText(
       'Enter Glazing',
     );
-    await expect(page.locator('.composition-header')).toContainText('USD');
+    // The currency is the last chosen customer's default (ruling E).
+    await expect(page.locator('.composition-header')).toContainText(
+      expectedCurrency,
+    );
     await expect(page.locator('[data-composition-fields]')).toContainText(
       'Call ahead',
     );
@@ -866,7 +945,7 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
     // active supplier role, selected on the order that asked for it.
     await page.getByRole('link', { name: 'Purchasing', exact: true }).click();
     await page.getByRole('link', { name: 'New', exact: true }).click();
-    await page.getByLabel('Order number *').fill('PO-PICKER');
+    await page.getByLabel('Notes').fill('PO-PICKER');
     const vendor = page.getByRole('combobox', { name: 'Vendor', exact: true });
     await vendor.fill('Lethbridge Millwork');
     // A customer-only party is not a vendor.
@@ -886,7 +965,7 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
       'data-selected-label',
       'Coastal Ink Supply',
     );
-    await expect(page.getByLabel('Order number *')).toHaveValue('PO-PICKER');
+    await expect(page.getByLabel('Notes')).toHaveValue('PO-PICKER');
     await expect(
       page.getByRole('columnheader', { name: 'Unit cost' }),
     ).toBeVisible();
@@ -902,11 +981,9 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
     noScript.setDefaultTimeout(30_000);
     await noScript.goto(url);
     await noScript.getByRole('link', { name: 'New', exact: true }).click();
-    await noScript.getByLabel('Order number *').fill('SO-NOSCRIPT');
+    await noScript.getByLabel('Notes').fill('SO-NOSCRIPT');
     await pick(noScript, 'Customer', 'Alpine', 'Alpine Office Supply');
-    await expect(noScript.getByLabel('Order number *')).toHaveValue(
-      'SO-NOSCRIPT',
-    );
+    await expect(noScript.getByLabel('Notes')).toHaveValue('SO-NOSCRIPT');
     await noScript
       .getByRole('combobox', { name: 'Customer', exact: true })
       .fill('NoScript Glazing');
@@ -940,9 +1017,7 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
       inline.getByRole('button', { name: 'Cancel', exact: true }).click(),
     );
     await expect(inline).toHaveCount(0);
-    await expect(noScript.getByLabel('Order number *')).toHaveValue(
-      'SO-NOSCRIPT',
-    );
+    await expect(noScript.getByLabel('Notes')).toHaveValue('SO-NOSCRIPT');
     expect(
       (await measure('masters', undefined, undefined, 'NoScript Glazing'))
         .parties,
@@ -969,9 +1044,7 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
     await expect(
       noScript.getByRole('combobox', { name: 'Customer', exact: true }),
     ).toHaveAttribute('data-selected-label', 'NoScript Glazing');
-    await expect(noScript.getByLabel('Order number *')).toHaveValue(
-      'SO-NOSCRIPT',
-    );
+    await expect(noScript.getByLabel('Notes')).toHaveValue('SO-NOSCRIPT');
     expect(
       await measure('masters', undefined, undefined, 'NoScript Glazing'),
     ).toMatchObject({
@@ -1066,17 +1139,19 @@ async function holdFirst(page: Page, match: (body: string) => boolean) {
     },
   };
 }
+// The order number is assigned by the server on first save, so an entered
+// value that must survive picker round trips is carried in Notes.
 async function header(
   page: Page,
-  number: string,
+  marker: string,
   party: 'Customer' | 'Vendor',
 ) {
-  await page.getByLabel('Order number *').fill(number);
+  await page.getByLabel('Notes').fill(marker);
   await pick(page, party, 'Alpine', 'Alpine Office Supply');
   await expect(
     page.getByRole('combobox', { name: party, exact: true }),
   ).toBeFocused();
-  await expect(page.getByLabel('Order number *')).toHaveValue(number);
+  await expect(page.getByLabel('Notes')).toHaveValue(marker);
   await page.getByLabel('Order date (UTC) *').fill('2026-09-15T12:00');
   // The declared default; no other currency is typed.
   await expect(page.getByLabel('Currency *')).toHaveValue('CAD');
@@ -1094,11 +1169,9 @@ async function line(
     .getByLabel(`Line ${index} quantity`, { exact: true })
     .fill(quantity);
   if (sales)
+    // A line also derives its list price and tax rate; this is its unit.
     await expect(
-      page
-        .locator('tr.draft-line')
-        .nth(index - 1)
-        .locator('output.derived-value'),
+      page.getByRole('status', { name: `Line ${index} unit`, exact: true }),
     ).toHaveText(sku === 'OFF-120' ? 'BOX' : 'EA');
   await page
     .getByLabel(`Line ${index} ${sales ? 'unit price' : 'unit cost'}`, {

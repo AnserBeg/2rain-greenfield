@@ -166,8 +166,10 @@ export const LEGAL_ENTITY_FAMILY_MAP_V1 = Object.freeze([
   { classification: 'tenantShared', familyId: 'legal_entity' },
   { classification: 'tenantShared', familyId: 'party' },
   { classification: 'tenantShared', familyId: 'party_role' },
+  { classification: 'tenantShared', familyId: 'party_address' },
   { classification: 'tenantShared', familyId: 'item' },
   { classification: 'tenantShared', familyId: 'location' },
+  { classification: 'tenantShared', familyId: 'tax_code' },
   { classification: 'entityOwned', familyId: 'inventory_movement' },
   { classification: 'entityOwned', familyId: 'inventory_transaction' },
   { classification: 'entityOwned', familyId: 'inventory_transaction_line' },
@@ -186,6 +188,10 @@ export const LEGAL_ENTITY_FAMILY_MAP_V1 = Object.freeze([
   { classification: 'entityOwned', familyId: 'shipment' },
   { classification: 'entityOwned', familyId: 'shipment_line' },
   { classification: 'entityOwned', familyId: 'sales_order_shipped' },
+  { classification: 'entityOwned', familyId: 'customer_invoice' },
+  { classification: 'entityOwned', familyId: 'customer_invoice_line' },
+  { classification: 'entityOwned', familyId: 'customer_payment' },
+  { classification: 'entityOwned', familyId: 'customer_credit' },
   { classification: 'entityOwned', familyId: 'stock_count' },
   { classification: 'entityOwned', familyId: 'stock_count_line' },
 ] as const satisfies readonly LegalEntityFamilyRuleV1[]);
@@ -214,6 +220,11 @@ export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
   {
     semantics: 'crossEntityAllowed',
     sourceFamilyId: 'party_role',
+    targetFamilyId: 'party',
+  },
+  {
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'party_address',
     targetFamilyId: 'party',
   },
   {
@@ -295,6 +306,31 @@ export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
     semantics: 'sameEntity',
     sourceFamilyId: 'sales_order_shipped',
     targetFamilyId: 'sales_order_line',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'customer_invoice',
+    targetFamilyId: 'sales_order',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'customer_invoice_line',
+    targetFamilyId: 'customer_invoice',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'customer_invoice_line',
+    targetFamilyId: 'sales_order_line',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'customer_payment',
+    targetFamilyId: 'customer_invoice',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'customer_credit',
+    targetFamilyId: 'customer_invoice',
   },
   {
     semantics: 'sameEntity',

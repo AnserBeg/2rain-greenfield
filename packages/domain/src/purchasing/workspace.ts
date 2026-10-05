@@ -223,6 +223,11 @@ export function purchasingWorkspace(
       recordActions: 'progressive',
       technicalDetails: 'progressive',
       task: { mode: 'nativeDialog', fallback: 'page' },
+      print: {
+        label: 'Purchase order',
+        datasets: [lines],
+        note: id('column', 'purchasing_notes'),
+      },
     },
     fields: [
       column('number', 'Purchase order', 10, f('purchase_order_number')),
@@ -306,14 +311,18 @@ export function purchasingWorkspace(
             ['item_get', 'item_base_unit'],
             'secondary',
           ),
-          column(
-            'unit_cost',
-            'Unit cost',
-            50,
-            f('purchase_order_line_unit_price'),
-            undefined,
-            'secondary',
-          ),
+          {
+            // Shown with grouped digits and two decimals, never rounded.
+            ...column(
+              'unit_cost',
+              'Unit cost',
+              50,
+              f('purchase_order_line_unit_price'),
+              undefined,
+              'secondary',
+            ),
+            format: 'money' as const,
+          },
         ],
       },
       {

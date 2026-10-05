@@ -601,7 +601,12 @@ test('Party executes the compiled declared-semantics contract on real PostgreSQL
         'uniquenessFold',
       ]),
     );
-    for (const entityId of Object.values(PARTY_IDS.entityIds)) {
+    // The harness compiles Party without Sales master data, so the address
+    // book SALES-PARITY adds (`salesMasterData`) is not among its entities.
+    for (const entityId of [
+      PARTY_IDS.entityIds.party,
+      PARTY_IDS.entityIds.role,
+    ]) {
       assert.deepEqual(
         verificationPlan.scenarios
           .filter(

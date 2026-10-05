@@ -10,6 +10,7 @@ import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '@north-star/postgres-provider
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/inventory-posting-capability-executor';
 import { FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/fulfillment-capability-executor';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/receiving-capability-executor';
+import { RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/receivables-capability-executor';
 import { createSurfaceRuntimeServer } from '@north-star/web/app-server';
 import { COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/sales-section';
 
@@ -19,6 +20,11 @@ import {
 } from '../../../packages/domain/src/app/seed.js';
 
 export interface ComposedApplicationServerOptions {
+  /**
+   * A compiled release envelope to serve instead of the checked-in one. Tests
+   * use it to serve a metadata-only variation through the unchanged runtime.
+   */
+  readonly compiledApplication?: unknown;
   readonly databaseUrl: string;
   readonly host?: string;
   readonly port?: number;
@@ -81,17 +87,20 @@ export async function startComposedApplication(
   if (!['127.0.0.1', '::1', 'localhost'].includes(host)) {
     throw new Error('the composed demo identity may bind only to loopback');
   }
-  const compiledApplication = JSON.parse(
-    await readFile(
-      new URL('../../web/release/app.compiled.json', import.meta.url),
-      'utf8',
-    ),
-  ) as unknown;
+  const compiledApplication =
+    options.compiledApplication ??
+    (JSON.parse(
+      await readFile(
+        new URL('../../web/release/app.compiled.json', import.meta.url),
+        'utf8',
+      ),
+    ) as unknown);
   const runtime = await createComposedApplicationRuntime({
     capabilityOperationExecutorFactories: [
       INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
       RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
       FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY,
+      RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY,
     ],
     compiledApplication,
     databaseUrl: options.databaseUrl,

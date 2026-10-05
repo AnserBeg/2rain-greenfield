@@ -147,12 +147,93 @@ export function orderEntrySurfaces(
         defaultValue: 'CAD',
       },
     };
+    const fromCustomer = (source: string) => ({
+      defaultFrom: {
+        referenceFieldId: id('field', `${local}_customer_party_id`),
+        sourceFieldId: id('field', source),
+      },
+    });
+    const fromAddress = (source: string) => ({
+      defaultFrom: {
+        referenceFieldId: id('field', `${local}_ship_to_address_id`),
+        sourceFieldId: id('field', `party_address_${source}`),
+      },
+    });
+    // A salesperson is a Party with an active salesperson role (ruling E).
+    const salesperson = {
+      reference: {
+        queryId: id('query', 'party_list'),
+        getQueryId: id('query', 'party_get'),
+        labelFieldIds: [id('field', 'party_name')],
+        detailFieldIds: [id('field', 'party_number')],
+        eligibility: {
+          queryId: id('query', 'party_role_list'),
+          relationId: id('relation', 'party_role_party'),
+          filters: [
+            {
+              fieldId: id('field', 'party_role_kind'),
+              value: id('option', 'salesperson'),
+            },
+            {
+              fieldId: id('field', 'party_role_status'),
+              value: id('option', 'active'),
+            },
+          ],
+        },
+      },
+    };
+    const taxCode = {
+      reference: {
+        queryId: id('query', 'tax_code_list'),
+        getQueryId: id('query', 'tax_code_get'),
+        labelFieldIds: [id('field', 'tax_code_code')],
+        detailFieldIds: [id('field', 'tax_code_name')],
+      },
+    };
+    // A rate is frozen from its tax code when the code is chosen (ruling B).
+    const rateOf = (taxCodeField: string) => ({
+      presentation: {
+        kind: 'derived',
+        referenceFieldId: id('field', taxCodeField),
+        sourceFieldId: id('field', 'tax_code_rate_percent'),
+      },
+    });
+    // A charge's tax code follows the order's whenever that changes.
+    const fromOrderTaxCode = {
+      defaultFrom: {
+        referenceFieldId: id('field', `${local}_tax_code_id`),
+        headerFieldId: id('field', `${local}_tax_code_id`),
+      },
+    };
+    const priceInCurrency = {
+      headerFieldId: id('field', `${local}_currency`),
+      cases: (['cad', 'usd', 'eur'] as const).map((code) => ({
+        value: code.toUpperCase(),
+        sourceFieldId: id('field', `item_price_${code}`),
+      })),
+    };
+    const shipTo = {
+      reference: {
+        queryId: id('query', 'party_address_list'),
+        getQueryId: id('query', 'party_address_get'),
+        labelFieldIds: [id('field', 'party_address_label')],
+        detailFieldIds: [
+          id('field', 'party_address_street'),
+          id('field', 'party_address_city'),
+        ],
+        within: {
+          referenceFieldId: id('field', `${local}_customer_party_id`),
+          relationId: id('relation', 'party_address_party'),
+        },
+      },
+    };
     return {
       kind: 'draftDocumentEditor',
       headerLabel: 'Order details',
       linesLabel: 'Order lines',
-      saveDescription:
-        'Save commits the header and each line in sequence. Drafts do not change stock. Release is a separate action.',
+      saveDescription: sales
+        ? 'Save commits the header and each line in sequence. Drafts do not change stock. Confirm is a separate action, offered once the order has a complete ship-to address (street, city, postal code and country).'
+        : 'Save commits the header and each line in sequence. Drafts do not change stock. Release is a separate action.',
       saveMode: 'sequential',
       headerFormSurfaceId: id('surface', `${local}_form`),
       recordSurfaceId: id('surface', `${local}_detail`),
@@ -162,20 +243,111 @@ export function orderEntrySurfaces(
       stateFieldId: id('derived_state_field', `machine.${local}_lifecycle`),
       editableStateIds: [id('state', `${local}_draft`)],
       lineNumberFieldId: id('field', `${local}_line_line_number`),
-      headerFields: [
-        field(`${local}_number`, 'Order number'),
-        field(
-          `${local}_${party}_party_id`,
-          sales ? 'Customer' : 'Vendor',
-          counterparty(sales ? 'customer' : 'supplier'),
-        ),
-        field(`${local}_order_date`, 'Order date'),
-        field(`${local}_${date}`, sales ? 'Requested date' : 'Expected date'),
-        field(`${local}_currency`, 'Currency', currency),
-        field(`${local}_notes`, 'Notes', {
-          presentation: { kind: 'multiline' },
-        }),
-      ],
+      // The order number is assigned by the server on first save.
+      headerFields: sales
+        ? [
+            field(
+              `${local}_customer_party_id`,
+              'Customer',
+              counterparty('customer'),
+            ),
+            // Customer defaults (owner ruling E): choosing a customer resets
+            // each of these to that customer's value, then they are the
+            // order's to change.
+            field(`${local}_salesperson_party_id`, 'Salesperson', {
+              ...salesperson,
+              ...fromCustomer('party_default_salesperson_party_id'),
+            }),
+            field(`${local}_order_date`, 'Order date'),
+            // A new order asks for delivery three weeks out, as the reference
+            // does; the user changes it before saving.
+            field(`${local}_requested_date`, 'Requested date', {
+              defaultDaysFromToday: 21,
+            }),
+            field(`${local}_currency`, 'Currency', {
+              ...currency,
+              ...fromCustomer('party_default_currency'),
+            }),
+            field(
+              `${local}_payment_terms`,
+              'Payment terms',
+              fromCustomer('party_payment_terms'),
+            ),
+            // The order's tax code (ruling B): the customer's, then each new
+            // line and charge starts from it.
+            field(`${local}_tax_code_id`, 'Tax code', {
+              ...taxCode,
+              ...fromCustomer('party_default_tax_code_id'),
+            }),
+            // The ship-to address is chosen from that customer's own book; the
+            // order keeps its own copy of the lines, filled from the choice.
+            field(`${local}_ship_to_address_id`, 'Ship-to address', {
+              ...shipTo,
+              ...fromCustomer('party_default_ship_to_address_id'),
+            }),
+            field(
+              `${local}_ship_to_name`,
+              'Recipient',
+              fromAddress('recipient'),
+            ),
+            field(`${local}_ship_to_street`, 'Street', {
+              presentation: { kind: 'multiline' },
+              ...fromAddress('street'),
+            }),
+            field(`${local}_ship_to_city`, 'City', fromAddress('city')),
+            field(
+              `${local}_ship_to_region`,
+              'Province or state',
+              fromAddress('region'),
+            ),
+            field(
+              `${local}_ship_to_postal_code`,
+              'Postal code',
+              fromAddress('postal_code'),
+            ),
+            field(
+              `${local}_ship_to_country`,
+              'Country',
+              fromAddress('country'),
+            ),
+            // Two charges, each taxed by its own code (ruling B).
+            field(`${local}_freight_amount`, 'Freight'),
+            field(`${local}_freight_tax_code_id`, 'Freight tax code', {
+              ...taxCode,
+              ...fromOrderTaxCode,
+            }),
+            field(
+              `${local}_freight_tax_rate_percent`,
+              'Freight tax rate %',
+              rateOf(`${local}_freight_tax_code_id`),
+            ),
+            field(`${local}_other_fee_amount`, 'Other fee'),
+            field(`${local}_other_fee_tax_code_id`, 'Other fee tax code', {
+              ...taxCode,
+              ...fromOrderTaxCode,
+            }),
+            field(
+              `${local}_other_fee_tax_rate_percent`,
+              'Other fee tax rate %',
+              rateOf(`${local}_other_fee_tax_code_id`),
+            ),
+            field(`${local}_notes`, 'Notes', {
+              presentation: { kind: 'multiline' },
+            }),
+          ]
+        : [
+            field(
+              `${local}_${party}_party_id`,
+              'Vendor',
+              counterparty('supplier'),
+            ),
+            field(`${local}_order_date`, 'Order date'),
+            field(`${local}_${date}`, 'Expected date'),
+            field(`${local}_currency`, 'Currency', currency),
+            field(`${local}_notes`, 'Notes', {
+              presentation: { kind: 'multiline' },
+            }),
+          ],
       lineFields: [
         field(`${local}_line_item_id`, 'Product', product),
         field(`${local}_line_ordered_quantity`, 'Quantity'),
@@ -192,7 +364,40 @@ export function orderEntrySurfaces(
               }),
             ]
           : []),
-        field(`${local}_line_unit_price`, sales ? 'Unit price' : 'Unit cost'),
+        ...(sales
+          ? [
+              // The item's price in the order currency, taken when the
+              // product is chosen and kept: a unit price that differs from
+              // it reads as a manual override (ruling B).
+              field(`${local}_line_unit_price`, 'Unit price', {
+                defaultFrom: {
+                  referenceFieldId: id('field', `${local}_line_item_id`),
+                  sourceByHeader: priceInCurrency,
+                },
+              }),
+              field(`${local}_line_list_price`, 'List price', {
+                presentation: {
+                  kind: 'derived',
+                  referenceFieldId: id('field', `${local}_line_item_id`),
+                  sourceFieldId: id('field', 'item_price_cad'),
+                  sourceByHeader: priceInCurrency,
+                },
+              }),
+              field(`${local}_line_discount_percent`, 'Discount %'),
+              field(`${local}_line_tax_code_id`, 'Tax code', {
+                ...taxCode,
+                defaultFrom: {
+                  referenceFieldId: id('field', `${local}_line_item_id`),
+                  headerFieldId: id('field', `${local}_tax_code_id`),
+                },
+              }),
+              field(
+                `${local}_line_tax_rate_percent`,
+                'Tax rate %',
+                rateOf(`${local}_line_tax_code_id`),
+              ),
+            ]
+          : [field(`${local}_line_unit_price`, 'Unit cost')]),
       ],
     };
   };
@@ -222,6 +427,15 @@ export function orderEntrySurfaces(
   const lineOwners: Readonly<Record<string, string>> = {
     inventory_transaction_line: 'inventory_transaction',
     stock_count_line: 'stock_count',
+    // An invoice's lines, payments and credits belong to its workspace.
+    customer_invoice_line: 'customer_invoice',
+    customer_payment: 'customer_invoice',
+    customer_credit: 'customer_invoice',
+  };
+  // A tenant-level child belongs to its master's workspace, such as a
+  // customer's ship-to addresses; it has no company entry to resolve.
+  const masterOwners: Readonly<Record<string, string>> = {
+    party_address: 'party',
   };
   return surfaces.map((surface) => {
     const name = String(surface.surfaceId).split(':surface.')[1]!;
@@ -240,6 +454,7 @@ export function orderEntrySurfaces(
             ].includes(local)
           ? 'sales_order'
           : (lineOwners[local] ?? null);
+    const master = masterOwners[local] ?? null;
     const listQueryId = String(
       (surface.dataSource as { targetId?: unknown } | undefined)?.targetId,
     );
@@ -257,13 +472,17 @@ export function orderEntrySurfaces(
       workspace: {
         membership:
           role === 'list'
-            ? editor || local === 'posted_stock_balance'
+            ? editor ||
+              local === 'posted_stock_balance' ||
+              local === 'customer_invoice'
               ? 'operational'
-              : owner
+              : owner || master
                 ? 'contextual'
                 : 'setup'
             : 'contextual',
-        ...(owner ? { ownerSurfaceId: id('surface', `${owner}_list`) } : {}),
+        ...(owner || master
+          ? { ownerSurfaceId: id('surface', `${owner ?? master}_list`) }
+          : {}),
         ...(editor ||
         owner ||
         local === 'posted_stock_balance' ||
@@ -280,6 +499,9 @@ export function orderEntrySurfaces(
         ? {
             label: local === 'sales_order' ? 'Sales orders' : 'Purchase orders',
           }
+        : {}),
+      ...(local === 'customer_invoice' && role === 'list'
+        ? { label: 'Invoices' }
         : {}),
     };
   });

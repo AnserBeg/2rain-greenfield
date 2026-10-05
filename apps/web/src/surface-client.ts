@@ -117,6 +117,9 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
     error.fallback = true;
     return error;
   };
+  // Header values priced lines read, as the page shows them now: the server
+  // answers by the page when one moved since it last saw it.
+  const lineSources = () => Object.fromEntries([...document.querySelectorAll('[data-line-source]')].map((control) => [control.name, control.value]));
   const post = async (body, signal) => {
     try {
       const response = await fetch(endpoint, { method: 'POST', credentials: 'same-origin', redirect: 'error', signal, headers: { 'x-rain-fragment': '1', 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(body) });
@@ -245,7 +248,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
     if (input) input.readOnly = true;
     field.setAttribute('aria-busy', 'true');
     inflight++;
-    post({ draftSession: valueOf('draftSession'), draftVersion: valueOf('draftVersion'), draftAction: option.value, draftLookupSeq: lookupOf(field)?.getAttribute('data-reference-seq') || '', draftFieldGeneration: field.getAttribute('data-reference-generation') || '' })
+    post({ ...lineSources(), draftSession: valueOf('draftSession'), draftVersion: valueOf('draftVersion'), draftAction: option.value, draftLookupSeq: lookupOf(field)?.getAttribute('data-reference-seq') || '', draftFieldGeneration: field.getAttribute('data-reference-generation') || '' })
       .then(({ html }) => {
         if (mine !== known.seq) return;
         apply(html, allowed);
@@ -275,7 +278,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
     if (input) input.readOnly = true;
     field.setAttribute('aria-busy', 'true');
     inflight++;
-    post({ draftSession: valueOf('draftSession'), draftVersion: valueOf('draftVersion'), draftAction: button.value, draftFieldGeneration: field.getAttribute('data-reference-generation') || '' })
+    post({ ...lineSources(), draftSession: valueOf('draftSession'), draftVersion: valueOf('draftVersion'), draftAction: button.value, draftFieldGeneration: field.getAttribute('data-reference-generation') || '' })
       .then(({ html }) => {
         if (mine !== known.seq) return;
         apply(html, allowed);
@@ -307,7 +310,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
     setOpen(field, false);
     field.setAttribute('aria-busy', 'true');
     inflight++;
-    post({ draftSession: valueOf('draftSession'), draftVersion: valueOf('draftVersion'), draftAction: option.value, draftFieldGeneration: field.getAttribute('data-reference-generation') || '', [input?.name || '']: term })
+    post({ ...lineSources(), draftSession: valueOf('draftSession'), draftVersion: valueOf('draftVersion'), draftAction: option.value, draftFieldGeneration: field.getAttribute('data-reference-generation') || '', [input?.name || '']: term })
       .then(({ html }) => {
         if (mine !== known.seq) return;
         apply(html, allowed);
@@ -349,6 +352,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
     if (createForm.hasAttribute('aria-busy')) return;
     createForm.setAttribute('aria-busy', 'true');
     const body = new URLSearchParams(new FormData(createForm));
+    for (const [name, value] of Object.entries(lineSources())) body.set(name, value);
     if (submitter?.name) body.set(submitter.name, submitter.value);
     inflight++;
     post(Object.fromEntries(body), undefined)
