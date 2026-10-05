@@ -22,7 +22,7 @@ Design: `DROP-SHIP-RELATION-INSTALL-design.md` at DROP-SHIP `4000c486` (owner se
 ## Controls
 
 - `relation-install-target-missing` -> claim 1: disable the new relation lookup branch.
-- `relation-install-foreign-company-target` -> claim 2: remove company columns at `applyDdlElement`'s FK installer for the synthetic added relation.
+- `relation-install-foreign-company-target` -> claim 2: provide a matching unscoped target key, then remove company columns at the synthetic relation's FK installer.
 - `relation-install-column-write-grant-absent` -> claim 3: omit add-column UPDATE admission.
 - Manifest: `test/evidence/RELATION-INSTALL.expected-red.json`; committed controls run through owner-approved evidence-on-demand CI. Local controls remain behind AC and >=2 GB free Windows memory checks.
 - First target-missing attempt ran but failed the restored-green prerequisite; no discriminating red is claimed. Its container was removed and source restored. Further unmutated diagnosis expired at the lock before starting. The test now exposes typed preparation codes and isolates this transition from unrelated historical installs; bounds unchanged.
@@ -31,8 +31,8 @@ Design: `DROP-SHIP-RELATION-INSTALL-design.md` at DROP-SHIP `4000c486` (owner se
 
 - Typecheck PASS; focused Prettier PASS.
 - Full hosted [earlier CI PASS](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37268185759) at `66cf178a`. [Refreshed CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37277958211) at `8505c168` has passing composed PostgreSQL and schema jobs; full completion remains pending.
-- [Controls at `8505c168`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37277961005): target-missing and column-write-grant-absent each killed one declared test for its declared reason, then restored one passing test. Foreign-company-target survived because its mutation did not reach the FK installer; no red is claimed for it. Its committed mutation now targets that installer; all three await a fresh run.
-- Static expected-red validation PASS (165 entries / 14 manifests). Typecheck, focused lint and formatting PASS; record-claim names executable `b318205c`. The diff to refreshed PAYABLES remains the same 17-line production addition.
+- [Controls at `8505c168`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37277961005): target-missing and column-write-grant-absent each killed one declared test for its declared reason, then restored one passing test. Foreign-company-target survived because its mutation did not reach the FK installer. [Rerun at `85a3763e`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37279569402) again passed the other two controls; company scope failed for undeclared SQL `42830`, not accepted as a red. The mutation now supplies the matching target key before weakening scope; fresh evidence remains owed.
+- Static expected-red validation PASS (165 entries / 14 manifests) before the target-key control adjustment. Typecheck, focused lint and formatting PASS; record-claim names executable `d3d1812b`. The diff to refreshed PAYABLES remains the same 17-line production addition.
 - Refreshed hosted CI, revised control evidence and owner Critical review pending; draft PR https://github.com/AnserBeg/2rain-greenfield/pull/20. Latest Windows memory about 1.36 GB remains below the local control minimum; no local control started.
 
 ## Test it yourself
@@ -49,14 +49,14 @@ DROP-SHIP's user-facing delivery workflow is the next authorized checkpoint afte
 
 ## Review prompt
 
-`RELATION-INSTALL-review-prompt.md` names executable `b318205c`; facts and questions only. Owner-run review pending; no self-review.
+`RELATION-INSTALL-review-prompt.md` names executable `d3d1812b`; facts and questions only. Owner-run review pending; no self-review.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RELATION-INSTALL",
   "base": "96ac234122322b2cbe18349299664f56c8f5190a",
-  "head": "b318205c0b885ecbbdcc2e14c18ba0345f71acbf",
+  "head": "d3d1812bc121937418180f3acfd7151d49ff1ce3",
   "changedPaths": [
     "packages/postgres-provider/src/module-storage-materializer.ts",
     "test/postgres/composed-application.test.ts",
