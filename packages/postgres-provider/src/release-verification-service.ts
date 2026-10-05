@@ -1664,15 +1664,18 @@ class SemanticVerificationExecutor {
   }
 
   /**
-   * The search a search-exclusion probe reads through, the arranged record's
-   * positive field for it, and the search's answer for that field's value.
-   * A candidate is a plain search of the entity that the gateway executes
-   * and that selects a positive field: a text or enum input, or an assigned
-   * number, that the plan does not exclude from search. The first candidate
-   * with the literal `true` filter is used, its answer returned whatever it
-   * is. Without one, the filtered candidates are read in catalog order and
-   * the first that returns the record is used; when none does, no search can
-   * witness the probe.
+   * The search and positive field a search-exclusion probe reads through,
+   * with the search's answer for that field's value. Every pair of a plain
+   * search of the entity that the gateway executes and a positive field it
+   * selects (a text or enum input, or an assigned number, that the plan does
+   * not exclude from search) is read in turn: searches whose filter restricts
+   * nothing (`restrictsNothing`) first, then the others, each in catalog
+   * order; within a search, fields whose arranged value is the record's own
+   * (text inputs, then assigned numbers) before enums, whose value other
+   * records share. The first pair whose answer holds the arranged record is
+   * used. A pair whose answer lacks it -- a filter that excludes the record,
+   * or a capped result filled by other records -- is passed over; when every
+   * pair is, no search can witness the probe.
    */
   async #searchWitness(
     entityId: string,
@@ -1698,57 +1701,53 @@ class SemanticVerificationExecutor {
     }
     const excludedFieldIds = this.#excludedFieldsByEntity.get(entityId);
     const createOperation = this.#createOperation(entityId);
-    const candidates = executed.flatMap((search) => {
+    const pairs = [
+      ...executed.filter((search) => restrictsNothing(search)),
+      ...executed.filter((search) => !restrictsNothing(search)),
+    ].flatMap((search) => {
       const selectedFieldIds = new Set(
         search.selections.map((selection) => selection.fieldId),
       );
-      const positiveFieldId =
-        createOperation.inputContract.fields.find(
-          (field) =>
-            selectedFieldIds.has(field.fieldId) &&
-            (field.fieldKind === 'textFieldType' ||
-              field.fieldKind === 'enumFieldType') &&
-            !excludedFieldIds?.has(field.fieldId),
-        )?.fieldId ??
-        // A server-assigned number is text the create stored and read back.
-        createOperation.inputContract.assignedFields?.find(
-          (assigned) =>
-            selectedFieldIds.has(assigned.fieldId) &&
-            !excludedFieldIds?.has(assigned.fieldId),
-        )?.fieldId;
-      return positiveFieldId ? [{ positiveFieldId, search }] : [];
+      const inputs = createOperation.inputContract.fields.filter(
+        (field) =>
+          selectedFieldIds.has(field.fieldId) &&
+          !excludedFieldIds?.has(field.fieldId),
+      );
+      // A server-assigned number is text the create stored and read back.
+      const assigned = (
+        createOperation.inputContract.assignedFields ?? []
+      ).filter(
+        (number) =>
+          selectedFieldIds.has(number.fieldId) &&
+          !excludedFieldIds?.has(number.fieldId),
+      );
+      return [
+        ...inputs.filter((field) => field.fieldKind === 'textFieldType'),
+        ...assigned,
+        ...inputs.filter((field) => field.fieldKind === 'enumFieldType'),
+      ].map((field) => ({ positiveFieldId: field.fieldId, search }));
     });
-    if (candidates.length === 0) {
+    if (pairs.length === 0) {
       throw failure(
         'VERIFICATION_SEARCHABLE_FIELD_MISSING',
         'search exclusion probe has no same-entity positive searchable field',
       );
     }
-    const read = async (candidate: (typeof candidates)[number]) => ({
-      ...candidate,
-      included: await this.#invokeQuery(
-        candidate.search,
-        { text: String(record.values[candidate.positiveFieldId]) },
-        record,
-      ),
-    });
-    const unfiltered = candidates.find(
-      (candidate) =>
-        inspectPredicateForExecution(candidate.search.filter).outcome ===
-        'accepted',
-    );
-    if (unfiltered) return read(unfiltered);
     const tried: string[] = [];
-    for (const candidate of candidates) {
-      const witness = await read(candidate);
-      if (hasRecord(witness.included, record.recordId)) return witness;
+    for (const pair of pairs) {
+      const included = await this.#invokeQuery(
+        pair.search,
+        { text: String(record.values[pair.positiveFieldId]) },
+        record,
+      );
+      if (hasRecord(included, record.recordId)) return { ...pair, included };
       tried.push(
-        `${candidate.search.queryId} (${queryAnswer(witness.included)})`,
+        `${pair.search.queryId} by ${pair.positiveFieldId} (${queryAnswer(included)})`,
       );
     }
     throw failure(
       'VERIFICATION_SEARCH_WITNESS_UNCONSTRUCTABLE',
-      `no search of ${entityId} that the gateway executes returns the record verification arranged, ${record.recordId}, by its positive field; tried ${tried.join('; ')}`,
+      `no search of ${entityId} that the gateway executes returns the record verification arranged, ${record.recordId}, by a positive field; tried ${tried.join('; ')}`,
     );
   }
 
@@ -2913,17 +2912,52 @@ function gatewayExecutes(query: VerificationQueryContract): boolean {
 
 /**
  * Whether a get returns any live record by id: the gateway executes it
- * (`gatewayExecutes`) and its filter is the literal `true`, which the
- * gateway's execution fence accepts -- a Q0 get, or a Q1 get whose compiled
- * plan then restricts nothing. Cleanup and the number witness read only
- * through such gets: any other filter could hide a live record, which cleanup
- * would take as archived.
+ * (`gatewayExecutes`) and its filter restricts nothing (`restrictsNothing`) --
+ * a Q0 get with the literal `true`, or a Q1 get whose filter is a true
+ * composition of literals. Cleanup and the number witness read only through
+ * such gets: any other filter could hide a live record, which cleanup would
+ * take as archived.
  */
 function returnsAnyLiveRecordById(query: VerificationQueryContract): boolean {
-  return (
-    gatewayExecutes(query) &&
-    inspectPredicateForExecution(query.filter).outcome === 'accepted'
-  );
+  return gatewayExecutes(query) && restrictsNothing(query);
+}
+
+/**
+ * Whether a query's filter restricts nothing: it references no field,
+ * parameter or operand, and its value is true (`constantPredicateValue`) --
+ * the literal `true`, or a composition of literals such as `not(false)`.
+ */
+function restrictsNothing(query: VerificationQueryContract): boolean {
+  return constantPredicateValue(query.filter) === true;
+}
+
+/**
+ * The value of a predicate built only from boolean literals with `not`,
+ * `all` and `any`: the same for every row. `undefined` for a predicate that
+ * references a field, parameter or operand -- its value can differ by row,
+ * and is unknown where a value is absent -- or for any node not named here.
+ */
+function constantPredicateValue(predicate: unknown): boolean | undefined {
+  if (!isRecord(predicate)) return undefined;
+  switch (predicate.kind) {
+    case 'booleanPredicate':
+      return typeof predicate.value === 'boolean' ? predicate.value : undefined;
+    case 'notPredicate': {
+      const term = constantPredicateValue(predicate.term);
+      return term === undefined ? undefined : !term;
+    }
+    case 'allPredicate':
+    case 'anyPredicate': {
+      if (!Array.isArray(predicate.terms)) return undefined;
+      const terms = predicate.terms.map((term) => constantPredicateValue(term));
+      if (terms.includes(undefined)) return undefined;
+      return predicate.kind === 'allPredicate'
+        ? terms.every((term) => term === true)
+        : terms.some((term) => term === true);
+    }
+    default:
+      return undefined;
+  }
 }
 
 /** A query result's outcome, with the gateway's reason when it has one. */
