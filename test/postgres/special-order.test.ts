@@ -330,38 +330,61 @@ test(
           );
         },
       );
-      const header = await fixture.create(
-        'shipment',
-        {
-          effective_at: new Date().toISOString(),
-          external_reference: randomUUID(),
-          kind: `${ns}:option.shipment_kind_initial`,
-          location_id: fixture.location,
-          reason_code: 'SHIP',
-          reason_narrative: 'Ship special order',
-          state: `${ns}:option.shipment_state_draft`,
-          ...Object.fromEntries(
-            Object.entries(order.values)
-              .filter(([key]) => key.includes(':field.sales_order_ship_to_'))
-              .map(([key, value]) => [key.split('sales_order_')[1]!, value]),
-          ),
+      const shipment = async (amount: string) => {
+        const header = await fixture.create(
+          'shipment',
+          {
+            effective_at: new Date().toISOString(),
+            external_reference: randomUUID(),
+            kind: `${ns}:option.shipment_kind_initial`,
+            location_id: fixture.location,
+            reason_code: 'SHIP',
+            reason_narrative: 'Ship special order',
+            state: `${ns}:option.shipment_state_draft`,
+            ...Object.fromEntries(
+              Object.entries(order.values)
+                .filter(([key]) => key.includes(':field.sales_order_ship_to_'))
+                .map(([key, value]) => [key.split('sales_order_')[1]!, value]),
+            ),
+          },
+          { order: order.recordId },
+        );
+        await fixture.create(
+          'shipment_line',
+          {
+            line_number: '1',
+            item_id: fixture.item,
+            unit_id: 'EA',
+            quantity: amount,
+          },
+          {
+            shipment: header.recordId,
+            order_line: demand.recordId,
+            reservation: reserved.recordId,
+          },
+        );
+        return header;
+      };
+      await t.test(
+        'oversized shipment is refused by name before writing any stock movement',
+        async () => {
+          const oversized = await shipment('3');
+          await assert.rejects(
+            command('shipment_post', oversized),
+            /SPECIAL_ORDER_ARRIVAL_LIMIT/u,
+          );
+          const rows = await fixture.pool.query(
+            `SELECT record_id FROM ${dropShipTable(movement)} WHERE tenant_id=$1 AND environment_id=$2 AND ${dropShipQuote(dropShipColumn(movement, 'inventory_movement_source_id'))}=$3`,
+            [
+              fixture.app.runtime.identity.tenantId,
+              fixture.app.runtime.identity.environmentId,
+              oversized.recordId,
+            ],
+          );
+          assert.equal(rows.rows.length, 0);
         },
-        { order: order.recordId },
       );
-      await fixture.create(
-        'shipment_line',
-        {
-          line_number: '1',
-          item_id: fixture.item,
-          unit_id: 'EA',
-          quantity: '2',
-        },
-        {
-          shipment: header.recordId,
-          order_line: demand.recordId,
-          reservation: reserved.recordId,
-        },
-      );
+      const header = await shipment('2');
       await t.test(
         'reserved arrived quantity ships through the unchanged stock operation',
         async () => {
