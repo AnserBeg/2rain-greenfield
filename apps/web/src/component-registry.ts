@@ -36,6 +36,12 @@ import type {
 } from './sales-section.js';
 import { sharedListView } from './list-runtime.js';
 import {
+  renderLauncherAction,
+  renderLauncherScan,
+  renderLauncherTiles,
+  type LauncherRenderData,
+} from './surface-launcher.js';
+import {
   declaredCellText,
   declaredListParameters,
   declaredRowAction,
@@ -155,6 +161,11 @@ export type SurfaceDataRenderState =
     }
   | { readonly status: 'EMPTY' }
   | {
+      /** A launcher Task's tiles and scan box (WAREHOUSE-MODE). */
+      readonly launcher: LauncherRenderData;
+      readonly status: 'LAUNCHER_READY';
+    }
+  | {
       // One authority: the read path's diagnostic subset is declared in the
       // catalog, so the render state cannot admit a code the catalog does not
       // register, and the gateway-error mapping targets the same set.
@@ -191,7 +202,7 @@ export function renderSurfaceDataComponent({
   if (data.status === 'DIAGNOSTIC') {
     return `${feedbackHtml(feedback)}${dataDiagnostic(data.code)}`;
   }
-  if (data.status === 'AGGREGATE_READY') {
+  if (data.status === 'AGGREGATE_READY' || data.status === 'LAUNCHER_READY') {
     return `${feedbackHtml(feedback)}${dataDiagnostic('QUERY_UNSUPPORTED')}`;
   }
   if (data.status === 'EMPTY') {
@@ -616,6 +627,15 @@ function renderTaskDecision(context: SurfaceComponentContext): string {
     return renderReferencedComponent(context);
   }
   const data = context.data ?? { status: 'UNBOUND' as const };
+  // A launcher's decision is where to go: its tiles, never the lookup result.
+  if (context.surface.launcher && data.status !== 'DIAGNOSTIC')
+    return slotPanel(
+      context,
+      data.status === 'LAUNCHER_READY'
+        ? renderLauncherTiles(context.surface, data.launcher)
+        : '',
+      'task-decision-slot',
+    );
   if (data.status === 'DIAGNOSTIC') {
     return slotPanel(context, dataDiagnostic(data.code), 'task-decision-slot');
   }
@@ -639,6 +659,15 @@ function renderTaskScanInput(context: SurfaceComponentContext): string {
   if (!taskUsesAggregateQuery(context)) {
     return renderReferencedComponent(context);
   }
+  // A launcher scans a code to open, never the lookup's raw parameters.
+  if (context.surface.launcher)
+    return slotPanel(
+      context,
+      context.data?.status === 'LAUNCHER_READY'
+        ? renderLauncherScan(context.surface, context.data.launcher)
+        : '',
+      'task-scan-input-slot',
+    );
   const binding = readCompiledSurfaceDataBinding(context.view, context.surface);
   if (binding.query.queryType !== 'aggregate') {
     throw new TypeError('task scan input requires an aggregate query');
@@ -677,6 +706,14 @@ function renderTaskPrimaryAction(context: SurfaceComponentContext): string {
   if (!taskUsesAggregateQuery(context)) {
     return renderReferencedComponent(context);
   }
+  if (context.surface.launcher)
+    return slotPanel(
+      context,
+      context.data?.status === 'LAUNCHER_READY'
+        ? renderLauncherAction(context.surface)
+        : '',
+      'task-primary-action-slot',
+    );
   return slotPanel(
     context,
     `<div class="task-primary-action"><button type="submit" form="${escapeHtml(taskLookupFormId(context.surface))}">Look up</button></div>`,

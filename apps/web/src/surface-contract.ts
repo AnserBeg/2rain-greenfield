@@ -6,7 +6,9 @@ import {
 import {
   SurfaceWorkspaceSchema,
   SurfaceDocumentEditorSchema,
+  SurfaceLauncherSchema,
   SurfaceListSchema,
+  type SurfaceLauncher,
   type SurfaceList,
   type SurfaceWorkspace,
   type SurfaceDocumentEditor,
@@ -276,6 +278,8 @@ export interface CompiledSurfaceSlot {
 
 export interface CompiledSurfaceDefinition {
   readonly list?: SurfaceList;
+  /** A launcher Task's tiles and scan box (surface floor 18). */
+  readonly launcher?: SurfaceLauncher;
   readonly workspace?: SurfaceWorkspace;
   readonly documentEditor?: SurfaceDocumentEditor;
   readonly composition?: SurfaceComposition;
@@ -992,6 +996,9 @@ function parseSurface(
     ...(value.list === undefined
       ? {}
       : { list: SurfaceListSchema.parse(value.list) }),
+    ...(value.launcher === undefined
+      ? {}
+      : { launcher: SurfaceLauncherSchema.parse(value.launcher) }),
     ...(value.documentEditor === undefined
       ? {}
       : {

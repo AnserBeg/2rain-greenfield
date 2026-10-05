@@ -1006,6 +1006,7 @@ async function inventoryNavigationJourney(
     'Inventory movement',
     'Inventory period lock',
     'Inventory transactions',
+    'Warehouse',
     'Legal entity',
     'Posted stock',
     'Stock count',
@@ -1079,6 +1080,7 @@ async function inventoryNavigationJourney(
       'Inventory movement',
       'Inventory period lock',
       'Inventory transactions',
+      'Warehouse',
       'Legal entity',
       'Posted stock',
       'Stock count',
@@ -1156,6 +1158,7 @@ async function inventoryNavigationJourney(
     'Inventory movement',
     'Inventory period lock',
     'Inventory transactions',
+    'Warehouse',
     'Stock count',
   ]) {
     await inventoryNavigation

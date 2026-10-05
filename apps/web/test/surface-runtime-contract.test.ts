@@ -89,6 +89,12 @@ import {
   renderCompositionProgression,
   type CompositionData,
 } from '../src/surface-composition.js';
+import {
+  renderLauncherAction,
+  renderLauncherScan,
+  renderLauncherTiles,
+  type LauncherRenderData,
+} from '../src/surface-launcher.js';
 import { entryCompanyChoice } from '../src/workspace-entry.js';
 import { createValuesFor } from '../src/document-editor.js';
 import { compiledFixturePath, demoEntry, webRoot } from './helpers.js';
@@ -1830,6 +1836,87 @@ test('the task rows, alert and progression lay out at phone width without a side
   assert.match(composition, /data-column-label="\$\{h\(input\.label\)\}"/u);
 });
 
+test('WAREHOUSE-MODE: a launcher renders large tiles and one scan field that works without script, and lays out at phone width', () => {
+  const source = readFileSync(`${webRoot}/src/surface-runtime.ts`, 'utf8');
+  // Three tiles a row on a tablet, one at phone width, each a target far
+  // above 44px; the scan field and its action are as tall as a thumb.
+  for (const rule of [
+    '.launcher-tiles ul{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))',
+    '.launcher-tile{display:flex;flex-direction:column;gap:var(--space-1);min-height:144px',
+    '.launcher-scan__field input{min-height:56px',
+    '.launcher-action button{min-height:56px}',
+    '@media(max-width:800px){.launcher-tiles ul{grid-template-columns:minmax(0,1fr)}.launcher-tile{min-height:96px}.launcher-action{position:sticky;bottom:0',
+  ])
+    assert.ok(source.includes(rule), rule);
+
+  const surface = {
+    label: 'Warehouse',
+    surfaceId: 'northstar.app:surface.inventory_warehouse',
+    launcher: {
+      kind: 'surfaceLauncher',
+      schemaVersion: 'v6',
+      tiles: [],
+      scan: { label: 'Scan a <code>', actionLabel: 'Open', targets: [] },
+    },
+  } as unknown as CompiledSurfaceDefinition;
+  const data: LauncherRenderData = {
+    tiles: [
+      {
+        tileId: 'northstar.app:launcher_tile.receive',
+        label: 'Receive <now>',
+        description: 'Orders & lines',
+        href: '/?surface=a&view=b',
+        count: 2,
+        viewLabel: 'To receive',
+      },
+      {
+        tileId: 'northstar.app:launcher_tile.put_away',
+        label: 'Put away',
+        description: 'Transfers',
+        href: '/?surface=c',
+        count: null,
+        viewLabel: null,
+      },
+    ],
+    scope: { parameterId: 'northstar.app:parameter.company', value: 'c1' },
+    scan: null,
+  };
+  // Every tile is a link carrying its own escaped words; a count that could
+  // not be read is left out, never shown as zero.
+  assert.equal(
+    renderLauncherTiles(surface, data),
+    '<nav class="launcher-tiles" aria-label="Warehouse"><ul>' +
+      '<li><a class="launcher-tile" href="/?surface=a&amp;view=b" data-launcher-tile="northstar.app:launcher_tile.receive"><strong class="launcher-tile__label">Receive &lt;now&gt;</strong><span class="launcher-tile__count" data-launcher-count>2</span><span class="launcher-tile__view">To receive</span><span class="launcher-tile__description">Orders &amp; lines</span></a></li>' +
+      '<li><a class="launcher-tile" href="/?surface=c" data-launcher-tile="northstar.app:launcher_tile.put_away"><strong class="launcher-tile__label">Put away</strong><span class="launcher-tile__description">Transfers</span></a></li>' +
+      '</ul></nav>',
+  );
+  // One GET form in the page's company: Enter submits it, a wedge scanner
+  // types into its focused field, and nothing needs script.
+  const blank = renderLauncherScan(surface, data);
+  assert.match(
+    blank,
+    /<form id="launcher-scan-northstar-app-surface-inventory-warehouse" class="launcher-scan__form" method="get" action="\/" role="search"><input type="hidden" name="surface" value="northstar\.app:surface\.inventory_warehouse"><input type="hidden" name="northstar\.app:parameter\.company" value="c1"><label class="launcher-scan__field"><span>Scan a &lt;code&gt;<\/span><input name="scan" value="" data-scan-input="true" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="go" maxlength="120" required autofocus><\/label><\/form>/u,
+  );
+  assert.doesNotMatch(blank, /data-message=/u);
+  // A code that opened nothing stays in the box, described by the reason.
+  const missed = renderLauncherScan(surface, {
+    ...data,
+    scan: { code: 'PO-<9>', outcome: 'SCAN_NO_MATCH' },
+  });
+  assert.match(
+    missed,
+    /<input name="scan" value="PO-&lt;9&gt;"[^>]* aria-invalid="true" aria-describedby="launcher-scan-northstar-app-surface-inventory-warehouse-message">/u,
+  );
+  assert.match(
+    missed,
+    /<div id="launcher-scan-northstar-app-surface-inventory-warehouse-message" class="launcher-scan__message" role="alert" data-message="SCAN_NO_MATCH"/u,
+  );
+  assert.equal(
+    renderLauncherAction(surface),
+    '<div class="task-primary-action launcher-action"><button type="submit" form="launcher-scan-northstar-app-surface-inventory-warehouse">Open</button></div>',
+  );
+});
+
 test('unknown surface and malformed projection fail as rendered diagnostics', async () => {
   await demoEntry().run({}, (view) => {
     const unknown = renderSurfaceRuntime(view, '/?surface=not-in-release');
@@ -1876,7 +1963,8 @@ test('the message catalog honours the vocabulary it declares', () => {
   // RAIN-ORDER-ENTRY adds company refusal, shared draft conflict/lock treatments,
   // and the redacted partial-commit outcome.
   // SALES-PARITY adds the declared-List export refusal (never a partial file).
-  assert.equal(SURFACE_MESSAGE_CODES.length, 48);
+  // WAREHOUSE-MODE adds the two answers of a scan that opened nothing.
+  assert.equal(SURFACE_MESSAGE_CODES.length, 50);
 
   for (const code of SURFACE_MESSAGE_CODES) {
     const entry = SURFACE_MESSAGE_CATALOG[code];
@@ -1960,6 +2048,7 @@ test('no user-facing sentence is written outside the catalog', () => {
     'message-render.ts',
     'surface-contract.ts',
     'surface-composition.ts',
+    'surface-launcher.ts',
     'surface-runtime.ts',
   ];
   const contents = new Map(
@@ -2002,6 +2091,7 @@ test('every registered code has a raise site outside the catalog', () => {
     'gateway-error-codes.ts',
     'surface-contract.ts',
     'surface-composition.ts',
+    'surface-launcher.ts',
     'surface-runtime.ts',
   ].map((name) =>
     stripComments(readFileSync(`${webRoot}/src/${name}`, 'utf8')),

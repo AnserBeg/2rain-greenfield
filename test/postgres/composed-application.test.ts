@@ -1179,8 +1179,10 @@ async function assertRealProductDefinition(
     // SALES-PARITY adds Party's ship-to address book and Catalog's tax codes,
     // then the invoice, its lines, payments and credits (list, detail, form
     // each). PURCHASING-PARITY adds the Expected receipts List; PAYABLES the
-    // vendor bill, its lines, payments and credits (list, detail, form each).
-    assert.equal(surfaces.length, 101);
+    // vendor bill, its lines, payments and credits (list, detail, form each);
+    // WAREHOUSE-MODE the Warehouse launcher.
+    assert.equal(surfaces.length, 102);
+    assert.ok(surfaces.includes('northstar.app:surface.inventory_warehouse'));
     assert.ok(surfaces.includes('northstar.app:surface.expected_receipt_list'));
     for (const local of [
       'goods_receipt',

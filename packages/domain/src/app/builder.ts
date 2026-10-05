@@ -24,6 +24,8 @@ import {
 } from '../purchasing/workspace.js';
 import { inventoryDocumentWorkspace } from '../inventory/workspace.js';
 import { itemStockWorkspace } from '../inventory/item-stock-workspace.js';
+import { periodLockWorkspace } from '../inventory/period-lock-workspace.js';
+import { warehouseSurface } from '../inventory/warehouse-workspace.js';
 
 const version = 'v6' as const;
 const normalizationProfileVersion = 'northstar.normalization/v6' as const;
@@ -103,6 +105,8 @@ const RECORD_COMPOSITIONS: Readonly<
     inventoryDocumentWorkspace(namespace, 'stock_count'),
   // An item's stock by location and its movements (INVENTORY-PARITY).
   item_detail: itemStockWorkspace,
+  // The period lock's Close and Reopen commands (WAREHOUSE-MODE).
+  inventory_period_lock_detail: periodLockWorkspace,
 });
 
 /**
@@ -239,64 +243,81 @@ export function composedApplicationDefinition(): Record<string, unknown> {
     schemaVersion: version,
     stateMachines: merged(definitions, 'stateMachines'),
     storageMappings: merged(definitions, 'storageMappings'),
-    surfaces: orderEntrySurfaces(
-      APPLICATION_NAMESPACE,
-      // Worklists join the workspace pass as Lists of their own.
-      withWorklistSurfaces(merged(definitions, 'surfaces')).map((surface) => {
-        if (!isRecord(surface))
-          throw new TypeError('surface must be an object');
-        const local = String(surface.surfaceId).split(':surface.')[1] ?? '';
-        const composition = RECORD_COMPOSITIONS[local]?.(APPLICATION_NAMESPACE);
-        if (!composition) return surface;
-        // A workspace may read its record with a read model's figures, such as
-        // a sales order's totals; the record query stays the plain get.
-        const dataSource = RECORD_DATA_SOURCES[local];
-        const slots = surface.slots as Record<string, unknown>[];
-        const slot = (name: string, suffix: string, orderKey: number) => ({
-          kind: 'surfaceSlot',
-          schemaVersion: version,
-          slot: name,
-          slotId: `${String(surface.surfaceId).replace(':surface.', ':slot.')}_${suffix}`,
-          orderKey,
-          content: {
-            kind: 'opaqueSurfaceContentReference',
+    surfaces: [
+      ...orderEntrySurfaces(
+        APPLICATION_NAMESPACE,
+        // Worklists join the workspace pass as Lists of their own.
+        withWorklistSurfaces(merged(definitions, 'surfaces')).map((surface) => {
+          if (!isRecord(surface))
+            throw new TypeError('surface must be an object');
+          const local = String(surface.surfaceId).split(':surface.')[1] ?? '';
+          const composition = RECORD_COMPOSITIONS[local]?.(
+            APPLICATION_NAMESPACE,
+          );
+          if (!composition) return surface;
+          // A workspace may read its record with a read model's figures, such as
+          // a sales order's totals; the record query stays the plain get.
+          const dataSource = RECORD_DATA_SOURCES[local];
+          const slots = surface.slots as Record<string, unknown>[];
+          const slot = (name: string, suffix: string, orderKey: number) => ({
+            kind: 'surfaceSlot',
             schemaVersion: version,
-            targetId: `${APPLICATION_NAMESPACE}:capability.standard_surface_content`,
-          },
-        });
-        return {
-          ...surface,
-          ...(dataSource
-            ? {
-                dataSource: {
-                  kind: 'queryReference',
-                  schemaVersion: version,
-                  targetId: `${APPLICATION_NAMESPACE}:query.${dataSource}`,
-                },
-              }
-            : {}),
-          composition,
-          slots: [
-            ...slots.map((slot) => ({
-              ...slot,
-              ...(slot.slot === 'keyFacts' ? { orderKey: 90 } : {}),
-              ...(slot.slot === 'sections' && LINES_LEAD.has(local)
-                ? { orderKey: 70 }
-                : {}),
-            })),
-            // A composition renders its fields in `sections`; a read-only
-            // document that never declared one gains it here.
-            ...(slots.some((value) => value.slot === 'sections')
-              ? []
-              : [
-                  slot('sections', 'sections', LINES_LEAD.has(local) ? 70 : 50),
-                ]),
-            slot('childTables', 'children', 60),
-          ],
-        };
-      }),
-      merged(definitions, 'queries') as Record<string, unknown>[],
-    ),
+            slot: name,
+            slotId: `${String(surface.surfaceId).replace(':surface.', ':slot.')}_${suffix}`,
+            orderKey,
+            content: {
+              kind: 'opaqueSurfaceContentReference',
+              schemaVersion: version,
+              targetId: `${APPLICATION_NAMESPACE}:capability.standard_surface_content`,
+            },
+          });
+          return {
+            ...surface,
+            ...(dataSource
+              ? {
+                  dataSource: {
+                    kind: 'queryReference',
+                    schemaVersion: version,
+                    targetId: `${APPLICATION_NAMESPACE}:query.${dataSource}`,
+                  },
+                }
+              : {}),
+            composition,
+            slots: [
+              ...slots.map((slot) => ({
+                ...slot,
+                ...(slot.slot === 'keyFacts' ? { orderKey: 90 } : {}),
+                ...(slot.slot === 'sections' && LINES_LEAD.has(local)
+                  ? { orderKey: 70 }
+                  : {}),
+              })),
+              // A composition renders its fields in `sections`; a read-only
+              // document that never declared one gains it here.
+              ...(slots.some((value) => value.slot === 'sections')
+                ? []
+                : [
+                    slot(
+                      'sections',
+                      'sections',
+                      LINES_LEAD.has(local) ? 70 : 50,
+                    ),
+                  ]),
+              // ... and its record commands in the command bar, which a
+              // read-only record never declared (the period lock's).
+              ...(slots.some((value) => value.slot === 'commandBar') ||
+              !(composition.actions as unknown[]).length
+                ? []
+                : [slot('commandBar', 'command_bar', 30)]),
+              slot('childTables', 'children', 60),
+            ],
+          };
+        }),
+        merged(definitions, 'queries') as Record<string, unknown>[],
+      ),
+      // Warehouse mode (WAREHOUSE-MODE): a launcher over the Lists above,
+      // declared beside them with its own workspace.
+      warehouseSurface(APPLICATION_NAMESPACE),
+    ],
   });
 }
 
