@@ -294,8 +294,10 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // List progress, open and before-today views and overdue dates require 12;
   // List row actions and supplementary progress (ORDER-PARITY) require 13;
   // record alerts and progression, multi-row Tasks and record columns naming
-  // a relation (ORDER-PARITY increment B) require 14.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 14);
+  // a relation (ORDER-PARITY increment B) require 14; the item page's
+  // field-scoped stock and movements (INVENTORY-PARITY) require 15; a stock
+  // document's create values require 16.
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 16);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.
@@ -861,7 +863,10 @@ function compileDefinition(
 
 function composedApplicationWithInventory(): Record<string, unknown> {
   const composed = structuredClone(composedApplicationDefinition());
-  const inventory = inventoryModuleDefinition('northstar.app');
+  // As the product mounts it: with stock documents (INVENTORY-PARITY).
+  const inventory = inventoryModuleDefinition('northstar.app', {
+    documentEntry: true,
+  });
   for (const collectionName of [
     'assertions',
     'entities',
@@ -931,7 +936,7 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
   let composed = composedApplicationWithInventory();
   composed = withoutModule(
     composed,
-    inventoryModuleDefinition('northstar.app'),
+    inventoryModuleDefinition('northstar.app', { documentEntry: true }),
     'inventory',
   );
   composed = withoutModule(
@@ -949,7 +954,39 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
     salesModuleDefinition('northstar.app'),
     'sales',
   );
-  return composed;
+  return withPlainItemPage(composed);
+}
+
+/**
+ * INVENTORY-PARITY: the item page shows Inventory's stock and movements with
+ * Sales' reservations, entered through Inventory's Posted stock List. Without
+ * those modules it is the plain record page it was before: Catalog's own
+ * surface in its contextual workspace.
+ */
+function withPlainItemPage(
+  composed: Record<string, unknown>,
+): Record<string, unknown> {
+  const surfaceId = 'northstar.app:surface.item_detail';
+  const surfaces = composed.surfaces;
+  assert.ok(Array.isArray(surfaces));
+  const plain = (
+    catalogModuleDefinition('northstar.app', { sellingPrices: true })
+      .surfaces as Record<string, unknown>[]
+  ).find((surface) => surface.surfaceId === surfaceId);
+  assert.ok(plain);
+  assert.equal(
+    surfaces.filter((surface) => surface.surfaceId === surfaceId).length,
+    1,
+    'flat fixture must find the item page exactly once',
+  );
+  return {
+    ...composed,
+    surfaces: surfaces.map((surface) =>
+      surface.surfaceId === surfaceId
+        ? { ...plain, workspace: { membership: 'contextual' } }
+        : surface,
+    ),
+  };
 }
 
 function withoutModule(

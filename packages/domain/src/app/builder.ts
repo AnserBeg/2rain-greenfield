@@ -23,6 +23,7 @@ import {
   receivingWorkspaceQueries,
 } from '../purchasing/workspace.js';
 import { inventoryDocumentWorkspace } from '../inventory/workspace.js';
+import { itemStockWorkspace } from '../inventory/item-stock-workspace.js';
 
 const version = 'v6' as const;
 const normalizationProfileVersion = 'northstar.normalization/v6' as const;
@@ -67,7 +68,12 @@ const MODULE_REGISTRY = Object.freeze([
       }),
     moduleName: 'purchasing',
   }),
-  Object.freeze({ create: inventoryModuleDefinition, moduleName: 'inventory' }),
+  Object.freeze({
+    // Stock documents recorded like the other documents (INVENTORY-PARITY).
+    create: (namespace: string) =>
+      inventoryModuleDefinition(namespace, { documentEntry: true }),
+    moduleName: 'inventory',
+  }),
   Object.freeze({
     create: (namespace: string) =>
       partyModuleDefinition(namespace, { salesMasterData: true }),
@@ -95,6 +101,8 @@ const RECORD_COMPOSITIONS: Readonly<
     inventoryDocumentWorkspace(namespace, 'inventory_transaction'),
   stock_count_detail: (namespace: string) =>
     inventoryDocumentWorkspace(namespace, 'stock_count'),
+  // An item's stock by location and its movements (INVENTORY-PARITY).
+  item_detail: itemStockWorkspace,
 });
 
 /**

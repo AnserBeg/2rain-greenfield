@@ -238,7 +238,7 @@ composedTest.describe('composed application journeys', () => {
   );
 
   composedTest(
-    'renders one staged adjustment and its authored edit submission',
+    'renders one staged adjustment and opens it in the stock document editor',
     async ({ composedApplication, page }) => {
       composedTest.setTimeout(journeyTimeoutMilliseconds.postingRoute);
       await postingRouteDraftJourney(
@@ -1005,7 +1005,7 @@ async function inventoryNavigationJourney(
     'Bills',
     'Inventory movement',
     'Inventory period lock',
-    'Inventory transaction',
+    'Inventory transactions',
     'Legal entity',
     'Posted stock',
     'Stock count',
@@ -1078,7 +1078,7 @@ async function inventoryNavigationJourney(
     [
       'Inventory movement',
       'Inventory period lock',
-      'Inventory transaction',
+      'Inventory transactions',
       'Legal entity',
       'Posted stock',
       'Stock count',
@@ -1155,7 +1155,7 @@ async function inventoryNavigationJourney(
   for (const destination of [
     'Inventory movement',
     'Inventory period lock',
-    'Inventory transaction',
+    'Inventory transactions',
     'Stock count',
   ]) {
     await inventoryNavigation
@@ -1661,7 +1661,7 @@ async function scopedInventoryJourney(
     .getByText('Inventory', { exact: true })
     .click();
   await scopedInventoryNavigation
-    .getByRole('link', { name: 'Inventory transaction', exact: true })
+    .getByRole('link', { name: 'Inventory transactions', exact: true })
     .click();
   expect(
     new URL(page.url()).searchParams.get(
@@ -1816,9 +1816,12 @@ async function scopedInventoryJourney(
  * `party_form` is the untouched twin: it was already conformant before this
  * packet and is asserted through the identical helper, so a regression in the
  * helper itself cannot read as an Inventory repair.
+ *
+ * The transaction form left this set with INVENTORY-PARITY: it is the stock
+ * document editor now, whose form, controls and Save draft are proved by
+ * `inventory-documents.spec.ts` and by the journeys below.
  */
 const repairedInventoryForms = [
-  'inventory_transaction_form',
   'inventory_transaction_line_form',
   'stock_count_form',
   'stock_count_line_form',
@@ -1917,20 +1920,22 @@ async function scopedFormPersistenceJourney(
   const listScopeParameterId = await loadSurfaceScopeParameterId(
     'inventory_transaction_list',
   );
-  await createScopedInventoryTransaction(
+  // A stock document is entered in the editor under its company and numbered
+  // by the server on first save (INVENTORY-PARITY), so each company's number
+  // is read back rather than typed.
+  const numberA = await createScopedStockDocument(
     page,
     baseUrl,
     scopeParameterId,
     browserLegalEntityId,
-    'TXN-SCOPE-A',
   );
-  await createScopedInventoryTransaction(
+  const numberB = await createScopedStockDocument(
     page,
     baseUrl,
     scopeParameterId,
     browserAlternateLegalEntityId,
-    'TXN-SCOPE-B',
   );
+  expect(numberB).not.toBe(numberA);
 
   // The read side independently observes the persisted attribution. A
   // hardcoded first UUID can make one create green; it cannot put the second
@@ -1941,62 +1946,75 @@ async function scopedFormPersistenceJourney(
     baseUrl,
     listScopeParameterId,
     browserLegalEntityId,
-    'TXN-SCOPE-A',
-    'TXN-SCOPE-B',
+    numberA,
+    numberB,
   );
   await expectScopedInventoryTransactions(
     page,
     baseUrl,
     listScopeParameterId,
     browserAlternateLegalEntityId,
-    'TXN-SCOPE-B',
-    'TXN-SCOPE-A',
+    numberB,
+    numberA,
   );
 
   // The hardest current specimen: stock_count_line has TWO required relations,
   // both targeting legal-entity-scoped lists. Create its parent through one
   // scoped picker, then create the line through both scoped pickers.
-  await createScopedStockCountLineWithRelations(page, baseUrl);
+  await createScopedStockCountLineWithRelations(
+    page,
+    baseUrl,
+    numberA,
+    numberB,
+  );
 
+  // A scoped generic create refuses anything but exactly one well-formed
+  // company. The stock count form is the specimen now that the transaction
+  // form is the stock document editor.
+  const stockCountScopeParameterId =
+    await loadSurfaceScopeParameterId('stock_count_form');
   const multipleScopeUrl = new URL(
     scopedSurfaceUrl(
       baseUrl,
-      'inventory_transaction_form',
-      scopeParameterId,
+      'stock_count_form',
+      stockCountScopeParameterId,
       browserLegalEntityId,
     ),
   );
   multipleScopeUrl.searchParams.append(
-    scopeParameterId,
+    stockCountScopeParameterId,
     browserAlternateLegalEntityId,
   );
-  await expectScopedInventoryCreateRefusal(
+  await expectScopedStockCountCreateRefusal(
     page,
     baseUrl,
-    scopeParameterId,
+    stockCountScopeParameterId,
     multipleScopeUrl.href,
-    'TXN-SCOPE-MULTIPLE',
+    numberA,
+    'COUNT-SCOPE-MULTIPLE',
     'OPERATION_INPUT_INVALID',
   );
-  await expectScopedInventoryCreateRefusal(
+  await expectScopedStockCountCreateRefusal(
     page,
     baseUrl,
-    scopeParameterId,
-    surfaceUrl(baseUrl, 'inventory_transaction_form'),
-    'TXN-SCOPE-OMITTED',
+    stockCountScopeParameterId,
+    surfaceUrl(baseUrl, 'stock_count_form'),
+    numberA,
+    'COUNT-SCOPE-OMITTED',
     'OPERATION_INPUT_INVALID',
   );
-  await expectScopedInventoryCreateRefusal(
+  await expectScopedStockCountCreateRefusal(
     page,
     baseUrl,
-    scopeParameterId,
+    stockCountScopeParameterId,
     scopedSurfaceUrl(
       baseUrl,
-      'inventory_transaction_form',
-      scopeParameterId,
+      'stock_count_form',
+      stockCountScopeParameterId,
       'not-a-uuid',
     ),
-    'TXN-SCOPE-MALFORMED',
+    numberA,
+    'COUNT-SCOPE-MALFORMED',
     // The authorization boundary refuses malformed scope before it can reach
     // provider input parsing; it must never inherit the demo role's ALLOW.
     'OPERATION_PERMISSION_DENIED',
@@ -2006,6 +2024,8 @@ async function scopedFormPersistenceJourney(
 async function createScopedStockCountLineWithRelations(
   page: Page,
   baseUrl: string,
+  transactionNumber: string,
+  foreignTransactionNumber: string,
 ): Promise<void> {
   const stockCountScopeParameterId =
     await loadSurfaceScopeParameterId('stock_count_form');
@@ -2023,23 +2043,12 @@ async function createScopedStockCountLineWithRelations(
   });
   await expect(transactionPicker).toBeVisible();
   await expect(
-    transactionPicker.locator('option', { hasText: 'TXN-SCOPE-A' }),
+    transactionPicker.locator('option', { hasText: transactionNumber }),
   ).toHaveCount(1);
   await expect(
-    transactionPicker.locator('option', { hasText: 'TXN-SCOPE-B' }),
+    transactionPicker.locator('option', { hasText: foreignTransactionNumber }),
   ).toHaveCount(0);
-  await transactionPicker.selectOption({ label: 'TXN-SCOPE-A' });
-  await page.getByLabel('Number', { exact: true }).fill('COUNT-SCOPE-A');
-  await page
-    .getByRole('combobox', { exact: true, name: 'Kind' })
-    .selectOption({ label: 'initial' });
-  await page
-    .getByRole('combobox', { exact: true, name: 'State' })
-    .selectOption({ label: 'draft' });
-  await page.getByLabel('Location', { exact: true }).fill(demoLocationId);
-  await page
-    .getByLabel('Counted at', { exact: true })
-    .fill('2026-07-30T12:00:00.000Z');
+  await fillStockCountForm(page, transactionNumber, 'COUNT-SCOPE-A');
   const stockCountId = await page
     .locator('form#surface-record-form input[name="recordId"]')
     .inputValue();
@@ -2105,41 +2114,38 @@ async function createScopedStockCountLineWithRelations(
   await expect(transactionLinePicker).toHaveCount(0);
 }
 
-async function fillInventoryTransactionForm(
+/** A stock count's create form, its transaction chosen by number. */
+async function fillStockCountForm(
   page: Page,
   transactionNumber: string,
+  countNumber: string,
 ): Promise<void> {
-  await page.getByLabel('Number', { exact: true }).fill(transactionNumber);
-  // Six declared transaction types now cross the grammar's five-option
-  // select threshold; the datalist input submits the canonical option id.
   await page
-    .getByRole('combobox', { exact: true, name: 'Type' })
-    .fill(
-      `${applicationNamespace}:option.inventory_transaction_type_adjustment`,
-    );
+    .getByRole('combobox', { exact: true, name: 'Transaction' })
+    .selectOption({ label: transactionNumber });
+  await page.getByLabel('Number', { exact: true }).fill(countNumber);
+  await page
+    .getByRole('combobox', { exact: true, name: 'Kind' })
+    .selectOption({ label: 'initial' });
   await page
     .getByRole('combobox', { exact: true, name: 'State' })
     .selectOption({ label: 'draft' });
-  await page.getByLabel('Source type', { exact: true }).fill('browser');
+  await page.getByLabel('Location', { exact: true }).fill(demoLocationId);
   await page
-    .getByLabel('Source', { exact: true })
-    .fill(transactionNumber.toLowerCase());
-  await page
-    .getByLabel('Effective at', { exact: true })
+    .getByLabel('Counted at', { exact: true })
     .fill('2026-07-30T12:00:00.000Z');
-  await page
-    .getByLabel('Recorded at', { exact: true })
-    .fill('2026-07-30T12:00:00.000Z');
-  await page.getByLabel('Actor', { exact: true }).fill('anatomy-actor');
 }
 
-async function createScopedInventoryTransaction(
+/**
+ * A stock document in one company, entered in the editor and saved as a
+ * draft: an opening-stock adjustment of one unit. Returns its number.
+ */
+async function createScopedStockDocument(
   page: Page,
   baseUrl: string,
   scopeParameterId: string,
   legalEntityId: string,
-  transactionNumber: string,
-): Promise<void> {
+): Promise<string> {
   await page.goto(
     scopedSurfaceUrl(
       baseUrl,
@@ -2148,19 +2154,94 @@ async function createScopedInventoryTransaction(
       legalEntityId,
     ),
   );
-  await fillInventoryTransactionForm(page, transactionNumber);
-  await expect(page.locator('form#surface-record-form')).toHaveAttribute(
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'New Inventory transaction' }),
+  ).toBeVisible();
+  await expect(page.locator('form#draft-editor-form')).toHaveAttribute(
     'action',
     new RegExp(
       `${encodeURIComponent(scopeParameterId)}=${encodeURIComponent(legalEntityId)}`,
     ),
   );
   await page
-    .locator('[data-platform-slot="record:commandBar"]')
-    .getByRole('button', { name: 'Save' })
+    .getByLabel('Reason', { exact: true })
+    .selectOption({ label: 'Opening stock' });
+  await page
+    .getByLabel('Narrative', { exact: true })
+    .fill('Scoped stock document');
+  await pickEditorRecord(page, 'Line 1 product', 'OFF-100', 'Field notebook');
+  await pickEditorRecord(
+    page,
+    'Line 1 to location',
+    'Calgary',
+    'Calgary warehouse',
+  );
+  await page.getByLabel('Line 1 quantity', { exact: true }).fill('1');
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(page).toHaveURL(/inventory_transaction_detail/u);
+  // Saved, not refused. The save opens the document's own page, whose
+  // sections render: its line, and Posted movements stating its declared
+  // empty state -- a draft has posted nothing. That empty state is the one
+  // message on the page; any other (a refusal, a failed section) is not.
+  const dataset = (local: string) =>
+    page.locator(
+      `[data-composition-dataset="${applicationNamespace}:dataset.inventory_transaction_${local}"]`,
+    );
+  await expect(dataset('inventory_transaction_line')).toHaveAttribute(
+    'data-resolution',
+    'ready',
+  );
+  await expect(dataset('inventory_movement')).toHaveAttribute(
+    'data-resolution',
+    'empty',
+  );
+  await expect(
+    dataset('inventory_movement').locator(
+      '[data-diagnostic-code="COMPOSITION_CHILD_EMPTY"]',
+    ),
+  ).toHaveCount(1);
+  await expect(
+    page.locator(
+      '[data-diagnostic-code]:not([data-diagnostic-code="COMPOSITION_CHILD_EMPTY"])',
+    ),
+  ).toHaveCount(0);
+  await expect(
+    page.locator('[data-diagnostic-code="COMPOSITION_CHILD_EMPTY"]'),
+  ).toHaveCount(1);
+  // Titled by the number the server gave it: a stock document's page
+  // declares no header of its own.
+  const title = page.getByRole('heading', { level: 1, name: /^STK-\d{6}$/u });
+  await expect(title).toBeVisible();
+  return (await title.innerText()).trim();
+}
+
+/**
+ * Types into an editor picker and chooses an offered record -- in place with
+ * the owned script, as ordinary submits without it -- then waits for the
+ * field to show the selection.
+ */
+async function pickEditorRecord(
+  page: Page,
+  name: string,
+  term: string,
+  option: string,
+): Promise<void> {
+  const box = page.getByRole('combobox', { name, exact: true });
+  await box.fill(term);
+  if (!(await page.locator('body[data-reference-enhanced]').count()))
+    await page
+      .locator('[data-reference-control]')
+      .filter({ has: box })
+      .getByRole('button', { name: 'Search', exact: true })
+      .click();
+  await page
+    .getByRole('option')
+    .filter({ has: page.locator('strong', { hasText: option }) })
+    .first()
     .click();
-  await expect(page.getByRole('status')).toContainText('Create complete');
-  await expect(page.locator('[data-diagnostic-code]')).toHaveCount(0);
+  await expect(
+    page.getByRole('combobox', { name, exact: true }),
+  ).toHaveAttribute('data-selected-label', option);
 }
 
 async function expectScopedInventoryTransactions(
@@ -2180,32 +2261,29 @@ async function expectScopedInventoryTransactions(
     ),
   );
   await expect(
-    page.getByRole('cell', { name: visibleNumber, exact: true }),
-  ).toBeVisible();
+    page.locator('tbody tr', { hasText: visibleNumber }),
+  ).toHaveCount(1);
   await expect(page.getByText(hiddenNumber, { exact: true })).toHaveCount(0);
 }
 
-async function expectScopedInventoryCreateRefusal(
+async function expectScopedStockCountCreateRefusal(
   page: Page,
   baseUrl: string,
   scopeParameterId: string,
   action: string,
   transactionNumber: string,
-  diagnosticCode:
-    | 'OPERATION_INPUT_INVALID'
-    | 'OPERATION_PERMISSION_DENIED'
-    | 'OPERATION_REFUSED',
-  refusalCode?: string,
+  countNumber: string,
+  diagnosticCode: 'OPERATION_INPUT_INVALID' | 'OPERATION_PERMISSION_DENIED',
 ): Promise<void> {
   await page.goto(
     scopedSurfaceUrl(
       baseUrl,
-      'inventory_transaction_form',
+      'stock_count_form',
       scopeParameterId,
       browserLegalEntityId,
     ),
   );
-  await fillInventoryTransactionForm(page, transactionNumber);
+  await fillStockCountForm(page, transactionNumber, countNumber);
   await page
     .locator('form#surface-record-form')
     .evaluate(
@@ -2219,15 +2297,9 @@ async function expectScopedInventoryCreateRefusal(
   await expect(
     page.locator(`[data-diagnostic-code="${diagnosticCode}"]`),
   ).toHaveCount(1);
-  if (refusalCode !== undefined) {
-    await expect(page.locator('[data-message-subject]')).toHaveText(
-      refusalCode,
-    );
-  }
 }
 
 const inventoryFormHeadings = Object.freeze({
-  inventory_transaction_form: 'Inventory transaction',
   inventory_transaction_line_form: 'Inventory transaction line',
   stock_count_form: 'Stock count',
   stock_count_line_form: 'Stock count line',
@@ -2253,29 +2325,28 @@ async function postingRouteDraftJourney(
   const editHref = await edit.getAttribute('href');
   expect(editHref).not.toBeNull();
   await page.goto(new URL(editHref ?? '', baseUrl).href);
+  // The staged adjustment opens in the stock document editor
+  // (INVENTORY-PARITY): its stored type and line, and no control for the
+  // number, state or source, which the server and the first save own.
   await expect(
     page.getByRole('heading', {
       level: 1,
       name: 'Edit Inventory transaction',
     }),
   ).toBeVisible();
-  const form = page.locator('form#surface-record-form');
-  await expect(form).toHaveCount(1);
-  const updateSubmission = await form.evaluate((recordForm) =>
-    Object.fromEntries(
-      [...new FormData(recordForm as HTMLFormElement).entries()].map(
-        ([name, value]) => [name, String(value)],
+  await expect(page.locator('form#draft-editor-form')).toHaveCount(1);
+  await expect(page.getByLabel('Type *', { exact: true })).toHaveValue(
+    `${applicationNamespace}:option.inventory_transaction_type_adjustment`,
+  );
+  await expect(page.getByLabel('Line 1 quantity', { exact: true })).toHaveValue(
+    '3',
+  );
+  for (const local of ['number', 'state', 'source_type', 'source_id'])
+    await expect(
+      page.locator(
+        `[name$=":${applicationNamespace}:field.inventory_transaction_${local}"]`,
       ),
-    ),
-  );
-  expect(updateSubmission.operationId).toBe(
-    `${applicationNamespace}:operation.inventory_transaction_update`,
-  );
-  expect(
-    updateSubmission[
-      `value:${applicationNamespace}:field.inventory_transaction_state`
-    ],
-  ).toBe(`${applicationNamespace}:option.inventory_transaction_state_draft`);
+    ).toHaveCount(0);
 }
 
 async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
@@ -2288,6 +2359,12 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
     scopeParameterId,
     browserLegalEntityId,
   )}&record=${encodeURIComponent(browserRouteTransactionId)}`;
+  const lineEditUrl = `${scopedSurfaceUrl(
+    baseUrl,
+    'inventory_transaction_line_form',
+    await loadSurfaceScopeParameterId('inventory_transaction_line_form'),
+    browserLegalEntityId,
+  )}&record=${encodeURIComponent(browserRouteTransactionLineId)}`;
   await page.goto(detailUrl);
   await expect(page.getByText(/Active · revision 1/)).toBeVisible();
   const edit = page.getByRole('link', { name: 'Edit', exact: true });
@@ -2295,8 +2372,10 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
   const editHref = await edit.getAttribute('href');
   expect(editHref).not.toBeNull();
   const editUrl = new URL(editHref ?? '', baseUrl).href;
+  // The draft is open in the stock document editor while it is posted
+  // elsewhere; that editor must not save over the posted document.
   const editPage = await page.context().newPage();
-  let updateSubmission: Record<string, string>;
+  let lineUpdateSubmission: Record<string, string>;
   try {
     await editPage.goto(editUrl);
     await expect(
@@ -2305,123 +2384,135 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
         name: 'Edit Inventory transaction',
       }),
     ).toBeVisible();
-    await expect(editPage.locator('form#surface-record-form')).toHaveCount(1);
+    await expect(editPage.locator('form#draft-editor-form')).toHaveCount(1);
     await expect(
-      editPage
-        .locator('[data-platform-slot="record:commandBar"]')
-        .getByRole('button', { name: 'Save' }),
+      editPage.getByRole('button', { name: 'Save draft', exact: true }),
     ).toBeVisible();
-    updateSubmission = await editPage
-      .locator('form#surface-record-form')
-      .evaluate((form) =>
-        Object.fromEntries(
-          [...new FormData(form as HTMLFormElement).entries()].map(
-            ([name, value]) => [name, String(value)],
+
+    // The line's own operation-addressed edit form, captured while the
+    // document is a draft: the real submission a caller could replay later.
+    const lineEditPage = await page.context().newPage();
+    try {
+      await lineEditPage.goto(lineEditUrl);
+      await expect(
+        lineEditPage.locator('form#surface-record-form'),
+      ).toHaveCount(1);
+      lineUpdateSubmission = await lineEditPage
+        .locator('form#surface-record-form')
+        .evaluate((form) =>
+          Object.fromEntries(
+            [...new FormData(form as HTMLFormElement).entries()].map(
+              ([name, value]) => [name, String(value)],
+            ),
           ),
+        );
+    } finally {
+      await lineEditPage.close();
+    }
+    expect(lineUpdateSubmission.operationId).toBe(
+      `${applicationNamespace}:operation.inventory_transaction_line_update`,
+    );
+
+    const command = page.locator('form.capability-command');
+    await expect(command).toHaveAttribute(
+      'data-capability-id',
+      INVENTORY_POSTING_CAPABILITY_ID,
+    );
+    await expect(command).toContainText('Draft staged.');
+    const renderedIdempotencyKey = await command
+      .locator('input[name="idempotencyKey"]')
+      .inputValue();
+    await command.getByRole('button', { name: 'Post' }).click();
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Confirm Post' }),
+    ).toBeVisible();
+    await expect(
+      page.locator('[data-predicted-effects="registered-capability"]'),
+    ).toContainText(INVENTORY_POSTING_CAPABILITY_ID);
+    await expect(page.locator('input[name="idempotencyKey"]')).toHaveValue(
+      renderedIdempotencyKey,
+    );
+    const preservedSubmission = Object.fromEntries(
+      await page
+        .locator('form input[type="hidden"]')
+        .evaluateAll((inputs) =>
+          inputs.map((input) => [
+            input.getAttribute('name') ?? '',
+            (input as HTMLInputElement).value,
+          ]),
         ),
-      );
+    );
+
+    const beforeConfirmation = await page.context().newPage();
+    try {
+      await beforeConfirmation.goto(detailUrl);
+      await expect(
+        beforeConfirmation.getByText(/Active · revision 1/),
+      ).toBeVisible();
+      await expect(
+        beforeConfirmation.locator('form.capability-command'),
+      ).toBeVisible();
+    } finally {
+      await beforeConfirmation.close();
+    }
+
+    await page.getByRole('button', { name: 'Confirm Post' }).click();
+    await expect(page.getByRole('status')).toContainText('Post complete');
+    await expect(page.getByText(/Active · revision 2/)).toBeVisible();
+    await expect(page.locator('form.capability-command')).toHaveCount(0);
+    await expect(edit).toHaveCount(0);
+
+    const replay = await page.request.post(
+      `${baseUrl}/?surface=${encodeURIComponent(`${applicationNamespace}:surface.inventory_transaction_detail`)}`,
+      { form: preservedSubmission },
+    );
+    expect(replay.status()).toBe(200);
+    const replayHtml = await replay.text();
+    expect(replayHtml).toContain('Post complete');
+    expect(replayHtml).toContain('Active · revision 2');
+
+    // The editor opened before posting is a second UI boundary: its Save
+    // draft is refused against the posted document rather than applied.
+    await editPage
+      .getByRole('button', { name: 'Save draft', exact: true })
+      .click();
+    await expect(
+      editPage.locator('[data-diagnostic-code="DRAFT_EDITOR_LOCKED"]'),
+    ).toHaveCount(1);
   } finally {
     await editPage.close();
   }
-  expect(updateSubmission.operationId).toBe(
-    `${applicationNamespace}:operation.inventory_transaction_update`,
-  );
-  expect(
-    updateSubmission[
-      `value:${applicationNamespace}:field.inventory_transaction_state`
-    ],
-  ).toBe(`${applicationNamespace}:option.inventory_transaction_state_draft`);
-  const command = page.locator('form.capability-command');
-  await expect(command).toHaveAttribute(
-    'data-capability-id',
-    INVENTORY_POSTING_CAPABILITY_ID,
-  );
-  await expect(command).toContainText('Draft staged.');
-  const renderedIdempotencyKey = await command
-    .locator('input[name="idempotencyKey"]')
-    .inputValue();
-  await command.getByRole('button', { name: 'Post' }).click();
+
+  // The direct URL is a third. Hiding Edit alone leaves a pasted editor URL
+  // and its Save draft live.
+  const lockedEditor = await page.goto(editUrl);
+  expect(lockedEditor?.status()).toBe(422);
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Confirm Post' }),
-  ).toBeVisible();
-  await expect(
-    page.locator('[data-predicted-effects="registered-capability"]'),
-  ).toContainText(INVENTORY_POSTING_CAPABILITY_ID);
-  await expect(page.locator('input[name="idempotencyKey"]')).toHaveValue(
-    renderedIdempotencyKey,
-  );
-  const preservedSubmission = Object.fromEntries(
-    await page
-      .locator('form input[type="hidden"]')
-      .evaluateAll((inputs) =>
-        inputs.map((input) => [
-          input.getAttribute('name') ?? '',
-          (input as HTMLInputElement).value,
-        ]),
-      ),
-  );
+    page.locator('[data-diagnostic-code="DRAFT_EDITOR_LOCKED"]'),
+  ).toHaveCount(1);
+  await expect(page.locator('form#draft-editor-form')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Save/u })).toHaveCount(0);
 
-  const beforeConfirmation = await page.context().newPage();
-  try {
-    await beforeConfirmation.goto(detailUrl);
-    await expect(
-      beforeConfirmation.getByText(/Active · revision 1/),
-    ).toBeVisible();
-    await expect(
-      beforeConfirmation.locator('form.capability-command'),
-    ).toBeVisible();
-  } finally {
-    await beforeConfirmation.close();
-  }
-
-  await page.getByRole('button', { name: 'Confirm Post' }).click();
-  await expect(page.getByRole('status')).toContainText('Post complete');
-  await expect(page.getByText(/Active · revision 2/)).toBeVisible();
-  await expect(page.locator('form.capability-command')).toHaveCount(0);
-  await expect(edit).toHaveCount(0);
-
-  const replay = await page.request.post(
-    `${baseUrl}/?surface=${encodeURIComponent(`${applicationNamespace}:surface.inventory_transaction_detail`)}`,
-    { form: preservedSubmission },
-  );
-  expect(replay.status()).toBe(200);
-  const replayHtml = await replay.text();
-  expect(replayHtml).toContain('Post complete');
-  expect(replayHtml).toContain('Active · revision 2');
-
-  // The direct URL is a second UI boundary. Hiding Edit alone leaves a pasted
-  // form URL, its Save button and implicit Enter submission live.
-  await page.goto(editUrl);
-  await expect(
-    page.getByRole('heading', {
-      level: 1,
-      name: 'Edit Inventory transaction',
-    }),
-  ).toBeVisible();
-  await expect(page.locator('form#surface-record-form')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Save' })).toHaveCount(0);
-
-  // The provider is the authority even when a caller posts around both UI
-  // affordances. This is the actual operation-addressed update form captured
-  // while the transaction was a draft, not a structurally invalid forgery.
-  // Only revision, idempotency and state change after posting.
-  const refusedRewind = await page.request.post(editUrl, {
+  // The provider is the authority even when a caller posts around every UI
+  // affordance. This is the actual operation-addressed line edit form
+  // captured while the transaction was a draft, not a structurally invalid
+  // forgery; only its idempotency and quantity change.
+  const refusedRewrite = await page.request.post(lineEditUrl, {
     form: {
-      ...updateSubmission,
-      expectedRevision: '2',
+      ...lineUpdateSubmission,
       idempotencyKey: '74200000-0000-4000-8000-000000000003',
-      [`value:${applicationNamespace}:field.inventory_transaction_state`]: `${applicationNamespace}:option.inventory_transaction_state_draft`,
+      [`value:${applicationNamespace}:field.inventory_transaction_line_quantity`]:
+        '30',
     },
   });
-  expect(refusedRewind.status()).toBe(422);
-  const refusedRewindHtml = await refusedRewind.text();
-  expect(refusedRewindHtml).toContain('OPERATION_REFUSED');
-  expect(refusedRewindHtml).toContain('MODULE_OPERATION_PRECONDITION_REFUSED');
-  expect(refusedRewindHtml).not.toContain('OPERATION_UNAVAILABLE');
+  expect(refusedRewrite.status()).toBe(422);
+  const refusedRewriteHtml = await refusedRewrite.text();
+  expect(refusedRewriteHtml).toContain('OPERATION_REFUSED');
+  expect(refusedRewriteHtml).toContain('MODULE_OPERATION_PRECONDITION_REFUSED');
+  expect(refusedRewriteHtml).not.toContain('OPERATION_UNAVAILABLE');
 
-  // One source effect remains one movement and one +3 on-hand delta. A rewind
-  // followed by a second post would make these 2 and 11 respectively because
-  // movement replay identity includes the source revision.
+  // One source effect remains one movement and one +3 on-hand delta. A
+  // rewritten line posted again would move both.
   await expectRoutePostingEffect(page, baseUrl, 1, '8');
   await page.goto(detailUrl);
   await expect(page.getByText(/Active · revision 2/)).toBeVisible();
@@ -2444,8 +2535,9 @@ async function expectRoutePostingEffect(
     browserLegalEntityId,
   );
   await page.goto(movementUrl);
+  // A stock document posts as its own source (INVENTORY-PARITY).
   await expect(
-    page.locator('tbody tr', { hasText: 'browser-posting-route' }),
+    page.locator('tbody tr', { hasText: browserRouteTransactionId }),
   ).toHaveCount(expectedMovementRows);
 
   const onHand = await loadOnHandLookupProjection();
@@ -3099,8 +3191,9 @@ async function seedInventoryDraft(
         inventory_transaction_reason_narrative:
           'Posted through the registered surface command',
         inventory_transaction_recorded_at: browserRoutePostingInstant,
-        inventory_transaction_source_id: 'browser-posting-route',
-        inventory_transaction_source_type: 'browser-checkpoint',
+        // Posted through the route, so it names itself as its source.
+        inventory_transaction_source_id: browserRouteTransactionId,
+        inventory_transaction_source_type: 'inventoryTransaction',
         inventory_transaction_state: enumOption(
           transaction,
           'inventory_transaction_state',

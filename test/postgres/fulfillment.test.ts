@@ -95,8 +95,8 @@ test(
             values: Record<string, ImmutableJsonValue>,
             relations: Record<string, string | null> = {},
             scoped = true,
+            recordId: string = randomUUID(),
           ) => {
-            const recordId = randomUUID();
             const result = await invoke(`${local}_create`, {
               ...(scoped ? { legalEntityId } : {}),
               recordId,
@@ -125,17 +125,34 @@ test(
             expectedRevision: number,
             key = randomUUID(),
           ) => invoke(local, { expectedRevision, recordId }, key);
+          /**
+           * A stock document as the editor saves one (INVENTORY-PARITY): the
+           * server numbers it, and it names itself as its posting source.
+           */
+          const stockDocument = (
+            values: Record<string, ImmutableJsonValue>,
+          ) => {
+            const recordId = randomUUID();
+            return create(
+              'inventory_transaction',
+              {
+                ...values,
+                actor_id: 'fulfillment-test',
+                recorded_at: new Date().toISOString(),
+                source_id: recordId,
+                source_type: 'inventoryTransaction',
+              },
+              {},
+              true,
+              recordId,
+            );
+          };
 
           const now = new Date().toISOString();
-          const stock = await create('inventory_transaction', {
-            actor_id: 'fulfillment-test',
+          const stock = await stockDocument({
             effective_at: now,
-            number: `ADJ-${randomUUID()}`,
             reason_code: 'SETUP',
             reason_narrative: 'Fulfillment concurrency stock',
-            recorded_at: now,
-            source_id: randomUUID(),
-            source_type: 'test',
             state: `${ns}:option.inventory_transaction_state_draft`,
             type: `${ns}:option.inventory_transaction_type_adjustment`,
           });
@@ -309,15 +326,10 @@ test(
           );
 
           // Existing stock reducers cannot leave on-hand below live coverage.
-          const reduction = await create('inventory_transaction', {
-            actor_id: 'fulfillment-test',
+          const reduction = await stockDocument({
             effective_at: now,
-            number: `ADJ-REDUCE-${randomUUID()}`,
             reason_code: 'REDUCE',
             reason_narrative: 'Must not bypass reservation',
-            recorded_at: now,
-            source_id: randomUUID(),
-            source_type: 'test',
             state: `${ns}:option.inventory_transaction_state_draft`,
             type: `${ns}:option.inventory_transaction_type_adjustment`,
           });
@@ -361,7 +373,6 @@ test(
           const transfer = await create('inventory_transaction', {
             actor_id: 'fulfillment-test',
             effective_at: now,
-            number: `TRN-RESERVED-${randomUUID()}`,
             reason_code: 'WAREHOUSE-TRANSFER',
             reason_narrative: null,
             recorded_at: now,
@@ -457,15 +468,10 @@ test(
           } finally {
             await directRuntimePool.end();
           }
-          const secondaryStock = await create('inventory_transaction', {
-            actor_id: 'fulfillment-test',
+          const secondaryStock = await stockDocument({
             effective_at: now,
-            number: `ADJ-B-${randomUUID()}`,
             reason_code: 'SETUP',
             reason_narrative: 'Cross-location order-bound stock',
-            recorded_at: now,
-            source_id: randomUUID(),
-            source_type: 'test',
             state: `${ns}:option.inventory_transaction_state_draft`,
             type: `${ns}:option.inventory_transaction_type_adjustment`,
           });
@@ -581,15 +587,10 @@ test(
           // location B, consume all coverage, permit an ordinary negative
           // adjustment while live coverage is zero, then attempt a correction
           // that would restore one unit of reservation against zero stock.
-          const trimSecondaryStock = await create('inventory_transaction', {
-            actor_id: 'fulfillment-test',
+          const trimSecondaryStock = await stockDocument({
             effective_at: now,
-            number: `ADJ-B-TRIM-${randomUUID()}`,
             reason_code: 'SETUP',
             reason_narrative: 'Leave exactly five for correction coverage',
-            recorded_at: now,
-            source_id: randomUUID(),
-            source_type: 'test',
             state: `${ns}:option.inventory_transaction_state_draft`,
             type: `${ns}:option.inventory_transaction_type_adjustment`,
           });
@@ -680,15 +681,10 @@ test(
               legalEntityId,
             ],
           );
-          const negativeAdjustment = await create('inventory_transaction', {
-            actor_id: 'fulfillment-test',
+          const negativeAdjustment = await stockDocument({
             effective_at: now,
-            number: `ADJ-B-NEGATIVE-${randomUUID()}`,
             reason_code: 'NEGATIVE',
             reason_narrative: 'Native allow-with-flag control at zero coverage',
-            recorded_at: now,
-            source_id: randomUUID(),
-            source_type: 'test',
             state: `${ns}:option.inventory_transaction_state_draft`,
             type: `${ns}:option.inventory_transaction_type_adjustment`,
           });
@@ -813,15 +809,10 @@ test(
           // Replenish enough that the identical correction is now backed. A
           // failed attempt has no receipt, so the same exact key remains a
           // legitimate retry and must commit once the invariant is satisfied.
-          const backingAdjustment = await create('inventory_transaction', {
-            actor_id: 'fulfillment-test',
+          const backingAdjustment = await stockDocument({
             effective_at: now,
-            number: `ADJ-B-BACK-${randomUUID()}`,
             reason_code: 'BACKING',
             reason_narrative: 'Back valid correction coverage',
-            recorded_at: now,
-            source_id: randomUUID(),
-            source_type: 'test',
             state: `${ns}:option.inventory_transaction_state_draft`,
             type: `${ns}:option.inventory_transaction_type_adjustment`,
           });

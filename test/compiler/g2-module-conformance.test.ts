@@ -63,6 +63,7 @@ import {
   APPLICATION_NAMESPACE,
   composedApplicationDefinition,
 } from '../../packages/domain/src/app/builder.js';
+import { catalogModuleDefinition } from '../../packages/domain/src/catalog/index.js';
 import {
   narrowAcknowledgementToDeclared,
   readAcknowledgementDocument,
@@ -1785,6 +1786,33 @@ function composedApplicationWithoutSales(): Record<string, unknown> {
         !belongsToSales(collectionName, entry as Record<string, unknown>),
     );
   }
+  // INVENTORY-PARITY: the item page's stock reads what Sales' reservations
+  // still hold, through Sales' fulfillment read model over its own copy of
+  // the posted stock list. Without Sales that read model has no reservation
+  // query to read, so the copy goes with Sales (read models do not nest, so
+  // one pass finds every such query), and the item page is Catalog's plain
+  // record page, as it was before.
+  const queries = definition.queries as Array<Record<string, unknown>>;
+  const remaining = new Set(queries.map((query) => String(query.queryId)));
+  definition.queries = queries.filter((query) =>
+    Object.values(
+      (query.readModel as { queries?: Record<string, unknown> } | undefined)
+        ?.queries ?? {},
+    ).every((dependency) => remaining.has(referenceTarget(dependency) ?? '')),
+  );
+  const itemPage = `${APPLICATION_NAMESPACE}:surface.item_detail`;
+  const plainItemPage = (
+    catalogModuleDefinition(APPLICATION_NAMESPACE, { sellingPrices: true })
+      .surfaces as Array<Record<string, unknown>>
+  ).find((surface) => surface.surfaceId === itemPage);
+  assert.ok(plainItemPage);
+  definition.surfaces = (
+    definition.surfaces as Array<Record<string, unknown>>
+  ).map((surface) =>
+    surface.surfaceId === itemPage
+      ? { ...plainItemPage, workspace: { membership: 'contextual' } }
+      : surface,
+  );
   return definition;
 }
 

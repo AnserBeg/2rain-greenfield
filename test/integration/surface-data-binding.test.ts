@@ -37,6 +37,8 @@ import {
   ModuleRuntimeInterpreterError,
   relationTargetPlans,
 } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import { fulfillmentProjectionIdentity } from '../../packages/postgres-provider/src/fulfillment.js';
+import { fulfillmentReadModel } from '../../packages/postgres-provider/src/fulfillment-read-model.js';
 import { commercialReadModel } from '../../packages/postgres-provider/src/commercial-read-model.js';
 import { encodeSharedListCursor } from '../../packages/runtime/src/list-behavior/index.js';
 import {
@@ -66,6 +68,7 @@ import {
   AuthenticatedRequestRuntimeEntryAdapter,
   CURRENT_POLICY_DECISION_VERSION,
   REQUEST_RUNTIME_PROJECTION_FAMILIES,
+  trustedContextForRequestRuntimeView,
   type CurrentPolicyDecisionRequest,
   type CurrentPolicyGateway,
   type CurrentPolicySubject,
@@ -10795,4 +10798,829 @@ test('PAYABLES (PY-G): each order line shows its three-way match as the read mod
   assert.equal(fact(withheld.html), '—');
   assert.match(withheld.html, /BILL-000007/u);
   f.deniedReads.delete(id('permission', 'purchase_order_read'));
+});
+
+test('INVENTORY-PARITY: the item page lists the stock and movements of one company by the item field, picks the company like an entry and re-authorizes every read', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const [scope, foreign] = f.scopes as [string, string];
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const field = (local: string) => id('field', local);
+  const parameter = id(
+    'parameter',
+    'posted_stock_balance_list_legal_entity_scope',
+  );
+  // An item and two locations as the providers return them: every field
+  // their gets and lists select.
+  const item = f.executor.seed('item', {
+    [field('item_sku')]: 'VEST-M',
+    [field('item_name')]: 'Safety vest (medium)',
+    [field('item_description')]: null,
+    [field('item_base_unit')]: 'EA',
+    [field('item_price_cad')]: '24.5',
+    [field('item_price_usd')]: null,
+    [field('item_price_eur')]: null,
+  });
+  const location = (code: string) =>
+    f.executor.seed('location', {
+      [field('location_code')]: code,
+      [field('location_name')]: `${code} warehouse`,
+      [field('location_type')]: id('option', 'warehouse'),
+    });
+  const main = location('CAL-WH');
+  const overflow = location('VAN-WH');
+  const balance = (
+    itemId: string,
+    locationId: string,
+    quantity: string,
+    company = scope,
+  ) =>
+    f.executor.seed(
+      'posted_stock_balance',
+      {
+        [field('posted_stock_balance_item_id')]: itemId,
+        [field('posted_stock_balance_location_id')]: locationId,
+        [field('posted_stock_balance_posted_quantity')]: quantity,
+        [field('posted_stock_balance_unit_id')]: 'EA',
+      },
+      company,
+    );
+  const mainStock = balance(item, main, '13.000000000000000000');
+  const overflowStock = balance(item, overflow, '6.000000000000000000');
+  balance(f.item, main, '99.000000000000000000');
+  const foreignStock = balance(item, main, '7.000000000000000000', foreign);
+  // Reservations with the balances the fulfillment projection keeps: what
+  // is left on each. A released reservation holds nothing; a draft has no
+  // balance yet; another item's reservation is not this item's.
+  const reservation = (
+    locationId: string,
+    state: string,
+    remaining: string | null,
+    itemId = item,
+  ) => {
+    const reservationId = f.executor.seed(
+      'reservation',
+      {
+        [field('reservation_number')]: `RSV-${randomUUID()}`,
+        [field('reservation_state')]: id(
+          'option',
+          `reservation_state_${state}`,
+        ),
+        [field('reservation_item_id')]: itemId,
+        [field('reservation_location_id')]: locationId,
+        [field('reservation_quantity')]: '3',
+        [field('reservation_unit_id')]: 'EA',
+        [field('reservation_reason')]: null,
+      },
+      scope,
+    );
+    if (remaining === null) return;
+    const balanceId = fulfillmentProjectionIdentity(
+      f.view,
+      scope,
+      'reservation',
+      reservationId,
+    );
+    f.executor.rows.set(balanceId, {
+      archived: false,
+      entityId: id('entity', 'reservation_balance'),
+      recordId: balanceId,
+      revision: 1,
+      values: {
+        [field('reservation_balance_remaining_quantity')]: remaining,
+        [field('reservation_balance_unit_id')]: 'EA',
+      },
+    });
+    f.executor.owners.set(balanceId, scope);
+  };
+  reservation(main, 'partially_consumed', '1');
+  reservation(main, 'released', '0');
+  reservation(overflow, 'draft', null);
+  reservation(main, 'active', '5', f.item);
+  // Movements, newest first as the list is asked for them.
+  const movement = (
+    effective: string,
+    role: string,
+    locationId: string,
+    delta: string,
+    source: string,
+    reason: string,
+    itemId = item,
+    company = scope,
+  ) =>
+    f.executor.seed(
+      'inventory_movement',
+      {
+        [field('inventory_movement_item_id')]: itemId,
+        [field('inventory_movement_location_id')]: locationId,
+        [field('inventory_movement_effective_at')]: effective,
+        [field('inventory_movement_recorded_at')]: effective,
+        [field('inventory_movement_posting_role')]: id(
+          'option',
+          `inventory_posting_role_${role}`,
+        ),
+        [field('inventory_movement_quantity_delta')]: delta,
+        [field('inventory_movement_unit_id')]: 'EA',
+        [field('inventory_movement_source_type')]: source,
+        [field('inventory_movement_reason_code')]: reason,
+      },
+      company,
+    );
+  const shipped = movement(
+    '2026-09-29T15:00:00.000Z',
+    'shipment',
+    main,
+    '-2.000000000000000000',
+    'shipment',
+    'SHIP',
+  );
+  movement(
+    '2026-09-29T14:00:00.000Z',
+    'receipt',
+    main,
+    '5.000000000000000000',
+    'goodsReceipt',
+    'RECEIVE',
+  );
+  movement(
+    '2026-09-29T13:00:00.000Z',
+    'adjustment',
+    overflow,
+    '6.000000000000000000',
+    'test',
+    'SETUP',
+  );
+  movement(
+    '2026-09-29T12:00:00.000Z',
+    'adjustment',
+    main,
+    '10.000000000000000000',
+    'test',
+    'SETUP',
+  );
+  movement(
+    '2026-09-29T11:00:00.000Z',
+    'adjustment',
+    main,
+    '99.000000000000000000',
+    'test',
+    'OTHER-ITEM',
+    f.item,
+  );
+  const foreignMovement = movement(
+    '2026-09-29T10:00:00.000Z',
+    'adjustment',
+    main,
+    '7.000000000000000000',
+    'test',
+    'FOREIGN',
+    item,
+    foreign,
+  );
+  // The fulfillment read model the product registers, over this storage.
+  const readModels = {
+    'northstar.sales:capability.fulfillment': fulfillmentReadModel,
+    'northstar.sales:capability.commercial': async ({
+      result,
+    }: {
+      result: SemanticQueryResultEnvelope;
+    }) => result,
+  };
+  const gateways = (executor: SemanticQueryExecutor = f.executor) => ({
+    ...f.gateways,
+    queryGateway: new SemanticQueryGateway(
+      f.policy,
+      executor,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      readModels,
+    ),
+  });
+  const page = (parameters: Record<string, string> = {}) =>
+    `/?${new URLSearchParams({
+      surface: id('surface', 'item_detail'),
+      record: item,
+      ...parameters,
+    }).toString()}`;
+  const escaped = (value: string) =>
+    value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  const section = (html: string, local: string) =>
+    new RegExp(
+      `<section id="${escaped(id('dataset', `item_${local}`))}"[\\s\\S]*?</section>`,
+      'u',
+    ).exec(html)?.[0] ?? '';
+  const rows = (html: string, local: string) =>
+    [
+      ...section(html, local).matchAll(
+        /<tr data-compact-card="true" data-presented-row="true" data-record-id="([^"]+)"[^>]*>([\s\S]*?)<\/tr>/gu,
+      ),
+    ].map((match) => ({
+      recordId: match[1]!,
+      cells: Object.fromEntries(
+        [
+          ...match[2]!.matchAll(
+            /<td data-column-label="([^"]+)"[^>]*>([\s\S]*?)<\/td>/gu,
+          ),
+        ].map((cell) => [cell[1]!, cell[2]!.replace(/<[^>]+>/gu, '')]),
+      ),
+    }));
+  const reads = (queryLocal: string) =>
+    f.policy.calls.filter(
+      (call) =>
+        (call.decisionInput as { kind?: string; queryId?: string }).kind ===
+          'registeredSemanticQueryPolicyInput' &&
+        (call.decisionInput as { queryId?: string }).queryId ===
+          id('query', queryLocal),
+    );
+
+  // Two authorized companies and no choice yet: the item and the company bar
+  // show, and each company-owned section asks for the company.
+  const unchosen = await renderSurfaceRuntimeWithData(
+    f.view,
+    page(),
+    gateways(),
+  );
+  assert.equal(unchosen.statusCode, 200);
+  assert.match(unchosen.html, /<h1>Safety vest \(medium\)<\/h1>/u);
+  assert.match(
+    unchosen.html,
+    new RegExp(`data-scope-parameter-id="${escaped(parameter)}"`, 'u'),
+  );
+  for (const local of ['stock', 'movements'])
+    assert.match(
+      section(unchosen.html, local),
+      /data-resolution="failed"[\s\S]*data-message="QUERY_LEGAL_ENTITY_SCOPE_REQUIRED"/u,
+    );
+  assert.equal(reads('item_stock_positions').length, 0);
+  assert.equal(reads('inventory_movement_list').length, 0);
+
+  // The chosen company: its stock at each location, reserved and available,
+  // and its movements of this item, newest first.
+  const chosen = await renderSurfaceRuntimeWithData(
+    f.view,
+    page({ [parameter]: scope }),
+    gateways(),
+  );
+  assert.equal(chosen.statusCode, 200);
+  assert.deepEqual(rows(chosen.html, 'stock'), [
+    {
+      recordId: mainStock,
+      cells: {
+        Location: 'CAL-WH',
+        'On hand': '13',
+        Reserved: '1',
+        Available: '12',
+        Unit: 'EA',
+      },
+    },
+    {
+      recordId: overflowStock,
+      cells: {
+        Location: 'VAN-WH',
+        'On hand': '6',
+        Reserved: '0',
+        Available: '6',
+        Unit: 'EA',
+      },
+    },
+  ]);
+  const movements = rows(chosen.html, 'movements');
+  assert.deepEqual(
+    movements.map((row) => [
+      row.cells.Role,
+      row.cells.Location,
+      row.cells.Change,
+      row.cells.Source,
+      row.cells.Reason,
+    ]),
+    [
+      ['shipment', 'CAL-WH', '-2', 'shipment', 'SHIP'],
+      ['receipt', 'CAL-WH', '5', 'goodsReceipt', 'RECEIVE'],
+      ['adjustment', 'VAN-WH', '6', 'test', 'SETUP'],
+      ['adjustment', 'CAL-WH', '10', 'test', 'SETUP'],
+    ],
+  );
+  assert.equal(movements[0]!.recordId, shipped);
+  assert.match(movements[0]!.cells.Date!, /Sep 29, 2026.*UTC/u);
+  assert.doesNotMatch(chosen.html, /OTHER-ITEM|FOREIGN/u);
+  assert.ok(!chosen.html.includes(foreignStock));
+  // The item's own facts: its unit and prices as money.
+  assert.match(chosen.html, /<dt>Base unit<\/dt><dd>EA<\/dd>/u);
+  assert.match(chosen.html, /<dt>Price \(CAD\)<\/dt><dd>24\.50<\/dd>/u);
+  // The bar offers each company on this same item and marks the chosen one;
+  // navigation carries the choice to the company's Lists.
+  const bar =
+    /<nav class="workspace-context-bar"[\s\S]*?<\/nav>/u.exec(
+      chosen.html,
+    )?.[0] ?? '';
+  const offered = [
+    ...bar.matchAll(/href="([^"]+)" data-legal-entity-id="([^"]+)"([^>]*)>/gu),
+  ].map((match) => {
+    const url = new URL(match[1]!, 'http://x');
+    return [
+      match[2],
+      url.searchParams.get('surface'),
+      url.searchParams.get('record'),
+      url.searchParams.get(parameter),
+      match[3]!.includes('aria-current="true"'),
+    ];
+  });
+  assert.deepEqual(offered, [
+    [scope, id('surface', 'item_detail'), item, scope, true],
+    [foreign, id('surface', 'item_detail'), item, foreign, false],
+  ]);
+  assert.match(
+    chosen.html,
+    new RegExp(
+      `href="/\\?surface=${escaped(encodeURIComponent(id('surface', 'posted_stock_balance_list')))}&${escaped(encodeURIComponent(parameter))}=${scope}"`,
+      'u',
+    ),
+  );
+  // Each dataset read passed current policy with its field scope, its sort
+  // and the chosen company -- never a broader read filtered afterwards.
+  for (const [queryLocal, fieldLocal, sort] of [
+    [
+      'item_stock_positions',
+      'posted_stock_balance_item_id',
+      [
+        {
+          fieldId: field('posted_stock_balance_posted_quantity'),
+          direction: 'descending',
+        },
+      ],
+    ],
+    [
+      'inventory_movement_list',
+      'inventory_movement_item_id',
+      [
+        {
+          fieldId: field('inventory_movement_effective_at'),
+          direction: 'descending',
+        },
+        {
+          fieldId: field('inventory_movement_recorded_at'),
+          direction: 'descending',
+        },
+      ],
+    ],
+  ] as const) {
+    const [call] = reads(queryLocal);
+    assert.ok(call, queryLocal);
+    const args = (
+      call.decisionInput as {
+        arguments: Record<string, { fieldFilters?: unknown; sort?: unknown }>;
+      }
+    ).arguments;
+    assert.deepEqual(args.list!.fieldFilters, [
+      { fieldId: field(fieldLocal), value: item },
+    ]);
+    assert.deepEqual(args.list!.sort, sort);
+    assert.equal(
+      args[id('parameter', `${queryLocal}_legal_entity_scope`)],
+      scope,
+    );
+  }
+
+  // The last company chosen is the default; another company shows its own.
+  const remembered = await renderSurfaceRuntimeWithData(
+    f.view,
+    page(),
+    gateways(),
+  );
+  assert.equal(remembered.statusCode, 303);
+  assert.equal(
+    new URL(remembered.location!, 'http://x').searchParams.get(parameter),
+    scope,
+  );
+  assert.equal(
+    new URL(remembered.location!, 'http://x').searchParams.get('record'),
+    item,
+  );
+  const other = await renderSurfaceRuntimeWithData(
+    f.view,
+    page({ [parameter]: foreign }),
+    gateways(),
+  );
+  assert.deepEqual(
+    rows(other.html, 'stock').map((row) => [
+      row.recordId,
+      row.cells['On hand'],
+      row.cells.Reserved,
+      row.cells.Available,
+    ]),
+    [[foreignStock, '7', '0', '7']],
+  );
+  assert.deepEqual(
+    rows(other.html, 'movements').map((row) => row.recordId),
+    [foreignMovement],
+  );
+  assert.equal(
+    new URL(
+      (await renderSurfaceRuntimeWithData(f.view, page(), gateways()))
+        .location!,
+      'http://x',
+    ).searchParams.get(parameter),
+    foreign,
+  );
+  // A company outside the offered set is refused by name.
+  const invalid = await renderSurfaceRuntimeWithData(
+    f.view,
+    page({ [parameter]: randomUUID() }),
+    gateways(),
+  );
+  assert.equal(invalid.statusCode, 422);
+  assert.match(invalid.html, /WORKSPACE_COMPANY_UNAVAILABLE/u);
+  // With one authorized company, it is picked whatever was chosen before.
+  f.allowed.delete(foreign);
+  const single = await renderSurfaceRuntimeWithData(f.view, page(), gateways());
+  assert.equal(single.statusCode, 303);
+  assert.equal(
+    new URL(single.location!, 'http://x').searchParams.get(parameter),
+    scope,
+  );
+  f.allowed.add(foreign);
+
+  // Current authority on every read: without reservation read the stock is
+  // refused by the reservation query's name, never shown as unreserved, and
+  // the movements still show; without movement read, the reverse.
+  f.deniedReads.add(id('permission', 'reservation_read'));
+  const withoutReservations = await renderSurfaceRuntimeWithData(
+    f.view,
+    page({ [parameter]: scope }),
+    gateways(),
+  );
+  assert.match(
+    section(withoutReservations.html, 'stock'),
+    /data-resolution="failed"[\s\S]*data-message="COMPOSITION_CHILD_FAILED"/u,
+  );
+  assert.equal(rows(withoutReservations.html, 'stock').length, 0);
+  assert.equal(rows(withoutReservations.html, 'movements').length, 4);
+  const refused = await gateways()
+    .queryGateway.invoke(f.view, {
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      queryId: id('query', 'item_stock_positions'),
+      arguments: {
+        includeArchived: false,
+        [id('parameter', 'item_stock_positions_legal_entity_scope')]: scope,
+        list: {
+          cursor: null,
+          fieldFilters: [
+            { fieldId: field('posted_stock_balance_item_id'), value: item },
+          ],
+          matchMode: 'substring',
+          pageSize: 10,
+          relationLabels: [],
+          schemaVersion: 'northstar.shared-list-query/v1',
+          search: '',
+          sort: [],
+        },
+      },
+    })
+    .then(
+      () => null,
+      (error: unknown) => error,
+    );
+  assert.ok(refused instanceof SemanticQueryPolicyDeniedError);
+  assert.equal(refused.queryId, id('query', 'workspace_stock_reservations'));
+  f.deniedReads.delete(id('permission', 'reservation_read'));
+  f.deniedReads.add(id('permission', 'inventory_movement_read'));
+  const withoutMovements = await renderSurfaceRuntimeWithData(
+    f.view,
+    page({ [parameter]: scope }),
+    gateways(),
+  );
+  assert.match(
+    section(withoutMovements.html, 'movements'),
+    /data-resolution="failed"[\s\S]*data-message="COMPOSITION_CHILD_FAILED"/u,
+  );
+  assert.equal(rows(withoutMovements.html, 'stock').length, 2);
+  f.deniedReads.delete(id('permission', 'inventory_movement_read'));
+
+  // An executor that ignores the field scope answers every item's rows
+  // without echoing it: each section is refused, never shown as this item's.
+  const ignoring: SemanticQueryExecutor = {
+    async execute(request) {
+      if (!request.list?.query.fieldFilters) return f.executor.execute(request);
+      const { fieldFilters: _ignored, ...query } = request.list.query;
+      void _ignored;
+      return f.executor.execute({
+        ...request,
+        list: { ...request.list, query },
+      });
+    },
+  };
+  const broad = await renderSurfaceRuntimeWithData(
+    f.view,
+    page({ [parameter]: scope }),
+    gateways(ignoring),
+  );
+  assert.equal(broad.statusCode, 200);
+  for (const local of ['stock', 'movements']) {
+    assert.match(
+      section(broad.html, local),
+      /data-resolution="failed"[\s\S]*data-message="COMPOSITION_CHILD_FAILED"/u,
+    );
+    assert.equal(rows(broad.html, local).length, 0);
+  }
+  assert.doesNotMatch(broad.html, /OTHER-ITEM|>99</u);
+});
+
+test('INVENTORY-PARITY: a stock document is entered in the shared editor; its first save writes the draft state and names the document as its own posting source, and nothing later rewrites them', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const field = (local: string) => id('field', local);
+  const location = (code: string, name: string) =>
+    f.executor.seed('location', {
+      [field('location_code')]: code,
+      [field('location_name')]: name,
+      [field('location_type')]: id('option', 'warehouse'),
+    });
+  const main = location('CAL-WH', 'Calgary warehouse');
+  location('VAN-WH', 'Vancouver warehouse');
+  const form = f.surfaces.find(
+    (value) => value.surfaceId === id('surface', 'inventory_transaction_form'),
+  )!;
+  assert.ok(form.documentEditor, 'the stock document form is the editor');
+  const url = new URL(
+    `http://fixture.local/?surface=${encodeURIComponent(form.surfaceId)}&${encodeURIComponent(id('parameter', 'inventory_transaction_get_legal_entity_scope'))}=${scope}`,
+  );
+  const open = () =>
+    documentEditor(f.view, form, f.surfaces, url, scope, f.gateways);
+  type Rendered = NonNullable<Awaited<ReturnType<typeof open>>>;
+  const post = (
+    rendered: Rendered,
+    action: string,
+    values: Record<string, string> = {},
+  ) =>
+    documentEditor(f.view, form, f.surfaces, url, scope, f.gateways, {
+      draftSession: hiddenValue(rendered.slots!.keyFacts!, 'draftSession'),
+      draftVersion: hiddenValue(rendered.slots!.keyFacts!, 'draftVersion'),
+      draftAction: action,
+      ...values,
+    });
+  const page = (rendered: Rendered) => Object.values(rendered.slots!).join('');
+  // Every offered control, as an operator fills a damaged-stock adjustment:
+  // two units taken from the Calgary warehouse.
+  const entered: Record<string, string> = {
+    inventory_transaction_type: id(
+      'option',
+      'inventory_transaction_type_adjustment',
+    ),
+    inventory_transaction_reason_code: 'DAMAGED',
+    inventory_transaction_reason_narrative: 'Forklift damage',
+    inventory_transaction_effective_at: '2026-09-30T00:00',
+    inventory_transaction_line_item_id: f.item,
+    inventory_transaction_line_from_location_id: main,
+    inventory_transaction_line_to_location_id: '',
+    inventory_transaction_line_quantity: '-2',
+  };
+  const fill = (
+    rendered: Rendered,
+    changed: Record<string, string> = {},
+  ): Record<string, string> => {
+    const result: Record<string, string> = {};
+    for (const match of page(rendered).matchAll(/name="(draft:[^"]+)"/g)) {
+      const local = match[1]!.split(':field.')[1]!;
+      result[match[1]!] = changed[local] ?? entered[local] ?? '';
+    }
+    return result;
+  };
+
+  const editor = (await open())!;
+  const html = page(editor);
+  assert.match(html, /<legend>Stock document<\/legend>/u);
+  assert.match(
+    html,
+    /A draft does not change stock; Post is a separate, confirmed action\./u,
+  );
+  // Of the stored types only an adjustment or a transfer is offered, the
+  // adjustment first; the reasons include opening stock.
+  const type = new RegExp(
+    `<select[^>]*name="draft:[^"]+:${field('inventory_transaction_type').replaceAll('.', '\\.')}"[^>]*>([\\s\\S]*?)</select>`,
+    'u',
+  ).exec(html)?.[1];
+  assert.deepEqual(
+    [...(type ?? '').matchAll(/<option value="([^"]*)"( selected)?>/gu)].map(
+      (option) => [option[1], option[2] === ' selected'],
+    ),
+    [
+      [id('option', 'inventory_transaction_type_adjustment'), true],
+      [id('option', 'inventory_transaction_type_transfer'), false],
+    ],
+  );
+  assert.match(html, /<option value="OPENING">Opening stock<\/option>/u);
+  // The number is the server's, and the state and source are the editor's
+  // own: none of them is a control.
+  for (const local of [
+    'inventory_transaction_number',
+    'inventory_transaction_state',
+    'inventory_transaction_source_type',
+    'inventory_transaction_source_id',
+    'inventory_transaction_recorded_at',
+    'inventory_transaction_actor_id',
+  ])
+    assert.doesNotMatch(html, new RegExp(`name="draft:[^"]+:${field(local)}"`));
+  const headerId = new RegExp(
+    `name="draft:([^:"]+):${field('inventory_transaction_type').replaceAll('.', '\\.')}"`,
+    'u',
+  ).exec(html)![1]!;
+
+  // A forged number, state, source or actor rides along and is ignored.
+  const saved = (await post(editor, 'save', {
+    ...fill(editor),
+    [`draft:${headerId}:${field('inventory_transaction_number')}`]:
+      'STK-FORGED',
+    [`draft:${headerId}:${field('inventory_transaction_state')}`]: id(
+      'option',
+      'inventory_transaction_state_posted',
+    ),
+    [`draft:${headerId}:${field('inventory_transaction_source_id')}`]: 'forged',
+    [`draft:${headerId}:${field('inventory_transaction_actor_id')}`]: 'forged',
+  }))!;
+  assert.equal(saved.statusCode, 303);
+  const recordId = new URL(
+    saved.location!,
+    'http://fixture.local',
+  ).searchParams.get('record')!;
+  assert.equal(recordId, headerId);
+  const [create, line] = f.executor.calls;
+  assert.equal(
+    create!.definition.operationId,
+    id('operation', 'inventory_transaction_create'),
+  );
+  const created = asRecord(create!.input);
+  assert.equal(created.recordId, recordId);
+  assert.equal(created.legalEntityId, scope);
+  // When and by whom it was first recorded: the save's instant and the
+  // saving principal, never typed.
+  const {
+    [field('inventory_transaction_recorded_at')]: recordedAt,
+    ...firstSave
+  } = asRecord(created.values);
+  assert.match(
+    String(recordedAt),
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
+  );
+  assert.deepEqual(firstSave, {
+    [field('inventory_transaction_type')]: id(
+      'option',
+      'inventory_transaction_type_adjustment',
+    ),
+    [field('inventory_transaction_reason_code')]: 'DAMAGED',
+    [field('inventory_transaction_reason_narrative')]: 'Forklift damage',
+    [field('inventory_transaction_effective_at')]: '2026-09-30T00:00:00.000Z',
+    [field('inventory_transaction_state')]: id(
+      'option',
+      'inventory_transaction_state_draft',
+    ),
+    [field('inventory_transaction_source_type')]: 'inventoryTransaction',
+    [field('inventory_transaction_source_id')]: recordId,
+    [field('inventory_transaction_actor_id')]:
+      trustedContextForRequestRuntimeView(f.view).principalId,
+  });
+  // The line: the product, where the stock comes from, the signed quantity,
+  // the product's own unit and the next line number, under this document.
+  const lineInput = asRecord(line!.input);
+  assert.deepEqual(asRecord(lineInput.values), {
+    [field('inventory_transaction_line_item_id')]: f.item,
+    [field('inventory_transaction_line_from_location_id')]: main,
+    [field('inventory_transaction_line_to_location_id')]: null,
+    [field('inventory_transaction_line_quantity')]: '-2',
+    [field('inventory_transaction_line_unit_id')]: 'EA',
+    [field('inventory_transaction_line_line_number')]: '1',
+  });
+  assert.deepEqual(lineInput.relations, {
+    [id('relation', 'inventory_transaction_line_transaction')]: recordId,
+  });
+  assert.equal(f.executor.calls.length, 2);
+
+  // Reopened, the draft updates only what changed: the create values are
+  // never sent again, so the document stays its own posting source.
+  url.searchParams.set('record', recordId);
+  const reopened = (await open())!;
+  const updated = (await post(
+    reopened,
+    'save',
+    fill(reopened, {
+      inventory_transaction_reason_narrative: 'Forklift damage, bay 4',
+    }),
+  ))!;
+  assert.equal(updated.statusCode, 303);
+  assert.equal(f.executor.calls.length, 3);
+  assert.deepEqual(asRecord(asRecord(f.executor.calls[2]!.input).patch), {
+    [field('inventory_transaction_type')]: id(
+      'option',
+      'inventory_transaction_type_adjustment',
+    ),
+    [field('inventory_transaction_reason_code')]: 'DAMAGED',
+    [field('inventory_transaction_reason_narrative')]: 'Forklift damage, bay 4',
+    [field('inventory_transaction_effective_at')]: '2026-09-30T00:00:00.000Z',
+  });
+  const stored = f.executor.rows.get(recordId)!;
+  assert.equal(
+    stored.values[field('inventory_transaction_source_id')],
+    recordId,
+  );
+
+  // Once posted, the document is no longer editable here.
+  f.executor.rows.set(recordId, {
+    ...stored,
+    values: {
+      ...stored.values,
+      [field('inventory_transaction_state')]: id(
+        'option',
+        'inventory_transaction_state_posted',
+      ),
+    },
+  });
+  const locked = (await open())!;
+  assert.equal(locked.statusCode, 422);
+  assert.match(locked.html, /DRAFT_EDITOR_LOCKED/u);
+});
+
+test('INVENTORY-PARITY: a new stock document is dated the instant it opens, not midnight, and a save that keeps that date sends it (ruling INV-A)', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const field = (local: string) => id('field', local);
+  const main = f.executor.seed('location', {
+    [field('location_code')]: 'CAL-WH',
+    [field('location_name')]: 'Calgary warehouse',
+    [field('location_type')]: id('option', 'warehouse'),
+  });
+  const form = f.surfaces.find(
+    (value) => value.surfaceId === id('surface', 'inventory_transaction_form'),
+  )!;
+  const url = new URL(
+    `http://fixture.local/?surface=${encodeURIComponent(form.surfaceId)}&${encodeURIComponent(id('parameter', 'inventory_transaction_get_legal_entity_scope'))}=${scope}`,
+  );
+  // The request clock: an afternoon instant, with milliseconds.
+  const gateways: SurfaceRuntimeGateways = {
+    ...f.gateways,
+    clock: () => new Date('2026-09-30T14:03:27.456Z'),
+  };
+  const editor = (await documentEditor(
+    f.view,
+    form,
+    f.surfaces,
+    url,
+    scope,
+    gateways,
+  ))!;
+  const html = Object.values(editor.slots!).join('');
+  const effective = new RegExp(
+    `<input type="datetime-local"[^>]*name="draft:[^"]+:${field('inventory_transaction_effective_at').replaceAll('.', '\\.')}" value="([^"]*)"`,
+    'u',
+  ).exec(html);
+  // Now, to the second its control shows -- not midnight, which would date a
+  // document that takes stock before the stock that arrived this morning.
+  assert.equal(effective?.[1], '2026-09-30T14:03:27');
+
+  // Saved with that date as shown: the create sends the same instant.
+  const entered: Record<string, string> = {
+    inventory_transaction_effective_at: effective![1]!,
+    inventory_transaction_type: id(
+      'option',
+      'inventory_transaction_type_adjustment',
+    ),
+    inventory_transaction_reason_code: 'DAMAGED',
+    inventory_transaction_reason_narrative: 'Forklift damage',
+    inventory_transaction_line_item_id: f.item,
+    inventory_transaction_line_from_location_id: main,
+    inventory_transaction_line_quantity: '-2',
+  };
+  const submission: Record<string, string> = {};
+  for (const match of html.matchAll(/name="(draft:[^"]+)"/g))
+    submission[match[1]!] = entered[match[1]!.split(':field.')[1]!] ?? '';
+  const saved = (await documentEditor(
+    f.view,
+    form,
+    f.surfaces,
+    url,
+    scope,
+    gateways,
+    {
+      draftSession: hiddenValue(editor.slots!.keyFacts!, 'draftSession'),
+      draftVersion: hiddenValue(editor.slots!.keyFacts!, 'draftVersion'),
+      draftAction: 'save',
+      ...submission,
+    },
+  ))!;
+  assert.equal(saved.statusCode, 303);
+  const create = f.executor.calls.find(
+    (call) =>
+      call.definition.operationId ===
+      id('operation', 'inventory_transaction_create'),
+  );
+  assert.equal(
+    asRecord(asRecord(create!.input).values)[
+      field('inventory_transaction_effective_at')
+    ],
+    '2026-09-30T14:03:27.000Z',
+  );
 });

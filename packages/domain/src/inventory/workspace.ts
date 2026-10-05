@@ -157,6 +157,22 @@ export function inventoryDocumentWorkspace(
                 50,
                 'inventory_movement_effective_at',
               ),
+              // The movements carry the reason, and the true recorded time,
+              // which a stock document's own header leaves blank.
+              column(
+                'movement',
+                'reason',
+                'Reason',
+                60,
+                'inventory_movement_reason_code',
+              ),
+              column(
+                'movement',
+                'recorded',
+                'Recorded',
+                70,
+                'inventory_movement_recorded_at',
+              ),
             ],
           ),
         ]

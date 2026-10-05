@@ -176,16 +176,23 @@ export function validateSurfaceWorkspaces(
       }
       if (presentation.kind === 'choice') {
         const values = presentation.options.map((option) => option.value);
+        // Offered values the field admits: text that fits it, or options of
+        // its enumeration -- a narrower set, never a wider or retyped one.
+        const admissible = (value: string) =>
+          type?.kind === 'textFieldType'
+            ? value.length <= type.maximumLength
+            : type?.kind === 'enumFieldType' &&
+              type.options.some((option) => option.optionId === value);
         if (
-          type?.kind !== 'textFieldType' ||
+          (type?.kind !== 'textFieldType' && type?.kind !== 'enumFieldType') ||
           new Set(values).size !== values.length ||
-          values.some((value) => value.length > type.maximumLength) ||
+          !values.every(admissible) ||
           (presentation.defaultValue !== undefined &&
             !values.includes(presentation.defaultValue))
         )
           fail(
             surface.surfaceId,
-            'choice presentation requires a text field, unique admissible values and a listed default',
+            'choice presentation requires a text or enumeration field, unique admissible values and a listed default',
           );
         return;
       }
@@ -395,6 +402,19 @@ export function validateSurfaceWorkspaces(
             surface.surfaceId,
             'a default counted from today is a UTC date-time field with no other default',
           );
+        if (
+          field.defaultNow &&
+          (field.defaultDaysFromToday !== undefined ||
+            field.defaultFrom ||
+            field.presentation ||
+            field.reference ||
+            target?.kind !== 'dateTimeFieldType' ||
+            target.timezoneSemantics !== 'utcInstant')
+        )
+          fail(
+            surface.surfaceId,
+            'a default of now is a UTC date-time field with no other default',
+          );
         if (field.reference) {
           if (
             !selects(field.reference.queryId, [
@@ -570,5 +590,54 @@ export function validateSurfaceWorkspaces(
         surface.surfaceId,
         'editable states must belong to the document state field',
       );
+    // What a never-saved document's first create also writes: header fields
+    // the editor does not offer, each once, with a value the field admits --
+    // text that fits, an option of its enumeration, the document's own record
+    // id or the saving principal into text long enough to hold one, or the
+    // save's instant into a UTC instant.
+    const headerEntity = headerQuery!.sourceEntity.targetId;
+    const offered = new Set(
+      [...editor.headerFields, ...editor.lineFields].map((value) =>
+        String(value.fieldId),
+      ),
+    );
+    const createValues = editor.createValues ?? [];
+    const createsHeader = model.operations.some(
+      (operation) =>
+        operation.effect.kind === 'createRecordEffect' &&
+        'entity' in operation.effect &&
+        operation.effect.entity.targetId === headerEntity,
+    );
+    if (
+      new Set(createValues.map((value) => value.fieldId)).size !==
+      createValues.length
+    )
+      fail(surface.surfaceId, 'a create value names each field once');
+    for (const entry of createValues) {
+      const type = fields.get(entry.fieldId)?.fieldType;
+      const value = entry.value;
+      // A record id or principal is a uuid: text of at least 36 characters.
+      // The save's instant is a UTC instant.
+      const admissible =
+        value.source === 'record' || value.source === 'actor'
+          ? type?.kind === 'textFieldType' && type.maximumLength >= 36
+          : value.source === 'generated'
+            ? type?.kind === 'dateTimeFieldType' &&
+              type.timezoneSemantics === 'utcInstant'
+            : type?.kind === 'textFieldType'
+              ? [...value.value].length <= type.maximumLength
+              : type?.kind === 'enumFieldType' &&
+                type.options.some((option) => option.optionId === value.value);
+      if (
+        !createsHeader ||
+        fields.get(entry.fieldId)?.entity.targetId !== headerEntity ||
+        offered.has(String(entry.fieldId)) ||
+        !admissible
+      )
+        fail(
+          surface.surfaceId,
+          'a create value is a header field no editor field offers, holding a value it admits',
+        );
+    }
   }
 }

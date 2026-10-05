@@ -15,6 +15,7 @@ import type { StorageTargetPayloadV1 } from '../../packages/compiler/src/index.j
 import { legalEntityReadScopeRequirement } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { moneyText } from '../../apps/web/src/list-declaration.js';
 import { declaredDefault } from '../../apps/web/src/control-semantics.js';
+import { FULFILLMENT_READ_MODEL_BINDINGS } from '../../packages/domain/src/sales/workspace.js';
 
 test('the scaffold exposes a canonical workspace contract', () => {
   assert.deepEqual(platformContract, {
@@ -1176,5 +1177,420 @@ test('PAYABLES (PY-G): each order line shows its three-way match from the purcha
   // The page still validates as a whole.
   assert.doesNotThrow(() =>
     normalizeApplicationPackage(structuredClone(source)),
+  );
+});
+
+test('INVENTORY-PARITY: the item page lists its stock and movements by a field of their own entity, in the company its entry names', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type Dataset = Loose & {
+    datasetId: string;
+    query: { targetId: string };
+    parent?: Loose;
+    fieldScope?: { fieldId: string; value: Loose };
+  };
+  const ns = 'northstar.app';
+  const surface = (candidate: Loose, local: string) =>
+    (candidate.surfaces as Loose[]).find(
+      (value) => value.surfaceId === `${ns}:surface.${local}`,
+    ) as Loose & {
+      composition?: { children: Dataset[]; actions: unknown[] };
+      workspace?: { entry?: Loose; membership: string };
+    };
+  const dataset = (candidate: Loose, local: string) =>
+    surface(candidate, 'item_detail').composition!.children.find(
+      (value) => value.datasetId === `${ns}:dataset.item_${local}`,
+    )!;
+  const query = (candidate: Loose, local: string) =>
+    (candidate.queries as Loose[]).find(
+      (value) => value.queryId === `${ns}:query.${local}`,
+    ) as Loose & {
+      readModel?: {
+        binding: string;
+        queries: Record<string, { targetId: string }>;
+        resultFields: Record<string, string>;
+      };
+      selections: { field: { targetId: string } }[];
+    };
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  // The shipped declaration: the item's own page, read-only, entered like the
+  // Posted stock List, each dataset scoped by the item field of its entity.
+  const page = surface(source, 'item_detail');
+  assert.deepEqual(page.composition!.actions, []);
+  assert.equal(page.workspace!.membership, 'contextual');
+  assert.equal(
+    page.workspace!.entry!.authorizationQueryId,
+    `${ns}:query.posted_stock_balance_list`,
+  );
+  assert.deepEqual(
+    page.composition!.children.map((value) => [
+      value.query.targetId,
+      value.fieldScope?.fieldId,
+      value.parent,
+    ]),
+    [
+      [
+        `${ns}:query.item_stock_positions`,
+        `${ns}:field.posted_stock_balance_item_id`,
+        undefined,
+      ],
+      [
+        `${ns}:query.inventory_movement_list`,
+        `${ns}:field.inventory_movement_item_id`,
+        undefined,
+      ],
+    ],
+  );
+  // Stock by location reads its own copy of the posted stock list with the
+  // fulfillment read model's stock figures; the list itself is untouched.
+  const positions = query(source, 'item_stock_positions');
+  const posted = query(source, 'posted_stock_balance_list');
+  assert.equal(posted.readModel, undefined);
+  assert.equal(
+    positions.readModel!.binding,
+    FULFILLMENT_READ_MODEL_BINDINGS.stock,
+  );
+  assert.deepEqual(positions.readModel!.resultFields, {
+    reserved: `${ns}:metric.reserved`,
+    available: `${ns}:metric.available`,
+  });
+  assert.deepEqual(
+    Object.values(positions.readModel!.queries).map((value) => value.targetId),
+    [
+      `${ns}:query.workspace_stock_reservations`,
+      `${ns}:query.reservation_balance_get`,
+    ],
+  );
+  const { readModel: _readModel, ...copy } = positions;
+  void _readModel;
+  assert.deepEqual(
+    JSON.parse(
+      JSON.stringify(copy).replaceAll(
+        'item_stock_positions',
+        'posted_stock_balance_list',
+      ),
+    ),
+    posted,
+  );
+
+  // Exactly one scope: a parent relation or a field, never both or neither.
+  refuse((candidate) => {
+    dataset(candidate, 'stock').parent = {
+      relationId: `${ns}:relation.reservation_order_line`,
+      value: { source: 'record', field: 'recordId' },
+      ownership: 'reference',
+    };
+  }, /a dataset is scoped by its parent relation or by a field, not both/);
+  refuse((candidate) => {
+    delete dataset(candidate, 'movements').fieldScope;
+  }, /child datasets require a scoped list/);
+  // The field holds the record's id: a selected text field of the dataset's
+  // own entity long enough for one.
+  const scopedBy = (fieldId: string) => (candidate: Loose) => {
+    dataset(candidate, 'stock').fieldScope!.fieldId = fieldId;
+  };
+  const fieldScopeRefusal =
+    /a field scope reads a selected text field of the dataset's own entity that can hold a record id/;
+  // Not text: the posted quantity.
+  refuse(
+    scopedBy(`${ns}:field.posted_stock_balance_posted_quantity`),
+    fieldScopeRefusal,
+  );
+  // Too short to hold a record id: the unit.
+  refuse(
+    scopedBy(`${ns}:field.posted_stock_balance_unit_id`),
+    fieldScopeRefusal,
+  );
+  // A read-model figure is not a stored field.
+  refuse(scopedBy(`${ns}:metric.reserved`), fieldScopeRefusal);
+  // Another entity's field.
+  refuse(scopedBy(`${ns}:field.reservation_item_id`), fieldScopeRefusal);
+  // A field the dataset's list does not select.
+  refuse((candidate) => {
+    const copy = query(candidate, 'item_stock_positions');
+    copy.selections = copy.selections.filter(
+      (selection) =>
+        selection.field.targetId !== `${ns}:field.posted_stock_balance_item_id`,
+    );
+  }, fieldScopeRefusal);
+  // A closed declaration: the record's own id is the only value, and a
+  // record identity is not a field.
+  refuse(scopedBy('recordId'), /CANON_SCHEMA_INVALID/);
+  refuse((candidate) => {
+    dataset(candidate, 'stock').fieldScope!.value = {
+      source: 'record',
+      field: `${ns}:field.item_sku`,
+    };
+  }, /CANON_SCHEMA_INVALID/);
+  refuse((candidate) => {
+    dataset(candidate, 'stock').fieldScope!.value = {
+      source: 'selected',
+      field: 'recordId',
+    };
+  }, /CANON_SCHEMA_INVALID/);
+  // One company's rows on a record every company shares need the company its
+  // entry names.
+  refuse((candidate) => {
+    delete surface(candidate, 'item_detail').workspace!.entry;
+  }, /a company's dataset on a record every company shares requires a workspace entry/);
+});
+
+test('INVENTORY-PARITY: a stock document is entered like an order, with a choice over its type and values its first create writes', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type Editor = Loose & {
+    headerFields: (Loose & {
+      fieldId: string;
+      presentation?: { options: { value: string }[]; defaultValue?: string };
+    })[];
+    createValues: (Loose & { fieldId: string; value: Loose })[];
+  };
+  const ns = 'northstar.app';
+  const surface = (candidate: Loose, local: string) =>
+    (candidate.surfaces as Loose[]).find(
+      (value) => value.surfaceId === `${ns}:surface.${local}`,
+    ) as Loose & {
+      documentEditor?: Editor;
+      label: string;
+      workspace: Loose & { membership: string; entry?: Loose };
+    };
+  const editor = (candidate: Loose) =>
+    surface(candidate, 'inventory_transaction_form').documentEditor!;
+  const header = (candidate: Loose, name: string) =>
+    editor(candidate).headerFields.find(
+      (value) => value.fieldId === `${ns}:field.inventory_transaction_${name}`,
+    )!;
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+
+  assert.doesNotThrow(() =>
+    normalizeApplicationPackage(structuredClone(source)),
+  );
+  // The shipped declaration: the form and the record page carry the editor,
+  // the List is an operational destination of its own, named for documents.
+  assert.deepEqual(
+    surface(source, 'inventory_transaction_detail').documentEditor,
+    editor(source),
+  );
+  assert.equal(
+    surface(source, 'inventory_transaction_list').label,
+    'Inventory transactions',
+  );
+  assert.equal(
+    surface(source, 'inventory_transaction_list').workspace.membership,
+    'operational',
+  );
+  assert.equal(
+    surface(source, 'inventory_transaction_list').workspace.entry
+      ?.authorizationQueryId,
+    `${ns}:query.inventory_transaction_list`,
+  );
+  // G1: the Type choice offers two options of its enumeration.
+  assert.deepEqual(
+    header(source, 'type').presentation!.options.map((option) => option.value),
+    [
+      `${ns}:option.inventory_transaction_type_adjustment`,
+      `${ns}:option.inventory_transaction_type_transfer`,
+    ],
+  );
+  // G2: the draft state, the document itself as its source, and when and by
+  // whom it was recorded -- first create only.
+  assert.deepEqual(editor(source).createValues, [
+    {
+      fieldId: `${ns}:field.inventory_transaction_state`,
+      value: {
+        source: 'literal',
+        value: `${ns}:option.inventory_transaction_state_draft`,
+      },
+    },
+    {
+      fieldId: `${ns}:field.inventory_transaction_source_type`,
+      value: { source: 'literal', value: 'inventoryTransaction' },
+    },
+    {
+      fieldId: `${ns}:field.inventory_transaction_source_id`,
+      value: { source: 'record', field: 'recordId' },
+    },
+    {
+      fieldId: `${ns}:field.inventory_transaction_recorded_at`,
+      value: { source: 'generated', value: 'instant' },
+    },
+    {
+      fieldId: `${ns}:field.inventory_transaction_actor_id`,
+      value: { source: 'actor', field: 'principalId' },
+    },
+  ]);
+
+  // A choice over an enumeration offers only its options.
+  refuse((candidate) => {
+    header(candidate, 'type').presentation!.options[1]!.value =
+      `${ns}:option.inventory_transaction_type_not_a_type`;
+  }, /choice presentation requires a text or enumeration field/);
+  refuse((candidate) => {
+    header(candidate, 'type').presentation!.defaultValue =
+      `${ns}:option.inventory_transaction_type_shipment`;
+  }, /choice presentation requires a text or enumeration field/);
+  // A create value is a header field no editor field offers, with a value it
+  // admits: text that fits, an option of its enumeration, the record id or
+  // the principal into text long enough to hold one, the save's instant into
+  // a UTC instant.
+  const createValueRefusal =
+    /a create value is a header field no editor field offers, holding a value it admits/;
+  refuse((candidate) => {
+    editor(candidate).createValues[0]!.fieldId =
+      `${ns}:field.inventory_transaction_line_unit_id`;
+  }, createValueRefusal);
+  refuse((candidate) => {
+    editor(candidate).createValues[1]!.fieldId =
+      `${ns}:field.inventory_transaction_reason_code`;
+  }, createValueRefusal);
+  refuse((candidate) => {
+    editor(candidate).createValues[1]!.value = {
+      source: 'literal',
+      value: 'x'.repeat(81),
+    };
+  }, createValueRefusal);
+  refuse((candidate) => {
+    editor(candidate).createValues[0]!.value = {
+      source: 'literal',
+      value: `${ns}:option.inventory_transaction_state_not_a_state`,
+    };
+  }, createValueRefusal);
+  refuse((candidate) => {
+    (
+      (candidate.fields as Loose[]).find(
+        (value) =>
+          value.fieldId === `${ns}:field.inventory_transaction_source_id`,
+      )!.fieldType as { maximumLength: number }
+    ).maximumLength = 35;
+  }, createValueRefusal);
+  refuse((candidate) => {
+    editor(candidate).createValues[1]!.value = {
+      source: 'generated',
+      value: 'instant',
+    };
+  }, createValueRefusal);
+  refuse((candidate) => {
+    (
+      (candidate.fields as Loose[]).find(
+        (value) =>
+          value.fieldId === `${ns}:field.inventory_transaction_actor_id`,
+      )!.fieldType as { maximumLength: number }
+    ).maximumLength = 35;
+  }, createValueRefusal);
+  refuse((candidate) => {
+    editor(candidate).createValues.push(
+      structuredClone(editor(candidate).createValues[0]!),
+    );
+  }, /a create value names each field once/);
+  // A closed declaration: a literal, the record's own id, the save's instant
+  // or the saving principal -- nothing else.
+  refuse((candidate) => {
+    editor(candidate).createValues[2]!.value = {
+      source: 'selected',
+      field: 'recordId',
+    };
+  }, /CANON_SCHEMA_INVALID/);
+  refuse((candidate) => {
+    editor(candidate).createValues[2]!.fallback = 'none';
+  }, /CANON_SCHEMA_INVALID/);
+  refuse((candidate) => {
+    editor(candidate).createValues[3]!.value = {
+      source: 'generated',
+      value: 'uuid',
+    };
+  }, /CANON_SCHEMA_INVALID/);
+});
+
+test('INVENTORY-PARITY: a new stock document is dated now, not midnight, a default of now (ruling INV-A)', () => {
+  const source = composedApplicationDefinition();
+  type Loose = Record<string, unknown>;
+  type EditorField = Loose & {
+    fieldId: string;
+    defaultNow?: unknown;
+    defaultDaysFromToday?: number;
+  };
+  const ns = 'northstar.app';
+  const headerField = (candidate: Loose, document: string, name: string) =>
+    (
+      (candidate.surfaces as Loose[]).find(
+        (value) => value.surfaceId === `${ns}:surface.${document}_form`,
+      )!.documentEditor as { headerFields: EditorField[] }
+    ).headerFields.find(
+      (field) => field.fieldId === `${ns}:field.${document}_${name}`,
+    )!;
+  const refuse = (change: (candidate: Loose) => void, expected: RegExp) => {
+    const candidate = structuredClone(source);
+    change(candidate);
+    assert.throws(
+      () => normalizeApplicationPackage(candidate),
+      (error: unknown) =>
+        error instanceof CanonicalModelError &&
+        error.diagnostics.some((value) => expected.test(JSON.stringify(value))),
+    );
+  };
+  const effective = headerField(
+    source,
+    'inventory_transaction',
+    'effective_at',
+  );
+  assert.equal(effective.defaultNow, true);
+  assert.equal(effective.defaultDaysFromToday, undefined);
+  // Only a UTC date-time field, never beside another default, and only ever
+  // declared as true.
+  const refusal =
+    /a default of now is a UTC date-time field with no other default/;
+  refuse((candidate) => {
+    headerField(candidate, 'sales_order', 'ship_to_city').defaultNow = true;
+  }, refusal);
+  refuse((candidate) => {
+    headerField(
+      candidate,
+      'inventory_transaction',
+      'reason_narrative',
+    ).defaultNow = true;
+  }, refusal);
+  refuse((candidate) => {
+    headerField(
+      candidate,
+      'inventory_transaction',
+      'effective_at',
+    ).defaultDaysFromToday = 0;
+  }, refusal);
+  refuse((candidate) => {
+    headerField(candidate, 'inventory_transaction', 'effective_at').defaultNow =
+      false;
+  }, /CANON_SCHEMA_INVALID/);
+  // The instant the draft opens, to the second its control shows -- where a
+  // default counted from today is that day's midnight.
+  const opened = new Date('2026-09-30T14:03:27.456Z');
+  assert.equal(
+    declaredDefault({ defaultNow: true }, opened),
+    '2026-09-30T14:03:27.000Z',
+  );
+  assert.equal(
+    declaredDefault({ defaultDaysFromToday: 0 }, opened),
+    '2026-09-30T00:00:00.000Z',
   );
 });

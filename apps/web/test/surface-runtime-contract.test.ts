@@ -14,6 +14,7 @@ import {
 import {
   STATUS_ROLES,
   SurfaceCompositionSchema,
+  SurfaceDocumentEditorSchema,
   SurfaceListSchema,
 } from '@north-star/canonical-model';
 import {
@@ -83,9 +84,13 @@ import {
 import {
   compositionProgressionStates,
   renderCompositionAlerts,
+  renderCompositionChildren,
+  renderCompositionHeader,
   renderCompositionProgression,
   type CompositionData,
 } from '../src/surface-composition.js';
+import { entryCompanyChoice } from '../src/workspace-entry.js';
+import { createValuesFor } from '../src/document-editor.js';
 import { compiledFixturePath, demoEntry, webRoot } from './helpers.js';
 
 const APP_SERVER_RUNTIME_VIEW_REFUSAL_IMPORT =
@@ -2370,3 +2375,279 @@ async function close(server: Server): Promise<void> {
     server.close((error) => (error ? reject(error) : resolve()));
   });
 }
+
+test('an entry picks the only authorized company, else the last one chosen; a record every company shares may default, a document may not', () => {
+  const [first, second] = [
+    '00000000-0000-4000-8000-00000000000a',
+    '00000000-0000-4000-8000-00000000000b',
+  ] as const;
+  const choose = (
+    offered: readonly string[],
+    explicit: readonly string[] = [],
+    preference: string | undefined = undefined,
+    mayDefault = true,
+  ) => entryCompanyChoice({ offered, explicit, preference, mayDefault });
+  // The only authorized company is picked, whatever was chosen before.
+  assert.deepEqual(choose([first], [], second), {
+    selected: first,
+    invalid: false,
+  });
+  // Several: the one chosen last while it is still offered, else none.
+  assert.deepEqual(choose([first, second], [], second), {
+    selected: second,
+    invalid: false,
+  });
+  assert.deepEqual(
+    choose([first, second], [], '00000000-0000-4000-8000-00000000000c'),
+    { selected: null, invalid: false },
+  );
+  assert.deepEqual(choose([first, second]), { selected: null, invalid: false });
+  assert.deepEqual(choose([]), { selected: null, invalid: false });
+  // A surface that may not default (an existing document) picks nothing.
+  assert.deepEqual(choose([first], [], first, false), {
+    selected: null,
+    invalid: false,
+  });
+  // An explicit company must be exactly one offered company.
+  assert.deepEqual(choose([first, second], [second]), {
+    selected: second,
+    invalid: false,
+  });
+  assert.deepEqual(
+    choose([first], ['00000000-0000-4000-8000-00000000000c']).invalid,
+    true,
+  );
+  assert.deepEqual(choose([first, second], [first, second]), {
+    selected: null,
+    invalid: true,
+  });
+});
+
+test('a field-scoped section renders its rows, asks for a company it lacks and refuses a failed read without rows', () => {
+  const ns = 'northstar.fixture';
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const ref = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: 'v6',
+    targetId,
+  });
+  const composition = SurfaceCompositionSchema.parse({
+    kind: 'surfaceComposition',
+    schemaVersion: 'v6',
+    presentation: {
+      header: {
+        title: id('column', 'thing_name'),
+        subtitle: [],
+        facts: [id('column', 'thing_unit')],
+      },
+      recordActions: 'progressive',
+      technicalDetails: 'progressive',
+    },
+    fields: [
+      {
+        columnId: id('column', 'thing_name'),
+        label: 'Name',
+        orderKey: 10,
+        field: id('field', 'thing_name'),
+      },
+      {
+        columnId: id('column', 'thing_unit'),
+        label: 'Unit',
+        orderKey: 20,
+        field: id('field', 'thing_unit'),
+      },
+    ],
+    children: [
+      {
+        datasetId: id('dataset', 'thing_stock'),
+        presentation: {
+          selection: 'none',
+          description: 'Missing or unavailable data is not zero stock.',
+        },
+        label: 'Stock by place',
+        orderKey: 10,
+        query: ref('queryReference', id('query', 'stock_list')),
+        fieldScope: {
+          fieldId: id('field', 'stock_thing_id'),
+          value: { source: 'record', field: 'recordId' },
+        },
+        columns: [
+          {
+            columnId: id('column', 'stock_place'),
+            label: 'Place',
+            orderKey: 10,
+            field: id('field', 'stock_place'),
+            presentation: { role: 'primary', priority: 10 },
+          },
+          {
+            columnId: id('column', 'stock_available'),
+            label: 'Available',
+            orderKey: 20,
+            field: id('metric', 'available'),
+            presentation: { role: 'quantity', priority: 20 },
+          },
+        ],
+      },
+    ],
+    actions: [],
+  });
+  const surface = {
+    composition,
+    label: 'Thing detail',
+    surfaceId: id('surface', 'thing_detail'),
+  } as unknown as CompiledSurfaceDefinition;
+  const thing = {
+    archived: false,
+    entityId: id('entity', 'thing'),
+    recordId: '00000000-0000-4000-8000-000000000001',
+    revision: 1,
+    values: {},
+  };
+  const data = (
+    child: Omit<CompositionData['children'][number], 'definition'>,
+  ): CompositionData => ({
+    record: thing,
+    fields: {
+      record: thing,
+      cells: {
+        [id('column', 'thing_name')]: 'Safety vest',
+        [id('column', 'thing_unit')]: 'EA',
+      },
+    },
+    fieldsFailed: false,
+    children: [{ definition: composition.children[0]!, ...child }],
+    selections: {},
+    selected: null,
+    selectedDatasetId: null,
+    url: '/?surface=thing',
+    scope: null,
+  });
+  const view = {} as IssuedRequestRuntimeView;
+  const row = {
+    record: { ...thing, recordId: '00000000-0000-4000-8000-000000000002' },
+    cells: {
+      [id('column', 'stock_place')]: 'CAL-WH',
+      [id('column', 'stock_available')]: '12',
+    },
+  };
+  const ready = renderCompositionChildren(
+    data({ rows: [row], status: 'ready' }),
+    surface,
+    view,
+  );
+  assert.match(
+    ready,
+    /data-resolution="ready"[\s\S]*<th scope="col" class="">Place<\/th><th scope="col" class="composition-quantity">Available<\/th>/u,
+  );
+  assert.match(ready, /<strong>CAL-WH<\/strong>/u);
+  assert.match(
+    ready,
+    /data-column-label="Available" data-column-priority="20" data-cell-role="quantity">12<\/td>/u,
+  );
+  assert.match(ready, /About these quantities/u);
+  // No selection column: the section is read-only.
+  assert.doesNotMatch(ready, />Actions<\/th>|>Select</u);
+  assert.match(
+    renderCompositionHeader(surface, data({ rows: [], status: 'empty' })),
+    /<h1>Safety vest<\/h1>[\s\S]*<dt>Unit<\/dt><dd>EA<\/dd>/u,
+  );
+  // One company's rows with no company chosen: the section asks for one.
+  const waiting = renderCompositionChildren(
+    data({
+      rows: [],
+      status: 'failed',
+      error: 'QUERY_LEGAL_ENTITY_SCOPE_REQUIRED',
+    }),
+    surface,
+    view,
+  );
+  assert.match(
+    waiting,
+    /<div role="status" data-message="QUERY_LEGAL_ENTITY_SCOPE_REQUIRED"/u,
+  );
+  assert.doesNotMatch(waiting, /<table|COMPOSITION_CHILD_FAILED/u);
+  // A failed read is a refusal, never an empty table.
+  const failed = renderCompositionChildren(
+    data({ rows: [], status: 'failed', error: 'COMPOSITION_CHILD_FAILED' }),
+    surface,
+    view,
+  );
+  assert.match(
+    failed,
+    /<div role="alert" data-message="COMPOSITION_CHILD_FAILED"/u,
+  );
+  assert.doesNotMatch(failed, /<table/u);
+});
+
+test('a document editor writes its declared create values on the header first create only', () => {
+  const ns = 'northstar.fixture';
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const definition = SurfaceDocumentEditorSchema.parse({
+    kind: 'draftDocumentEditor',
+    headerFormSurfaceId: id('surface', 'slip_form'),
+    recordSurfaceId: id('surface', 'slip_detail'),
+    lineFormSurfaceId: id('surface', 'slip_line_form'),
+    lineQueryId: id('query', 'slip_line_list'),
+    parentRelationId: id('relation', 'slip_line_slip'),
+    stateFieldId: id('field', 'slip_state'),
+    editableStateIds: [id('option', 'slip_state_draft')],
+    headerFields: [{ fieldId: id('field', 'slip_reason'), label: 'Reason' }],
+    lineFields: [{ fieldId: id('field', 'slip_line_item'), label: 'Item' }],
+    lineNumberFieldId: id('field', 'slip_line_number'),
+    saveMode: 'sequential',
+    createValues: [
+      {
+        fieldId: id('field', 'slip_state'),
+        value: { source: 'literal', value: id('option', 'slip_state_draft') },
+      },
+      {
+        fieldId: id('field', 'slip_source_id'),
+        value: { source: 'record', field: 'recordId' },
+      },
+      {
+        fieldId: id('field', 'slip_recorded_at'),
+        value: { source: 'generated', value: 'instant' },
+      },
+      {
+        fieldId: id('field', 'slip_actor_id'),
+        value: { source: 'actor', field: 'principalId' },
+      },
+    ],
+  });
+  const header = {
+    id: '00000000-0000-4000-8000-0000000000a1',
+    record: null,
+    removed: false,
+  };
+  const save = {
+    instant: '2026-09-30T14:05:09.123Z',
+    principalId: '00000000-0000-4000-8000-0000000000b2',
+  };
+  // The header's first create: the literal as declared, its own id -- the id
+  // the create itself sends -- and the save's instant and principal.
+  assert.deepEqual(createValuesFor(definition, header, true, save), {
+    [id('field', 'slip_state')]: id('option', 'slip_state_draft'),
+    [id('field', 'slip_source_id')]: header.id,
+    [id('field', 'slip_recorded_at')]: save.instant,
+    [id('field', 'slip_actor_id')]: save.principalId,
+  });
+  // Never an update of a saved header, a removal or a line.
+  assert.deepEqual(
+    createValuesFor(
+      definition,
+      { ...header, record: { recordId: header.id } },
+      true,
+      save,
+    ),
+    {},
+  );
+  assert.deepEqual(
+    createValuesFor(definition, { ...header, removed: true }, true, save),
+    {},
+  );
+  assert.deepEqual(createValuesFor(definition, header, false, save), {});
+  // An editor that declares none writes none.
+  const { createValues: _declared, ...plain } = definition;
+  void _declared;
+  assert.deepEqual(createValuesFor(plain, header, true, save), {});
+});

@@ -172,7 +172,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 13 adds List row actions and supplementary (omitted-when-denied) progress.
     // 14 adds record alerts and progression, multi-row Tasks and record
     // columns and links that name a relation of their record.
-    maximumSupportedVersion: 14,
+    // 15 adds composition datasets scoped by a field of their own entity.
+    // 16 adds a draft editor's create values.
+    maximumSupportedVersion: 16,
   },
 });
 

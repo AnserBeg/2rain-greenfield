@@ -15,6 +15,7 @@
 | **BUILD** | `PURCHASING-PARITY` | Purchasing parity with PaneFlow through metadata, stacked on `packet/SALES-PARITY`; sole local author on `packet/PURCHASING-PARITY`; slices 1-4 (priced purchase orders, ending an order, receiving paperwork, what is still to arrive) and the ADR-0066 re-baseline on draft PR #8 (2026-09-30); outside the Critical set; [record](packets/PURCHASING-PARITY.md); no merge/deployment |
 | **BUILD** | `ORDER-PARITY` | The order Lists at PaneFlow parity through metadata, stacked on `packet/PURCHASING-PARITY`; sole local author on `packet/ORDER-PARITY`; increment A (List row actions, supplementary progress, Sales and Purchase orders List figures and Total) 2026-09-30; outside the Critical set; [record](packets/ORDER-PARITY.md); no merge/deployment |
 | **BUILD** | `PAYABLES` | Vendor bills, payments and credits mirroring receivables, stacked on `packet/ORDER-PARITY`; sole local author on `packet/PAYABLES`; increments 1-2 2026-09-30, increment 3 (three-way match) chartered; outside the Critical set; [record](packets/PAYABLES.md); no merge/deployment |
+| **BUILD** | `INVENTORY-PARITY` | Stock on the item page and stock documents (adjustments, transfers, opening stock; STK- numbers; Effective date now, ruling INV-A) through metadata and the shared runtimes, stacked on `packet/PAYABLES`; sole local author on `packet/INVENTORY-PARITY`; S1 and the documents slice 2026-09-30; outside the Critical set; [record](packets/INVENTORY-PARITY.md); no merge/deployment |
 | **SUPPORT** | — | idle |
 
 
