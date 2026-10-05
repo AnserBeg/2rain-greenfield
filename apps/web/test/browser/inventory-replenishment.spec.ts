@@ -59,8 +59,17 @@ test('an item keeps its reorder levels, Stock by item names what is short and th
     ).toBeVisible();
     await page.getByLabel('Reorder point', { exact: true }).fill('20');
     await page.getByLabel('Reorder up to', { exact: true }).fill('30');
-    // The preferred location is chosen by name; the item keeps its id.
-    const location = page.getByLabel('Preferred location', { exact: true });
+    // The preferred location is chosen by name; the item keeps its id. A
+    // select is found by its role, as every generic form's choice is: its
+    // label's text includes the chosen option.
+    const location = page.getByRole('combobox', {
+      name: 'Preferred location',
+      exact: true,
+    });
+    await expect(location).toHaveAttribute(
+      'data-form-reference',
+      `${ns}:field.item_preferred_location_id`,
+    );
     await expect(location.locator('option')).toHaveText([
       'None',
       'Beltline store',
