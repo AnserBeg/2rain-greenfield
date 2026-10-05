@@ -169,7 +169,10 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 10 adds declared Lists: columns, saved views, filters, sort and export.
     // 11 adds editor defaults and scoped pickers.
     // 12 adds List progress, open and before-today views and overdue dates.
-    maximumSupportedVersion: 12,
+    // 13 adds List row actions and supplementary (omitted-when-denied) progress.
+    // 14 adds record alerts and progression, multi-row Tasks and record
+    // columns and links that name a relation of their record.
+    maximumSupportedVersion: 14,
   },
 });
 

@@ -49,6 +49,7 @@ export {
   SurfaceListSchema,
   type SurfaceList,
   type SurfaceListProgress,
+  type SurfaceListRowAction,
   FieldNumberingSchema,
   type FieldNumbering,
   SurfaceDocumentEditorSchema,

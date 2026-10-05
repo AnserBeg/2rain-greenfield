@@ -17,7 +17,10 @@ import {
   worklistQueries,
   worklistSurfaces,
 } from './list-declarations.js';
-import { purchasingWorkspace } from '../purchasing/workspace.js';
+import {
+  purchasingWorkspace,
+  receivingWorkspaceQueries,
+} from '../purchasing/workspace.js';
 import { inventoryDocumentWorkspace } from '../inventory/workspace.js';
 
 const version = 'v6' as const;
@@ -104,6 +107,15 @@ const LINES_LEAD: ReadonlySet<string> = new Set([
 const RECORD_DATA_SOURCES: Readonly<Record<string, string>> = Object.freeze({
   sales_order_detail: 'commercial_order_get',
   purchase_order_detail: 'commercial_purchase_order_get',
+});
+
+/**
+ * Lists that read their rows through a read-model clone of their query, such
+ * as purchase orders with their totals (ORDER-PARITY). Swapped after the
+ * worklists are cut from their source Lists, which keep reading plain clones.
+ */
+const LIST_DATA_SOURCES: Readonly<Record<string, string>> = Object.freeze({
+  purchase_order_list: 'commercial_purchase_order_list',
 });
 
 /** The mounted module names, in composition order, for callers that assert on the set. */
@@ -203,6 +215,11 @@ export function composedApplicationDefinition(): Record<string, unknown> {
         APPLICATION_NAMESPACE,
         merged(definitions, 'queries') as Record<string, unknown>[],
       ),
+      // A receipt's lines with what each can still reverse (ORDER-PARITY).
+      ...receivingWorkspaceQueries(
+        APPLICATION_NAMESPACE,
+        merged(definitions, 'queries') as Record<string, unknown>[],
+      ),
     ],
     relations: merged(definitions, 'relations'),
     schemaVersion: version,
@@ -281,12 +298,33 @@ function withWorklistSurfaces(surfaces: unknown[]): unknown[] {
 }
 
 /** Declared Lists apply after the workspace pass, over the final surfaces. */
-function withDeclaredLists<T extends { surfaces: Record<string, unknown>[] }>(
-  application: T,
-): T {
+function withDeclaredLists<
+  T extends {
+    queries: Record<string, unknown>[];
+    surfaces: Record<string, unknown>[];
+  },
+>(application: T): T {
   return {
     ...application,
-    surfaces: declareLists(APPLICATION_NAMESPACE, application.surfaces),
+    surfaces: declareLists(
+      APPLICATION_NAMESPACE,
+      application.surfaces.map((surface) => {
+        const local = String(surface.surfaceId).split(':surface.')[1] ?? '';
+        const queryId = `${APPLICATION_NAMESPACE}:query.${LIST_DATA_SOURCES[local] ?? ''}`;
+        // Only when the application composes the read-model query.
+        return Object.hasOwn(LIST_DATA_SOURCES, local) &&
+          application.queries.some((query) => query.queryId === queryId)
+          ? {
+              ...surface,
+              dataSource: {
+                kind: 'queryReference',
+                schemaVersion: version,
+                targetId: queryId,
+              },
+            }
+          : surface;
+      }),
+    ),
   };
 }
 

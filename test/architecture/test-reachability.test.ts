@@ -422,7 +422,13 @@ test('the Playwright producers run every browser spec in exactly one job and rep
   assert.ok(specs.length > 0, 'browser spec discovery returned zero files');
   // Chartered and not yet written: each must reach the operations job by its
   // file name alone.
-  const charted = ['expected-receipts', 'item-stock', 'order-lists', 'payables']
+  const charted = [
+    'expected-receipts',
+    'item-stock',
+    'order-lists',
+    'order-pages',
+    'payables',
+  ]
     .map((name) => resolve(`apps/web/test/browser/${name}.spec.ts`))
     // Once written, a chartered spec is discovered like any other; counting
     // it twice would read as two jobs.

@@ -103,6 +103,23 @@ async function storedOrders(fixture: Fixture) {
   return rows;
 }
 
+/** Stored active sales order lines of the fixture's company. */
+async function storedLineCount(fixture: Fixture) {
+  const target = await governedStorageTarget();
+  const line = target.entities.find(
+    (value) => value.entityId === `${ns}:entity.sales_order_line`,
+  )!;
+  const { rows } = await fixture.pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count FROM ${fulfillmentTable(line)}
+      WHERE tenant_id = $1 AND environment_id = $2 AND archived_at IS NULL`,
+    [
+      fixture.app.runtime.identity.tenantId,
+      fixture.app.runtime.identity.environmentId,
+    ],
+  );
+  return Number(rows[0]!.count);
+}
+
 test(
   'a declared List pages, counts, searches by label, sorts, filters and exports through the query gateway',
   { timeout: 300_000 },
@@ -117,11 +134,15 @@ test(
           ).length;
 
         // Tabs: one server count per view, equal to the stored rows by state.
+        // The List orders carry no lines, so nothing is left to ship: the
+        // stored lines say so (order-lists.test.ts counts shipped work).
+        assert.equal(await storedLineCount(fixture), 0);
         const first = await page(listUrl(fixture, 'sales_order'));
         assert.equal(first.status, 200);
         assert.equal(first.currentView, salesView('all'));
         assert.deepEqual(first.counts, {
           [salesView('all')]: ORDERS,
+          [salesView('to_ship')]: 0,
           [salesView('draft')]: byState('draft'),
           [salesView('released')]: byState('released'),
           [salesView('closed')]: byState('closed'),
@@ -217,10 +238,11 @@ test(
           .replace(/^\uFEFF/u, '')
           .trimEnd()
           .split('\r\n');
-        // Ruling E adds the salesperson, named like the customer.
+        // Ruling E adds the salesperson, named like the customer; ORDER-PARITY
+        // the units each order's lines order, ship and leave open.
         assert.equal(
           csv[0],
-          'Number,Customer,Salesperson,Order date,Requested,Status,Currency',
+          'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Currency',
         );
         assert.equal(csv.length - 1, byState('draft'));
         assert.ok(csv.slice(1).every((row) => row.includes(',Draft,')));

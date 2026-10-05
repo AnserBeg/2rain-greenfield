@@ -522,6 +522,7 @@ export class SemanticQueryGateway {
           request.arguments,
         )
       : null;
+    assertRelationTargetsArgument(definition, request.arguments);
     if (definition.lifecycle !== 'active') {
       if (definition.queryType === 'aggregate') {
         throw new UnsupportedSemanticAggregateQueryError(
@@ -723,6 +724,45 @@ export class SemanticQueryGateway {
       }),
     );
   }
+}
+
+/** At most this many relations a single get may be asked to state. */
+export const MAXIMUM_RELATION_TARGETS = 4;
+
+/**
+ * `relationTargets` asks a get to state, for each named relation of the read
+ * record, the stored target record id -- an invoice's sales order -- as
+ * `relationLabels[relationId] = { recordId, label: null }`. It is a column of
+ * a record the caller may already read, so it needs no permission of its own:
+ * the label and any link re-enter the target's own query under current
+ * policy. The executor resolves each id against the pinned compiled relations
+ * and refuses one the queried entity does not own; here only its shape is
+ * ruled, on the one query type that takes it.
+ */
+function assertRelationTargetsArgument(
+  definition: RegisteredSemanticQueryDefinition,
+  argumentsValue: ImmutableJsonValue,
+): void {
+  if (!isRecord(argumentsValue) || !('relationTargets' in argumentsValue))
+    return;
+  const targets = argumentsValue.relationTargets;
+  if (definition.queryType !== 'get')
+    throw new MalformedSemanticQueryRequestError(
+      'relation targets belong only to a registered get query',
+    );
+  if (
+    !Array.isArray(targets) ||
+    targets.length === 0 ||
+    targets.length > MAXIMUM_RELATION_TARGETS ||
+    targets.some(
+      (target) =>
+        typeof target !== 'string' || !canonicalIdPattern.test(target),
+    ) ||
+    new Set(targets).size !== targets.length
+  )
+    throw new MalformedSemanticQueryRequestError(
+      `relation targets are one to ${String(MAXIMUM_RELATION_TARGETS)} distinct relation ids`,
+    );
 }
 
 /**

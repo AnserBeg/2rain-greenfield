@@ -33,19 +33,25 @@ import {
   AuthenticatedRequestEntryAdapter,
   type AuthenticatedIdentity,
 } from '../../packages/runtime/src/request-context.js';
-import { ModuleRuntimeInterpreterError } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import {
+  ModuleRuntimeInterpreterError,
+  relationTargetPlans,
+} from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import { commercialReadModel } from '../../packages/postgres-provider/src/commercial-read-model.js';
 import { encodeSharedListCursor } from '../../packages/runtime/src/list-behavior/index.js';
 import {
   SEMANTIC_OPERATION_REQUEST_VERSION,
   SEMANTIC_OPERATION_RESULT_VERSION,
   SemanticOperationGateway,
   SemanticOperationMediationAuthority,
+  type RegisteredCapabilityOperationExecutor,
   type SemanticOperationExecutionRequest,
   type SemanticOperationExecutor,
   type SemanticOperationNonAcceptedRequest,
   type SemanticOperationResultEnvelope,
 } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import {
+  MalformedSemanticQueryRequestError,
   SEMANTIC_QUERY_RESULT_VERSION,
   SEMANTIC_QUERY_REQUEST_VERSION,
   registeredSemanticQueryFromPinnedView,
@@ -79,6 +85,7 @@ import {
 } from '../../apps/web/src/surface-runtime.js';
 import {
   SurfaceProjectionError,
+  pickerEnumerationQuery,
   readCompiledSurfaceDataBinding,
   readCompiledSurfaceManifest,
   type CompiledSurfaceDataBinding,
@@ -87,6 +94,7 @@ import {
   FIXTURE_IDS,
   ordinaryModuleV1,
 } from '../fixtures/g2/module-conformance/definitions.js';
+import { governedStorageTarget } from '../helpers/governed-storage-target.js';
 import {
   EVERY_KIND_FIELD_IDS,
   everyFieldKindModule,
@@ -8426,10 +8434,11 @@ test('PURCHASING-PARITY: Expected receipts sums, counts and marks late orders in
   );
 
   // Two Lists read purchase orders: the Purchase orders List keeps standing
-  // for them -- its navigation and the receipt form's order picker.
+  // for them -- its navigation and the receipt form's order picker. It reads
+  // its orders with their totals (ORDER-PARITY), under its own parameter.
   const orders = await renderSurfaceRuntimeWithData(
     f.view,
-    `/?${new URLSearchParams({ surface: id('surface', 'purchase_order_list'), [`${ns}:parameter.purchase_order_list_legal_entity_scope`]: scope }).toString()}`,
+    `/?${new URLSearchParams({ surface: id('surface', 'purchase_order_list'), [`${ns}:parameter.commercial_purchase_order_list_legal_entity_scope`]: scope }).toString()}`,
     at('2026-09-29T15:00:00.000Z'),
   );
   assert.match(
@@ -8460,7 +8469,8 @@ test('PURCHASING-PARITY: Expected receipts sums, counts and marks late orders in
   assert.match(receiptForm.html, /PO-LATE/u);
 
   // Without received-quantity read the List is refused by the progress
-  // query's name; the Purchase orders List does not read it and still serves.
+  // query's name; the Purchase orders List reads it as supplementary figures
+  // (ORDER-PARITY) and still serves without them.
   f.deniedReads.add(id('permission', 'purchase_order_received_read'));
   const denied = await renderSurfaceRuntimeWithData(
     f.view,
@@ -8512,7 +8522,7 @@ test('PURCHASING-PARITY: Expected receipts sums, counts and marks late orders in
   assert.equal(refused.queryId, id('query', 'purchase_order_received_list'));
   const stillServed = await renderSurfaceRuntimeWithData(
     f.view,
-    `/?${new URLSearchParams({ surface: id('surface', 'purchase_order_list'), [`${ns}:parameter.purchase_order_list_legal_entity_scope`]: scope }).toString()}`,
+    `/?${new URLSearchParams({ surface: id('surface', 'purchase_order_list'), [`${ns}:parameter.commercial_purchase_order_list_legal_entity_scope`]: scope }).toString()}`,
     f.gateways,
   );
   assert.doesNotMatch(stillServed.html, /QUERY_PERMISSION_DENIED/u);
@@ -8634,4 +8644,1736 @@ test('PURCHASING-PARITY: a line with nothing left to arrive offers no receipt; a
   );
   assert.match(stale.html, /COMPOSITION_TASK_UNAVAILABLE/u);
   assert.equal(f.executor.calls.length, 0);
+});
+
+test('ORDER-PARITY: order Lists sum their lines, link each row to its work, and serve without figures current policy withholds', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const [scope, foreign] = f.scopes as [string, string];
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  // The real commercial read model states each paged order's total from its
+  // lines, read through the gateway as the List's own request is.
+  const gateways: SurfaceRuntimeGateways = {
+    ...f.gateways,
+    clock: () => new Date('2026-09-29T15:00:00.000Z'),
+    queryGateway: new SemanticQueryGateway(
+      f.policy,
+      f.executor,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        'northstar.sales:capability.fulfillment': async ({ result }) => result,
+        'northstar.sales:capability.commercial': commercialReadModel,
+      },
+    ),
+  };
+  const counts = (html: string) =>
+    Object.fromEntries(
+      [
+        ...html.matchAll(
+          /data-view-id="([^"]+)"[^>]*>(?:<span>[^<]*<\/span>)(?:<span class="list-view__count" data-view-count="(\d+)")?/gu,
+        ),
+      ].map((match) => [
+        match[1]!,
+        match[2] === undefined ? null : Number(match[2]),
+      ]),
+    );
+  const row = (html: string, recordId: string) =>
+    new RegExp(
+      `<tr data-compact-card="true" data-record-id="${recordId}">([\\s\\S]*?)</tr>`,
+      'u',
+    ).exec(html)?.[1] ?? '';
+  const cell = (html: string, recordId: string, column: string) =>
+    new RegExp(`data-column-id="${column}">([\\s\\S]*?)</td>`, 'u').exec(
+      row(html, recordId),
+    )?.[1];
+  const action = (html: string, recordId: string) => {
+    const match =
+      /<a class="secondary-action" href="([^"]+)" data-row-action="([^"]+)" aria-label="([^"]+)">([^<]+)<\/a>/u.exec(
+        row(html, recordId),
+      );
+    return match
+      ? {
+          href: match[1]!.replaceAll('&amp;', '&'),
+          actionId: match[2]!,
+          name: match[3]!,
+          label: match[4]!,
+        }
+      : null;
+  };
+  const withheldMark = '<span class="muted">—</span>';
+
+  // Sales: orders with lines and shipped quantities, stored as the providers
+  // do -- a line points at its order, a shipped row at its line.
+  const salesOrder = (
+    number: string,
+    state: string,
+    lines: readonly (readonly [ordered: number, shipped: number])[],
+    company = scope,
+  ) => {
+    const orderId = f.executor.seed(
+      'sales_order',
+      {
+        [id('field', 'sales_order_number')]: number,
+        [id('field', 'sales_order_customer_party_id')]: f.party,
+        [id('field', 'sales_order_order_date')]: '2026-09-20T12:00:00.000Z',
+        [id('field', 'sales_order_currency')]: 'CAD',
+        [id('derived_state_field', 'machine.sales_order_lifecycle')]: id(
+          'state',
+          `sales_order_${state}`,
+        ),
+      },
+      company,
+    );
+    for (const [ordered, shipped] of lines) {
+      const lineId = f.executor.seed(
+        'sales_order_line',
+        {
+          [id('field', 'sales_order_line_ordered_quantity')]: String(ordered),
+          [id('relation', 'sales_order_line_order')]: orderId,
+        },
+        company,
+      );
+      if (shipped > 0)
+        f.executor.seed(
+          'sales_order_shipped',
+          {
+            [id('field', 'sales_order_shipped_shipped_quantity')]:
+              String(shipped),
+            [id('relation', 'sales_order_shipped_order_line')]: lineId,
+          },
+          company,
+        );
+    }
+    return orderId;
+  };
+  const open = salesOrder('SO-OPEN', 'released', [
+    [10, 4],
+    [5, 0],
+  ]);
+  const shipped = salesOrder('SO-SHIPPED', 'released', [[3, 3]]);
+  const draft = salesOrder('SO-DRAFT', 'draft', [[7, 0]]);
+  salesOrder('SO-FOREIGN', 'released', [[9, 0]], foreign);
+  const salesView = (local: string) =>
+    id('list_view', `sales_order_list_${local}`);
+  const salesColumn = (local: string) =>
+    id('list_column', `sales_order_list_${local}`);
+  const salesUrl = (parameters: Record<string, string> = {}) =>
+    `/?${new URLSearchParams({
+      surface: id('surface', 'sales_order_list'),
+      [id('parameter', 'sales_order_list_legal_entity_scope')]: scope,
+      ...parameters,
+    }).toString()}`;
+
+  const sales = await renderSurfaceRuntimeWithData(
+    f.view,
+    salesUrl(),
+    gateways,
+  );
+  assert.equal(sales.statusCode, 200);
+  // Tabs are server counts; To ship is released with something open.
+  assert.deepEqual(counts(sales.html), {
+    [salesView('all')]: 3,
+    [salesView('to_ship')]: 1,
+    [salesView('draft')]: 1,
+    [salesView('released')]: 2,
+    [salesView('closed')]: 0,
+    [salesView('cancelled')]: 0,
+  });
+  assert.equal(cell(sales.html, open, salesColumn('ordered')), '15');
+  assert.equal(cell(sales.html, open, salesColumn('shipped')), '4');
+  assert.equal(cell(sales.html, open, salesColumn('open')), '11');
+  // Open reads 0 outside the released state, and once all has shipped.
+  assert.equal(cell(sales.html, draft, salesColumn('open')), '0');
+  assert.equal(cell(sales.html, shipped, salesColumn('open')), '0');
+  assert.doesNotMatch(sales.html, /SO-FOREIGN/u);
+  assert.match(sales.html, /<th scope="col">Actions<\/th>/u);
+  // The row's one action: Fulfill while something is open on a released
+  // order, at its fulfillment section; otherwise View, at the page itself.
+  const fulfill = action(sales.html, open)!;
+  assert.deepEqual(
+    [fulfill.label, fulfill.name, fulfill.actionId],
+    [
+      'Fulfill',
+      'Fulfill SO-OPEN',
+      id('list_row_action', 'sales_order_list_fulfill'),
+    ],
+  );
+  const target = new URL(fulfill.href, 'http://fixture.local');
+  assert.equal(
+    target.searchParams.get('surface'),
+    id('surface', 'sales_order_detail'),
+  );
+  assert.equal(target.searchParams.get('record'), open);
+  assert.equal(
+    target.searchParams.get(
+      id('parameter', 'commercial_order_get_legal_entity_scope'),
+    ),
+    scope,
+  );
+  assert.equal(target.hash, `#${id('dataset', 'fulfillment_lines')}`);
+  for (const other of [shipped, draft]) {
+    const view = action(sales.html, other)!;
+    assert.equal(view.label, 'View');
+    assert.equal(new URL(view.href, 'http://fixture.local').hash, '');
+  }
+  // Progress re-enters current policy for the companies listed, every request.
+  const progressCalls = f.policy.calls.filter(
+    (call) =>
+      (call.decisionInput as { kind?: string }).kind ===
+      'registeredSemanticListProgressPolicyInput',
+  );
+  assert.deepEqual(
+    [...new Set(progressCalls.map((call) => call.permissionId))].sort(),
+    [
+      id('permission', 'sales_order_line_read'),
+      id('permission', 'sales_order_shipped_read'),
+    ],
+  );
+  // One page, six tab counts: each passed both reads.
+  assert.equal(progressCalls.length, 2 * 7);
+  const toShip = await renderSurfaceRuntimeWithData(
+    f.view,
+    salesUrl({ view: salesView('to_ship') }),
+    gateways,
+  );
+  assert.match(toShip.html, /data-list-total="1"/u);
+  assert.match(toShip.html, /SO-OPEN/u);
+  assert.doesNotMatch(toShip.html, /SO-SHIPPED|SO-DRAFT/u);
+
+  // Without shipped-quantity read the figures are supplementary: the List
+  // serves its other views with "—", saying which figures it reads without;
+  // To ship, which only they can judge, is refused by name and not counted.
+  f.deniedReads.add(id('permission', 'sales_order_shipped_read'));
+  const withheld = await renderSurfaceRuntimeWithData(
+    f.view,
+    salesUrl(),
+    gateways,
+  );
+  assert.equal(withheld.statusCode, 200);
+  assert.doesNotMatch(withheld.html, /data-diagnostic-code=/u);
+  assert.deepEqual(counts(withheld.html), {
+    [salesView('all')]: 3,
+    [salesView('to_ship')]: null,
+    [salesView('draft')]: 1,
+    [salesView('released')]: 2,
+    [salesView('closed')]: 0,
+    [salesView('cancelled')]: 0,
+  });
+  for (const local of ['ordered', 'shipped', 'open'])
+    assert.equal(cell(withheld.html, open, salesColumn(local)), withheldMark);
+  assert.match(
+    withheld.html,
+    new RegExp(
+      `data-list-progress-withheld="${id('query', 'sales_order_shipped_list')}">Ordered, Shipped and Open are withheld by current policy; To ship needs them and is unavailable.<`,
+      'u',
+    ),
+  );
+  // Nothing open can be stated, so no row promises the work.
+  assert.equal(action(withheld.html, open)?.label, 'View');
+  const refusedView = await renderSurfaceRuntimeWithData(
+    f.view,
+    salesUrl({ view: salesView('to_ship') }),
+    gateways,
+  );
+  assert.match(
+    refusedView.html,
+    /data-diagnostic-code="QUERY_PERMISSION_DENIED"/u,
+  );
+  assert.doesNotMatch(refusedView.html, /SO-OPEN/u);
+  assert.equal(counts(refusedView.html)[salesView('all')], 3);
+  assert.match(refusedView.html, /aria-current="page"><span>To ship<\/span>/u);
+  // The export follows the page: the figures' columns are empty; an open
+  // view refuses rather than writing every row.
+  const exported = await renderSurfaceRuntimeWithData(
+    f.view,
+    salesUrl({ export: 'csv' }),
+    gateways,
+  );
+  assert.equal(exported.statusCode, 200);
+  const csv = exported
+    .download!.body.replace(/^\uFEFF/u, '')
+    .trimEnd()
+    .split('\r\n');
+  assert.equal(
+    csv[0],
+    'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Currency',
+  );
+  assert.ok(csv.some((line) => /^SO-OPEN,.*,,,,CAD$/u.test(line)));
+  const refusedExport = await renderSurfaceRuntimeWithData(
+    f.view,
+    salesUrl({ view: salesView('to_ship'), export: 'csv' }),
+    gateways,
+  );
+  assert.equal(refusedExport.statusCode, 422);
+  assert.match(refusedExport.html, /QUERY_PERMISSION_DENIED/u);
+  // The gateway itself still refuses a request carrying the progress, by
+  // the progress query's name: the fallback is the runtime's, per request.
+  const refused = await gateways.queryGateway
+    .invoke(f.view, {
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      queryId: id('query', 'sales_order_list'),
+      arguments: {
+        includeArchived: false,
+        [id('parameter', 'sales_order_list_legal_entity_scope')]: scope,
+        list: {
+          cursor: null,
+          matchMode: 'substring',
+          pageSize: 10,
+          relationLabels: [],
+          schemaVersion: 'northstar.shared-list-query/v1',
+          search: '',
+          sort: [],
+          progress: {
+            lines: {
+              fieldId: id('field', 'sales_order_line_ordered_quantity'),
+              queryId: id('query', 'commercial_lines'),
+              relationId: id('relation', 'sales_order_line_order'),
+            },
+            done: {
+              fieldId: id('field', 'sales_order_shipped_shipped_quantity'),
+              queryId: id('query', 'sales_order_shipped_list'),
+              relationId: id('relation', 'sales_order_shipped_order_line'),
+            },
+            outputs: {
+              done: id('list_output', 'sales_order_list_shipped'),
+              open: id('list_output', 'sales_order_list_open'),
+              ordered: id('list_output', 'sales_order_list_ordered'),
+            },
+          },
+        },
+      },
+    })
+    .then(
+      () => null,
+      (error: unknown) => error,
+    );
+  assert.ok(refused instanceof SemanticQueryPolicyDeniedError);
+  assert.equal(refused.queryId, id('query', 'sales_order_shipped_list'));
+  f.deniedReads.clear();
+
+  // Purchasing: the List reads its commercial clone, so each order states its
+  // total from its own lines, beside its received and open units.
+  const purchase = (
+    number: string,
+    state: string,
+    expected: string | null,
+    lines: readonly (readonly [
+      ordered: number,
+      received: number,
+      price: string | null,
+    ])[],
+  ) => {
+    const orderId = f.executor.seed(
+      'purchase_order',
+      {
+        [id('field', 'purchase_order_number')]: number,
+        [id('field', 'purchase_order_supplier_party_id')]: f.party,
+        [id('field', 'purchase_order_order_date')]: '2026-09-01T12:00:00.000Z',
+        [id('field', 'purchase_order_expected_date')]: expected,
+        [id('field', 'purchase_order_currency')]: 'CAD',
+        [id('derived_state_field', 'machine.purchase_order_lifecycle')]: id(
+          'state',
+          `purchase_order_${state}`,
+        ),
+      },
+      scope,
+    );
+    for (const [index, [ordered, received, price]] of lines.entries()) {
+      const lineId = f.executor.seed(
+        'purchase_order_line',
+        {
+          [id('field', 'purchase_order_line_line_number')]: String(index + 1),
+          [id('field', 'purchase_order_line_ordered_quantity')]:
+            String(ordered),
+          [id('field', 'purchase_order_line_unit_price')]: price,
+          [id('relation', 'purchase_order_line_order')]: orderId,
+        },
+        scope,
+      );
+      if (received > 0)
+        f.executor.seed(
+          'purchase_order_received',
+          {
+            [id('field', 'purchase_order_received_received_quantity')]:
+              String(received),
+            [id('relation', 'purchase_order_received_order_line')]: lineId,
+          },
+          scope,
+        );
+    }
+    return orderId;
+  };
+  const late = purchase('PO-LATE', 'released', '2026-09-25T12:00:00.000Z', [
+    [10, 4, '2.5'],
+    [5, 0, '1.2'],
+  ]);
+  const received = purchase('PO-RECEIVED', 'released', null, [[3, 3, '4']]);
+  const unpriced = purchase('PO-UNPRICED', 'draft', null, [[2, 0, null]]);
+  const purchaseView = (local: string) =>
+    id('list_view', `purchase_order_list_${local}`);
+  const purchaseColumn = (local: string) =>
+    id('list_column', `purchase_order_list_${local}`);
+  // The clone renames the company parameter; the List reads by its own.
+  const purchaseUrl = (parameters: Record<string, string> = {}) =>
+    `/?${new URLSearchParams({
+      surface: id('surface', 'purchase_order_list'),
+      [id('parameter', 'commercial_purchase_order_list_legal_entity_scope')]:
+        scope,
+      ...parameters,
+    }).toString()}`;
+  const orders = await renderSurfaceRuntimeWithData(
+    f.view,
+    purchaseUrl(),
+    gateways,
+  );
+  assert.equal(orders.statusCode, 200);
+  assert.deepEqual(counts(orders.html), {
+    [purchaseView('all')]: 3,
+    [purchaseView('to_receive')]: 1,
+    [purchaseView('late')]: 1,
+    [purchaseView('draft')]: 1,
+    [purchaseView('released')]: 2,
+    [purchaseView('closed')]: 0,
+    [purchaseView('cancelled')]: 0,
+  });
+  assert.equal(cell(orders.html, late, purchaseColumn('ordered')), '15');
+  assert.equal(cell(orders.html, late, purchaseColumn('received')), '4');
+  assert.equal(cell(orders.html, late, purchaseColumn('open')), '11');
+  // 10 × 2.50 + 5 × 1.20, untaxed: the figure the order page states.
+  assert.equal(cell(orders.html, late, purchaseColumn('total')), '31.00');
+  assert.equal(cell(orders.html, received, purchaseColumn('total')), '12.00');
+  // An unpriced line states no total, never a guessed one.
+  assert.equal(
+    cell(orders.html, unpriced, purchaseColumn('total')),
+    withheldMark,
+  );
+  // The Total is shown, never offered as a sort; the Expected date of the
+  // row the Late tab counts reads how late it is.
+  assert.doesNotMatch(
+    orders.html,
+    new RegExp(`data-sort-column="${purchaseColumn('total')}"`, 'u'),
+  );
+  assert.match(
+    cell(orders.html, late, purchaseColumn('expected_date')) ?? '',
+    /data-overdue-days="4">4 days late/u,
+  );
+  const receive = action(orders.html, late)!;
+  assert.deepEqual(
+    [receive.label, receive.name],
+    ['Receive', 'Receive PO-LATE'],
+  );
+  const receiving = new URL(receive.href, 'http://fixture.local');
+  assert.equal(
+    receiving.searchParams.get('surface'),
+    id('surface', 'purchase_order_detail'),
+  );
+  assert.equal(
+    receiving.searchParams.get(
+      id('parameter', 'commercial_purchase_order_get_legal_entity_scope'),
+    ),
+    scope,
+  );
+  assert.equal(receiving.hash, `#${id('dataset', 'purchasing_lines')}`);
+  assert.equal(action(orders.html, received)?.label, 'View');
+  assert.equal(action(orders.html, unpriced)?.label, 'View');
+  // The page read its query and each paged order's lines, nothing else.
+  const binding = readCompiledSurfaceDataBinding(
+    f.view,
+    f.surfaces.find(
+      (value) => value.surfaceId === id('surface', 'purchase_order_list'),
+    )!,
+  );
+  assert.equal(
+    binding.query.queryId,
+    id('query', 'commercial_purchase_order_list'),
+  );
+
+  // Without line read neither the figures nor the totals can be stated: the
+  // List still serves every view that is not open, with "—" for both.
+  f.deniedReads.add(id('permission', 'purchase_order_line_read'));
+  const linesWithheld = await renderSurfaceRuntimeWithData(
+    f.view,
+    purchaseUrl(),
+    gateways,
+  );
+  assert.equal(linesWithheld.statusCode, 200);
+  assert.doesNotMatch(linesWithheld.html, /data-diagnostic-code=/u);
+  for (const local of ['ordered', 'received', 'open', 'total'])
+    assert.equal(
+      cell(linesWithheld.html, late, purchaseColumn(local)),
+      withheldMark,
+      local,
+    );
+  assert.match(
+    linesWithheld.html,
+    new RegExp(
+      `data-list-progress-withheld="${id('query', 'purchase_order_line_list')}">Ordered, Received and Open are withheld by current policy; To receive and Late need them and are unavailable.<`,
+      'u',
+    ),
+  );
+  assert.doesNotMatch(linesWithheld.html, /data-overdue-days=/u);
+  assert.equal(action(linesWithheld.html, late)?.label, 'View');
+  const lateRefused = await renderSurfaceRuntimeWithData(
+    f.view,
+    purchaseUrl({ view: purchaseView('late') }),
+    gateways,
+  );
+  assert.match(
+    lateRefused.html,
+    /data-diagnostic-code="QUERY_PERMISSION_DENIED"/u,
+  );
+  assert.deepEqual(counts(lateRefused.html), {
+    [purchaseView('all')]: 3,
+    [purchaseView('to_receive')]: null,
+    [purchaseView('late')]: null,
+    [purchaseView('draft')]: 1,
+    [purchaseView('released')]: 2,
+    [purchaseView('closed')]: 0,
+    [purchaseView('cancelled')]: 0,
+  });
+  // A single order's read keeps refusing: its page is its lines.
+  await assert.rejects(
+    gateways.queryGateway.invoke(f.view, {
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      queryId: id('query', 'commercial_purchase_order_get'),
+      arguments: {
+        recordId: late,
+        includeArchived: false,
+        [id('parameter', 'commercial_purchase_order_get_legal_entity_scope')]:
+          scope,
+      },
+    }),
+    SemanticQueryPolicyDeniedError,
+  );
+  // Expected receipts keeps its refusal: its progress is its purpose.
+  f.deniedReads.clear();
+  f.deniedReads.add(id('permission', 'purchase_order_received_read'));
+  const expected = await renderSurfaceRuntimeWithData(
+    f.view,
+    `/?${new URLSearchParams({
+      surface: id('surface', 'expected_receipt_list'),
+      [id('parameter', 'expected_receipt_list_legal_entity_scope')]: scope,
+    }).toString()}`,
+    gateways,
+  );
+  assert.match(
+    expected.html,
+    /data-diagnostic-code="QUERY_PERMISSION_DENIED"/u,
+  );
+  assert.doesNotMatch(expected.html, /data-view-id=/u);
+  // With received read withheld the totals still stand: they read lines.
+  const receivedWithheld = await renderSurfaceRuntimeWithData(
+    f.view,
+    purchaseUrl(),
+    gateways,
+  );
+  assert.equal(
+    cell(receivedWithheld.html, late, purchaseColumn('total')),
+    '31.00',
+  );
+  assert.equal(
+    cell(receivedWithheld.html, late, purchaseColumn('received')),
+    withheldMark,
+  );
+});
+
+test('ORDER-PARITY: a picker over purchase orders enumerates their plain list query, never the read-model clone the List reads', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  f.executor.seed(
+    'purchase_order',
+    {
+      [id('field', 'purchase_order_number')]: 'PO-PICKED',
+      [id('field', 'purchase_order_supplier_party_id')]: f.party,
+      [id('field', 'purchase_order_currency')]: 'CAD',
+      [id('derived_state_field', 'machine.purchase_order_lifecycle')]: id(
+        'state',
+        'purchase_order_released',
+      ),
+    },
+    scope,
+  );
+  // Every query the commercial read model is run for, as the gateway runs it.
+  const computed: string[] = [];
+  const gateways: SurfaceRuntimeGateways = {
+    ...f.gateways,
+    queryGateway: new SemanticQueryGateway(
+      f.policy,
+      f.executor,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        'northstar.sales:capability.fulfillment': async ({ result }) => result,
+        'northstar.sales:capability.commercial': async ({
+          definition,
+          result,
+        }) => {
+          computed.push(definition.queryId);
+          return result;
+        },
+      },
+    ),
+  };
+  const clone = id('query', 'commercial_purchase_order_list');
+  const plain = id('query', 'purchase_order_list');
+  const reads = (queryId: string) => f.executor.listReads.get(queryId) ?? 0;
+  const before = { clone: reads(clone), plain: reads(plain) };
+
+  // The receipt form's order picker: its options are the orders' labels.
+  const form = await renderSurfaceRuntimeWithData(
+    f.view,
+    `/?${new URLSearchParams({ surface: id('surface', 'goods_receipt_form'), [id('parameter', 'goods_receipt_get_legal_entity_scope')]: scope }).toString()}`,
+    gateways,
+  );
+  assert.doesNotMatch(form.html, /RELATION_ENUMERATION_UNAVAILABLE/u);
+  assert.match(form.html, /PO-PICKED/u);
+  // Through the plain query, never the clone and never its read model.
+  assert.equal(reads(clone), before.clone);
+  assert.ok(reads(plain) > before.plain);
+  // A copy: an assertion on `computed` itself would narrow it to never[].
+  assert.deepEqual([...computed], []);
+
+  // Which List stands for purchase orders is unchanged: Purchase orders, whose
+  // query is the clone; the picker chooses the query, not the List. Its entry
+  // authorization query is preferred over an equivalent plain clone (the
+  // Expected receipts worklist's), and a List without a read model keeps its
+  // own query.
+  const surface = (local: string) =>
+    f.surfaces.find((value) => value.surfaceId === id('surface', local))!;
+  const listQuery = (local: string) => {
+    const bound = readCompiledSurfaceDataBinding(f.view, surface(local)).query;
+    assert.notEqual(bound.queryType, 'aggregate');
+    return bound as Exclude<typeof bound, { queryType: 'aggregate' }>;
+  };
+  assert.equal(listQuery('purchase_order_list').queryId, clone);
+  assert.equal(
+    pickerEnumerationQuery(
+      f.view,
+      surface('purchase_order_list'),
+      listQuery('purchase_order_list'),
+    ).queryId,
+    plain,
+  );
+  for (const local of ['expected_receipt_list', 'sales_order_list'])
+    assert.equal(
+      pickerEnumerationQuery(f.view, surface(local), listQuery(local)).queryId,
+      id('query', local),
+    );
+
+  // The List itself still reads its orders with their totals.
+  await renderSurfaceRuntimeWithData(
+    f.view,
+    `/?${new URLSearchParams({ surface: id('surface', 'purchase_order_list'), [id('parameter', 'commercial_purchase_order_list_legal_entity_scope')]: scope }).toString()}`,
+    gateways,
+  );
+  assert.ok(reads(clone) > before.clone);
+  assert.ok(computed.includes(clone));
+});
+
+// ORDER-PARITY increment B: record pages that show their exceptions and their
+// progress, link to the records they name, and work through several rows.
+const regexpText = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+/** A submitted value of a named control, as the page renders it. */
+function controlValue(html: string, name: string): string | undefined {
+  return new RegExp(`name="${regexpText(name)}" value="([^"]*)"`, 'u').exec(
+    html,
+  )?.[1];
+}
+/** Every row a multi-row Task shows, in order. */
+function taskRowIds(html: string): string[] {
+  return [...html.matchAll(/data-task-row="([^"]+)"/gu)].map(
+    (match) => match[1]!,
+  );
+}
+/** A released purchase order and its lines, stored as the providers do. */
+function seedPurchaseOrder(
+  f: OrderEntryWitness,
+  lines: readonly string[],
+  state = 'released',
+) {
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const order = f.executor.seed(
+    'purchase_order',
+    {
+      [`${ns}:field.purchase_order_number`]: 'PO-000042',
+      [`${ns}:field.purchase_order_supplier_party_id`]: f.party,
+      [`${ns}:field.purchase_order_currency`]: 'CAD',
+      [`${ns}:field.purchase_order_order_date`]: '2026-09-26T09:30:00Z',
+      ...Object.fromEntries(
+        [
+          'expected_date',
+          'notes',
+          'receiving_location_id',
+          'payment_terms',
+          'tax_code_id',
+          'freight_amount',
+          'freight_tax_code_id',
+          'freight_tax_rate_percent',
+          'other_fee_amount',
+          'other_fee_tax_code_id',
+          'other_fee_tax_rate_percent',
+        ].map((name) => [`${ns}:field.purchase_order_${name}`, null]),
+      ),
+      [`${ns}:derived_state_field.machine.purchase_order_lifecycle`]: `${ns}:state.purchase_order_${state}`,
+    },
+    scope,
+  );
+  const lineIds = lines.map((ordered, index) =>
+    f.executor.seed(
+      'purchase_order_line',
+      {
+        [`${ns}:field.purchase_order_line_line_number`]: String(index + 1),
+        [`${ns}:field.purchase_order_line_item_id`]: f.item,
+        [`${ns}:field.purchase_order_line_ordered_quantity`]: ordered,
+        [`${ns}:field.purchase_order_line_unit_price`]: '2.4',
+        [`${ns}:field.purchase_order_line_discount_percent`]: null,
+        [`${ns}:field.purchase_order_line_tax_code_id`]: null,
+        [`${ns}:field.purchase_order_line_tax_rate_percent`]: null,
+        [`${ns}:relation.purchase_order_line_order`]: order,
+      },
+      scope,
+    ),
+  );
+  return { order, lines: lineIds };
+}
+/** A gateway whose read models state the figures a test gives them. */
+function statingGateways(
+  f: OrderEntryWitness,
+  stated: {
+    readonly commercial?: (
+      key: string,
+      record: SemanticRecordDto,
+    ) => ImmutableJsonValue;
+    readonly fulfillment?: (
+      key: string,
+      record: SemanticRecordDto,
+    ) => ImmutableJsonValue;
+    readonly receiving?: (
+      key: string,
+      record: SemanticRecordDto,
+    ) => ImmutableJsonValue;
+  },
+  executor: SemanticQueryExecutor = f.executor,
+): SurfaceRuntimeGateways {
+  const stating =
+    (
+      state:
+        | ((key: string, record: SemanticRecordDto) => ImmutableJsonValue)
+        | undefined,
+    ) =>
+    async ({
+      definition,
+      result,
+    }: {
+      definition: { readModel?: { resultFields: Record<string, string> } };
+      result: SemanticQueryResultEnvelope;
+    }) => ({
+      ...result,
+      records: result.records.map((record) => ({
+        ...record,
+        values: {
+          ...record.values,
+          ...Object.fromEntries(
+            Object.entries(definition.readModel!.resultFields).map(
+              ([key, fieldId]) => [fieldId, state ? state(key, record) : null],
+            ),
+          ),
+        },
+      })),
+    });
+  return {
+    ...f.gateways,
+    queryGateway: new SemanticQueryGateway(
+      f.policy,
+      executor,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        'northstar.sales:capability.fulfillment': stated.fulfillment
+          ? stating(stated.fulfillment)
+          : async ({ result }) => result,
+        'northstar.sales:capability.commercial': stating(stated.commercial),
+        'northstar.purchasing:capability.receiving': stating(stated.receiving),
+      },
+    ),
+  };
+}
+
+/**
+ * The receiving routes as this witness keeps them: a receipt takes its number
+ * when it is created, as the server assigns one, and the receiving capability
+ * posts it -- marked posted under its next revision, a replayed key answered
+ * with its first answer. Every call is recorded with the witness's own.
+ */
+function receivingGateways(
+  f: OrderEntryWitness,
+  gateways: SurfaceRuntimeGateways,
+): SurfaceRuntimeGateways {
+  const ns = f.ns;
+  let numbered = 0;
+  const executor: SemanticOperationExecutor = {
+    recordNonAccepted: () => f.executor.recordNonAccepted(),
+    async execute(request) {
+      const result = await f.executor.execute(request);
+      const created = result.readBack;
+      if (
+        request.definition.operationId ===
+          `${ns}:operation.goods_receipt_create` &&
+        created
+      ) {
+        const stored = f.executor.rows.get(created.recordId)!;
+        f.executor.rows.set(created.recordId, {
+          ...stored,
+          values: {
+            ...stored.values,
+            [`${ns}:field.goods_receipt_number`]: `RCV-${String(++numbered).padStart(6, '0')}`,
+          },
+        });
+      }
+      return result;
+    },
+  };
+  const receiving: RegisteredCapabilityOperationExecutor = {
+    capabilityId: 'northstar.purchasing:capability.receiving',
+    async prepareAuthorization(request) {
+      return {
+        decisionInput: request.input,
+        legalEntityReadScopeIds: [f.scopes[0]!],
+        readBackArguments: {
+          recordId: asRecord(request.input).recordId as string,
+          includeArchived: false,
+        },
+      };
+    },
+    async execute(request) {
+      f.executor.calls.push(request as never);
+      if (f.executor.failAt === f.executor.calls.length)
+        throw new Error('Isolated post failure');
+      const cached = f.executor.receipts.get(request.idempotencyKey);
+      if (cached) return cached;
+      const draft = f.executor.rows.get(
+        String(asRecord(request.input).recordId),
+      )!;
+      const posted: SemanticRecordDto = {
+        ...draft,
+        revision: draft.revision + 1,
+        values: {
+          ...draft.values,
+          [`${ns}:field.goods_receipt_state`]: `${ns}:option.goods_receipt_state_posted`,
+        },
+      };
+      f.executor.rows.set(posted.recordId, posted);
+      const result: SemanticOperationResultEnvelope = {
+        kind: 'semanticOperationResult',
+        schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
+        operationId: request.definition.operationId,
+        outcome: 'succeeded',
+        readBack: posted,
+        unsupportedReason: null,
+        trust: {
+          changeDocumentId: randomUUID(),
+          domainEventId: randomUUID(),
+          invocationId: randomUUID(),
+          outboxId: randomUUID(),
+        },
+      };
+      f.executor.receipts.set(request.idempotencyKey, result);
+      return result;
+    },
+  };
+  return {
+    ...gateways,
+    operationGateway: new SemanticOperationGateway(
+      f.policy,
+      executor,
+      gateways.operationMediation,
+      undefined,
+      [receiving],
+    ),
+  };
+}
+
+test('ORDER-PARITY: an invoice states its sales order through its own get, labels it under current policy on every request and opens it', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const order = f.executor.seed(
+    'sales_order',
+    {
+      [id('field', 'sales_order_number')]: 'SO-000321',
+      [id('field', 'sales_order_customer_party_id')]: f.party,
+      [id('field', 'sales_order_order_date')]: '2026-09-20T12:00:00.000Z',
+      [id('field', 'sales_order_currency')]: 'CAD',
+      [id('derived_state_field', 'machine.sales_order_lifecycle')]: id(
+        'state',
+        'sales_order_released',
+      ),
+    },
+    scope,
+  );
+  const invoice = f.executor.seed(
+    'customer_invoice',
+    {
+      [id('field', 'customer_invoice_number')]: 'INV-000007',
+      [id('field', 'customer_invoice_state')]: id(
+        'option',
+        'customer_invoice_state_open',
+      ),
+      [id('field', 'customer_invoice_invoice_date')]:
+        '2026-09-21T12:00:00.000Z',
+      [id('field', 'customer_invoice_due_date')]: '2026-10-21T12:00:00.000Z',
+      [id('field', 'customer_invoice_customer_party_id')]: f.party,
+      [id('field', 'customer_invoice_currency')]: 'CAD',
+      [id('field', 'customer_invoice_payment_terms')]: null,
+      ...Object.fromEntries(
+        [
+          'subtotal',
+          'charges',
+          'tax',
+          'total',
+          'paid_amount',
+          'credited_amount',
+          'balance',
+        ].map((name) => [id('field', `customer_invoice_${name}`), '0']),
+      ),
+      [id('relation', 'customer_invoice_order')]: order,
+    },
+    scope,
+  );
+  // Like the PostgreSQL provider: a stored relation is no value of a get, and
+  // each relation a get is asked to state is resolved by the provider's own
+  // planner against the governed compiled storage.
+  const storage = await governedStorageTarget();
+  const gets: Record<string, unknown>[] = [];
+  const executor: SemanticQueryExecutor = {
+    async execute(request) {
+      const result = await f.executor.execute(request);
+      if (request.definition.queryType !== 'get') return result;
+      const args = asRecord(request.arguments);
+      gets.push({ queryId: request.definition.queryId, ...args });
+      const targets = relationTargetPlans(
+        storage,
+        storage.entities.find(
+          (value) => value.entityId === request.definition.sourceEntityId,
+        )!,
+        args.relationTargets as ImmutableJsonValue | undefined,
+      );
+      return {
+        ...result,
+        records: result.records.map((record) => ({
+          ...record,
+          values: Object.fromEntries(
+            Object.entries(record.values).filter(
+              ([key]) => !key.includes(':relation.'),
+            ),
+          ),
+          ...(targets.length
+            ? {
+                relationLabels: Object.fromEntries(
+                  targets.map((target) => [
+                    target.relationId,
+                    {
+                      label: null,
+                      recordId:
+                        (record.values[target.relationId] as
+                          string | undefined) ?? null,
+                    },
+                  ]),
+                ),
+              }
+            : {}),
+        })),
+      };
+    },
+  };
+  const gateways = statingGateways(f, {}, executor);
+  const path = `/?${new URLSearchParams({
+    surface: id('surface', 'customer_invoice_detail'),
+    record: invoice,
+    [id('parameter', 'customer_invoice_get_legal_entity_scope')]: scope,
+  }).toString()}`;
+  const fact = (html: string) =>
+    /<div><dt>Sales order<\/dt><dd>([^<]*)<\/dd><\/div>/u.exec(html)?.[1];
+
+  const page = await renderSurfaceRuntimeWithData(f.view, path, gateways);
+  assert.equal(page.statusCode, 200);
+  assert.equal(fact(page.html), 'SO-000321');
+  // The invoice's own get stated its order, the one relation the page names.
+  assert.deepEqual(
+    gets.find((read) => read.queryId === id('query', 'customer_invoice_get'))
+      ?.relationTargets,
+    [id('relation', 'customer_invoice_order')],
+  );
+  // Open sales order: the order's own page in this company, with no way
+  // "back" to a page that is not the order's.
+  const href = /<a class="button" href="([^"]+)">Open sales order<\/a>/u
+    .exec(page.html)?.[1]
+    ?.replaceAll('&amp;', '&');
+  assert.ok(href);
+  const target = new URL(href, 'http://fixture.local');
+  assert.equal(
+    target.searchParams.get('surface'),
+    id('surface', 'sales_order_detail'),
+  );
+  assert.equal(target.searchParams.get('record'), order);
+  assert.equal(
+    target.searchParams.get(
+      id('parameter', 'commercial_order_get_legal_entity_scope'),
+    ),
+    scope,
+  );
+  assert.equal(target.searchParams.get('returnTo'), null);
+  // Current policy decides the label on every request: withheld, the fact
+  // reads "—" and the invoice still serves; restored, it reads again.
+  f.deniedReads.add(id('permission', 'sales_order_read'));
+  const withheld = await renderSurfaceRuntimeWithData(f.view, path, gateways);
+  assert.equal(withheld.statusCode, 200);
+  assert.equal(fact(withheld.html), '—');
+  assert.match(withheld.html, /INV-000007/u);
+  f.deniedReads.delete(id('permission', 'sales_order_read'));
+  assert.equal(
+    fact((await renderSurfaceRuntimeWithData(f.view, path, gateways)).html),
+    'SO-000321',
+  );
+
+  // The gateway rules the argument's shape; the provider its meaning.
+  const read = (queryId: string, args: Record<string, ImmutableJsonValue>) =>
+    gateways.queryGateway.invoke(f.view, {
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      queryId: id('query', queryId),
+      arguments: {
+        ...args,
+        [id('parameter', `${queryId}_legal_entity_scope`)]: scope,
+      },
+    });
+  for (const relationTargets of [
+    [],
+    'customer_invoice_order',
+    [7],
+    ['not a canonical id'],
+    Array.from({ length: 5 }, (_, index) => id('relation', `r${index}`)),
+    [
+      id('relation', 'customer_invoice_order'),
+      id('relation', 'customer_invoice_order'),
+    ],
+  ])
+    await assert.rejects(
+      read('customer_invoice_get', {
+        recordId: invoice,
+        includeArchived: false,
+        relationTargets: relationTargets as ImmutableJsonValue,
+      }),
+      MalformedSemanticQueryRequestError,
+      JSON.stringify(relationTargets),
+    );
+  await assert.rejects(
+    read('customer_invoice_list', {
+      includeArchived: false,
+      relationTargets: [id('relation', 'customer_invoice_order')],
+    }),
+    /relation targets belong only to a registered get query/u,
+  );
+  // A relation the invoice does not own, or none at all, is refused by name.
+  for (const relation of [
+    id('relation', 'sales_order_line_order'),
+    id('relation', 'missing'),
+  ])
+    await assert.rejects(
+      read('customer_invoice_get', {
+        recordId: invoice,
+        includeArchived: false,
+        relationTargets: [relation],
+      }),
+      (error: unknown) =>
+        error instanceof ModuleRuntimeInterpreterError &&
+        error.code === 'MODULE_RELATION_TARGET_INVALID',
+      relation,
+    );
+});
+
+test('ORDER-PARITY: a truck receipt receives several lines in one receipt, filled from what is open, one request key per run', async () => {
+  const f = await orderEntryWitness(true);
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const location = f.executor.seed('location', {
+    [id('field', 'location_name')]: 'Receiving dock',
+  });
+  const {
+    order,
+    lines: [lineA, lineB, lineC, lineD],
+  } = seedPurchaseOrder(f, ['5', '2', '4', '3']);
+  // Open to receive, as the commercial read model states it: nothing left on
+  // B, and C's received read withheld.
+  const open = new Map<string, string | null>([
+    [lineA!, '5'],
+    [lineB!, '0'],
+    [lineC!, null],
+    [lineD!, '3'],
+  ]);
+  const gateways = receivingGateways(
+    f,
+    statingGateways(f, {
+      commercial: (key, record) =>
+        key === 'open_to_receive' ? (open.get(record.recordId) ?? null) : null,
+    }),
+  );
+  const action = id('action', 'receive_lines_known');
+  const path = `/?${new URLSearchParams({
+    surface: id('surface', 'purchase_order_detail'),
+    record: order,
+    [id('parameter', 'commercial_purchase_order_get_legal_entity_scope')]:
+      scope,
+  }).toString()}`;
+  const page = await renderSurfaceRuntimeWithData(f.view, path, gateways);
+  assert.equal(page.statusCode, 200);
+  // Offered on the record, and as the order's next step.
+  assert.match(
+    page.html,
+    new RegExp(`name="compositionAction" value="${regexpText(action)}"`, 'u'),
+  );
+  assert.match(
+    page.html,
+    new RegExp(`data-next-action="${regexpText(action)}"`, 'u'),
+  );
+  assert.match(
+    page.html,
+    /aria-label="Next action: Receive lines with actual cost"/u,
+  );
+
+  const start = await submitSurfaceRuntimeIntent(
+    f.view,
+    path,
+    { compositionAction: action },
+    gateways,
+  );
+  assert.equal(start.statusCode, 200);
+  // Nothing else is started while the Task is open.
+  assert.doesNotMatch(start.html, /data-next-action=/u);
+  const token = hiddenValue(start.html, 'taskToken');
+  // Every line with something to arrive, and the one whose figure is withheld.
+  assert.deepEqual(taskRowIds(start.html), [lineA, lineC, lineD]);
+  const quantity = (line: string) =>
+    `${id('input', 'receive_lines_quantity')}@${line}`;
+  const cost = (line: string) => `${id('input', 'receive_lines_cost')}@${line}`;
+  for (const line of [lineA!, lineC!, lineD!]) {
+    assert.equal(controlValue(start.html, quantity(line)), '');
+    assert.equal(controlValue(start.html, cost(line)), '');
+  }
+  // Each row's inputs are named with the line they belong to.
+  assert.match(
+    start.html,
+    /aria-label="Quantity to receive, Readable product, Line 1"/u,
+  );
+  assert.match(
+    start.html,
+    /<button type="submit" class="secondary-action" name="taskStage" value="fill" formnovalidate>Fill open quantities<\/button>/u,
+  );
+  // Enter reviews the Task; it never fills.
+  assert.ok(
+    start.html.indexOf('data-task-default') <
+      start.html.indexOf('value="fill"'),
+  );
+  const post = (values: Record<string, string>) =>
+    submitSurfaceRuntimeIntent(
+      f.view,
+      path,
+      { taskToken: token, compositionAction: action, ...values },
+      gateways,
+    );
+  const header = {
+    [id('input', 'receive_lines_location')]: location,
+    [id('input', 'receive_lines_currency')]: 'CAD',
+    [id('input', 'receive_lines_packing_slip')]: 'PS-77',
+    [id('input', 'receive_lines_notes')]: '',
+  };
+
+  // Fill: each row from what is still open; the withheld line stays empty
+  // and what was entered elsewhere is kept.
+  const filled = await post({ taskStage: 'fill', ...header });
+  assert.equal(controlValue(filled.html, quantity(lineA!)), '5');
+  assert.equal(controlValue(filled.html, quantity(lineD!)), '3');
+  assert.equal(controlValue(filled.html, quantity(lineC!)), '');
+  assert.equal(
+    controlValue(filled.html, id('input', 'receive_lines_packing_slip')),
+    'PS-77',
+  );
+  // Nothing entered on any line: refused beside the rows, nothing written.
+  const empty = await post({ taskStage: 'prepare', ...header });
+  assert.match(empty.html, /COMPOSITION_INPUT_INVALID/u);
+  assert.match(empty.html, /Enter at least one line\./u);
+  // A line given a quantity needs its cost; a bad quantity is named on its line.
+  const invalid = await post({
+    taskStage: 'prepare',
+    ...header,
+    [quantity(lineA!)]: '5',
+    [quantity(lineD!)]: '-1',
+    [cost(lineD!)]: '2',
+  });
+  assert.match(
+    invalid.html,
+    new RegExp(`id="${regexpText(`${cost(lineA!)}-error`)}">Required\\.<`, 'u'),
+  );
+  assert.match(
+    invalid.html,
+    new RegExp(
+      `id="${regexpText(`${quantity(lineD!)}-error`)}">Enter a positive exact quantity\\.<`,
+      'u',
+    ),
+  );
+  assert.equal(f.executor.calls.length, 0);
+
+  // Two lines of the truck; the withheld line is left empty and skipped.
+  const review = await post({
+    taskStage: 'prepare',
+    ...header,
+    [quantity(lineA!)]: '5',
+    [cost(lineA!)]: '2.50',
+    [quantity(lineD!)]: '2',
+    [cost(lineD!)]: '1.2',
+  });
+  assert.match(review.html, /data-task-phase="review"/u);
+  assert.deepEqual(taskRowIds(review.html), [lineA, lineD]);
+  assert.equal(f.executor.calls.length, 0);
+  // The second line's run fails: the reviewed runs are retried as they were.
+  f.executor.failAt = 3;
+  const failed = await post({
+    taskStage: 'confirm',
+    preparedId: hiddenValue(review.html, 'preparedId'),
+  });
+  assert.match(failed.html, /COMPOSITION_UNCERTAIN/u);
+  f.executor.failAt = 0;
+  const done = await post({ taskStage: 'retry' });
+  assert.match(done.html, /Receive lines with actual cost: done/u);
+  const calls = f.executor.calls;
+  assert.deepEqual(
+    calls.map((call) => call.definition.operationId),
+    [
+      id('operation', 'goods_receipt_create'),
+      id('operation', 'goods_receipt_line_create'),
+      id('operation', 'goods_receipt_line_create'),
+      id('operation', 'goods_receipt_line_create'),
+      id('operation', 'goods_receipt_post'),
+    ],
+  );
+  // One key per run, and the retried run kept its key and its exact input.
+  assert.equal(calls[3]!.idempotencyKey, calls[2]!.idempotencyKey);
+  assert.deepEqual(calls[3]!.input, calls[2]!.input);
+  assert.equal(
+    new Set(calls.map((call) => call.idempotencyKey)).size,
+    calls.length - 1,
+  );
+  const receipt = asRecord(calls[0]!.input);
+  const receiptId = String(receipt.recordId);
+  assert.deepEqual(asRecord(receipt.values), {
+    [id('field', 'goods_receipt_state')]: id(
+      'option',
+      'goods_receipt_state_draft',
+    ),
+    [id('field', 'goods_receipt_kind')]: id(
+      'option',
+      'goods_receipt_kind_initial',
+    ),
+    [id('field', 'goods_receipt_effective_at')]: asRecord(receipt.values)[
+      id('field', 'goods_receipt_effective_at')
+    ],
+    [id('field', 'goods_receipt_location_id')]: location,
+    [id('field', 'goods_receipt_reason_code')]: 'RECEIVE',
+    [id('field', 'goods_receipt_reason_narrative')]:
+      'Receive from purchase order',
+    [id('field', 'goods_receipt_packing_slip')]: 'PS-77',
+    [id('field', 'goods_receipt_notes')]: null,
+  });
+  assert.deepEqual(asRecord(receipt.relations), {
+    [id('relation', 'goods_receipt_order')]: order,
+  });
+  const lineRuns = [calls[1]!, calls[3]!].map((call) => asRecord(call.input));
+  assert.notEqual(lineRuns[0]!.recordId, lineRuns[1]!.recordId);
+  assert.deepEqual(
+    lineRuns.map((run) => {
+      const values = asRecord(run.values);
+      return [
+        values[id('field', 'goods_receipt_line_line_number')],
+        values[id('field', 'goods_receipt_line_quantity')],
+        values[id('field', 'goods_receipt_line_unit_id')],
+        values[id('field', 'goods_receipt_line_unit_cost')],
+        values[id('field', 'goods_receipt_line_currency')],
+        values[id('field', 'goods_receipt_line_cost_status')],
+        asRecord(run.relations)[
+          id('relation', 'goods_receipt_line_order_line')
+        ],
+        asRecord(run.relations)[id('relation', 'goods_receipt_line_receipt')],
+      ];
+    }),
+    [
+      [
+        '1',
+        '5',
+        'EA',
+        '2.5',
+        'CAD',
+        id('option', 'goods_receipt_line_cost_status_known'),
+        lineA,
+        receiptId,
+      ],
+      [
+        '4',
+        '2',
+        'EA',
+        '1.2',
+        'CAD',
+        id('option', 'goods_receipt_line_cost_status_known'),
+        lineD,
+        receiptId,
+      ],
+    ],
+  );
+  assert.deepEqual(asRecord(calls[4]!.input), {
+    recordId: receiptId,
+    expectedRevision: 1,
+  });
+  // A line with nothing open anywhere offers no truck receipt.
+  const none = statingGateways(f, {
+    commercial: (key) => (key === 'open_to_receive' ? '0' : null),
+  });
+  const closed = await renderSurfaceRuntimeWithData(f.view, path, none);
+  assert.doesNotMatch(
+    closed.html,
+    new RegExp(`value="${regexpText(action)}"`, 'u'),
+  );
+});
+
+test('ORDER-PARITY: reversing a receipt reverses each line that still adds to stock, at exactly that, through the receiving routes', async () => {
+  const f = await orderEntryWitness(true);
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const location = f.executor.seed('location', {
+    [id('field', 'location_name')]: 'Receiving dock',
+  });
+  const {
+    order,
+    lines: [lineA, lineB],
+  } = seedPurchaseOrder(f, ['5', '2']);
+  const receipt = (state: 'draft' | 'posted') =>
+    f.executor.seed(
+      'goods_receipt',
+      {
+        [id('field', 'goods_receipt_number')]: `RCV-${state}`,
+        [id('field', 'goods_receipt_state')]: id(
+          'option',
+          `goods_receipt_state_${state}`,
+        ),
+        [id('field', 'goods_receipt_kind')]: id(
+          'option',
+          'goods_receipt_kind_initial',
+        ),
+        [id('field', 'goods_receipt_effective_at')]: '2026-09-27T10:00:00Z',
+        [id('field', 'goods_receipt_location_id')]: location,
+        [id('field', 'goods_receipt_packing_slip')]: null,
+        [id('relation', 'goods_receipt_order')]: order,
+      },
+      scope,
+    );
+  const posted = receipt('posted');
+  const receiptLine = (
+    parent: string,
+    number: string,
+    orderLine: string,
+    quantity: string,
+  ) =>
+    f.executor.seed(
+      'goods_receipt_line',
+      {
+        [id('field', 'goods_receipt_line_line_number')]: number,
+        [id('field', 'goods_receipt_line_item_id')]: f.item,
+        [id('field', 'goods_receipt_line_quantity')]: quantity,
+        [id('field', 'goods_receipt_line_unit_id')]: 'EA',
+        [id('field', 'goods_receipt_line_cost_status')]: id(
+          'option',
+          'goods_receipt_line_cost_status_known',
+        ),
+        // As the PostgreSQL provider reads a stored decimal back: at its
+        // column's scale, which is not an input the provider admits.
+        [id('field', 'goods_receipt_line_unit_cost')]: '2.500000000000000000',
+        [id('field', 'goods_receipt_line_currency')]: 'CAD',
+        [id('field', 'goods_receipt_line_reversal_of_movement_id')]: null,
+        [id('relation', 'goods_receipt_line_receipt')]: parent,
+        [id('relation', 'goods_receipt_line_order_line')]: orderLine,
+      },
+      scope,
+    );
+  const first = receiptLine(posted, '1', lineA!, '4');
+  // Already compensated in full: nothing of it is offered.
+  receiptLine(posted, '2', lineB!, '2');
+  // What each line still adds to stock, its movement and order line, as the
+  // receiving read model states them: the second is already compensated.
+  const movement = '0b000000-0000-4000-8000-00000000000a';
+  let movementsStated = true;
+  const receiving = (key: string, record: SemanticRecordDto) => {
+    const line = record.recordId === first;
+    if (key === 'order_line') return line ? lineA! : lineB!;
+    if (!movementsStated) return null;
+    if (key === 'movement') return line ? movement : randomUUID();
+    if (key === 'reversible') return line ? '4' : '0';
+    return line ? '-4' : '0';
+  };
+  const gateways = receivingGateways(
+    f,
+    statingGateways(f, {
+      commercial: (key) => (key === 'open_to_receive' ? '1' : null),
+      receiving,
+    }),
+  );
+  const receipts = id('dataset', 'purchasing_receipts');
+  const action = id('action', 'reverse_receipt');
+  const pathFor = (selected: string) =>
+    `/?${new URLSearchParams({
+      surface: id('surface', 'purchase_order_detail'),
+      record: order,
+      [id('parameter', 'commercial_purchase_order_get_legal_entity_scope')]:
+        scope,
+      dataset: receipts,
+      selected,
+      [`select:${receipts}`]: selected,
+    }).toString()}`;
+  const path = pathFor(posted);
+  const page = await renderSurfaceRuntimeWithData(f.view, path, gateways);
+  assert.equal(page.statusCode, 200);
+  // The selected receipt shows its lines and offers its reversal.
+  assert.match(
+    page.html,
+    /data-composition-dataset="northstar\.app:dataset\.purchasing_receipt_lines" data-resolution="ready"/u,
+  );
+  assert.match(
+    page.html,
+    new RegExp(`name="compositionAction" value="${regexpText(action)}"`, 'u'),
+  );
+  const start = await submitSurfaceRuntimeIntent(
+    f.view,
+    path,
+    { compositionAction: action },
+    gateways,
+  );
+  const token = hiddenValue(start.html, 'taskToken');
+  assert.deepEqual(taskRowIds(start.html), [first]);
+  const post = (values: Record<string, string>) =>
+    submitSurfaceRuntimeIntent(
+      f.view,
+      path,
+      { taskToken: token, compositionAction: action, ...values },
+      gateways,
+    );
+  const review = await post({
+    taskStage: 'prepare',
+    [id('input', 'reverse_receipt_reason')]: 'Wrong item delivered',
+  });
+  assert.deepEqual(taskRowIds(review.html), [first]);
+  const done = await post({
+    taskStage: 'confirm',
+    preparedId: hiddenValue(review.html, 'preparedId'),
+  });
+  assert.match(done.html, /Reverse receipt: done/u);
+  const calls = f.executor.calls;
+  assert.deepEqual(
+    calls.map((call) => call.definition.operationId),
+    [
+      id('operation', 'goods_receipt_create'),
+      id('operation', 'goods_receipt_line_create'),
+      id('operation', 'goods_receipt_post'),
+    ],
+  );
+  const header = asRecord(calls[0]!.input);
+  const values = asRecord(header.values);
+  assert.deepEqual(
+    [
+      values[id('field', 'goods_receipt_kind')],
+      values[id('field', 'goods_receipt_state')],
+      values[id('field', 'goods_receipt_location_id')],
+      values[id('field', 'goods_receipt_reason_code')],
+      values[id('field', 'goods_receipt_reason_narrative')],
+    ],
+    [
+      id('option', 'goods_receipt_kind_reversal'),
+      id('option', 'goods_receipt_state_draft'),
+      location,
+      'REVERSE',
+      'Wrong item delivered',
+    ],
+  );
+  assert.deepEqual(asRecord(header.relations), {
+    [id('relation', 'goods_receipt_order')]: order,
+    [id('relation', 'goods_receipt_supersedes')]: posted,
+  });
+  const line = asRecord(calls[1]!.input);
+  const lineValues = asRecord(line.values);
+  assert.deepEqual(
+    [
+      lineValues[id('field', 'goods_receipt_line_line_number')],
+      lineValues[id('field', 'goods_receipt_line_quantity')],
+      lineValues[id('field', 'goods_receipt_line_reversal_of_movement_id')],
+      lineValues[id('field', 'goods_receipt_line_cost_status')],
+      lineValues[id('field', 'goods_receipt_line_unit_cost')],
+      lineValues[id('field', 'goods_receipt_line_currency')],
+      lineValues[id('field', 'goods_receipt_line_unit_id')],
+    ],
+    [
+      '1',
+      '-4',
+      movement,
+      id('option', 'goods_receipt_line_cost_status_known'),
+      '2.5',
+      'CAD',
+      'EA',
+    ],
+  );
+  assert.deepEqual(asRecord(line.relations), {
+    [id('relation', 'goods_receipt_line_receipt')]: header.recordId,
+    [id('relation', 'goods_receipt_line_order_line')]: lineA,
+  });
+  assert.deepEqual(asRecord(calls[2]!.input), {
+    recordId: header.recordId,
+    expectedRevision: 1,
+  });
+
+  // Without the movement read nothing is stated, so nothing is offered, and
+  // a page opened before cannot start it.
+  movementsStated = false;
+  const withheld = await renderSurfaceRuntimeWithData(f.view, path, gateways);
+  assert.doesNotMatch(
+    withheld.html,
+    new RegExp(`value="${regexpText(action)}"`, 'u'),
+  );
+  const stale = await submitSurfaceRuntimeIntent(
+    f.view,
+    path,
+    { compositionAction: action },
+    gateways,
+  );
+  assert.match(stale.html, /COMPOSITION_TASK_UNAVAILABLE/u);
+  // A draft receipt has nothing to reverse.
+  movementsStated = true;
+  const draft = receipt('draft');
+  receiptLine(draft, '1', lineA!, '1');
+  const drafted = await renderSurfaceRuntimeWithData(
+    f.view,
+    pathFor(draft),
+    gateways,
+  );
+  assert.doesNotMatch(
+    drafted.html,
+    new RegExp(`value="${regexpText(action)}"`, 'u'),
+  );
+  assert.equal(f.executor.calls.length, 3);
+});
+
+test('ORDER-PARITY: an order page names the lines it is short and shows where it stands, with the first next step offered now', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const seedOrder = (state: string) => {
+    const order = f.executor.seed(
+      'sales_order',
+      {
+        [id('field', 'sales_order_number')]: `SO-${state}`,
+        [id('field', 'sales_order_customer_party_id')]: f.party,
+        [id('field', 'sales_order_order_date')]: '2026-09-20T12:00:00.000Z',
+        [id('field', 'sales_order_requested_date')]: '2026-10-11T00:00:00.000Z',
+        [id('field', 'sales_order_currency')]: 'CAD',
+        ...Object.fromEntries(
+          [
+            'notes',
+            'salesperson_party_id',
+            'payment_terms',
+            'ship_to_name',
+            'ship_to_region',
+            'tax_code_id',
+            'freight_amount',
+            'freight_tax_code_id',
+            'other_fee_amount',
+            'other_fee_tax_code_id',
+          ].map((name) => [id('field', `sales_order_${name}`), null]),
+        ),
+        // A complete ship-to, which Confirm requires (ruling E).
+        [id('field', 'sales_order_ship_to_street')]: '100 Industrial Way',
+        [id('field', 'sales_order_ship_to_city')]: 'Calgary',
+        [id('field', 'sales_order_ship_to_postal_code')]: 'T2P 0A1',
+        [id('field', 'sales_order_ship_to_country')]: 'Canada',
+        [id('derived_state_field', 'machine.sales_order_lifecycle')]: id(
+          'state',
+          `sales_order_${state}`,
+        ),
+      },
+      scope,
+    );
+    const lines = ['5', '3'].map((ordered, index) =>
+      f.executor.seed(
+        'sales_order_line',
+        {
+          [id('field', 'sales_order_line_line_number')]: String(index + 1),
+          [id('field', 'sales_order_line_item_id')]: f.item,
+          [id('field', 'sales_order_line_ordered_quantity')]: ordered,
+          [id('field', 'sales_order_line_unit_id')]: 'EA',
+          ...Object.fromEntries(
+            ['unit_price', 'list_price', 'discount_percent', 'tax_code_id'].map(
+              (name) => [id('field', `sales_order_line_${name}`), null],
+            ),
+          ),
+          [id('relation', 'sales_order_line_order')]: order,
+        },
+        scope,
+      ),
+    );
+    return { order, lines };
+  };
+  const path = (order: string) =>
+    `/?${new URLSearchParams({
+      surface: id('surface', 'sales_order_detail'),
+      record: order,
+      [id('parameter', 'commercial_order_get_legal_entity_scope')]: scope,
+    }).toString()}`;
+  const draft = seedOrder('draft');
+  let short = new Map<string, string | null>([
+    [draft.lines[0]!, '2'],
+    [draft.lines[1]!, '0'],
+  ]);
+  let toInvoice: string | null = null;
+  const gateways = statingGateways(f, {
+    fulfillment: (key, record) =>
+      key === 'short'
+        ? (short.get(record.recordId) ?? null)
+        : key === 'available_now'
+          ? '3'
+          : key === 'shipped' || key === 'coverage'
+            ? '0'
+            : String(
+                record.values[id('field', 'sales_order_line_ordered_quantity')],
+              ),
+    commercial: (key) =>
+      key === 'order_to_invoice'
+        ? toInvoice
+        : key === 'order_total'
+          ? toInvoice && '25'
+          : null,
+  });
+  const alert = (html: string) =>
+    /<section class="composition-alert"[^>]*>([\s\S]*?)<\/section>/u.exec(
+      html,
+    )?.[1];
+  const states = (html: string) =>
+    [...html.matchAll(/<li data-step-state="([a-z]+)"/gu)].map(
+      (match) => match[1],
+    );
+
+  const drafted = await renderSurfaceRuntimeWithData(
+    f.view,
+    path(draft.order),
+    gateways,
+  );
+  assert.equal(drafted.statusCode, 200);
+  // The line short of free stock is named; the covered one is not.
+  const banner = alert(drafted.html);
+  assert.ok(banner);
+  assert.match(
+    banner,
+    /<h2 id="composition-alert-0">Fulfillment exception<\/h2>/u,
+  );
+  assert.deepEqual(
+    [...banner.matchAll(/<li data-record-id="([^"]+)">/gu)].map(
+      (match) => match[1],
+    ),
+    [draft.lines[0]],
+  );
+  assert.match(
+    banner,
+    /<strong>Readable product<\/strong> <span>Short 2<\/span>/u,
+  );
+  // Never a live region, so it never competes with an outcome's status.
+  assert.doesNotMatch(banner, /role=/u);
+  assert.deepEqual(states(drafted.html), [
+    'current',
+    'upcoming',
+    'upcoming',
+    'upcoming',
+  ]);
+  // Next: the order's own Confirm, as its command bar offers it, under its
+  // own name.
+  assert.match(
+    drafted.html,
+    new RegExp(
+      `data-next-operation="${regexpText(id('operation', 'sales_order_release'))}"`,
+      'u',
+    ),
+  );
+  assert.match(drafted.html, /aria-label="Next action: [^"]+"/u);
+  // Nothing short, or nothing stated: no banner.
+  for (const stated of ['0', null]) {
+    short = new Map(draft.lines.map((line) => [line, stated]));
+    assert.equal(
+      alert(
+        (
+          await renderSurfaceRuntimeWithData(
+            f.view,
+            path(draft.order),
+            gateways,
+          )
+        ).html,
+      ),
+      undefined,
+    );
+  }
+  // Confirmed with shipped quantity to invoice: invoicing needs attention,
+  // and invoicing it is the next step.
+  const released = seedOrder('released');
+  toInvoice = '2';
+  const confirmed = await renderSurfaceRuntimeWithData(
+    f.view,
+    path(released.order),
+    gateways,
+  );
+  assert.deepEqual(states(confirmed.html), [
+    'complete',
+    'current',
+    'attention',
+    'upcoming',
+  ]);
+  assert.match(
+    confirmed.html,
+    new RegExp(
+      `data-next-action="${regexpText(id('action', 'invoice_shipped'))}"`,
+      'u',
+    ),
+  );
+  assert.match(
+    confirmed.html,
+    /aria-label="Next action: Invoice shipped quantities"/u,
+  );
+  // A cancelled order stopped at every step, with nothing next -- even with
+  // figures that would otherwise offer a step.
+  const cancelled = seedOrder('cancelled');
+  const stopped = await renderSurfaceRuntimeWithData(
+    f.view,
+    path(cancelled.order),
+    gateways,
+  );
+  assert.deepEqual(states(stopped.html), [
+    'stopped',
+    'stopped',
+    'stopped',
+    'stopped',
+  ]);
+  assert.doesNotMatch(stopped.html, /data-next-(?:action|operation)=/u);
 });

@@ -1,8 +1,13 @@
 import type {
+  SurfaceComposition,
   SurfaceList,
   VersionedNormalizedApplicationPackage,
 } from './schemas.js';
-import { CanonicalModelError, diagnostic } from './diagnostics.js';
+import {
+  CanonicalModelError,
+  compareCodeUnits,
+  diagnostic,
+} from './diagnostics.js';
 
 /**
  * A declared List is cross-reference checked against the surface's own list
@@ -76,6 +81,13 @@ export function validateSurfaceLists(
     const progressOutputs = new Set(
       list.progress ? Object.values(list.progress.outputs) : [],
     );
+    // A read model's figures, such as an order's total, are computed from the
+    // page the list statement returned, so they exist only after paging.
+    const readModelOutputs = new Set<string>(
+      'readModel' in query && query.readModel
+        ? Object.values(query.readModel.resultFields)
+        : [],
+    );
     for (const column of list.columns) {
       if (progressOutputs.has(column.field)) {
         // A progress figure exists only in the list statement's answer: it is
@@ -89,6 +101,24 @@ export function validateSurfaceLists(
           column.overdue
         )
           fail(column.columnId, 'a progress column is an unsorted plain value');
+        continue;
+      }
+      if (readModelOutputs.has(column.field)) {
+        // Shown -- as money when declared -- and never sorted, filtered,
+        // searched or counted: nothing before the page can read it. A view,
+        // filter or sort naming it is refused below as an unselected field.
+        if (
+          column.sortable ||
+          column.role !== 'value' ||
+          (column.format !== undefined && column.format !== 'money') ||
+          column.reference ||
+          column.statusRoles ||
+          column.overdue
+        )
+          fail(
+            column.columnId,
+            'a read-model column is an unsorted value, plain or money',
+          );
         continue;
       }
       if (!selected.has(column.field))
@@ -276,10 +306,92 @@ export function validateSurfaceLists(
         )
       )
         fail(id, 'list progress outputs name no field or column');
+      // A read model writes its figures into the same row values, after the
+      // statement: one of them would silently replace a summed figure.
+      if ([...progressOutputs].some((output) => readModelOutputs.has(output)))
+        fail(id, 'list progress outputs name no read-model figure');
       if (progress.openIn) {
         unique(progress.openIn.values, id, 'progress open values');
         for (const value of progress.openIn.values)
           filterable(progress.openIn.field, value, id);
+      }
+      // Omitted figures serve every view that does not keep open rows; a List
+      // whose every view keeps them would serve nothing at all.
+      if (
+        progress.whenDenied === 'omit' &&
+        list.views.length > 0 &&
+        list.views.every((view) => view.open)
+      )
+        fail(
+          id,
+          'a List that omits denied progress keeps a view that does not need it',
+        );
+    }
+    if (list.rowActions) {
+      unique(
+        list.rowActions.map((action) => action.actionId),
+        id,
+        'row action ids',
+      );
+      // The page a row links to: the record surfaces over the List's records.
+      // A section is a dataset of every one of them, so the link lands where
+      // it says whichever page the runtime opens.
+      const records = model.surfaces.filter(
+        (candidate) =>
+          candidate.surfaceRole === 'record' &&
+          candidate.lifecycle === 'active' &&
+          queries.get(String(candidate.dataSource.targetId))?.sourceEntity
+            .targetId === query.sourceEntity.targetId,
+      );
+      if (records.length === 0)
+        fail(id, "list row actions link to the record page of the List's rows");
+      const ordered = [...list.rowActions].sort(
+        (left, right) =>
+          left.orderKey - right.orderKey ||
+          compareCodeUnits(left.actionId, right.actionId),
+      );
+      for (const [index, action] of ordered.entries()) {
+        if (!action.when) {
+          // The first action whose condition holds is the row's: nothing
+          // after an unconditional one could ever be shown.
+          if (index < ordered.length - 1)
+            fail(
+              action.actionId,
+              'an unconditional row action is the last one',
+            );
+        } else {
+          const filters = action.when.filters ?? [];
+          if (filters.length === 0 && !action.when.open)
+            fail(
+              action.actionId,
+              'a row action condition names a filter or open',
+            );
+          unique(
+            filters.map((filter) => filter.field),
+            action.actionId,
+            'row action filter fields',
+          );
+          for (const filter of filters)
+            filterable(filter.field, filter.value, action.actionId);
+          if (action.when.open && !list.progress)
+            fail(
+              action.actionId,
+              "a row action's open condition needs the List's declared progress",
+            );
+        }
+        if (
+          action.section !== undefined &&
+          !records.every((record) =>
+            (
+              ('composition' in record ? record.composition : undefined) as
+                SurfaceComposition | undefined
+            )?.children.some((child) => child.datasetId === action.section),
+          )
+        )
+          fail(
+            action.actionId,
+            "a row action's section is a dataset of the List's record page",
+          );
       }
     }
     // The gateway accepts at most four exact filters per request: the busiest
