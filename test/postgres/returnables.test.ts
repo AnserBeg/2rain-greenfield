@@ -426,9 +426,10 @@ test('returnables: deposits on issue, bounded returns and forfeits, refunds boun
     );
     await kit.post(rtn.recordId, 'refund', { amount: '80', method: 'cash' });
     now = await kit.figures(rtn.recordId);
+    // Nothing is held any more: 180.00 went back and 30.00 was kept.
     assert.deepEqual(
-      [now.state, now.refunded, now.held, now.refundable],
-      ['closed', '180.00', '30.00', '0.00'],
+      [now.state, now.refunded, now.kept, now.held, now.refundable],
+      ['closed', '180.00', '30.00', '0.00', '0.00'],
     );
     // The custody's figures are what its posted events add up to.
     const restated = await kit.independent(rtn.recordId);
