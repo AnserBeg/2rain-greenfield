@@ -202,14 +202,20 @@ export const LEGAL_ENTITY_FAMILY_MAP_V1 = Object.freeze([
 ] as const satisfies readonly LegalEntityFamilyRuleV1[]);
 
 export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
-  ...([
-    ['sales_order_line', 'purchase_order_line'],
-    ['purchase_order_line', 'sales_order_line'],
-    ['drop_ship_delivery', 'sales_order'],
-    ['drop_ship_delivery', 'sales_order_line'],
-    ['drop_ship_delivery', 'purchase_order'],
-    ['drop_ship_delivery', 'purchase_order_line'],
-  ] as const).map(([sourceFamilyId, targetFamilyId]) => ({ semantics: 'sameEntity' as const, sourceFamilyId, targetFamilyId })),
+  ...(
+    [
+      ['sales_order_line', 'purchase_order_line'],
+      ['purchase_order_line', 'sales_order_line'],
+      ['drop_ship_delivery', 'sales_order'],
+      ['drop_ship_delivery', 'sales_order_line'],
+      ['drop_ship_delivery', 'purchase_order'],
+      ['drop_ship_delivery', 'purchase_order_line'],
+    ] as const
+  ).map(([sourceFamilyId, targetFamilyId]) => ({
+    semantics: 'sameEntity' as const,
+    sourceFamilyId,
+    targetFamilyId,
+  })),
   {
     semantics: 'sameEntity',
     sourceFamilyId: 'inventory_movement',

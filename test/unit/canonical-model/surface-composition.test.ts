@@ -64,6 +64,29 @@ const selected = (field: string, datasetId?: string) => ({
   ...(datasetId ? { datasetId } : {}),
 });
 
+test('DROP-SHIP scalar capability arguments are closed and cannot become record patches or prototype paths', () => {
+  for (const [path, operation] of [
+    [['arguments', 'quantity', 'nested'], 'purchase_order_record_delivery'],
+    [['arguments', '__proto__'], 'purchase_order_record_delivery'],
+    [['arguments', 'quantity'], 'purchase_order_update'],
+  ] as const) {
+    assert.match(
+      refused('purchase_order_detail', (value) => {
+        const step = action(value, 'record_supplier_delivery').steps[0];
+        step.operation.targetId = id('operation', operation);
+        step.bindings = step.bindings.filter(
+          (binding: Json) =>
+            binding.path[0] !== 'arguments' || binding.path[1] === 'quantity',
+        );
+        step.bindings.find(
+          (binding: Json) => binding.path[0] === 'arguments',
+        ).path = [...path];
+      }),
+      /scalar member|unsafe input path/u,
+    );
+  }
+});
+
 test('the composed pages declare alerts, progression, multi-row Tasks and a related order, and validate', () => {
   validateSurfaceCompositions(structuredClone(normalized) as never);
   const sales = composition(normalized, 'sales_order_detail');

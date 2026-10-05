@@ -10,6 +10,7 @@ import {
 } from './commercial-amounts.js';
 import { fulfillmentProjectionIdentity } from './fulfillment.js';
 import { receivedIdentity } from './goods-receipt.js';
+import { commercialLinkedFacts } from './commercial-link-read-model.js';
 import {
   registeredSemanticQueryFromPinnedView,
   SEMANTIC_QUERY_REQUEST_VERSION,
@@ -307,27 +308,49 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
     return quantityText(open);
   };
   let deliveriesWithheld = false;
-  const deliveredOf = async (line: SemanticRecordDto): Promise<bigint | null> => {
+  const deliveredOf = async (
+    line: SemanticRecordDto,
+  ): Promise<bigint | null> => {
     if (!model.queries.deliveries) return 0n;
     if (deliveriesWithheld) return null;
     try {
-      const rows = await listAll('deliveries', `${ns}:relation.drop_ship_delivery_${purchase ? 'purchase' : 'sales'}_line`, line.recordId, 'referenceScope');
+      const rows = await listAll(
+        'deliveries',
+        `${ns}:relation.drop_ship_delivery_${purchase ? 'purchase' : 'sales'}_line`,
+        line.recordId,
+        'referenceScope',
+      );
       let delivered = 0n;
-      for (const row of rows) if (row.values[field('drop_ship_delivery_state')] === `${ns}:option.drop_ship_delivery_state_posted`) {
-        const amount = units(row.values[field('drop_ship_delivery_quantity')]);
-        if (amount === null || amount < 0n) throw new Error('Supplier delivery quantities require reconciliation');
-        delivered += amount;
-      }
+      for (const row of rows)
+        if (
+          row.values[field('drop_ship_delivery_state')] ===
+          `${ns}:option.drop_ship_delivery_state_posted`
+        ) {
+          const amount = units(
+            row.values[field('drop_ship_delivery_quantity')],
+          );
+          if (amount === null || amount < 0n)
+            throw new Error(
+              'Supplier delivery quantities require reconciliation',
+            );
+          delivered += amount;
+        }
       return delivered;
     } catch (error) {
       if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
-      deliveriesWithheld = true; return null;
+      deliveriesWithheld = true;
+      return null;
     }
   };
   const receivedAndDelivered = async (line: SemanticRecordDto) => {
-    const received = await receivedOf(line); const delivered = await deliveredOf(line);
-    return received === null || delivered === null ? null : received + delivered;
+    const received = await receivedOf(line);
+    const delivered = await deliveredOf(line);
+    return received === null || delivered === null
+      ? null
+      : received + delivered;
   };
+  const linkedFactsOf = (row: SemanticRecordDto) =>
+    commercialLinkedFacts(row, ns, purchase, invoke);
   /** Shipped or delivered quantity not yet on an invoice that counts (ruling D-B). */
   const toInvoice = (orderId: string, lines: readonly SemanticRecordDto[]) =>
     toSettle(orderId, lines, {
@@ -474,8 +497,17 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
       // A release whose purchase lines declare no progress states none.
       const received =
         purchase && model.resultFields.received ? await receivedOf(row) : null;
-      const delivered = model.resultFields.delivered ? await deliveredOf(row) : 0n;
-      if (model.resultFields.delivered) emit('delivered', delivered === null ? null : quantityText(delivered));
+      const delivered = model.resultFields.delivered
+        ? await deliveredOf(row)
+        : 0n;
+      if (model.resultFields.delivered)
+        emit('delivered', delivered === null ? null : quantityText(delivered));
+      if (model.resultFields.linked_line) {
+        const links = await linkedFactsOf(row);
+        emit('linked_line', links.linkedLine);
+        emit('linked_order', links.linkedOrder);
+        emit('route', links.route);
+      }
       if (purchase && model.resultFields.received) {
         const ordered = units(
           row.values[field('purchase_order_line_ordered_quantity')],
@@ -493,7 +525,10 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
       // never enforced; declared only where payables are composed.
       if (purchase && model.resultFields.match_status) {
         const billed = await billedOf(row);
-        const match = threeWayMatch(received === null || delivered === null ? null : received + delivered, billed);
+        const match = threeWayMatch(
+          received === null || delivered === null ? null : received + delivered,
+          billed,
+        );
         emit('billed', billed === null ? null : quantityText(billed));
         emit(
           'to_bill',

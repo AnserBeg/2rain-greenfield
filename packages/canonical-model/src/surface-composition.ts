@@ -837,9 +837,13 @@ export function validateSurfaceCompositions(
           const root = binding.path[0]!;
           if (
             root === 'arguments' &&
-            (effect.kind !== 'registeredCapabilityEffect' || binding.path.length !== 2)
+            (effect.kind !== 'registeredCapabilityEffect' ||
+              binding.path.length !== 2)
           )
-            fail(surface.surfaceId, 'capability arguments require a registered effect and one scalar member');
+            fail(
+              surface.surfaceId,
+              'capability arguments require a registered effect and one scalar member',
+            );
           if (
             ['recordId', 'expectedRevision', 'legalEntityId'].includes(root) &&
             binding.path.length !== 1

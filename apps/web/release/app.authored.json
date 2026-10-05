@@ -873,6 +873,30 @@
       },
       "kind": "assertionDefinition",
       "schemaVersion": "v6"
+    },
+    {
+      "assertionId": "northstar.app:assertion.drop_ship_delivery_walking_slice",
+      "evidenceKinds": [
+        "structure",
+        "provider",
+        "userInterface",
+        "agent",
+        "migration",
+        "recovery"
+      ],
+      "expectedDiagnosticCode": null,
+      "expectedOutcome": "succeeds",
+      "invocation": {
+        "kind": "queryInvocation",
+        "query": {
+          "kind": "queryReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:query.drop_ship_delivery_get"
+        },
+        "schemaVersion": "v6"
+      },
+      "kind": "assertionDefinition",
+      "schemaVersion": "v6"
     }
   ],
   "capabilityRequirements": [
@@ -990,6 +1014,24 @@
       "declaredEffects": ["appendFact"],
       "kind": "capabilityRequirement",
       "requiredProjections": ["operation", "surface", "verification"],
+      "schemaVersion": "v6",
+      "supportStatus": "supported"
+    },
+    {
+      "capabilityId": "northstar.commercial:capability.drop_ship",
+      "capabilityVersion": 1,
+      "declaredEffects": ["recordMutation"],
+      "kind": "capabilityRequirement",
+      "requiredProjections": [
+        "storage",
+        "policy",
+        "query",
+        "operation",
+        "surface",
+        "agent",
+        "reporting",
+        "verification"
+      ],
       "schemaVersion": "v6",
       "supportStatus": "supported"
     }
@@ -1588,6 +1630,23 @@
         "kind": "storageMappingReference",
         "schemaVersion": "v6",
         "targetId": "northstar.app:storage.location"
+      }
+    },
+    {
+      "entityId": "northstar.app:entity.drop_ship_delivery",
+      "kind": "entityDefinition",
+      "label": "Supplier delivery",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "orderKey": 110,
+      "schemaVersion": "v6",
+      "storage": {
+        "kind": "storageMappingReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:storage.drop_ship_delivery"
       }
     }
   ],
@@ -8735,6 +8794,450 @@
       "reportable": true,
       "schemaVersion": "v6",
       "searchable": false
+    },
+    {
+      "businessKey": "tenantEnvironmentCaseInsensitiveUnique",
+      "numbering": {
+        "kind": "documentSequence",
+        "sequenceId": "northstar.app:document_sequence.drop_ship_delivery",
+        "prefix": "DSD",
+        "minimumDigits": 6,
+        "start": 1
+      },
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "none",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "fieldId": "northstar.app:field.drop_ship_delivery_number",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 60,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Delivery number",
+      "orderKey": 10,
+      "presence": "required",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": true
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "none",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "fieldId": "northstar.app:field.drop_ship_delivery_state",
+      "fieldType": {
+        "kind": "enumFieldType",
+        "schemaVersion": "v6",
+        "options": [
+          {
+            "kind": "enumOption",
+            "schemaVersion": "v6",
+            "optionId": "northstar.app:option.drop_ship_delivery_state_draft",
+            "label": "Draft",
+            "orderKey": 10
+          },
+          {
+            "kind": "enumOption",
+            "schemaVersion": "v6",
+            "optionId": "northstar.app:option.drop_ship_delivery_state_posted",
+            "label": "Posted",
+            "orderKey": 20
+          },
+          {
+            "kind": "enumOption",
+            "schemaVersion": "v6",
+            "optionId": "northstar.app:option.drop_ship_delivery_state_reversed",
+            "label": "Reversed",
+            "orderKey": 30
+          }
+        ]
+      },
+      "kind": "fieldDefinition",
+      "label": "State",
+      "orderKey": 20,
+      "presence": "required",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "none",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "fieldId": "northstar.app:field.drop_ship_delivery_delivery_date",
+      "fieldType": {
+        "kind": "dateTimeFieldType",
+        "precision": "millisecond",
+        "schemaVersion": "v6",
+        "timezoneSemantics": "utcInstant"
+      },
+      "kind": "fieldDefinition",
+      "label": "Delivery date",
+      "orderKey": 30,
+      "presence": "required",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "none",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "fieldId": "northstar.app:field.drop_ship_delivery_quantity",
+      "fieldType": {
+        "kind": "exactDecimalFieldType",
+        "precision": 38,
+        "representation": "canonicalString",
+        "scale": 18,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Delivered quantity",
+      "orderKey": 40,
+      "presence": "required",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "none",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "fieldId": "northstar.app:field.drop_ship_delivery_reason",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 1000,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Notes",
+      "orderKey": 50,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "coalesceAtRead",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order_line"
+      },
+      "fieldId": "northstar.app:field.sales_order_line_fulfillment_route",
+      "fieldType": {
+        "schemaVersion": "v6",
+        "kind": "enumFieldType",
+        "options": [
+          {
+            "kind": "enumOption",
+            "schemaVersion": "v6",
+            "optionId": "northstar.app:option.fulfillment_route_stock",
+            "label": "Stock",
+            "orderKey": 10
+          },
+          {
+            "kind": "enumOption",
+            "schemaVersion": "v6",
+            "optionId": "northstar.app:option.fulfillment_route_drop_ship",
+            "label": "Drop ship",
+            "orderKey": 20
+          }
+        ]
+      },
+      "kind": "fieldDefinition",
+      "label": "Fulfillment route",
+      "orderKey": 100,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false,
+      "defaultValue": {
+        "kind": "textValue",
+        "schemaVersion": "v6",
+        "value": "northstar.app:option.fulfillment_route_stock"
+      }
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order_line"
+      },
+      "fieldId": "northstar.app:field.sales_order_line_drop_ship_supplier_id",
+      "fieldType": {
+        "schemaVersion": "v6",
+        "kind": "textFieldType",
+        "maximumLength": 80
+      },
+      "kind": "fieldDefinition",
+      "label": "Drop-ship supplier",
+      "orderKey": 110,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "fieldId": "northstar.app:field.drop_ship_delivery_unit_id",
+      "fieldType": {
+        "schemaVersion": "v6",
+        "kind": "textFieldType",
+        "maximumLength": 32
+      },
+      "kind": "fieldDefinition",
+      "label": "Unit",
+      "orderKey": 60,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "fieldId": "northstar.app:field.drop_ship_delivery_external_reference",
+      "fieldType": {
+        "schemaVersion": "v6",
+        "kind": "textFieldType",
+        "maximumLength": 120
+      },
+      "kind": "fieldDefinition",
+      "label": "Supplier reference",
+      "orderKey": 70,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "fieldId": "northstar.app:field.drop_ship_delivery_reversal_reason",
+      "fieldType": {
+        "schemaVersion": "v6",
+        "kind": "textFieldType",
+        "maximumLength": 500
+      },
+      "kind": "fieldDefinition",
+      "label": "Reversal reason",
+      "orderKey": 80,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.purchase_order"
+      },
+      "fieldId": "northstar.app:field.purchase_order_ship_to_address_id",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 80,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Ship-to address",
+      "orderKey": 390,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.purchase_order"
+      },
+      "fieldId": "northstar.app:field.purchase_order_ship_to_name",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 240,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Ship-to recipient",
+      "orderKey": 400,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.purchase_order"
+      },
+      "fieldId": "northstar.app:field.purchase_order_ship_to_street",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 500,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Ship-to street",
+      "orderKey": 410,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.purchase_order"
+      },
+      "fieldId": "northstar.app:field.purchase_order_ship_to_city",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 120,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Ship-to city",
+      "orderKey": 420,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.purchase_order"
+      },
+      "fieldId": "northstar.app:field.purchase_order_ship_to_region",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 120,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Ship-to province or state",
+      "orderKey": 430,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.purchase_order"
+      },
+      "fieldId": "northstar.app:field.purchase_order_ship_to_postal_code",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 20,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Ship-to postal code",
+      "orderKey": 440,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
+    },
+    {
+      "classification": "internal",
+      "collation": "binary",
+      "defaultSemantics": "nullable",
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.purchase_order"
+      },
+      "fieldId": "northstar.app:field.purchase_order_ship_to_country",
+      "fieldType": {
+        "kind": "textFieldType",
+        "maximumLength": 60,
+        "schemaVersion": "v6"
+      },
+      "kind": "fieldDefinition",
+      "label": "Ship-to country",
+      "orderKey": 450,
+      "presence": "optional",
+      "reportable": true,
+      "schemaVersion": "v6",
+      "searchable": false
     }
   ],
   "hashAlgorithm": "sha256",
@@ -10110,7 +10613,7 @@
         "capability": {
           "kind": "capabilityReference",
           "schemaVersion": "v6",
-          "targetId": "northstar.sales:capability.fulfillment"
+          "targetId": "northstar.sales:capability.receivables"
         }
       },
       "kind": "operationDefinition",
@@ -11628,7 +12131,7 @@
         "capability": {
           "kind": "capabilityReference",
           "schemaVersion": "v6",
-          "targetId": "northstar.purchasing:capability.receiving"
+          "targetId": "northstar.purchasing:capability.payables"
         }
       },
       "kind": "operationDefinition",
@@ -14942,6 +15445,374 @@
       },
       "schemaVersion": "v6",
       "tier": "o0"
+    },
+    {
+      "confirmation": "none",
+      "effect": {
+        "entity": {
+          "kind": "entityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:entity.drop_ship_delivery"
+        },
+        "kind": "createRecordEffect",
+        "schemaVersion": "v6"
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "operationId": "northstar.app:operation.drop_ship_delivery_create",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.drop_ship_delivery_create"
+      },
+      "precondition": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:field.drop_ship_delivery_state"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v6",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v6",
+          "value": "northstar.app:option.drop_ship_delivery_state_draft"
+        }
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.drop_ship_delivery_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o0"
+    },
+    {
+      "confirmation": "none",
+      "effect": {
+        "entity": {
+          "kind": "entityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:entity.drop_ship_delivery"
+        },
+        "kind": "updateRecordEffect",
+        "schemaVersion": "v6"
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "operationId": "northstar.app:operation.drop_ship_delivery_update",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.drop_ship_delivery_update"
+      },
+      "precondition": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:field.drop_ship_delivery_state"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v6",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v6",
+          "value": "northstar.app:option.drop_ship_delivery_state_draft"
+        }
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.drop_ship_delivery_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o0"
+    },
+    {
+      "confirmation": "humanRequired",
+      "effect": {
+        "entity": {
+          "kind": "entityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:entity.drop_ship_delivery"
+        },
+        "kind": "archiveRecordEffect",
+        "schemaVersion": "v6"
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "operationId": "northstar.app:operation.drop_ship_delivery_archive",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.drop_ship_delivery_archive"
+      },
+      "precondition": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:field.drop_ship_delivery_state"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v6",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v6",
+          "value": "northstar.app:option.drop_ship_delivery_state_draft"
+        }
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.drop_ship_delivery_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o0"
+    },
+    {
+      "confirmation": "none",
+      "effect": {
+        "entity": {
+          "kind": "entityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:entity.drop_ship_delivery"
+        },
+        "kind": "restoreRecordEffect",
+        "schemaVersion": "v6"
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "operationId": "northstar.app:operation.drop_ship_delivery_restore",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.drop_ship_delivery_restore"
+      },
+      "precondition": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:field.drop_ship_delivery_state"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v6",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v6",
+          "value": "northstar.app:option.drop_ship_delivery_state_draft"
+        }
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.drop_ship_delivery_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o0"
+    },
+    {
+      "confirmation": "humanRequired",
+      "effect": {
+        "kind": "registeredCapabilityEffect",
+        "schemaVersion": "v6",
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.commercial:capability.drop_ship"
+        }
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "operationId": "northstar.app:operation.drop_ship_delivery_post",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.drop_ship_delivery_post"
+      },
+      "precondition": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:field.drop_ship_delivery_state"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v6",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v6",
+          "value": "northstar.app:option.drop_ship_delivery_state_draft"
+        }
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.drop_ship_delivery_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o1"
+    },
+    {
+      "confirmation": "humanRequired",
+      "effect": {
+        "kind": "registeredCapabilityEffect",
+        "schemaVersion": "v6",
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.commercial:capability.drop_ship"
+        }
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "operationId": "northstar.app:operation.sales_order_create_drop_ship_po",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.sales_order_create_drop_ship_po"
+      },
+      "precondition": {
+        "kind": "fieldComparisonPredicate",
+        "schemaVersion": "v6",
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+        },
+        "operator": "equals",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v6",
+          "value": "northstar.app:state.sales_order_released"
+        }
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.sales_order_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o1"
+    },
+    {
+      "confirmation": "humanRequired",
+      "effect": {
+        "kind": "registeredCapabilityEffect",
+        "schemaVersion": "v6",
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.commercial:capability.drop_ship"
+        }
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "operationId": "northstar.app:operation.drop_ship_delivery_reverse",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.drop_ship_delivery_reverse"
+      },
+      "precondition": {
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:field.drop_ship_delivery_state"
+        },
+        "kind": "fieldComparisonPredicate",
+        "operator": "equals",
+        "schemaVersion": "v6",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v6",
+          "value": "northstar.app:option.drop_ship_delivery_state_posted"
+        }
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.drop_ship_delivery_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o1"
+    },
+    {
+      "confirmation": "humanRequired",
+      "effect": {
+        "kind": "registeredCapabilityEffect",
+        "schemaVersion": "v6",
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.commercial:capability.drop_ship"
+        }
+      },
+      "kind": "operationDefinition",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "operationId": "northstar.app:operation.purchase_order_record_delivery",
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.purchase_order_record_delivery"
+      },
+      "precondition": {
+        "kind": "fieldComparisonPredicate",
+        "schemaVersion": "v6",
+        "field": {
+          "kind": "fieldReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+        },
+        "operator": "equals",
+        "value": {
+          "kind": "textValue",
+          "schemaVersion": "v6",
+          "value": "northstar.app:state.purchase_order_released"
+        }
+      },
+      "readBack": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.purchase_order_get"
+      },
+      "schemaVersion": "v6",
+      "tier": "o1"
     }
   ],
   "package": {
@@ -17040,6 +17911,114 @@
         "targetId": "northstar.app:entity.location"
       },
       "schemaVersion": "v6"
+    },
+    {
+      "action": "create",
+      "kind": "permissionDefinition",
+      "label": "drop_ship_delivery create",
+      "permissionId": "northstar.app:permission.drop_ship_delivery_create",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "read",
+      "kind": "permissionDefinition",
+      "label": "drop_ship_delivery read",
+      "permissionId": "northstar.app:permission.drop_ship_delivery_read",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "update",
+      "kind": "permissionDefinition",
+      "label": "drop_ship_delivery update",
+      "permissionId": "northstar.app:permission.drop_ship_delivery_update",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "archive",
+      "kind": "permissionDefinition",
+      "label": "drop_ship_delivery archive",
+      "permissionId": "northstar.app:permission.drop_ship_delivery_archive",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "restore",
+      "kind": "permissionDefinition",
+      "label": "drop_ship_delivery restore",
+      "permissionId": "northstar.app:permission.drop_ship_delivery_restore",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "transition",
+      "kind": "permissionDefinition",
+      "label": "drop_ship_delivery post",
+      "permissionId": "northstar.app:permission.drop_ship_delivery_post",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "transition",
+      "kind": "permissionDefinition",
+      "label": "Create drop-ship PO",
+      "permissionId": "northstar.app:permission.sales_order_create_drop_ship_po",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "transition",
+      "kind": "permissionDefinition",
+      "label": "Reverse supplier delivery",
+      "permissionId": "northstar.app:permission.drop_ship_delivery_reverse",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "schemaVersion": "v6"
+    },
+    {
+      "action": "transition",
+      "kind": "permissionDefinition",
+      "label": "Record supplier delivery",
+      "permissionId": "northstar.app:permission.purchase_order_record_delivery",
+      "resource": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.purchase_order"
+      },
+      "schemaVersion": "v6"
     }
   ],
   "queries": [
@@ -18375,6 +19354,28 @@
           "orderKey": 90,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.sales_order_line_get_9"
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_get_sales_order_line_fulfillment_route",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_fulfillment_route"
+          },
+          "orderKey": 209
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_get_sales_order_line_drop_ship_supplier_id",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_drop_ship_supplier_id"
+          },
+          "orderKey": 210
         }
       ],
       "sourceEntity": {
@@ -18517,6 +19518,28 @@
           "orderKey": 90,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.sales_order_line_list_9"
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_list_sales_order_line_fulfillment_route",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_fulfillment_route"
+          },
+          "orderKey": 209
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_list_sales_order_line_drop_ship_supplier_id",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_drop_ship_supplier_id"
+          },
+          "orderKey": 210
         }
       ],
       "sourceEntity": {
@@ -18557,12 +19580,31 @@
             "kind": "queryReference",
             "schemaVersion": "v6",
             "targetId": "northstar.app:query.workspace_stock"
+          },
+          "deliveries": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.drop_ship_delivery_list"
+          },
+          "lineSource": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.sales_order_line_get"
+          },
+          "linkedLine": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.purchase_order_line_get"
           }
         },
         "resultFields": {
           "coverage": "northstar.app:metric.coverage",
           "shipped": "northstar.app:metric.shipped",
-          "open_to_ship": "northstar.app:metric.open_to_ship"
+          "open_to_ship": "northstar.app:metric.open_to_ship",
+          "delivered": "northstar.app:metric.line_delivered",
+          "linked_line": "northstar.app:metric.sales_line_linked_line",
+          "linked_order": "northstar.app:metric.sales_line_linked_order",
+          "route": "northstar.app:metric.sales_line_route"
         }
       }
     },
@@ -18699,6 +19741,28 @@
           "orderKey": 90,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.sales_order_line_search_9"
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_search_sales_order_line_fulfillment_route",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_fulfillment_route"
+          },
+          "orderKey": 209
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_search_sales_order_line_drop_ship_supplier_id",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_drop_ship_supplier_id"
+          },
+          "orderKey": 210
         }
       ],
       "sourceEntity": {
@@ -18855,6 +19919,28 @@
           "orderKey": 90,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.sales_order_line_resolve_9"
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_resolve_sales_order_line_fulfillment_route",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_fulfillment_route"
+          },
+          "orderKey": 209
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.sales_order_line_resolve_sales_order_line_drop_ship_supplier_id",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_drop_ship_supplier_id"
+          },
+          "orderKey": 210
         }
       ],
       "sourceEntity": {
@@ -23738,6 +24824,83 @@
           "orderKey": 160,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.purchase_order_get_16"
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_get_purchase_order_ship_to_address_id",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_address_id"
+          },
+          "orderKey": 316
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_get_purchase_order_ship_to_name",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_name"
+          },
+          "orderKey": 317
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_get_purchase_order_ship_to_street",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_street"
+          },
+          "orderKey": 318
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_get_purchase_order_ship_to_city",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_city"
+          },
+          "orderKey": 319
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_get_purchase_order_ship_to_region",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_region"
+          },
+          "orderKey": 320
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_get_purchase_order_ship_to_postal_code",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_postal_code"
+          },
+          "orderKey": 321
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_get_purchase_order_ship_to_country",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_country"
+          },
+          "orderKey": 322
         }
       ],
       "sourceEntity": {
@@ -23958,6 +25121,83 @@
           "orderKey": 160,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.purchase_order_list_16"
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_list_purchase_order_ship_to_address_id",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_address_id"
+          },
+          "orderKey": 316
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_list_purchase_order_ship_to_name",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_name"
+          },
+          "orderKey": 317
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_list_purchase_order_ship_to_street",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_street"
+          },
+          "orderKey": 318
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_list_purchase_order_ship_to_city",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_city"
+          },
+          "orderKey": 319
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_list_purchase_order_ship_to_region",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_region"
+          },
+          "orderKey": 320
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_list_purchase_order_ship_to_postal_code",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_postal_code"
+          },
+          "orderKey": 321
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_list_purchase_order_ship_to_country",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_country"
+          },
+          "orderKey": 322
         }
       ],
       "sourceEntity": {
@@ -24177,6 +25417,83 @@
           "orderKey": 160,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.purchase_order_search_16"
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_search_purchase_order_ship_to_address_id",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_address_id"
+          },
+          "orderKey": 316
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_search_purchase_order_ship_to_name",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_name"
+          },
+          "orderKey": 317
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_search_purchase_order_ship_to_street",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_street"
+          },
+          "orderKey": 318
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_search_purchase_order_ship_to_city",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_city"
+          },
+          "orderKey": 319
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_search_purchase_order_ship_to_region",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_region"
+          },
+          "orderKey": 320
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_search_purchase_order_ship_to_postal_code",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_postal_code"
+          },
+          "orderKey": 321
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_search_purchase_order_ship_to_country",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_country"
+          },
+          "orderKey": 322
         }
       ],
       "sourceEntity": {
@@ -24410,6 +25727,83 @@
           "orderKey": 160,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.purchase_order_resolve_16"
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_resolve_purchase_order_ship_to_address_id",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_address_id"
+          },
+          "orderKey": 316
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_resolve_purchase_order_ship_to_name",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_name"
+          },
+          "orderKey": 317
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_resolve_purchase_order_ship_to_street",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_street"
+          },
+          "orderKey": 318
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_resolve_purchase_order_ship_to_city",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_city"
+          },
+          "orderKey": 319
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_resolve_purchase_order_ship_to_region",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_region"
+          },
+          "orderKey": 320
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_resolve_purchase_order_ship_to_postal_code",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_postal_code"
+          },
+          "orderKey": 321
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.purchase_order_resolve_purchase_order_ship_to_country",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_country"
+          },
+          "orderKey": 322
         }
       ],
       "sourceEntity": {
@@ -35444,6 +36838,28 @@
           "orderKey": 90,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.commercial_lines_9"
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_lines_sales_order_line_fulfillment_route",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_fulfillment_route"
+          },
+          "orderKey": 209
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_lines_sales_order_line_drop_ship_supplier_id",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_drop_ship_supplier_id"
+          },
+          "orderKey": 210
         }
       ],
       "sourceEntity": {
@@ -35586,6 +37002,28 @@
           "orderKey": 90,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.commercial_order_lines_9"
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_lines_sales_order_line_fulfillment_route",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_fulfillment_route"
+          },
+          "orderKey": 209
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_order_lines_sales_order_line_drop_ship_supplier_id",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_drop_ship_supplier_id"
+          },
+          "orderKey": 210
         }
       ],
       "sourceEntity": {
@@ -35601,11 +37039,31 @@
           "targetId": "northstar.sales:capability.commercial"
         },
         "binding": "northstar.sales:read_model.commercial_line",
-        "queries": {},
+        "queries": {
+          "deliveries": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.drop_ship_delivery_list"
+          },
+          "lineSource": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.sales_order_line_get"
+          },
+          "linkedLine": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.purchase_order_line_get"
+          }
+        },
         "resultFields": {
           "line_amount": "northstar.app:metric.line_amount",
           "line_tax": "northstar.app:metric.line_tax",
-          "price_basis": "northstar.app:metric.price_basis"
+          "price_basis": "northstar.app:metric.price_basis",
+          "delivered": "northstar.app:metric.line_delivered",
+          "linked_line": "northstar.app:metric.sales_line_linked_line",
+          "linked_order": "northstar.app:metric.sales_line_linked_order",
+          "route": "northstar.app:metric.sales_line_route"
         }
       }
     },
@@ -35931,6 +37389,11 @@
             "kind": "queryReference",
             "schemaVersion": "v6",
             "targetId": "northstar.app:query.customer_invoice_line_list"
+          },
+          "deliveries": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.drop_ship_delivery_list"
           }
         },
         "resultFields": {
@@ -36208,6 +37671,21 @@
             "kind": "queryReference",
             "schemaVersion": "v6",
             "targetId": "northstar.app:query.vendor_bill_get"
+          },
+          "deliveries": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.drop_ship_delivery_list"
+          },
+          "lineSource": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.purchase_order_line_get"
+          },
+          "linkedLine": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.sales_order_line_get"
           }
         },
         "resultFields": {
@@ -36217,7 +37695,11 @@
           "open_to_receive": "northstar.app:metric.open_to_receive",
           "billed": "northstar.app:metric.billed",
           "to_bill": "northstar.app:metric.to_bill",
-          "match_status": "northstar.app:metric.match_status"
+          "match_status": "northstar.app:metric.match_status",
+          "delivered": "northstar.app:metric.purchase_line_delivered",
+          "linked_line": "northstar.app:metric.purchase_line_linked_line",
+          "linked_order": "northstar.app:metric.purchase_line_linked_order",
+          "route": "northstar.app:metric.purchase_line_route"
         }
       }
     },
@@ -36431,6 +37913,83 @@
           "orderKey": 160,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.commercial_purchase_order_get_16"
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_get_purchase_order_ship_to_address_id",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_address_id"
+          },
+          "orderKey": 316
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_get_purchase_order_ship_to_name",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_name"
+          },
+          "orderKey": 317
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_get_purchase_order_ship_to_street",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_street"
+          },
+          "orderKey": 318
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_get_purchase_order_ship_to_city",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_city"
+          },
+          "orderKey": 319
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_get_purchase_order_ship_to_region",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_region"
+          },
+          "orderKey": 320
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_get_purchase_order_ship_to_postal_code",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_postal_code"
+          },
+          "orderKey": 321
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_get_purchase_order_ship_to_country",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_country"
+          },
+          "orderKey": 322
         }
       ],
       "sourceEntity": {
@@ -36466,6 +38025,11 @@
             "kind": "queryReference",
             "schemaVersion": "v6",
             "targetId": "northstar.app:query.vendor_bill_line_list"
+          },
+          "deliveries": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.drop_ship_delivery_list"
           }
         },
         "resultFields": {
@@ -36688,6 +38252,83 @@
           "orderKey": 160,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.commercial_purchase_order_list_16"
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_purchase_order_ship_to_address_id",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_address_id"
+          },
+          "orderKey": 316
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_purchase_order_ship_to_name",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_name"
+          },
+          "orderKey": 317
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_purchase_order_ship_to_street",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_street"
+          },
+          "orderKey": 318
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_purchase_order_ship_to_city",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_city"
+          },
+          "orderKey": 319
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_purchase_order_ship_to_region",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_region"
+          },
+          "orderKey": 320
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_purchase_order_ship_to_postal_code",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_postal_code"
+          },
+          "orderKey": 321
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.commercial_purchase_order_list_purchase_order_ship_to_country",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_country"
+          },
+          "orderKey": 322
         }
       ],
       "sourceEntity": {
@@ -36708,6 +38349,11 @@
             "kind": "queryReference",
             "schemaVersion": "v6",
             "targetId": "northstar.app:query.commercial_purchase_lines"
+          },
+          "deliveries": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.drop_ship_delivery_list"
           }
         },
         "resultFields": {
@@ -36851,6 +38497,28 @@
           "orderKey": 90,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.fulfillment_order_lines_9"
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.fulfillment_order_lines_sales_order_line_fulfillment_route",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_fulfillment_route"
+          },
+          "orderKey": 209
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.fulfillment_order_lines_sales_order_line_drop_ship_supplier_id",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.sales_order_line_drop_ship_supplier_id"
+          },
+          "orderKey": 210
         }
       ],
       "sourceEntity": {
@@ -36901,6 +38569,21 @@
             "kind": "queryReference",
             "schemaVersion": "v6",
             "targetId": "northstar.app:query.sales_order_get"
+          },
+          "deliveries": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.drop_ship_delivery_list"
+          },
+          "lineSource": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.sales_order_line_get"
+          },
+          "linkedLine": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.purchase_order_line_get"
           }
         },
         "resultFields": {
@@ -36908,7 +38591,11 @@
           "shipped": "northstar.app:metric.shipped",
           "open_to_ship": "northstar.app:metric.open_to_ship",
           "available_now": "northstar.app:metric.available_now",
-          "short": "northstar.app:metric.short"
+          "short": "northstar.app:metric.short",
+          "delivered": "northstar.app:metric.line_delivered",
+          "linked_line": "northstar.app:metric.sales_line_linked_line",
+          "linked_order": "northstar.app:metric.sales_line_linked_order",
+          "route": "northstar.app:metric.sales_line_route"
         }
       }
     },
@@ -37123,6 +38810,83 @@
           "orderKey": 160,
           "schemaVersion": "v6",
           "selectionId": "northstar.app:selection.expected_receipt_list_16"
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.expected_receipt_list_purchase_order_ship_to_address_id",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_address_id"
+          },
+          "orderKey": 316
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.expected_receipt_list_purchase_order_ship_to_name",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_name"
+          },
+          "orderKey": 317
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.expected_receipt_list_purchase_order_ship_to_street",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_street"
+          },
+          "orderKey": 318
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.expected_receipt_list_purchase_order_ship_to_city",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_city"
+          },
+          "orderKey": 319
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.expected_receipt_list_purchase_order_ship_to_region",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_region"
+          },
+          "orderKey": 320
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.expected_receipt_list_purchase_order_ship_to_postal_code",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_postal_code"
+          },
+          "orderKey": 321
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.expected_receipt_list_purchase_order_ship_to_country",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.purchase_order_ship_to_country"
+          },
+          "orderKey": 322
         }
       ],
       "sourceEntity": {
@@ -37288,6 +39052,545 @@
           "order_line": "northstar.app:metric.order_line"
         }
       }
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.drop_ship_delivery_get_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.drop_ship_delivery_get_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 1,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.drop_ship_delivery_read"
+      },
+      "queryId": "northstar.app:query.drop_ship_delivery_get",
+      "queryType": "get",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_get_1",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_number"
+          },
+          "orderKey": 10
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_get_2",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_state"
+          },
+          "orderKey": 20
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_get_3",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_delivery_date"
+          },
+          "orderKey": 30
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_get_4",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_quantity"
+          },
+          "orderKey": 40
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_get_5",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_reason"
+          },
+          "orderKey": 50
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_get_6",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_unit_id"
+          },
+          "orderKey": 60
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_get_7",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_external_reference"
+          },
+          "orderKey": 70
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_get_8",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_reversal_reason"
+          },
+          "orderKey": 80
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "tier": "q0"
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.drop_ship_delivery_list_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.drop_ship_delivery_list_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.drop_ship_delivery_read"
+      },
+      "queryId": "northstar.app:query.drop_ship_delivery_list",
+      "queryType": "list",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_list_1",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_number"
+          },
+          "orderKey": 10
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_list_2",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_state"
+          },
+          "orderKey": 20
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_list_3",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_delivery_date"
+          },
+          "orderKey": 30
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_list_4",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_quantity"
+          },
+          "orderKey": 40
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_list_5",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_reason"
+          },
+          "orderKey": 50
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_list_6",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_unit_id"
+          },
+          "orderKey": 60
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_list_7",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_external_reference"
+          },
+          "orderKey": 70
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_list_8",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_reversal_reason"
+          },
+          "orderKey": 80
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "tier": "q0",
+      "exportMaximumResultCount": 5000
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.drop_ship_delivery_search_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.drop_ship_delivery_search_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.drop_ship_delivery_read"
+      },
+      "queryId": "northstar.app:query.drop_ship_delivery_search",
+      "queryType": "search",
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_search_1",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_number"
+          },
+          "orderKey": 10
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_search_2",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_state"
+          },
+          "orderKey": 20
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_search_3",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_delivery_date"
+          },
+          "orderKey": 30
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_search_4",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_quantity"
+          },
+          "orderKey": 40
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_search_5",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_reason"
+          },
+          "orderKey": 50
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_search_6",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_unit_id"
+          },
+          "orderKey": 60
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_search_7",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_external_reference"
+          },
+          "orderKey": 70
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_search_8",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_reversal_reason"
+          },
+          "orderKey": 80
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "tier": "q0"
+    },
+    {
+      "kind": "queryDefinition",
+      "legalEntityScope": {
+        "cardinality": "exactlyOne",
+        "kind": "queryLegalEntityScope",
+        "operand": {
+          "kind": "queryParameterReference",
+          "parameterId": "northstar.app:parameter.drop_ship_delivery_resolve_legal_entity_scope",
+          "schemaVersion": "v6"
+        },
+        "schemaVersion": "v6"
+      },
+      "parameters": [
+        {
+          "kind": "queryParameterDefinition",
+          "orderKey": 10,
+          "parameterId": "northstar.app:parameter.drop_ship_delivery_resolve_legal_entity_scope",
+          "schemaVersion": "v6"
+        }
+      ],
+      "maximumResultCount": 100,
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "permission": {
+        "kind": "permissionReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:permission.drop_ship_delivery_read"
+      },
+      "queryId": "northstar.app:query.drop_ship_delivery_resolve",
+      "queryType": "resolve",
+      "resolveMatchKeys": [
+        {
+          "authority": "identifier",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_number"
+          },
+          "kind": "resolveMatchKey",
+          "matchKeyId": "northstar.app:resolve-key.drop_ship_delivery",
+          "orderKey": 10,
+          "schemaVersion": "v6"
+        }
+      ],
+      "schemaVersion": "v6",
+      "selections": [
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_resolve_1",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_number"
+          },
+          "orderKey": 10
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_resolve_2",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_state"
+          },
+          "orderKey": 20
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_resolve_3",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_delivery_date"
+          },
+          "orderKey": 30
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_resolve_4",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_quantity"
+          },
+          "orderKey": 40
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_resolve_5",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_reason"
+          },
+          "orderKey": 50
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_resolve_6",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_unit_id"
+          },
+          "orderKey": 60
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_resolve_7",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_external_reference"
+          },
+          "orderKey": 70
+        },
+        {
+          "kind": "querySelection",
+          "schemaVersion": "v6",
+          "selectionId": "northstar.app:selection.drop_ship_delivery_resolve_8",
+          "field": {
+            "kind": "fieldReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:field.drop_ship_delivery_reversal_reason"
+          },
+          "orderKey": 80
+        }
+      ],
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "tier": "q0"
     }
   ],
   "relations": [
@@ -38200,6 +40503,162 @@
         "schemaVersion": "v6",
         "targetId": "northstar.app:entity.party"
       }
+    },
+    {
+      "archiveBehavior": "restrict",
+      "cardinality": "manyToOne",
+      "foreignKeyActions": {
+        "onDelete": "restrict",
+        "onUpdate": "restrict",
+        "schemaVersion": "v6"
+      },
+      "joinEligibility": "query",
+      "kind": "relationDefinition",
+      "orderKey": 235,
+      "ownership": "reference",
+      "relationId": "northstar.app:relation.sales_order_line_purchase_line",
+      "required": false,
+      "schemaVersion": "v6",
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order_line"
+      },
+      "targetEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.purchase_order_line"
+      }
+    },
+    {
+      "archiveBehavior": "restrict",
+      "cardinality": "manyToOne",
+      "foreignKeyActions": {
+        "onDelete": "restrict",
+        "onUpdate": "restrict",
+        "schemaVersion": "v6"
+      },
+      "joinEligibility": "query",
+      "kind": "relationDefinition",
+      "orderKey": 236,
+      "ownership": "reference",
+      "relationId": "northstar.app:relation.purchase_order_line_sales_line",
+      "required": false,
+      "schemaVersion": "v6",
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.purchase_order_line"
+      },
+      "targetEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order_line"
+      }
+    },
+    {
+      "archiveBehavior": "restrict",
+      "cardinality": "manyToOne",
+      "foreignKeyActions": {
+        "onDelete": "restrict",
+        "onUpdate": "restrict",
+        "schemaVersion": "v6"
+      },
+      "joinEligibility": "query",
+      "kind": "relationDefinition",
+      "orderKey": 237,
+      "ownership": "reference",
+      "relationId": "northstar.app:relation.drop_ship_delivery_sales_order",
+      "required": true,
+      "schemaVersion": "v6",
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "targetEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order"
+      }
+    },
+    {
+      "archiveBehavior": "restrict",
+      "cardinality": "manyToOne",
+      "foreignKeyActions": {
+        "onDelete": "restrict",
+        "onUpdate": "restrict",
+        "schemaVersion": "v6"
+      },
+      "joinEligibility": "query",
+      "kind": "relationDefinition",
+      "orderKey": 238,
+      "ownership": "reference",
+      "relationId": "northstar.app:relation.drop_ship_delivery_purchase_order",
+      "required": true,
+      "schemaVersion": "v6",
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "targetEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.purchase_order"
+      }
+    },
+    {
+      "archiveBehavior": "restrict",
+      "cardinality": "manyToOne",
+      "foreignKeyActions": {
+        "onDelete": "restrict",
+        "onUpdate": "restrict",
+        "schemaVersion": "v6"
+      },
+      "joinEligibility": "query",
+      "kind": "relationDefinition",
+      "orderKey": 239,
+      "ownership": "reference",
+      "relationId": "northstar.app:relation.drop_ship_delivery_sales_line",
+      "required": true,
+      "schemaVersion": "v6",
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "targetEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.sales_order_line"
+      }
+    },
+    {
+      "archiveBehavior": "restrict",
+      "cardinality": "manyToOne",
+      "foreignKeyActions": {
+        "onDelete": "restrict",
+        "onUpdate": "restrict",
+        "schemaVersion": "v6"
+      },
+      "joinEligibility": "query",
+      "kind": "relationDefinition",
+      "orderKey": 240,
+      "ownership": "reference",
+      "relationId": "northstar.app:relation.drop_ship_delivery_purchase_line",
+      "required": true,
+      "schemaVersion": "v6",
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "targetEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.purchase_order_line"
+      }
     }
   ],
   "schemaVersion": "v6",
@@ -38912,6 +41371,17 @@
       "schemaVersion": "v6",
       "storageClass": "dedicatedTable",
       "storageMappingId": "northstar.app:storage.location"
+    },
+    {
+      "entity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.drop_ship_delivery"
+      },
+      "kind": "storageMappingDefinition",
+      "schemaVersion": "v6",
+      "storageClass": "dedicatedTable",
+      "storageMappingId": "northstar.app:storage.drop_ship_delivery"
     }
   ],
   "surfaces": [
@@ -39125,6 +41595,15 @@
             "role": "value",
             "priority": 9,
             "sortable": true
+          },
+          {
+            "columnId": "northstar.app:list_column.sales_order_list_delivered",
+            "label": "Delivered",
+            "orderKey": 110,
+            "field": "northstar.app:list_output.sales_order_list_delivered",
+            "role": "value",
+            "priority": 10,
+            "sortable": false
           }
         ],
         "defaultSort": [
@@ -39229,6 +41708,22 @@
             },
             "relation": "northstar.app:relation.sales_order_shipped_order_line",
             "quantity": "northstar.app:field.sales_order_shipped_shipped_quantity"
+          },
+          "additionalDone": {
+            "query": {
+              "kind": "queryReference",
+              "schemaVersion": "v6",
+              "targetId": "northstar.app:query.drop_ship_delivery_list"
+            },
+            "relation": "northstar.app:relation.drop_ship_delivery_sales_line",
+            "quantity": "northstar.app:field.drop_ship_delivery_quantity",
+            "filters": [
+              {
+                "field": "northstar.app:field.drop_ship_delivery_state",
+                "value": "northstar.app:option.drop_ship_delivery_state_posted"
+              }
+            ],
+            "output": "northstar.app:list_output.sales_order_list_delivered"
           },
           "openIn": {
             "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle",
@@ -39911,6 +42406,54 @@
                 "field": "northstar.app:metric.line_amount",
                 "format": "money",
                 "presentation": { "role": "quantity", "priority": 80 }
+              },
+              {
+                "columnId": "northstar.app:column.sales_order_delivered",
+                "label": "Delivered",
+                "orderKey": 125,
+                "field": "northstar.app:metric.line_delivered"
+              },
+              {
+                "columnId": "northstar.app:column.sales_linked_line",
+                "label": "Linked purchase line",
+                "orderKey": 142,
+                "field": "northstar.app:metric.sales_line_linked_line",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:query.purchase_order_line_get"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:field.purchase_order_line_line_number"
+                  }
+                }
+              },
+              {
+                "columnId": "northstar.app:column.sales_linked_order",
+                "label": "Linked purchase order",
+                "orderKey": 143,
+                "field": "northstar.app:metric.sales_line_linked_order",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:query.purchase_order_get"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:field.purchase_order_number"
+                  }
+                }
+              },
+              {
+                "columnId": "northstar.app:column.sales_route",
+                "label": "Route",
+                "orderKey": 126,
+                "field": "northstar.app:metric.sales_line_route"
               }
             ]
           },
@@ -40039,6 +42582,54 @@
                 "orderKey": 90,
                 "field": "northstar.app:metric.available_now",
                 "presentation": { "role": "detail", "priority": 90 }
+              },
+              {
+                "columnId": "northstar.app:column.sales_order_delivered",
+                "label": "Delivered",
+                "orderKey": 125,
+                "field": "northstar.app:metric.line_delivered"
+              },
+              {
+                "columnId": "northstar.app:column.sales_linked_line",
+                "label": "Linked purchase line",
+                "orderKey": 142,
+                "field": "northstar.app:metric.sales_line_linked_line",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:query.purchase_order_line_get"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:field.purchase_order_line_line_number"
+                  }
+                }
+              },
+              {
+                "columnId": "northstar.app:column.sales_linked_order",
+                "label": "Linked purchase order",
+                "orderKey": 143,
+                "field": "northstar.app:metric.sales_line_linked_order",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:query.purchase_order_get"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:field.purchase_order_number"
+                  }
+                }
+              },
+              {
+                "columnId": "northstar.app:column.sales_route",
+                "label": "Route",
+                "orderKey": 126,
+                "field": "northstar.app:metric.sales_line_route"
               }
             ]
           },
@@ -40252,6 +42843,42 @@
                 "format": "money"
               }
             ]
+          },
+          {
+            "datasetId": "northstar.app:dataset.sales_order_deliveries",
+            "presentation": { "selection": "none" },
+            "label": "Deliveries",
+            "orderKey": 80,
+            "query": {
+              "kind": "queryReference",
+              "schemaVersion": "v6",
+              "targetId": "northstar.app:query.drop_ship_delivery_list"
+            },
+            "parent": {
+              "relationId": "northstar.app:relation.drop_ship_delivery_sales_order",
+              "ownership": "reference",
+              "value": { "source": "record", "field": "recordId" }
+            },
+            "columns": [
+              {
+                "columnId": "northstar.app:column.sales_order_delivery_number",
+                "label": "Delivery",
+                "orderKey": 10,
+                "field": "northstar.app:field.drop_ship_delivery_number"
+              },
+              {
+                "columnId": "northstar.app:column.sales_order_delivery_quantity",
+                "label": "Delivered",
+                "orderKey": 20,
+                "field": "northstar.app:field.drop_ship_delivery_quantity"
+              },
+              {
+                "columnId": "northstar.app:column.sales_order_delivery_state",
+                "label": "State",
+                "orderKey": 30,
+                "field": "northstar.app:field.drop_ship_delivery_state"
+              }
+            ]
           }
         ],
         "actions": [
@@ -40301,6 +42928,14 @@
                 },
                 "operator": "equals",
                 "compare": "northstar.app:state.sales_order_released"
+              },
+              {
+                "value": {
+                  "source": "selected",
+                  "field": "northstar.app:metric.sales_line_route"
+                },
+                "operator": "equals",
+                "compare": "Stock"
               }
             ],
             "inputs": [
@@ -41096,6 +43731,102 @@
               },
               "record": { "source": "selected", "field": "recordId" }
             }
+          },
+          {
+            "actionId": "northstar.app:action.sales_open_linked_order",
+            "orderKey": 140,
+            "label": "Open purchase order",
+            "description": "Open the linked demand/supply order",
+            "inputs": [],
+            "steps": [],
+            "datasetId": "northstar.app:dataset.fulfillment_lines",
+            "conditions": [
+              {
+                "value": {
+                  "source": "selected",
+                  "field": "northstar.app:metric.sales_line_linked_order"
+                },
+                "operator": "notEquals",
+                "compare": null
+              }
+            ],
+            "navigate": {
+              "surface": {
+                "kind": "surfaceReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:surface.purchase_order_detail"
+              },
+              "query": {
+                "kind": "queryReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:query.commercial_purchase_order_get"
+              },
+              "record": {
+                "source": "selected",
+                "field": "northstar.app:metric.sales_line_linked_order"
+              }
+            }
+          },
+          {
+            "actionId": "northstar.app:action.create_drop_ship_po",
+            "orderKey": 120,
+            "label": "Create drop-ship PO",
+            "description": "Create drop-ship PO",
+            "conditions": [
+              {
+                "value": {
+                  "source": "record",
+                  "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle"
+                },
+                "operator": "equals",
+                "compare": "northstar.app:state.sales_order_released"
+              }
+            ],
+            "inputs": [],
+            "steps": [
+              {
+                "stepId": "northstar.app:step.create_drop_ship_po",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.sales_order_create_drop_ship_po"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "record", "field": "recordId" }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": { "source": "record", "field": "revision" }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "actionId": "northstar.app:action.sales_order_open_delivery",
+            "orderKey": 130,
+            "label": "Open delivery",
+            "description": "Open the supplier delivery document",
+            "conditions": [],
+            "inputs": [],
+            "steps": [],
+            "datasetId": "northstar.app:dataset.sales_order_deliveries",
+            "presentation": { "placement": "row" },
+            "navigate": {
+              "surface": {
+                "kind": "surfaceReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:surface.drop_ship_delivery_detail"
+              },
+              "query": {
+                "kind": "queryReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:query.drop_ship_delivery_get"
+              },
+              "record": { "source": "selected", "field": "recordId" }
+            }
           }
         ]
       },
@@ -41524,6 +44255,33 @@
               "kind": "derived",
               "referenceFieldId": "northstar.app:field.sales_order_line_tax_code_id",
               "sourceFieldId": "northstar.app:field.tax_code_rate_percent"
+            }
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_line_fulfillment_route",
+            "label": "Fulfillment route (Stock by default)"
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_line_drop_ship_supplier_id",
+            "label": "Drop-ship supplier",
+            "reference": {
+              "queryId": "northstar.app:query.party_list",
+              "getQueryId": "northstar.app:query.party_get",
+              "labelFieldIds": ["northstar.app:field.party_name"],
+              "eligibility": {
+                "queryId": "northstar.app:query.party_role_list",
+                "relationId": "northstar.app:relation.party_role_party",
+                "filters": [
+                  {
+                    "fieldId": "northstar.app:field.party_role_kind",
+                    "value": "northstar.app:option.supplier"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.party_role_status",
+                    "value": "northstar.app:option.active"
+                  }
+                ]
+              }
             }
           }
         ]
@@ -42046,6 +44804,33 @@
               "kind": "derived",
               "referenceFieldId": "northstar.app:field.sales_order_line_tax_code_id",
               "sourceFieldId": "northstar.app:field.tax_code_rate_percent"
+            }
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_line_fulfillment_route",
+            "label": "Fulfillment route (Stock by default)"
+          },
+          {
+            "fieldId": "northstar.app:field.sales_order_line_drop_ship_supplier_id",
+            "label": "Drop-ship supplier",
+            "reference": {
+              "queryId": "northstar.app:query.party_list",
+              "getQueryId": "northstar.app:query.party_get",
+              "labelFieldIds": ["northstar.app:field.party_name"],
+              "eligibility": {
+                "queryId": "northstar.app:query.party_role_list",
+                "relationId": "northstar.app:relation.party_role_party",
+                "filters": [
+                  {
+                    "fieldId": "northstar.app:field.party_role_kind",
+                    "value": "northstar.app:option.supplier"
+                  },
+                  {
+                    "fieldId": "northstar.app:field.party_role_status",
+                    "value": "northstar.app:option.active"
+                  }
+                ]
+              }
             }
           }
         ]
@@ -45763,6 +48548,15 @@
             "role": "value",
             "priority": 9,
             "sortable": true
+          },
+          {
+            "columnId": "northstar.app:list_column.purchase_order_list_delivered",
+            "label": "Delivered",
+            "orderKey": 110,
+            "field": "northstar.app:list_output.purchase_order_list_delivered",
+            "role": "value",
+            "priority": 10,
+            "sortable": false
           }
         ],
         "defaultSort": [
@@ -45883,6 +48677,22 @@
             },
             "relation": "northstar.app:relation.purchase_order_received_order_line",
             "quantity": "northstar.app:field.purchase_order_received_received_quantity"
+          },
+          "additionalDone": {
+            "query": {
+              "kind": "queryReference",
+              "schemaVersion": "v6",
+              "targetId": "northstar.app:query.drop_ship_delivery_list"
+            },
+            "relation": "northstar.app:relation.drop_ship_delivery_purchase_line",
+            "quantity": "northstar.app:field.drop_ship_delivery_quantity",
+            "filters": [
+              {
+                "field": "northstar.app:field.drop_ship_delivery_state",
+                "value": "northstar.app:option.drop_ship_delivery_state_posted"
+              }
+            ],
+            "output": "northstar.app:list_output.purchase_order_list_delivered"
           },
           "openIn": {
             "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle",
@@ -46419,6 +49229,48 @@
             "orderKey": 73,
             "field": "northstar.app:metric.order_total",
             "format": "money"
+          },
+          {
+            "columnId": "northstar.app:column.purchase_purchase_order_ship_to_address_id",
+            "label": "Ship-to address",
+            "orderKey": 418,
+            "field": "northstar.app:field.purchase_order_ship_to_address_id"
+          },
+          {
+            "columnId": "northstar.app:column.purchase_purchase_order_ship_to_name",
+            "label": "Ship-to recipient",
+            "orderKey": 419,
+            "field": "northstar.app:field.purchase_order_ship_to_name"
+          },
+          {
+            "columnId": "northstar.app:column.purchase_purchase_order_ship_to_street",
+            "label": "Ship-to street",
+            "orderKey": 420,
+            "field": "northstar.app:field.purchase_order_ship_to_street"
+          },
+          {
+            "columnId": "northstar.app:column.purchase_purchase_order_ship_to_city",
+            "label": "Ship-to city",
+            "orderKey": 421,
+            "field": "northstar.app:field.purchase_order_ship_to_city"
+          },
+          {
+            "columnId": "northstar.app:column.purchase_purchase_order_ship_to_region",
+            "label": "Ship-to province or state",
+            "orderKey": 422,
+            "field": "northstar.app:field.purchase_order_ship_to_region"
+          },
+          {
+            "columnId": "northstar.app:column.purchase_purchase_order_ship_to_postal_code",
+            "label": "Ship-to postal code",
+            "orderKey": 423,
+            "field": "northstar.app:field.purchase_order_ship_to_postal_code"
+          },
+          {
+            "columnId": "northstar.app:column.purchase_purchase_order_ship_to_country",
+            "label": "Ship-to country",
+            "orderKey": 424,
+            "field": "northstar.app:field.purchase_order_ship_to_country"
           }
         ],
         "children": [
@@ -46526,6 +49378,54 @@
                 "field": "northstar.app:metric.line_amount",
                 "presentation": { "role": "quantity", "priority": 80 },
                 "format": "money"
+              },
+              {
+                "columnId": "northstar.app:column.purchase_order_delivered",
+                "label": "Delivered",
+                "orderKey": 125,
+                "field": "northstar.app:metric.purchase_line_delivered"
+              },
+              {
+                "columnId": "northstar.app:column.purchase_linked_line",
+                "label": "Linked sales line",
+                "orderKey": 142,
+                "field": "northstar.app:metric.purchase_line_linked_line",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:query.sales_order_line_get"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:field.sales_order_line_line_number"
+                  }
+                }
+              },
+              {
+                "columnId": "northstar.app:column.purchase_linked_order",
+                "label": "Linked sales order",
+                "orderKey": 143,
+                "field": "northstar.app:metric.purchase_line_linked_order",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:query.sales_order_get"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:field.sales_order_number"
+                  }
+                }
+              },
+              {
+                "columnId": "northstar.app:column.purchase_route",
+                "label": "Route",
+                "orderKey": 126,
+                "field": "northstar.app:metric.purchase_line_route"
               }
             ]
           },
@@ -46667,6 +49567,54 @@
                 "field": "northstar.app:field.purchase_order_line_unit_price",
                 "presentation": { "role": "secondary", "priority": 50 },
                 "format": "money"
+              },
+              {
+                "columnId": "northstar.app:column.purchase_order_delivered",
+                "label": "Delivered",
+                "orderKey": 125,
+                "field": "northstar.app:metric.purchase_line_delivered"
+              },
+              {
+                "columnId": "northstar.app:column.purchase_linked_line",
+                "label": "Linked sales line",
+                "orderKey": 142,
+                "field": "northstar.app:metric.purchase_line_linked_line",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:query.sales_order_line_get"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:field.sales_order_line_line_number"
+                  }
+                }
+              },
+              {
+                "columnId": "northstar.app:column.purchase_linked_order",
+                "label": "Linked sales order",
+                "orderKey": 143,
+                "field": "northstar.app:metric.purchase_line_linked_order",
+                "reference": {
+                  "query": {
+                    "kind": "queryReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:query.sales_order_get"
+                  },
+                  "labelField": {
+                    "kind": "fieldReference",
+                    "schemaVersion": "v6",
+                    "targetId": "northstar.app:field.sales_order_number"
+                  }
+                }
+              },
+              {
+                "columnId": "northstar.app:column.purchase_route",
+                "label": "Route",
+                "orderKey": 126,
+                "field": "northstar.app:metric.purchase_line_route"
               }
             ]
           },
@@ -46873,6 +49821,42 @@
                 "format": "money"
               }
             ]
+          },
+          {
+            "datasetId": "northstar.app:dataset.purchase_order_deliveries",
+            "presentation": { "selection": "none" },
+            "label": "Deliveries",
+            "orderKey": 80,
+            "query": {
+              "kind": "queryReference",
+              "schemaVersion": "v6",
+              "targetId": "northstar.app:query.drop_ship_delivery_list"
+            },
+            "parent": {
+              "relationId": "northstar.app:relation.drop_ship_delivery_purchase_order",
+              "ownership": "reference",
+              "value": { "source": "record", "field": "recordId" }
+            },
+            "columns": [
+              {
+                "columnId": "northstar.app:column.purchase_order_delivery_number",
+                "label": "Delivery",
+                "orderKey": 10,
+                "field": "northstar.app:field.drop_ship_delivery_number"
+              },
+              {
+                "columnId": "northstar.app:column.purchase_order_delivery_quantity",
+                "label": "Delivered",
+                "orderKey": 20,
+                "field": "northstar.app:field.drop_ship_delivery_quantity"
+              },
+              {
+                "columnId": "northstar.app:column.purchase_order_delivery_state",
+                "label": "State",
+                "orderKey": 30,
+                "field": "northstar.app:field.drop_ship_delivery_state"
+              }
+            ]
           }
         ],
         "actions": [
@@ -46901,6 +49885,14 @@
                   },
                   "operator": "notEquals",
                   "compare": "0"
+                },
+                {
+                  "value": {
+                    "source": "selected",
+                    "field": "northstar.app:metric.purchase_line_route"
+                  },
+                  "operator": "equals",
+                  "compare": "Stock"
                 }
               ],
               "fillLabel": "Fill open quantities"
@@ -47265,6 +50257,14 @@
                   },
                   "operator": "notEquals",
                   "compare": "0"
+                },
+                {
+                  "value": {
+                    "source": "selected",
+                    "field": "northstar.app:metric.purchase_line_route"
+                  },
+                  "operator": "equals",
+                  "compare": "Stock"
                 }
               ],
               "fillLabel": "Fill open quantities"
@@ -47899,6 +50899,14 @@
                 },
                 "operator": "notEquals",
                 "compare": "0"
+              },
+              {
+                "value": {
+                  "source": "selected",
+                  "field": "northstar.app:metric.purchase_line_route"
+                },
+                "operator": "equals",
+                "compare": "Stock"
               }
             ],
             "inputs": [
@@ -48247,6 +51255,14 @@
                 },
                 "operator": "notEquals",
                 "compare": "0"
+              },
+              {
+                "value": {
+                  "source": "selected",
+                  "field": "northstar.app:metric.purchase_line_route"
+                },
+                "operator": "equals",
+                "compare": "Stock"
               }
             ],
             "inputs": [
@@ -48563,6 +51579,14 @@
                 },
                 "operator": "positive",
                 "compare": null
+              },
+              {
+                "value": {
+                  "source": "selected",
+                  "field": "northstar.app:metric.purchase_line_route"
+                },
+                "operator": "equals",
+                "compare": "Stock"
               }
             ],
             "inputs": [
@@ -48816,6 +51840,145 @@
                 "kind": "queryReference",
                 "targetId": "northstar.app:query.goods_receipt_get",
                 "schemaVersion": "v6"
+              },
+              "record": { "source": "selected", "field": "recordId" }
+            }
+          },
+          {
+            "actionId": "northstar.app:action.purchase_open_linked_order",
+            "orderKey": 140,
+            "label": "Open sales order",
+            "description": "Open the linked demand/supply order",
+            "inputs": [],
+            "steps": [],
+            "datasetId": "northstar.app:dataset.purchasing_lines",
+            "conditions": [
+              {
+                "value": {
+                  "source": "selected",
+                  "field": "northstar.app:metric.purchase_line_linked_order"
+                },
+                "operator": "notEquals",
+                "compare": null
+              }
+            ],
+            "navigate": {
+              "surface": {
+                "kind": "surfaceReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:surface.sales_order_detail"
+              },
+              "query": {
+                "kind": "queryReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:query.commercial_order_get"
+              },
+              "record": {
+                "source": "selected",
+                "field": "northstar.app:metric.purchase_line_linked_order"
+              }
+            }
+          },
+          {
+            "actionId": "northstar.app:action.record_supplier_delivery",
+            "orderKey": 120,
+            "label": "Record supplier delivery",
+            "description": "Record supplier delivery",
+            "conditions": [
+              {
+                "value": {
+                  "source": "record",
+                  "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle"
+                },
+                "operator": "equals",
+                "compare": "northstar.app:state.purchase_order_released"
+              },
+              {
+                "value": {
+                  "source": "selected",
+                  "field": "northstar.app:metric.purchase_line_route"
+                },
+                "operator": "equals",
+                "compare": "Drop ship"
+              }
+            ],
+            "inputs": [
+              {
+                "inputId": "northstar.app:input.delivery_quantity",
+                "label": "Delivered quantity",
+                "orderKey": 10,
+                "required": true,
+                "type": "quantity"
+              },
+              {
+                "inputId": "northstar.app:input.delivery_reference",
+                "label": "Supplier reference",
+                "orderKey": 20,
+                "required": false,
+                "type": "text"
+              }
+            ],
+            "steps": [
+              {
+                "stepId": "northstar.app:step.record_supplier_delivery",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.purchase_order_record_delivery"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "record", "field": "recordId" }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": { "source": "record", "field": "revision" }
+                  },
+                  {
+                    "path": ["arguments", "purchaseLineId"],
+                    "value": { "source": "selected", "field": "recordId" }
+                  },
+                  {
+                    "path": ["arguments", "quantity"],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.delivery_quantity"
+                    }
+                  },
+                  {
+                    "path": ["arguments", "reference"],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.delivery_reference"
+                    }
+                  }
+                ]
+              }
+            ],
+            "datasetId": "northstar.app:dataset.purchasing_lines",
+            "presentation": { "placement": "selection" }
+          },
+          {
+            "actionId": "northstar.app:action.purchase_order_open_delivery",
+            "orderKey": 130,
+            "label": "Open delivery",
+            "description": "Open the supplier delivery document",
+            "conditions": [],
+            "inputs": [],
+            "steps": [],
+            "datasetId": "northstar.app:dataset.purchase_order_deliveries",
+            "presentation": { "placement": "row" },
+            "navigate": {
+              "surface": {
+                "kind": "surfaceReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:surface.drop_ship_delivery_detail"
+              },
+              "query": {
+                "kind": "queryReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:query.drop_ship_delivery_get"
               },
               "record": { "source": "selected", "field": "recordId" }
             }
@@ -56717,6 +59880,15 @@
             "role": "value",
             "priority": 6,
             "sortable": true
+          },
+          {
+            "columnId": "northstar.app:list_column.expected_receipt_list_delivered",
+            "label": "Delivered",
+            "orderKey": 80,
+            "field": "northstar.app:list_output.expected_receipt_list_delivered",
+            "role": "value",
+            "priority": 7,
+            "sortable": false
           }
         ],
         "defaultSort": [
@@ -56787,6 +59959,22 @@
             "relation": "northstar.app:relation.purchase_order_received_order_line",
             "quantity": "northstar.app:field.purchase_order_received_received_quantity"
           },
+          "additionalDone": {
+            "query": {
+              "kind": "queryReference",
+              "schemaVersion": "v6",
+              "targetId": "northstar.app:query.drop_ship_delivery_list"
+            },
+            "relation": "northstar.app:relation.drop_ship_delivery_purchase_line",
+            "quantity": "northstar.app:field.drop_ship_delivery_quantity",
+            "filters": [
+              {
+                "field": "northstar.app:field.drop_ship_delivery_state",
+                "value": "northstar.app:option.drop_ship_delivery_state_posted"
+              }
+            ],
+            "output": "northstar.app:list_output.expected_receipt_list_delivered"
+          },
           "openIn": {
             "field": "northstar.app:derived_state_field.machine.purchase_order_lifecycle",
             "values": ["northstar.app:state.purchase_order_released"]
@@ -56796,6 +59984,641 @@
             "done": "northstar.app:list_output.expected_receipt_list_received",
             "open": "northstar.app:list_output.expected_receipt_list_open"
           }
+        }
+      }
+    },
+    {
+      "archetype": "list",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.drop_ship_delivery_list"
+      },
+      "kind": "surfaceDefinition",
+      "label": "Supplier delivery list",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "schemaVersion": "v6",
+      "slots": [
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "slot": "title",
+          "slotId": "northstar.app:slot.drop_ship_delivery_list_title"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "slot": "dataGrid",
+          "slotId": "northstar.app:slot.drop_ship_delivery_list_data_grid"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "slot": "bulkActions",
+          "slotId": "northstar.app:slot.drop_ship_delivery_list_bulk_actions"
+        },
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v6",
+          "slot": "savedViews",
+          "slotId": "northstar.app:slot.drop_ship_delivery_list_saved_views",
+          "orderKey": 15,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          }
+        }
+      ],
+      "statusRoles": [],
+      "surfaceId": "northstar.app:surface.drop_ship_delivery_list",
+      "surfaceRole": "list",
+      "workspace": {
+        "membership": "contextual",
+        "ownerSurfaceId": "northstar.app:surface.purchase_order_list",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.purchase_order_list"
+        }
+      },
+      "list": {
+        "kind": "surfaceList",
+        "schemaVersion": "v6",
+        "pageSize": 25,
+        "columns": [
+          {
+            "columnId": "northstar.app:list_column.drop_ship_delivery_list_number",
+            "label": "Delivery",
+            "orderKey": 10,
+            "field": "northstar.app:field.drop_ship_delivery_number",
+            "role": "title",
+            "priority": 0,
+            "sortable": true
+          },
+          {
+            "columnId": "northstar.app:list_column.drop_ship_delivery_list_state",
+            "label": "State",
+            "orderKey": 20,
+            "field": "northstar.app:field.drop_ship_delivery_state",
+            "role": "status",
+            "priority": 1,
+            "sortable": true
+          },
+          {
+            "columnId": "northstar.app:list_column.drop_ship_delivery_list_date",
+            "label": "Delivered",
+            "orderKey": 30,
+            "field": "northstar.app:field.drop_ship_delivery_delivery_date",
+            "role": "value",
+            "priority": 2,
+            "sortable": true,
+            "format": "date"
+          },
+          {
+            "columnId": "northstar.app:list_column.drop_ship_delivery_list_quantity",
+            "label": "Quantity",
+            "orderKey": 40,
+            "field": "northstar.app:field.drop_ship_delivery_quantity",
+            "role": "value",
+            "priority": 3,
+            "sortable": true
+          },
+          {
+            "columnId": "northstar.app:list_column.drop_ship_delivery_list_unit",
+            "label": "Unit",
+            "orderKey": 50,
+            "field": "northstar.app:field.drop_ship_delivery_unit_id",
+            "role": "value",
+            "priority": 4,
+            "sortable": true
+          },
+          {
+            "columnId": "northstar.app:list_column.drop_ship_delivery_list_reference",
+            "label": "Supplier reference",
+            "orderKey": 60,
+            "field": "northstar.app:field.drop_ship_delivery_external_reference",
+            "role": "value",
+            "priority": 5,
+            "sortable": true
+          }
+        ],
+        "defaultSort": [
+          {
+            "columnId": "northstar.app:list_column.drop_ship_delivery_list_number",
+            "direction": "descending"
+          }
+        ],
+        "views": [
+          {
+            "viewId": "northstar.app:list_view.drop_ship_delivery_list_draft",
+            "label": "Draft",
+            "orderKey": 10,
+            "filters": [
+              {
+                "field": "northstar.app:field.drop_ship_delivery_state",
+                "value": "northstar.app:option.drop_ship_delivery_state_draft"
+              }
+            ]
+          },
+          {
+            "viewId": "northstar.app:list_view.drop_ship_delivery_list_posted",
+            "label": "Posted",
+            "orderKey": 20,
+            "filters": [
+              {
+                "field": "northstar.app:field.drop_ship_delivery_state",
+                "value": "northstar.app:option.drop_ship_delivery_state_posted"
+              }
+            ]
+          },
+          {
+            "viewId": "northstar.app:list_view.drop_ship_delivery_list_reversed",
+            "label": "Reversed",
+            "orderKey": 30,
+            "filters": [
+              {
+                "field": "northstar.app:field.drop_ship_delivery_state",
+                "value": "northstar.app:option.drop_ship_delivery_state_reversed"
+              }
+            ]
+          }
+        ],
+        "filters": [],
+        "export": { "format": "csv" }
+      }
+    },
+    {
+      "archetype": "record",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.drop_ship_delivery_get"
+      },
+      "kind": "surfaceDefinition",
+      "label": "Supplier delivery detail",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "schemaVersion": "v6",
+      "slots": [
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "slot": "breadcrumb",
+          "slotId": "northstar.app:slot.drop_ship_delivery_detail_breadcrumb"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "slot": "titleStatus",
+          "slotId": "northstar.app:slot.drop_ship_delivery_detail_title_status"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "slot": "commandBar",
+          "slotId": "northstar.app:slot.drop_ship_delivery_detail_command_bar"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "slot": "keyFacts",
+          "slotId": "northstar.app:slot.drop_ship_delivery_detail_key_facts"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "slot": "sections",
+          "slotId": "northstar.app:slot.drop_ship_delivery_detail_sections"
+        },
+        {
+          "kind": "surfaceSlot",
+          "schemaVersion": "v6",
+          "slot": "childTables",
+          "slotId": "northstar.app:slot.drop_ship_delivery_detail_child_tables",
+          "orderKey": 60,
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          }
+        }
+      ],
+      "statusRoles": [],
+      "surfaceId": "northstar.app:surface.drop_ship_delivery_detail",
+      "surfaceRole": "record",
+      "workspace": {
+        "membership": "contextual",
+        "ownerSurfaceId": "northstar.app:surface.purchase_order_list",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.purchase_order_list"
+        }
+      },
+      "composition": {
+        "kind": "surfaceComposition",
+        "schemaVersion": "v6",
+        "presentation": {
+          "header": {
+            "title": "northstar.app:column.delivery_0",
+            "subtitle": [],
+            "status": "northstar.app:column.delivery_1",
+            "facts": [
+              "northstar.app:column.delivery_2",
+              "northstar.app:column.delivery_3",
+              "northstar.app:column.delivery_6"
+            ]
+          },
+          "context": {
+            "label": "Supplier delivery",
+            "description": "Delivered directly to the customer. No warehouse stock movement."
+          },
+          "recordActions": "progressive",
+          "technicalDetails": "progressive",
+          "task": { "mode": "nativeDialog", "fallback": "page" }
+        },
+        "fields": [
+          {
+            "columnId": "northstar.app:column.delivery_0",
+            "label": "Delivery number",
+            "orderKey": 10,
+            "field": "northstar.app:field.drop_ship_delivery_number"
+          },
+          {
+            "columnId": "northstar.app:column.delivery_1",
+            "label": "State",
+            "orderKey": 20,
+            "field": "northstar.app:field.drop_ship_delivery_state"
+          },
+          {
+            "columnId": "northstar.app:column.delivery_2",
+            "label": "Delivery date",
+            "orderKey": 30,
+            "field": "northstar.app:field.drop_ship_delivery_delivery_date"
+          },
+          {
+            "columnId": "northstar.app:column.delivery_3",
+            "label": "Delivered quantity",
+            "orderKey": 40,
+            "field": "northstar.app:field.drop_ship_delivery_quantity"
+          },
+          {
+            "columnId": "northstar.app:column.delivery_4",
+            "label": "Notes",
+            "orderKey": 50,
+            "field": "northstar.app:field.drop_ship_delivery_reason"
+          },
+          {
+            "columnId": "northstar.app:column.delivery_5",
+            "label": "Unit",
+            "orderKey": 60,
+            "field": "northstar.app:field.drop_ship_delivery_unit_id"
+          },
+          {
+            "columnId": "northstar.app:column.delivery_6",
+            "label": "Supplier reference",
+            "orderKey": 70,
+            "field": "northstar.app:field.drop_ship_delivery_external_reference"
+          },
+          {
+            "columnId": "northstar.app:column.delivery_7",
+            "label": "Reversal reason",
+            "orderKey": 80,
+            "field": "northstar.app:field.drop_ship_delivery_reversal_reason"
+          },
+          {
+            "columnId": "northstar.app:column.delivery_sales_order",
+            "label": "Sales order",
+            "orderKey": 5,
+            "field": "northstar.app:relation.drop_ship_delivery_sales_order",
+            "reference": {
+              "query": {
+                "kind": "queryReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:query.commercial_order_get"
+              },
+              "labelField": {
+                "kind": "fieldReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:field.sales_order_number"
+              }
+            }
+          },
+          {
+            "columnId": "northstar.app:column.delivery_purchase_order",
+            "label": "Purchase order",
+            "orderKey": 5,
+            "field": "northstar.app:relation.drop_ship_delivery_purchase_order",
+            "reference": {
+              "query": {
+                "kind": "queryReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:query.commercial_purchase_order_get"
+              },
+              "labelField": {
+                "kind": "fieldReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:field.purchase_order_number"
+              }
+            }
+          }
+        ],
+        "children": [],
+        "actions": [
+          {
+            "actionId": "northstar.app:action.post_delivery",
+            "orderKey": 120,
+            "label": "Record supplier delivery",
+            "description": "Record supplier delivery",
+            "conditions": [
+              {
+                "value": {
+                  "source": "record",
+                  "field": "northstar.app:field.drop_ship_delivery_state"
+                },
+                "operator": "equals",
+                "compare": "northstar.app:option.drop_ship_delivery_state_draft"
+              }
+            ],
+            "inputs": [],
+            "steps": [
+              {
+                "stepId": "northstar.app:step.post_delivery",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.drop_ship_delivery_post"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "record", "field": "recordId" }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": { "source": "record", "field": "revision" }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "actionId": "northstar.app:action.reverse_delivery",
+            "orderKey": 120,
+            "label": "Reverse supplier delivery",
+            "description": "Reverse supplier delivery",
+            "conditions": [
+              {
+                "value": {
+                  "source": "record",
+                  "field": "northstar.app:field.drop_ship_delivery_state"
+                },
+                "operator": "equals",
+                "compare": "northstar.app:option.drop_ship_delivery_state_posted"
+              }
+            ],
+            "inputs": [
+              {
+                "inputId": "northstar.app:input.delivery_reversal_reason",
+                "label": "Reason",
+                "orderKey": 10,
+                "required": true,
+                "type": "text"
+              }
+            ],
+            "steps": [
+              {
+                "stepId": "northstar.app:step.reverse_delivery",
+                "operation": {
+                  "kind": "operationReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:operation.drop_ship_delivery_reverse"
+                },
+                "bindings": [
+                  {
+                    "path": ["recordId"],
+                    "value": { "source": "record", "field": "recordId" }
+                  },
+                  {
+                    "path": ["expectedRevision"],
+                    "value": { "source": "record", "field": "revision" }
+                  },
+                  {
+                    "path": ["arguments", "reason"],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.delivery_reversal_reason"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "actionId": "northstar.app:action.delivery_open_sales_order",
+            "label": "Open sales order",
+            "description": "Open the linked order",
+            "orderKey": 150,
+            "conditions": [],
+            "inputs": [],
+            "steps": [],
+            "navigate": {
+              "surface": {
+                "kind": "surfaceReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:surface.sales_order_detail"
+              },
+              "query": {
+                "kind": "queryReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:query.commercial_order_get"
+              },
+              "record": {
+                "source": "record",
+                "field": "northstar.app:relation.drop_ship_delivery_sales_order"
+              }
+            }
+          },
+          {
+            "actionId": "northstar.app:action.delivery_open_purchase_order",
+            "label": "Open purchase order",
+            "description": "Open the linked order",
+            "orderKey": 150,
+            "conditions": [],
+            "inputs": [],
+            "steps": [],
+            "navigate": {
+              "surface": {
+                "kind": "surfaceReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:surface.purchase_order_detail"
+              },
+              "query": {
+                "kind": "queryReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:query.commercial_purchase_order_get"
+              },
+              "record": {
+                "source": "record",
+                "field": "northstar.app:relation.drop_ship_delivery_purchase_order"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "archetype": "record",
+      "dataSource": {
+        "kind": "queryReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:query.drop_ship_delivery_get"
+      },
+      "kind": "surfaceDefinition",
+      "label": "Supplier delivery form",
+      "module": {
+        "kind": "moduleReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:module.purchasing"
+      },
+      "schemaVersion": "v6",
+      "slots": [
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 10,
+          "schemaVersion": "v6",
+          "slot": "breadcrumb",
+          "slotId": "northstar.app:slot.drop_ship_delivery_form_breadcrumb"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 20,
+          "schemaVersion": "v6",
+          "slot": "titleStatus",
+          "slotId": "northstar.app:slot.drop_ship_delivery_form_title_status"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 30,
+          "schemaVersion": "v6",
+          "slot": "commandBar",
+          "slotId": "northstar.app:slot.drop_ship_delivery_form_command_bar"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 40,
+          "schemaVersion": "v6",
+          "slot": "keyFacts",
+          "slotId": "northstar.app:slot.drop_ship_delivery_form_key_facts"
+        },
+        {
+          "content": {
+            "kind": "opaqueSurfaceContentReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:capability.standard_surface_content"
+          },
+          "kind": "surfaceSlot",
+          "orderKey": 50,
+          "schemaVersion": "v6",
+          "slot": "sections",
+          "slotId": "northstar.app:slot.drop_ship_delivery_form_sections"
+        }
+      ],
+      "statusRoles": [],
+      "surfaceId": "northstar.app:surface.drop_ship_delivery_form",
+      "surfaceRole": "form",
+      "workspace": {
+        "membership": "contextual",
+        "ownerSurfaceId": "northstar.app:surface.purchase_order_list",
+        "entry": {
+          "companyQueryId": "northstar.app:query.legal_entity_list",
+          "companyNameFieldId": "northstar.app:field.legal_entity_name",
+          "companyStateFieldId": "northstar.app:field.legal_entity_status",
+          "activeStateId": "northstar.app:option.legal_entity_status_active",
+          "policy": "authorizedSingleOrPreference",
+          "authorizationQueryId": "northstar.app:query.purchase_order_list"
         }
       }
     }

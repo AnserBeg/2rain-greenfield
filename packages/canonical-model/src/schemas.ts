@@ -1333,6 +1333,13 @@ const listProgressSource = z.strictObject({
 const listProgress = z.strictObject({
   lines: listProgressSource,
   done: listProgressSource,
+  /** A second, independently visible fact stream (never a stock projection). */
+  additionalDone: listProgressSource
+    .extend({
+      filters: z.array(listFieldValue).min(1).max(4),
+      output: CanonicalIdSchema,
+    })
+    .optional(),
   openIn: z
     .strictObject({
       field: CanonicalIdSchema,

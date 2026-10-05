@@ -38,7 +38,10 @@ import {
 import { withModuleRuntimeRole } from './module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 import { executeReceivingOrderState } from './receiving-order-capability.js';
-import { assertStockRoutes } from './drop-ship-support.js';
+import {
+  assertNoDeliveredOrder,
+  assertStockRoutes,
+} from './drop-ship-support.js';
 
 interface PreparedReceiving {
   readonly request: RegisteredCapabilityOperationAuthorizationRequest;
@@ -203,7 +206,21 @@ class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecut
       request.definition.operationId.endsWith(
         ':operation.purchase_order_line_amend',
       )
-    )
+    ) {
+      await withTrustedRequestTransaction(
+        this.context.pool,
+        request.context,
+        (client) =>
+          withModuleRuntimeRole(client, () =>
+            assertStockRoutes(
+              client,
+              this.#binding.target,
+              { ...request.context, legalEntityId: prepared.legalEntityId },
+              'purchase',
+              [prepared.recordId],
+            ),
+          ),
+      );
       return executeReceivingOrderState(
         this.context,
         this.#binding,
@@ -211,6 +228,7 @@ class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecut
         'amend',
         prepared.legalEntityId,
       );
+    }
     if (
       request.definition.operationId.endsWith(':operation.purchase_order_close')
     )
@@ -239,7 +257,21 @@ class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecut
       request.definition.operationId.endsWith(
         ':operation.purchase_order_cancel',
       )
-    )
+    ) {
+      await withTrustedRequestTransaction(
+        this.context.pool,
+        request.context,
+        (client) =>
+          withModuleRuntimeRole(client, () =>
+            assertNoDeliveredOrder(
+              client,
+              this.#binding.target,
+              { ...request.context, legalEntityId: prepared.legalEntityId },
+              'purchase',
+              prepared.recordId,
+            ),
+          ),
+      );
       return executeReceivingOrderState(
         this.context,
         this.#binding,
@@ -247,6 +279,7 @@ class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecut
         'cancel',
         prepared.legalEntityId,
       );
+    }
     if (
       !request.definition.operationId.endsWith(
         ':operation.goods_receipt_post',
@@ -333,7 +366,23 @@ class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecut
               ],
             );
             const effectiveAt = field('effective_at');
-            await assertStockRoutes(client, binding.target, { ...request.context, legalEntityId }, 'purchase', rows.rows.map((row: Record<string, unknown>) => String(row[receiptRelation(binding, binding.line, 'goods_receipt_line_order_line')])));
+            await assertStockRoutes(
+              client,
+              binding.target,
+              { ...request.context, legalEntityId },
+              'purchase',
+              rows.rows.map((row: Record<string, unknown>) =>
+                String(
+                  row[
+                    receiptRelation(
+                      binding,
+                      binding.line,
+                      'goods_receipt_line_order_line',
+                    )
+                  ],
+                ),
+              ),
+            );
             return {
               authorization: {
                 decision: 'ALLOW',

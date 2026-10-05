@@ -528,14 +528,26 @@ function operationCatalogPayload(
 ): unknown {
   // Capability arguments are admitted only for operations whose authored
   // Tasks bind them. The executor validates the closed scalar vocabulary.
-  const argumentOperations = new Set(original.surfaces
-    .filter((surface) => surface.lifecycle === 'active')
-    .flatMap((surface) => {
-      const composition = ('composition' in surface ? surface.composition : undefined) as SurfaceComposition | undefined;
-      return composition ? composition.actions.flatMap((action) => action.steps
-        .filter((step) => step.bindings.some((binding) => binding.path[0] === 'arguments'))
-        .map((step) => step.operation.targetId)) : [];
-    }));
+  const argumentOperations = new Set(
+    original.surfaces
+      .filter((surface) => surface.lifecycle === 'active')
+      .flatMap((surface) => {
+        const composition = (
+          'composition' in surface ? surface.composition : undefined
+        ) as SurfaceComposition | undefined;
+        return composition
+          ? composition.actions.flatMap((action) =>
+              action.steps
+                .filter((step) =>
+                  step.bindings.some(
+                    (binding) => binding.path[0] === 'arguments',
+                  ),
+                )
+                .map((step) => step.operation.targetId),
+            )
+          : [];
+      }),
+  );
   const fieldsByEntity = groupBy(
     packageRevision.fields.filter((field) => field.lifecycle === 'active'),
     (field) => field.entity.targetId,
@@ -856,141 +868,166 @@ function surfaceManifestPayload(
       // 9: picker eligibility and typed Task inputs. A reader that dropped
       // either would offer every party as a customer, or ask for free text
       // where a governed value is declared -- a wrong render, not a lesser one.
-      minimumVersion: [...compositions.values()].some(
-        (value) =>
-          value !== undefined &&
-          (value.presentation?.alerts !== undefined ||
-            value.presentation?.progression !== undefined ||
-            value.actions.some(
-              (action) =>
-                action.rows !== undefined ||
-                action.inputs.some((input) => input.perRow !== undefined) ||
-                action.steps.some((step) => step.each !== undefined) ||
-                (action.navigate?.record.source === 'record' &&
-                  relationIds.has(action.navigate.record.field)),
-            ) ||
-            value.fields.some((column) => relationIds.has(column.field))),
-      )
-        ? 14
-        : original.surfaces.some((surface) => {
-              const list =
-                'list' in surface
-                  ? (surface.list as SurfaceList | undefined)
-                  : undefined;
-              return (
-                list !== undefined &&
-                (list.rowActions !== undefined ||
-                  list.progress?.whenDenied !== undefined)
-              );
-            })
-          ? 13
-          : original.surfaces.some((surface) => {
-                const list =
-                  'list' in surface
-                    ? (surface.list as SurfaceList | undefined)
-                    : undefined;
-                return (
-                  list !== undefined &&
-                  (list.progress !== undefined ||
-                    list.views.some((view) => view.open || view.before) ||
-                    list.columns.some((column) => column.overdue))
-                );
-              })
-            ? 12
+      // 15: an independent filtered progress stream, or scalar capability
+      // arguments bound by a Task. Dropping either changes business meaning.
+      minimumVersion:
+        original.surfaces.some(
+          (surface) =>
+            'list' in surface &&
+            (surface.list as SurfaceList | undefined)?.progress
+              ?.additionalDone !== undefined,
+        ) ||
+        [...compositions.values()].some((value) =>
+          value?.actions.some((action) =>
+            action.steps.some((step) =>
+              step.bindings.some((binding) => binding.path[0] === 'arguments'),
+            ),
+          ),
+        )
+          ? 15
+          : [...compositions.values()].some(
+                (value) =>
+                  value !== undefined &&
+                  (value.presentation?.alerts !== undefined ||
+                    value.presentation?.progression !== undefined ||
+                    value.actions.some(
+                      (action) =>
+                        action.rows !== undefined ||
+                        action.inputs.some(
+                          (input) => input.perRow !== undefined,
+                        ) ||
+                        action.steps.some((step) => step.each !== undefined) ||
+                        (action.navigate?.record.source === 'record' &&
+                          relationIds.has(action.navigate.record.field)),
+                    ) ||
+                    value.fields.some((column) =>
+                      relationIds.has(column.field),
+                    )),
+              )
+            ? 14
             : original.surfaces.some((surface) => {
-                  const editor =
-                    'documentEditor' in surface
-                      ? (surface.documentEditor as
-                          SurfaceDocumentEditor | undefined)
+                  const list =
+                    'list' in surface
+                      ? (surface.list as SurfaceList | undefined)
                       : undefined;
                   return (
-                    [
-                      ...(editor?.headerFields ?? []),
-                      ...(editor?.lineFields ?? []),
-                    ].some(
-                      (field) =>
-                        field.defaultFrom ||
-                        field.reference?.within ||
-                        (field.presentation?.kind === 'derived' &&
-                          field.presentation.sourceByHeader),
-                    ) ||
-                    compositions
-                      .get(surface.surfaceId)
-                      ?.actions.some((action) =>
-                        action.inputs.some((input) => input.eligibility),
-                      ) === true
+                    list !== undefined &&
+                    (list.rowActions !== undefined ||
+                      list.progress?.whenDenied !== undefined)
                   );
                 })
-              ? 11
-              : original.surfaces.some(
-                    (surface) => 'list' in surface && surface.list,
-                  )
-                ? 10
+              ? 13
+              : original.surfaces.some((surface) => {
+                    const list =
+                      'list' in surface
+                        ? (surface.list as SurfaceList | undefined)
+                        : undefined;
+                    return (
+                      list !== undefined &&
+                      (list.progress !== undefined ||
+                        list.views.some((view) => view.open || view.before) ||
+                        list.columns.some((column) => column.overdue))
+                    );
+                  })
+                ? 12
                 : original.surfaces.some((surface) => {
                       const editor =
                         'documentEditor' in surface
                           ? (surface.documentEditor as
                               SurfaceDocumentEditor | undefined)
                           : undefined;
-                      const composition = compositions.get(surface.surfaceId);
                       return (
                         [
                           ...(editor?.headerFields ?? []),
                           ...(editor?.lineFields ?? []),
-                        ].some((field) => field.reference?.eligibility) ||
-                        composition?.actions.some((action) =>
-                          action.inputs.some((input) => input.presentation),
-                        ) === true
+                        ].some(
+                          (field) =>
+                            field.defaultFrom ||
+                            field.reference?.within ||
+                            (field.presentation?.kind === 'derived' &&
+                              field.presentation.sourceByHeader),
+                        ) ||
+                        compositions
+                          .get(surface.surfaceId)
+                          ?.actions.some((action) =>
+                            action.inputs.some((input) => input.eligibility),
+                          ) === true
                       );
                     })
-                  ? 9
+                  ? 11
                   : original.surfaces.some(
-                        (surface) =>
-                          'workspace' in surface || 'documentEditor' in surface,
+                        (surface) => 'list' in surface && surface.list,
                       )
-                    ? 8
-                    : [...compositions.values()].some(
-                          (value) =>
-                            value?.actions.some(
-                              (action) => action.presentation?.task,
-                            ) ||
-                            value?.children.some(
-                              (child) => child.presentation?.selectedActions,
-                            ),
-                        )
-                      ? 7
-                      : [...compositions.values()].some(
-                            (value) =>
-                              value?.presentation?.task ||
-                              value?.children.some(
-                                (child) =>
-                                  child.sort?.length ||
-                                  child.presentation?.compact,
-                              ),
+                    ? 10
+                    : original.surfaces.some((surface) => {
+                          const editor =
+                            'documentEditor' in surface
+                              ? (surface.documentEditor as
+                                  SurfaceDocumentEditor | undefined)
+                              : undefined;
+                          const composition = compositions.get(
+                            surface.surfaceId,
+                          );
+                          return (
+                            [
+                              ...(editor?.headerFields ?? []),
+                              ...(editor?.lineFields ?? []),
+                            ].some((field) => field.reference?.eligibility) ||
+                            composition?.actions.some((action) =>
+                              action.inputs.some((input) => input.presentation),
+                            ) === true
+                          );
+                        })
+                      ? 9
+                      : original.surfaces.some(
+                            (surface) =>
+                              'workspace' in surface ||
+                              'documentEditor' in surface,
                           )
-                        ? 6
+                        ? 8
                         : [...compositions.values()].some(
                               (value) =>
-                                value?.presentation ||
+                                value?.actions.some(
+                                  (action) => action.presentation?.task,
+                                ) ||
                                 value?.children.some(
                                   (child) =>
-                                    child.presentation ||
-                                    child.columns.some(
-                                      (column) => column.presentation,
-                                    ),
-                                ) ||
-                                value?.actions.some(
-                                  (action) => action.presentation,
+                                    child.presentation?.selectedActions,
                                 ),
                             )
-                          ? 5
-                          : composed
-                            ? 4
-                            : emitsFieldKinds
-                              ? 3
-                              : navigation
-                                ? 2
-                                : 1,
+                          ? 7
+                          : [...compositions.values()].some(
+                                (value) =>
+                                  value?.presentation?.task ||
+                                  value?.children.some(
+                                    (child) =>
+                                      child.sort?.length ||
+                                      child.presentation?.compact,
+                                  ),
+                              )
+                            ? 6
+                            : [...compositions.values()].some(
+                                  (value) =>
+                                    value?.presentation ||
+                                    value?.children.some(
+                                      (child) =>
+                                        child.presentation ||
+                                        child.columns.some(
+                                          (column) => column.presentation,
+                                        ),
+                                    ) ||
+                                    value?.actions.some(
+                                      (action) => action.presentation,
+                                    ),
+                                )
+                              ? 5
+                              : composed
+                                ? 4
+                                : emitsFieldKinds
+                                  ? 3
+                                  : navigation
+                                    ? 2
+                                    : 1,
     },
   };
 }
@@ -1215,6 +1252,22 @@ function agentListPresets(original: VersionedNormalizedApplicationPackage) {
                   queryId: list.progress.lines.query.targetId,
                   relationId: list.progress.lines.relation,
                 },
+                ...(list.progress.additionalDone
+                  ? {
+                      additionalDone: {
+                        fieldId: list.progress.additionalDone.quantity,
+                        queryId: list.progress.additionalDone.query.targetId,
+                        relationId: list.progress.additionalDone.relation,
+                        fieldFilters: list.progress.additionalDone.filters.map(
+                          (filter) => ({
+                            fieldId: filter.field,
+                            value: filter.value,
+                          }),
+                        ),
+                        output: list.progress.additionalDone.output,
+                      },
+                    }
+                  : {}),
                 ...(list.progress.openIn
                   ? {
                       openIn: {
@@ -1473,7 +1526,11 @@ function operationInputContract(
         : capabilityRecordScope
           ? // ADR-0038's O1 command carries only its record/revision pin;
             // business content is hydrated from the staged draft.
-            [...(capabilityArguments ? ['arguments'] : []), 'expectedRevision', 'recordId']
+            [
+              ...(capabilityArguments ? ['arguments'] : []),
+              'expectedRevision',
+              'recordId',
+            ]
           : ['expectedRevision', 'recordId'];
   return {
     closedArgumentKeys,

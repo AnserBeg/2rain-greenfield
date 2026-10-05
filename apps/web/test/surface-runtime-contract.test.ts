@@ -91,6 +91,48 @@ import { compiledFixturePath, demoEntry, webRoot } from './helpers.js';
 const APP_SERVER_RUNTIME_VIEW_REFUSAL_IMPORT =
   "import { RequestRuntimeViewRefusalError } from '@north-star/runtime/request-runtime-view';\n";
 
+test('DROP-SHIP declared order Lists send separately visible posted delivery progress for page, count and export', () => {
+  const definition = composedApplicationDefinition() as unknown as {
+    surfaces: { surfaceId: string; list?: unknown }[];
+  };
+  for (const local of [
+    'sales_order_list',
+    'purchase_order_list',
+    'expected_receipt_list',
+  ]) {
+    const list = SurfaceListSchema.parse(
+      definition.surfaces.find(
+        (surface) => surface.surfaceId === `northstar.app:surface.${local}`,
+      )!.list,
+    );
+    const state = readDeclaredListState(list, new URL('http://list.local/'));
+    for (const mode of ['page', 'count', 'export'] as const) {
+      const args = declaredListArguments(list, state, {
+        mode,
+        now: new Date('2026-10-01T00:00:00Z'),
+        queryId: `northstar.app:query.${local}`,
+        scopeArguments: {},
+      }) as unknown as {
+        list: {
+          progress: {
+            additionalDone: { fieldFilters: unknown; output: string };
+          };
+        };
+      };
+      assert.deepEqual(args.list.progress.additionalDone.fieldFilters, [
+        {
+          fieldId: 'northstar.app:field.drop_ship_delivery_state',
+          value: 'northstar.app:option.drop_ship_delivery_state_posted',
+        },
+      ]);
+      assert.equal(
+        args.list.progress.additionalDone.output,
+        `northstar.app:list_output.${local}_delivered`,
+      );
+    }
+  }
+});
+
 test('script-free pages retain a CSP that exactly pins the owned Task enhancement', async () => {
   const server = createSurfaceRuntimeServer(demoEntry());
   const baseUrl = await listen(server);

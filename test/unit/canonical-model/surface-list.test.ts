@@ -14,6 +14,29 @@ const expectedList = `${ns}:surface.expected_receipt_list`;
 const purchaseList = `${ns}:surface.purchase_order_list`;
 const invoiceList = `${ns}:surface.customer_invoice_list`;
 
+test('D-B: additional progress is selected, filtered and linked to the same lines', () => {
+  const extra = (app: ReturnType<typeof application>) =>
+    (listOf(app).list.progress as Json).additionalDone as Json;
+  for (const mutate of [
+    (app: ReturnType<typeof application>) => {
+      extra(app).relation = `${ns}:relation.drop_ship_delivery_purchase_line`;
+    },
+    (app: ReturnType<typeof application>) => {
+      (extra(app).filters as Json[])[0]!.field =
+        `${ns}:field.sales_order_notes`;
+    },
+    (app: ReturnType<typeof application>) => {
+      extra(app).output = (
+        (listOf(app).list.progress as Json).outputs as Json
+      ).done;
+      listOf(app).list.columns.find(
+        (column) => column.label === 'Delivered',
+      )!.field = extra(app).output;
+    },
+  ])
+    assert.match(refused(mutate), /additional progress|progress outputs/u);
+});
+
 function application(): Json & { surfaces: Json[]; queries: Json[] } {
   return structuredClone(composedApplicationDefinition()) as Json & {
     surfaces: Json[];
@@ -56,6 +79,7 @@ test('the composed application declares its Lists and they normalize unchanged',
   assert.deepEqual(declared.map((surface) => surface.surfaceId).sort(), [
     // Ruling C: the Invoices List.
     `${ns}:surface.customer_invoice_list`,
+    `${ns}:surface.drop_ship_delivery_list`,
     // PURCHASING-PARITY: what is still to arrive, beside Purchase orders.
     expectedList,
     `${ns}:surface.posted_stock_balance_list`,

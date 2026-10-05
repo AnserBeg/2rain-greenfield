@@ -1181,7 +1181,7 @@ async function assertRealProductDefinition(
     // then the invoice, its lines, payments and credits (list, detail, form
     // each). PURCHASING-PARITY adds the Expected receipts List; PAYABLES the
     // vendor bill, its lines, payments and credits (list, detail, form each).
-    assert.equal(surfaces.length, 101);
+    assert.equal(surfaces.length, 104);
     assert.ok(surfaces.includes('northstar.app:surface.expected_receipt_list'));
     for (const local of [
       'goods_receipt',
@@ -3530,8 +3530,8 @@ async function assertBoundedFreshTenantInstallEvidence(
   // invoice number is searchable, so it adds no search exclusion.
   assert.equal(
     servingScenarioCount,
-    573,
-    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, and 72 for payables',
+    606,
+    'compiled DROP-SHIP head: 573 base scenarios plus 33 delivery/link/ship-to scenarios',
   );
   await assertFreshInstallLineageEvidence(
     pool,
@@ -5870,8 +5870,8 @@ async function assertExactPartitionEvidence(
   // the compiled head): 573, 496.
   assert.equal(
     evidence.results.length,
-    496,
-    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, and payables 72',
+    529,
+    'compiled DROP-SHIP head: 529 constructible scenarios, observed executed here',
   );
   assert.equal(
     derivations.length,
@@ -6129,7 +6129,7 @@ function assertSalesVerificationCoverage(compiledApplication: unknown): void {
     // then the tax code and two charges with codes and frozen rates.
     sales_order: 29,
     // SALES-PARITY: list price, discount, tax code and frozen rate.
-    sales_order_line: 16,
+    sales_order_line: 20,
     sales_order_shipped: 10,
     // SALES-PARITY: carrier, reference type and reference, then six ship-to lines.
     shipment: 29,

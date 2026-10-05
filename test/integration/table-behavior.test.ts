@@ -209,6 +209,77 @@ const partyProgress = {
   },
 } as const;
 const today = '2026-09-29T00:00:00.000Z';
+
+test('additional List progress is cursor-bound and re-authorized independently', async () => {
+  const extra = {
+    ...partyProgress.done,
+    queryId: ROLE_LIST,
+    fieldId: PARTY_IDS.fieldIds.roleKind,
+    fieldFilters: [
+      {
+        fieldId: PARTY_IDS.fieldIds.roleStatus,
+        value: `${PARTY_IDS.namespace}:option.active`,
+      },
+    ],
+    output: `${PARTY_IDS.namespace}:list_output.extra`,
+  };
+  const progress = { ...partyProgress, additionalDone: extra };
+  const parsed = parseSharedListArguments(
+    listArguments({ progress }),
+    parseInput,
+  )!;
+  assert.deepEqual(parsed.progress, progress);
+  const cursor = encodeSharedListCursor(ROLE_LIST, parsed, 25);
+  assert.throws(
+    () =>
+      parseSharedListArguments(
+        listArguments({
+          cursor,
+          progress: {
+            ...progress,
+            additionalDone: {
+              ...extra,
+              fieldFilters: [{ ...extra.fieldFilters[0]!, value: 'revoked' }],
+            },
+          },
+        }),
+        parseInput,
+      ),
+    refusedWith('LIST_CURSOR_INVALID'),
+  );
+  const policy: CurrentPolicyGateway = {
+    async authorize(call) {
+      const input = call.decisionInput as {
+        kind?: string;
+        arguments?: { fieldId?: string };
+      };
+      return {
+        decision:
+          input.kind === 'registeredSemanticListProgressPolicyInput' &&
+          input.arguments?.fieldId === extra.fieldId
+            ? 'DENY'
+            : 'ALLOW',
+        decisionVersion: CURRENT_POLICY_DECISION_VERSION,
+        policyVersion: 'additional-progress/v1',
+      };
+    },
+    async readCurrentVersion() {
+      return { policyVersion: 'additional-progress/v1' };
+    },
+  };
+  const { view } = await issuedPartyView(policy);
+  const executor = new ObservedListExecutor();
+  await assert.rejects(
+    new SemanticQueryGateway(policy, executor).invoke(view, {
+      ...request(ROLE_LIST),
+      arguments: listArguments({ progress }),
+    }),
+    (error) =>
+      error instanceof SemanticQueryPolicyDeniedError &&
+      error.queryId === ROLE_LIST,
+  );
+  assert.equal(executor.executions, 0);
+});
 const listArguments = (list: Record<string, ImmutableJsonValue>) =>
   ({
     includeArchived: false,

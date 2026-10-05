@@ -273,7 +273,7 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // (SALES-PARITY), + the invoice, its lines, payments and credits (twelve),
   // + PURCHASING-PARITY's Expected receipts List, + PAYABLES' vendor bill,
   // its lines, payments and credits (twelve).
-  assert.equal(groupedManifest.surfaces.length, 101);
+  assert.equal(groupedManifest.surfaces.length, 104);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -295,7 +295,7 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // List row actions and supplementary progress (ORDER-PARITY) require 13;
   // record alerts and progression, multi-row Tasks and record columns naming
   // a relation (ORDER-PARITY increment B) require 14.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 14);
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 15);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.
@@ -838,7 +838,15 @@ function compiledSurfaceManifest(
 function compileDefinition(
   definition: Record<string, unknown>,
 ): CompileSuccess {
-  const normalized = normalizeApplicationPackage(definition);
+  const normalized = (() => {
+    try {
+      return normalizeApplicationPackage(definition);
+    } catch (error) {
+      if (error instanceof CanonicalModelError)
+        assert.fail(JSON.stringify(error.diagnostics));
+      throw error;
+    }
+  })();
   const compiled = compileApplication({
     dependencies: [],
     expectedActiveRelease: null,
@@ -948,6 +956,48 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
     composed,
     salesModuleDefinition('northstar.app'),
     'sales',
+  );
+  // Cross-module application additions have no module field of their own.
+  // A setup-only fixture drops their orphaned entity/relationship metadata.
+  const entities = composed.entities as {
+    entityId: string;
+    storage: { targetId: string };
+  }[];
+  const live = new Set(entities.map((entity) => entity.entityId));
+  const mappings = new Set(entities.map((entity) => entity.storage.targetId));
+  composed.fields = (
+    composed.fields as { entity: { targetId: string } }[]
+  ).filter((field) => live.has(field.entity.targetId));
+  composed.permissions = (
+    composed.permissions as { resource: { kind: string; targetId: string } }[]
+  ).filter(
+    (permission) =>
+      permission.resource.kind !== 'entityReference' ||
+      live.has(permission.resource.targetId),
+  );
+  composed.relations = (
+    composed.relations as {
+      sourceEntity: { targetId: string };
+      targetEntity: { targetId: string };
+    }[]
+  ).filter(
+    (relation) =>
+      live.has(relation.sourceEntity.targetId) &&
+      live.has(relation.targetEntity.targetId),
+  );
+  composed.storageMappings = (
+    composed.storageMappings as { storageMappingId: string }[]
+  ).filter((mapping) => mappings.has(mapping.storageMappingId));
+  composed.assertions = (
+    composed.assertions as { assertionId: string }[]
+  ).filter(
+    (assertion) => !assertion.assertionId.includes('.drop_ship_delivery_'),
+  );
+  composed.capabilityRequirements = (
+    composed.capabilityRequirements as { capabilityId: string }[]
+  ).filter(
+    (requirement) =>
+      requirement.capabilityId !== 'northstar.commercial:capability.drop_ship',
   );
   return composed;
 }

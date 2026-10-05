@@ -1,5 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { assertDropShipMutation } from './drop-ship-mutation-guards.js';
+import {
+  additionalListProgressSql,
+  type AdditionalListProgressPlan,
+} from './list-progress-read-model.js';
 
 import {
   PARAMETERIZED_PREDICATE_LOWERING_PLAN_VERSION,
@@ -1291,7 +1295,15 @@ async function executeQueryOnClient(
     [
       entity,
       ...relationPlans.map((plan) => plan.target),
-      ...(progressPlan ? [progressPlan.lines, progressPlan.done] : []),
+      ...(progressPlan
+        ? [
+            progressPlan.lines,
+            progressPlan.done,
+            ...(progressPlan.additionalDone
+              ? [progressPlan.additionalDone.entity]
+              : []),
+          ]
+        : []),
     ],
   );
   if (definition.queryType === 'aggregate') {
@@ -2227,6 +2239,7 @@ interface ListRelatedFilterPlan {
 }
 
 interface ListProgressPlan {
+  readonly additionalDone?: AdditionalListProgressPlan;
   readonly done: StorageEntity;
   /** The done rows' column that holds a line's record id. */
   readonly doneLineColumn: string;
@@ -2302,6 +2315,52 @@ function listProgressPlan(
     return column.physicalName;
   };
   const states = requested.openIn;
+  const additionalDone = requested.additionalDone
+    ? (() => {
+        if (!requested.additionalDoneEntityId)
+          throw new SharedListContractError(
+            'LIST_FIELD_NOT_AUTHORIZED',
+            'additional progress lacks authorization',
+            requested.additionalDone.queryId,
+          );
+        const extra = requiredEntity(storage, requested.additionalDoneEntityId);
+        const link = storage.relations.find(
+          (candidate) =>
+            candidate.relationId === requested.additionalDone!.relationId &&
+            candidate.sourceEntityId === extra.entityId &&
+            candidate.targetEntityId === lines.entityId,
+        );
+        if (!link)
+          throw new SharedListContractError(
+            'LIST_FIELD_NOT_AUTHORIZED',
+            'additional progress points at the compiled lines',
+            requested.additionalDone.relationId,
+          );
+        return Object.freeze({
+          entity: extra,
+          lineColumn: link.relationColumn.physicalName,
+          quantityColumn: quantity(extra, requested.additionalDone.fieldId),
+          output: requested.additionalDone.output,
+          filters: requested.additionalDone.fieldFilters.map((filter) => {
+            const column = extra.columns.find(
+              (candidate) => candidate.canonicalFieldId === filter.fieldId,
+            );
+            if (
+              !column ||
+              !['enumFieldType', 'textFieldType', 'booleanFieldType'].includes(
+                column.fieldContract.fieldKind,
+              )
+            )
+              throw new SharedListContractError(
+                'LIST_FIELD_NOT_AUTHORIZED',
+                'additional progress filters compiled scalar columns',
+                filter.fieldId,
+              );
+            return Object.freeze({ column, value: filter.value });
+          }),
+        });
+      })()
+    : undefined;
   const stateColumn = states
     ? entity.columns.find(
         (candidate) => candidate.canonicalFieldId === states.fieldId,
@@ -2317,6 +2376,7 @@ function listProgressPlan(
     done,
     doneLineColumn: toDone.relationColumn.physicalName,
     doneQuantityColumn: quantity(done, requested.done.fieldId),
+    ...(additionalDone ? { additionalDone } : {}),
     lines,
     linesParentColumn: toLines.relationColumn.physicalName,
     linesQuantityColumn: quantity(lines, requested.lines.fieldId),
@@ -2378,16 +2438,32 @@ function listProgressFromSql(
           AND ${qualified(done, plan.done.archive.archivedAtColumn)} IS NULL${sameCompany(done, plan.done, line, plan.lines)}${legalEntityReadScopeJoinConjunction(plan.done, readScope, values, done)}
         WHERE ${activeLines()})`;
   const totals = 'table_progress_totals';
-  const remainder = `${qualified(totals, 'ordered_total')} - ${qualified(totals, 'done_total')}`;
+  const additional = additionalListProgressSql(
+    plan.additionalDone,
+    plan.lines,
+    activeLines(),
+    {
+      quote: quoted,
+      column: qualified,
+      bind: (value) => parameter(values, value),
+      visible: visibleFieldExpression,
+      scope: (target, alias) =>
+        legalEntityReadScopeJoinConjunction(target, readScope, values, alias),
+      sameCompany,
+    },
+  );
+  const remainder = `${qualified(totals, 'ordered_total')} - ${qualified(totals, 'done_total')} - ${qualified(totals, 'additional_total')}`;
   const open = plan.openIn
     ? `CASE WHEN ${qualified(sourceAlias, plan.openIn.column.physicalName)}::text = ANY(${parameter(values, [...plan.openIn.values])}::text[]) THEN ${remainder} ELSE 0 END`
     : remainder;
   return `CROSS JOIN LATERAL (
     SELECT ${qualified(totals, 'ordered_total')} AS ${quoted('ordered_total')},
            ${qualified(totals, 'done_total')} AS ${quoted('done_total')},
+           ${qualified(totals, 'additional_total')} AS ${quoted('additional_total')},
            ${open} AS ${quoted('open_total')}
       FROM (SELECT ${ordered} AS ${quoted('ordered_total')},
-                   ${recorded} AS ${quoted('done_total')}) AS ${quoted(totals)}
+                   ${recorded} AS ${quoted('done_total')},
+                   ${additional} AS ${quoted('additional_total')}) AS ${quoted(totals)}
   ) AS ${quoted(PROGRESS_ALIAS)}`;
 }
 
@@ -2883,7 +2959,7 @@ function listSelectList(
     `${visibleFieldExpression(plan.labelColumn, plan.tableAlias)} AS ${quoted(plan.labelAlias)}`,
   ]);
   const progressValues = progress
-    ? (['ordered', 'done', 'open'] as const).map(
+    ? (['ordered', 'done', 'open', 'additional'] as const).map(
         (figure) =>
           `${qualified(PROGRESS_ALIAS, `${figure}_total`)}::text AS ${quoted(`nsm_table_progress_${figure}`)}`,
       )
@@ -2972,6 +3048,13 @@ function toListDto(
           [progress.outputs.open]: canonicalProgressDecimal(
             row.nsm_table_progress_open,
           ),
+          ...(progress.additionalDone
+            ? {
+                [progress.additionalDone.output]: canonicalProgressDecimal(
+                  row.nsm_table_progress_additional,
+                ),
+              }
+            : {}),
         }),
       })
     : projected;

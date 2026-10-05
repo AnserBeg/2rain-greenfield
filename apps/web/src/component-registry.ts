@@ -966,6 +966,23 @@ function renderCapabilityCommand(
    */
   next?: { readonly name: string },
 ): string {
+  // A declared Task owns commands with its record and argument bindings.
+  // Do not also expose a bare command which cannot submit those arguments.
+  if (
+    !next &&
+    context.surface.composition?.actions.some((action) =>
+      action.steps.some(
+        (step) =>
+          step.operation.targetId === operation.operationId &&
+          step.bindings.some(
+            (binding) =>
+              binding.path[0] === 'recordId' &&
+              binding.value.source === 'record',
+          ),
+      ),
+    )
+  )
+    return '';
   // Both sides of the merge are load-bearing and they compose exactly.
   // `5g3-sm` distinguishes the standing explanation by effect kind; this
   // packet replaces the `intent=command` hidden input with the operation's own
