@@ -1,6 +1,6 @@
 # SPECIAL-ORDER — dedicated purchase supply received into stock
 
-Status: BUILD active on `packet/SPECIAL-ORDER`, based on DROP-SHIP `1b16c746`; [draft PR #28](https://github.com/AnserBeg/2rain-greenfield/pull/28), executable freeze `5cc804d5`. No integration or deployment.
+Status: BUILD active on `packet/SPECIAL-ORDER`, based on DROP-SHIP `1b16c746`; [draft PR #28](https://github.com/AnserBeg/2rain-greenfield/pull/28), executable freeze `38e1e1c4`. No integration or deployment.
 
 ## Design (before implementation)
 
@@ -33,13 +33,14 @@ Review: not owed — intended diff is outside the Critical set.
 - Shared supplier field retains its canonical ID; its label now covers both supplier routes. Special-order PO ship-to is not copied from the customer: goods use the ordinary receiving location.
 - [Hosted snapshot regeneration](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37341036343) PASS at `6f9aa31a`; its downloaded artifact expands the route check and is committed at `5cc804d5`. Definition/storage bytes are unchanged since generation; label removed.
 - Initial CI exposed two stale unit pins (five Sales order commands and Arrived declarations); corrected, with 31 focused tests PASS. Borrowed writer rejection now destroys its connection, with a focused cleanup test. No Critical path or readiness/timeout/budget change.
+- Commercial PostgreSQL also asserts the named refusal for a shipment above linked arrivals and observes zero movements for its source. Focused lint/typecheck PASS; hosted execution pending.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SPECIAL-ORDER",
   "base": "1b16c74678f17950055b536478988c2ef7ad6141",
-  "head": "5cc804d5645ca635b038f0c91b6aa34424d249c3",
+  "head": "38e1e1c4d01ebdbf36198ee1cae9213c268e534c",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
@@ -72,8 +73,8 @@ Review: not owed — intended diff is outside the Critical set.
     "test/postgres/special-order.test.ts",
     "test/unit/purchasing-definition.test.ts",
     "test/unit/sales-definition.test.ts",
-    "test/unit/special-order.test.ts"
-    ,"test/unit/workspace-contract.test.ts"
+    "test/unit/special-order.test.ts",
+    "test/unit/workspace-contract.test.ts"
   ],
   "symbols": [
     {
