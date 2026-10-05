@@ -76,9 +76,11 @@ test('kegs go out to a customer against a deposit, come back or are forfeited, a
     await page.getByRole('link', { name: 'New', exact: true }).click();
     await page.getByLabel('Code', { exact: true }).fill('KEG-50');
     await page.getByLabel('Name', { exact: true }).fill('50 L keg');
+    // Six asset classes cross the grammar's five-option select threshold; the
+    // datalist input submits the canonical option id.
     await page
-      .getByLabel('Asset class', { exact: true })
-      .selectOption({ label: 'Keg' });
+      .getByRole('combobox', { name: 'Asset class', exact: true })
+      .fill(`${ns}:option.returnable_asset_type_asset_class_keg`);
     await page.getByLabel('Deposit cad', { exact: true }).fill('30');
     await page.getByRole('button', { name: 'Save' }).click();
     await expect(page.getByRole('status')).toContainText('Create complete');
