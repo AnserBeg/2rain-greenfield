@@ -5,6 +5,17 @@ export const FULFILLMENT_READ_MODEL_BINDINGS = Object.freeze({
   // hold there (INVENTORY-PARITY): the item page's Stock by location.
   stock: 'northstar.sales:read_model.stock',
 });
+/**
+ * The sales order states whose open lines can be short of stock (owner ruling
+ * R1): a draft or a confirmed order, never a closed or cancelled one. One
+ * list for the order page's fulfillment read model and the Sales orders
+ * List's supply (SUPPLY-WARNINGS), so the row, the tab and the banner judge
+ * the same orders.
+ */
+export const SALES_SHORTAGE_STATES = Object.freeze([
+  'draft',
+  'released',
+] as const);
 /** Line amounts and order totals, computed on read (owner ruling B). */
 export const COMMERCIAL_READ_MODEL_BINDINGS = Object.freeze({
   line: 'northstar.sales:read_model.commercial_line',

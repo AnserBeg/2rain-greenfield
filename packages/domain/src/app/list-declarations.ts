@@ -4,6 +4,8 @@
  * the canonical `surface.list` vocabulary; the shared List runtime has no
  * knowledge of any of these surfaces.
  */
+import { SALES_SHORTAGE_STATES } from '../sales/workspace.js';
+
 const version = 'v6';
 
 type Role = 'title' | 'value' | 'status';
@@ -552,9 +554,10 @@ function salesSupply(namespace: string): ListSupplySpec {
         },
       ],
     },
+    // The states the order page states shortage in: one list for both.
     shortIn: {
       field: `${namespace}:derived_state_field.machine.sales_order_lifecycle`,
-      values: [state('draft'), state('released')],
+      values: SALES_SHORTAGE_STATES.map(state),
     },
     outputs: { covered: output('covered'), short: output('short') },
     whenDenied: 'omit',
