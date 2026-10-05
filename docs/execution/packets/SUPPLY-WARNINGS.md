@@ -17,7 +17,7 @@ Base: `packet/LOCATIONS` at `be722966`. Reference: PaneFlow `d057daff` (`lib/ser
 3. The gateway authorizes every supply query under current policy per request for the List's company (`registeredSemanticListSupplyPolicyInput`), refuses a denial by that query's name, checks the item is a field the lines' query selects, and echoes and binds the supply in the cursor as part of the progress; the closed request contract is `list-behavior/supply.ts`.
 4. Without a supply read the web runtime reads the List with its progress alone: Short reads "—", one line names what is withheld, the supply tabs refuse with `QUERY_PERMISSION_DENIED` and stay uncounted, the export leaves Short empty, and no row offers "Post shipment"; without the progress, neither is read.
 5. Named refusals (`CANON_SCHEMA_INVALID`): supply queries that are not active q0 lists without a read model, company rows under a non-company List, coverage through the wrong relation, related rows not pointing at it, non-decimal or unselected quantities, an item that is not the lines' long-enough text field, a sum match that cannot hold an id, the wrong sum parts, a parent outside its rows, foreign or repeated short states, outputs that repeat or shadow, every view keeping supply when it is omitted, supply views or row-action conditions without a supply, a sortable or formatted supply column. Surface floor 21 (20 is CATALOG-EXTRAS', in parallel); the runtime supports 21; agent presets publish the supply and each view's `supply`.
-6. Sales orders: tabs All, To ship, **Blocked by supply** (confirmed and short), **Reserved** (confirmed with reserved stock still to ship), Draft, Released, Closed, Cancelled; **Short** after Open, a positive Short marked "!"; row actions **Post shipment** (confirmed, something covered) → the order's Fulfillment section, then Fulfill, then View. The supply reads the very queries the order page's fulfillment read model reads, and states shortage for draft and confirmed orders as the page does.
+6. Sales orders: tabs All, To ship, **Blocked by supply** (confirmed and short), **Reserved** (confirmed with reserved stock still to ship), Draft, Released, Closed, Cancelled; **Short** after Open, a positive Short marked "!"; row actions **Post shipment** (confirmed, something covered) → the order's Fulfillment section, then Fulfill, then View. The supply reads the very queries the order page's fulfillment read model reads, and states shortage in the states the page reads from the same list.
 
 ## Decisions
 
@@ -28,6 +28,7 @@ Base: `packet/LOCATIONS` at `be722966`. Reference: PaneFlow `d057daff` (`lib/ser
 - The List shows Short but no reserved-quantity column: 11 of 12 columns; reserved work shows through the tab and "Post shipment".
 - Blocked by supply keeps confirmed orders only (PaneFlow); "!" also marks a short draft, as its page's banner does.
 - Tabs follow PaneFlow's order: Blocked by supply, then Reserved, after To ship.
+- One list of shortage states (`SALES_SHORTAGE_STATES`, draft and confirmed) feeds both the order page's read model and the List's `shortIn`, so the two cannot judge different orders.
 
 ## Gates
 
@@ -57,19 +58,20 @@ Base: `packet/LOCATIONS` at `be722966`. Reference: PaneFlow `d057daff` (`lib/ser
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "SUPPLY-WARNINGS",
   "base": "be722966960ee3a4acde76b0474dc4ef9ac05755",
-  "head": "360579c6d2f56fa2d5e0b9c8f7c54bda936a113d",
+  "head": "577d2c7f11181d16605f1cbb8cbcc13273897ca6",
   "changedPaths": [
     "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts",
     "apps/web/src/list-declaration.ts", "apps/web/src/surface-runtime.ts", "apps/web/test/browser/declared-list.spec.ts",
     "apps/web/test/browser/order-lists-supply.spec.ts", "apps/web/test/browser/order-lists.spec.ts", "apps/web/test/surface-runtime-contract.test.ts",
     "package.json", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/schemas.ts",
     "packages/canonical-model/src/surface-list.ts", "packages/compiler/src/projections.ts", "packages/domain/src/app/list-declarations.ts",
-    "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/runtime/src/list-behavior/figures.ts", "packages/runtime/src/list-behavior/index.ts",
-    "packages/runtime/src/list-behavior/supply.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-query-gateway.ts",
-    "test/architecture/repository-hygiene.test.ts", "test/architecture/surface-grammar-conformance.test.ts", "test/fixtures/g2/language-conformance/coverage-decisions.json",
-    "test/helpers/order-entry-fixture.ts", "test/helpers/reachability-producers.ts", "test/integration/surface-data-binding.test.ts",
-    "test/postgres/declared-list.test.ts", "test/postgres/order-lists-supply.test.ts", "test/postgres/order-lists.test.ts",
-    "test/postgres/request-runtime-view.test.ts", "test/unit/canonical-model/surface-list.test.ts"
+    "packages/domain/src/sales/workspace.ts", "packages/postgres-provider/src/fulfillment-read-model.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts",
+    "packages/runtime/src/list-behavior/figures.ts", "packages/runtime/src/list-behavior/index.ts", "packages/runtime/src/list-behavior/supply.ts",
+    "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/repository-hygiene.test.ts",
+    "test/architecture/surface-grammar-conformance.test.ts", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/order-entry-fixture.ts",
+    "test/helpers/reachability-producers.ts", "test/integration/surface-data-binding.test.ts", "test/postgres/declared-list.test.ts",
+    "test/postgres/order-lists-supply.test.ts", "test/postgres/order-lists.test.ts", "test/postgres/request-runtime-view.test.ts",
+    "test/unit/canonical-model/surface-list.test.ts"
   ],
   "symbols": [
     {"path": "apps/web/src/component-registry.ts", "name": "withheldFiguresNote"},
@@ -81,6 +83,8 @@ Base: `packet/LOCATIONS` at `be722966`. Reference: PaneFlow `d057daff` (`lib/ser
     {"path": "packages/compiler/src/projections.ts", "name": "agentSupply"},
     {"path": "packages/domain/src/app/list-declarations.ts", "name": "salesSupply"},
     {"path": "packages/domain/src/app/list-declarations.ts", "name": "lowerSupply"},
+    {"path": "packages/domain/src/sales/workspace.ts", "name": "SALES_SHORTAGE_STATES"},
+    {"path": "packages/postgres-provider/src/fulfillment-read-model.ts", "name": "fulfillmentReadModel"},
     {"path": "packages/postgres-provider/src/module-runtime-interpreter.ts", "name": "figurePartsPlanner"},
     {"path": "packages/postgres-provider/src/module-runtime-interpreter.ts", "name": "figureSumSql"},
     {"path": "packages/postgres-provider/src/module-runtime-interpreter.ts", "name": "listSupplyPlan"},
