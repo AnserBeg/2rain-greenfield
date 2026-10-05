@@ -183,6 +183,10 @@ test('the period lock closes a period and reopens it, each reviewed and confirme
     await expect(page.locator('[data-message-subject]').first()).toHaveText(
       'INVENTORY_PERIOD_CLOSED',
     );
+    // The refusal is a page of its own; the document is opened again, still
+    // a draft.
+    await page.goto(documentUrl);
+    await expect(page.getByText(/Active · revision 1/u)).toBeVisible();
 
     // Closing through an earlier time would reopen: refused by name.
     await openPeriodLock(page);
