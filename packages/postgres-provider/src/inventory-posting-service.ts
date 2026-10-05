@@ -8792,19 +8792,27 @@ async function assertStockCountCompensationAvailable(
  * count and a correction must carry exactly that, so the variance they post
  * leaves on-hand at the counted quantity as of that instant; a stale expected
  * -- a movement posted for the item since the count was reviewed -- is refused
- * and nothing is written.
+ * with INVENTORY_COUNT_EXPECTED_STALE, and the posting's transaction rolls
+ * back: no movement, count transition or accepted receipt is committed (the
+ * failed invocation itself may be recorded).
  *
  * Two consequences of "at or before the count's instant", both deliberate:
  * a movement effective at the same instant (a fixed test clock, two postings
- * inside one tick) counts as before the count, which is also where the
- * same-instant order places it (its recorded time is no later than this
- * posting's, by the floor in `enforceNegativeStock`); and a movement dated
- * after the count never makes it stale, because the count speaks only of its
- * own instant. Read under the stock-identity locks every posting takes at
- * BEGIN, so nothing can change the answer before this posting commits.
+ * inside one tick) is included in the sum; and a movement dated after the
+ * count never makes it stale, because the count speaks only of its own
+ * instant. The first is a statement about this inclusive sum only, not about
+ * the kernel's full movement order: there, equal effective and recorded times
+ * fall to the later keys of the same-instant tuple, which need not place that
+ * movement before this posting's. Read under the stock-identity locks every
+ * posting takes at BEGIN, so no other posting for these items at this
+ * location can change the sum before this posting commits.
  *
- * A reversal is exempt: each of its lines must already be the exact inverse
- * of the movement it compensates (`assertStockCountCompensationAvailable`).
+ * A reversal is exempt. `assertStockCountCompensationAvailable` checks each
+ * of its lines against the one movement that line names (same item, location
+ * and unit, the exact negative quantity, a movement of the reversed count).
+ * That is a per-line check, not a proof that the lines reverse every movement
+ * of the reversed count exactly once; the route derives them from that
+ * count's movements (`deriveReversalLines`).
  */
 async function assertCountExpectedIsLedger(
   client: PoolClient,
