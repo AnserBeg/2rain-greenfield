@@ -31,9 +31,13 @@ Design: `DROP-SHIP-RELATION-INSTALL-design.md` at DROP-SHIP `4000c486` (owner se
 
 - Typecheck PASS; focused Prettier PASS.
 - Full hosted [earlier CI PASS](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37268185759) at `66cf178a`. [Refreshed CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37277958211) at `8505c168` has passing composed PostgreSQL and schema jobs; full completion remains pending.
-- [Controls at `8505c168`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37277961005): target-missing and column-write-grant-absent each killed one declared test for its declared reason, then restored one passing test. Foreign-company-target survived because its mutation did not reach the FK installer. [Rerun at `85a3763e`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37279569402) again passed the other two controls; company scope failed for undeclared SQL `42830`, not accepted as a red. The mutation now supplies the matching target key before weakening scope; fresh evidence remains owed.
-- Static expected-red validation PASS (165 entries / 14 manifests) before the target-key control adjustment. Typecheck, focused lint and formatting PASS; record-claim names executable `d3d1812b`. The diff to refreshed PAYABLES remains the same 17-line production addition.
-- Refreshed hosted CI, revised control evidence and owner Critical review pending; draft PR https://github.com/AnserBeg/2rain-greenfield/pull/20. Latest Windows memory about 1.36 GB remains below the local control minimum; no local control started.
+- [Controls at `8505c168`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37277961005): target-missing and column-write-grant-absent each killed one declared test for its declared reason, then restored one passing test. Foreign-company-target survived because its mutation did not reach the FK installer. [Rerun at `85a3763e`](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37279569402) again passed the other two controls; company scope failed for undeclared SQL `42830`, not accepted as a red. The adjusted mutation supplies the matching target key before weakening scope; its valid evidence follows.
+- [Expected-red controls on CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37280700983), head `540023a413ee12db054d13080bf111569ade95f7`:
+- `relation-install-target-missing` at 540023a413ee: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (1 passing).
+- `relation-install-foreign-company-target` at 540023a413ee: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (1 passing).
+- `relation-install-column-write-grant-absent` at 540023a413ee: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (1 passing).
+- Static expected-red validation PASS (165 entries / 14 manifests) at `540023a4`; typecheck, focused lint and formatting PASS. Record-claim names executable `d3d1812b`; the diff to refreshed PAYABLES remains the same 17-line production addition.
+- [Full CI PASS](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37280700984/attempts/2) at `540023a413ee12db054d13080bf111569ade95f7`: all 11 jobs, including executed-file reachability. Attempt 1's indeterminate performance (85.7% idle vs unchanged 90% minimum) received exactly one whole-workflow rerun, not `--failed`. All three controls are valid; owner Critical review remains owed. Local control checks were below 2 GB; the owner-approved hosted workflow supplied the evidence.
 
 ## Test it yourself
 
@@ -74,5 +78,5 @@ DROP-SHIP's user-facing delivery workflow is the next authorized checkpoint afte
 
 ## Continuation checkpoint — 2026-10-05
 
-- Next: focused revised PostgreSQL transition, all three controls and fresh CI; no application artifact, deadline or readiness change.
+- Checkpoint: full CI and all three controls PASS; facts-only owner prompt written. No application artifact, deadline or readiness change; no owner review, merge or deployment inferred.
 - Authorized step 6 is active: DROP-SHIP merged the refreshed PAYABLES and bridge at `76a3628c`; draft PR #19 continues on its own worktree. Schema regeneration, PostgreSQL/browser and full green CI remain owed.
