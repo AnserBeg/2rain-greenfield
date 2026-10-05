@@ -1088,6 +1088,276 @@ test(
   },
 );
 
+// Review round 7: an earlier executable search whose filter excludes the
+// record verification arranged must not stand in for a later search that can
+// return it. `party_search` is Q1 filtered `false` (its id kept), sorting
+// before `party_z_search`, a Q0 copy with the literal `true` filter.
+test(
+  "release verification probes search through a later literal-true search when an earlier Q1 search's filter excludes its record",
+  { timeout: 300_000 },
+  async () => {
+    const definition = searchPartyDefinition([
+      { filter: literalFilter(false), local: 'party_search', tier: 'q1' },
+      { local: 'party_z_search', tier: 'q0' },
+    ]);
+    assert.deepEqual(
+      compiledPartySearches(definition).map((search) => search.slice(0, 4)),
+      [
+        [q1Search, 'q1', true, 'rejected'],
+        [unexecutedSearch, 'q0', false, 'accepted'],
+      ],
+    );
+
+    await withRealPartyRuntime(
+      'verification-search-reversed',
+      async (runtime) => {
+        // Through the real gateway: the Q1 search returns no party, the Q0
+        // search returns one by its name.
+        const partyId = await createParty(runtime, 'Quarry Rentals');
+        assert.deepEqual(
+          await searchParty(runtime, 'party_search', 'QUARRY'),
+          [],
+        );
+        assert.deepEqual(
+          await searchParty(runtime, 'party_z_search', 'QUARRY'),
+          [partyId],
+        );
+        await assertFullVerification(runtime);
+      },
+      definition,
+    );
+  },
+);
+
+// Without a literal-true search, verification tries the executable filtered
+// searches in catalog order. `party_search` (Q1, name equals "Quarry
+// Rentals") excludes the record verification arranged; `party_t_search` (Q1,
+// name not "Quarry Rentals") returns it; `party_z_search` is Q0 filtered
+// `false`, which the gateway does not run.
+test(
+  'release verification probes search through the first filtered search that returns its record',
+  { timeout: 300_000 },
+  async () => {
+    const definition = searchPartyDefinition([
+      {
+        filter: nameFilter('equals', 'Quarry Rentals'),
+        local: 'party_search',
+        tier: 'q1',
+      },
+      {
+        filter: nameFilter('notEquals', 'Quarry Rentals'),
+        local: 'party_t_search',
+        tier: 'q1',
+      },
+      { filter: literalFilter(false), local: 'party_z_search', tier: 'q0' },
+    ]);
+    assert.deepEqual(
+      compiledPartySearches(definition).map((search) => search.slice(0, 4)),
+      [
+        [q1Search, 'q1', true, 'rejected'],
+        [`${PARTY_IDS.namespace}:query.party_t_search`, 'q1', true, 'rejected'],
+        [unexecutedSearch, 'q0', false, 'rejected'],
+      ],
+    );
+
+    await withRealPartyRuntime(
+      'verification-search-filtered',
+      async (runtime) => {
+        // Both filters are satisfiable: a party named "Quarry Rentals" is
+        // returned by the first search and not by the second.
+        const partyId = await createParty(runtime, 'Quarry Rentals');
+        assert.deepEqual(await searchParty(runtime, 'party_search', 'QUARRY'), [
+          partyId,
+        ]);
+        assert.deepEqual(
+          await searchParty(runtime, 'party_t_search', 'QUARRY'),
+          [],
+        );
+        await assertFullVerification(runtime);
+      },
+      definition,
+    );
+  },
+);
+
+// When no search the gateway executes returns the record verification
+// arranged, the probe cannot be witnessed, and verification says so by name.
+test(
+  'release verification refuses a search probe that no search can witness, naming each search it tried',
+  { timeout: 300_000 },
+  async () => {
+    const definition = searchPartyDefinition([
+      {
+        filter: nameFilter('equals', 'Quarry Rentals'),
+        local: 'party_search',
+        tier: 'q1',
+      },
+      { filter: literalFilter(false), local: 'party_z_search', tier: 'q0' },
+    ]);
+    assert.deepEqual(
+      compiledPartySearches(definition).map((search) => search.slice(0, 4)),
+      [
+        [q1Search, 'q1', true, 'rejected'],
+        [unexecutedSearch, 'q0', false, 'rejected'],
+      ],
+    );
+    await assert.rejects(
+      withRealPartyRuntime(
+        'verification-search-unwitnessed',
+        async () => {
+          assert.fail(
+            'activation admitted a release whose search probe has no witness',
+          );
+        },
+        definition,
+      ),
+      (error: unknown) => {
+        assert.equal(
+          (error as { code?: unknown }).code,
+          'VERIFICATION_SEARCH_WITNESS_UNCONSTRUCTABLE',
+          String(error),
+        );
+        assert.match(String(error), /northstar\.party:query\.party_search \(/u);
+        assert.doesNotMatch(String(error), /party_z_search/u);
+        return true;
+      },
+    );
+  },
+);
+
+// A literal-true search that selects no positive field is not the probe's
+// search: the gateway runs it, but the interpreter refuses a search with no
+// searchable column (`MODULE_SEARCH_CAPABILITY_UNAVAILABLE`). `party_a_search`
+// (Q1, literal `true`, only the contact summary, which the plan excludes from
+// search) sorts before the usual `party_search`.
+test(
+  'release verification probes search through the first literal-true search with a positive field',
+  { timeout: 300_000 },
+  async () => {
+    const definition = searchPartyDefinition([
+      {
+        fieldIds: [PARTY_IDS.fieldIds.contactSummary],
+        local: 'party_a_search',
+        tier: 'q1',
+      },
+    ]);
+    assert.deepEqual(compiledPartySearches(definition), [
+      [
+        `${PARTY_IDS.namespace}:query.party_a_search`,
+        'q1',
+        true,
+        'accepted',
+        [PARTY_IDS.fieldIds.contactSummary],
+      ],
+      [
+        q1Search,
+        'q0',
+        false,
+        'accepted',
+        [
+          PARTY_IDS.fieldIds.number,
+          PARTY_IDS.fieldIds.name,
+          PARTY_IDS.fieldIds.contactSummary,
+        ],
+      ],
+    ]);
+
+    await withRealPartyRuntime(
+      'verification-search-positive-field',
+      async (runtime) => {
+        await assertFullVerification(runtime);
+      },
+      definition,
+    );
+  },
+);
+
+// Review round 7's coverage gap: an assigned number that the create's
+// read-back omits and that only a literal-true Q1 get selects is read through
+// that get, not taken as its sentinel unread.
+test(
+  'release verification reads an assigned number through a Q1 get whose filter is the literal true',
+  { timeout: 300_000 },
+  async () => {
+    const definition = q1WitnessPartyDefinition();
+    type Query = {
+      filter: unknown;
+      filterPlan?: unknown;
+      queryId: string;
+      queryType: string;
+      selections: { fieldId: string }[];
+      sourceEntityId: string;
+      tier: string;
+    };
+    const compiled = compilePartyFixture(definition).compiled;
+    assert.deepEqual(
+      projectionPayload<{ queries: Query[] }>(
+        compiled,
+        PROJECTION_FAMILY_IDS.queryCatalog,
+      )
+        .queries.filter(
+          (query) =>
+            query.queryType === 'get' &&
+            query.selections.some(
+              (selection) => selection.fieldId === accountNumber,
+            ),
+        )
+        .map((query) => [
+          query.queryId,
+          query.tier,
+          query.filterPlan !== undefined,
+          inspectPredicateForExecution(query.filter).outcome,
+        ]),
+      [[executedAccountGet, 'q1', true, 'accepted']],
+    );
+
+    await withRealPartyRuntime(
+      'verification-q1-witness',
+      async (runtime) => {
+        const party = storageEntity(runtime.storage, PARTY_IDS.entityIds.party);
+        await assertFullVerification(runtime);
+        const executedIn = await admittedEvidence(runtime);
+        const records = await storedRecords(
+          runtime,
+          party,
+          executedIn.executed_tenant_id,
+          executedIn.executed_environment_id,
+          [accountNumber],
+        );
+        assert.ok(records.length > 0, 'verification arranged parties');
+        for (const record of records) {
+          assert.equal(
+            record.values[accountNumber],
+            verificationSentinelNumber(
+              record.recordId,
+              accountNumber,
+              storageColumn(party, accountNumber).fieldContract.bounds
+                .maximumLength,
+            ),
+          );
+          assert.equal(record.archived, true, 'no party is left live');
+        }
+
+        // Only the number witness reads through the Q1 get: cleanup, the
+        // typed-error probe and the declared evidence read `party_get`.
+        const executor = new UnsupportedGetExecutor(runtime);
+        await new PostgresReleaseVerificationService(
+          runtime.runtimePool,
+        ).executeSemanticCandidateWithExecutor(
+          runtime.contexts.a,
+          await stagedInTenantA(runtime),
+          executor,
+        );
+        assert.ok(
+          executor.queryIds.has(executedAccountGet),
+          'the witness read the account number through the Q1 get',
+        );
+      },
+      definition,
+    );
+  },
+);
+
 type StorageEntity = StorageTargetPayloadV1['entities'][number];
 
 /** Every record of an entity in one tenant environment, with field values. */
@@ -1187,10 +1457,10 @@ async function stagedInTenantA(runtime: RealPartyRuntime) {
 }
 
 /**
- * Verification's interpreter, in sentinel mode, except that it answers one get
- * as it answers a get whose pinned contract it does not support (no
- * `infrastructure`): `unsupported`, with no record. It records every query it
- * runs; the gateway passes it only the queries the gateway executes.
+ * Verification's interpreter, in sentinel mode, recording every query it runs
+ * (the gateway passes it only the queries the gateway executes). Given a get,
+ * it answers that get as it answers a get whose pinned contract it does not
+ * support (no `infrastructure`): `unsupported`, with no record.
  */
 class UnsupportedGetExecutor
   implements SemanticOperationExecutor, SemanticQueryExecutor
@@ -1200,7 +1470,7 @@ class UnsupportedGetExecutor
 
   constructor(
     runtime: RealPartyRuntime,
-    private readonly unsupportedQueryId: string,
+    private readonly unsupportedQueryId: string | null = null,
   ) {
     this.#interpreter = new PostgresModuleRuntimeInterpreter(
       runtime.runtimePool,
@@ -1452,6 +1722,187 @@ function q1GetPartyDefinition(): Record<string, unknown> {
     };
   }
   return definition;
+}
+
+/** A comparison of the party's name with a text literal, as a query filter. */
+function nameFilter(
+  operator: 'equals' | 'notEquals',
+  value: string,
+): Record<string, unknown> {
+  return {
+    field: {
+      kind: 'fieldReference',
+      schemaVersion: 'v6',
+      targetId: PARTY_IDS.fieldIds.name,
+    },
+    kind: 'fieldComparisonPredicate',
+    operator,
+    schemaVersion: 'v6',
+    value: { kind: 'textValue', schemaVersion: 'v6', value },
+  };
+}
+
+function literalFilter(value: boolean): Record<string, unknown> {
+  return { kind: 'booleanPredicate', schemaVersion: 'v6', value };
+}
+
+/**
+ * Party's own definition with its searches as listed: `party_search` itself,
+ * or a copy of it with fresh ids, with the given tier and, when given, filter
+ * and selected fields.
+ */
+function searchPartyDefinition(
+  searches: readonly {
+    readonly fieldIds?: readonly string[];
+    readonly filter?: Record<string, unknown>;
+    readonly local: string;
+    readonly tier: 'q0' | 'q1';
+  }[],
+): Record<string, unknown> {
+  type Json = Record<string, unknown>;
+  type Query = Json & { queryId: string; selections: Json[] };
+  const definition = structuredClone(partyModuleDefinition()) as Json & {
+    queries: Query[];
+  };
+  const original = definition.queries.find(
+    (entry) => entry.queryId === q1Search,
+  )!;
+  const source = structuredClone(original);
+  for (const search of searches) {
+    let query = original;
+    if (search.local !== 'party_search') {
+      query = structuredClone(source);
+      query.queryId = `${PARTY_IDS.namespace}:query.${search.local}`;
+      query.selections = query.selections.map((selection) => ({
+        ...selection,
+        selectionId: String(selection.selectionId).replace(
+          '.party_search_',
+          `.${search.local}_`,
+        ),
+      }));
+      definition.queries.push(query);
+    }
+    query.tier = search.tier;
+    if (search.filter) query.filter = search.filter;
+    if (search.fieldIds) {
+      const fieldIds = search.fieldIds;
+      query.selections = query.selections.filter((selection) =>
+        fieldIds.includes(
+          String((selection.field as { targetId: string }).targetId),
+        ),
+      );
+    }
+  }
+  return definition;
+}
+
+/**
+ * `numberedPartyDefinition`, with the account number selected only by
+ * `party_z_account_get`, a Q1 get with the literal `true` filter sorting
+ * after the read-back `party_get` (see `executedAccountGet`).
+ */
+function q1WitnessPartyDefinition(): Record<string, unknown> {
+  type Json = Record<string, unknown>;
+  type Query = Json & { queryId: string; selections: Json[] };
+  const definition = numberedPartyDefinition() as Json & { queries: Query[] };
+  const get = definition.queries.find(
+    (entry) => entry.queryId === unexecutedAccountGet,
+  )!;
+  get.queryId = executedAccountGet;
+  get.selections = get.selections.map((selection) => ({
+    ...selection,
+    selectionId: String(selection.selectionId).replace(
+      '.party_account_get_',
+      '.party_z_account_get_',
+    ),
+  }));
+  get.tier = 'q1';
+  return definition;
+}
+
+/** The party's searches as compiled: id, tier, plan, fence outcome, fields. */
+function compiledPartySearches(definition: Record<string, unknown>) {
+  return projectionPayload<{
+    queries: {
+      filter: unknown;
+      filterPlan?: unknown;
+      queryId: string;
+      queryType: string;
+      selections: { fieldId: string }[];
+      sourceEntityId: string;
+      tier: string;
+    }[];
+  }>(
+    compilePartyFixture(definition).compiled,
+    PROJECTION_FAMILY_IDS.queryCatalog,
+  )
+    .queries.filter(
+      (query) =>
+        query.sourceEntityId === PARTY_IDS.entityIds.party &&
+        query.queryType === 'search',
+    )
+    .map((query) => [
+      query.queryId,
+      query.tier,
+      query.filterPlan !== undefined,
+      inspectPredicateForExecution(query.filter).outcome,
+      query.selections.map((selection) => selection.fieldId),
+    ]);
+}
+
+/**
+ * Activation's release verification executed every scenario, the party's
+ * search-exclusion probe included, with nothing derived.
+ */
+async function assertFullVerification(runtime: RealPartyRuntime) {
+  const plan = releaseVerificationBinding(runtime.compiled).plan;
+  assert.ok(
+    plan.scenarios.some(
+      (scenario) =>
+        scenario.kind === 'searchableExclusion' &&
+        scenario.entityId === PARTY_IDS.entityIds.party,
+    ),
+    'the plan probes the party search',
+  );
+  const executedIn = await admittedEvidence(runtime);
+  assert.equal(executedIn.execution_scope, 'FULL', 'nothing was derived');
+  assert.deepEqual(
+    executedIn.scenarioIds,
+    plan.scenarios.map((scenario) => scenario.scenarioId).toSorted(),
+    'release verification executed every scenario',
+  );
+}
+
+/** Creates a party with the given name in tenant a, through the gateway. */
+async function createParty(runtime: RealPartyRuntime, name: string) {
+  const partyId = randomUUID();
+  const created = await invokePartyOperation(
+    runtime,
+    runtime.views.a,
+    'party_create',
+    {
+      recordId: partyId,
+      values: {
+        [PARTY_IDS.fieldIds.contactSummary]: 'search@example.test',
+        [PARTY_IDS.fieldIds.name]: name,
+        [PARTY_IDS.fieldIds.number]: `P-${partyId.slice(0, 8)}`,
+      },
+    },
+  );
+  assert.equal(created.outcome, 'succeeded');
+  return partyId;
+}
+
+/** The record ids a party search returns for a text, through the gateway. */
+async function searchParty(
+  runtime: RealPartyRuntime,
+  local: string,
+  text: string,
+) {
+  const result = await invokePartyQuery(runtime, runtime.views.a, local, {
+    text,
+  });
+  return result.records.map((record) => record.recordId);
 }
 
 function humanActorIssuer(): TrustedActorEnvelopeIssuer {
