@@ -10796,3 +10796,232 @@ test('PAYABLES (PY-G): each order line shows its three-way match as the read mod
   assert.match(withheld.html, /BILL-000007/u);
   f.deniedReads.delete(id('permission', 'purchase_order_read'));
 });
+
+test('RETURNABLE-ASSETS: a party page enters a company for the custody records it is in, and a custody page offers each event only where its figures admit it', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const [scope, other] = f.scopes as [string, string];
+  const type = f.executor.seed('returnable_asset_type', {
+    [id('field', 'returnable_asset_type_code')]: 'PAL-EURO',
+    [id('field', 'returnable_asset_type_name')]: 'Euro pallet',
+    [id('field', 'returnable_asset_type_asset_class')]: id(
+      'option',
+      'returnable_asset_type_asset_class_pallet',
+    ),
+    [id('field', 'returnable_asset_type_deposit_cad')]: '15',
+    [id('field', 'returnable_asset_type_deposit_usd')]: null,
+    [id('field', 'returnable_asset_type_deposit_eur')]: null,
+  });
+  const custody = (
+    number: string,
+    state: string,
+    figures: { outstanding: string; refundable: string },
+    company: string,
+  ) =>
+    f.executor.seed(
+      'returnable_custody',
+      {
+        [id('field', 'returnable_custody_number')]: number,
+        [id('field', 'returnable_custody_state')]: id(
+          'option',
+          `returnable_custody_state_${state}`,
+        ),
+        [id('field', 'returnable_custody_party_id')]: f.party,
+        [id('field', 'returnable_custody_direction')]: id(
+          'option',
+          'returnable_custody_direction_out',
+        ),
+        [id('field', 'returnable_custody_asset_type_id')]: type,
+        [id('field', 'returnable_custody_currency')]: id(
+          'option',
+          'returnable_custody_currency_cad',
+        ),
+        [id('field', 'returnable_custody_unit_deposit')]: '15',
+        [id('field', 'returnable_custody_issued_quantity')]: '6',
+        [id('field', 'returnable_custody_returned_quantity')]: '2',
+        [id('field', 'returnable_custody_forfeited_quantity')]: '0',
+        [id('field', 'returnable_custody_outstanding_quantity')]:
+          figures.outstanding,
+        [id('field', 'returnable_custody_deposit_taken')]: '90',
+        [id('field', 'returnable_custody_deposit_refunded')]: '0',
+        [id('field', 'returnable_custody_deposit_forfeited')]: '0',
+        [id('field', 'returnable_custody_deposit_held')]: '90',
+        [id('field', 'returnable_custody_deposit_refundable')]:
+          figures.refundable,
+        [id('field', 'returnable_custody_notes')]: null,
+        [id('relation', 'returnable_custody_party')]: f.party,
+      },
+      company,
+    );
+  const open = custody(
+    'RTN-000001',
+    'open',
+    { outstanding: '4', refundable: '0' },
+    scope,
+  );
+  const awaiting = custody(
+    'RTN-000002',
+    'awaiting_refund',
+    { outstanding: '0', refundable: '30' },
+    scope,
+  );
+  custody('RTN-000003', 'open', { outstanding: '2', refundable: '0' }, other);
+  f.executor.seed(
+    'returnable_event',
+    {
+      [id('field', 'returnable_event_state')]: id(
+        'option',
+        'returnable_event_state_posted',
+      ),
+      [id('field', 'returnable_event_kind')]: id(
+        'option',
+        'returnable_event_kind_issue',
+      ),
+      [id('field', 'returnable_event_event_date')]: '2026-10-05T09:00:00.000Z',
+      [id('field', 'returnable_event_quantity')]: '6',
+      [id('field', 'returnable_event_amount')]: '90',
+      [id('field', 'returnable_event_method')]: id(
+        'option',
+        'returnable_event_method_cheque',
+      ),
+      [id('field', 'returnable_event_reference')]: 'CHQ-7001',
+      [id('field', 'returnable_event_reason')]: 'Opening delivery',
+      [id('field', 'returnable_event_recorded_by')]: 'operator',
+      [id('relation', 'returnable_event_custody')]: open,
+    },
+    scope,
+  );
+  const enters = id('parameter', 'returnable_custody_list_legal_entity_scope');
+  const partyPath = (company?: string) =>
+    `/?${new URLSearchParams({
+      surface: id('surface', 'party_detail'),
+      record: f.party,
+      ...(company ? { [enters]: company } : {}),
+    }).toString()}`;
+  const returnables = (html: string) =>
+    new RegExp(
+      `data-composition-dataset="${regexpText(id('dataset', 'party_returnables'))}" data-resolution="([a-z]+)"`,
+      'u',
+    ).exec(html)?.[1];
+  const offers = (html: string, local: string) =>
+    html.includes(`value="${id('action', local)}"`);
+
+  // Two companies and none chosen: the party serves, its company-owned
+  // section reads nothing and fails nothing, and its own tasks stay offered.
+  const unentered = await renderSurfaceRuntimeWithData(
+    f.view,
+    partyPath(),
+    f.gateways,
+  );
+  assert.equal(unentered.statusCode, 200);
+  assert.equal(returnables(unentered.html), 'empty');
+  assert.doesNotMatch(unentered.html, /RTN-00000/u);
+  assert.ok(offers(unentered.html, 'party_add_role'));
+
+  // Entered in a company: that company's custody records of this party, each
+  // opened in the same company.
+  const entered = await renderSurfaceRuntimeWithData(
+    f.view,
+    partyPath(scope),
+    f.gateways,
+  );
+  assert.equal(entered.statusCode, 200);
+  assert.equal(returnables(entered.html), 'ready');
+  assert.match(entered.html, /RTN-000001/u);
+  assert.match(entered.html, /RTN-000002/u);
+  assert.doesNotMatch(entered.html, /RTN-000003/u);
+  assert.ok(offers(entered.html, 'party_issue_returnables'));
+  const opened = [
+    ...entered.html.matchAll(
+      /<a class="button" href="([^"]+)">Open custody<\/a>/gu,
+    ),
+  ].map(
+    (match) =>
+      new URL(match[1]!.replaceAll('&amp;', '&'), 'http://fixture.local'),
+  );
+  assert.deepEqual(
+    opened.map((url) => url.searchParams.get('record')).toSorted(),
+    [open, awaiting].toSorted(),
+  );
+  for (const url of opened) {
+    assert.equal(
+      url.searchParams.get('surface'),
+      id('surface', 'returnable_custody_detail'),
+    );
+    assert.equal(
+      url.searchParams.get(
+        id('parameter', 'returnable_custody_get_legal_entity_scope'),
+      ),
+      scope,
+    );
+  }
+
+  // A company the caller may not enter is refused by name.
+  const foreign = await renderSurfaceRuntimeWithData(
+    f.view,
+    partyPath(randomUUID()),
+    f.gateways,
+  );
+  assert.equal(foreign.statusCode, 422);
+  assert.match(foreign.html, /WORKSPACE_COMPANY_UNAVAILABLE/u);
+
+  // One company the caller may enter: the page pins it, as a List does.
+  f.allowed.delete(other);
+  const single = await renderSurfaceRuntimeWithData(
+    f.view,
+    partyPath(),
+    f.gateways,
+  );
+  f.allowed.add(other);
+  assert.equal(single.statusCode, 303);
+  assert.equal(
+    new URL(single.location!, 'http://fixture.local').searchParams.get(enters),
+    scope,
+  );
+
+  // A custody record offers Return and Forfeit while something is
+  // outstanding, Refund deposit while a deposit is refundable, Issue always.
+  const custodyPath = (record: string) =>
+    `/?${new URLSearchParams({
+      surface: id('surface', 'returnable_custody_detail'),
+      record,
+      [id('parameter', 'returnable_custody_get_legal_entity_scope')]: scope,
+    }).toString()}`;
+  const tasks = (html: string) =>
+    [
+      'custody_issue',
+      'custody_return',
+      'custody_forfeit',
+      'custody_refund',
+    ].filter((local) => offers(html, local));
+  const openPage = await renderSurfaceRuntimeWithData(
+    f.view,
+    custodyPath(open),
+    f.gateways,
+  );
+  assert.equal(openPage.statusCode, 200);
+  assert.deepEqual(tasks(openPage.html), [
+    'custody_issue',
+    'custody_return',
+    'custody_forfeit',
+  ]);
+  assert.match(
+    openPage.html,
+    new RegExp(
+      `data-composition-dataset="${regexpText(id('dataset', 'custody_events'))}" data-resolution="ready"`,
+      'u',
+    ),
+  );
+  assert.match(openPage.html, /CHQ-7001/u);
+  assert.match(openPage.html, /Opening delivery/u);
+  const awaitingPage = await renderSurfaceRuntimeWithData(
+    f.view,
+    custodyPath(awaiting),
+    f.gateways,
+  );
+  assert.deepEqual(tasks(awaitingPage.html), [
+    'custody_issue',
+    'custody_refund',
+  ]);
+});
