@@ -1,7 +1,7 @@
 # INTEGRATION — the open draft PR chain combined on one branch, with an ADR-0066 re-baseline
 
-Status: in progress on `packet/INTEGRATION` (draft PR, DO NOT MERGE). It exists for CI and evidence only; the owner decides what merges into `main`. No merge, no deployment, no production data.
-Tier: outside the Critical set as a combination — every leaf carries its own review arm; this branch resolves conflicts and re-derives. A conflict hunk inside Critical code is named under Decisions and its controls run on GitHub (`run-controls`).
+Status: M1-M7 merged and re-derived on `packet/INTEGRATION` ([draft PR #29](https://github.com/AnserBeg/2rain-greenfield/pull/29), DO NOT MERGE); M8 (SALES-EXTRAS) blocked by two canonical schema bounds (stop, below). The branch exists for CI and evidence only; the owner decides what merges into `main`. No merge, no deployment, no production data.
+Tier: outside the Critical set as a combination — every leaf carries its own review arm; this branch resolves conflicts and re-derives. No conflict hunk fell in the posting kernel, release verification or another Critical path, so no control is owed to a hunk here.
 Base: `origin/main` at `fe97b63b`. Plan: the integration plan of 2026-10-05 (merge order, conflict groups, ADR-0066 conditions), verified as it went.
 
 ## Owner rulings
@@ -14,62 +14,75 @@ Base: `origin/main` at `fe97b63b`. Plan: the integration plan of 2026-10-05 (mer
 |---|---|---|---|---|
 | M1 | POSTING-FORWARD-DATE | #9 | `1de2ac20` | merged `dd601465`, clean |
 | M2 | SUPPLY-WARNINGS (with #5-#8, #10, #11, #13, #16, #20, #22) | #26 | `c88f5bd2` | merged `5fd5e828`, clean |
-| M3 | STOCK-COUNTS' compact `app.authored.json` | — | `3e89d9aa` | ported `011e7576`; authored file re-derived |
+| M3 | STOCK-COUNTS' compact `app.authored.json` | — | `3e89d9aa` | ported `011e7576` |
 | R | the ADR-0066 re-baseline | — | — | `65bddb4a` |
-| — | RETURNS' composed splits + 1 GB preset | — | `72beb936`, `45d0bfaf` | ported `3bcb1d25` (tests only) |
-| M4 | CATALOG-EXTRAS | #24 | `58747c42` | pending |
-| M5 | WAREHOUSE-MODE | #18 | `0ab2a0b6` | pending |
-| M6 | VALUATION | #12 | `1b25f96e` | pending |
-| M7 | APPROVALS | #14 | `78045571` | pending |
-| M8 | SALES-EXTRAS | #25 | `2547c4e7` | pending |
-| later | UNITS #17 `533b4628`; SPECIAL-ORDER #28 `95ec4f41` (with DROP-SHIP #19); STOCK-COUNTS #23 `550c723e`; RETURNS #15 `2603fc00`; RETURNABLE-ASSETS #27 `8a9dcad4`; SALES-PARITY round-8 fix (#7 `08142d0e`) | | | not now: mid-review or mid-build (SHAs as fetched 2026-10-05, still moving). Fold each in at its reviewed SHA with one `--no-ff` merge naming it, then the re-derive sequence below. |
+| — | RETURNS' composed splits + 1 GB preset | #15 | `72beb936`, `45d0bfaf` | ported `3bcb1d25` (tests only) |
+| M4 | CATALOG-EXTRAS | #24 | `58747c42` | merged `cb2ce225` |
+| M5 | WAREHOUSE-MODE | #18 | `0ab2a0b6` | merged `b4fced9a`; calendar fix `7ef4ba0d` |
+| M6 | VALUATION | #12 | `1b25f96e` | merged `22c689b0` (decision I-V1) |
+| M7 | APPROVALS | #14 | `78045571` | merged `667b360e` |
+| M8 | SALES-EXTRAS | #25 | `2547c4e7` | BLOCKED; resolution kept on local `wip/integration-m8-sales-extras` `89e56a78` |
+| later | UNITS #17 `533b4628`; SPECIAL-ORDER #28 `95ec4f41` (with DROP-SHIP #19); STOCK-COUNTS #23 `550c723e`; RETURNS #15 `2603fc00`; RETURNABLE-ASSETS #27 `8a9dcad4`; SALES-PARITY round-8 fix (#7 `08142d0e`) | | | not now (SHAs as fetched 2026-10-05, still moving). Fold each in at its reviewed SHA with one `--no-ff` merge naming it, then the sequence below. |
 
 ## Re-derive sequence (after every merge)
 
-1. `node --import tsx apps/web/scripts/generate-app-authored.ts` (compact JSON since M3).
-2. `node --import tsx apps/web/scripts/compile-app-release.ts --pre-tenant-rebaseline` — the lineage stays one entry.
-3. `check:app-release`, `check:demo-release`, `check:language-coverage` (over this run's unit, compiler, integration, contracts evidence), `check:expected-red`.
-4. The inventory-contract golden, re-derived exactly as `inventory-contract.cases.ts` computes `releaseSummary(mustCompile())`.
-5. Pins re-measured from the compile (below), never guessed.
-6. `check:schema` — owed: it needs Docker, which the owner paused on 2026-10-05; `db/` is byte-identical to `main` through M8, so its result cannot differ from `main`'s.
-7. R1: authored and normalized bytes against `maximumAuthoredBytes` / `maximumNormalizedBytes` (2,097,152 B, `packages/canonical-model/src/constants.ts`); a merge over either stops before its commit.
+1. `generate-app-authored.ts` (compact JSON since M3); 2. `compile-app-release.ts --pre-tenant-rebaseline` (one entry); 3. `check:app-release`, `check:demo-release`, `check:language-coverage`, `check:expected-red`; 4. the inventory-contract golden and `coverage-decisions.json`, each re-derived with the code's own derivations (a golden summary exactly as `inventory-contract.cases.ts` computes it; the ledger's exported digests, with every leaf's rationale sentence kept); 5. pins re-measured from the compile; 6. R1 sizes; 7. `check:schema` — owed while Docker is paused; `db/` is byte-identical to `main` through M7.
+- A conflict in a derived artifact is re-derived, never picked; the full-replay snapshot keeps the current file at a merge and is regenerated on GitHub (`regen-snapshot`) at the head.
 
-## Sizes (R1)
+## Sizes (R1: 2,097,152 B for each of authored and normalized)
 
 | after | authored file B | authored canonical B | normalized B | compiled B | entries |
 |---|---|---|---|---|---|
 | M2 | 1,998,246 | 1,301,584 | 1,355,964 | 44,967,616 | 9 |
 | M3 | 1,301,585 | 1,301,584 | 1,355,964 | 44,967,616 | 9 |
 | R | 1,301,585 | 1,301,584 | 1,355,964 | 5,715,247 | 1 |
+| M4 | 1,333,650 | 1,333,649 | 1,389,276 | 5,852,447 | 1 |
+| M5 | 1,340,529 | 1,340,528 | 1,396,176 | 5,870,435 | 1 |
+| M6 | 1,378,192 | 1,378,191 | 1,434,861 | 5,977,607 | 1 |
+| M7 | 1,440,469 | 1,440,468 | 1,499,742 | 6,237,235 | 1 |
+| M8 (blocked) | 1,548,116 | 1,548,115 | 1,610,354 with the two over-bound arrays trimmed in memory only | — | — |
+
+## Pins from the compile (each a sum of the leaves' measured deltas)
+
+| pin | R | M4 | M5 | M6 | M7 |
+|---|---|---|---|---|---|
+| grouped and composed surfaces | 103 | 106 (+3 CATALOG) | 107 (+1 WAREHOUSE) | 108 (+1 VALUATION) | 113 (+5 APPROVALS) |
+| navigation leaves | 18 | 18 | 19 | 20 | 22 |
+| verification scenarios / executed / derived | 584 / 507 / 77 | 601 / 524 / 77 (+17 CATALOG) | same | same | 633 / 535 / 98 (+32/+11/+21 APPROVALS) |
+| surface floor grouped / flat / runtime | 21 / 19 / 21 | 21 / 20 / 21 | same | same | same |
+| coverage obligations / observed | 2774 / 921 | 2797 / 938 | 2805 / 945 | 2805 / 945 | 2805 / 946 |
 
 ## Surface floor numbering
 
-Leaves took surface-manifest floors in parallel. Two leaves holding one number for two different features would let a reader at that floor serve a payload whose meaning it lacks, so colliding rungs take integration-only numbers from 22 up. That is safe here only because the one-entry lineage records no release carrying an old number, and no runtime outside this branch reads one.
+Leaves took surface-manifest floors in parallel. Two leaves holding one number for two features would let a reader at that floor serve a payload whose meaning it lacks, so colliding rungs take integration-only numbers from 22 up, highest-first in the ladder. That is safe only because the one-entry lineage records no release carrying an old number and no runtime outside this branch reads one.
 
 | feature (leaf) | leaf's number | integration number |
 |---|---|---|
-| composition datasets scoped by a field (INVENTORY-PARITY) | 15 | 15 |
-| a draft editor's create values (INVENTORY-PARITY) | 16 | 16 |
-| List figures, band views, Record form references (REPLENISHMENT) | 17 | 17 |
-| a launcher Task's tiles and scan box (WAREHOUSE-MODE) | 18 | 18 |
-| a Record form's omitted fields, figures through a reference (LOCATIONS) | 19 | 19 |
-| searches through children, figure choices, band cases (CATALOG-EXTRAS) | 20 | 20 |
-| a List progress's supply (SUPPLY-WARNINGS) | 21 | 21 |
+| datasets scoped by a field (INVENTORY-PARITY) / create values (INVENTORY-PARITY) / List figures (REPLENISHMENT) | 15 / 16 / 17 | 15 / 16 / 17 |
+| launcher Task (WAREHOUSE-MODE) / omitted form fields (LOCATIONS) / searched children (CATALOG-EXTRAS) / supply (SUPPLY-WARNINGS) | 18 / 19 / 20 / 21 | 18 / 19 / 20 / 21 |
+| ranked defaults and chained Tasks (SALES-EXTRAS) | 15 | 22 (prepared in `89e56a78`; not on the branch) |
+| DROP-SHIP, SPECIAL-ORDER, STOCK-COUNTS | 15, 16, 17 | 23, 24, 25 planned; measure at fold-in |
 
 ## Decisions
 
-- M3 is a cherry-pick (`-x`) of `3e89d9aa` alone, not a merge of STOCK-COUNTS: only its generator and `.prettierignore` are taken, and `app.authored.json` is re-derived by the ported generator (same JSON value).
-- R's bootstrap is re-derived from the current package (it now names the payables capability among its requirements); as in PD, the head's root moves with it while its normalized definition stays byte-identical to SUPPLY-WARNINGS' entry 8.
-- No history-pinning test changes at R: PD moved every lineage-position claim to synthetic lineages, and the entries 2-8 since then added no test that reads recorded history by position.
-- The full-replay snapshot is a derived artifact regenerated on GitHub (`regen-snapshot`) while Docker is paused, then committed alone; until then a merge keeps the current file rather than a textual union of two leaves' snapshots.
-- The 1 GB volume is one exported preset, `LINEAGE_INSTALL_VOLUME`; every other database keeps 256 MB.
-- Local suites run with `FORCE_COLOR` unset: this shell sets `FORCE_COLOR=3`, which colours assertion messages and turns `assert.throws(..., /regex/)` honesty controls red (seen once in compiler, 174/175; 175/175 without it).
+- M3 cherry-picks `3e89d9aa` alone (`-x`); `app.authored.json` is re-derived by the ported generator (same JSON value).
+- R's bootstrap is re-derived from the current package (it names the payables capability); as in PD the head's root moves while its normalized definition stays byte-identical to SUPPLY-WARNINGS' entry 8. No history-pinning test changed: PD made every lineage-position claim synthetic.
+- The 1 GB volume is one preset, `LINEAGE_INSTALL_VOLUME` (cites `28461658`); every other database keeps 256 MB. APPROVALS split the rollback-edge test as RETURNS did; RETURNS' copy (ported first, on the preset) is kept, not both.
+- POSTING-FORWARD-DATE moved the composed tenant's calendar to America/Edmonton; three tests from the leaves (item stock, replenishment, catalog extras) provisioned a second company at UTC and got `INVENTORY_TENANT_CALENDAR_CONFLICT` on CI. `7ef4ba0d` passes them the tenant's calendar, as #9 did for its own test. Test-only.
+- I-V1: INVENTORY-PARITY's stock page stays the item page (item get, Posted stock entry), because REPLENISHMENT, LOCATIONS, CATALOG-EXTRAS and WAREHOUSE-MODE build on it. VALUATION's item-page composition, its `inventory_value_get` data source and entry are not taken; its figures stay on the Inventory value List; its contract test and browser spec say so. A combined item page is owed to the owner and the VALUATION lane.
+- APPROVALS made `CompositionData.offeredActionIds` required; INVENTORY-PARITY's field-scoped section test supplies it.
+- Coverage rationales carry every leaf's sentence plus one INTEGRATION sentence (M4 and M5 first dropped CATALOG-EXTRAS' and WAREHOUSE-MODE's; restored at M7).
+- Local suites run with `FORCE_COLOR` unset: this shell sets `FORCE_COLOR=3`, which turns `assert.throws(..., /regex/)` honesty controls red.
+- M8 stop (R1's class, and AGENTS.md's STOP list (a): raising a canonical bound changes the language): every conflict resolves (`89e56a78`, rerere recorded), but the union does not normalize. The Sales orders List needs 9 views (List views max 8: 6 + SUPPLY-WARNINGS 2 + SALES-EXTRAS' Counter sales) and the sales order page 34 composition fields (max 30: 24 + SALES-EXTRAS 6 + VALUATION 4). Raising a bound is a language change; dropping a tab or facts drops a leaf's feature. Bytes are within R1.
+- In `89e56a78`, beyond unions: price-list entities move to orderKeys 40-60 (CATALOG-EXTRAS' alias holds 30); SALES-EXTRAS' `enumField` becomes `requiredEnumField` beside CATALOG-EXTRAS'; the flat grammar arm keeps Location (REPLENISHMENT's item form needs it) and leaves the nine price-list surfaces out; the floor checks read 22 and 21.
 
 ## Gates
 
-- At R (`65bddb4a`, no container): `check:app-release`, `check:demo-release` PASS; unit 218/218; compiler 175/175; integration 248/248; web contracts 40/40; language coverage PASS (2774 obligations, 921 observed, as SUPPLY-WARNINGS); expected-red 168 entries in 15 manifests OK; inventory-contract golden re-derives byte-identical.
+- Local, every merge (no container): app/demo release checks; unit, compiler, integration, web contracts, agent, architecture without its three Docker-backed files, lint, format, typecheck, coverage, expected-red (168 entries in 15 manifests). At M7: unit 247/247, compiler 175/175, integration 257/257, contracts 46/46, agent 3/3, architecture 150/150.
+- CI at R (run 37348030612): quality, browsers, scans, commercial green; composed failed only its two full-replay snapshot comparisons (the stale snapshot); schema failed the two calendar conflicts; perf `COMPILE_BUDGET_INDETERMINATE` (CPU idle 86.8%). Snapshot at R (evidence run 37348046646) equals the 9-entry one except the ordinal positions of 15 columns in two tables.
+- CI at `7ef4ba0d` (run 37358401689): everything green but composed's two snapshot comparisons; schema 19m51s, commercial 13m34s, composed 17m6s of 30; browser 12m17s, operations 12m34s, composed browser 6m55s of 20.
 
 ## Owed
 
 - `check:schema` and `dev:reset` (Docker paused): a development database built from any leaf's lineage needs `corepack pnpm --filter @north-star/api dev:reset` before it can run this release.
-- The full-replay snapshot from GitHub at the integrated head.
+- The owner's call on M8's two bounds; a combined item page (I-V1); then M9 onward.
