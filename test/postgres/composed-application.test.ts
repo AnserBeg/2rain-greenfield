@@ -840,6 +840,11 @@ test(
 
 // Same harness limit: this parent performs one bounded fresh install and then
 // verifies and activates compiled successors through the normal upgrade path.
+// Its reversal journey -- the forward-only refusal, the non-exact reverse
+// pairs, the rollback and the forward replay -- is the next parent: together
+// they passed 300 s in-matrix at lineage entry 6 (CI 37261615364, both
+// attempts), so they split at that semantic boundary, each with this bound
+// and its own deployment, as the ADR-0047 rollback-edge directions did.
 test(
   'composed product advances an existing deployment to an exact compiled successor',
   { timeout: 300_000 },
@@ -971,6 +976,77 @@ test(
             sourceReleaseId,
             candidateReleaseId,
           );
+        } finally {
+          await runtime.close();
+        }
+      },
+      // Every install and activation here keeps its release artifacts and their
+      // write-ahead log. At lineage entry 6 they filled the default 256 MB
+      // volume (sqlstate 53100), so this parent runs on the full-replay
+      // generator's 1 GB volume.
+      { dataSizeMegabytes: 1024 },
+    );
+  },
+);
+
+// The advancement parent's reversal journey on a deployment of its own: the
+// same fresh install and the same storage-changing successor, reached through
+// the normal upgrade path, then everything that parent did after it.
+test(
+  'an advanced deployment refuses a forward-only reversal, reverses to its exact predecessor and replays forward',
+  { timeout: 300_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'g2-1g-release-reversal',
+      async ({ connection, pool }) => {
+        const compiledApplication = JSON.parse(
+          await readFile(compiledArtifactPath, 'utf8'),
+        ) as unknown;
+        const authoredApplication = JSON.parse(
+          await readFile(authoredArtifactPath, 'utf8'),
+        ) as Record<string, unknown>;
+        const databaseUrl = connectionUrl(connection);
+        let runtime = await createRuntime(
+          compiledApplication,
+          databaseUrl,
+          'advancing-tenant',
+        );
+        try {
+          await assertExactSwapTriggerEnabled(pool);
+          const sourceReleaseId = runtime.activeReleaseId;
+          const recordId = randomUUID();
+          const created = await createParty(runtime, recordId, 'P-UPGRADE-001');
+          assert.equal(created.outcome, 'succeeded');
+          const candidate = await compileCandidateEnvelope(
+            compiledApplication,
+            authoredApplication,
+            true,
+          );
+          await runtime.close();
+
+          runtime = await createRuntime(
+            candidate,
+            databaseUrl,
+            'advancing-tenant',
+          );
+          await assertExactSwapTriggerEnabled(pool);
+          assert.notEqual(
+            runtime.releaseRoot,
+            parseCompiledApplication(compiledApplication).application.compiled
+              .releaseRoot,
+          );
+          const after = await partyRowSnapshot(
+            pool,
+            runtime,
+            candidate,
+            recordId,
+          );
+          const candidateReleaseId = runtime.activeReleaseId;
+          await assertMaterializedReversibleForwardTransition(
+            pool,
+            sourceReleaseId,
+            candidateReleaseId,
+          );
           await runtime.close();
           await setLatestForwardTransitionRecoveryMode(
             pool,
@@ -1089,10 +1165,8 @@ test(
           await runtime.close();
         }
       },
-      // Every install and activation here keeps its release artifacts and their
-      // write-ahead log. At lineage entry 6 they filled the default 256 MB
-      // volume (sqlstate 53100), so this parent runs on the full-replay
-      // generator's 1 GB volume.
+      // As the advancement parent: its installs and activations outgrow the
+      // default 256 MB volume.
       { dataSizeMegabytes: 1024 },
     );
   },
