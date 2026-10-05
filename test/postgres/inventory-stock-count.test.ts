@@ -724,13 +724,6 @@ test('stock-count correction: a correction at another location is refused, and o
   );
 });
 
-/**
- * PUR-2a ACCEPTANCE CONTROL, named by `purchasing-sales-v1-plan.md` section
- * 7.16: create and review a stock-count source with NO pre-staged transaction
- * or transaction lines, post it through the compiled family-execution binding,
- * and prove the kernel derives and writes both companion IDs and both
- * revisions.
- */
 // STOCK-COUNTS C6, review round 1: Post proves the columns it does not write
 // unchanged to their last decimal. A physical count of 1.000000000000000001 is
 // a numeric(38,18), which a JavaScript number cannot tell from ...002.
@@ -756,6 +749,82 @@ test('stock-count read-back: a physical count is proved unchanged to its last de
   );
 });
 
+// STOCK-COUNTS, review round 1 (defect 3). Version 4's digest covers the
+// caller's authorization evidence, and the count route builds a retried Post
+// with the policy version current at the retry. So an unchanged Post retried
+// under its key after the policy version changed is digested with the
+// evidence of the invocation its receipt records, and replays. Under a new
+// key it replays by its natural effect, and that key's duplicate replays too.
+// Changed business input under the original key still conflicts.
+test('stock-count replay: an unchanged Post retried after a policy-version change replays its version-4 receipt', async () => {
+  await withCompanionEnvironment(
+    'count-policy-change-replay',
+    async ({ actor, binding, context, databasePool, runtimePool, service }) => {
+      const command = countCommand({
+        countedQuantity: '4',
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 52,
+        supersedesStockCountId: null,
+        varianceQuantity: '4',
+      });
+      await seedReviewedCount(runtimePool, context, binding, command);
+      const posted = await service.postStockCount(context, actor, command);
+      const stored = await readReceipt(databasePool, command.idempotencyKey);
+      assert.equal(stored.inputDigestVersion, 4);
+      const later: InventoryStockCountPostingCommandV2 = {
+        ...command,
+        authorization: {
+          ...command.authorization,
+          policyVersion: `${command.authorization.policyVersion}+later`,
+        },
+      };
+      const retried = await service.postStockCount(context, actor, later);
+      assert.equal(
+        retried.replayed,
+        true,
+        'an unchanged Post retried after a policy-version change must replay',
+      );
+      assert.deepEqual(retried.trust, posted.trust);
+      assert.deepEqual(
+        await readReceipt(databasePool, command.idempotencyKey),
+        stored,
+        'the recorded digest is not rewritten',
+      );
+
+      const alias = { ...later, idempotencyKey: randomUUID() };
+      const aliasReplay = await service.postStockCount(context, actor, alias);
+      assert.equal(aliasReplay.replayed, true);
+      const aliasDuplicate = await service.postStockCount(
+        context,
+        actor,
+        alias,
+      );
+      assert.equal(
+        aliasDuplicate.replayed,
+        true,
+        'a new-key replay after a policy change must replay its own duplicate',
+      );
+      assert.deepEqual(aliasDuplicate.trust, aliasReplay.trust);
+
+      await assert.rejects(
+        service.postStockCount(context, actor, {
+          ...later,
+          reason: { ...later.reason, narrative: 'A different narrative' },
+        }),
+        { code: 'INVENTORY_POSTING_IDEMPOTENCY_CONFLICT' },
+      );
+    },
+  );
+});
+
+/**
+ * PUR-2a ACCEPTANCE CONTROL, named by `purchasing-sales-v1-plan.md` section
+ * 7.16: create and review a stock-count source with NO pre-staged transaction
+ * or transaction lines, post it through the compiled family-execution binding,
+ * and prove the kernel derives and writes both companion IDs and both
+ * revisions.
+ */
 test('stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities', async () => {
   await withCompanionEnvironment(
     'companion-derivation',
