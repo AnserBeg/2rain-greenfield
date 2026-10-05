@@ -42,6 +42,7 @@ import {
   dropShipEntity as entity,
   dropShipQuantity as quantity,
   dropShipQuantityText,
+  dropShipRevision,
   dropShipQuote as q,
   dropShipRefused as refused,
   dropShipRelation as relation,
@@ -355,7 +356,7 @@ class DropShipExecutor implements RegisteredCapabilityOperationExecutor {
     patch: Readonly<Record<string, unknown>> = {},
   ): Promise<number> {
     const keys = Object.keys(patch);
-    const result = await client.query<{ revision: number }>(
+    const result = await client.query<{ revision: number | string }>(
       `UPDATE ${table(target)} SET revision=revision+1${keys.map((key, index) => `,${q(key)}=$${index + 6}`).join('')} WHERE tenant_id=$1 AND environment_id=$2 AND ${q(target.legalEntity!.column)}=$3 AND record_id=$4 AND revision=$5 RETURNING revision`,
       [
         ...this.#scope(scope),
@@ -366,7 +367,7 @@ class DropShipExecutor implements RegisteredCapabilityOperationExecutor {
     );
     if (result.rows.length !== 1)
       refused('Linked record changed during supplier delivery command');
-    return result.rows[0]!.revision;
+    return dropShipRevision(result.rows[0]!.revision);
   }
   async #create(
     client: PoolClient,

@@ -732,3 +732,8 @@ How to apply: bind an immutable normalized preparation to a server-issued identi
 Date: 2026-10-05
 Why: DROP-SHIP's Sales command inherited Purchasing's module from its vendor-credit template; the compiler's without-Sales predecessor retained the command but removed its permission and read-back query.
 How to apply: copy the target entity's module when re-expressing a command across modules, and compile its dependent predecessor as well as the full application. See [DROP-SHIP](docs/execution/packets/DROP-SHIP.md).
+
+## Normalize stored revisions before constructing trust commands
+Date: 2026-10-05
+Why: DROP-SHIP returned an SQL `bigint` revision unchanged; the PostgreSQL driver returns a string, while accepted trust commands require a positive safe-integer number.
+How to apply: normalize and validate revisions at the provider boundary, retain the trust check, and test the driver's actual representation plus the governed PostgreSQL journey. See [DROP-SHIP](docs/execution/packets/DROP-SHIP.md).

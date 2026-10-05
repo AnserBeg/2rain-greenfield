@@ -60,6 +60,15 @@ export function dropShipQuantityText(value: bigint): string {
   const tail = (value % scale).toString().padStart(18, '0').replace(/0+$/u, '');
   return `${value / scale}${tail ? `.${tail}` : ''}`;
 }
+export function dropShipRevision(value: unknown): number {
+  const revision =
+    typeof value === 'number' || typeof value === 'string'
+      ? Number(value)
+      : NaN;
+  if (!Number.isSafeInteger(revision) || revision <= 0)
+    dropShipRefused('Stored record revision must be a positive safe integer');
+  return revision;
+}
 export function dropShipBound(
   quantity: bigint,
   salesOpen: bigint,

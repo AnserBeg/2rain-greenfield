@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import pg from 'pg';
 import {
   dropShipBound,
   dropShipQuantity,
   dropShipQuantityText,
+  dropShipRevision,
 } from '../../packages/postgres-provider/src/drop-ship-support.js';
 
 test('D-B: supplier delivery bounds are exact on both linked lines', () => {
@@ -37,6 +39,20 @@ test('D-B: supplier delivery bounds are exact on both linked lines', () => {
     /exact non-negative/u,
   );
   assert.throws(() => dropShipQuantity('-1'), /exact non-negative/u);
+});
+
+test('drop-ship revisions normalize PostgreSQL bigint strings and reject unsafe values', () => {
+  const stored = pg.types.getTypeParser(20)('3');
+  assert.equal(typeof stored, 'string');
+  assert.equal(dropShipRevision(stored), 3);
+  assert.equal(dropShipRevision('3'), 3);
+  assert.equal(dropShipRevision(3), 3);
+  assert.equal(
+    dropShipRevision(String(Number.MAX_SAFE_INTEGER)),
+    Number.MAX_SAFE_INTEGER,
+  );
+  for (const value of [null, true, '', '0', '-1', '1.5', '9007199254740993'])
+    assert.throws(() => dropShipRevision(value), /positive safe integer/u);
 });
 
 import {
