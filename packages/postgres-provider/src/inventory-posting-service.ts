@@ -4677,6 +4677,17 @@ function declaredColumns(
   });
 }
 
+/**
+ * STOCK-COUNTS, review round 1 (C6). A row as each column's exact JSON text,
+ * for a preservation proof: a numeric(38,18) read through `to_jsonb` arrives
+ * as a JavaScript number, and 1.000000000000000001 and ...002 are one number.
+ * The keys are the row's columns, so the coverage equality reads them as
+ * before; each value is the column's jsonb text, compared as a string.
+ */
+function exactRowSql(alias: string): string {
+  return `(SELECT jsonb_object_agg(exact_column.key, exact_column.value::text) FROM jsonb_each(to_jsonb(${alias})) AS exact_column)`;
+}
+
 function preservedColumns(
   prior: Readonly<Record<string, unknown>>,
   current: Readonly<Record<string, unknown>>,
@@ -7702,7 +7713,7 @@ async function assertCompanionIdentitiesPersisted(
             source.${quoted(binding.stockCountStateColumn)} AS "sourceState",
             source.${quoted(binding.stockCountActorColumn)} AS "sourceActorId",
             to_char(source.${quoted(binding.stockCountRecordedAtColumn)} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "sourceRecordedAt",
-            to_jsonb(source) AS "sourcePersistedRow",
+            ${exactRowSql('source')} AS "sourcePersistedRow",
             to_jsonb(companion) AS "companionPersistedRow",
             companion.tenant_id::text AS "companionTenantId",
             companion.environment_id::text AS "companionEnvironmentId",
@@ -7960,7 +7971,7 @@ async function assertCompanionIdentitiesPersisted(
             companion.${quoted(binding.transactionLineToLocationColumn)}::text AS "companionToLocationId",
             companion.${quoted(binding.transactionLine.revisionColumn)}::integer AS "companionRevision",
             (SELECT relation.relname FROM pg_catalog.pg_class AS relation WHERE relation.oid = companion.tableoid) AS "observedCompanionRelation",
-            to_jsonb(source) AS "sourcePersistedRow",
+            ${exactRowSql('source')} AS "sourcePersistedRow",
             to_jsonb(companion) AS "companionPersistedRow"
        FROM ${table(binding, binding.stockCountLine)} AS source
        JOIN ${table(binding, binding.transactionLine)} AS companion
@@ -8495,7 +8506,7 @@ async function lockAndAssertStockCountEvidence(
             source.${quoted(binding.stockCountSupersedesColumn)}::text AS "supersedesStockCountId",
             source.${quoted(binding.stockCountRelationToTransactionColumn)}::text AS "transactionId",
             source.${quoted(binding.stockCount.revisionColumn)}::integer AS revision,
-            to_jsonb(source) AS "priorRow"
+            ${exactRowSql('source')} AS "priorRow"
        FROM ${table(binding, binding.stockCount)} AS source
       WHERE tenant_id = $1 AND environment_id = $2
         AND ${quoted(binding.stockCount.legalEntityColumn!)} = $3
@@ -8571,7 +8582,7 @@ async function lockAndAssertStockCountEvidence(
             source.${quoted(binding.stockCountLineUnitColumn)} AS "unitId",
             source.${quoted(binding.stockCountLineReversalColumn)}::text AS "reversalOfMovementId",
             source.${quoted(binding.stockCountLineRelationToTransactionLineColumn)}::text AS "transactionLineId",
-            to_jsonb(source) AS "priorRow"
+            ${exactRowSql('source')} AS "priorRow"
        FROM ${table(binding, binding.stockCountLine)} AS source
       WHERE tenant_id = $1 AND environment_id = $2
         AND ${quoted(binding.stockCountLine.legalEntityColumn!)} = $3
