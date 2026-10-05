@@ -224,9 +224,17 @@ export const IMMUTABLE_DEFAULTS_V0 = Object.freeze({
   }),
 });
 
+/**
+ * The two package-byte ceilings are a v0 structural/performance budget, not a
+ * security control: they are outside `limitsDigest`, no request path or storage
+ * column depends on them, and raising them only admits more. Raised from
+ * 2,097,152 (2 MiB) to 4,194,304 (4 MiB) by STRUCTURAL-LIMITS-RAISE under
+ * ADR-0070 (PENDING owner ruling); `canonical-language-v0.md` T10 records the
+ * values and `compiler-slos.md` the compile budget re-measured at this size.
+ */
 export const STRUCTURAL_LIMITS_V0 = Object.freeze({
-  maximumAuthoredBytes: 2_097_152,
-  maximumNormalizedBytes: 2_097_152,
+  maximumAuthoredBytes: 4_194_304,
+  maximumNormalizedBytes: 4_194_304,
   maximumCollectionCount: 4_096,
   maximumExpressionDepth: 24,
   maximumStringScalars: 4_000,

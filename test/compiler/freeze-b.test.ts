@@ -14,6 +14,7 @@ import {
   canonicalize,
 } from '../../packages/canonical-model/src/index.js';
 import {
+  DEFAULT_COMPILER_LIMITS,
   PROJECTION_FAMILY_IDS,
   REQUIRED_MODULE_PROJECTION_FAMILIES,
   STORAGE_ELEMENT_CONTRACT_VERSION,
@@ -26,6 +27,11 @@ import {
 } from '../../packages/compiler/src/index.js';
 import { hashBytes } from '../../packages/compiler/src/hash.js';
 import { HASH_DOMAINS } from '../../packages/compiler/src/protocol.js';
+import {
+  PACKAGE_BYTE_MAXIMUM_V0,
+  normalizedCanonicalBytes,
+  packageAtByteBoundary,
+} from '../helpers/package-byte-boundary.js';
 import {
   artifactSummary,
   authoredFixture,
@@ -615,4 +621,60 @@ test('the output limit covers the final release manifest as well as staged leave
     result.diagnostics.map(({ code, phase }) => ({ code, phase })),
     [{ code: 'COMPILER_OUTPUT_LIMIT_EXCEEDED', phase: 'emit' }],
   );
+});
+
+/**
+ * STRUCTURAL-LIMITS-RAISE (ADR-0070, PENDING owner ruling): the compiler's own
+ * decode (`decodeNormalizedPackage`) admits a package of exactly the 4 MiB
+ * normalized maximum and compiles it, and refuses one byte more at
+ * `decodeSchemaCheck` with one deterministic diagnostic, before any lowering.
+ */
+test('compiler decode admits exactly the normalized byte maximum and refuses one byte more', () => {
+  const boundary = packageAtByteBoundary(
+    authoredFixture('vertical-v1'),
+    normalizedCanonicalBytes,
+  );
+  const atMaximum = normalizedBytes(boundary.atTarget);
+  assert.equal(atMaximum.byteLength, PACKAGE_BYTE_MAXIMUM_V0);
+  const compiled = mustCompile(compilerInput(atMaximum));
+  assert.equal(compiled.status, 'compiled');
+  assert.ok(
+    compiled.stagedArtifacts.reduce(
+      (sum, artifact) => sum + artifact.canonicalBytes.byteLength,
+      0,
+    ) <= DEFAULT_COMPILER_LIMITS.maximumOutputBytes,
+  );
+
+  const decoded = JSON.parse(new TextDecoder().decode(atMaximum)) as {
+    fields: Array<{ defaultValue?: { value?: unknown } }>;
+  };
+  const shortDefault = decoded.fields.find(
+    (field) =>
+      typeof field.defaultValue?.value === 'string' &&
+      field.defaultValue.value.length < 4_000,
+  )!.defaultValue!;
+  shortDefault.value = `${String(shortDefault.value)}x`;
+  const oneByteOver = new TextEncoder().encode(canonicalize(decoded as never));
+  assert.equal(oneByteOver.byteLength, PACKAGE_BYTE_MAXIMUM_V0 + 1);
+  const refusals = [1, 2].map(() => {
+    const result = compileApplication(compilerInput(oneByteOver));
+    assert.equal(result.status, 'failed');
+    assert.equal(result.releaseRoot, null);
+    assert.deepEqual(result.stagedArtifacts, []);
+    return result.diagnostics;
+  });
+  assert.deepEqual(refusals[0], [
+    {
+      acceptedAlternative: 'split the package or reduce canonical definitions',
+      code: 'CANON_LIMIT_NORMALIZED_BYTES',
+      diagnosticVersion: 'northstar.compiler-diagnostic/v0-experimental',
+      occurrenceIndex: 0,
+      path: '$',
+      phase: 'decodeSchemaCheck',
+      rule: 'normalized package bytes must not exceed 4194304',
+      severity: 'error',
+      subjectId: null,
+    },
+  ]);
+  assert.deepEqual(refusals[1], refusals[0], 'refusal must be deterministic');
 });
