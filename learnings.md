@@ -731,4 +731,4 @@ How to apply: bind an immutable normalized preparation to a server-issued identi
 ## Retain plain entity reads beside derived document queries
 Date: 2026-10-04
 Why: VALUATION slice-two CI refused release admission after shipment and invoice gets gained read models; verification deliberately executes plain queries only.
-How to apply: preserve or clone a plain get for every costed entity, and assert its compiled presence in the metadata contract. See [VALUATION](docs/execution/packets/VALUATION.md).
+How to apply: preserve the original plain get identity for every costed entity and its declared probes; use a separate derived display query and assert both in the compiled artifact in the metadata contract. See [VALUATION](docs/execution/packets/VALUATION.md).

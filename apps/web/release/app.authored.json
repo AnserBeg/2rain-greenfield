@@ -17059,7 +17059,7 @@
         "kind": "queryLegalEntityScope",
         "operand": {
           "kind": "queryParameterReference",
-          "parameterId": "northstar.app:parameter.shipment_stored_get_legal_entity_scope",
+          "parameterId": "northstar.app:parameter.shipment_get_legal_entity_scope",
           "schemaVersion": "v6"
         },
         "schemaVersion": "v6"
@@ -17068,7 +17068,7 @@
         {
           "kind": "queryParameterDefinition",
           "orderKey": 10,
-          "parameterId": "northstar.app:parameter.shipment_stored_get_legal_entity_scope",
+          "parameterId": "northstar.app:parameter.shipment_get_legal_entity_scope",
           "schemaVersion": "v6"
         }
       ],
@@ -17083,7 +17083,7 @@
         "schemaVersion": "v6",
         "targetId": "northstar.app:permission.shipment_read"
       },
-      "queryId": "northstar.app:query.shipment_stored_get",
+      "queryId": "northstar.app:query.valuation_shipment_get",
       "queryType": "get",
       "schemaVersion": "v6",
       "selections": [
@@ -17096,7 +17096,7 @@
           "kind": "querySelection",
           "orderKey": 10,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.shipment_stored_get_1"
+          "selectionId": "northstar.app:selection.valuation_shipment_get_1"
         },
         {
           "field": {
@@ -17107,7 +17107,7 @@
           "kind": "querySelection",
           "orderKey": 20,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.shipment_stored_get_2"
+          "selectionId": "northstar.app:selection.valuation_shipment_get_2"
         },
         {
           "field": {
@@ -17118,7 +17118,7 @@
           "kind": "querySelection",
           "orderKey": 30,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.shipment_stored_get_3"
+          "selectionId": "northstar.app:selection.valuation_shipment_get_3"
         },
         {
           "field": {
@@ -17129,7 +17129,7 @@
           "kind": "querySelection",
           "orderKey": 40,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.shipment_stored_get_4"
+          "selectionId": "northstar.app:selection.valuation_shipment_get_4"
         },
         {
           "field": {
@@ -17140,7 +17140,7 @@
           "kind": "querySelection",
           "orderKey": 50,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.shipment_stored_get_5"
+          "selectionId": "northstar.app:selection.valuation_shipment_get_5"
         },
         {
           "field": {
@@ -17151,7 +17151,7 @@
           "kind": "querySelection",
           "orderKey": 60,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.shipment_stored_get_6"
+          "selectionId": "northstar.app:selection.valuation_shipment_get_6"
         },
         {
           "field": {
@@ -17162,7 +17162,7 @@
           "kind": "querySelection",
           "orderKey": 70,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.shipment_stored_get_7"
+          "selectionId": "northstar.app:selection.valuation_shipment_get_7"
         },
         {
           "field": {
@@ -17173,7 +17173,7 @@
           "kind": "querySelection",
           "orderKey": 80,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.shipment_stored_get_8"
+          "selectionId": "northstar.app:selection.valuation_shipment_get_8"
         },
         {
           "field": {
@@ -17184,7 +17184,7 @@
           "kind": "querySelection",
           "orderKey": 90,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.shipment_stored_get_9"
+          "selectionId": "northstar.app:selection.valuation_shipment_get_9"
         },
         {
           "field": {
@@ -17195,7 +17195,7 @@
           "kind": "querySelection",
           "orderKey": 100,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.shipment_stored_get_10"
+          "selectionId": "northstar.app:selection.valuation_shipment_get_10"
         },
         {
           "field": {
@@ -17206,7 +17206,7 @@
           "kind": "querySelection",
           "orderKey": 110,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.shipment_stored_get_11"
+          "selectionId": "northstar.app:selection.valuation_shipment_get_11"
         },
         {
           "field": {
@@ -17217,7 +17217,7 @@
           "kind": "querySelection",
           "orderKey": 120,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.shipment_stored_get_12"
+          "selectionId": "northstar.app:selection.valuation_shipment_get_12"
         },
         {
           "field": {
@@ -17228,7 +17228,7 @@
           "kind": "querySelection",
           "orderKey": 130,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.shipment_stored_get_13"
+          "selectionId": "northstar.app:selection.valuation_shipment_get_13"
         },
         {
           "field": {
@@ -17239,7 +17239,7 @@
           "kind": "querySelection",
           "orderKey": 140,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.shipment_stored_get_14"
+          "selectionId": "northstar.app:selection.valuation_shipment_get_14"
         },
         {
           "field": {
@@ -17250,7 +17250,7 @@
           "kind": "querySelection",
           "orderKey": 150,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.shipment_stored_get_15"
+          "selectionId": "northstar.app:selection.valuation_shipment_get_15"
         },
         {
           "field": {
@@ -17261,7 +17261,7 @@
           "kind": "querySelection",
           "orderKey": 160,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.shipment_stored_get_16"
+          "selectionId": "northstar.app:selection.valuation_shipment_get_16"
         },
         {
           "field": {
@@ -17272,7 +17272,7 @@
           "kind": "querySelection",
           "orderKey": 170,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.shipment_stored_get_17"
+          "selectionId": "northstar.app:selection.valuation_shipment_get_17"
         }
       ],
       "sourceEntity": {
@@ -17280,7 +17280,67 @@
         "schemaVersion": "v6",
         "targetId": "northstar.app:entity.shipment"
       },
-      "tier": "q0"
+      "tier": "q0",
+      "readModel": {
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.inventory:capability.valuation"
+        },
+        "binding": "northstar.inventory:read_model.shipment_cost",
+        "queries": {
+          "inventory_movement": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.inventory_movement_list"
+          },
+          "goods_receipt": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.goods_receipt_list"
+          },
+          "goods_receipt_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.goods_receipt_line_list"
+          },
+          "shipment": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.shipment_list"
+          },
+          "shipment_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.shipment_line_list"
+          },
+          "sales_order": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.sales_order_list"
+          },
+          "sales_order_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_lines"
+          },
+          "customer_invoice": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.customer_invoice_list"
+          },
+          "customer_invoice_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.customer_invoice_line_list"
+          }
+        },
+        "resultFields": {
+          "cost_of_goods": "northstar.app:metric.cost_of_goods",
+          "cost_unvalued_quantity": "northstar.app:metric.cost_unvalued_quantity",
+          "cost_coverage": "northstar.app:metric.cost_coverage"
+        }
+      }
     },
     {
       "kind": "queryDefinition",
@@ -17289,7 +17349,7 @@
         "kind": "queryLegalEntityScope",
         "operand": {
           "kind": "queryParameterReference",
-          "parameterId": "northstar.app:parameter.customer_invoice_stored_get_legal_entity_scope",
+          "parameterId": "northstar.app:parameter.customer_invoice_get_legal_entity_scope",
           "schemaVersion": "v6"
         },
         "schemaVersion": "v6"
@@ -17298,7 +17358,7 @@
         {
           "kind": "queryParameterDefinition",
           "orderKey": 10,
-          "parameterId": "northstar.app:parameter.customer_invoice_stored_get_legal_entity_scope",
+          "parameterId": "northstar.app:parameter.customer_invoice_get_legal_entity_scope",
           "schemaVersion": "v6"
         }
       ],
@@ -17313,7 +17373,7 @@
         "schemaVersion": "v6",
         "targetId": "northstar.app:permission.customer_invoice_read"
       },
-      "queryId": "northstar.app:query.customer_invoice_stored_get",
+      "queryId": "northstar.app:query.valuation_customer_invoice_get",
       "queryType": "get",
       "schemaVersion": "v6",
       "selections": [
@@ -17326,7 +17386,7 @@
           "kind": "querySelection",
           "orderKey": 10,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.customer_invoice_stored_get_1"
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_1"
         },
         {
           "field": {
@@ -17337,7 +17397,7 @@
           "kind": "querySelection",
           "orderKey": 20,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.customer_invoice_stored_get_2"
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_2"
         },
         {
           "field": {
@@ -17348,7 +17408,7 @@
           "kind": "querySelection",
           "orderKey": 30,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.customer_invoice_stored_get_3"
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_3"
         },
         {
           "field": {
@@ -17359,7 +17419,7 @@
           "kind": "querySelection",
           "orderKey": 40,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.customer_invoice_stored_get_4"
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_4"
         },
         {
           "field": {
@@ -17370,7 +17430,7 @@
           "kind": "querySelection",
           "orderKey": 50,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.customer_invoice_stored_get_5"
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_5"
         },
         {
           "field": {
@@ -17381,7 +17441,7 @@
           "kind": "querySelection",
           "orderKey": 60,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.customer_invoice_stored_get_6"
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_6"
         },
         {
           "field": {
@@ -17392,7 +17452,7 @@
           "kind": "querySelection",
           "orderKey": 70,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.customer_invoice_stored_get_7"
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_7"
         },
         {
           "field": {
@@ -17403,7 +17463,7 @@
           "kind": "querySelection",
           "orderKey": 80,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.customer_invoice_stored_get_8"
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_8"
         },
         {
           "field": {
@@ -17414,7 +17474,7 @@
           "kind": "querySelection",
           "orderKey": 90,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.customer_invoice_stored_get_9"
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_9"
         },
         {
           "field": {
@@ -17425,7 +17485,7 @@
           "kind": "querySelection",
           "orderKey": 100,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.customer_invoice_stored_get_10"
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_10"
         },
         {
           "field": {
@@ -17436,7 +17496,7 @@
           "kind": "querySelection",
           "orderKey": 110,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.customer_invoice_stored_get_11"
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_11"
         },
         {
           "field": {
@@ -17447,7 +17507,7 @@
           "kind": "querySelection",
           "orderKey": 120,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.customer_invoice_stored_get_12"
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_12"
         },
         {
           "field": {
@@ -17458,7 +17518,7 @@
           "kind": "querySelection",
           "orderKey": 130,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.customer_invoice_stored_get_13"
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_13"
         },
         {
           "field": {
@@ -17469,7 +17529,7 @@
           "kind": "querySelection",
           "orderKey": 140,
           "schemaVersion": "v6",
-          "selectionId": "northstar.app:selection.customer_invoice_stored_get_14"
+          "selectionId": "northstar.app:selection.valuation_customer_invoice_get_14"
         }
       ],
       "sourceEntity": {
@@ -17477,7 +17537,68 @@
         "schemaVersion": "v6",
         "targetId": "northstar.app:entity.customer_invoice"
       },
-      "tier": "q0"
+      "tier": "q0",
+      "readModel": {
+        "capability": {
+          "kind": "capabilityReference",
+          "schemaVersion": "v6",
+          "targetId": "northstar.inventory:capability.valuation"
+        },
+        "binding": "northstar.inventory:read_model.invoice_cost",
+        "queries": {
+          "inventory_movement": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.inventory_movement_list"
+          },
+          "goods_receipt": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.goods_receipt_list"
+          },
+          "goods_receipt_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.goods_receipt_line_list"
+          },
+          "shipment": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.shipment_list"
+          },
+          "shipment_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.shipment_line_list"
+          },
+          "sales_order": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.sales_order_list"
+          },
+          "sales_order_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.commercial_lines"
+          },
+          "customer_invoice": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.customer_invoice_list"
+          },
+          "customer_invoice_line": {
+            "kind": "queryReference",
+            "schemaVersion": "v6",
+            "targetId": "northstar.app:query.customer_invoice_line_list"
+          }
+        },
+        "resultFields": {
+          "cost_of_goods": "northstar.app:metric.cost_of_goods",
+          "cost_unvalued_quantity": "northstar.app:metric.cost_unvalued_quantity",
+          "cost_coverage": "northstar.app:metric.cost_coverage",
+          "product_margin": "northstar.app:metric.product_margin"
+        }
+      }
     },
     {
       "kind": "queryDefinition",
@@ -20640,67 +20761,7 @@
         "schemaVersion": "v6",
         "targetId": "northstar.app:entity.shipment"
       },
-      "tier": "q0",
-      "readModel": {
-        "capability": {
-          "kind": "capabilityReference",
-          "schemaVersion": "v6",
-          "targetId": "northstar.inventory:capability.valuation"
-        },
-        "binding": "northstar.inventory:read_model.shipment_cost",
-        "queries": {
-          "inventory_movement": {
-            "kind": "queryReference",
-            "schemaVersion": "v6",
-            "targetId": "northstar.app:query.inventory_movement_list"
-          },
-          "goods_receipt": {
-            "kind": "queryReference",
-            "schemaVersion": "v6",
-            "targetId": "northstar.app:query.goods_receipt_list"
-          },
-          "goods_receipt_line": {
-            "kind": "queryReference",
-            "schemaVersion": "v6",
-            "targetId": "northstar.app:query.goods_receipt_line_list"
-          },
-          "shipment": {
-            "kind": "queryReference",
-            "schemaVersion": "v6",
-            "targetId": "northstar.app:query.shipment_list"
-          },
-          "shipment_line": {
-            "kind": "queryReference",
-            "schemaVersion": "v6",
-            "targetId": "northstar.app:query.shipment_line_list"
-          },
-          "sales_order": {
-            "kind": "queryReference",
-            "schemaVersion": "v6",
-            "targetId": "northstar.app:query.sales_order_list"
-          },
-          "sales_order_line": {
-            "kind": "queryReference",
-            "schemaVersion": "v6",
-            "targetId": "northstar.app:query.commercial_lines"
-          },
-          "customer_invoice": {
-            "kind": "queryReference",
-            "schemaVersion": "v6",
-            "targetId": "northstar.app:query.customer_invoice_list"
-          },
-          "customer_invoice_line": {
-            "kind": "queryReference",
-            "schemaVersion": "v6",
-            "targetId": "northstar.app:query.customer_invoice_line_list"
-          }
-        },
-        "resultFields": {
-          "cost_of_goods": "northstar.app:metric.cost_of_goods",
-          "cost_unvalued_quantity": "northstar.app:metric.cost_unvalued_quantity",
-          "cost_coverage": "northstar.app:metric.cost_coverage"
-        }
-      }
+      "tier": "q0"
     },
     {
       "kind": "queryDefinition",
@@ -22281,68 +22342,7 @@
         "schemaVersion": "v6",
         "targetId": "northstar.app:entity.customer_invoice"
       },
-      "tier": "q0",
-      "readModel": {
-        "capability": {
-          "kind": "capabilityReference",
-          "schemaVersion": "v6",
-          "targetId": "northstar.inventory:capability.valuation"
-        },
-        "binding": "northstar.inventory:read_model.invoice_cost",
-        "queries": {
-          "inventory_movement": {
-            "kind": "queryReference",
-            "schemaVersion": "v6",
-            "targetId": "northstar.app:query.inventory_movement_list"
-          },
-          "goods_receipt": {
-            "kind": "queryReference",
-            "schemaVersion": "v6",
-            "targetId": "northstar.app:query.goods_receipt_list"
-          },
-          "goods_receipt_line": {
-            "kind": "queryReference",
-            "schemaVersion": "v6",
-            "targetId": "northstar.app:query.goods_receipt_line_list"
-          },
-          "shipment": {
-            "kind": "queryReference",
-            "schemaVersion": "v6",
-            "targetId": "northstar.app:query.shipment_list"
-          },
-          "shipment_line": {
-            "kind": "queryReference",
-            "schemaVersion": "v6",
-            "targetId": "northstar.app:query.shipment_line_list"
-          },
-          "sales_order": {
-            "kind": "queryReference",
-            "schemaVersion": "v6",
-            "targetId": "northstar.app:query.sales_order_list"
-          },
-          "sales_order_line": {
-            "kind": "queryReference",
-            "schemaVersion": "v6",
-            "targetId": "northstar.app:query.commercial_lines"
-          },
-          "customer_invoice": {
-            "kind": "queryReference",
-            "schemaVersion": "v6",
-            "targetId": "northstar.app:query.customer_invoice_list"
-          },
-          "customer_invoice_line": {
-            "kind": "queryReference",
-            "schemaVersion": "v6",
-            "targetId": "northstar.app:query.customer_invoice_line_list"
-          }
-        },
-        "resultFields": {
-          "cost_of_goods": "northstar.app:metric.cost_of_goods",
-          "cost_unvalued_quantity": "northstar.app:metric.cost_unvalued_quantity",
-          "cost_coverage": "northstar.app:metric.cost_coverage",
-          "product_margin": "northstar.app:metric.product_margin"
-        }
-      }
+      "tier": "q0"
     },
     {
       "kind": "queryDefinition",
@@ -42150,7 +42150,7 @@
               "query": {
                 "kind": "queryReference",
                 "schemaVersion": "v6",
-                "targetId": "northstar.app:query.customer_invoice_get"
+                "targetId": "northstar.app:query.valuation_customer_invoice_get"
               },
               "record": { "source": "selected", "field": "recordId" }
             }
@@ -42183,7 +42183,7 @@
               "query": {
                 "kind": "queryReference",
                 "schemaVersion": "v6",
-                "targetId": "northstar.app:query.shipment_get"
+                "targetId": "northstar.app:query.valuation_shipment_get"
               },
               "record": { "source": "selected", "field": "recordId" }
             }
@@ -43900,7 +43900,7 @@
       "dataSource": {
         "kind": "queryReference",
         "schemaVersion": "v6",
-        "targetId": "northstar.app:query.shipment_get"
+        "targetId": "northstar.app:query.valuation_shipment_get"
       },
       "kind": "surfaceDefinition",
       "label": "Shipment detail",
@@ -44280,7 +44280,7 @@
       "dataSource": {
         "kind": "queryReference",
         "schemaVersion": "v6",
-        "targetId": "northstar.app:query.shipment_get"
+        "targetId": "northstar.app:query.valuation_shipment_get"
       },
       "kind": "surfaceDefinition",
       "label": "Shipment form",
@@ -45051,7 +45051,7 @@
       "dataSource": {
         "kind": "queryReference",
         "schemaVersion": "v6",
-        "targetId": "northstar.app:query.customer_invoice_get"
+        "targetId": "northstar.app:query.valuation_customer_invoice_get"
       },
       "kind": "surfaceDefinition",
       "label": "Invoice detail",
@@ -45914,7 +45914,7 @@
       "dataSource": {
         "kind": "queryReference",
         "schemaVersion": "v6",
-        "targetId": "northstar.app:query.customer_invoice_get"
+        "targetId": "northstar.app:query.valuation_customer_invoice_get"
       },
       "kind": "surfaceDefinition",
       "label": "Invoice form",

@@ -2463,8 +2463,7 @@ test('inventory shipment cost is declared separately from packed facts and custo
       'the serving compiled artifact retains a plain get for admission',
     );
     const stored = queries.find(
-      (query) =>
-        query.queryId === `${ns}:query.${local.replace('_get', '_stored_get')}`,
+      (query) => query.queryId === `${ns}:query.${local}`,
     )!;
     assert.ok(
       stored,
@@ -2473,7 +2472,7 @@ test('inventory shipment cost is declared separately from packed facts and custo
     assert.equal(stored.readModel, undefined);
     assert.equal(stored.queryType, 'get');
     const model = queries.find(
-      (query) => query.queryId === `${ns}:query.${local}`,
+      (query) => query.queryId === `${ns}:query.valuation_${local}`,
     )!.readModel as {
       capability: { targetId: string };
       queries: Record<string, { targetId: string }>;

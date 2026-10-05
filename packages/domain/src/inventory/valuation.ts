@@ -228,24 +228,34 @@ export function withShipmentValuation<
     queries: dependencies,
     resultFields: outputs(false),
   };
-  const storedGets = Object.keys(models).map((local) => {
+  const costGets = Object.entries(models).map(([local, binding]) => {
     const source = application.queries.find(
       (query) => query.queryId === `${namespace}:query.${local}`,
     );
     if (!source || source.readModel)
       throw new Error(`Shipment valuation requires plain ${local}`);
-    const name = local.replace('_get', '_stored_get');
-    return JSON.parse(
+    const name = `valuation_${local}`;
+    const clone = JSON.parse(
       JSON.stringify(source)
         .replaceAll(`:query.${local}`, `:query.${name}`)
-        .replaceAll(`:selection.${local}_`, `:selection.${name}_`)
-        .replaceAll(`:parameter.${local}_`, `:parameter.${name}_`),
+        .replaceAll(`:selection.${local}_`, `:selection.${name}_`),
     ) as Record<string, unknown>;
+    // Row-query operands are local to their query. Keeping the company's
+    // existing operand preserves document URLs while the stored get stays plain.
+    return {
+      ...clone,
+      readModel: {
+        capability: ref('capabilityReference', VALUATION_CAPABILITY_ID),
+        binding,
+        queries: dependencies,
+        resultFields: outputs(local === 'customer_invoice_get'),
+      },
+    };
   });
   return {
     ...application,
     queries: [
-      ...storedGets,
+      ...costGets,
       ...application.queries.map((query) => {
         const local = String(query.queryId).split(':query.')[1]!;
         if (local === 'commercial_order_get') {
@@ -265,22 +275,19 @@ export function withShipmentValuation<
             },
           };
         }
-        const binding = models[local];
-        return binding
-          ? {
-              ...query,
-              readModel: {
-                capability: ref('capabilityReference', VALUATION_CAPABILITY_ID),
-                binding,
-                queries: dependencies,
-                resultFields: outputs(local === 'customer_invoice_get'),
-              },
-            }
-          : query;
+        return query;
       }),
       costLines,
     ],
-    surfaces: application.surfaces.map((surface) => {
+    surfaces: application.surfaces.map((sourceSurface) => {
+      const surface = JSON.parse(
+        JSON.stringify(sourceSurface)
+          .replaceAll(':query.shipment_get', ':query.valuation_shipment_get')
+          .replaceAll(
+            ':query.customer_invoice_get',
+            ':query.valuation_customer_invoice_get',
+          ),
+      ) as Record<string, unknown>;
       const local = String(surface.surfaceId).split(':surface.')[1]!;
       if (
         ![

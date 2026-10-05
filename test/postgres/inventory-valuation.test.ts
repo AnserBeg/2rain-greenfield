@@ -190,9 +190,9 @@ test(
           });
         });
       for (const [local, id] of [
-        ['shipment_get', seed.shipment],
+        ['valuation_shipment_get', seed.shipment],
         ['commercial_order_get', seed.order],
-        ['customer_invoice_get', seed.invoice],
+        ['valuation_customer_invoice_get', seed.invoice],
       ]) {
         const row = (await read(local!, id!)).records[0]!;
         assert.equal(
@@ -201,7 +201,7 @@ test(
           local,
         );
         assert.equal(row.values[`${ns}:metric.cost_unvalued_quantity`], '0');
-        if (local !== 'shipment_get')
+        if (local !== 'valuation_shipment_get')
           assert.equal(
             row.values[`${ns}:metric.product_margin`],
             `CAD ${(Number(billed.revenue) - Number(oracle.relieved)).toFixed(2)}`,

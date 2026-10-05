@@ -92,10 +92,11 @@ The order margin compares net shipped quantity at the stored order-line price
 and discount with its relieved cost; unshipped revenue is excluded. Shipment
 line relief is a separate read-only child table beside the original packed
 facts. Cost, coverage and margin are internal record fields, excluded from the
-customer invoice print declaration. Existing query identities and company
-operands are retained so document links remain valid. Dedicated plain stored
-get queries remain available for each costed entity; release admission and
-other consumers of stored facts do not depend on derived costing.
+customer invoice print declaration. Original stored get identities stay plain for release admission and its
+declared probes. Dedicated valuation gets serve the document compositions;
+their existing company operands preserve document URLs. Row-query operands
+are query-local in the adopted grammar. Other consumers of stored facts do
+not depend on derived costing.
 
 ## Slice 3 — landed cost
 

@@ -11080,14 +11080,14 @@ test('VALUATION: shipment and invoice costs follow declared line references; pol
     });
   };
   for (const [local, id] of [
-    ['shipment_get', shipment],
+    ['valuation_shipment_get', shipment],
     ['commercial_order_get', order],
-    ['customer_invoice_get', invoice],
+    ['valuation_customer_invoice_get', invoice],
   ]) {
     const row = (await read(local!, id!)).records[0]!;
     assert.equal(row.values[`${ns}:metric.cost_of_goods`], 'CAD 40.00');
     assert.equal(row.values[`${ns}:metric.cost_unvalued_quantity`], '0');
-    if (local !== 'shipment_get')
+    if (local !== 'valuation_shipment_get')
       assert.equal(row.values[`${ns}:metric.product_margin`], 'CAD 60.00');
   }
   assert.equal(
