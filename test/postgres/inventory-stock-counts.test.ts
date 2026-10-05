@@ -758,6 +758,17 @@ test(
         reversal.recordId,
         reversal.revision,
       );
+      // A reversal is never returned to counting: its lines are derived from
+      // the count it reverses, not counted, so a reviewed reversal is posted
+      // or cancelled. The operation's own precondition refuses it.
+      await assert.rejects(
+        count.command('reopen', reversal.recordId, reversed.readBack!.revision),
+        refusal(
+          'INVENTORY_POSTING_INPUT_INVALID',
+          /^INVENTORY_POSTING_INPUT_INVALID: the count precondition does not hold$/u,
+        ),
+        'returning a reviewed reversal to counting must be refused by its precondition',
+      );
       const reversalLines = await read.lines(reversal.recordId);
       const correctionMovements = await read.movements(correction.recordId);
       assert.deepEqual(
@@ -803,6 +814,70 @@ test(
           'INVENTORY_COUNT_COMPENSATION_CONFLICT',
           /already has a posted compensation/u,
         ),
+      );
+    });
+  },
+);
+
+// Review round 1, defect 1: a count command that committed is reported again
+// under its own key after the count has moved on; the receipt decides, not
+// the count's revision.
+test(
+  'STOCK-COUNTS: a committed count command replays under its key after the count moved on',
+  { timeout: 300_000 },
+  async () => {
+    await withOrderEntryFixture(async (fixture) => {
+      const read = await storage(fixture);
+      const count = counts(fixture);
+      const created = await count.create(fixture.location);
+      const startKey = randomUUID();
+      const started = await count.command(
+        'start',
+        created.recordId,
+        created.revision,
+        startKey,
+      );
+      assert.equal(started.outcome, 'succeeded');
+      // The count moves on under another key.
+      const cancelled = await count.command(
+        'cancel',
+        created.recordId,
+        started.readBack!.revision,
+      );
+      assert.equal(
+        cancelled.readBack?.values[countField('state')],
+        state('cancelled'),
+      );
+      const after = await read.stored(created.recordId);
+
+      // The committed Start, retried unchanged under its key, is reported as
+      // it was, and nothing changes.
+      const replayed = await count.command(
+        'start',
+        created.recordId,
+        created.revision,
+        startKey,
+      );
+      assert.equal(replayed.outcome, 'succeeded');
+      assert.deepEqual(await read.stored(created.recordId), after);
+
+      // A fresh key with that revision is a new Start, refused as stale.
+      await assert.rejects(
+        count.command('start', created.recordId, created.revision),
+        refusal('INVENTORY_TRANSACTION_STATE_CONFLICT'),
+      );
+      // The committed key with changed input is a conflict.
+      await assert.rejects(
+        count.command(
+          'start',
+          created.recordId,
+          Number(after!.revision),
+          startKey,
+        ),
+        (error: unknown) =>
+          error instanceof Error &&
+          'code' in error &&
+          error.code === 'SEMANTIC_OPERATION_IDEMPOTENCY_CONFLICT',
       );
     });
   },

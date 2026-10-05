@@ -731,6 +731,31 @@ test('stock-count correction: a correction at another location is refused, and o
  * and prove the kernel derives and writes both companion IDs and both
  * revisions.
  */
+// STOCK-COUNTS C6, review round 1: Post proves the columns it does not write
+// unchanged to their last decimal. A physical count of 1.000000000000000001 is
+// a numeric(38,18), which a JavaScript number cannot tell from ...002.
+test('stock-count read-back: a physical count is proved unchanged to its last decimal', async () => {
+  await withCompanionEnvironment(
+    'count-physical-exact',
+    async ({ actor, binding, context, runtimePool, service }) => {
+      const exact = '1.000000000000000001';
+      const count = countCommand({
+        countedQuantity: exact,
+        expectedQuantity: '0',
+        kind: 'initial',
+        sequence: 51,
+        supersedesStockCountId: null,
+        varianceQuantity: exact,
+      });
+      await seedReviewedCount(runtimePool, context, binding, count, {
+        physicalQuantity: exact,
+      });
+      const posted = await service.postStockCount(context, actor, count);
+      assert.equal(posted.movements[0]?.quantityDelta, exact);
+    },
+  );
+});
+
 test('stock-count companion derivation: a source with no pre-staged transaction posts and the kernel writes both companion identities', async () => {
   await withCompanionEnvironment(
     'companion-derivation',
@@ -3088,6 +3113,7 @@ async function seedReviewedCount(
   context: TrustedRequestContext,
   binding: StorageBinding,
   command: InventoryStockCountPostingCommandV2,
+  options: { readonly physicalQuantity?: string } = {},
 ): Promise<void> {
   // PUR-2a ACCEPTANCE CONTROL. Nothing here stages an inventory transaction or
   // its lines. A reviewed stock count is created with NO companion at all; the
@@ -3136,6 +3162,9 @@ async function seedReviewedCount(
           stock_count_line_reversal_of_movement_id: line.reversalOfMovementId,
           stock_count_line_unit_id: line.unitId,
           stock_count_line_variance_quantity: line.varianceQuantity,
+          ...(options.physicalQuantity === undefined
+            ? {}
+            : { stock_count_line_physical_quantity: options.physicalQuantity }),
         },
         line.stockCountLineId,
         command.legalEntityId,
