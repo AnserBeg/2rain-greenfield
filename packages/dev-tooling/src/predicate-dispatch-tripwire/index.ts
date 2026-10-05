@@ -133,8 +133,9 @@ const recognizedDispatches: Readonly<Record<string, readonly PredicateKind[]>> =
       'notPredicate',
     ]),
     // STOCK-COUNTS: the count guard's all(not(...)) arms, the stock documents
-    // List's any(type) filter and the commands' any(state) preconditions --
-    // constructed, never evaluated.
+    // List's any(type) filter, the commands' any(state) preconditions and
+    // Return to counting's all(state, not(reversal)) -- constructed, never
+    // evaluated.
     'packages/domain/src/inventory/definition.ts': signature([
       'notPredicate',
       'fieldComparisonPredicate',
@@ -142,6 +143,8 @@ const recognizedDispatches: Readonly<Record<string, readonly PredicateKind[]>> =
       'fieldComparisonPredicate',
       'allPredicate',
       'anyPredicate',
+      'notPredicate',
+      'allPredicate',
       'anyPredicate',
     ]),
     'packages/postgres-provider/src/module-runtime-interpreter.ts': signature([

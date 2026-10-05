@@ -125,6 +125,35 @@ test('STOCK-COUNTS: the product mounts stock counts numbered CNT-000001 with Sta
     schemaVersion: 'v6',
     terms: locals.map(state),
   });
+  // A reversal is never returned to counting (review round 1, SC-6).
+  const notReversal = {
+    kind: 'notPredicate',
+    schemaVersion: 'v6',
+    term: {
+      field: {
+        kind: 'fieldReference',
+        schemaVersion: 'v6',
+        targetId: `${ns}:field.stock_count_kind`,
+      },
+      kind: 'fieldComparisonPredicate',
+      operator: 'equals',
+      schemaVersion: 'v6',
+      value: {
+        kind: 'textValue',
+        schemaVersion: 'v6',
+        value: `${ns}:option.stock_count_kind_reversal`,
+      },
+    },
+  };
+  assert.deepEqual(
+    operation('stock_count_reopen')!.precondition,
+    {
+      kind: 'allPredicate',
+      schemaVersion: 'v6',
+      terms: [state('reviewed'), notReversal],
+    },
+    'Return to counting is declared for a reviewed count that is not a reversal (SC-6)',
+  );
   assert.deepEqual(
     ['start', 'review', 'post', 'reopen', 'cancel'].map((action) => {
       const value = operation(`stock_count_${action}`)!;
@@ -142,7 +171,15 @@ test('STOCK-COUNTS: the product mounts stock counts numbered CNT-000001 with Sta
         ['Start counting', state('draft'), 'none'],
         ['Review', state('counting'), 'none'],
         ['Post', state('reviewed'), 'humanRequired'],
-        ['Return to counting', state('reviewed'), 'none'],
+        [
+          'Return to counting',
+          {
+            kind: 'allPredicate',
+            schemaVersion: 'v6',
+            terms: [state('reviewed'), notReversal],
+          },
+          'none',
+        ],
         [
           'Cancel count',
           either('draft', 'counting', 'reviewed'),
