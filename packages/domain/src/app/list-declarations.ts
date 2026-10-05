@@ -101,6 +101,16 @@ export interface ListSpec {
    * strings (REPLENISHMENT).
    */
   readonly figures?: ListFiguresSpec;
+  /**
+   * Children whose text field also answers the search, through their
+   * parentScopedChild relation to the row -- an item's aliases
+   * (CATALOG-EXTRAS).
+   */
+  readonly searchChildren?: readonly {
+    readonly query: string;
+    readonly relation: string;
+    readonly field: string;
+  }[];
 }
 
 /** Rows of a list query that hold the listed record's id as text. */
@@ -122,7 +132,19 @@ type ListFigureOperandSpec =
   { readonly figure: string } | { readonly field: string };
 
 type ListFigureThresholdSpec =
-  { readonly field: string } | { readonly value: string };
+  | { readonly field: string }
+  | { readonly figure: string }
+  | { readonly value: string };
+
+/** An operand, or a percentage of one by the List's company's own value. */
+type ListFigureChoiceValueSpec =
+  | ListFigureOperandSpec
+  | {
+      readonly percent: {
+        readonly of: ListFigureOperandSpec;
+        readonly company: { readonly query: string; readonly field: string };
+      };
+    };
 
 interface ListFiguresSpec {
   readonly sums: readonly {
@@ -135,6 +157,16 @@ interface ListFiguresSpec {
       readonly quantity: string;
     };
     readonly sum: 'rows' | 'related' | 'remaining';
+  }[];
+  /** By the row's own enumeration, the first case holding it (CATALOG-EXTRAS). */
+  readonly choices?: readonly {
+    readonly figureId: string;
+    readonly by: string;
+    readonly cases: readonly {
+      readonly values: readonly string[];
+      readonly value?: ListFigureChoiceValueSpec;
+    }[];
+    readonly otherwise?: ListFigureChoiceValueSpec;
   }[];
   readonly totals?: readonly {
     readonly figureId: string;
@@ -150,6 +182,11 @@ interface ListFiguresSpec {
       readonly label: string;
       readonly below?: ListFigureThresholdSpec;
       readonly atMost?: ListFigureThresholdSpec;
+      /** The row's own enumeration holds one of these (CATALOG-EXTRAS). */
+      readonly when?: {
+        readonly field: string;
+        readonly values: readonly string[];
+      };
     }[];
     readonly otherwise: { readonly value: string; readonly label: string };
   }[];
@@ -798,9 +835,43 @@ function itemFigureList(
       sum: 'remaining',
     },
   ];
-  const reorderPoint = { field: field('item_reorder_point') };
+  // CATALOG-EXTRAS: an item's reorder point is its own, or -- under the
+  // company rule -- the company's percentage of its reorder-up-to level, in
+  // the one company the List is read in; nothing is rewritten. A company
+  // without a percentage gives such an item no reorder point there.
+  const option = (name: string) => `${namespace}:option.${name}`;
+  const reorderPoint = { figure: figure('reorder_point') };
+  const notStocked = {
+    value: band('not_stocked'),
+    label: 'Not stocked',
+    when: {
+      field: field('item_inventory_policy'),
+      values: [option('item_inventory_policy_non_stocked')],
+    },
+  };
   const figures: ListFiguresSpec = {
     sums,
+    choices: [
+      {
+        figureId: figure('reorder_point'),
+        by: field('item_reorder_rule'),
+        cases: [
+          {
+            values: [option('item_reorder_rule_company')],
+            value: {
+              percent: {
+                of: { field: field('item_reorder_up_to') },
+                company: {
+                  query: query('legal_entity_list'),
+                  field: field('legal_entity_reorder_point_percent'),
+                },
+              },
+            },
+          },
+        ],
+        otherwise: { field: field('item_reorder_point') },
+      },
+    ],
     totals: [
       {
         figureId: figure('available'),
@@ -824,12 +895,15 @@ function itemFigureList(
           ]
         : []),
     ],
+    // A non-stocked item is never short, due or to buy (CATALOG-EXTRAS):
+    // its band names it first, so no view that keeps a range keeps it.
     bands: [
       buying
         ? {
             figureId: figure('due'),
             of: figure('projected'),
             cases: [
+              notStocked,
               { value: band('due'), label: 'To buy', atMost: reorderPoint },
             ],
             otherwise: { value: band('covered'), label: 'Covered' },
@@ -838,6 +912,7 @@ function itemFigureList(
             figureId: figure('status'),
             of: figure('projected'),
             cases: [
+              notStocked,
               {
                 value: band('shortage'),
                 label: 'Shortage',
@@ -896,11 +971,8 @@ function itemFigureList(
       shown('incoming', 'Incoming'),
       shown('open_demand', 'Open demand'),
       shown('projected', 'Projected'),
-      {
-        local: 'reorder_point',
-        label: 'Reorder point',
-        field: field('item_reorder_point'),
-      },
+      // The point the bands judge: the item's own, or the company's rule.
+      shown('reorder_point', 'Reorder point'),
       ...(buying
         ? [
             {
@@ -951,6 +1023,58 @@ function itemFigureList(
     filters: [],
     export: true,
     figures,
+  };
+}
+
+/**
+ * The Items List (CATALOG-EXTRAS): every item by SKU, with its unit, policy
+ * and CAD price. Its search also finds an item through its aliases -- another
+ * SKU, a barcode or a supplier's code -- and its tabs keep the stocked and the
+ * non-stocked. Declared only where Catalog is mounted with its extras: the
+ * builder declares Lists over the surfaces it composes.
+ */
+function itemList(namespace: string): ListSpec {
+  const field = (name: string) => `${namespace}:field.${name}`;
+  const policy = field('item_inventory_policy');
+  const option = (name: string) =>
+    `${namespace}:option.item_inventory_policy_${name}`;
+  return {
+    pageSize: 50,
+    columns: [
+      { local: 'sku', label: 'SKU', field: field('item_sku'), role: 'title' },
+      { local: 'item', label: 'Item', field: field('item_name') },
+      { local: 'unit', label: 'Unit', field: field('item_base_unit') },
+      { local: 'policy', label: 'Inventory policy', field: policy },
+      {
+        local: 'price_cad',
+        label: 'Price (CAD)',
+        field: field('item_price_cad'),
+        format: 'money',
+      },
+    ],
+    defaultSort: [{ column: 'sku', direction: 'ascending' }],
+    views: [
+      { local: 'all', label: 'All', filters: {} },
+      {
+        local: 'stocked',
+        label: 'Stocked',
+        filters: { [policy]: option('stocked') },
+      },
+      {
+        local: 'non_stocked',
+        label: 'Non-stocked',
+        filters: { [policy]: option('non_stocked') },
+      },
+    ],
+    filters: [],
+    export: false,
+    searchChildren: [
+      {
+        query: `${namespace}:query.item_alias_list`,
+        relation: `${namespace}:relation.item_alias_item`,
+        field: field('item_alias_value'),
+      },
+    ],
   };
 }
 
@@ -1029,6 +1153,9 @@ function figuresComposed(
       latest.within.query,
       latest.label.query,
     ]),
+    ...choiceValues(figures).flatMap((value) =>
+      'percent' in value ? [value.percent.company.query] : [],
+    ),
   ];
   const selected = new Set(
     (source.selections as { field: { targetId: string } }[]).map(
@@ -1037,6 +1164,7 @@ function figuresComposed(
   );
   const figureIds = new Set([
     ...figures.sums.map((sum) => sum.figureId),
+    ...(figures.choices ?? []).map((choice) => choice.figureId),
     ...(figures.totals ?? []).map((total) => total.figureId),
     ...(figures.bands ?? []).map((band) => band.figureId),
     ...(figures.latest ?? []).map((latest) => latest.figureId),
@@ -1052,15 +1180,30 @@ function figuresComposed(
     ),
     ...(figures.bands ?? []).flatMap((band) =>
       band.cases.flatMap((entry) => {
+        if (entry.when) return [entry.when.field];
         const threshold = entry.below ?? entry.atMost;
         return threshold && 'field' in threshold ? [threshold.field] : [];
       }),
+    ),
+    ...(figures.choices ?? []).map((choice) => choice.by),
+    ...choiceValues(figures).flatMap((value) =>
+      operand('percent' in value ? value.percent.of : value),
     ),
   ];
   return (
     read.every((queryId) => composed.has(queryId)) &&
     named.every((fieldId) => selected.has(fieldId))
   );
+}
+
+/** Every value a List's choices take, cases and otherwise alike. */
+function choiceValues(
+  figures: ListFiguresSpec,
+): readonly ListFigureChoiceValueSpec[] {
+  return (figures.choices ?? []).flatMap((choice) => [
+    ...choice.cases.flatMap((entry) => (entry.value ? [entry.value] : [])),
+    ...(choice.otherwise ? [choice.otherwise] : []),
+  ]);
 }
 
 /** Clones of the worklists' source queries, when their source is composed. */
@@ -1257,6 +1400,9 @@ export function composedListSpecs(
     // Stock by item and the Buying worklist (REPLENISHMENT).
     [ITEM_STOCK_LIST]: itemFigureList(namespace, ITEM_STOCK_LIST),
     [ITEM_BUYING_LIST]: itemFigureList(namespace, ITEM_BUYING_LIST),
+    // The catalog's own Items List (CATALOG-EXTRAS): found by an alias as by
+    // its SKU or name, with tabs by inventory policy.
+    item_list: itemList(namespace),
     // A balance, not a document: no lifecycle, so no saved views; item and
     // location are named through their own lists rather than shown as ids.
     posted_stock_balance_list: {
@@ -1396,6 +1542,19 @@ function lowerList(namespace: string, listLocal: string, spec: ListSpec) {
         }
       : {}),
     ...(spec.figures ? { figures: lowerFigures(spec.figures) } : {}),
+    ...(spec.searchChildren
+      ? {
+          searchChildren: spec.searchChildren.map((child) => ({
+            query: {
+              kind: 'queryReference',
+              schemaVersion: version,
+              targetId: child.query,
+            },
+            relation: child.relation,
+            field: child.field,
+          })),
+        }
+      : {}),
     ...(spec.rowActions
       ? {
           rowActions: spec.rowActions.map((action, index) => ({
@@ -1436,6 +1595,18 @@ function lowerFigures(figures: ListFiguresSpec) {
     field: value.field,
     values: [...value.values],
   });
+  const taken = (value: ListFigureChoiceValueSpec) =>
+    'percent' in value
+      ? {
+          percent: {
+            of: { ...value.percent.of },
+            company: {
+              query: queryReference(value.percent.company.query),
+              field: value.percent.company.field,
+            },
+          },
+        }
+      : { ...value };
   return {
     sums: figures.sums.map((sum) => ({
       figureId: sum.figureId,
@@ -1456,6 +1627,19 @@ function lowerFigures(figures: ListFiguresSpec) {
         : {}),
       sum: sum.sum,
     })),
+    ...(figures.choices
+      ? {
+          choices: figures.choices.map((choice) => ({
+            figureId: choice.figureId,
+            by: choice.by,
+            cases: choice.cases.map((entry) => ({
+              values: [...entry.values],
+              ...(entry.value ? { value: taken(entry.value) } : {}),
+            })),
+            ...(choice.otherwise ? { otherwise: taken(choice.otherwise) } : {}),
+          })),
+        }
+      : {}),
     ...(figures.totals
       ? {
           totals: figures.totals.map((total) => ({
@@ -1476,6 +1660,14 @@ function lowerFigures(figures: ListFiguresSpec) {
               label: entry.label,
               ...(entry.below ? { below: { ...entry.below } } : {}),
               ...(entry.atMost ? { atMost: { ...entry.atMost } } : {}),
+              ...(entry.when
+                ? {
+                    when: {
+                      field: entry.when.field,
+                      values: [...entry.when.values],
+                    },
+                  }
+                : {}),
             })),
             otherwise: { ...band.otherwise },
           })),

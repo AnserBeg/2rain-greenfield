@@ -934,8 +934,10 @@ async function invokeOperation(
 
 function inventoryApplicationDefinition(): Record<string, unknown> {
   const application = composedApplicationDefinition();
-  // As the product mounts it: with stock documents (INVENTORY-PARITY).
+  // As the product mounts it: with stock documents (INVENTORY-PARITY)
+  // and a company's reorder rule (CATALOG-EXTRAS).
   const inventory = inventoryModuleDefinition(APPLICATION_NAMESPACE, {
+    companyReorderRule: true,
     documentEntry: true,
   });
   for (const collection of [

@@ -175,7 +175,10 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 15 adds composition datasets scoped by a field of their own entity.
     // 16 adds a draft editor's create values.
     // 17 adds List figures, views keeping a band, and Record form references.
-    maximumSupportedVersion: 17,
+    // 20 adds searches through children, figure choices, band cases by an
+    // enumeration or against a figure, and Task inputs leaving the record out
+    // (CATALOG-EXTRAS; 18 and 19 belong to WAREHOUSE-MODE and LOCATIONS).
+    maximumSupportedVersion: 20,
   },
 });
 

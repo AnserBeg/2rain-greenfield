@@ -28,6 +28,8 @@ export {
   sharedListFigureKinds,
   type AuthorizedSharedListFigures,
   type SharedListFigureBand,
+  type SharedListFigureChoice,
+  type SharedListFigureChoiceValue,
   type SharedListFigureLatest,
   type SharedListFigureOperand,
   type SharedListFigures,
@@ -102,6 +104,19 @@ export interface SharedListRelatedFilter {
   }[];
 }
 
+/**
+ * A child entity whose records also answer the search (CATALOG-EXTRAS): a row
+ * matches when one of its active children, through the child's
+ * parentScopedChild relation to it, holds the search text in a text field of
+ * the child's unscoped list query -- an item found by an alias. The list
+ * query carries the read permission that must allow the match.
+ */
+export interface SharedListSearchChild {
+  readonly fieldId: string;
+  readonly queryId: string;
+  readonly relationId: string;
+}
+
 /** A declared list query whose rows are added up, through one relation. */
 export interface SharedListProgressSource {
   readonly fieldId: string;
@@ -173,6 +188,8 @@ export interface SharedListQueryRequest {
   readonly requestedPageSize: number;
   readonly schemaVersion: typeof SHARED_LIST_QUERY_VERSION;
   readonly search: string;
+  /** Children whose text also answers the search; echoed when applied. */
+  readonly searchChildren?: readonly SharedListSearchChild[];
   readonly sort: readonly SharedListSort[];
   readonly truncatedByMaximum: boolean;
 }
@@ -189,6 +206,11 @@ export interface AuthorizedSharedListReferenceLabel extends SharedListReferenceL
   readonly targetEntityId: string;
 }
 
+/** A searched child whose query passed current policy, with its entity. */
+export interface AuthorizedSharedListSearchChild extends SharedListSearchChild {
+  readonly childEntityId: string;
+}
+
 /** Progress whose two queries passed current policy, with their entities. */
 export interface AuthorizedSharedListProgress extends SharedListProgress {
   readonly doneEntityId: string;
@@ -202,6 +224,7 @@ export interface AuthorizedSharedListRequest {
   readonly relatedFilter?: AuthorizedSharedListRelatedFilter;
   readonly progress?: AuthorizedSharedListProgress;
   readonly figures?: AuthorizedSharedListFigures;
+  readonly searchChildren?: readonly AuthorizedSharedListSearchChild[];
 }
 
 export interface SharedListCoverage {
@@ -233,6 +256,11 @@ export interface SharedListCoverage {
   readonly progress?: SharedListProgress;
   /** Echoed and REQUIRED to match, as progress is: a band kept is a count. */
   readonly figures?: SharedListFigures;
+  /**
+   * Echoed and REQUIRED to match: an executor that searched without the
+   * children would miss every row found only through one of them.
+   */
+  readonly searchChildren?: readonly SharedListSearchChild[];
   /** Echoed so an executor that paged an export instead is observable. */
   readonly outputMode?: 'export';
   readonly projectedSearchValueCount: number;
@@ -289,6 +317,7 @@ export function parseSharedListArguments(
     progress: progressValue,
     beforeFilters: beforeFiltersValue,
     figures: figuresValue,
+    searchChildren: searchChildrenValue,
     ...closedList
   } = list;
   assertExactKeys(closedList, [
@@ -347,6 +376,10 @@ export function parseSharedListArguments(
     beforeFiltersValue === undefined
       ? undefined
       : parseBeforeFilters(beforeFiltersValue);
+  const searchChildren =
+    searchChildrenValue === undefined
+      ? undefined
+      : parseSearchChildren(searchChildrenValue);
   if (list.schemaVersion !== SHARED_LIST_QUERY_VERSION) {
     throw malformed('list schemaVersion is not supported');
   }
@@ -405,6 +438,7 @@ export function parseSharedListArguments(
     relationLabels,
     ...(referenceLabels ? { referenceLabels } : {}),
     search: list.search,
+    ...(searchChildren ? { searchChildren } : {}),
     sort,
   });
   const pageOffset = cursor ? decodeSharedListCursor(cursor, bindingDigest) : 0;
@@ -427,6 +461,7 @@ export function parseSharedListArguments(
     requestedPageSize,
     schemaVersion: SHARED_LIST_QUERY_VERSION,
     search: list.search,
+    ...(searchChildren ? { searchChildren } : {}),
     sort,
     truncatedByMaximum: requestedPageSize > effectivePageSize,
   });
@@ -536,11 +571,15 @@ export function requireSharedListEcho(
     !same(
       query.figures as ImmutableJsonValue | undefined,
       listCoverage.figures as ImmutableJsonValue | undefined,
+    ) ||
+    !same(
+      query.searchChildren as ImmutableJsonValue | undefined,
+      listCoverage.searchChildren as ImmutableJsonValue | undefined,
     )
   ) {
     throw new SharedListContractError(
       'LIST_RESULT_MALFORMED',
-      'the list result did not apply the requested progress, figures or before filters',
+      'the list result did not apply the requested progress, figures, before filters or searched children',
     );
   }
 }
@@ -708,6 +747,32 @@ function parseProgress(value: ImmutableJsonValue): SharedListProgress {
       ordered: outputs.ordered,
     }),
   });
+}
+
+/** One or two children, each through its own relation. */
+function parseSearchChildren(
+  value: ImmutableJsonValue,
+): readonly SharedListSearchChild[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 2)
+    throw malformed('one or two searched children required');
+  const relationIds = new Set<string>();
+  return Object.freeze(
+    value.map((entry) => {
+      if (!isRecord(entry)) throw malformed('searched child must be an object');
+      assertExactKeys(entry, ['fieldId', 'queryId', 'relationId']);
+      assertCanonicalId(entry.fieldId, 'searched child fieldId');
+      assertCanonicalId(entry.queryId, 'searched child queryId');
+      assertCanonicalId(entry.relationId, 'searched child relationId');
+      if (relationIds.has(entry.relationId))
+        throw malformed('searched child relationIds must be unique');
+      relationIds.add(entry.relationId);
+      return Object.freeze({
+        fieldId: entry.fieldId,
+        queryId: entry.queryId,
+        relationId: entry.relationId,
+      });
+    }),
+  );
 }
 
 /** Only a canonical UTC instant, so the digest and the SQL see one spelling. */

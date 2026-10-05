@@ -817,6 +817,12 @@ const compositionInput = z.strictObject({
   /** A reference input's eligibility, as a draft editor picker declares it. Optional v6 key. */
   eligibility: pickerEligibility.optional(),
   /**
+   * A reference input over the record's own entity that never offers the
+   * record itself -- the item a duplicate is merged into. Optional v6 key
+   * (CATALOG-EXTRAS).
+   */
+  excludeRecord: z.literal(true).optional(),
+  /**
    * A reference input's starting choice: the record's stored value of a field
    * its query selects, preselected only when that record is offered -- an
    * order's receiving location. Optional v6 key (ADR-0047 §7).
@@ -1236,6 +1242,24 @@ const editorField = z.strictObject({
           relationId: CanonicalIdSchema,
         })
         .optional(),
+      /**
+       * The search also finds a record through its children -- an item by
+       * one of its aliases: records with an active child, through the
+       * child's parentScopedChild relation to them, holding the search text
+       * in a text field the child's unscoped list query selects. Optional v6
+       * key (CATALOG-EXTRAS).
+       */
+      searchChildren: z
+        .array(
+          z.strictObject({
+            queryId: CanonicalIdSchema,
+            relationId: CanonicalIdSchema,
+            fieldId: CanonicalIdSchema,
+          }),
+        )
+        .min(1)
+        .max(2)
+        .optional(),
       create: editorCreate.optional(),
     })
     .optional(),
@@ -1496,10 +1520,14 @@ const listFigureTotal = z.strictObject({
   minus: z.array(listFigureOperand).max(6),
   floor: z.literal('zero').optional(),
 });
-/** A row field, or a fixed decimal, a figure is compared with. */
+/**
+ * A row field, a fixed decimal, or -- an optional v6 member (CATALOG-EXTRAS)
+ * -- a number figure declared before the band, a figure is compared with.
+ */
 const listFigureThreshold = z.union([
   z.strictObject({ field: CanonicalIdSchema }),
   z.strictObject({ value: CanonicalSignedDecimalStringSchema }),
+  z.strictObject({ figure: CanonicalIdSchema }),
 ]);
 /**
  * Names a figure's range: the first case whose comparison holds, else the
@@ -1517,6 +1545,17 @@ const listFigureBand = z.strictObject({
         label: LabelSchema,
         below: listFigureThreshold.optional(),
         atMost: listFigureThreshold.optional(),
+        /**
+         * Instead of a comparison, the row's own value of an enumeration the
+         * List selects is one of these -- an item that is not kept in stock.
+         * Optional v6 key (CATALOG-EXTRAS).
+         */
+        when: z
+          .strictObject({
+            field: CanonicalIdSchema,
+            values: z.array(z.string().min(1).max(240)).min(1).max(8),
+          })
+          .optional(),
       }),
     )
     .min(1)
@@ -1543,17 +1582,70 @@ const listFigureLatest = z.strictObject({
   }),
 });
 /**
+ * What a choice takes: an exact decimal the List selects, a number figure
+ * declared before it, or a percentage of either by an exact decimal of the
+ * List's own company -- the legal entity it is read in -- read through an
+ * unscoped list query of the companies, never stored on the row.
+ */
+const listFigureChoiceValue = z.union([
+  z.strictObject({ field: CanonicalIdSchema }),
+  z.strictObject({ figure: CanonicalIdSchema }),
+  z.strictObject({
+    percent: z.strictObject({
+      of: listFigureOperand,
+      company: z.strictObject({
+        query: compositionReference('queryReference'),
+        field: CanonicalIdSchema,
+      }),
+    }),
+  }),
+]);
+/**
+ * Per row, the first case whose values hold the row's own value of an
+ * enumeration the List selects, else `otherwise`; a case or otherwise without
+ * a value leaves the figure unstated. An item's reorder point: its own, or
+ * the company's percentage of its reorder-up-to level (CATALOG-EXTRAS).
+ */
+const listFigureChoice = z.strictObject({
+  figureId: CanonicalIdSchema,
+  by: CanonicalIdSchema,
+  cases: z
+    .array(
+      z.strictObject({
+        values: z.array(z.string().min(1).max(240)).min(1).max(8),
+        value: listFigureChoiceValue.optional(),
+      }),
+    )
+    .min(1)
+    .max(4),
+  otherwise: listFigureChoiceValue.optional(),
+});
+/**
  * Per List row, figures the list statement computes before the count and the
- * page -- sums over rows that hold the row's id, totals of them, bands that
- * name their ranges and the latest of a parent's values -- so a view keeping
- * one band counts, pages and exports exactly that set. Shown, never sorted or
- * searched. Optional v6 key (ADR-0047 §7).
+ * page -- sums over rows that hold the row's id, choices between row values,
+ * totals of them, bands that name their ranges and the latest of a parent's
+ * values -- so a view keeping one band counts, pages and exports exactly that
+ * set. Shown, never sorted or searched. Optional v6 key (ADR-0047 §7);
+ * `choices` is an optional v6 key of its own (CATALOG-EXTRAS).
  */
 const listFigures = z.strictObject({
   sums: z.array(listFigureSum).min(1).max(8),
+  choices: z.array(listFigureChoice).max(2).optional(),
   totals: z.array(listFigureTotal).max(6).optional(),
   bands: z.array(listFigureBand).max(2).optional(),
   latest: z.array(listFigureLatest).max(2).optional(),
+});
+/**
+ * A child entity whose records also answer the List's search: a row matches
+ * when one of its active children, through their parentScopedChild relation
+ * to it, holds the search text in a text field their unscoped list query
+ * selects -- an item found by an alias. Authorized and echoed per request.
+ * Optional v6 key (CATALOG-EXTRAS).
+ */
+const listSearchChild = z.strictObject({
+  query: compositionReference('queryReference'),
+  relation: CanonicalIdSchema,
+  field: CanonicalIdSchema,
 });
 export const SurfaceListSchema = z.strictObject({
   kind: z.literal('surfaceList'),
@@ -1625,6 +1717,7 @@ export const SurfaceListSchema = z.strictObject({
   progress: listProgress.optional(),
   rowActions: z.array(listRowAction).min(1).max(3).optional(),
   figures: listFigures.optional(),
+  searchChildren: z.array(listSearchChild).min(1).max(2).optional(),
 });
 export type SurfaceList = z.infer<typeof SurfaceListSchema>;
 export type SurfaceListProgress = NonNullable<SurfaceList['progress']>;

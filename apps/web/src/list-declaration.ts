@@ -226,9 +226,30 @@ function figuresArgument(
     Object.freeze(
       'figure' in value ? { figureId: value.figure } : { fieldId: value.field },
     );
-  const threshold = (value: { field: string } | { value: string }) =>
+  const threshold = (
+    value: { field: string } | { figure: string } | { value: string },
+  ) =>
     Object.freeze(
-      'field' in value ? { fieldId: value.field } : { value: value.value },
+      'field' in value
+        ? { fieldId: value.field }
+        : 'figure' in value
+          ? { figureId: value.figure }
+          : { value: value.value },
+    );
+  type Choice = NonNullable<NonNullable<SurfaceList['figures']>['choices']>;
+  const taken = (value: NonNullable<Choice[number]['otherwise']>) =>
+    Object.freeze(
+      'percent' in value
+        ? {
+            percent: Object.freeze({
+              company: Object.freeze({
+                fieldId: value.percent.company.field,
+                queryId: value.percent.company.query.targetId,
+              }),
+              of: operand(value.percent.of),
+            }),
+          }
+        : operand(value),
     );
   return Object.freeze({
     ...(figures.bands
@@ -244,12 +265,43 @@ function figuresArgument(
                       ...(value.atMost
                         ? { atMost: threshold(value.atMost) }
                         : {}),
+                      ...(value.when
+                        ? {
+                            when: Object.freeze({
+                              fieldId: value.when.field,
+                              values: Object.freeze([...value.when.values]),
+                            }),
+                          }
+                        : {}),
                     }),
                   ),
                 ),
                 figureId: entry.figureId,
                 of: entry.of,
                 otherwise: entry.otherwise.value,
+              }),
+            ),
+          ),
+        }
+      : {}),
+    ...(figures.choices
+      ? {
+          choices: Object.freeze(
+            figures.choices.map((entry) =>
+              Object.freeze({
+                byFieldId: entry.by,
+                cases: Object.freeze(
+                  entry.cases.map((value) =>
+                    Object.freeze({
+                      ...(value.value ? { value: taken(value.value) } : {}),
+                      values: Object.freeze([...value.values]),
+                    }),
+                  ),
+                ),
+                figureId: entry.figureId,
+                ...(entry.otherwise
+                  ? { otherwise: taken(entry.otherwise) }
+                  : {}),
               }),
             ),
           ),
@@ -430,6 +482,19 @@ export function declaredListArguments(
         ]
       : [],
   );
+  // The children the search also matches through, on every request, so a
+  // count, a page and an export find the same rows (CATALOG-EXTRAS).
+  const searchChildren = list.searchChildren
+    ? Object.freeze(
+        list.searchChildren.map((child) =>
+          Object.freeze({
+            fieldId: child.field,
+            queryId: child.query.targetId,
+            relationId: child.relation,
+          }),
+        ),
+      )
+    : undefined;
   const digestInput: SharedListQueryRequest = {
     cursor: null,
     effectivePageSize: pageSize,
@@ -446,6 +511,7 @@ export function declaredListArguments(
     requestedPageSize: pageSize,
     schemaVersion: SHARED_LIST_QUERY_VERSION,
     search: state.search,
+    ...(searchChildren ? { searchChildren } : {}),
     sort,
     truncatedByMaximum: false,
   };
@@ -468,6 +534,7 @@ export function declaredListArguments(
       relationLabels: [],
       schemaVersion: SHARED_LIST_QUERY_VERSION,
       search: state.search,
+      ...(searchChildren ? { searchChildren } : {}),
       sort,
     }),
     ...options.scopeArguments,

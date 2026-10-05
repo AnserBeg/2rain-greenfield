@@ -1435,6 +1435,7 @@ export async function submitCompositionAction(
             gateways,
             session.data.scope,
             input,
+            session.data.record.recordId,
           );
           displayChoices[input.inputId] = choices;
           if (inputs[input.inputId]) {
@@ -1580,8 +1581,20 @@ export async function submitCompositionAction(
       view,
       surface.dataSourceQueryId,
     );
-    const scope = definition?.legalEntityScope
-      ? url.searchParams.get(definition.legalEntityScope.operand.parameterId)
+    // A record every company shares (an item) has no company of its own: its
+    // page carries the company its entry names under the authorization
+    // List's operand, as `resolveWorkspaceEntry` reads it, and its Tasks read
+    // their company sections there too (CATALOG-EXTRAS).
+    const operand =
+      definition?.legalEntityScope ??
+      (surface.surfaceRole === 'record' && surface.workspace?.entry
+        ? registeredSemanticQueryFromPinnedView(
+            view,
+            surface.workspace.entry.authorizationQueryId,
+          )?.legalEntityScope
+        : undefined);
+    const scope = operand
+      ? url.searchParams.get(operand.operand.parameterId)
       : null;
     const result = await query(
       view,
@@ -1865,6 +1878,7 @@ export async function submitCompositionAction(
           gateways,
           current.data.scope,
           input,
+          current.data.record.recordId,
         );
         const choice = choices.find(
           (choice) => choice.recordId === inputs[input.inputId],
@@ -2200,6 +2214,8 @@ async function referenceChoices(
   gateways: CompositionGateways,
   scope: string | null,
   input: Action['inputs'][number],
+  /** The page's own record, which an `excludeRecord` input never offers. */
+  recordId: string,
 ): Promise<SemanticRecordDto[]> {
   if (!input.query || !input.labelField)
     throw new Error('Reference input is undeclared');
@@ -2263,7 +2279,11 @@ async function referenceChoices(
       throw new Error('Reference choices are incomplete');
     cursor = page.listCoverage.nextCursor;
   } while (cursor !== null);
-  return records;
+  // A duplicate is never merged into itself (CATALOG-EXTRAS): the record is
+  // not offered, so a submitted choice of it is refused as unavailable.
+  return input.excludeRecord
+    ? records.filter((record) => record.recordId !== recordId)
+    : records;
 }
 
 interface CompositionGateways {

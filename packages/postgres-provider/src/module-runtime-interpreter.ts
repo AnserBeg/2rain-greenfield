@@ -66,6 +66,7 @@ import {
   type AuthorizedSharedListRequest,
   type SharedListBeforeFilter,
   type SharedListCoverage,
+  type SharedListFigureChoiceValue,
   type SharedListFigureOperand,
   type SharedListFigureThreshold,
   type SharedListFigureWithin,
@@ -1290,6 +1291,10 @@ async function executeQueryOnClient(
     definition.queryType === 'list' && list
       ? listFiguresPlan(storage, entity, list)
       : null;
+  const searchChildPlans =
+    definition.queryType === 'list' && list
+      ? searchChildrenPlan(storage, entity, list)
+      : null;
   const readScope = await verifyLegalEntityReadScope(
     client,
     storage,
@@ -1299,6 +1304,7 @@ async function executeQueryOnClient(
       ...relationPlans.map((plan) => plan.target),
       ...(progressPlan ? [progressPlan.lines, progressPlan.done] : []),
       ...(figuresPlan?.entities ?? []),
+      ...(searchChildPlans ?? []).map((plan) => plan.child),
     ],
   );
   if (definition.queryType === 'aggregate') {
@@ -1366,6 +1372,7 @@ async function executeQueryOnClient(
           relatedFilterPlan(storage, entity, list),
           progressPlan,
           figuresPlan,
+          searchChildPlans,
         );
       }
       const limit = boundedLimit(args.limit, definition.maximumResultCount);
@@ -2477,7 +2484,19 @@ type FigureOperandPlan =
   { readonly figureId: string } | { readonly column: string };
 
 type FigureThresholdPlan =
-  { readonly column: string } | { readonly value: string };
+  | { readonly column: string }
+  | { readonly figureId: string }
+  | { readonly value: string };
+
+/**
+ * A choice's value: an operand, or a percentage of one by the List's own
+ * company's value of a compiled exact decimal column of the legal-entity
+ * master (CATALOG-EXTRAS). `company` indexes the company values the first
+ * lateral reads once per row.
+ */
+type FigureChoiceValuePlan =
+  | FigureOperandPlan
+  | { readonly of: FigureOperandPlan; readonly company: number };
 
 interface ListFiguresPlan {
   readonly sums: readonly {
@@ -2486,6 +2505,20 @@ interface ListFiguresPlan {
     readonly within: FigureWithinPlan | null;
     readonly related: FigureRelatedPlan | null;
     readonly sum: 'related' | 'remaining' | 'rows';
+  }[];
+  /** The legal-entity master columns choices read for the List's company. */
+  readonly companyValues: readonly {
+    readonly entity: StorageEntity;
+    readonly column: string;
+  }[];
+  readonly choices: readonly {
+    readonly figureId: string;
+    readonly byColumn: string;
+    readonly cases: readonly {
+      readonly values: readonly string[];
+      readonly value: FigureChoiceValuePlan | null;
+    }[];
+    readonly otherwise: FigureChoiceValuePlan | null;
   }[];
   readonly totals: readonly {
     readonly figureId: string;
@@ -2496,11 +2529,19 @@ interface ListFiguresPlan {
   readonly bands: readonly {
     readonly figureId: string;
     readonly of: string;
-    readonly cases: readonly {
-      readonly value: string;
-      readonly comparison: 'atMost' | 'below';
-      readonly threshold: FigureThresholdPlan;
-    }[];
+    readonly cases: readonly (
+      | {
+          readonly value: string;
+          readonly comparison: 'atMost' | 'below';
+          readonly threshold: FigureThresholdPlan;
+        }
+      | {
+          readonly value: string;
+          readonly comparison: 'when';
+          readonly column: string;
+          readonly values: readonly string[];
+        }
+    )[];
     readonly otherwise: string;
   }[];
   readonly latest: readonly {
@@ -2651,7 +2692,61 @@ function listFiguresPlan(
   const threshold = (value: SharedListFigureThreshold): FigureThresholdPlan =>
     'fieldId' in value
       ? Object.freeze({ column: listedDecimal(value.fieldId) })
-      : Object.freeze({ value: value.value });
+      : 'figureId' in value
+        ? Object.freeze({ figureId: value.figureId })
+        : Object.freeze({ value: value.value });
+  // The listed row's own enumeration a choice or a band case reads.
+  const listedEnumeration = (fieldId: string) =>
+    column(
+      entity,
+      fieldId,
+      ['enumFieldType'],
+      'a figure reads a compiled enumeration column of the listed entity',
+    ).physicalName;
+  // A company value is read from the legal-entity master, the record the
+  // issued read scope names, never from any other entity a request names.
+  const companyValues: { entity: StorageEntity; column: string }[] = [];
+  const choiceValue = (
+    value: SharedListFigureChoiceValue | undefined,
+  ): FigureChoiceValuePlan | null => {
+    if (value === undefined) return null;
+    if (!('percent' in value)) return operand(value);
+    const master = entityOf(value.percent.company.queryId);
+    if (master.legalEntityMaster === undefined)
+      return refuse(
+        value.percent.company.queryId,
+        "a company percentage reads the legal-entity master's own record",
+      );
+    const companyColumn = column(
+      master,
+      value.percent.company.fieldId,
+      ['exactDecimalFieldType'],
+      'a company percentage reads a compiled exact decimal column',
+    ).physicalName;
+    let index = companyValues.findIndex(
+      (entry) =>
+        entry.entity.entityId === master.entityId &&
+        entry.column === companyColumn,
+    );
+    if (index < 0) {
+      companyValues.push({ entity: master, column: companyColumn });
+      index = companyValues.length - 1;
+    }
+    return Object.freeze({ of: operand(value.percent.of), company: index });
+  };
+  const choices = (requested.choices ?? []).map((choice) =>
+    Object.freeze({
+      figureId: choice.figureId,
+      byColumn: listedEnumeration(choice.byFieldId),
+      cases: choice.cases.map((entry) =>
+        Object.freeze({
+          values: entry.values,
+          value: choiceValue(entry.value),
+        }),
+      ),
+      otherwise: choiceValue(choice.otherwise),
+    }),
+  );
   const sums = requested.sums.map((sum) => {
     const rows = rowsPlan(
       sum.rows.queryId,
@@ -2705,11 +2800,20 @@ function listFiguresPlan(
       figureId: band.figureId,
       of: band.of,
       cases: band.cases.map((entry) =>
-        Object.freeze({
-          value: entry.value,
-          comparison: entry.below ? ('below' as const) : ('atMost' as const),
-          threshold: threshold((entry.below ?? entry.atMost)!),
-        }),
+        entry.when
+          ? Object.freeze({
+              value: entry.value,
+              comparison: 'when' as const,
+              column: listedEnumeration(entry.when.fieldId),
+              values: entry.when.values,
+            })
+          : Object.freeze({
+              value: entry.value,
+              comparison: entry.below
+                ? ('below' as const)
+                : ('atMost' as const),
+              threshold: threshold((entry.below ?? entry.atMost)!),
+            }),
       ),
       otherwise: band.otherwise,
     }),
@@ -2756,6 +2860,8 @@ function listFiguresPlan(
   });
   return Object.freeze({
     sums,
+    companyValues: Object.freeze(companyValues),
+    choices,
     totals,
     bands,
     latest,
@@ -2860,6 +2966,22 @@ function listFiguresFromSql(
                  ${qualified(parentAlias, figure.within.parent.recordIdentity.column)} DESC
         LIMIT 1) AS ${quoted(`latest_${String(index)}`)}`;
   });
+  // The List's one company -- the single legal entity the issued read scope
+  // names -- read from the legal-entity master's own record, once per row.
+  const companyColumns = plan.companyValues.map((value, index) => {
+    if (readScope?.legalEntityIds.length !== 1)
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        "a company percentage is read in exactly one company's List",
+        value.entity.entityId,
+      );
+    const alias = `table_company_${String(index)}`;
+    return `(SELECT ${qualified(alias, value.column)}
+         FROM north_star_module.${quoted(value.entity.physicalTableName)} AS ${quoted(alias)}
+        WHERE ${qualified(alias, 'tenant_id')} = ${qualified(sourceAlias, 'tenant_id')}
+          AND ${qualified(alias, 'environment_id')} = ${qualified(sourceAlias, 'environment_id')}
+          AND ${qualified(alias, value.entity.recordIdentity.column)} = ${parameter(values, readScope.legalEntityIds[0])}::uuid) AS ${quoted(`company_${String(index)}`)}`;
+  });
   // Totals, bands and labels read the sums by id; a total names only figures
   // declared before it, so each expression is built from finished ones.
   const expressions = new Map<string, string>();
@@ -2881,6 +3003,26 @@ function listFiguresFromSql(
     return expression;
   };
   const figureColumns: string[] = [];
+  // CATALOG-EXTRAS: a choice takes, by the row's own enumeration, an
+  // operand or a percentage of one by the company's value, rounded to the
+  // eighteen places a level is kept at; a missing value stays unstated.
+  const choiceValueSql = (value: FigureChoiceValuePlan | null) =>
+    value === null
+      ? 'NULL::numeric'
+      : 'company' in value
+        ? `round((${operandSql(value.of)}) * ${qualified(FIGURE_SUMS_ALIAS, `company_${String(value.company)}`)} * 0.01, 18)`
+        : `(${operandSql(value)})::numeric`;
+  plan.choices.forEach((choice, index) => {
+    const cases = choice.cases
+      .map(
+        (entry) =>
+          `WHEN ${qualified(sourceAlias, choice.byColumn)}::text = ANY(${parameter(values, [...entry.values])}::text[]) THEN ${choiceValueSql(entry.value)}`,
+      )
+      .join(' ');
+    const expression = `(CASE ${cases} ELSE ${choiceValueSql(choice.otherwise)} END)`;
+    expressions.set(choice.figureId, expression);
+    figureColumns.push(`${expression} AS ${quoted(`choice_${String(index)}`)}`);
+  });
   plan.totals.forEach((total, index) => {
     const signed = [
       ...total.plus.map((value) => `+ ${operandSql(value)}`),
@@ -2898,10 +3040,14 @@ function listFiguresFromSql(
     const of = operandSql({ figureId: band.of });
     const cases = band.cases
       .map((entry) => {
+        if (entry.comparison === 'when')
+          return `WHEN ${qualified(sourceAlias, entry.column)}::text = ANY(${parameter(values, [...entry.values])}::text[]) THEN ${parameter(values, entry.value)}::text`;
         const threshold =
           'column' in entry.threshold
             ? qualified(sourceAlias, entry.threshold.column)
-            : `${parameter(values, entry.threshold.value)}::numeric`;
+            : 'figureId' in entry.threshold
+              ? operandSql({ figureId: entry.threshold.figureId })
+              : `${parameter(values, entry.threshold.value)}::numeric`;
         return `WHEN ${of} ${entry.comparison === 'below' ? '<' : '<='} ${threshold} THEN ${parameter(values, entry.value)}::text`;
       })
       .join(' ');
@@ -2920,7 +3066,7 @@ function listFiguresFromSql(
     );
   });
   return `CROSS JOIN LATERAL (
-    SELECT ${[...sumColumns, ...latestColumns].join(',\n           ')}
+    SELECT ${[...sumColumns, ...latestColumns, ...companyColumns].join(',\n           ')}
   ) AS ${quoted(FIGURE_SUMS_ALIAS)}
   CROSS JOIN LATERAL (
     SELECT ${['1 AS "figures"', ...figureColumns].join(',\n           ')}
@@ -2935,6 +3081,9 @@ function listFigureColumns(plan: ListFiguresPlan): readonly {
   readonly label: string | null;
 }[] {
   const sums = new Map(plan.sums.map((sum, index) => [sum.figureId, index]));
+  const choices = new Map(
+    plan.choices.map((choice, index) => [choice.figureId, index]),
+  );
   const totals = new Map(
     plan.totals.map((total, index) => [total.figureId, index]),
   );
@@ -2946,6 +3095,7 @@ function listFigureColumns(plan: ListFiguresPlan): readonly {
   );
   return plan.order.map(({ figureId, kind }) => {
     const sum = sums.get(figureId);
+    const choice = choices.get(figureId);
     const total = totals.get(figureId);
     const band = bands.get(figureId);
     const last = latest.get(figureId);
@@ -2955,17 +3105,96 @@ function listFigureColumns(plan: ListFiguresPlan): readonly {
       value:
         sum !== undefined
           ? qualified(FIGURE_SUMS_ALIAS, `sum_${String(sum)}`)
-          : total !== undefined
-            ? qualified(FIGURES_ALIAS, `total_${String(total)}`)
-            : band !== undefined
-              ? qualified(FIGURES_ALIAS, `band_${String(band)}`)
-              : qualified(FIGURE_SUMS_ALIAS, `latest_${String(last!)}`),
+          : choice !== undefined
+            ? qualified(FIGURES_ALIAS, `choice_${String(choice)}`)
+            : total !== undefined
+              ? qualified(FIGURES_ALIAS, `total_${String(total)}`)
+              : band !== undefined
+                ? qualified(FIGURES_ALIAS, `band_${String(band)}`)
+                : qualified(FIGURE_SUMS_ALIAS, `latest_${String(last!)}`),
       label:
         last !== undefined
           ? qualified(FIGURES_ALIAS, `label_${String(last)}`)
           : null,
     });
   });
+}
+
+/** A child entity whose text field also answers the search (CATALOG-EXTRAS). */
+interface SearchChildPlan {
+  readonly child: StorageEntity;
+  /** The child's column holding the listed row's record id. */
+  readonly relationColumn: string;
+  readonly column: StorageColumn;
+}
+
+/**
+ * Resolves the searched children against the PINNED COMPILED storage: each
+ * authorized query names its child entity, whose compiled parentScopedChild
+ * relation must point at the listed entity, and whose field must be a
+ * compiled text column. Anything else fails closed rather than searching
+ * without a child the request named.
+ */
+function searchChildrenPlan(
+  storage: StorageTargetPayloadV1,
+  entity: StorageEntity,
+  list: AuthorizedSharedListRequest,
+): readonly SearchChildPlan[] | null {
+  const requested = list.query.searchChildren;
+  // Nothing to search, nothing read: the gateway authorizes the children
+  // only for a search, and the statement adds them only to one.
+  if (!requested || list.query.search.trim() === '') return null;
+  const refuse = (subject: string, message: string): never => {
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      message,
+      subject,
+    );
+  };
+  return Object.freeze(
+    requested.map((child) => {
+      const authorized = (list.searchChildren ?? []).find(
+        (candidate) =>
+          candidate.queryId === child.queryId &&
+          candidate.relationId === child.relationId &&
+          candidate.fieldId === child.fieldId,
+      );
+      if (!authorized)
+        return refuse(
+          child.queryId,
+          'a searched child reached the executor without authorization',
+        );
+      const target = requiredEntity(storage, authorized.childEntityId);
+      const relation = storage.relations.find(
+        (candidate) =>
+          candidate.relationId === child.relationId &&
+          candidate.sourceEntityId === target.entityId &&
+          candidate.targetEntityId === entity.entityId &&
+          candidate.ownership === 'parentScopedChild',
+      );
+      if (!relation)
+        return refuse(
+          child.relationId,
+          'a searched child does not match the compiled storage relations',
+        );
+      const column = target.columns.find(
+        (candidate) =>
+          candidate.canonicalFieldId === child.fieldId &&
+          candidate.fieldContract.fieldKind === 'textFieldType',
+      );
+      if (!column)
+        return refuse(
+          child.fieldId,
+          'a searched child matches a compiled text column of its entity',
+        );
+      safeIdentifier(target.physicalTableName);
+      return Object.freeze({
+        child: target,
+        relationColumn: relation.relationColumn.physicalName,
+        column,
+      });
+    }),
+  );
 }
 
 /**
@@ -3066,6 +3295,7 @@ async function listSharedRecords(
   relatedFilter: ListRelatedFilterPlan | null = null,
   progress: ListProgressPlan | null = null,
   figures: ListFiguresPlan | null = null,
+  searchChildren: readonly SearchChildPlan[] | null = null,
 ): Promise<SemanticQueryResultEnvelope> {
   const sourceAlias = 'table_source';
   const selectedColumns = definition.selections.map((selection) => {
@@ -3124,7 +3354,36 @@ async function listSharedRecords(
       values.length,
     );
     values.push(...match.values);
-    predicates.push(match.sql);
+    // CATALOG-EXTRAS: a row also matches through an active child holding the
+    // text -- an item through one of its aliases -- judged before the count
+    // and the page, like every other search term.
+    const childTerms = (searchChildren ?? []).map((plan, index) => {
+      const alias = `table_search_child_${String(index)}`;
+      const company = legalEntityReadScopeJoinConjunction(
+        plan.child,
+        readScope,
+        values,
+        alias,
+      );
+      const childMatch = buildFoldedExpressionMatchPredicate(
+        [foldedVisibleFieldExpression(plan.child, plan.column, alias)],
+        list.query.search,
+        list.query.matchMode,
+        values.length,
+      );
+      values.push(...childMatch.values);
+      return `EXISTS (SELECT 1 FROM north_star_module.${quoted(plan.child.physicalTableName)} AS ${quoted(alias)}
+        WHERE ${qualified(alias, 'tenant_id')} = ${qualified(sourceAlias, 'tenant_id')}
+          AND ${qualified(alias, 'environment_id')} = ${qualified(sourceAlias, 'environment_id')}
+          AND ${qualified(alias, plan.relationColumn)} = ${qualified(sourceAlias, entity.recordIdentity.column)}
+          AND ${qualified(alias, plan.child.archive.archivedAtColumn)} IS NULL${company}
+          AND ${childMatch.sql})`;
+    });
+    predicates.push(
+      childTerms.length > 0
+        ? `(${match.sql} OR ${childTerms.join(' OR ')})`
+        : match.sql,
+    );
   }
   appendQueryFilterPredicates(
     entity,
@@ -3269,12 +3528,19 @@ async function listSharedRecords(
       ? { progress: list.query.progress }
       : {}),
     ...(figures && list.query.figures ? { figures: list.query.figures } : {}),
+    // Echoed when applied, and when there was no text to apply them to.
+    ...(list.query.searchChildren &&
+    (searchChildren !== null || list.query.search.trim() === '')
+      ? { searchChildren: list.query.searchChildren }
+      : {}),
     ...(list.query.beforeFilters
       ? { beforeFilters: list.query.beforeFilters }
       : {}),
     ...(list.query.outputMode ? { outputMode: list.query.outputMode } : {}),
     projectedSearchValueCount:
-      list.query.search.trim() === '' ? 0 : searchExpressions.length,
+      list.query.search.trim() === ''
+        ? 0
+        : searchExpressions.length + (searchChildren?.length ?? 0),
     requestedPageSize: list.query.requestedPageSize,
     returnedCount: records.length,
     schemaVersion: SHARED_LIST_RESULT_VERSION,

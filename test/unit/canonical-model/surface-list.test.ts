@@ -64,6 +64,8 @@ test('the composed application declares its Lists and they normalize unchanged',
     `${ns}:surface.inventory_transaction_list`,
     // REPLENISHMENT: the Buying worklist and Stock by item.
     buyingList,
+    // CATALOG-EXTRAS: the Items List, found by an alias too.
+    `${ns}:surface.item_list`,
     stockList,
     `${ns}:surface.posted_stock_balance_list`,
     `${ns}:surface.purchase_order_list`,

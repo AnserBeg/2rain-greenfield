@@ -1089,6 +1089,12 @@ test(
           await runtime.close();
         }
       },
+      // The data volume, not a check: this deployment keeps the lineage, two
+      // compiled successors and four verifications' records with their
+      // write-ahead log, which passed the default 256 MB at CATALOG-EXTRAS'
+      // lineage entry 8 ("No space left on device"). As the full-replay
+      // generator does.
+      { dataSizeMegabytes: 1024 },
     );
   },
 );
@@ -1180,8 +1186,10 @@ async function assertRealProductDefinition(
     // then the invoice, its lines, payments and credits (list, detail, form
     // each). PURCHASING-PARITY adds the Expected receipts List; PAYABLES the
     // vendor bill, its lines, payments and credits (list, detail, form each);
-    // REPLENISHMENT Stock by item and the Buying worklist.
-    assert.equal(surfaces.length, 103);
+    // REPLENISHMENT Stock by item and the Buying worklist; CATALOG-EXTRAS an
+    // item's aliases (list, detail, form).
+    assert.equal(surfaces.length, 106);
+    assert.ok(surfaces.includes('northstar.app:surface.item_alias_list'));
     assert.ok(surfaces.includes('northstar.app:surface.expected_receipt_list'));
     assert.ok(surfaces.includes('northstar.app:surface.item_stock_list'));
     assert.ok(surfaces.includes('northstar.app:surface.item_buying_list'));
@@ -3491,6 +3499,7 @@ async function assertBoundedFreshTenantInstallEvidence(
   assertReceivingVerificationCoverage(compiledApplication);
   assertSalesVerificationCoverage(compiledApplication);
   assertPayablesVerificationCoverage(compiledApplication);
+  assertCatalogExtrasVerificationCoverage(compiledApplication);
   // 174 -> 198. PUR-1 adds exactly 24, MEASURED by enumerating the compiled
   // plan rather than derived from this arithmetic: 12 declaredEvidence (six per
   // purchasing entity), 6 searchableExclusion (the two dates, notes, and the
@@ -3528,11 +3537,15 @@ async function assertBoundedFreshTenantInstallEvidence(
   // REPLENISHMENT adds 6, measured: one search exclusion for each of the
   // item's six non-searchable fields (reorder point and up-to level, preferred
   // location, standard cost in three currencies). Its two Lists' queries add
-  // none: a List over items adds no entity.
+  // none: a List over items adds no entity. CATALOG-EXTRAS adds 17, measured
+  // from the compiled plan: the item alias (12, its item's archive refused
+  // while it names it among them), the item's inventory policy and reorder
+  // rule (4: each enum's rejection and search exclusion) and the company's
+  // reorder percentage (1 search exclusion).
   assert.equal(
     servingScenarioCount,
-    579,
-    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables and 6 for replenishment',
+    596,
+    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, 6 for replenishment and 17 for catalog extras',
   );
   await assertFreshInstallLineageEvidence(
     pool,
@@ -4066,6 +4079,11 @@ test(
           await reversed.close();
         }
       },
+      // The data volume, not a check: two tenants' lineages and four
+      // verifications' records with their write-ahead log passed the default
+      // 256 MB at CATALOG-EXTRAS' lineage entry 8. As the full-replay
+      // generator does.
+      { dataSizeMegabytes: 1024 },
     );
   },
 );
@@ -5855,11 +5873,13 @@ async function assertExactPartitionEvidence(
   // request, each with a generic create: 501, 424. PAYABLES' 72 execute too
   // (each vendor document has a generic create, replayed by this oracle over
   // the compiled head): 573, 496. REPLENISHMENT's 6 item search exclusions
-  // execute through the item's generic create: 579, 502.
+  // execute through the item's generic create: 579, 502. CATALOG-EXTRAS' 17
+  // execute too: the alias, the item and the legal entity each have a
+  // generic create: 596, 519.
   assert.equal(
     evidence.results.length,
-    502,
-    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72 and replenishment 6',
+    519,
+    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72, replenishment 6 and catalog extras 17',
   );
   assert.equal(
     derivations.length,
@@ -6164,6 +6184,33 @@ function assertPayablesVerificationCoverage(
       ).length,
       count,
       `the payables entity ${local} contributes its measured verifier scenarios`,
+    );
+  }
+}
+
+function assertCatalogExtrasVerificationCoverage(
+  compiledApplication: unknown,
+): void {
+  const { plan } = releaseVerificationBinding(
+    parseCompiledApplication(compiledApplication).application.compiled,
+  );
+  for (const [local, count] of Object.entries({
+    // CATALOG-EXTRAS: the inventory policy and reorder rule add each enum's
+    // rejection and search exclusion to the item's 19.
+    item: 23,
+    // The alias: its walking slice (six evidence kinds), its folded
+    // uniqueness, its kind's rejection and search exclusion, its typed
+    // errors, its resolver, and its item's archive refused while it names it.
+    item_alias: 12,
+    // The company's reorder percentage adds one search exclusion.
+    legal_entity: 13,
+  })) {
+    assert.equal(
+      plan.scenarios.filter(
+        (scenario) => scenario.entityId === `northstar.app:entity.${local}`,
+      ).length,
+      count,
+      `the catalog-extras entity ${local} contributes its measured verifier scenarios`,
     );
   }
 }

@@ -3136,6 +3136,8 @@ async function seedInventoryDraft(
         legal_entity_code: browserAlternateInventoryScope.entityCode,
         legal_entity_is_default: false,
         legal_entity_name: browserAlternateInventoryScope.entityName,
+        // CATALOG-EXTRAS: the company's reorder rule; this company has none.
+        legal_entity_reorder_point_percent: null,
         legal_entity_status: enumOption(
           legalEntity,
           'legal_entity_status',
