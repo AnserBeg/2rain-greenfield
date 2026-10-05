@@ -13,6 +13,7 @@ import {
 import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
 import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
 import { governedStorageTarget } from '../helpers/governed-storage-target.js';
+import { COMPOSED_APPLICATION_INVENTORY_SCOPE } from '../../apps/api/src/composition-root.js';
 import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
 
 const ns = 'northstar.app';
@@ -550,13 +551,17 @@ test(
       // A second company with its own stock of the notebook: neither List
       // counts it here, and its own List counts only it.
       const second = randomUUID();
+      // The calendar belongs to the tenant, not the legal entity, so a
+      // second entity declares the calendar the composed tenant has.
       await fixture.pool.query(
-        `SELECT platform.provision_inventory_scope($1,$2,$3,'REPL-B','REPL B','UTC','00:00:00',$4,1::smallint,'reject',0,'codeAndNarrative','codeOnly','codeAndNarrative','codeAndNarrative','codeAndNarrative',NULL,NULL,NULL,NULL,NULL)`,
+        `SELECT platform.provision_inventory_scope($1,$2,$3,'REPL-B','REPL B',$5,$6,$4,1::smallint,'reject',0,'codeAndNarrative','codeOnly','codeAndNarrative','codeAndNarrative','codeAndNarrative',NULL,NULL,NULL,NULL,NULL)`,
         [
           fixture.app.runtime.identity.tenantId,
           fixture.app.runtime.identity.environmentId,
           second,
           fixture.app.runtime.releaseRoot,
+          COMPOSED_APPLICATION_INVENTORY_SCOPE.timeZone,
+          COMPOSED_APPLICATION_INVENTORY_SCOPE.businessDayBoundary,
         ],
       );
       const master = await fixture.invoke('legal_entity_create', {

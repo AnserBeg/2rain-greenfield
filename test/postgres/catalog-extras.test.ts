@@ -18,6 +18,7 @@ import {
 } from '../../packages/runtime/src/list-behavior/index.js';
 import type { ImmutableJsonValue } from '../../packages/runtime/src/request-runtime-view.js';
 import { governedStorageTarget } from '../helpers/governed-storage-target.js';
+import { COMPOSED_APPLICATION_INVENTORY_SCOPE } from '../../apps/api/src/composition-root.js';
 import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
 
 /**
@@ -551,13 +552,17 @@ test(
       // Another company has its own rule: unset, the pens have no reorder
       // point there; at 10% they reorder at 5. The item is the same record.
       const second = randomUUID();
+      // The calendar belongs to the tenant, not the legal entity, so a
+      // second entity declares the calendar the composed tenant has.
       await fixture.pool.query(
-        `SELECT platform.provision_inventory_scope($1,$2,$3,'CAT-B','CAT B','UTC','00:00:00',$4,1::smallint,'reject',0,'codeAndNarrative','codeOnly','codeAndNarrative','codeAndNarrative','codeAndNarrative',NULL,NULL,NULL,NULL,NULL)`,
+        `SELECT platform.provision_inventory_scope($1,$2,$3,'CAT-B','CAT B',$5,$6,$4,1::smallint,'reject',0,'codeAndNarrative','codeOnly','codeAndNarrative','codeAndNarrative','codeAndNarrative',NULL,NULL,NULL,NULL,NULL)`,
         [
           fixture.app.runtime.identity.tenantId,
           fixture.app.runtime.identity.environmentId,
           second,
           fixture.app.runtime.releaseRoot,
+          COMPOSED_APPLICATION_INVENTORY_SCOPE.timeZone,
+          COMPOSED_APPLICATION_INVENTORY_SCOPE.businessDayBoundary,
         ],
       );
       const master = await fixture.invoke('legal_entity_create', {
