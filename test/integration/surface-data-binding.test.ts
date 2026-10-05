@@ -12021,6 +12021,11 @@ test('WAREHOUSE-MODE: the period lock page closes the period through a UTC insta
     ),
   );
   assert.doesNotMatch(open.html, /Reopen to/u);
+  // The lock offers no other record action: no empty disclosure is shown.
+  assert.doesNotMatch(
+    open.html,
+    /<details class="composition-record-actions">/u,
+  );
 
   const task = async (local: string) => {
     const submit = (body: Record<string, string>) =>

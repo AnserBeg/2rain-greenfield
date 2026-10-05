@@ -953,9 +953,12 @@ function renderCommandBar(context: SurfaceComponentContext): string {
       : '',
     record ? renderLifecycleOverflow(context, record) : '',
   ].join('');
+  // Progressive record actions disclose what the record offers; a record that
+  // offers none -- the period lock, whose commands are its composition's --
+  // shows no empty disclosure.
   return slotPanel(
     context,
-    `${compositionActions}${context.surface.composition?.presentation?.recordActions === 'progressive' ? `<details class="composition-record-actions"><summary>Record actions</summary><div class="command-bar" aria-label="Record commands">${actions}</div></details>` : `<div class="command-bar" aria-label="Record commands">${actions}</div>`}`,
+    `${compositionActions}${context.surface.composition?.presentation?.recordActions === 'progressive' ? (actions ? `<details class="composition-record-actions"><summary>Record actions</summary><div class="command-bar" aria-label="Record commands">${actions}</div></details>` : '') : `<div class="command-bar" aria-label="Record commands">${actions}</div>`}`,
     'command-bar-slot',
   );
 }
