@@ -78,7 +78,8 @@ test('an item keeps its reorder levels, Stock by item names what is short and th
       'Vancouver warehouse',
     ]);
     await location.selectOption({ label: 'Calgary warehouse' });
-    await page.getByLabel('Standard cost (CAD)', { exact: true }).fill('4.5');
+    // The generic form names a field by its id, as it names Price cad.
+    await page.getByLabel('Standard cost cad', { exact: true }).fill('4.5');
     await page.getByRole('button', { name: 'Save' }).click();
     await expect(page.getByRole('status')).toContainText('Update complete');
 
