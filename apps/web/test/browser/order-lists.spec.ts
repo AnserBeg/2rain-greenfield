@@ -59,8 +59,10 @@ test('the order Lists show what is left to ship and receive, total each purchase
     await expect(
       page.locator(`[data-sort-column="${salesColumn('open')}"]`),
     ).toHaveCount(0);
+    // One of its reserved units is still to ship (SUPPLY-WARNINGS): the row
+    // offers "Post shipment", at the same fulfillment section.
     const fulfill = page.getByRole('link', {
-      name: `Fulfill ${shipping.number}`,
+      name: `Post shipment ${shipping.number}`,
       exact: true,
     });
     await expect(fulfill).toBeVisible();

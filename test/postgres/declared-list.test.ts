@@ -143,6 +143,9 @@ test(
         assert.deepEqual(first.counts, {
           [salesView('all')]: ORDERS,
           [salesView('to_ship')]: 0,
+          // Nothing ordered is short or reserved (SUPPLY-WARNINGS).
+          [salesView('blocked')]: 0,
+          [salesView('reserved')]: 0,
           [salesView('draft')]: byState('draft'),
           [salesView('released')]: byState('released'),
           [salesView('closed')]: byState('closed'),
@@ -242,7 +245,7 @@ test(
         // the units each order's lines order, ship and leave open.
         assert.equal(
           csv[0],
-          'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Currency',
+          'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Short,Currency',
         );
         assert.equal(csv.length - 1, byState('draft'));
         assert.ok(csv.slice(1).every((row) => row.includes(',Draft,')));

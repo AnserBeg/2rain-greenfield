@@ -81,6 +81,10 @@ import {
 import { createSurfaceRuntimeServer } from '../../apps/web/src/app-server.js';
 import { renderSurfaceDataComponent } from '../../apps/web/src/component-registry.js';
 import {
+  declaredListArguments,
+  readDeclaredListState,
+} from '../../apps/web/src/list-declaration.js';
+import {
   renderSurfaceRuntimeWithData,
   semanticOperationRequestFor,
   submitSurfaceRuntimeIntent,
@@ -4755,6 +4759,160 @@ class OrderEntryExecutor
             : 0;
         return { ordered, done, open };
       };
+      // Like the PostgreSQL statement (SUPPLY-WARNINGS): a line's coverage is
+      // what its covering rows' related rows hold; its uncovered quantity is
+      // what it has open less that, never below zero; per item, free stock --
+      // the plus sums less the minus sums over rows holding the item's id, in
+      // the row's company, never below zero -- covers it, and the rest is
+      // short, stated in the short states only. Covered counts each line at
+      // most for what it has open. Whole units only in this witness.
+      const supplied = new Map<string, { covered: number; short: number }>();
+      const supplyOf = (row: SemanticRecordDto) => {
+        const supply = progress?.supply;
+        if (!progress || !supply) return null;
+        const known = supplied.get(row.recordId);
+        if (known) return known;
+        const company = this.owners.get(row.recordId);
+        const entityOf = (queryId: string) =>
+          progress.supplyEntityIds![queryId]!;
+        const live = (candidate: SemanticRecordDto, entityId: string) =>
+          candidate.entityId === entityId &&
+          !candidate.archived &&
+          this.owners.get(candidate.recordId) === company;
+        const all = [...this.rows.values()];
+        const holding = (
+          related: { queryId: string; relationId: string; fieldId: string },
+          held: SemanticRecordDto,
+        ) =>
+          all
+            .filter(
+              (candidate) =>
+                live(candidate, entityOf(related.queryId)) &&
+                candidate.values[related.relationId] === held.recordId,
+            )
+            .reduce(
+              (total, candidate) =>
+                total + Number(candidate.values[related.fieldId]),
+              0,
+            );
+        const lines = all
+          .filter(
+            (candidate) =>
+              live(candidate, progress.linesEntityId) &&
+              candidate.values[progress.lines.relationId] === row.recordId,
+          )
+          .map((line) => {
+            const done = all
+              .filter(
+                (candidate) =>
+                  live(candidate, progress.doneEntityId) &&
+                  candidate.values[progress.done.relationId] === line.recordId,
+              )
+              .reduce(
+                (total, entry) =>
+                  total + Number(entry.values[progress.done.fieldId]),
+                0,
+              );
+            const covered = all
+              .filter(
+                (candidate) =>
+                  live(candidate, entityOf(supply.coverage.queryId)) &&
+                  candidate.values[supply.coverage.relationId] ===
+                    line.recordId,
+              )
+              .reduce(
+                (total, cover) =>
+                  total + holding(supply.coverage.related, cover),
+                0,
+              );
+            return {
+              item: String(line.values[supply.itemFieldId] ?? ''),
+              open: Number(line.values[progress.lines.fieldId]) - done,
+              covered,
+            };
+          });
+        // A parent through a relation, or the record whose id the rows hold
+        // in a reference field: a location belongs to no company.
+        const parentHolds = (
+          candidate: SemanticRecordDto,
+          within: NonNullable<(typeof supply.free.plus)[number]['within']>,
+        ) => {
+          const parent = this.rows.get(
+            String(
+              candidate.values[
+                within.referenceFieldId ?? within.relationId ?? ''
+              ],
+            ),
+          );
+          return (
+            parent !== undefined &&
+            parent.entityId === entityOf(within.queryId) &&
+            !parent.archived &&
+            (within.referenceFieldId !== undefined ||
+              this.owners.get(parent.recordId) === company) &&
+            within.values.includes(String(parent.values[within.fieldId]))
+          );
+        };
+        const part = (sum: (typeof supply.free.plus)[number], item: string) =>
+          all
+            .filter(
+              (candidate) =>
+                live(candidate, entityOf(sum.rows.queryId)) &&
+                candidate.values[sum.rows.matchFieldId] === item &&
+                (!sum.within || parentHolds(candidate, sum.within)),
+            )
+            .reduce((total, candidate) => {
+              const quantity = sum.rows.quantityFieldId
+                ? Number(candidate.values[sum.rows.quantityFieldId])
+                : 0;
+              const related = sum.related ? holding(sum.related, candidate) : 0;
+              return (
+                total +
+                (sum.sum === 'rows'
+                  ? quantity
+                  : sum.sum === 'related'
+                    ? related
+                    : Math.max(quantity - related, 0))
+              );
+            }, 0);
+        const uncovered = new Map<string, number>();
+        for (const line of lines)
+          uncovered.set(
+            line.item,
+            (uncovered.get(line.item) ?? 0) +
+              Math.max(line.open - line.covered, 0),
+          );
+        const stated =
+          !supply.shortIn ||
+          supply.shortIn.values.includes(
+            String(row.values[supply.shortIn.fieldId]),
+          );
+        let short = 0;
+        if (stated)
+          for (const [item, left] of uncovered) {
+            if (left <= 0) continue;
+            const free =
+              supply.free.plus.reduce(
+                (total, sum) => total + part(sum, item),
+                0,
+              ) -
+              supply.free.minus.reduce(
+                (total, sum) => total + part(sum, item),
+                0,
+              );
+            short += Math.max(left - Math.max(free, 0), 0);
+          }
+        const answer = {
+          covered: lines.reduce(
+            (total, line) =>
+              total + Math.min(line.covered, Math.max(line.open, 0)),
+            0,
+          ),
+          short,
+        };
+        supplied.set(row.recordId, answer);
+        return answer;
+      };
       // Like the PostgreSQL statement (REPLENISHMENT): each figure adds up
       // rows of its own query's entity that hold the listed row's id, in the
       // List's company; totals, bands and the latest parent follow, and a
@@ -4913,6 +5071,8 @@ class OrderEntryExecutor
               String(figuresOf(row)?.values[kept.figureId]),
             )) &&
           (!progress?.openOnly || (figures(row)?.open ?? 0) > 0) &&
+          (!progress?.supply?.keep ||
+            (supplyOf(row)?.[progress.supply.keep] ?? 0) > 0) &&
           (beforeFilters ?? []).every((filter) => {
             const value = row.values[filter.fieldId];
             return (
@@ -4936,6 +5096,7 @@ class OrderEntryExecutor
         }
         const projected = projectedListRecord(request, row);
         const summed = figures(row);
+        const supply = supplyOf(row);
         return summed && progress
           ? {
               ...projected,
@@ -4944,6 +5105,12 @@ class OrderEntryExecutor
                 [progress.outputs.ordered]: String(summed.ordered),
                 [progress.outputs.done]: String(summed.done),
                 [progress.outputs.open]: String(summed.open),
+                ...(supply && progress.supply
+                  ? {
+                      [progress.supply.outputs.covered]: String(supply.covered),
+                      [progress.supply.outputs.short]: String(supply.short),
+                    }
+                  : {}),
               },
             }
           : projected;
@@ -8946,10 +9113,14 @@ test('ORDER-PARITY: order Lists sum their lines, link each row to its work, and 
     gateways,
   );
   assert.equal(sales.statusCode, 200);
-  // Tabs are server counts; To ship is released with something open.
+  // Tabs are server counts; To ship is released with something open. These
+  // lines name no stocked item, so what is open on the released order is
+  // short (SUPPLY-WARNINGS) and nothing is reserved.
   assert.deepEqual(counts(sales.html), {
     [salesView('all')]: 3,
     [salesView('to_ship')]: 1,
+    [salesView('blocked')]: 1,
+    [salesView('reserved')]: 0,
     [salesView('draft')]: 1,
     [salesView('released')]: 2,
     [salesView('closed')]: 0,
@@ -9005,8 +9176,8 @@ test('ORDER-PARITY: order Lists sum their lines, link each row to its work, and 
       id('permission', 'sales_order_shipped_read'),
     ],
   );
-  // One page, six tab counts: each passed both reads.
-  assert.equal(progressCalls.length, 2 * 7);
+  // One page, eight tab counts: each passed both reads.
+  assert.equal(progressCalls.length, 2 * 9);
   const toShip = await renderSurfaceRuntimeWithData(
     f.view,
     salesUrl({ view: salesView('to_ship') }),
@@ -9030,17 +9201,20 @@ test('ORDER-PARITY: order Lists sum their lines, link each row to its work, and 
   assert.deepEqual(counts(withheld.html), {
     [salesView('all')]: 3,
     [salesView('to_ship')]: null,
+    [salesView('blocked')]: null,
+    [salesView('reserved')]: null,
     [salesView('draft')]: 1,
     [salesView('released')]: 2,
     [salesView('closed')]: 0,
     [salesView('cancelled')]: 0,
   });
-  for (const local of ['ordered', 'shipped', 'open'])
+  // The supply extends the progress, so it is withheld with it.
+  for (const local of ['ordered', 'shipped', 'open', 'short'])
     assert.equal(cell(withheld.html, open, salesColumn(local)), withheldMark);
   assert.match(
     withheld.html,
     new RegExp(
-      `data-list-progress-withheld="${id('query', 'sales_order_shipped_list')}">Ordered, Shipped and Open are withheld by current policy; To ship needs them and is unavailable.<`,
+      `data-list-progress-withheld="${id('query', 'sales_order_shipped_list')}">Ordered, Shipped, Open and Short are withheld by current policy; To ship, Blocked by supply and Reserved need them and are unavailable.<`,
       'u',
     ),
   );
@@ -9072,9 +9246,9 @@ test('ORDER-PARITY: order Lists sum their lines, link each row to its work, and 
     .split('\r\n');
   assert.equal(
     csv[0],
-    'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Currency',
+    'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Short,Currency',
   );
-  assert.ok(csv.some((line) => /^SO-OPEN,.*,,,,CAD$/u.test(line)));
+  assert.ok(csv.some((line) => /^SO-OPEN,.*,,,,,CAD$/u.test(line)));
   const refusedExport = await renderSurfaceRuntimeWithData(
     f.view,
     salesUrl({ view: salesView('to_ship'), export: 'csv' }),
@@ -9351,6 +9525,441 @@ test('ORDER-PARITY: order Lists sum their lines, link each row to its work, and 
     cell(receivedWithheld.html, late, purchaseColumn('received')),
     withheldMark,
   );
+});
+
+test('SUPPLY-WARNINGS: the Sales orders List counts Blocked by supply and Reserved in the statement, marks what each order is short and links reserved work to its shipments, without the supply current policy withholds', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const [scope, foreign] = f.scopes as [string, string];
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const field = (local: string) => id('field', local);
+  const relation = (local: string) => id('relation', local);
+  const salesView = (local: string) =>
+    id('list_view', `sales_order_list_${local}`);
+  const salesColumn = (local: string) =>
+    id('list_column', `sales_order_list_${local}`);
+  const salesUrl = (parameters: Record<string, string> = {}) =>
+    `/?${new URLSearchParams({
+      surface: id('surface', 'sales_order_list'),
+      [id('parameter', 'sales_order_list_legal_entity_scope')]: scope,
+      ...parameters,
+    }).toString()}`;
+  const counts = (html: string) =>
+    Object.fromEntries(
+      [
+        ...html.matchAll(
+          /data-view-id="([^"]+)"[^>]*>(?:<span>[^<]*<\/span>)(?:<span class="list-view__count" data-view-count="(\d+)")?/gu,
+        ),
+      ].map((match) => [
+        match[1]!,
+        match[2] === undefined ? null : Number(match[2]),
+      ]),
+    );
+  const row = (html: string, recordId: string) =>
+    new RegExp(
+      `<tr data-compact-card="true" data-record-id="${recordId}">([\\s\\S]*?)</tr>`,
+      'u',
+    ).exec(html)?.[1] ?? '';
+  const cell = (html: string, recordId: string, local: string) =>
+    new RegExp(
+      `data-column-id="${salesColumn(local)}">([\\s\\S]*?)</td>`,
+      'u',
+    ).exec(row(html, recordId))?.[1];
+  const action = (html: string, recordId: string) => {
+    const match =
+      /<a class="secondary-action" href="([^"]+)" data-row-action="([^"]+)" aria-label="([^"]+)">([^<]+)<\/a>/u.exec(
+        row(html, recordId),
+      );
+    return match
+      ? {
+          href: match[1]!.replaceAll('&amp;', '&'),
+          actionId: match[2]!,
+          name: match[3]!,
+          label: match[4]!,
+        }
+      : null;
+  };
+  const rows = (html: string) =>
+    [
+      ...html.matchAll(
+        /<tr data-compact-card="true" data-record-id="([^"]+)">/gu,
+      ),
+    ]
+      .map((match) => match[1]!)
+      .sort();
+  const withheldMark = '<span class="muted">—</span>';
+  const shortMark =
+    ' <span class="status-pill" data-status-role="blocked" data-short-mark="true"><span aria-hidden="true">!</span><span class="sr-only">Short of stock</span></span>';
+
+  // Stock as the providers keep it: posted balances by item and location,
+  // reservations with what their balances still hold. Free stock of the valve
+  // now is the 10 at the warehouse less the 3 + 2 reservations hold there:
+  // 5. The 4 in quarantine is on hand but not usable, and what a reservation
+  // holds there reduces nothing usable; another company's 100 is its own.
+  const location = (code: string, status: string) =>
+    f.executor.seed('location', {
+      [field('location_code')]: code,
+      [field('location_name')]: code,
+      [field('location_type')]: id('option', 'location_type_warehouse'),
+      [field('location_status')]: id('option', `location_status_${status}`),
+      [field('location_status_reason')]: null,
+      [field('location_status_changed_at')]: null,
+    });
+  const warehouse = location('WH-1', 'usable');
+  const hold = location('QA-HOLD', 'quarantine');
+  const valve = f.executor.seed('item', {
+    [field('item_name')]: 'Valve',
+    [field('item_sku')]: 'VALVE-10',
+    [field('item_base_unit')]: 'EA',
+  });
+  const bolt = f.executor.seed('item', {
+    [field('item_name')]: 'Bolt',
+    [field('item_sku')]: 'BOLT-20',
+    [field('item_base_unit')]: 'EA',
+  });
+  const balance = (
+    itemId: string,
+    locationId: string,
+    quantity: string,
+    company = scope,
+  ) =>
+    f.executor.seed(
+      'posted_stock_balance',
+      {
+        [field('posted_stock_balance_item_id')]: itemId,
+        [field('posted_stock_balance_location_id')]: locationId,
+        [field('posted_stock_balance_posted_quantity')]: quantity,
+        [field('posted_stock_balance_unit_id')]: 'EA',
+      },
+      company,
+    );
+  balance(valve, warehouse, '10');
+  balance(valve, hold, '4');
+  balance(valve, warehouse, '100', foreign);
+  balance(bolt, warehouse, '3');
+  const reserve = (
+    itemId: string,
+    locationId: string,
+    remaining: string,
+    lineId: string | null,
+  ) => {
+    const reservationId = f.executor.seed(
+      'reservation',
+      {
+        [field('reservation_number')]: `RSV-${randomUUID()}`,
+        [field('reservation_state')]: id('option', 'reservation_state_active'),
+        [field('reservation_item_id')]: itemId,
+        [field('reservation_location_id')]: locationId,
+        [field('reservation_quantity')]: remaining,
+        [field('reservation_unit_id')]: 'EA',
+        [field('reservation_reason')]: null,
+        ...(lineId ? { [relation('reservation_order_line')]: lineId } : {}),
+      },
+      scope,
+    );
+    f.executor.seed(
+      'reservation_balance',
+      {
+        [field('reservation_balance_remaining_quantity')]: remaining,
+        [field('reservation_balance_unit_id')]: 'EA',
+        [relation('reservation_balance_reservation')]: reservationId,
+      },
+      scope,
+    );
+  };
+  // Orders: each line points at its order, a shipped row at its line.
+  const sale = (
+    number: string,
+    state: string,
+    lines: readonly (readonly [itemId: string, ordered: string])[],
+    company = scope,
+  ) => {
+    const orderId = f.executor.seed(
+      'sales_order',
+      {
+        [field('sales_order_number')]: number,
+        [field('sales_order_customer_party_id')]: f.party,
+        [field('sales_order_order_date')]: '2026-10-01T12:00:00.000Z',
+        [field('sales_order_currency')]: 'CAD',
+        [id('derived_state_field', 'machine.sales_order_lifecycle')]: id(
+          'state',
+          `sales_order_${state}`,
+        ),
+      },
+      company,
+    );
+    const lineIds = lines.map(([itemId, ordered], index) =>
+      f.executor.seed(
+        'sales_order_line',
+        {
+          [field('sales_order_line_item_id')]: itemId,
+          [field('sales_order_line_line_number')]: String(index + 1),
+          [field('sales_order_line_ordered_quantity')]: ordered,
+          [relation('sales_order_line_order')]: orderId,
+        },
+        company,
+      ),
+    );
+    return { orderId, lineIds };
+  };
+  // Two valve lines share the 5 free: 9 ordered with 3 of its own reserved
+  // and 5 more leave 11 uncovered, so the order is 6 short.
+  const short = sale('SO-SHORT', 'released', [
+    [valve, '9'],
+    [valve, '5'],
+  ]);
+  reserve(valve, warehouse, '3', short.lineIds[0]!);
+  // Stock reserved for another order: covered, so nothing short.
+  const elsewhere = sale('SO-ELSEWHERE', 'released', [[valve, '2']]);
+  reserve(valve, warehouse, '2', elsewhere.lineIds[0]!);
+  // Held in quarantine: shown as reserved there, never reducing usable stock.
+  reserve(valve, hold, '1', null);
+  // Enough bolts free: open, nothing reserved, nothing short.
+  const bolts = sale('SO-BOLTS', 'released', [[bolt, '3']]);
+  // A draft asking for more bolts than are free is short, as its page says,
+  // but not blocked: only a confirmed order waits for supply.
+  const draft = sale('SO-DRAFT', 'draft', [[bolt, '5']]);
+  // Nothing is short once an order is closed.
+  const closed = sale('SO-CLOSED', 'closed', [[valve, '7']]);
+  sale('SO-FOREIGN', 'released', [[valve, '50']], foreign);
+
+  const supplyCalls = () =>
+    f.policy.calls.filter(
+      (call) =>
+        (call.decisionInput as { kind?: string }).kind ===
+        'registeredSemanticListSupplyPolicyInput',
+    );
+  const before = supplyCalls().length;
+  const sales = await renderSurfaceRuntimeWithData(
+    f.view,
+    salesUrl(),
+    f.gateways,
+  );
+  assert.equal(sales.statusCode, 200);
+  assert.doesNotMatch(sales.html, /SO-FOREIGN|data-list-supply-withheld/u);
+  // Every tab is a server count of exactly its set.
+  assert.deepEqual(counts(sales.html), {
+    [salesView('all')]: 5,
+    [salesView('to_ship')]: 3,
+    [salesView('blocked')]: 1,
+    [salesView('reserved')]: 2,
+    [salesView('draft')]: 1,
+    [salesView('released')]: 3,
+    [salesView('closed')]: 1,
+    [salesView('cancelled')]: 0,
+  });
+  // Short is the order's, marked where anything is short.
+  assert.equal(cell(sales.html, short.orderId, 'short'), `6${shortMark}`);
+  assert.equal(cell(sales.html, draft.orderId, 'short'), `2${shortMark}`);
+  for (const order of [elsewhere, bolts, closed])
+    assert.equal(cell(sales.html, order.orderId, 'short'), '0');
+  assert.equal(cell(sales.html, short.orderId, 'open'), '14');
+  // Reserved stock still to ship leads the row's actions: a link to the
+  // order's fulfillment section, where its own ship Task is.
+  const post = action(sales.html, short.orderId)!;
+  assert.deepEqual(
+    [post.label, post.name, post.actionId],
+    [
+      'Post shipment',
+      'Post shipment SO-SHORT',
+      id('list_row_action', 'sales_order_list_post_shipment'),
+    ],
+  );
+  const target = new URL(post.href, 'http://fixture.local');
+  assert.equal(
+    target.searchParams.get('surface'),
+    id('surface', 'sales_order_detail'),
+  );
+  assert.equal(target.searchParams.get('record'), short.orderId);
+  assert.equal(target.hash, `#${id('dataset', 'fulfillment_lines')}`);
+  assert.equal(action(sales.html, elsewhere.orderId)?.label, 'Post shipment');
+  assert.equal(action(sales.html, bolts.orderId)?.label, 'Fulfill');
+  for (const order of [draft, closed])
+    assert.equal(action(sales.html, order.orderId)?.label, 'View');
+  // The supply re-enters current policy for the List's company on every
+  // request -- the page and each of the eight tab counts -- query by query.
+  const calls = supplyCalls().slice(before);
+  assert.deepEqual(
+    [...new Set(calls.map((call) => call.permissionId))].sort(),
+    [
+      id('permission', 'location_read'),
+      id('permission', 'posted_stock_balance_read'),
+      id('permission', 'reservation_balance_read'),
+      id('permission', 'reservation_read'),
+    ],
+  );
+  assert.equal(calls.length, 5 * 9);
+  const scopeParameter = id('parameter', 'sales_order_list_legal_entity_scope');
+  for (const call of calls) {
+    const input = call.decisionInput as {
+      queryId: string;
+      arguments: Record<string, unknown>;
+    };
+    assert.deepEqual(
+      input.arguments[scopeParameter],
+      input.queryId === id('query', 'location_list') ? undefined : [scope],
+      input.queryId,
+    );
+  }
+
+  // Each supply tab lists, counts and exports exactly its set.
+  const blocked = await renderSurfaceRuntimeWithData(
+    f.view,
+    salesUrl({ view: salesView('blocked') }),
+    f.gateways,
+  );
+  assert.match(blocked.html, /data-list-total="1"/u);
+  assert.deepEqual(rows(blocked.html), [short.orderId]);
+  const reserved = await renderSurfaceRuntimeWithData(
+    f.view,
+    salesUrl({ view: salesView('reserved') }),
+    f.gateways,
+  );
+  assert.match(reserved.html, /data-list-total="2"/u);
+  assert.deepEqual(
+    rows(reserved.html),
+    [short.orderId, elsewhere.orderId].sort(),
+  );
+  const exported = await renderSurfaceRuntimeWithData(
+    f.view,
+    salesUrl({ view: salesView('blocked'), export: 'csv' }),
+    f.gateways,
+  );
+  assert.equal(exported.statusCode, 200);
+  const csv = exported
+    .download!.body.replace(/^\uFEFF/u, '')
+    .trimEnd()
+    .split('\r\n');
+  assert.equal(
+    csv[0],
+    'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Short,Currency',
+  );
+  assert.equal(csv.length, 2);
+  assert.match(csv[1]!, /^SO-SHORT,.*,14,0,14,6,CAD$/u);
+
+  // The agent path: the preset carries the supply as the argument it is.
+  const preset = (
+    f.view.projections.agent.payload as {
+      listPresets: Array<{
+        surfaceId: string;
+        progress?: { supply?: { outputs: Record<string, string> } };
+        views: Array<{ viewId: string; supply?: string }>;
+      }>;
+    }
+  ).listPresets.find(
+    (value) => value.surfaceId === id('surface', 'sales_order_list'),
+  )!;
+  assert.deepEqual(preset.progress?.supply?.outputs, {
+    covered: id('list_output', 'sales_order_list_covered'),
+    short: id('list_output', 'sales_order_list_short'),
+  });
+  assert.deepEqual(
+    preset.views.flatMap((value) =>
+      value.supply ? [[value.viewId, value.supply]] : [],
+    ),
+    [
+      [salesView('blocked'), 'short'],
+      [salesView('reserved'), 'covered'],
+    ],
+  );
+
+  // Without stock read the supply is supplementary: the List serves with its
+  // progress and "—" for Short, says what it reads without, and the two
+  // supply tabs are refused by name and uncounted. Nothing reserved can be
+  // stated, so no row promises a shipment.
+  for (const [permission, queryId] of [
+    ['posted_stock_balance_read', 'workspace_stock'],
+    ['location_read', 'location_list'],
+    ['reservation_balance_read', 'reservation_balance_list'],
+  ] as const) {
+    f.deniedReads.add(id('permission', permission));
+    const withheld = await renderSurfaceRuntimeWithData(
+      f.view,
+      salesUrl(),
+      f.gateways,
+    );
+    assert.equal(withheld.statusCode, 200, permission);
+    assert.doesNotMatch(withheld.html, /data-diagnostic-code=/u);
+    assert.deepEqual(counts(withheld.html), {
+      [salesView('all')]: 5,
+      [salesView('to_ship')]: 3,
+      [salesView('blocked')]: null,
+      [salesView('reserved')]: null,
+      [salesView('draft')]: 1,
+      [salesView('released')]: 3,
+      [salesView('closed')]: 1,
+      [salesView('cancelled')]: 0,
+    });
+    assert.equal(cell(withheld.html, short.orderId, 'short'), withheldMark);
+    assert.equal(cell(withheld.html, short.orderId, 'open'), '14');
+    assert.match(
+      withheld.html,
+      new RegExp(
+        `data-list-supply-withheld="${id('query', queryId)}">Short is withheld by current policy; Blocked by supply and Reserved need it and are unavailable.<`,
+        'u',
+      ),
+    );
+    assert.equal(action(withheld.html, short.orderId)?.label, 'Fulfill');
+    const refused = await renderSurfaceRuntimeWithData(
+      f.view,
+      salesUrl({ view: salesView('blocked') }),
+      f.gateways,
+    );
+    assert.match(
+      refused.html,
+      /data-diagnostic-code="QUERY_PERMISSION_DENIED"/u,
+    );
+    assert.match(refused.html, /data-list-supply-withheld=/u);
+    assert.equal(rows(refused.html).length, 0);
+    assert.equal(counts(refused.html)[salesView('all')], 5);
+    // The export follows the page: Short is empty, a supply tab refuses.
+    const file = await renderSurfaceRuntimeWithData(
+      f.view,
+      salesUrl({ export: 'csv' }),
+      f.gateways,
+    );
+    assert.equal(file.statusCode, 200);
+    assert.ok(
+      file
+        .download!.body.split('\r\n')
+        .some((line) => /^SO-SHORT,.*,14,0,14,,CAD$/u.test(line)),
+    );
+    const refusedFile = await renderSurfaceRuntimeWithData(
+      f.view,
+      salesUrl({ view: salesView('reserved'), export: 'csv' }),
+      f.gateways,
+    );
+    assert.equal(refusedFile.statusCode, 422);
+    f.deniedReads.clear();
+  }
+  // The gateway itself still refuses a request carrying the supply, by the
+  // supply query's name: the fallback is the web runtime's, per request.
+  f.deniedReads.add(id('permission', 'posted_stock_balance_read'));
+  const list = readCompiledSurfaceManifest(f.view).surfaces.find(
+    (value) => value.surfaceId === id('surface', 'sales_order_list'),
+  )!.list!;
+  const denied = await f.gateways.queryGateway
+    .invoke(f.view, {
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      queryId: id('query', 'sales_order_list'),
+      arguments: declaredListArguments(
+        list,
+        readDeclaredListState(list, new URL('http://list.local/')),
+        {
+          mode: 'page',
+          now: new Date('2026-10-05T12:00:00.000Z'),
+          queryId: id('query', 'sales_order_list'),
+          scopeArguments: { [scopeParameter]: scope },
+        },
+      ),
+    })
+    .then(
+      () => null,
+      (error: unknown) => error,
+    );
+  assert.ok(denied instanceof SemanticQueryPolicyDeniedError);
+  assert.equal(denied.queryId, id('query', 'workspace_stock'));
+  f.deniedReads.clear();
 });
 
 test('ORDER-PARITY: a picker over purchase orders enumerates their plain list query, never the read-model clone the List reads', async () => {

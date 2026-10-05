@@ -270,6 +270,80 @@ function parseThreshold(
 }
 
 /**
+ * What one sum adds up -- its rows, their parent and related rows, and which
+ * of them it adds -- from a member whose keys the caller has closed. `rows`
+ * adds a quantity, `related` related rows, `remaining` both: exactly those.
+ */
+function parseSumParts(
+  sum: Readonly<Record<string, ImmutableJsonValue | undefined>>,
+): Omit<SharedListFigureSum, 'figureId'> {
+  const rows = record(
+    sum.rows,
+    'rows',
+    ['matchFieldId', 'queryId'],
+    ['quantityFieldId'],
+  );
+  if (sum.sum !== 'rows' && sum.sum !== 'related' && sum.sum !== 'remaining')
+    throw malformed('list figures sum is rows, related or remaining');
+  if (
+    (rows.quantityFieldId !== undefined) !== (sum.sum !== 'related') ||
+    (sum.related !== undefined) !== (sum.sum !== 'rows')
+  )
+    throw malformed('list figures sum names exactly the parts it adds');
+  return {
+    ...(sum.related === undefined
+      ? {}
+      : { related: parseSharedListFigureRelated(sum.related) }),
+    rows: Object.freeze({
+      matchFieldId: canonicalId(rows.matchFieldId, 'rows matchFieldId'),
+      queryId: canonicalId(rows.queryId, 'rows queryId'),
+      ...(rows.quantityFieldId === undefined
+        ? {}
+        : {
+            quantityFieldId: canonicalId(
+              rows.quantityFieldId,
+              'rows quantityFieldId',
+            ),
+          }),
+    }),
+    sum: sum.sum,
+    ...(sum.within === undefined ? {} : { within: parseWithin(sum.within) }),
+  };
+}
+
+/** Rows pointing at other rows through a relation, and the quantity added. */
+export function parseSharedListFigureRelated(
+  value: ImmutableJsonValue | undefined,
+): SharedListFigureRelated {
+  const related = record(value, 'related', [
+    'fieldId',
+    'queryId',
+    'relationId',
+  ]);
+  return Object.freeze({
+    fieldId: canonicalId(related.fieldId, 'related fieldId'),
+    queryId: canonicalId(related.queryId, 'related queryId'),
+    relationId: canonicalId(related.relationId, 'related relationId'),
+  });
+}
+
+/**
+ * One part of an item's free stock in a List's supply (SUPPLY-WARNINGS): a
+ * sum's parts without an id of its own, with the same closed contract.
+ */
+export function parseSharedListSupplySum(
+  value: ImmutableJsonValue | undefined,
+): Omit<SharedListFigureSum, 'figureId'> {
+  const sum = record(
+    value,
+    'supply sum',
+    ['rows', 'sum'],
+    ['related', 'within'],
+  );
+  return Object.freeze(parseSumParts(sum));
+}
+
+/**
  * The closed request contract. Beyond each member's shape it proves what the
  * statement relies on: unique figure ids, a sum naming exactly the parts it
  * adds, totals and bands over figures declared before them, and a `keep` of
@@ -301,64 +375,9 @@ export function parseSharedListFigures(
         ['related', 'within'],
       );
       const figureId = declare(sum.figureId);
-      const rows = record(
-        sum.rows,
-        'rows',
-        ['matchFieldId', 'queryId'],
-        ['quantityFieldId'],
-      );
-      if (
-        sum.sum !== 'rows' &&
-        sum.sum !== 'related' &&
-        sum.sum !== 'remaining'
-      )
-        throw malformed('list figures sum is rows, related or remaining');
-      // `rows` adds a quantity, `related` related rows, `remaining` both.
-      if (
-        (rows.quantityFieldId !== undefined) !== (sum.sum !== 'related') ||
-        (sum.related !== undefined) !== (sum.sum !== 'rows')
-      )
-        throw malformed('list figures sum names exactly the parts it adds');
-      const related =
-        sum.related === undefined
-          ? undefined
-          : record(sum.related, 'related', [
-              'fieldId',
-              'queryId',
-              'relationId',
-            ]);
+      const parts = parseSumParts(sum);
       numbers.add(figureId);
-      return Object.freeze({
-        figureId,
-        ...(related
-          ? {
-              related: Object.freeze({
-                fieldId: canonicalId(related.fieldId, 'related fieldId'),
-                queryId: canonicalId(related.queryId, 'related queryId'),
-                relationId: canonicalId(
-                  related.relationId,
-                  'related relationId',
-                ),
-              }),
-            }
-          : {}),
-        rows: Object.freeze({
-          matchFieldId: canonicalId(rows.matchFieldId, 'rows matchFieldId'),
-          queryId: canonicalId(rows.queryId, 'rows queryId'),
-          ...(rows.quantityFieldId === undefined
-            ? {}
-            : {
-                quantityFieldId: canonicalId(
-                  rows.quantityFieldId,
-                  'rows quantityFieldId',
-                ),
-              }),
-        }),
-        sum: sum.sum,
-        ...(sum.within === undefined
-          ? {}
-          : { within: parseWithin(sum.within) }),
-      });
+      return Object.freeze({ figureId, ...parts });
     },
   );
   const totals =

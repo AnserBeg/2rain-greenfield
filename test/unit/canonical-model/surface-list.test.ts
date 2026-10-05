@@ -101,9 +101,14 @@ test('the composed application declares its Lists and they normalize unchanged',
   type Declared = {
     dataSource: { targetId: string };
     list: {
-      progress?: { whenDenied?: string };
-      rowActions?: Array<{ label: string; section?: string }>;
-      views: Array<{ label: string; open?: true }>;
+      progress?: { whenDenied?: string; supply?: { whenDenied?: string } };
+      rowActions?: Array<{
+        label: string;
+        section?: string;
+        when?: { supply?: string };
+      }>;
+      views: Array<{ label: string; open?: true; supply?: string }>;
+      columns: Array<{ label: string }>;
     };
   };
   const list = (expected as unknown as Declared).list;
@@ -137,13 +142,53 @@ test('the composed application declares its Lists and they normalize unchanged',
     assert.equal(order.list.views[1]?.label, work);
     assert.equal(order.list.views[1]?.open, true);
     assert.deepEqual(
-      order.list.rowActions?.map((value) => [value.label, value.section]),
+      order.list.rowActions
+        ?.filter((value) => value.when?.supply === undefined)
+        .map((value) => [value.label, value.section]),
       [
         [action, section],
         ['View', undefined],
       ],
     );
   }
+  // SUPPLY-WARNINGS: the Sales orders List says what its open lines are
+  // short of and what reservations hold for them, supplementary like its
+  // progress: the reference's two supply tabs after To ship, a Short column
+  // after Open, and "Post shipment" leading the row's actions while reserved
+  // stock is still to ship, at the same section.
+  const salesOrders = declared.find(
+    (surface) => surface.surfaceId === salesList,
+  ) as unknown as Declared;
+  assert.equal(salesOrders.list.progress?.supply?.whenDenied, 'omit');
+  assert.deepEqual(
+    salesOrders.list.views.map((view) => [view.label, view.supply ?? null]),
+    [
+      ['All', null],
+      ['To ship', null],
+      ['Blocked by supply', 'short'],
+      ['Reserved', 'covered'],
+      ['Draft', null],
+      ['Released', null],
+      ['Closed', null],
+      ['Cancelled', null],
+    ],
+  );
+  assert.deepEqual(
+    salesOrders.list.columns.map((column) => column.label).slice(-3),
+    ['Open', 'Short', 'Currency'],
+  );
+  assert.deepEqual(
+    salesOrders.list.rowActions?.map((value) => [
+      value.label,
+      value.section,
+      value.when?.supply ?? null,
+    ]),
+    [
+      ['Post shipment', `${ns}:dataset.fulfillment_lines`, 'covered'],
+      ['Fulfill', `${ns}:dataset.fulfillment_lines`, null],
+      ['View', undefined, null],
+    ],
+  );
   // The commercial clone keeps the source's selections and permission.
   const totals = normalized.queries.find(
     (value) => value.queryId === `${ns}:query.commercial_purchase_order_list`,
@@ -522,11 +567,11 @@ test('List row actions, supplementary progress and read-model columns are refuse
       [
         'an unconditional row action is the last one',
         (app) => {
-          sales(app)[1]!.orderKey = 5;
+          sales(app).at(-1)!.orderKey = 5;
         },
       ],
       [
-        'a row action condition names a filter or open',
+        'a row action condition names a filter, open or supply',
         (app) => {
           sales(app)[0]!.when = {};
         },
@@ -628,6 +673,226 @@ test('List row actions, supplementary progress and read-model columns are refuse
   delete listOf(app).list.rowActions;
   delete (listOf(app).list.progress as { whenDenied?: string }).whenDenied;
   assert.doesNotThrow(() => normalizeApplicationPackage(app as never));
+});
+
+test('SUPPLY-WARNINGS: a List progress supply, its views and its row actions are refused for each misuse the runtime cannot honour', () => {
+  type Sum = {
+    rows: { query: { targetId: string }; match: string; quantity?: string };
+    within?: Json;
+    related?: {
+      query: { targetId: string };
+      relation: string;
+      quantity: string;
+    };
+    sum: string;
+  };
+  type Supply = {
+    coverage: {
+      query: { targetId: string };
+      relation: string;
+      related: {
+        query: { targetId: string };
+        relation: string;
+        quantity: string;
+      };
+    };
+    item: string;
+    free: { plus: Sum[]; minus: Sum[] };
+    shortIn?: { field: string; values: string[] };
+    outputs: { covered: string; short: string };
+    whenDenied?: string;
+  };
+  const sales = (app: ReturnType<typeof application>) => {
+    const { list } = listOf(app);
+    const progress = list.progress as {
+      outputs: Record<string, string>;
+      supply: Supply;
+    };
+    return {
+      list,
+      progress,
+      supply: progress.supply,
+      column: (local: string) =>
+        list.columns.find(
+          (value) =>
+            value.columnId === `${ns}:list_column.sales_order_list_${local}`,
+        )!,
+    };
+  };
+  const query = (local: string) => `${ns}:query.${local}`;
+  const field = (local: string) => `${ns}:field.${local}`;
+  const relation = (local: string) => `${ns}:relation.${local}`;
+  const cases: Array<[string, (app: ReturnType<typeof application>) => void]> =
+    [
+      [
+        // The line list carries a read model the statement never runs.
+        'list supply reads active q0 list queries without a read model',
+        (app) => {
+          sales(app).supply.coverage.query.targetId = query('reservation_list');
+        },
+      ],
+      [
+        "list supply coverage rows point at the List's lines through a relation",
+        (app) => {
+          sales(app).supply.coverage.relation = relation(
+            'reservation_balance_reservation',
+          );
+        },
+      ],
+      [
+        'list supply coverage holds what related rows pointing at it hold',
+        (app) => {
+          sales(app).supply.coverage.related.relation = relation(
+            'reservation_order_line',
+          );
+        },
+      ],
+      [
+        'list supply adds an exact decimal its query selects',
+        (app) => {
+          sales(app).supply.coverage.related.quantity = field(
+            'reservation_balance_unit_id',
+          );
+        },
+      ],
+      [
+        "list supply names a line's item by a text field the lines' query selects",
+        (app) => {
+          sales(app).supply.item = field('sales_order_line_ordered_quantity');
+        },
+      ],
+      [
+        "list supply names a line's item by a text field the lines' query selects",
+        (app) => {
+          sales(app).supply.item = field('posted_stock_balance_item_id');
+        },
+      ],
+      [
+        "a supply sum's rows hold the item's id in a text field their query selects",
+        (app) => {
+          sales(app).supply.free.plus[0]!.rows.match = field(
+            'posted_stock_balance_posted_quantity',
+          );
+        },
+      ],
+      [
+        'a supply sum names exactly the parts it adds up',
+        (app) => {
+          sales(app).supply.free.plus[0]!.sum = 'related';
+        },
+      ],
+      [
+        'a supply sum names exactly the parts it adds up',
+        (app) => {
+          delete sales(app).supply.free.minus[0]!.related;
+        },
+      ],
+      [
+        "a supply sum's related rows point at its rows through a relation",
+        (app) => {
+          sales(app).supply.free.minus[0]!.related!.relation = relation(
+            'reservation_order_line',
+          );
+        },
+      ],
+      [
+        'list supply adds an exact decimal its query selects',
+        (app) => {
+          sales(app).supply.free.plus[0]!.rows.quantity = field(
+            'posted_stock_balance_unit_id',
+          );
+        },
+      ],
+      [
+        "a figure's parent is the record whose id its rows hold in a text field their query selects",
+        (app) => {
+          (sales(app).supply.free.plus[0]!.within as Json).reference = field(
+            'posted_stock_balance_posted_quantity',
+          );
+        },
+      ],
+      [
+        'list supply reads active q0 list queries without a read model',
+        (app) => {
+          (
+            (sales(app).supply.free.plus[0]!.within as Json).query as {
+              targetId: string;
+            }
+          ).targetId = query('location_get');
+        },
+      ],
+      [
+        'an enumeration filter value is one of its options',
+        (app) => {
+          sales(app).supply.shortIn!.values = [
+            `${ns}:state.sales_order_shipped`,
+          ];
+        },
+      ],
+      [
+        'supply short values must be unique',
+        (app) => {
+          const { shortIn } = sales(app).supply;
+          shortIn!.values = [shortIn!.values[0]!, shortIn!.values[0]!];
+        },
+      ],
+      [
+        'progress outputs must be unique',
+        (app) => {
+          const { progress, supply } = sales(app);
+          supply.outputs.covered = progress.outputs.open!;
+        },
+      ],
+      [
+        'list progress outputs name no field or column',
+        (app) => {
+          const { supply, column } = sales(app);
+          supply.outputs.short = field('sales_order_notes');
+          column('short').field = field('sales_order_notes');
+        },
+      ],
+      [
+        'a progress column is an unsorted plain value',
+        (app) => {
+          sales(app).column('short').sortable = true;
+        },
+      ],
+      [
+        'a List that omits denied supply keeps a view that does not need it',
+        (app) => {
+          for (const view of sales(app).list.views) view.supply = 'short';
+        },
+      ],
+      [
+        "a supply view needs the List's declared supply",
+        (app) => {
+          listOf(app, purchaseList).list.views[0]!.supply = 'covered';
+        },
+      ],
+      [
+        "a row action's supply condition needs the List's declared supply",
+        (app) => {
+          const actions = listOf(app, purchaseList).list.rowActions as Array<{
+            when?: Json;
+          }>;
+          actions[0]!.when = { supply: 'covered' };
+        },
+      ],
+      [
+        // A view keeps covered or short rows only.
+        'closed supported schema',
+        (app) => {
+          sales(app).list.views[2]!.supply = 'incoming';
+        },
+      ],
+    ];
+  const outcomes = cases.map(([reason, mutate]) => [reason, refused(mutate)]);
+  for (const [reason, rule] of outcomes)
+    assert.match(
+      rule!,
+      new RegExp(reason!.replace(/[()']/gu, '.')),
+      `${reason!} -> ${rule!}`,
+    );
 });
 
 test('REPLENISHMENT: Stock by item and the Buying worklist read items in one company, with figures their statement adds up', () => {

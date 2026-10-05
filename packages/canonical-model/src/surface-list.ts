@@ -2,6 +2,7 @@ import type {
   SurfaceComposition,
   SurfaceList,
   SurfaceListFigures,
+  SurfaceListSupply,
   VersionedNormalizedApplicationPackage,
 } from './schemas.js';
 import {
@@ -79,8 +80,15 @@ export function validateSurfaceLists(
     const columns = new Map<string, SurfaceList['columns'][number]>(
       list.columns.map((column) => [column.columnId, column]),
     );
+    // The supply's figures are progress figures too: computed by the same
+    // statement, shown as they are and never sorted (SUPPLY-WARNINGS).
     const progressOutputs = new Set<string>(
-      list.progress ? Object.values(list.progress.outputs) : [],
+      list.progress
+        ? [
+            ...Object.values(list.progress.outputs),
+            ...Object.values(list.progress.supply?.outputs ?? {}),
+          ]
+        : [],
     );
     // Figures computed by the list statement, by id: sums and totals are
     // exact decimals, a band names a range by value, a latest is a record id.
@@ -266,6 +274,8 @@ export function validateSurfaceLists(
         filterable(filter.field, filter.value, view.viewId);
       if (view.open && !list.progress)
         fail(view.viewId, "an open view needs the List's declared progress");
+      if (view.supply && !list.progress?.supply)
+        fail(view.viewId, "a supply view needs the List's declared supply");
       if (view.band) {
         const values = bandValues.get(view.band.figure);
         unique(view.band.values, view.viewId, 'view band values');
@@ -306,6 +316,200 @@ export function validateSurfaceLists(
           'an overdue marker names a view that keeps rows before today on its own date',
         );
     }
+    // What the progress supply and the figures join by compiled identity: list
+    // queries the gateway authorizes per request, fields they select, and the
+    // relations between their entities.
+    const selects = (
+      source: { selections: readonly { field: { targetId: string } }[] },
+      fieldId: string,
+    ) =>
+      source.selections.some(
+        (selection) => String(selection.field.targetId) === fieldId,
+      );
+    const read = (targetId: string, subject = 'list figures read') => {
+      const source = queries.get(targetId);
+      if (
+        !source ||
+        source.queryType !== 'list' ||
+        source.lifecycle !== 'active' ||
+        source.tier !== 'q0' ||
+        ('readModel' in source && source.readModel)
+      )
+        return fail(
+          id,
+          `${subject} active q0 list queries without a read model`,
+        );
+      // The executor reads these rows within the List's own companies, so a
+      // company-scoped read needs a company-scoped List to be issued under.
+      if (
+        'legalEntityScope' in source &&
+        source.legalEntityScope &&
+        !('legalEntityScope' in query && query.legalEntityScope)
+      )
+        fail(id, `${subject} company rows only under a company List`);
+      return source;
+    };
+    const decimal = (
+      source: { selections: readonly { field: { targetId: string } }[] },
+      fieldId: string,
+      what = 'a figure sums',
+    ) => {
+      if (
+        !selects(source, fieldId) ||
+        fields.get(fieldId)?.fieldType.kind !== 'exactDecimalFieldType'
+      )
+        fail(id, `${what} an exact decimal its query selects`);
+    };
+    const parentOf = (
+      rows: ReturnType<typeof read>,
+      within: NonNullable<SurfaceListFigures['sums'][number]['within']>,
+      subject?: string,
+    ) => {
+      const parent = read(within.query.targetId, subject);
+      if ('relation' in within) {
+        const relation = relations.get(within.relation);
+        if (
+          !relation ||
+          relation.lifecycle !== 'active' ||
+          relation.sourceEntity.targetId !== rows.sourceEntity.targetId ||
+          relation.targetEntity.targetId !== parent.sourceEntity.targetId
+        )
+          fail(id, "a figure's parent is its rows' parent through a relation");
+      } else {
+        // The record whose id the rows hold as text, as a stock balance
+        // holds its location: a record id is 36 characters.
+        const reference = fields.get(within.reference);
+        if (
+          !selects(rows, within.reference) ||
+          reference?.entity.targetId !== rows.sourceEntity.targetId ||
+          reference.fieldType.kind !== 'textFieldType' ||
+          reference.fieldType.maximumLength < 36
+        )
+          fail(
+            id,
+            "a figure's parent is the record whose id its rows hold in a text field their query selects",
+          );
+      }
+      unique(within.values, id, 'figure parent values');
+      const state = fields.get(within.field);
+      if (
+        !selects(parent, within.field) ||
+        (state?.fieldType.kind === 'enumFieldType' &&
+          !within.values.every((value) =>
+            state.fieldType.kind === 'enumFieldType'
+              ? state.fieldType.options.some(
+                  (option) => option.optionId === value,
+                )
+              : false,
+          ))
+      )
+        fail(
+          id,
+          "a figure's parent values are values of a field its parent query selects",
+        );
+      return parent;
+    };
+    // The supply (SUPPLY-WARNINGS) joins the progress lines to what covers
+    // them and to their item's free stock, by compiled identity only: list
+    // queries the gateway authorizes per request, the fields they select and
+    // the relations between their entities. Anything else is refused here.
+    const validateSupply = (
+      supply: SurfaceListSupply,
+      lines: ReturnType<typeof read>,
+    ) => {
+      const reads = (targetId: string) => read(targetId, 'list supply reads');
+      const covering = reads(supply.coverage.query.targetId);
+      const toLine = relations.get(supply.coverage.relation);
+      if (
+        !toLine ||
+        toLine.lifecycle !== 'active' ||
+        toLine.sourceEntity.targetId !== covering.sourceEntity.targetId ||
+        toLine.targetEntity.targetId !== lines.sourceEntity.targetId
+      )
+        fail(
+          id,
+          "list supply coverage rows point at the List's lines through a relation",
+        );
+      const holding = reads(supply.coverage.related.query.targetId);
+      const toCovering = relations.get(supply.coverage.related.relation);
+      if (
+        !toCovering ||
+        toCovering.lifecycle !== 'active' ||
+        toCovering.sourceEntity.targetId !== holding.sourceEntity.targetId ||
+        toCovering.targetEntity.targetId !== covering.sourceEntity.targetId
+      )
+        fail(
+          id,
+          'list supply coverage holds what related rows pointing at it hold',
+        );
+      decimal(holding, supply.coverage.related.quantity, 'list supply adds');
+      // A line names what it asks for by its record id: 36 characters.
+      const item = fields.get(supply.item);
+      if (
+        !selects(lines, supply.item) ||
+        item?.entity.targetId !== lines.sourceEntity.targetId ||
+        item.fieldType.kind !== 'textFieldType' ||
+        item.fieldType.maximumLength < 36
+      )
+        fail(
+          id,
+          "list supply names a line's item by a text field the lines' query selects",
+        );
+      for (const sum of [...supply.free.plus, ...supply.free.minus]) {
+        const rows = reads(sum.rows.query.targetId);
+        const match = fields.get(sum.rows.match);
+        if (
+          !selects(rows, sum.rows.match) ||
+          match?.entity.targetId !== rows.sourceEntity.targetId ||
+          match.fieldType.kind !== 'textFieldType' ||
+          match.fieldType.maximumLength < 36
+        )
+          fail(
+            id,
+            "a supply sum's rows hold the item's id in a text field their query selects",
+          );
+        // `rows` adds a quantity, `related` related rows, `remaining` both.
+        if (
+          (sum.rows.quantity !== undefined) !== (sum.sum !== 'related') ||
+          (sum.related !== undefined) !== (sum.sum !== 'rows')
+        )
+          fail(id, 'a supply sum names exactly the parts it adds up');
+        if (sum.rows.quantity !== undefined)
+          decimal(rows, sum.rows.quantity, 'list supply adds');
+        if (sum.within) parentOf(rows, sum.within, 'list supply reads');
+        if (sum.related) {
+          const pointing = reads(sum.related.query.targetId);
+          const relation = relations.get(sum.related.relation);
+          if (
+            !relation ||
+            relation.lifecycle !== 'active' ||
+            relation.sourceEntity.targetId !== pointing.sourceEntity.targetId ||
+            relation.targetEntity.targetId !== rows.sourceEntity.targetId
+          )
+            fail(
+              id,
+              "a supply sum's related rows point at its rows through a relation",
+            );
+          decimal(pointing, sum.related.quantity, 'list supply adds');
+        }
+      }
+      if (supply.shortIn) {
+        unique(supply.shortIn.values, id, 'supply short values');
+        for (const value of supply.shortIn.values)
+          filterable(supply.shortIn.field, value, id);
+      }
+      // Omitted supply serves every view that keeps neither covered nor short
+      // rows; a List whose every view keeps them would serve nothing at all.
+      if (
+        supply.whenDenied === 'omit' &&
+        list.views.length > 0 &&
+        list.views.every((view) => view.supply)
+      )
+        fail(
+          id,
+          'a List that omits denied supply keeps a view that does not need it',
+        );
+    };
     if (list.progress) {
       const progress = list.progress;
       const source = (entry: typeof progress.lines) => {
@@ -362,7 +566,14 @@ export function validateSurfaceLists(
           id,
           'list progress done rows point at its lines through a relation',
         );
-      unique(Object.values(progress.outputs), id, 'progress outputs');
+      unique(
+        [
+          ...Object.values(progress.outputs),
+          ...Object.values(progress.supply?.outputs ?? {}),
+        ],
+        id,
+        'progress outputs',
+      );
       if (
         [...progressOutputs].some(
           (output) => fields.has(output) || columns.has(output),
@@ -389,6 +600,7 @@ export function validateSurfaceLists(
           id,
           'a List that omits denied progress keeps a view that does not need it',
         );
+      if (progress.supply) validateSupply(progress.supply, lines);
     }
     // Every figure names what the statement joins by compiled identity: list
     // queries the gateway authorizes per request, fields they select, and the
@@ -417,36 +629,6 @@ export function validateSurfaceLists(
         )
       )
         fail(id, 'list figures name no field, column or other output');
-      const selects = (
-        source: { selections: readonly { field: { targetId: string } }[] },
-        fieldId: string,
-      ) =>
-        source.selections.some(
-          (selection) => String(selection.field.targetId) === fieldId,
-        );
-      const read = (targetId: string) => {
-        const source = queries.get(targetId);
-        if (
-          !source ||
-          source.queryType !== 'list' ||
-          source.lifecycle !== 'active' ||
-          source.tier !== 'q0' ||
-          ('readModel' in source && source.readModel)
-        )
-          return fail(
-            id,
-            'list figures read active q0 list queries without a read model',
-          );
-        // The executor reads these rows within the List's own companies, so a
-        // company-scoped read needs a company-scoped List to be issued under.
-        if (
-          'legalEntityScope' in source &&
-          source.legalEntityScope &&
-          !('legalEntityScope' in query && query.legalEntityScope)
-        )
-          fail(id, 'list figures read company rows only under a company List');
-        return source;
-      };
       const matched = (rows: {
         query: { targetId: string };
         match: string;
@@ -465,67 +647,6 @@ export function validateSurfaceLists(
             "a figure's rows hold the listed record's id in a text field their query selects",
           );
         return source;
-      };
-      const decimal = (
-        source: { selections: readonly { field: { targetId: string } }[] },
-        fieldId: string,
-      ) => {
-        if (
-          !selects(source, fieldId) ||
-          fields.get(fieldId)?.fieldType.kind !== 'exactDecimalFieldType'
-        )
-          fail(id, 'a figure sums an exact decimal its query selects');
-      };
-      const parentOf = (
-        rows: ReturnType<typeof read>,
-        within: NonNullable<SurfaceListFigures['sums'][number]['within']>,
-      ) => {
-        const parent = read(within.query.targetId);
-        if ('relation' in within) {
-          const relation = relations.get(within.relation);
-          if (
-            !relation ||
-            relation.lifecycle !== 'active' ||
-            relation.sourceEntity.targetId !== rows.sourceEntity.targetId ||
-            relation.targetEntity.targetId !== parent.sourceEntity.targetId
-          )
-            fail(
-              id,
-              "a figure's parent is its rows' parent through a relation",
-            );
-        } else {
-          // The record whose id the rows hold as text, as a stock balance
-          // holds its location: a record id is 36 characters.
-          const reference = fields.get(within.reference);
-          if (
-            !selects(rows, within.reference) ||
-            reference?.entity.targetId !== rows.sourceEntity.targetId ||
-            reference.fieldType.kind !== 'textFieldType' ||
-            reference.fieldType.maximumLength < 36
-          )
-            fail(
-              id,
-              "a figure's parent is the record whose id its rows hold in a text field their query selects",
-            );
-        }
-        unique(within.values, id, 'figure parent values');
-        const state = fields.get(within.field);
-        if (
-          !selects(parent, within.field) ||
-          (state?.fieldType.kind === 'enumFieldType' &&
-            !within.values.every((value) =>
-              state.fieldType.kind === 'enumFieldType'
-                ? state.fieldType.options.some(
-                    (option) => option.optionId === value,
-                  )
-                : false,
-            ))
-        )
-          fail(
-            id,
-            "a figure's parent values are values of a field its parent query selects",
-          );
-        return parent;
       };
       const numbers = new Set<string>();
       for (const sum of figures.sums) {
@@ -664,10 +785,14 @@ export function validateSurfaceLists(
             );
         } else {
           const filters = action.when.filters ?? [];
-          if (filters.length === 0 && !action.when.open)
+          if (
+            filters.length === 0 &&
+            !action.when.open &&
+            action.when.supply === undefined
+          )
             fail(
               action.actionId,
-              'a row action condition names a filter or open',
+              'a row action condition names a filter, open or supply',
             );
           unique(
             filters.map((filter) => filter.field),
@@ -680,6 +805,11 @@ export function validateSurfaceLists(
             fail(
               action.actionId,
               "a row action's open condition needs the List's declared progress",
+            );
+          if (action.when.supply && !list.progress?.supply)
+            fail(
+              action.actionId,
+              "a row action's supply condition needs the List's declared supply",
             );
         }
         if (

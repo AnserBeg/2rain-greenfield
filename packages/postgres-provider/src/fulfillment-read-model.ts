@@ -1,4 +1,7 @@
-import { FULFILLMENT_READ_MODEL_BINDINGS } from '../../domain/src/sales/workspace.js';
+import {
+  FULFILLMENT_READ_MODEL_BINDINGS,
+  SALES_SHORTAGE_STATES,
+} from '../../domain/src/sales/workspace.js';
 import {
   fulfillmentDecimal,
   fulfillmentProjectionIdentity,
@@ -335,10 +338,10 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
         });
         const [header] = order.records;
         if (order.outcome !== 'exact' || !header) return null;
-        const open = [
-          `${ns}:state.sales_order_draft`,
-          `${ns}:state.sales_order_released`,
-        ].includes(
+        // The states the Sales orders List judges too (SUPPLY-WARNINGS).
+        const open = SALES_SHORTAGE_STATES.map(
+          (state) => `${ns}:state.sales_order_${state}`,
+        ).includes(
           String(
             header.values[
               `${ns}:derived_state_field.machine.sales_order_lifecycle`

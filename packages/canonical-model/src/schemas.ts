@@ -1385,63 +1385,6 @@ const listFieldValue = z.strictObject({
   field: CanonicalIdSchema,
   value: z.string().min(1).max(240),
 });
-/** A declared list query and the relation and quantity its rows add up. */
-const listProgressSource = z.strictObject({
-  query: compositionReference('queryReference'),
-  relation: CanonicalIdSchema,
-  quantity: CanonicalIdSchema,
-});
-/**
- * Per List row, what its active lines order and what their active done rows
- * record, summed by the list statement before the count and the page, and the
- * open remainder between them. `openIn` names the row states in which anything
- * is open; in any other state open reads 0. The outputs are the ids the row's
- * values carry them under: shown, never sorted, searched or filtered but by
- * a view's `open`. Optional v6 key (ADR-0047 §7).
- */
-const listProgress = z.strictObject({
-  lines: listProgressSource,
-  done: listProgressSource,
-  openIn: z
-    .strictObject({
-      field: CanonicalIdSchema,
-      values: z.array(z.string().min(1).max(240)).min(1).max(8),
-    })
-    .optional(),
-  outputs: z.strictObject({
-    ordered: CanonicalIdSchema,
-    done: CanonicalIdSchema,
-    open: CanonicalIdSchema,
-  }),
-  /**
-   * `omit`: the figures are supplementary. When current policy denies either
-   * summed query, the List is read without them -- its progress columns read
-   * "—" -- and only a view that keeps open rows is refused. Absent, a denial
-   * refuses the whole List, as a List whose progress is its purpose must.
-   * Optional v6 key (ADR-0047 §7).
-   */
-  whenDenied: z.literal('omit').optional(),
-});
-/**
- * A link from a List row to its record page, at one of the page's dataset
- * sections. The first action (by order) whose condition holds is the row's,
- * judged from server-projected values as an overdue date is; the record page
- * re-checks everything it offers there. Optional v6 key (ADR-0047 §7).
- */
-const listRowAction = z.strictObject({
-  actionId: CanonicalIdSchema,
-  label: LabelSchema,
-  orderKey: boundedOrderKey,
-  /** Exact stored values the row must hold, and something open when `open`. */
-  when: z
-    .strictObject({
-      filters: z.array(listFieldValue).max(3).optional(),
-      open: z.literal(true).optional(),
-    })
-    .optional(),
-  /** A dataset of the record page's composition, opened at its section. */
-  section: CanonicalIdSchema.optional(),
-});
 /**
  * The rows of a declared list query that hold the listed record's id in one of
  * their own text fields -- an item's stock balances, reservations and order
@@ -1478,6 +1421,128 @@ const listFigureRelated = z.strictObject({
   query: compositionReference('queryReference'),
   relation: CanonicalIdSchema,
   quantity: CanonicalIdSchema,
+});
+/**
+ * One part of an item's free stock: rows holding the item's id, added up as a
+ * figure sum adds them -- their quantity, their related rows' quantity, or
+ * what remains of each -- only where their parent holds one of `within`'s
+ * values, as stock at a usable location.
+ */
+const listSupplySum = z.strictObject({
+  rows: listFigureRows,
+  within: listFigureWithin.optional(),
+  related: listFigureRelated.optional(),
+  sum: z.enum(['rows', 'related', 'remaining']),
+});
+/**
+ * Per List row, what reservations still hold for its open lines and what
+ * those lines are short of now (SUPPLY-WARNINGS, owner ruling R1), computed
+ * by the list statement beside the progress it extends, before the count and
+ * the page. A line's coverage is what the `coverage` rows pointing at it still
+ * hold through their related rows -- a reservation of the line and what its
+ * balance still holds. A line's uncovered quantity is its open quantity (its
+ * progress quantity less its done rows') less its coverage, never below zero.
+ * `item` is the lines' text field holding the id of what a line asks for; the
+ * free stock of an item is its `free.plus` sums less its `free.minus` sums --
+ * on hand at usable locations less what live reservations hold there. Per
+ * item, the free stock (never below zero) is allocated to the row's uncovered
+ * quantity in line order and what it cannot cover is short, so two lines of
+ * one item share it; incoming supply is not counted. Outputs: `covered`, the
+ * coverage of lines with something open, each at most what the line has
+ * open; `short`, what the row is short in `shortIn` states, 0 in any other.
+ * Shown, never sorted, searched or filtered but by a view's `supply`.
+ * Optional v6 key (ADR-0047 §7).
+ */
+const listProgressSupply = z.strictObject({
+  coverage: z.strictObject({
+    query: compositionReference('queryReference'),
+    relation: CanonicalIdSchema,
+    related: listFigureRelated,
+  }),
+  item: CanonicalIdSchema,
+  free: z.strictObject({
+    plus: z.array(listSupplySum).min(1).max(4),
+    minus: z.array(listSupplySum).max(4),
+  }),
+  shortIn: z
+    .strictObject({
+      field: CanonicalIdSchema,
+      values: z.array(z.string().min(1).max(240)).min(1).max(8),
+    })
+    .optional(),
+  outputs: z.strictObject({
+    covered: CanonicalIdSchema,
+    short: CanonicalIdSchema,
+  }),
+  /**
+   * `omit`: supplementary, as progress may be. When current policy denies a
+   * query the supply reads, the List is read without it -- its columns read
+   * "—" -- and only a view that keeps covered or short rows is refused.
+   */
+  whenDenied: z.literal('omit').optional(),
+});
+/** A declared list query and the relation and quantity its rows add up. */
+const listProgressSource = z.strictObject({
+  query: compositionReference('queryReference'),
+  relation: CanonicalIdSchema,
+  quantity: CanonicalIdSchema,
+});
+/**
+ * Per List row, what its active lines order and what their active done rows
+ * record, summed by the list statement before the count and the page, and the
+ * open remainder between them. `openIn` names the row states in which anything
+ * is open; in any other state open reads 0. The outputs are the ids the row's
+ * values carry them under: shown, never sorted, searched or filtered but by
+ * a view's `open`. Optional v6 key (ADR-0047 §7).
+ */
+const listProgress = z.strictObject({
+  lines: listProgressSource,
+  done: listProgressSource,
+  openIn: z
+    .strictObject({
+      field: CanonicalIdSchema,
+      values: z.array(z.string().min(1).max(240)).min(1).max(8),
+    })
+    .optional(),
+  outputs: z.strictObject({
+    ordered: CanonicalIdSchema,
+    done: CanonicalIdSchema,
+    open: CanonicalIdSchema,
+  }),
+  /**
+   * `omit`: the figures are supplementary. When current policy denies either
+   * summed query, the List is read without them -- its progress columns read
+   * "—" -- and only a view that keeps open rows is refused. Absent, a denial
+   * refuses the whole List, as a List whose progress is its purpose must.
+   * Optional v6 key (ADR-0047 §7).
+   */
+  whenDenied: z.literal('omit').optional(),
+  supply: listProgressSupply.optional(),
+});
+/**
+ * A link from a List row to its record page, at one of the page's dataset
+ * sections. The first action (by order) whose condition holds is the row's,
+ * judged from server-projected values as an overdue date is; the record page
+ * re-checks everything it offers there. Optional v6 key (ADR-0047 §7).
+ */
+const listRowAction = z.strictObject({
+  actionId: CanonicalIdSchema,
+  label: LabelSchema,
+  orderKey: boundedOrderKey,
+  /**
+   * Exact stored values the row must hold, something open when `open`, and
+   * something covered or short by its progress's supply when `supply`
+   * (optional v6 key, SUPPLY-WARNINGS).
+   */
+  when: z
+    .strictObject({
+      filters: z.array(listFieldValue).max(3).optional(),
+      open: z.literal(true).optional(),
+      supply: z.enum(['covered', 'short']).optional(),
+    })
+    .optional(),
+  /** A dataset of the record page's composition, opened at its section. */
+  section: CanonicalIdSchema.optional(),
 });
 /**
  * One per-row sum: `rows` adds the rows' quantity, `related` the related rows'
@@ -1609,6 +1674,13 @@ export const SurfaceListSchema = z.strictObject({
             values: z.array(CanonicalIdSchema).min(1).max(4),
           })
           .optional(),
+        /**
+         * Only rows whose declared supply leaves something covered by
+         * reservations (`covered`) or something short (`short`), judged by
+         * the list statement before the count and the page. Optional v6 key
+         * (SUPPLY-WARNINGS, ADR-0047 §7).
+         */
+        supply: z.enum(['covered', 'short']).optional(),
       }),
     )
     .max(8),
@@ -1639,6 +1711,7 @@ export const SurfaceListSchema = z.strictObject({
 export type SurfaceList = z.infer<typeof SurfaceListSchema>;
 export type SurfaceListProgress = NonNullable<SurfaceList['progress']>;
 export type SurfaceListFigures = NonNullable<SurfaceList['figures']>;
+export type SurfaceListSupply = NonNullable<SurfaceListProgress['supply']>;
 export type SurfaceListRowAction = NonNullable<
   SurfaceList['rowActions']
 >[number];

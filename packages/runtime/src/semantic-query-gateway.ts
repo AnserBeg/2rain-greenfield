@@ -46,6 +46,7 @@ import {
   requireSharedListEcho,
   requireSharedListResult,
   SharedListContractError,
+  sharedListSupplyReads,
   type AuthorizedSharedListFigures,
   type AuthorizedSharedListProgress,
   type AuthorizedSharedListRelatedFilter,
@@ -912,10 +913,86 @@ async function authorizeSharedListProjection(
       if (predicateReceipt.outcome !== 'accepted') return null;
       entityIds[role] = summed.sourceEntityId;
     }
+    // The supply (SUPPLY-WARNINGS): every query it reads, with the fields and
+    // relations it names there -- one current-policy decision per query and
+    // request, for the companies the List reads, as the figures are. A denial
+    // refuses by that query's name; the web runtime may read the List again
+    // without the supply where it is declared supplementary.
+    const supply = query.progress.supply;
+    let supplyEntityIds: Record<string, string> | undefined;
+    if (supply) {
+      const lines = registeredQueryFromPinnedView(
+        view,
+        query.progress.lines.queryId,
+      );
+      if (
+        !lines?.selections.some(
+          (selection) => selection.fieldId === supply.itemFieldId,
+        )
+      )
+        throw new SharedListContractError(
+          'LIST_FIELD_NOT_AUTHORIZED',
+          "list supply names a line's item by a field its lines' query selects",
+          supply.itemFieldId,
+        );
+      supplyEntityIds = {};
+      for (const [queryId, read] of sharedListSupplyReads(supply)) {
+        const supplied = registeredQueryFromPinnedView(view, queryId);
+        if (
+          !supplied ||
+          supplied.lifecycle !== 'active' ||
+          supplied.tier !== 'q0' ||
+          supplied.queryType !== 'list' ||
+          supplied.readModel !== undefined ||
+          ![...read.fieldIds].every((fieldId) =>
+            supplied.selections.some(
+              (selection) => selection.fieldId === fieldId,
+            ),
+          )
+        )
+          throw new SharedListContractError(
+            'LIST_FIELD_NOT_AUTHORIZED',
+            'list supply must read selected fields of active pinned list queries',
+            queryId,
+          );
+        const decision = await authorizeCurrentPolicy(
+          currentPolicy,
+          view,
+          supplied.permissionId,
+          Object.freeze({
+            arguments: Object.freeze({
+              fieldIds: Object.freeze([...read.fieldIds].sort()),
+              relationIds: Object.freeze([...read.relationIds].sort()),
+              ...(scope && supplied.legalEntityScope !== undefined
+                ? { [scope.parameterId]: Object.freeze([...scope.members]) }
+                : {}),
+            }),
+            kind: 'registeredSemanticListSupplyPolicyInput',
+            queryId: supplied.queryId,
+            requestId: view.requestId,
+            schemaVersion: QUERY_POLICY_INPUT_VERSION,
+          }),
+        );
+        if (decision.decision === 'DENY') {
+          await recordDenied(supplied.queryId, decision.policyVersion);
+          throw new SemanticQueryPolicyDeniedError(supplied.queryId, view);
+        }
+        const predicateReceipt = inspectPredicateForExecution(supplied.filter);
+        observePredicateReceiptSafely(
+          observePredicateReceipt,
+          predicateReceipt,
+        );
+        if (predicateReceipt.outcome !== 'accepted') return null;
+        supplyEntityIds[supplied.queryId] = supplied.sourceEntityId;
+      }
+    }
     progress = Object.freeze({
       ...query.progress,
       doneEntityId: entityIds.done,
       linesEntityId: entityIds.lines,
+      ...(supplyEntityIds
+        ? { supplyEntityIds: Object.freeze(supplyEntityIds) }
+        : {}),
     });
   }
   let figures: AuthorizedSharedListFigures | undefined;

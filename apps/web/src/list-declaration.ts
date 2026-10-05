@@ -154,6 +154,13 @@ interface ListArgumentOptions {
    * only open rows cannot be asked this way -- it would count every row.
    */
   readonly withoutProgress?: boolean;
+  /**
+   * The progress supply withheld by current policy (SUPPLY-WARNINGS,
+   * `whenDenied: 'omit'`): the progress is sent without it, so its figures
+   * read "—". A view that keeps covered or short rows cannot be asked this
+   * way, and neither can it without the progress the supply extends.
+   */
+  readonly withoutSupply?: boolean;
 }
 
 const DAY_MILLISECONDS = 86_400_000;
@@ -170,10 +177,93 @@ export function startOfTodayUtc(now: Date): Date {
 }
 
 /**
- * The progress argument a declared List sends, with a view's `open`. Inferred
- * rather than annotated, so it stays a plain JSON argument value.
+ * One part of a supply's free stock in the list argument's shape -- a figure
+ * sum without an id of its own. Inferred, so it stays a plain JSON value.
  */
-function progressArgument(list: SurfaceList, open: boolean) {
+function supplySumArgument(
+  entry: NonNullable<
+    NonNullable<SurfaceList['progress']>['supply']
+  >['free']['plus'][number],
+) {
+  return Object.freeze({
+    ...(entry.related
+      ? {
+          related: Object.freeze({
+            fieldId: entry.related.quantity,
+            queryId: entry.related.query.targetId,
+            relationId: entry.related.relation,
+          }),
+        }
+      : {}),
+    rows: Object.freeze({
+      matchFieldId: entry.rows.match,
+      queryId: entry.rows.query.targetId,
+      ...(entry.rows.quantity ? { quantityFieldId: entry.rows.quantity } : {}),
+    }),
+    sum: entry.sum,
+    ...(entry.within
+      ? {
+          within: Object.freeze({
+            fieldId: entry.within.field,
+            queryId: entry.within.query.targetId,
+            ...('relation' in entry.within
+              ? { relationId: entry.within.relation }
+              : { referenceFieldId: entry.within.reference }),
+            values: Object.freeze([...entry.within.values]),
+          }),
+        }
+      : {}),
+  });
+}
+
+/**
+ * The supply argument a declared List sends with its progress (SUPPLY-
+ * WARNINGS), with a view's `supply` as `keep`. Inferred rather than
+ * annotated, so it stays a plain JSON argument value.
+ */
+function supplyArgument(
+  supply: NonNullable<NonNullable<SurfaceList['progress']>['supply']>,
+  keep: 'covered' | 'short' | undefined,
+) {
+  return Object.freeze({
+    coverage: Object.freeze({
+      queryId: supply.coverage.query.targetId,
+      related: Object.freeze({
+        fieldId: supply.coverage.related.quantity,
+        queryId: supply.coverage.related.query.targetId,
+        relationId: supply.coverage.related.relation,
+      }),
+      relationId: supply.coverage.relation,
+    }),
+    free: Object.freeze({
+      minus: Object.freeze(supply.free.minus.map(supplySumArgument)),
+      plus: Object.freeze(supply.free.plus.map(supplySumArgument)),
+    }),
+    itemFieldId: supply.item,
+    ...(keep ? { keep } : {}),
+    outputs: Object.freeze({ ...supply.outputs }),
+    ...(supply.shortIn
+      ? {
+          shortIn: Object.freeze({
+            fieldId: supply.shortIn.field,
+            values: Object.freeze([...supply.shortIn.values]),
+          }),
+        }
+      : {}),
+  });
+}
+
+/**
+ * The progress argument a declared List sends, with a view's `open` and its
+ * supply's `keep` -- or without its supply when current policy withholds it.
+ * Inferred rather than annotated, so it stays a plain JSON argument value.
+ */
+function progressArgument(
+  list: SurfaceList,
+  open: boolean,
+  keep: 'covered' | 'short' | undefined,
+  withoutSupply: boolean,
+) {
   const progress = list.progress;
   if (!progress) return undefined;
   return Object.freeze({
@@ -197,6 +287,9 @@ function progressArgument(list: SurfaceList, open: boolean) {
       : {}),
     ...(open ? { openOnly: true as const } : {}),
     outputs: Object.freeze({ ...progress.outputs }),
+    ...(progress.supply && !withoutSupply
+      ? { supply: supplyArgument(progress.supply, keep) }
+      : {}),
   });
 }
 
@@ -416,9 +509,16 @@ export function declaredListArguments(
   // three in the statement, never over a fetched page.
   if (options.withoutProgress && view?.open)
     throw new Error('an open view is never read without its progress');
+  if ((options.withoutProgress || options.withoutSupply) && view?.supply)
+    throw new Error('a supply view is never read without its supply');
   const progress = options.withoutProgress
     ? undefined
-    : progressArgument(list, view?.open === true);
+    : progressArgument(
+        list,
+        view?.open === true,
+        view?.supply,
+        options.withoutSupply === true,
+      );
   // Figures ride every request too: a count, a page and an export read the
   // same figures, and a view's band narrows all three in the statement.
   const figures = figuresArgument(list, view?.band);
@@ -547,6 +647,7 @@ export function overdueDays(
   )
     return null;
   if (view.open && !somethingOpen(list, record)) return null;
+  if (view.supply && !somethingSupplied(list, record, view.supply)) return null;
   const value = record.values[view.before.field];
   const instant = typeof value === 'string' ? Date.parse(value) : Number.NaN;
   const anchor = startOfTodayUtc(now).getTime();
@@ -572,16 +673,68 @@ function somethingOpen(list: SurfaceList, record: SemanticRecordDto): boolean {
 }
 
 /**
+ * Whether the row's server-projected supply leaves something covered, or
+ * something short: an unsigned exact decimal with a digit other than zero. A
+ * withheld or absent figure states neither -- nothing unstated is guessed.
+ */
+function somethingSupplied(
+  list: SurfaceList,
+  record: SemanticRecordDto,
+  kind: 'covered' | 'short',
+): boolean {
+  const supply = list.progress?.supply;
+  const value = supply ? record.values[supply.outputs[kind]] : undefined;
+  return (
+    typeof value === 'string' &&
+    /^\d+(?:\.\d+)?$/u.test(value) &&
+    /[1-9]/u.test(value)
+  );
+}
+
+/**
+ * Whether a declared column shows what the row is short of and the row is
+ * short (SUPPLY-WARNINGS): such a cell is marked, as the reference marks an
+ * exception "!", judged from the server-projected figure alone.
+ */
+export function shortMarked(
+  list: SurfaceList,
+  column: DeclaredListColumn,
+  record: SemanticRecordDto,
+): boolean {
+  const supply = list.progress?.supply;
+  return (
+    supply !== undefined &&
+    column.field === supply.outputs.short &&
+    somethingSupplied(list, record, 'short')
+  );
+}
+
+/**
  * Whether a view can be read only with the List's progress: it keeps the
- * rows with something open, which only the list statement can judge. Without
- * the progress such a view is refused; every other view still serves.
+ * rows with something open -- or covered or short, which the progress's
+ * supply judges -- which only the list statement can judge. Without the
+ * progress such a view is refused; every other view still serves.
  */
 export function viewNeedsProgress(
   list: SurfaceList,
   viewId: string | null,
 ): boolean {
+  const view = list.views.find((candidate) => candidate.viewId === viewId);
+  return view?.open === true || view?.supply !== undefined;
+}
+
+/**
+ * Whether a view can be read only with the List's supply: it keeps the rows
+ * with something covered or short. Without the supply such a view is
+ * refused; every other view still serves (SUPPLY-WARNINGS).
+ */
+export function viewNeedsSupply(
+  list: SurfaceList,
+  viewId: string | null,
+): boolean {
   return (
-    list.views.find((candidate) => candidate.viewId === viewId)?.open === true
+    list.views.find((candidate) => candidate.viewId === viewId)?.supply !==
+    undefined
   );
 }
 
@@ -608,6 +761,34 @@ export function withheldProgressQuery(
   return summed.includes(error.queryId) ? error.queryId : null;
 }
 
+/**
+ * The supply query current policy withheld from a List whose supply is
+ * supplementary (`whenDenied: 'omit'`, SUPPLY-WARNINGS), named by the
+ * gateway's refusal; `null` for anything else -- the List's own query, its
+ * progress, a label, or a supply that is the List's purpose.
+ */
+export function withheldSupplyQuery(
+  list: SurfaceList,
+  error: unknown,
+): string | null {
+  const supply = list.progress?.supply;
+  if (
+    supply?.whenDenied !== 'omit' ||
+    !(error instanceof SemanticQueryPolicyDeniedError)
+  )
+    return null;
+  const read: readonly string[] = [
+    supply.coverage.query.targetId,
+    supply.coverage.related.query.targetId,
+    ...[...supply.free.plus, ...supply.free.minus].flatMap((sum) => [
+      sum.rows.query.targetId,
+      ...(sum.within ? [sum.within.query.targetId] : []),
+      ...(sum.related ? [sum.related.query.targetId] : []),
+    ]),
+  ];
+  return read.includes(error.queryId) ? error.queryId : null;
+}
+
 export type DeclaredListRowAction = SurfaceListRowAction;
 
 export function orderedRowActions(
@@ -622,9 +803,10 @@ export function orderedRowActions(
 
 /**
  * The row's action: the first declared (in order) whose condition holds --
- * its exact filters and, for `open`, something open -- judged from the row's
- * server-projected values, as an overdue date is. With its progress withheld
- * a row states nothing open, so an action that needs it is not the row's.
+ * its exact filters, for `open` something open, and for `supply` something
+ * covered or short -- judged from the row's server-projected values, as an
+ * overdue date is. With its progress or supply withheld a row states nothing
+ * open, covered or short, so an action that needs it is not the row's.
  */
 export function declaredRowAction(
   list: SurfaceList,
@@ -636,7 +818,9 @@ export function declaredRowAction(
         (action.when?.filters ?? []).every(
           (filter) => record.values[filter.field] === filter.value,
         ) &&
-        (!action.when?.open || somethingOpen(list, record)),
+        (!action.when?.open || somethingOpen(list, record)) &&
+        (action.when?.supply === undefined ||
+          somethingSupplied(list, record, action.when.supply)),
     ) ?? null
   );
 }

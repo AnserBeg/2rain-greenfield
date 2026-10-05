@@ -40356,12 +40356,21 @@
             "sortable": false
           },
           {
-            "columnId": "northstar.app:list_column.sales_order_list_currency",
-            "label": "Currency",
+            "columnId": "northstar.app:list_column.sales_order_list_short",
+            "label": "Short",
             "orderKey": 100,
-            "field": "northstar.app:field.sales_order_currency",
+            "field": "northstar.app:list_output.sales_order_list_short",
             "role": "value",
             "priority": 9,
+            "sortable": false
+          },
+          {
+            "columnId": "northstar.app:list_column.sales_order_list_currency",
+            "label": "Currency",
+            "orderKey": 110,
+            "field": "northstar.app:field.sales_order_currency",
+            "role": "value",
+            "priority": 10,
             "sortable": true
           }
         ],
@@ -40391,9 +40400,33 @@
             "open": true
           },
           {
+            "viewId": "northstar.app:list_view.sales_order_list_blocked",
+            "label": "Blocked by supply",
+            "orderKey": 30,
+            "filters": [
+              {
+                "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle",
+                "value": "northstar.app:state.sales_order_released"
+              }
+            ],
+            "supply": "short"
+          },
+          {
+            "viewId": "northstar.app:list_view.sales_order_list_reserved",
+            "label": "Reserved",
+            "orderKey": 40,
+            "filters": [
+              {
+                "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle",
+                "value": "northstar.app:state.sales_order_released"
+              }
+            ],
+            "supply": "covered"
+          },
+          {
             "viewId": "northstar.app:list_view.sales_order_list_draft",
             "label": "Draft",
-            "orderKey": 30,
+            "orderKey": 50,
             "filters": [
               {
                 "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle",
@@ -40404,7 +40437,7 @@
           {
             "viewId": "northstar.app:list_view.sales_order_list_released",
             "label": "Released",
-            "orderKey": 40,
+            "orderKey": 60,
             "filters": [
               {
                 "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle",
@@ -40415,7 +40448,7 @@
           {
             "viewId": "northstar.app:list_view.sales_order_list_closed",
             "label": "Closed",
-            "orderKey": 50,
+            "orderKey": 70,
             "filters": [
               {
                 "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle",
@@ -40426,7 +40459,7 @@
           {
             "viewId": "northstar.app:list_view.sales_order_list_cancelled",
             "label": "Cancelled",
-            "orderKey": 60,
+            "orderKey": 80,
             "filters": [
               {
                 "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle",
@@ -40477,13 +40510,118 @@
             "done": "northstar.app:list_output.sales_order_list_shipped",
             "open": "northstar.app:list_output.sales_order_list_open"
           },
-          "whenDenied": "omit"
+          "whenDenied": "omit",
+          "supply": {
+            "coverage": {
+              "query": {
+                "kind": "queryReference",
+                "schemaVersion": "v6",
+                "targetId": "northstar.app:query.workspace_reservations"
+              },
+              "relation": "northstar.app:relation.reservation_order_line",
+              "related": {
+                "query": {
+                  "kind": "queryReference",
+                  "schemaVersion": "v6",
+                  "targetId": "northstar.app:query.reservation_balance_list"
+                },
+                "relation": "northstar.app:relation.reservation_balance_reservation",
+                "quantity": "northstar.app:field.reservation_balance_remaining_quantity"
+              }
+            },
+            "item": "northstar.app:field.sales_order_line_item_id",
+            "free": {
+              "plus": [
+                {
+                  "rows": {
+                    "query": {
+                      "kind": "queryReference",
+                      "schemaVersion": "v6",
+                      "targetId": "northstar.app:query.workspace_stock"
+                    },
+                    "match": "northstar.app:field.posted_stock_balance_item_id",
+                    "quantity": "northstar.app:field.posted_stock_balance_posted_quantity"
+                  },
+                  "within": {
+                    "reference": "northstar.app:field.posted_stock_balance_location_id",
+                    "query": {
+                      "kind": "queryReference",
+                      "schemaVersion": "v6",
+                      "targetId": "northstar.app:query.location_list"
+                    },
+                    "field": "northstar.app:field.location_status",
+                    "values": ["northstar.app:option.location_status_usable"]
+                  },
+                  "sum": "rows"
+                }
+              ],
+              "minus": [
+                {
+                  "rows": {
+                    "query": {
+                      "kind": "queryReference",
+                      "schemaVersion": "v6",
+                      "targetId": "northstar.app:query.workspace_stock_reservations"
+                    },
+                    "match": "northstar.app:field.reservation_item_id"
+                  },
+                  "within": {
+                    "reference": "northstar.app:field.reservation_location_id",
+                    "query": {
+                      "kind": "queryReference",
+                      "schemaVersion": "v6",
+                      "targetId": "northstar.app:query.location_list"
+                    },
+                    "field": "northstar.app:field.location_status",
+                    "values": ["northstar.app:option.location_status_usable"]
+                  },
+                  "related": {
+                    "query": {
+                      "kind": "queryReference",
+                      "schemaVersion": "v6",
+                      "targetId": "northstar.app:query.reservation_balance_list"
+                    },
+                    "relation": "northstar.app:relation.reservation_balance_reservation",
+                    "quantity": "northstar.app:field.reservation_balance_remaining_quantity"
+                  },
+                  "sum": "related"
+                }
+              ]
+            },
+            "shortIn": {
+              "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle",
+              "values": [
+                "northstar.app:state.sales_order_draft",
+                "northstar.app:state.sales_order_released"
+              ]
+            },
+            "outputs": {
+              "covered": "northstar.app:list_output.sales_order_list_covered",
+              "short": "northstar.app:list_output.sales_order_list_short"
+            },
+            "whenDenied": "omit"
+          }
         },
         "rowActions": [
           {
+            "actionId": "northstar.app:list_row_action.sales_order_list_post_shipment",
+            "label": "Post shipment",
+            "orderKey": 10,
+            "when": {
+              "filters": [
+                {
+                  "field": "northstar.app:derived_state_field.machine.sales_order_lifecycle",
+                  "value": "northstar.app:state.sales_order_released"
+                }
+              ],
+              "supply": "covered"
+            },
+            "section": "northstar.app:dataset.fulfillment_lines"
+          },
+          {
             "actionId": "northstar.app:list_row_action.sales_order_list_fulfill",
             "label": "Fulfill",
-            "orderKey": 10,
+            "orderKey": 20,
             "when": {
               "filters": [
                 {
@@ -40498,7 +40636,7 @@
           {
             "actionId": "northstar.app:list_row_action.sales_order_list_view",
             "label": "View",
-            "orderKey": 20
+            "orderKey": 30
           }
         ]
       }

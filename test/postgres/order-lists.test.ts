@@ -270,9 +270,15 @@ test(
       assert.equal(toShip.length, 2);
       const sales = await page(salesUrl(fixture), 'sales_order_list');
       assert.equal(sales.status, 200);
+      // SUPPLY-WARNINGS: the shipping order still holds 1 of its reserved 4
+      // for its open line, and free stock (10 on hand less 3 shipped less
+      // that 1) covers everything open, so one order is reserved and none
+      // is blocked (order-lists-supply.test.ts judges the supply itself).
       assert.deepEqual(sales.counts, {
         [salesView('all')]: truth.length,
         [salesView('to_ship')]: toShip.length,
+        [salesView('blocked')]: 0,
+        [salesView('reserved')]: 1,
         [salesView('draft')]: byState('draft'),
         [salesView('released')]: byState('released'),
         [salesView('closed')]: byState('closed'),
@@ -284,9 +290,11 @@ test(
       assert.equal(sales.cell(shipping, 'shipped'), '3');
       assert.equal(sales.cell(shipping, 'open'), '5');
       assert.equal(sales.cell(scenario.sales.draft.recordId, 'open'), '0');
-      // The row's work: its order's fulfillment section.
+      // The row's work: its order's fulfillment section -- "Post shipment"
+      // while reserved stock is still to ship, else "Fulfill".
+      assert.equal(sales.action(untouched.recordId)?.label, 'Fulfill');
       const fulfill = sales.action(shipping)!;
-      assert.equal(fulfill.label, 'Fulfill');
+      assert.equal(fulfill.label, 'Post shipment');
       const target = new URL(fulfill.href, fixture.app.baseUrl);
       assert.equal(target.searchParams.get('record'), shipping);
       assert.equal(target.hash, `#${ns}:dataset.fulfillment_lines`);
@@ -317,7 +325,7 @@ test(
         .split('\r\n');
       assert.equal(
         csv[0],
-        'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Currency',
+        'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Short,Currency',
       );
       assert.equal(csv.length - 1, toShip.length);
 
@@ -412,7 +420,7 @@ test(
       assert.equal(withheld.status, 200);
       assert.doesNotMatch(withheld.html, /data-diagnostic-code=/u);
       assert.equal(withheld.total, truth.length);
-      for (const local of ['ordered', 'shipped', 'open'])
+      for (const local of ['ordered', 'shipped', 'open', 'short'])
         assert.equal(withheld.cell(shipping, local), WITHHELD, local);
       assert.match(
         withheld.html,
@@ -422,6 +430,8 @@ test(
         ),
       );
       assert.equal(withheld.counts[salesView('to_ship')], null);
+      assert.equal(withheld.counts[salesView('blocked')], null);
+      assert.equal(withheld.counts[salesView('reserved')], null);
       assert.equal(withheld.counts[salesView('released')], byState('released'));
       assert.equal(withheld.action(shipping)?.label, 'View');
       const refused = await page(
