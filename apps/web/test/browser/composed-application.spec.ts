@@ -994,11 +994,13 @@ async function inventoryNavigationJourney(
       ':scope > a > span:nth-child(2), :scope > details > summary > span:nth-child(2) > .nav-group-label',
     ),
   ).toHaveText(['Sales', 'Purchasing', 'Inventory', 'Party', 'More']);
-  // Sales lists its invoices beside its orders (ruling C), Purchasing its
-  // expected receipts (PURCHASING-PARITY) and its bills (PAYABLES) beside its
-  // orders and Catalog its tax codes beside its items (ruling B).
+  // Sales lists its invoices (ruling C) and its returns (RETURNS) beside its
+  // orders, Purchasing its expected receipts (PURCHASING-PARITY) and its
+  // bills (PAYABLES) beside its orders and Catalog its tax codes beside its
+  // items (ruling B).
   await expect(navigation.locator('a > span:nth-child(2)')).toHaveText([
     'Invoices',
+    'Returns',
     'Sales orders',
     'Expected receipts',
     'Purchase orders',

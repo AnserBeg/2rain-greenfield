@@ -95,6 +95,8 @@ const ENTITY_OWNED_QUERY_FAMILIES = new Set([
   'customer_invoice_line',
   'customer_payment',
   'customer_credit',
+  'customer_return',
+  'customer_return_line',
 ]);
 
 /** The receivables documents: each is written as a draft and posted once. */
@@ -123,6 +125,9 @@ function ids(namespace: string) {
       customerInvoiceLine: entity('customer_invoice_line'),
       customerPayment: entity('customer_payment'),
       customerCredit: entity('customer_credit'),
+      // Ruling D: goods back from a customer against a shipped line.
+      customerReturn: entity('customer_return'),
+      customerReturnLine: entity('customer_return_line'),
     },
     fieldIds: {
       salesOrder: {
@@ -183,6 +188,10 @@ function ids(namespace: string) {
       invoiceLineOrderLine: `${namespace}:relation.customer_invoice_line_order_line`,
       paymentInvoice: `${namespace}:relation.customer_payment_invoice`,
       creditInvoice: `${namespace}:relation.customer_credit_invoice`,
+      returnOrder: `${namespace}:relation.customer_return_order`,
+      returnSupersedes: `${namespace}:relation.customer_return_supersedes`,
+      returnLineReturn: `${namespace}:relation.customer_return_line_return`,
+      returnLineOrderLine: `${namespace}:relation.customer_return_line_order_line`,
     },
     stateFieldId: derivedStateFieldId(machineId),
     stateIds: Object.fromEntries(
@@ -227,6 +236,12 @@ export function salesModuleDefinition(
     ['customer_invoice_line', 'Invoice line', entityIds.customerInvoiceLine],
     ['customer_payment', 'Payment', entityIds.customerPayment],
     ['customer_credit', 'Credit', entityIds.customerCredit],
+    ['customer_return', 'Customer return', entityIds.customerReturn],
+    [
+      'customer_return_line',
+      'Customer return line',
+      entityIds.customerReturnLine,
+    ],
   ] as const;
 
   return {
@@ -346,6 +361,7 @@ export function salesModuleDefinition(
       ),
       ...fulfillmentFields(definitionIds),
       ...receivablesFields(definitionIds),
+      ...returnFields(definitionIds),
       field(
         definitionIds,
         entityIds.salesOrder,
@@ -595,6 +611,30 @@ export function salesModuleDefinition(
       fulfillmentOperation(definitionIds, 'reservation', 'reserve'),
       fulfillmentOperation(definitionIds, 'reservation', 'release'),
       fulfillmentOperation(definitionIds, 'shipment', 'post'),
+      // Ruling D: a return is written and changed only while a draft, and
+      // posts once through the fulfillment capability's return family, which
+      // bounds it by what was shipped under the order's lock.
+      ...operations(
+        definitionIds,
+        'customer_return',
+        entityIds.customerReturn,
+        fieldComparison(
+          `${namespace}:field.customer_return_state`,
+          `${namespace}:option.customer_return_state_draft`,
+        ),
+      ),
+      ...operations(
+        definitionIds,
+        'customer_return_line',
+        entityIds.customerReturnLine,
+      ),
+      {
+        ...fulfillmentOperation(definitionIds, 'customer_return', 'post'),
+        precondition: fieldComparison(
+          `${namespace}:field.customer_return_state`,
+          `${namespace}:option.customer_return_state_draft`,
+        ),
+      },
       // Close and cancel act on a confirmed order; the declared guard keeps
       // them out of a draft's or a closed order's commands.
       {
@@ -692,6 +732,7 @@ export function salesModuleDefinition(
           ['reservation', 'reserve'],
           ['reservation', 'release'],
           ['shipment', 'post'],
+          ['customer_return', 'post'],
           ['customer_invoice', 'post'],
           ['customer_invoice', 'void'],
           ['customer_payment', 'post'],
@@ -831,6 +872,42 @@ export function salesModuleDefinition(
           entityIds.customerCredit,
           entityIds.customerInvoice,
           130,
+        ),
+        ownership: 'reference',
+      },
+      // A return belongs to the order it takes goods back against; a
+      // correction or reversal names the posted return it compensates.
+      {
+        ...relation(
+          definitionIds.relationIds.returnOrder,
+          entityIds.customerReturn,
+          entityIds.salesOrder,
+          140,
+        ),
+        ownership: 'reference',
+      },
+      {
+        ...relation(
+          definitionIds.relationIds.returnSupersedes,
+          entityIds.customerReturn,
+          entityIds.customerReturn,
+          150,
+        ),
+        ownership: 'reference',
+        required: false,
+      },
+      relation(
+        definitionIds.relationIds.returnLineReturn,
+        entityIds.customerReturnLine,
+        entityIds.customerReturn,
+        160,
+      ),
+      {
+        ...relation(
+          definitionIds.relationIds.returnLineOrderLine,
+          entityIds.customerReturnLine,
+          entityIds.salesOrderLine,
+          170,
         ),
         ownership: 'reference',
       },
@@ -995,6 +1072,88 @@ function fulfillmentOperation(
     schemaVersion: version,
     tier: 'o1',
   };
+}
+
+/**
+ * Customer return fields (ruling D). A return names the location the goods
+ * come back into -- any active location (ruling R-C) -- and its reason; a
+ * line's quantity is the signed movement it posts: positive on an initial
+ * return, negative on a correction or reversal, which names the movement it
+ * compensates.
+ */
+const RETURN_FIELDS: ReadonlyArray<
+  readonly [
+    local: 'customer_return' | 'customer_return_line',
+    name: string,
+    label: string,
+    type: 'text' | 'integer' | 'decimal' | 'instant' | 'state' | 'kind',
+    length?: number,
+    optional?: boolean,
+  ]
+> = [
+  ['customer_return', 'number', 'Return number', 'text', 60],
+  ['customer_return', 'state', 'State', 'state'],
+  ['customer_return', 'kind', 'Kind', 'kind'],
+  ['customer_return', 'effective_at', 'Returned at', 'instant'],
+  ['customer_return', 'location_id', 'Return-to location', 'text', 80],
+  ['customer_return', 'reason_code', 'Reason', 'text', 80],
+  ['customer_return', 'reason_narrative', 'Notes', 'text', 1000, true],
+  ['customer_return_line', 'line_number', 'Line number', 'integer'],
+  ['customer_return_line', 'item_id', 'Item', 'text', 80],
+  ['customer_return_line', 'quantity', 'Quantity', 'decimal'],
+  ['customer_return_line', 'unit_id', 'Base unit', 'text', 32],
+  [
+    'customer_return_line',
+    'reversal_of_movement_id',
+    'Compensated movement',
+    'text',
+    80,
+    true,
+  ],
+];
+
+function returnFields(ids: SalesIds): Array<Record<string, unknown>> {
+  return RETURN_FIELDS.map(
+    ([local, name, label, type, length, optional], index) =>
+      field(
+        ids,
+        `${ids.namespace}:entity.${local}`,
+        `${ids.namespace}:field.${local}_${name}`,
+        label,
+        (index + 1) * 10,
+        type === 'text'
+          ? text(length ?? 80)
+          : type === 'integer'
+            ? integer()
+            : type === 'decimal'
+              ? decimal()
+              : type === 'instant'
+                ? instant()
+                : enumeration(
+                    ids,
+                    `${local}_${name}`,
+                    type === 'state'
+                      ? [
+                          ['draft', 'Draft'],
+                          ['posted', 'Posted'],
+                        ]
+                      : [
+                          ['initial', 'Return'],
+                          ['correction', 'Correction'],
+                          ['reversal', 'Reversal'],
+                        ],
+                  ),
+        {
+          optional: optional ?? false,
+          searchable: ['number', 'item_id', 'location_id', 'unit_id'].includes(
+            name,
+          ),
+          ...(name === 'number'
+            ? { businessKey: true, numberedAs: 'RMA' }
+            : {}),
+        },
+      ),
+  );
 }
 
 /**
@@ -1389,6 +1548,12 @@ function selectedFieldsForEntity(
         specs.map(([name]) => name),
       ]),
     ),
+    customer_return: RETURN_FIELDS.filter(
+      ([document]) => document === 'customer_return',
+    ).map(([, name]) => name),
+    customer_return_line: RETURN_FIELDS.filter(
+      ([document]) => document === 'customer_return_line',
+    ).map(([, name]) => name),
   };
   return (fields[local] ?? []).map(
     (name) => `${ids.namespace}:field.${local}_${name}`,
@@ -1407,6 +1572,8 @@ function resolveFieldForEntity(ids: SalesIds, local: string): string {
     customer_invoice_line: 'customer_invoice_line_item_id',
     customer_payment: 'customer_payment_number',
     customer_credit: 'customer_credit_number',
+    customer_return: 'customer_return_number',
+    customer_return_line: 'customer_return_line_item_id',
   };
   return `${ids.namespace}:field.${names[local] ?? 'sales_order_shipped_unit_id'}`;
 }
@@ -1541,7 +1708,9 @@ function queries(
       maximumResultCount: queryType === 'get' ? 1 : 100,
       // The declared List exports this whole filtered set in one statement.
       ...(queryType === 'list' &&
-      (local === 'sales_order' || local === 'customer_invoice')
+      (local === 'sales_order' ||
+        local === 'customer_invoice' ||
+        local === 'customer_return')
         ? { exportMaximumResultCount: 5_000 }
         : {}),
       module: reference('moduleReference', ids.moduleId),

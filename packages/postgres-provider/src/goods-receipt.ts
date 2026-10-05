@@ -42,6 +42,41 @@ export interface DerivedGoodsReceiptCommand extends Omit<
   })[];
 }
 
+/**
+ * RETURNS (ruling R-A). Goods received against purchase order lines sent back
+ * to the supplier from one location. Each line posts one negative movement
+ * attributed to its order line, so what the line has received -- and its
+ * open-to-receive -- is net of what went back.
+ */
+export interface VendorReturnLineCommand {
+  readonly returnLineId: string;
+  readonly orderLineId: string;
+  readonly sourceLine: string;
+  readonly itemId: string;
+  readonly unitId: string;
+  /** Negative: the goods leave the location. */
+  readonly quantityDelta: string;
+}
+export interface VendorReturnCommand extends Omit<
+  InventoryAdjustmentPostingCommandV1,
+  'transactionId' | 'sourceType' | 'lines'
+> {
+  readonly sourceType: 'vendorReturn';
+  readonly returnNumber: string;
+  readonly orderId: string;
+  readonly locationId: string;
+  readonly lines: readonly VendorReturnLineCommand[];
+}
+export interface DerivedVendorReturnCommand extends Omit<
+  VendorReturnCommand,
+  'lines'
+> {
+  readonly transactionId: string;
+  readonly lines: readonly (VendorReturnLineCommand & {
+    readonly transactionLineId: string;
+  })[];
+}
+
 type Entity = StorageTargetPayloadV1['entities'][number];
 export interface ReceiptBinding {
   readonly target: StorageTargetPayloadV1;
@@ -51,6 +86,9 @@ export interface ReceiptBinding {
   readonly orderLine: Entity;
   readonly received: Entity;
   readonly movement: Entity;
+  /** Absent from a release that declares no vendor returns. */
+  readonly vendorReturn: Entity | null;
+  readonly vendorReturnLine: Entity | null;
 }
 export function receiptBinding(
   target: StorageTargetPayloadV1,
@@ -72,6 +110,9 @@ export function receiptBinding(
     )
   )
     return null;
+  const returns = target.entities.some((entry) =>
+    entry.entityId.endsWith(':entity.vendor_return'),
+  );
   return {
     target,
     receipt: entity('goods_receipt'),
@@ -80,6 +121,8 @@ export function receiptBinding(
     orderLine: entity('purchase_order_line'),
     received: entity('purchase_order_received'),
     movement: entity('inventory_movement'),
+    vendorReturn: returns ? entity('vendor_return') : null,
+    vendorReturnLine: returns ? entity('vendor_return_line') : null,
   };
 }
 export const receiptTable = (entity: Entity): string =>
@@ -432,23 +475,41 @@ export async function receivedLedger(
   orderLineId: string,
 ): Promise<{ quantity: string; unit: string | null; count: number }> {
   const m = binding.movement,
-    l = binding.line;
+    l = binding.line,
+    v = binding.vendorReturnLine;
+  const q = quoteReceiptIdentifier;
+  // Receipts, their corrections and reversals attributed through their
+  // receipt lines; then (RETURNS, ruling R-A) every vendor return attributed
+  // through its return lines, each a negative movement. Received is the net.
+  const receipts = `SELECT m.${q(receiptColumn(m, 'inventory_movement_quantity_delta'))} AS quantity,
+        m.${q(receiptColumn(m, 'inventory_movement_unit_id'))} AS unit
+    FROM ${receiptTable(m)} m JOIN ${receiptTable(l)} l ON l.tenant_id=m.tenant_id AND l.environment_id=m.environment_id
+      AND l.${q(l.legalEntity!.column)}=m.${q(m.legalEntity!.column)}
+      AND l.record_id::text=m.${q(receiptColumn(m, 'inventory_movement_source_line'))}
+      AND l.${q(receiptRelation(binding, l, 'goods_receipt_line_receipt'))}::text=m.${q(receiptColumn(m, 'inventory_movement_source_id'))}
+    WHERE m.tenant_id=$1 AND m.environment_id=$2 AND m.${q(m.legalEntity!.column)}=$3
+      AND l.${q(receiptRelation(binding, l, 'goods_receipt_line_order_line'))}=$4
+      AND m.${q(receiptColumn(m, 'inventory_movement_source_type'))}='goodsReceipt' AND m.archived_at IS NULL`;
+  const vendorReturns = v
+    ? `SELECT m.${q(receiptColumn(m, 'inventory_movement_quantity_delta'))} AS quantity,
+        m.${q(receiptColumn(m, 'inventory_movement_unit_id'))} AS unit
+    FROM ${receiptTable(m)} m JOIN ${receiptTable(v)} v ON v.tenant_id=m.tenant_id AND v.environment_id=m.environment_id
+      AND v.${q(v.legalEntity!.column)}=m.${q(m.legalEntity!.column)}
+      AND v.record_id::text=m.${q(receiptColumn(m, 'inventory_movement_source_line'))}
+      AND v.${q(receiptRelation(binding, v, 'vendor_return_line_return'))}::text=m.${q(receiptColumn(m, 'inventory_movement_source_id'))}
+    WHERE m.tenant_id=$1 AND m.environment_id=$2 AND m.${q(m.legalEntity!.column)}=$3
+      AND v.${q(receiptRelation(binding, v, 'vendor_return_line_order_line'))}=$4
+      AND m.${q(receiptColumn(m, 'inventory_movement_source_type'))}='vendorReturn' AND m.archived_at IS NULL`
+    : null;
   const result = await client.query<{
     quantity: string;
     unit: string | null;
     count: string;
     units: string;
   }>(
-    `SELECT coalesce(sum(m.${quoteReceiptIdentifier(receiptColumn(m, 'inventory_movement_quantity_delta'))}),0)::text AS quantity,
-      min(m.${quoteReceiptIdentifier(receiptColumn(m, 'inventory_movement_unit_id'))}) AS unit, count(*)::text AS count,
-      count(DISTINCT m.${quoteReceiptIdentifier(receiptColumn(m, 'inventory_movement_unit_id'))})::text AS units
-    FROM ${receiptTable(m)} m JOIN ${receiptTable(l)} l ON l.tenant_id=m.tenant_id AND l.environment_id=m.environment_id
-      AND l.${quoteReceiptIdentifier(l.legalEntity!.column)}=m.${quoteReceiptIdentifier(m.legalEntity!.column)}
-      AND l.record_id::text=m.${quoteReceiptIdentifier(receiptColumn(m, 'inventory_movement_source_line'))}
-      AND l.${quoteReceiptIdentifier(receiptRelation(binding, l, 'goods_receipt_line_receipt'))}::text=m.${quoteReceiptIdentifier(receiptColumn(m, 'inventory_movement_source_id'))}
-    WHERE m.tenant_id=$1 AND m.environment_id=$2 AND m.${quoteReceiptIdentifier(m.legalEntity!.column)}=$3
-      AND l.${quoteReceiptIdentifier(receiptRelation(binding, l, 'goods_receipt_line_order_line'))}=$4
-      AND m.${quoteReceiptIdentifier(receiptColumn(m, 'inventory_movement_source_type'))}='goodsReceipt' AND m.archived_at IS NULL`,
+    `SELECT coalesce(sum(facts.quantity),0)::text AS quantity, min(facts.unit) AS unit,
+      count(*)::text AS count, count(DISTINCT facts.unit)::text AS units
+    FROM (${receipts}${vendorReturns ? ` UNION ALL ${vendorReturns}` : ''}) facts`,
     [context.tenantId, context.environmentId, legalEntityId, orderLineId],
   );
   const row = result.rows[0]!;
@@ -519,7 +580,10 @@ export async function writeReceivedProjection(
   client: PoolClient,
   binding: ReceiptBinding,
   context: TrustedRequestContext,
-  command: DerivedGoodsReceiptCommand,
+  command: {
+    readonly legalEntityId: string;
+    readonly lines: readonly { readonly orderLineId: string }[];
+  },
 ): Promise<void> {
   const entity = binding.received;
   for (const id of [

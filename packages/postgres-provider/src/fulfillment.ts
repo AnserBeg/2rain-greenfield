@@ -40,6 +40,45 @@ export interface DerivedShipmentCommand extends Omit<ShipmentCommand, 'lines'> {
   })[];
 }
 
+/**
+ * Ruling D: goods back from a customer against a shipped order line, into a
+ * location the return names. An initial line is positive and compensates
+ * nothing; a correction or reversal line is negative and names a movement of
+ * the posted return it supersedes.
+ */
+export interface CustomerReturnLineCommand {
+  readonly returnLineId: string;
+  readonly orderLineId: string;
+  readonly sourceLine: string;
+  readonly itemId: string;
+  readonly unitId: string;
+  readonly quantityDelta: string;
+  readonly reversalOfMovementId: string | null;
+}
+
+export interface CustomerReturnCommand extends Omit<
+  InventoryAdjustmentPostingCommandV1,
+  'transactionId' | 'sourceType' | 'lines'
+> {
+  readonly sourceType: 'customerReturn';
+  readonly kind: 'initial' | 'correction' | 'reversal';
+  readonly returnNumber: string;
+  readonly orderId: string;
+  readonly locationId: string;
+  readonly supersedesReturnId: string | null;
+  readonly lines: readonly CustomerReturnLineCommand[];
+}
+
+export interface DerivedCustomerReturnCommand extends Omit<
+  CustomerReturnCommand,
+  'lines'
+> {
+  readonly transactionId: string;
+  readonly lines: readonly (CustomerReturnLineCommand & {
+    readonly transactionLineId: string;
+  })[];
+}
+
 type Entity = StorageTargetPayloadV1['entities'][number];
 export interface FulfillmentBinding {
   readonly target: StorageTargetPayloadV1;
@@ -56,6 +95,9 @@ export interface FulfillmentBinding {
   readonly location: Entity;
   readonly party: Entity;
   readonly partyRole: Entity;
+  /** Absent from a release that declares no customer returns. */
+  readonly customerReturn: Entity | null;
+  readonly customerReturnLine: Entity | null;
 }
 
 export function fulfillmentBinding(
@@ -78,6 +120,9 @@ export function fulfillmentBinding(
     )
   )
     return null;
+  const returns = target.entities.some((entry) =>
+    entry.entityId.endsWith(':entity.customer_return'),
+  );
   return {
     target,
     reservation: entity('reservation'),
@@ -93,6 +138,8 @@ export function fulfillmentBinding(
     location: entity('location'),
     party: entity('party'),
     partyRole: entity('party_role'),
+    customerReturn: returns ? entity('customer_return') : null,
+    customerReturnLine: returns ? entity('customer_return_line') : null,
   };
 }
 

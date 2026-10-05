@@ -202,6 +202,8 @@ test(
           'customer_credit_number',
           'customer_invoice_number',
           'customer_payment_number',
+          // RETURNS (ruling D): a customer return's RMA number.
+          'customer_return_number',
           'goods_receipt_number',
           'inventory_transaction_number',
           'purchase_order_number',
@@ -211,6 +213,8 @@ test(
           'vendor_bill_number',
           'vendor_credit_number',
           'vendor_payment_number',
+          // RETURNS (ruling R-A): a vendor return's VRT number.
+          'vendor_return_number',
         ].map((local) => `${ns}:field.${local}`),
       );
       const plan = (
@@ -258,9 +262,9 @@ test(
               numbered.some((entry) => entry.fieldId === scenario.subjectId),
           )
           .map((scenario) => executed.has(scenario.scenarioId)),
-        // Eleven, as the compile states: PAYABLES' ten and the stock
-        // document's (INVENTORY-PARITY).
-        [true, true, true, true, true, true, true, true, true, true, true],
+        // Thirteen, as the compile states: PAYABLES' ten, the stock
+        // document's (INVENTORY-PARITY) and the two returns' (RETURNS).
+        Array.from({ length: 13 }, () => true),
         'each number’s uniqueness probe executed',
       );
       const derivationCodes = (
