@@ -44,6 +44,7 @@ import {
   orderedFilters,
   orderedViews,
   overdueDays,
+  shortMarked,
   startOfTodayUtc,
   type DeclaredListColumn,
   type DeclaredListRowAction,
@@ -151,6 +152,12 @@ export interface DeclaredListRenderData {
    * supplementary: they read "—", and a view that keeps open rows refuses.
    */
   readonly progressWithheld?: string;
+  /**
+   * The supply query current policy withheld from a List whose supply is
+   * supplementary (SUPPLY-WARNINGS): its figures read "—", and a view that
+   * keeps covered or short rows refuses.
+   */
+  readonly supplyWithheld?: string;
   readonly state: DeclaredListState;
 }
 
@@ -565,6 +572,7 @@ function renderDataGrid(context: SurfaceComponentContext): string {
           figureBandLabel(context.surface.list!, fieldId, value) ??
           displayFieldValue(context.view, record, fieldId, value),
         progressWithheld: data.declaredList.progressWithheld ?? null,
+        supplyWithheld: data.declaredList.supplyWithheld ?? null,
         recordLabel,
         records: data.records,
         // The row's record page, at the section its action names -- only a
@@ -589,13 +597,13 @@ function renderDataGrid(context: SurfaceComponentContext): string {
   }
   if (data.status === 'DIAGNOSTIC') {
     // A view refused for its withheld figures says which figures it needs.
-    const withheld =
-      context.surface.list && data.declaredList?.progressWithheld
-        ? progressWithheldNote(
-            context.surface.list,
-            data.declaredList.progressWithheld,
-          )
-        : '';
+    const withheld = context.surface.list
+      ? withheldFiguresNote(
+          context.surface.list,
+          data.declaredList?.progressWithheld ?? null,
+          data.declaredList?.supplyWithheld ?? null,
+        )
+      : '';
     return slotPanel(
       context,
       `${feedbackHtml(context.feedback)}${withheld}${dataDiagnostic(data.code)}`,
@@ -2368,6 +2376,8 @@ interface DeclaredListRenderInput {
   readonly present: FieldPresenter;
   /** The progress query current policy withheld; its figures read "—". */
   readonly progressWithheld: string | null;
+  /** The supply query current policy withheld; its figures read "—". */
+  readonly supplyWithheld: string | null;
   readonly recordLabel: string;
   readonly records: readonly SemanticRecordDto[];
   /** Where a row's action leads, or `null` when it cannot be linked. */
@@ -2382,12 +2392,18 @@ interface DeclaredListRenderInput {
 
 /**
  * Says which figures a List reads without, and which views they would have
- * served: the progress columns, withheld by current policy, and the views
- * that keep only open rows, which are refused while they are.
+ * served: the progress columns -- with the supply's, which extend them -- or
+ * the supply's alone (SUPPLY-WARNINGS), withheld by current policy, and the
+ * views that keep open, covered or short rows, refused while they are.
  */
-function progressWithheldNote(list: SurfaceList, withheld: string): string {
-  if (!list.progress) return '';
-  const outputs = new Set(Object.values(list.progress.outputs));
+function withheldNote(
+  list: SurfaceList,
+  withheld: string,
+  attribute: 'data-list-progress-withheld' | 'data-list-supply-withheld',
+  outputs: ReadonlySet<string>,
+  needs: (view: SurfaceList['views'][number]) => boolean,
+  fallback: string,
+): string {
   const series = (labels: readonly string[]) =>
     labels.length > 1
       ? `${labels.slice(0, -1).join(', ')} and ${labels.at(-1)!}`
@@ -2396,14 +2412,44 @@ function progressWithheldNote(list: SurfaceList, withheld: string): string {
     .filter((column) => outputs.has(column.field))
     .map((column) => column.label);
   const views = orderedViews(list)
-    .filter((view) => view.open)
+    .filter(needs)
     .map((view) => view.label);
-  const text = `${figures.length > 0 ? series(figures) : 'Progress figures'} ${figures.length === 1 ? 'is' : 'are'} withheld by current policy${
+  const text = `${figures.length > 0 ? series(figures) : fallback} ${figures.length === 1 ? 'is' : 'are'} withheld by current policy${
     views.length > 0
-      ? `; ${series(views)} ${views.length === 1 ? 'needs them and is' : 'need them and are'} unavailable`
+      ? `; ${series(views)} ${views.length === 1 ? `needs ${figures.length === 1 ? 'it' : 'them'} and is` : `need ${figures.length === 1 ? 'it' : 'them'} and are`} unavailable`
       : ''
   }.`;
-  return `<p class="muted" data-list-progress-withheld="${escapeHtml(withheld)}">${escapeHtml(text)}</p>`;
+  return `<p class="muted" ${attribute}="${escapeHtml(withheld)}">${escapeHtml(text)}</p>`;
+}
+
+/** The note for what current policy withheld, if anything. */
+function withheldFiguresNote(
+  list: SurfaceList,
+  progressWithheld: string | null,
+  supplyWithheld: string | null,
+): string {
+  const progress = list.progress;
+  if (!progress) return '';
+  const supplyOutputs = Object.values(progress.supply?.outputs ?? {});
+  if (progressWithheld !== null)
+    return withheldNote(
+      list,
+      progressWithheld,
+      'data-list-progress-withheld',
+      new Set([...Object.values(progress.outputs), ...supplyOutputs]),
+      (view) => view.open === true || view.supply !== undefined,
+      'Progress figures',
+    );
+  if (supplyWithheld !== null && progress.supply)
+    return withheldNote(
+      list,
+      supplyWithheld,
+      'data-list-supply-withheld',
+      new Set(supplyOutputs),
+      (view) => view.supply !== undefined,
+      'Supply figures',
+    );
+  return '';
 }
 
 /** Saved-view tabs; counts are server counts of each view under the current search and filters. */
@@ -2541,7 +2587,10 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
           // A declared overdue date reads "N days late" when the row meets its
           // view's conditions -- the same ones its tab was counted by.
           const late = overdueDays(list, column, record, input.now);
-          return `<td ${label}>${text === null ? '<span class="muted">—</span>' : escapeHtml(text)}${late === null ? '' : ` <span class="status-pill" data-status-role="attention" data-overdue-days="${String(late)}">${escapeHtml(`${String(late)} ${late === 1 ? 'day' : 'days'} late`)}</span>`}</td>`;
+          // What the row is short of now is marked, as the reference marks
+          // an exception "!" (SUPPLY-WARNINGS).
+          const short = shortMarked(list, column, record);
+          return `<td ${label}>${text === null ? '<span class="muted">—</span>' : escapeHtml(text)}${late === null ? '' : ` <span class="status-pill" data-status-role="attention" data-overdue-days="${String(late)}">${escapeHtml(`${String(late)} ${late === 1 ? 'day' : 'days'} late`)}</span>`}${short ? ' <span class="status-pill" data-status-role="blocked" data-short-mark="true"><span aria-hidden="true">!</span><span class="sr-only">Short of stock</span></span>' : ''}</td>`;
         })
         .join('');
       const title =
@@ -2590,8 +2639,10 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
     ? ` data-list-anchor="${escapeHtml(startOfTodayUtc(input.now).toISOString())}"`
     : '';
   // Figures withheld by current policy are said once, above the rows.
-  const withheld = input.progressWithheld
-    ? progressWithheldNote(list, input.progressWithheld)
-    : '';
+  const withheld = withheldFiguresNote(
+    list,
+    input.progressWithheld,
+    input.supplyWithheld,
+  );
   return `<section class="panel data-panel" data-data-state="exact" data-list-result="${escapeHtml(coverage.schemaVersion)}" data-declared-list="true"${anchor}><div class="panel__heading"><div><h2>${escapeHtml(input.recordLabel)}</h2></div><div class="list-summary"><span class="status-pill" data-status-role="success" data-list-total="${String(coverage.totalCount)}">${escapeHtml(count)}</span>${range ? `<span class="muted">${escapeHtml(range)}</span>` : ''}${exportControl}</div></div>${withheld}${controls}${empty}${input.records.length > 0 ? `<div class="data-table-wrap" data-list-rendering="responsive-single"><table><thead><tr>${input.selectionCell ? '<th scope="col">Select</th>' : ''}${header}${rowActions ? '<th scope="col">Actions</th>' : ''}</tr></thead><tbody>${body}</tbody></table></div>` : ''}${paging}</section>`;
 }

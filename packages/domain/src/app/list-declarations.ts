@@ -49,6 +49,8 @@ export interface ListSpec {
       readonly figure: string;
       readonly values: readonly string[];
     };
+    /** Only rows the List's supply leaves something covered or short on. */
+    readonly supply?: ListSupplyCondition;
   }[];
   readonly filters: readonly {
     readonly local: string;
@@ -79,6 +81,11 @@ export interface ListSpec {
      * open rows is refused.
      */
     readonly whenDenied?: 'omit';
+    /**
+     * What reservations still hold for the lines and what they are short of
+     * now, computed beside the progress (SUPPLY-WARNINGS).
+     */
+    readonly supply?: ListSupplySpec;
   };
   /**
    * Links from a row to its record page, at a named section of it. The first
@@ -91,6 +98,8 @@ export interface ListSpec {
       readonly filters?: Readonly<Record<string, string>>;
       /** Only while the row's progress leaves something open. */
       readonly open?: true;
+      /** Only while the row's supply leaves something covered or short. */
+      readonly supply?: ListSupplyCondition;
     };
     /** A dataset of the record page's composition. */
     readonly section?: string;
@@ -169,6 +178,49 @@ interface ListFiguresSpec {
   }[];
 }
 
+/** A view or row action keeping rows with something covered or short. */
+type ListSupplyCondition = 'covered' | 'short';
+
+/** One part of an item's free stock, added up as a figure sum adds it. */
+interface ListSupplySumSpec {
+  readonly rows: ListFigureRowsSpec;
+  readonly within?: ListFigureWithinSpec;
+  readonly related?: {
+    readonly query: string;
+    readonly relation: string;
+    readonly quantity: string;
+  };
+  readonly sum: 'rows' | 'related' | 'remaining';
+}
+
+/**
+ * Per row, what reservations still hold for its open lines and what those
+ * lines are short of now (SUPPLY-WARNINGS, owner ruling R1), in the canonical
+ * `surface.list.progress.supply` shape with query ids as strings.
+ */
+interface ListSupplySpec {
+  readonly coverage: {
+    readonly query: string;
+    readonly relation: string;
+    readonly related: {
+      readonly query: string;
+      readonly relation: string;
+      readonly quantity: string;
+    };
+  };
+  readonly item: string;
+  readonly free: {
+    readonly plus: readonly ListSupplySumSpec[];
+    readonly minus: readonly ListSupplySumSpec[];
+  };
+  readonly shortIn?: {
+    readonly field: string;
+    readonly values: readonly string[];
+  };
+  readonly outputs: { readonly covered: string; readonly short: string };
+  readonly whenDenied?: 'omit';
+}
+
 const CURRENCIES = [
   ['CAD', 'CAD'],
   ['USD', 'USD'],
@@ -202,6 +254,22 @@ interface OrderWork {
   };
   /** A read-model total, shown beside the currency and never sorted. */
   readonly total?: string;
+  /**
+   * What reservations still hold for the open lines and what the lines are
+   * short of now (SUPPLY-WARNINGS): a Short column after Open, a "short" and
+   * a "covered" tab after the work tabs, and a link to the order's work
+   * leading the row's actions while something reserved is still to ship.
+   */
+  readonly supply?: {
+    readonly spec: ListSupplySpec;
+    readonly shortView: { readonly local: string; readonly label: string };
+    readonly coveredView: { readonly local: string; readonly label: string };
+    readonly action: {
+      readonly local: string;
+      readonly label: string;
+      readonly section: string;
+    };
+  };
 }
 
 function documentList(
@@ -287,6 +355,17 @@ function documentList(
             },
           ]
         : []),
+      // What the open lines are short of now, marked where anything is.
+      ...(work?.supply
+        ? [
+            {
+              local: 'short',
+              label: 'Short',
+              field: work.supply.spec.outputs.short,
+              sortable: false,
+            },
+          ]
+        : []),
       // Computed from the page's own rows: shown, never sorted or counted.
       ...(work?.total
         ? [
@@ -321,6 +400,24 @@ function documentList(
                     filters: released,
                     open: true as const,
                     before: field(work.late),
+                  },
+                ]
+              : []),
+            // Then the supply tabs, as the reference's "Blocked by supply"
+            // and "Reserved" follow its "Open fulfillment".
+            ...(work.supply
+              ? [
+                  {
+                    local: work.supply.shortView.local,
+                    label: work.supply.shortView.label,
+                    filters: released,
+                    supply: 'short' as const,
+                  },
+                  {
+                    local: work.supply.coveredView.local,
+                    label: work.supply.coveredView.label,
+                    filters: released,
+                    supply: 'covered' as const,
                   },
                 ]
               : []),
@@ -368,10 +465,22 @@ function documentList(
               open: output('open'),
             },
             whenDenied: 'omit' as const,
+            ...(work.supply ? { supply: work.supply.spec } : {}),
           },
           // A link to the order at the work, else to the order itself; the
-          // page re-checks everything it offers there.
+          // page re-checks everything it offers there. Reserved stock still
+          // to ship comes first: its Task is the page's, never the List's.
           rowActions: [
+            ...(work.supply
+              ? [
+                  {
+                    local: work.supply.action.local,
+                    label: work.supply.action.label,
+                    when: { filters: released, supply: 'covered' as const },
+                    section: work.supply.action.section,
+                  },
+                ]
+              : []),
             {
               local: work.action.local,
               label: work.action.label,
@@ -382,6 +491,73 @@ function documentList(
           ],
         }
       : {}),
+  };
+}
+
+/**
+ * What the Sales orders List says about supply (SUPPLY-WARNINGS, owner ruling
+ * R1), read from the very queries the order page's Fulfillment reads: a
+ * line's coverage is what its own reservations' balances still hold; free
+ * stock of an item now is its posted stock at usable locations less what
+ * every live reservation of it holds there (LOCATIONS); shortage is stated for
+ * draft and confirmed orders, as the page states it, and incoming purchase
+ * orders are not counted.
+ */
+function salesSupply(namespace: string): ListSupplySpec {
+  const field = (name: string) => `${namespace}:field.${name}`;
+  const query = (name: string) => `${namespace}:query.${name}`;
+  const relation = (name: string) => `${namespace}:relation.${name}`;
+  const state = (name: string) => `${namespace}:state.sales_order_${name}`;
+  const output = (name: string) =>
+    `${namespace}:list_output.sales_order_list_${name}`;
+  const usable = (locationField: string) => ({
+    reference: field(locationField),
+    query: query('location_list'),
+    field: field('location_status'),
+    values: [`${namespace}:option.location_status_usable`],
+  });
+  const balances = {
+    query: query('reservation_balance_list'),
+    relation: relation('reservation_balance_reservation'),
+    quantity: field('reservation_balance_remaining_quantity'),
+  };
+  return {
+    coverage: {
+      query: query('workspace_reservations'),
+      relation: relation('reservation_order_line'),
+      related: balances,
+    },
+    item: field('sales_order_line_item_id'),
+    free: {
+      plus: [
+        {
+          rows: {
+            query: query('workspace_stock'),
+            match: field('posted_stock_balance_item_id'),
+            quantity: field('posted_stock_balance_posted_quantity'),
+          },
+          within: usable('posted_stock_balance_location_id'),
+          sum: 'rows',
+        },
+      ],
+      minus: [
+        {
+          rows: {
+            query: query('workspace_stock_reservations'),
+            match: field('reservation_item_id'),
+          },
+          within: usable('reservation_location_id'),
+          related: balances,
+          sum: 'related',
+        },
+      ],
+    },
+    shortIn: {
+      field: `${namespace}:derived_state_field.machine.sales_order_lifecycle`,
+      values: [state('draft'), state('released')],
+    },
+    outputs: { covered: output('covered'), short: output('short') },
+    whenDenied: 'omit',
   };
 }
 
@@ -1314,12 +1490,26 @@ export function composedListSpecs(
           quantity: `${namespace}:field.sales_order_shipped_shipped_quantity`,
         },
         openView: { local: 'to_ship', label: 'To ship' },
-        // "Post shipment" waits for reservation coverage (a later increment):
-        // until then a row opens its order's fulfillment section.
+        // Something open and nothing reserved: the order's fulfillment
+        // section, where its lines are reserved.
         action: {
           local: 'fulfill',
           label: 'Fulfill',
           section: `${namespace}:dataset.fulfillment_lines`,
+        },
+        // SUPPLY-WARNINGS: the reference's "Blocked by supply" and
+        // "Reserved", the Short column, and "Post shipment" while reserved
+        // stock is still to ship -- a link to the same section, whose
+        // reservations the page's own ship Task takes.
+        supply: {
+          spec: salesSupply(namespace),
+          shortView: { local: 'blocked', label: 'Blocked by supply' },
+          coveredView: { local: 'reserved', label: 'Reserved' },
+          action: {
+            local: 'post_shipment',
+            label: 'Post shipment',
+            section: `${namespace}:dataset.fulfillment_lines`,
+          },
         },
       },
     ),
@@ -1477,6 +1667,7 @@ function lowerList(namespace: string, listLocal: string, spec: ListSpec) {
       ...(view.band
         ? { band: { figure: view.band.figure, values: [...view.band.values] } }
         : {}),
+      ...(view.supply ? { supply: view.supply } : {}),
     })),
     filters: spec.filters.map((filter, index) => ({
       filterId: id('list_filter', filter.local),
@@ -1503,6 +1694,9 @@ function lowerList(namespace: string, listLocal: string, spec: ListSpec) {
             ...(spec.progress.whenDenied
               ? { whenDenied: spec.progress.whenDenied }
               : {}),
+            ...(spec.progress.supply
+              ? { supply: lowerSupply(spec.progress.supply) }
+              : {}),
           },
         }
       : {}),
@@ -1524,6 +1718,9 @@ function lowerList(namespace: string, listLocal: string, spec: ListSpec) {
                         }
                       : {}),
                     ...(action.when.open ? { open: true } : {}),
+                    ...(action.when.supply
+                      ? { supply: action.when.supply }
+                      : {}),
                   },
                 }
               : {}),
@@ -1531,6 +1728,63 @@ function lowerList(namespace: string, listLocal: string, spec: ListSpec) {
           })),
         }
       : {}),
+  };
+}
+
+/** A List's supply in the canonical shape: each query as its reference. */
+function lowerSupply(supply: ListSupplySpec) {
+  const queryReference = (targetId: string) => ({
+    kind: 'queryReference',
+    schemaVersion: version,
+    targetId,
+  });
+  const related = (value: ListSupplySpec['coverage']['related']) => ({
+    query: queryReference(value.query),
+    relation: value.relation,
+    quantity: value.quantity,
+  });
+  const sum = (value: ListSupplySumSpec) => ({
+    rows: {
+      query: queryReference(value.rows.query),
+      match: value.rows.match,
+      ...(value.rows.quantity ? { quantity: value.rows.quantity } : {}),
+    },
+    ...(value.within
+      ? {
+          within: {
+            ...(value.within.reference !== undefined
+              ? { reference: value.within.reference }
+              : { relation: value.within.relation }),
+            query: queryReference(value.within.query),
+            field: value.within.field,
+            values: [...value.within.values],
+          },
+        }
+      : {}),
+    ...(value.related ? { related: related(value.related) } : {}),
+    sum: value.sum,
+  });
+  return {
+    coverage: {
+      query: queryReference(supply.coverage.query),
+      relation: supply.coverage.relation,
+      related: related(supply.coverage.related),
+    },
+    item: supply.item,
+    free: {
+      plus: supply.free.plus.map(sum),
+      minus: supply.free.minus.map(sum),
+    },
+    ...(supply.shortIn
+      ? {
+          shortIn: {
+            field: supply.shortIn.field,
+            values: [...supply.shortIn.values],
+          },
+        }
+      : {}),
+    outputs: { ...supply.outputs },
+    ...(supply.whenDenied ? { whenDenied: supply.whenDenied } : {}),
   };
 }
 

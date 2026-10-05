@@ -17,7 +17,9 @@ import {
   figureBandLabel,
   readDeclaredListState,
   viewNeedsProgress,
+  viewNeedsSupply,
   withheldProgressQuery,
+  withheldSupplyQuery,
   type DeclaredListState,
 } from './list-declaration.js';
 import type { SurfaceList } from '../../../packages/canonical-model/src/index.js';
@@ -546,6 +548,63 @@ async function loadFormReferences(
 }
 
 /**
+ * What current policy withheld from a List whose figures are supplementary:
+ * its progress (and so its supply, which extends it), or its supply alone.
+ */
+interface WithheldFigures {
+  readonly progress: string | null;
+  readonly supply: string | null;
+}
+
+/**
+ * The withheld figures after one more refusal, or `null` when the refusal
+ * names nothing supplementary -- the List's own query, a label, or figures
+ * that are the List's purpose -- and must stand.
+ */
+function withholding(
+  list: SurfaceList,
+  withheld: WithheldFigures,
+  error: unknown,
+): WithheldFigures | null {
+  if (withheld.progress !== null) return null;
+  const progress = withheldProgressQuery(list, error);
+  if (progress !== null) return { ...withheld, progress };
+  const supply =
+    withheld.supply === null ? withheldSupplyQuery(list, error) : null;
+  return supply === null ? null : { ...withheld, supply };
+}
+
+/** Whether a view can be read with what is withheld: never one needing it. */
+function viewServes(
+  list: SurfaceList,
+  withheld: WithheldFigures,
+  viewId: string | null,
+): boolean {
+  return !(
+    (withheld.progress !== null && viewNeedsProgress(list, viewId)) ||
+    (withheld.supply !== null && viewNeedsSupply(list, viewId))
+  );
+}
+
+/** The request options that leave out what is withheld. */
+function withoutWithheld(withheld: WithheldFigures) {
+  return {
+    ...(withheld.progress !== null ? { withoutProgress: true } : {}),
+    ...(withheld.supply !== null ? { withoutSupply: true } : {}),
+  };
+}
+
+/** What the rendered List says it reads without. */
+function withheldRenderData(withheld: WithheldFigures) {
+  return {
+    ...(withheld.progress === null
+      ? {}
+      : { progressWithheld: withheld.progress }),
+    ...(withheld.supply === null ? {} : { supplyWithheld: withheld.supply }),
+  };
+}
+
+/**
  * A declared List's page, plus a server count for every saved view under the
  * same search and filters. A page number past the end is answered with the
  * last page rather than an empty window that claims records exist. A view
@@ -555,6 +614,8 @@ async function loadFormReferences(
  * without it when current policy withholds either summed query: its figures
  * read "—", its other views still serve and count, and a view that keeps only
  * open rows -- which only the figures can judge -- is refused and uncounted.
+ * Its supply (SUPPLY-WARNINGS) is withheld the same way, alone: the progress
+ * still serves, and only the views that keep covered or short rows refuse.
  */
 async function declaredListData(
   view: RuntimeViewContract.RequestRuntimeView,
@@ -569,7 +630,7 @@ async function declaredListData(
   const read = (
     mode: 'count' | 'page',
     listState: DeclaredListState,
-    withoutProgress: boolean,
+    withheld: WithheldFigures,
     viewId?: string,
   ) =>
     queryGateway.invoke(view, {
@@ -582,24 +643,19 @@ async function declaredListData(
         queryId: binding.query.queryId,
         scopeArguments,
         ...(viewId === undefined ? {} : { viewId }),
-        ...(withoutProgress ? { withoutProgress: true } : {}),
+        ...withoutWithheld(withheld),
       }),
       queryId: binding.query.queryId,
       schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
     });
-  const viewCounts = async (withoutProgress: boolean) => {
+  const viewCounts = async (withheld: WithheldFigures) => {
     const counts: Record<string, number> = {};
     for (const listView of list.views) {
-      // An open view is never counted without its figures: its tab shows no
-      // count, and its own page refuses.
-      if (withoutProgress && listView.open) continue;
+      // A view needing withheld figures is never counted without them: its
+      // tab shows no count, and its own page refuses.
+      if (!viewServes(list, withheld, listView.viewId)) continue;
       try {
-        const counted = await read(
-          'count',
-          state,
-          withoutProgress,
-          listView.viewId,
-        );
+        const counted = await read('count', state, withheld, listView.viewId);
         if (counted.listCoverage)
           counts[listView.viewId] = counted.listCoverage.totalCount;
       } catch {
@@ -608,25 +664,27 @@ async function declaredListData(
     }
     return counts;
   };
-  let withheld: string | null = null;
-  let result: SemanticQueryResultEnvelope;
-  try {
-    result = await read('page', state, false);
-  } catch (error) {
-    withheld = withheldProgressQuery(list, error);
-    if (withheld === null) throw error;
-    if (viewNeedsProgress(list, state.viewId))
-      return {
-        code: 'QUERY_PERMISSION_DENIED',
-        declaredList: {
-          counts: await viewCounts(true),
-          now,
-          progressWithheld: withheld,
-          state,
-        },
-        status: 'DIAGNOSTIC',
-      };
-    result = await read('page', state, true);
+  let withheld: WithheldFigures = { progress: null, supply: null };
+  let result: SemanticQueryResultEnvelope | undefined;
+  while (result === undefined) {
+    try {
+      result = await read('page', state, withheld);
+    } catch (error) {
+      const next = withholding(list, withheld, error);
+      if (next === null) throw error;
+      withheld = next;
+      if (!viewServes(list, withheld, state.viewId))
+        return {
+          code: 'QUERY_PERMISSION_DENIED',
+          declaredList: {
+            counts: await viewCounts(withheld),
+            now,
+            ...withheldRenderData(withheld),
+            state,
+          },
+          status: 'DIAGNOSTIC',
+        };
+    }
   }
   const coverage = result.listCoverage;
   if (
@@ -637,9 +695,9 @@ async function declaredListData(
   ) {
     const lastPage = Math.ceil(coverage.totalCount / list.pageSize);
     state = { ...state, page: lastPage };
-    result = await read('page', state, withheld !== null);
+    result = await read('page', state, withheld);
   }
-  const counts = await viewCounts(withheld !== null);
+  const counts = await viewCounts(withheld);
   const data = dataState(result);
   return data.status === 'READY'
     ? {
@@ -647,7 +705,7 @@ async function declaredListData(
         declaredList: {
           counts,
           now,
-          ...(withheld === null ? {} : { progressWithheld: withheld }),
+          ...withheldRenderData(withheld),
           state,
         },
       }
@@ -675,7 +733,7 @@ async function exportDeclaredList(
       : undefined;
   if (!list.export || exportMaximumResultCount === undefined)
     return renderApplicationDiagnostic(404, { code: 'QUERY_UNSUPPORTED' });
-  const exported = (withoutProgress: boolean) =>
+  const exported = (withheld: WithheldFigures) =>
     queryGateway.invoke(view, {
       arguments: declaredListArguments(list, state, {
         exportMaximumResultCount,
@@ -683,24 +741,24 @@ async function exportDeclaredList(
         now,
         queryId: binding.query.queryId,
         scopeArguments: legalEntityScopeArguments(binding, url),
-        ...(withoutProgress ? { withoutProgress: true } : {}),
+        ...withoutWithheld(withheld),
       }),
       queryId: binding.query.queryId,
       schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
     });
-  let result: SemanticQueryResultEnvelope;
+  let result: SemanticQueryResultEnvelope | undefined;
   try {
-    try {
-      result = await exported(false);
-    } catch (error) {
-      // Supplementary figures withheld: the file keeps their columns empty,
-      // as the page reads "—"; an open view, which only they judge, refuses.
-      if (
-        withheldProgressQuery(list, error) === null ||
-        viewNeedsProgress(list, state.viewId)
-      )
-        throw error;
-      result = await exported(true);
+    let withheld: WithheldFigures = { progress: null, supply: null };
+    while (result === undefined) {
+      try {
+        result = await exported(withheld);
+      } catch (error) {
+        // Supplementary figures withheld: the file keeps their columns empty,
+        // as the page reads "—"; a view only they judge refuses.
+        const next = withholding(list, withheld, error);
+        if (next === null || !viewServes(list, next, state.viewId)) throw error;
+        withheld = next;
+      }
     }
   } catch (error) {
     return renderApplicationDiagnostic(422, { code: queryMessageCode(error) });

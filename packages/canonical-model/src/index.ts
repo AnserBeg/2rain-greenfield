@@ -50,6 +50,7 @@ export {
   type SurfaceList,
   type SurfaceListProgress,
   type SurfaceListFigures,
+  type SurfaceListSupply,
   type SurfaceListRowAction,
   SurfaceFormSchema,
   type SurfaceForm,

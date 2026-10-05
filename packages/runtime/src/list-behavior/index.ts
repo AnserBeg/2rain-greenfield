@@ -19,6 +19,7 @@ import {
   type AuthorizedSharedListFigures,
   type SharedListFigures,
 } from './figures.js';
+import { parseSharedListSupply, type SharedListSupply } from './supply.js';
 
 // The closed-contract primitives and cursor identity moved to siblings; both
 // stay part of this module's public surface so no caller import changes.
@@ -30,12 +31,18 @@ export {
   type SharedListFigureBand,
   type SharedListFigureLatest,
   type SharedListFigureOperand,
+  type SharedListFigureRelated,
   type SharedListFigures,
   type SharedListFigureSum,
   type SharedListFigureThreshold,
   type SharedListFigureTotal,
   type SharedListFigureWithin,
 } from './figures.js';
+export {
+  sharedListSupplyReads,
+  type SharedListSupply,
+  type SharedListSupplySum,
+} from './supply.js';
 
 export const SHARED_LIST_QUERY_VERSION =
   'northstar.shared-list-query/v1' as const;
@@ -132,6 +139,12 @@ export interface SharedListProgress {
     readonly open: string;
     readonly ordered: string;
   };
+  /**
+   * What reservations still hold for the lines and what they are short of
+   * now, in the same statement (SUPPLY-WARNINGS); its `keep` narrows the set
+   * before the count and the page window, as `openOnly` does.
+   */
+  readonly supply?: SharedListSupply;
 }
 
 /**
@@ -193,6 +206,8 @@ export interface AuthorizedSharedListReferenceLabel extends SharedListReferenceL
 export interface AuthorizedSharedListProgress extends SharedListProgress {
   readonly doneEntityId: string;
   readonly linesEntityId: string;
+  /** The source entity of every query the supply reads, by query id. */
+  readonly supplyEntityIds?: Readonly<Record<string, string>>;
 }
 
 export interface AuthorizedSharedListRequest {
@@ -467,6 +482,9 @@ export function authorizeSharedListFields(
   // selects; the figures come back under ids that shadow nothing it projects.
   const compared = [
     ...(query.progress?.openIn ? [query.progress.openIn.fieldId] : []),
+    ...(query.progress?.supply?.shortIn
+      ? [query.progress.supply.shortIn.fieldId]
+      : []),
     ...(query.beforeFilters ?? []).map((filter) => filter.fieldId),
   ];
   for (const fieldId of compared) {
@@ -478,7 +496,10 @@ export function authorizeSharedListFields(
       );
     }
   }
-  for (const output of Object.values(query.progress?.outputs ?? {})) {
+  for (const output of [
+    ...Object.values(query.progress?.outputs ?? {}),
+    ...Object.values(query.progress?.supply?.outputs ?? {}),
+  ]) {
     if (input.selectedFieldIds.has(output) || relationIds.has(output)) {
       throw new SharedListContractError(
         'LIST_FIELD_NOT_AUTHORIZED',
@@ -657,7 +678,7 @@ function parseProgressSource(
 
 function parseProgress(value: ImmutableJsonValue): SharedListProgress {
   if (!isRecord(value)) throw malformed('list progress must be an object');
-  const { openIn, openOnly, ...closed } = value;
+  const { openIn, openOnly, supply: supplyValue, ...closed } = value;
   assertExactKeys(closed, ['done', 'lines', 'outputs']);
   const outputs = closed.outputs;
   if (!isRecord(outputs))
@@ -668,6 +689,15 @@ function parseProgress(value: ImmutableJsonValue): SharedListProgress {
   assertCanonicalId(outputs.ordered, 'list progress ordered output');
   if (new Set([outputs.done, outputs.open, outputs.ordered]).size !== 3)
     throw malformed('list progress outputs must be three distinct ids');
+  const supply =
+    supplyValue === undefined ? undefined : parseSharedListSupply(supplyValue);
+  if (
+    supply &&
+    [supply.outputs.covered, supply.outputs.short].some((output) =>
+      [outputs.done, outputs.open, outputs.ordered].includes(output),
+    )
+  )
+    throw malformed('list supply outputs are not progress outputs');
   if (openOnly !== undefined && openOnly !== true)
     throw malformed('list progress openOnly is true when present');
   const states =
@@ -707,6 +737,7 @@ function parseProgress(value: ImmutableJsonValue): SharedListProgress {
       open: outputs.open,
       ordered: outputs.ordered,
     }),
+    ...(supply ? { supply } : {}),
   });
 }
 
