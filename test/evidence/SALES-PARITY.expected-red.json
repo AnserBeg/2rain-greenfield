@@ -428,10 +428,10 @@
     },
     {
       "name": "verification-constant-false-filters-stay-restrictive",
-      "claim": "A filter built from literals that is false for every row, such as all(true, not(true)), restricts: cleanup does not read through a get filtered by it and take its empty answers as archived records, but refuses the records it cannot read.",
+      "claim": "A filter built from literals that is false for every row, such as all(true, not(true)), restricts: verification takes the value the canonical predicate kernel evaluates for it, so cleanup does not read through a get filtered by it and take its empty answers as archived records, but refuses the records it cannot read.",
       "file": "packages/postgres-provider/src/release-verification-service.ts",
-      "original": "      return term === undefined ? undefined : !term;\n",
-      "replacement": "      return term;\n",
+      "original": "  return receipt.outcome === 'evaluated' ? receipt.result : undefined;\n",
+      "replacement": "  return receipt.outcome === 'evaluated' ? true : undefined;\n",
       "test": {
         "files": ["test/postgres/document-numbering.test.ts"],
         "namePattern": "a constant false composition"
@@ -440,7 +440,7 @@
         {
           "file": "test/postgres/document-numbering.test.ts",
           "name": "release verification refuses cleanup through a Q1 get whose filter is a constant false composition",
-          "expected": "Missing expected rejection"
+          "expected": "activation admitted a release whose probe records no get can read"
         }
       ]
     }

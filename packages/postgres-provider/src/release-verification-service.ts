@@ -2933,31 +2933,22 @@ function restrictsNothing(query: VerificationQueryContract): boolean {
 
 /**
  * The value of a predicate built only from boolean literals with `not`,
- * `all` and `any`: the same for every row. `undefined` for a predicate that
- * references a field, parameter or operand -- its value can differ by row,
- * and is unknown where a value is absent -- or for any node not named here.
+ * `all` and `any`: the same for every row. The canonical predicate kernel
+ * evaluates it (`inspectPredicateForExecution` with an evaluation request, as
+ * a query filter), so verification keeps no evaluator of its own. Every term
+ * is evaluated, and a field comparison is given no resolution, so a predicate
+ * that compares a field -- its value can differ by row, and is unknown where
+ * a value is absent -- has no constant value: `undefined`, as for any node or
+ * shape the kernel does not parse.
  */
 function constantPredicateValue(predicate: unknown): boolean | undefined {
-  if (!isRecord(predicate)) return undefined;
-  switch (predicate.kind) {
-    case 'booleanPredicate':
-      return typeof predicate.value === 'boolean' ? predicate.value : undefined;
-    case 'notPredicate': {
-      const term = constantPredicateValue(predicate.term);
-      return term === undefined ? undefined : !term;
-    }
-    case 'allPredicate':
-    case 'anyPredicate': {
-      if (!Array.isArray(predicate.terms)) return undefined;
-      const terms = predicate.terms.map((term) => constantPredicateValue(term));
-      if (terms.includes(undefined)) return undefined;
-      return predicate.kind === 'allPredicate'
-        ? terms.every((term) => term === true)
-        : terms.some((term) => term === true);
-    }
-    default:
-      return undefined;
-  }
+  const receipt = inspectPredicateForExecution(predicate, {
+    bindingPosition: 'queryFilter',
+    resolveComparison: () => {
+      throw new Error('a field comparison has no constant value');
+    },
+  });
+  return receipt.outcome === 'evaluated' ? receipt.result : undefined;
 }
 
 /** A query result's outcome, with the gateway's reason when it has one. */
