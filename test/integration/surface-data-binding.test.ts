@@ -6451,6 +6451,8 @@ test('Milestone B: reference fields answer in place, bound to their own request 
         s.id(s.line, `${s.f.ns}:field.sales_order_line_unit_id`),
         s.id(s.line, `${s.f.ns}:field.sales_order_line_unit_price`),
         s.id(s.line, `${s.f.ns}:field.sales_order_line_list_price`),
+        // SALES-EXTRAS: the price list that priced it, if one did.
+        s.id(s.line, `${s.f.ns}:field.sales_order_line_price_list_id`),
         `${s.id(s.line, `${s.f.ns}:field.sales_order_line_tax_code_id`)}-field`,
         s.id(s.line, `${s.f.ns}:field.sales_order_line_tax_rate_percent`),
       ]);
@@ -8781,6 +8783,7 @@ test('ORDER-PARITY: order Lists sum their lines, link each row to its work, and 
     [salesView('released')]: 2,
     [salesView('closed')]: 0,
     [salesView('cancelled')]: 0,
+    [salesView('counter')]: 0,
   });
   assert.equal(cell(sales.html, open, salesColumn('ordered')), '15');
   assert.equal(cell(sales.html, open, salesColumn('shipped')), '4');
@@ -8832,8 +8835,9 @@ test('ORDER-PARITY: order Lists sum their lines, link each row to its work, and 
       id('permission', 'sales_order_shipped_read'),
     ],
   );
-  // One page, six tab counts: each passed both reads.
-  assert.equal(progressCalls.length, 2 * 7);
+  // One page, seven tab counts (SALES-EXTRAS adds Counter sales): each passed
+  // both reads.
+  assert.equal(progressCalls.length, 2 * 8);
   const toShip = await renderSurfaceRuntimeWithData(
     f.view,
     salesUrl({ view: salesView('to_ship') }),
@@ -8861,6 +8865,7 @@ test('ORDER-PARITY: order Lists sum their lines, link each row to its work, and 
     [salesView('released')]: 2,
     [salesView('closed')]: 0,
     [salesView('cancelled')]: 0,
+    [salesView('counter')]: 0,
   });
   for (const local of ['ordered', 'shipped', 'open'])
     assert.equal(cell(withheld.html, open, salesColumn(local)), withheldMark);
@@ -10205,6 +10210,7 @@ test('ORDER-PARITY: an order page names the lines it is short and shows where it
             'freight_tax_code_id',
             'other_fee_amount',
             'other_fee_tax_code_id',
+            'counter_sale',
           ].map((name) => [id('field', `sales_order_${name}`), null]),
         ),
         // A complete ship-to, which Confirm requires (ruling E).
@@ -10795,4 +10801,397 @@ test('PAYABLES (PY-G): each order line shows its three-way match as the read mod
   assert.equal(fact(withheld.html), '—');
   assert.match(withheld.html, /BILL-000007/u);
   f.deniedReads.delete(id('permission', 'purchase_order_read'));
+});
+
+/**
+ * SALES-EXTRAS price lists: a sales line's price comes from the customer's
+ * highest-priority active list in the order's currency, for the largest
+ * quantity break at or below the line's quantity, through the editor's
+ * declared tiered default -- re-read when the quantity changes while the
+ * price is not one typed by hand.
+ */
+test("SALES-EXTRAS: a sales line takes its customer's price list break, follows its quantity, and keeps a typed price", async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const list = (
+    code: string,
+    priority: string,
+    currency: 'cad' | 'usd',
+    status: 'active' | 'inactive',
+    breaks: readonly (readonly [string, string])[],
+  ) => {
+    const recordId = f.executor.seed('price_list', {
+      [`${ns}:field.price_list_code`]: code,
+      [`${ns}:field.price_list_name`]: `${code} prices`,
+      [`${ns}:field.price_list_currency`]: `${ns}:option.price_list_currency_${currency}`,
+      [`${ns}:field.price_list_priority`]: priority,
+      [`${ns}:field.price_list_status`]: `${ns}:option.price_list_status_${status}`,
+    });
+    for (const [minimum, price] of breaks)
+      f.executor.seed('price_list_entry', {
+        [`${ns}:field.price_list_entry_item_id`]: f.item,
+        [`${ns}:field.price_list_entry_minimum_quantity`]: minimum,
+        [`${ns}:field.price_list_entry_unit_price`]: price,
+        [`${ns}:relation.price_list_entry_price_list`]: recordId,
+      });
+    f.executor.seed('price_list_assignment', {
+      [`${ns}:field.price_list_assignment_party_id`]: f.party,
+      [`${ns}:relation.price_list_assignment_price_list`]: recordId,
+    });
+    return recordId;
+  };
+  const wholesale = list('WHOLESALE', '10', 'cad', 'active', [
+    ['1', '11'],
+    ['10', '9.5'],
+    ['50', '8.75'],
+  ]);
+  // Lower priority, another currency, or inactive: none of them prices it.
+  list('RETAIL', '1', 'cad', 'active', [['1', '12']]);
+  list('EXPORT', '20', 'usd', 'active', [['1', '7']]);
+  list('PROMO', '99', 'cad', 'inactive', [['1', '5']]);
+  let editor = (await f.open())!;
+  const html = () => Object.values(editor.slots!).join('');
+  const header =
+    /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_currency"/.exec(
+      html(),
+    )![1]!;
+  const line =
+    /name="draft:([0-9a-f-]{36}):northstar\.app:field\.sales_order_line_item_id"/.exec(
+      html(),
+    )![1]!;
+  const name = (row: string, field: string) =>
+    `draft:${row}:${ns}:field.${field}`;
+  const control = (field: string) =>
+    `editor-${line}-${`${ns}:field.${field}`.replace(/[^a-z0-9]/giu, '-')}`;
+  const shown = (field: string) => {
+    const match = new RegExp(
+      `<(?:input|output)[^>]*id="${control(field)}"[^>]*?(?:value="([^"]*)"[^>]*)?>([^<]*)`,
+      'u',
+    ).exec(html());
+    assert.ok(match, `${field} is rendered`);
+    return match[1] ?? match[2]!;
+  };
+  const refresh = async (values: Record<string, string>) => {
+    editor = (await f.post(editor, 'refresh', values))!;
+    assert.equal(editor.statusCode, 200);
+  };
+  // Customer, currency, product and a quantity of 4: the 1+ break of the
+  // highest-priority active CAD list.
+  await refresh({
+    [name(header, 'sales_order_customer_party_id')]: f.party,
+    [name(header, 'sales_order_currency')]: 'CAD',
+    [name(line, 'sales_order_line_item_id')]: f.item,
+    [name(line, 'sales_order_line_ordered_quantity')]: '4',
+  });
+  assert.equal(shown('sales_order_line_unit_price'), '11');
+  assert.equal(shown('sales_order_line_list_price'), '11');
+  assert.equal(shown('sales_order_line_price_list_id'), 'WHOLESALE');
+  // 12 crosses the 10 break; the price follows while it is not typed.
+  await refresh({ [name(line, 'sales_order_line_ordered_quantity')]: '12' });
+  assert.equal(shown('sales_order_line_unit_price'), '9.5');
+  assert.equal(shown('sales_order_line_list_price'), '9.5');
+  // A typed price stays when the quantity moves again; the list price moves.
+  await refresh({
+    [name(line, 'sales_order_line_unit_price')]: '8',
+    [name(line, 'sales_order_line_ordered_quantity')]: '60',
+  });
+  assert.equal(shown('sales_order_line_unit_price'), '8');
+  await refresh({ [name(line, 'sales_order_line_ordered_quantity')]: '4' });
+  assert.equal(shown('sales_order_line_unit_price'), '8');
+  assert.equal(shown('sales_order_line_list_price'), '11');
+  // Saved as shown: the typed price, the list's price and the list itself.
+  const values = f.values(editor);
+  delete values[name(line, 'sales_order_line_unit_price')];
+  values[name(line, 'sales_order_line_ordered_quantity')] = '4';
+  const saved = (await f.post(editor, 'save', values))!;
+  assert.equal(saved.statusCode, 303);
+  const lineCall = f.executor.calls.find((call) =>
+    call.definition.operationId.endsWith('.sales_order_line_create'),
+  )!;
+  const stored = asRecord(asRecord(lineCall.input).values);
+  assert.deepEqual(
+    [
+      stored[`${ns}:field.sales_order_line_unit_price`],
+      stored[`${ns}:field.sales_order_line_list_price`],
+      stored[`${ns}:field.sales_order_line_price_list_id`],
+    ],
+    ['8', '11', wholesale],
+  );
+});
+
+/**
+ * SALES-EXTRAS counter sale: one Task confirms the order, reserves each line,
+ * ships every line from one location against that line's own reservation,
+ * invoices and takes the payment of the invoice's balance -- each a declared
+ * operation the order already has. The capability operations are stood in
+ * for here; the PostgreSQL and browser proofs run them for real.
+ */
+test('SALES-EXTRAS: a counter sale runs each line’s reserve and ship against that line’s own reservation, then invoices and takes the balance', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const location = f.executor.seed('location', {
+    [id('field', 'location_name')]: 'Store counter',
+  });
+  const shipTo = {
+    ship_to_name: 'Picked up at the counter',
+    ship_to_street: '120 Industrial Way',
+    ship_to_city: 'Calgary',
+    ship_to_region: 'AB',
+    ship_to_postal_code: 'T2P 0A1',
+    ship_to_country: 'Canada',
+  };
+  const order = f.executor.seed(
+    'sales_order',
+    {
+      [id('field', 'sales_order_number')]: 'SO-000042',
+      [id('field', 'sales_order_customer_party_id')]: f.party,
+      [id('field', 'sales_order_currency')]: 'CAD',
+      [id('field', 'sales_order_order_date')]: '2026-10-05T09:30:00.000Z',
+      ...Object.fromEntries(
+        [
+          'requested_date',
+          'notes',
+          'salesperson_party_id',
+          'payment_terms',
+          'ship_to_address_id',
+          'tax_code_id',
+          'freight_amount',
+          'freight_tax_code_id',
+          'freight_tax_rate_percent',
+          'other_fee_amount',
+          'other_fee_tax_code_id',
+          'other_fee_tax_rate_percent',
+          'counter_sale',
+        ].map((name) => [id('field', `sales_order_${name}`), null]),
+      ),
+      ...Object.fromEntries(
+        Object.entries(shipTo).map(([name, value]) => [
+          id('field', `sales_order_${name}`),
+          value,
+        ]),
+      ),
+      [`${ns}:derived_state_field.machine.sales_order_lifecycle`]: `${ns}:state.sales_order_draft`,
+    },
+    scope,
+  );
+  const lines = ['3', '2'].map((ordered, index) =>
+    f.executor.seed(
+      'sales_order_line',
+      {
+        [id('field', 'sales_order_line_line_number')]: String(index + 1),
+        [id('field', 'sales_order_line_item_id')]: f.item,
+        [id('field', 'sales_order_line_ordered_quantity')]: ordered,
+        [id('field', 'sales_order_line_unit_id')]: 'EA',
+        [id('field', 'sales_order_line_unit_price')]: '12.5',
+        ...Object.fromEntries(
+          [
+            'list_price',
+            'discount_percent',
+            'tax_code_id',
+            'tax_rate_percent',
+            'price_list_id',
+          ].map((name) => [id('field', `sales_order_line_${name}`), null]),
+        ),
+        [id('relation', 'sales_order_line_order')]: order,
+      },
+      scope,
+    ),
+  );
+  // Capability operations stand-ins: each moves its record one revision on,
+  // and a posted invoice states a balance of 66.25.
+  const capability = (
+    capabilityId: string,
+  ): RegisteredCapabilityOperationExecutor => ({
+    capabilityId,
+    async prepareAuthorization(request) {
+      return {
+        decisionInput: request.input,
+        legalEntityReadScopeIds: [scope],
+        readBackArguments: {
+          recordId: asRecord(request.input).recordId as string,
+          includeArchived: false,
+          [request.readBackDefinition.legalEntityScope!.operand.parameterId]:
+            scope,
+        },
+      };
+    },
+    async execute(request) {
+      f.executor.calls.push(request as never);
+      const cached = f.executor.receipts.get(request.idempotencyKey);
+      if (cached) return cached;
+      const target = f.executor.rows.get(
+        String(asRecord(request.input).recordId),
+      )!;
+      const moved: SemanticRecordDto = {
+        ...target,
+        revision: target.revision + 1,
+        values: {
+          ...target.values,
+          ...(request.definition.operationId.endsWith(
+            ':operation.customer_invoice_post',
+          )
+            ? {
+                [id('field', 'customer_invoice_balance')]:
+                  '66.250000000000000000',
+              }
+            : {}),
+        },
+      };
+      f.executor.rows.set(moved.recordId, moved);
+      const result: SemanticOperationResultEnvelope = {
+        kind: 'semanticOperationResult',
+        schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
+        operationId: request.definition.operationId,
+        outcome: 'succeeded',
+        readBack: moved,
+        unsupportedReason: null,
+        trust: {
+          changeDocumentId: randomUUID(),
+          domainEventId: randomUUID(),
+          invocationId: randomUUID(),
+          outboxId: randomUUID(),
+        },
+      };
+      f.executor.receipts.set(request.idempotencyKey, result);
+      return result;
+    },
+  });
+  // Nothing shipped or reserved yet; every line open and in stock.
+  const stated = statingGateways(f, {
+    fulfillment: (key, row) =>
+      key === 'short'
+        ? '0'
+        : key === 'available_now'
+          ? '10'
+          : key === 'shipped' || key === 'coverage'
+            ? '0'
+            : String(
+                row.values[id('field', 'sales_order_line_ordered_quantity')],
+              ),
+  });
+  const gateways: SurfaceRuntimeGateways = {
+    ...stated,
+    operationGateway: new SemanticOperationGateway(
+      f.policy,
+      f.executor,
+      stated.operationMediation,
+      undefined,
+      [
+        capability('northstar.sales:capability.fulfillment'),
+        capability('northstar.sales:capability.receivables'),
+      ],
+    ),
+  };
+  const action = id('action', 'counter_sale_paid');
+  const path = `/?${new URLSearchParams({
+    surface: id('surface', 'sales_order_detail'),
+    record: order,
+    [id('parameter', 'commercial_order_get_legal_entity_scope')]: scope,
+  }).toString()}`;
+  const page = await renderSurfaceRuntimeWithData(f.view, path, gateways);
+  assert.equal(page.statusCode, 200);
+  assert.match(
+    page.html,
+    new RegExp(`name="compositionAction" value="${regexpText(action)}"`, 'u'),
+  );
+  const start = await submitSurfaceRuntimeIntent(
+    f.view,
+    path,
+    { compositionAction: action },
+    gateways,
+  );
+  assert.equal(start.statusCode, 200);
+  // Every line of the order is a row of the sale.
+  assert.deepEqual(taskRowIds(start.html), lines);
+  const token = hiddenValue(start.html, 'taskToken');
+  const post = (values: Record<string, string>) =>
+    submitSurfaceRuntimeIntent(
+      f.view,
+      path,
+      { taskToken: token, compositionAction: action, ...values },
+      gateways,
+    );
+  const review = await post({
+    taskStage: 'prepare',
+    [id('input', 'counter_location')]: location,
+    [id('input', 'counter_method')]: id(
+      'option',
+      'customer_payment_method_cash',
+    ),
+    [id('input', 'counter_reference')]: '',
+  });
+  assert.match(review.html, /data-task-phase="review"/u);
+  const done = await post({
+    taskStage: 'confirm',
+    preparedId: hiddenValue(review.html, 'preparedId'),
+  });
+  // Every step committed. The stand-in executor's new shipment and invoice
+  // carry only their bound values, so the page's own re-read of them fails
+  // and the Task answers with its completion receipt.
+  assert.match(done.html, /COMPOSITION_COMPLETE/u);
+  const calls = f.executor.calls;
+  const local = (call: (typeof calls)[number]) =>
+    call.definition.operationId.split(':operation.')[1];
+  assert.deepEqual(calls.map(local), [
+    'sales_order_update',
+    'sales_order_release',
+    'reservation_create',
+    'reservation_create',
+    'reservation_reserve',
+    'reservation_reserve',
+    'shipment_create',
+    'shipment_line_create',
+    'shipment_line_create',
+    'shipment_post',
+    'customer_invoice_create',
+    'customer_invoice_post',
+    'customer_payment_create',
+    'customer_payment_post',
+  ]);
+  // Each line reserves its own ordered quantity, and its shipment line names
+  // that line's own reservation: a per-row step reading its row's read-back.
+  const reservations = calls.filter(
+    (call) => local(call) === 'reservation_create',
+  );
+  const reserved = calls.filter(
+    (call) => local(call) === 'reservation_reserve',
+  );
+  const shipped = calls.filter(
+    (call) => local(call) === 'shipment_line_create',
+  );
+  for (const [index, line] of lines.entries()) {
+    const reservation = asRecord(reservations[index]!.input);
+    assert.equal(
+      asRecord(reservation.relations)[id('relation', 'reservation_order_line')],
+      line,
+    );
+    assert.equal(
+      asRecord(reservation.values)[id('field', 'reservation_quantity')],
+      ['3', '2'][index],
+    );
+    assert.equal(
+      asRecord(reserved[index]!.input).recordId,
+      reservation.recordId,
+    );
+    const relations = asRecord(asRecord(shipped[index]!.input).relations);
+    assert.equal(
+      relations[id('relation', 'shipment_line_reservation')],
+      reservation.recordId,
+    );
+    assert.equal(relations[id('relation', 'shipment_line_order_line')], line);
+  }
+  // The order is marked a counter sale before it is confirmed, and the
+  // payment takes the invoice's whole balance, recorded as cash.
+  assert.deepEqual(asRecord(asRecord(calls[0]!.input).patch), {
+    [id('field', 'sales_order_counter_sale')]: true,
+  });
+  const payment = asRecord(asRecord(calls[12]!.input).values);
+  assert.equal(payment[id('field', 'customer_payment_amount')], '66.25');
+  assert.equal(
+    payment[id('field', 'customer_payment_method')],
+    id('option', 'customer_payment_method_cash'),
+  );
+  assert.equal(payment[id('field', 'customer_payment_reference')], null);
 });

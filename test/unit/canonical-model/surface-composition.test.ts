@@ -607,3 +607,69 @@ test('a record names a relation of its own entity only through the related get, 
     /a record names at most four related records/u,
   );
 });
+
+test('SALES-EXTRAS: a counter sale is one Task of up to twelve steps whose per-row steps read only their own row’s earlier read-backs', () => {
+  const sales = composition(normalized, 'sales_order_detail');
+  for (const [local, length] of [
+    ['counter_sale_paid', 11],
+    ['counter_sale_account', 9],
+  ] as const) {
+    const task = action(sales, local);
+    assert.equal(task.steps.length, length, local);
+    assert.equal(task.rows.datasetId, id('dataset', 'fulfillment_lines'));
+    // Reserving and shipping run once per line; the rest once.
+    assert.deepEqual(
+      (task.steps as Json[]).map((step) => step.each === true),
+      [
+        false,
+        false,
+        true,
+        true,
+        false,
+        true,
+        false,
+        false,
+        false,
+        ...(length === 11 ? [false, false] : []),
+      ],
+      local,
+    );
+  }
+  // A shipment line reads its own line's reservation: a per-row read-back
+  // read by a later per-row step.
+  const shipmentLine = (action(sales, 'counter_sale_paid').steps as Json[])[5]!;
+  assert.ok(
+    (shipmentLine.bindings as Json[]).some(
+      (binding) =>
+        binding.value.source === 'step' &&
+        binding.value.stepId === id('step', 'counter_reserve_draft'),
+    ),
+  );
+  // The shipment post, once, reads no per-row read-back.
+  assert.match(
+    refused('sales_order_detail', (value) => {
+      const steps = action(value, 'counter_sale_paid').steps as Json[];
+      (steps[6]!.bindings as Json[])[0]!.value = {
+        source: 'step',
+        stepId: id('step', 'counter_reserve_draft'),
+        field: 'recordId',
+      };
+    }),
+    /no step reads the read-back of a per-row step/u,
+  );
+  // Twelve steps at most: the declared Tasks parse, one of thirteen does not.
+  assert.equal(SurfaceCompositionSchema.safeParse(sales).success, true);
+  const thirteen = structuredClone(action(sales, 'counter_sale_paid')) as Json;
+  thirteen.steps = [
+    ...(thirteen.steps as Json[]),
+    { ...(thirteen.steps as Json[])[0]!, stepId: id('step', 'extra_one') },
+    { ...(thirteen.steps as Json[])[0]!, stepId: id('step', 'extra_two') },
+  ];
+  assert.equal(
+    SurfaceCompositionSchema.safeParse({
+      ...sales,
+      actions: [thirteen],
+    }).success,
+    false,
+  );
+});

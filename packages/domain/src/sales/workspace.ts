@@ -9,7 +9,21 @@ export const COMMERCIAL_READ_MODEL_BINDINGS = Object.freeze({
   // The same figures for a purchase order (ruling B extended to purchasing).
   purchaseLine: 'northstar.sales:read_model.commercial_purchase_line',
   purchaseOrder: 'northstar.sales:read_model.commercial_purchase_order',
+  // A customer's credit on its own page (SALES-EXTRAS).
+  customerCredit: 'northstar.sales:read_model.party_credit',
 });
+/**
+ * A customer's credit (SALES-EXTRAS): its limit, what its open invoices owe,
+ * what its confirmed orders will still invoice, what the limit leaves, and
+ * how that stands -- on the customer's page and on each of its orders.
+ */
+export const CREDIT_READ_MODEL_OUTPUTS = Object.freeze([
+  'customer_credit_limit',
+  'customer_open_balance',
+  'customer_on_order',
+  'customer_available_credit',
+  'customer_credit_status',
+] as const);
 /** The commercial outputs, by read-model binding. */
 export const COMMERCIAL_READ_MODEL_OUTPUTS = Object.freeze({
   line: ['line_amount', 'line_tax', 'price_basis'],
@@ -29,6 +43,7 @@ export const COMMERCIAL_READ_MODEL_OUTPUTS = Object.freeze({
     'order_tax',
     'order_total',
   ],
+  customerCredit: CREDIT_READ_MODEL_OUTPUTS,
 } as const);
 /**
  * A purchase order's received quantity not yet on a live vendor bill
@@ -118,7 +133,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
     }));
   const selected = (name: string) => ({ source: 'selected', field: name });
   const record = (name: string) => ({ source: 'record', field: name });
-  const literal = (value: string | number | null) => ({
+  const literal = (value: string | number | boolean | null) => ({
     source: 'literal',
     value,
   });
@@ -259,6 +274,195 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
     type: 'quantity',
     required: true,
   };
+  /**
+   * A counter sale (SALES-EXTRAS) in one Task, through the operations the
+   * order already has: it marks the draft as a counter sale, confirms it
+   * (credit is checked as for any order), reserves and ships every line in
+   * full from one location (the fulfillment route posts it), invoices it
+   * and, when paid at the counter, records the payment of the whole balance.
+   * No payment provider: cash, cheque or other, as recorded.
+   */
+  const counterSale = (paid: boolean) => ({
+    actionId: id('action', paid ? 'counter_sale_paid' : 'counter_sale_account'),
+    label: paid ? 'Counter sale: take payment' : 'Counter sale: on account',
+    description: paid
+      ? 'Confirms this order, ships every line from one location, invoices it and records the payment of the whole balance. Each step uses the order’s own operations.'
+      : 'Confirms this order, ships every line from one location and invoices it on the customer’s account. Each step uses the order’s own operations.',
+    orderKey: paid ? 60 : 61,
+    conditions: [inState('draft')],
+    rows: {
+      datasetId: lines,
+      conditions: [
+        {
+          value: selected(field('sales_order_line_ordered_quantity')),
+          operator: 'positive',
+          compare: null,
+        },
+      ],
+    },
+    inputs: [
+      {
+        inputId: id('input', 'counter_location'),
+        label: 'Ship from',
+        orderKey: 10,
+        type: 'reference',
+        required: true,
+        query: q('location_list'),
+        labelField: ref('fieldReference', field('location_name')),
+      },
+      ...(paid
+        ? [
+            {
+              inputId: id('input', 'counter_method'),
+              label: 'Paid by',
+              orderKey: 20,
+              type: 'text',
+              required: true,
+              presentation: {
+                kind: 'choice',
+                options: (
+                  [
+                    ['cash', 'Cash'],
+                    ['cheque', 'Cheque'],
+                    ['other', 'Other'],
+                  ] as const
+                ).map(([value, label]) => ({
+                  value: id('option', `customer_payment_method_${value}`),
+                  label,
+                })),
+                defaultValue: id('option', 'customer_payment_method_cash'),
+              },
+            },
+            {
+              inputId: id('input', 'counter_reference'),
+              label: 'Reference (cheque number)',
+              orderKey: 30,
+              type: 'text',
+              required: false,
+            },
+          ]
+        : []),
+    ],
+    steps: [
+      step('counter_mark', 'sales_order_update', [
+        bind(['recordId'], record('recordId')),
+        bind(['expectedRevision'], record('revision')),
+        bind(['patch', field('sales_order_counter_sale')], literal(true)),
+      ]),
+      step('counter_confirm', 'sales_order_release', [
+        bind(['recordId'], record('recordId')),
+        bind(['expectedRevision'], stepValue('counter_mark', 'revision')),
+      ]),
+      {
+        ...create(
+          'counter_reserve_draft',
+          'reservation',
+          {
+            number: generated('uuid'),
+            state: literal(id('option', 'reservation_state_draft')),
+            item_id: selected(field('sales_order_line_item_id')),
+            location_id: input('counter_location'),
+            quantity: selected(field('sales_order_line_ordered_quantity')),
+            unit_id: selected(field('sales_order_line_unit_id')),
+            reason: literal('Counter sale'),
+          },
+          { order_line: selected('recordId') },
+        ),
+        each: true as const,
+      },
+      {
+        ...step('counter_reserve', 'reservation_reserve', [
+          bind(['recordId'], stepValue('counter_reserve_draft', 'recordId')),
+          bind(
+            ['expectedRevision'],
+            stepValue('counter_reserve_draft', 'revision'),
+          ),
+        ]),
+        each: true as const,
+      },
+      create(
+        'counter_shipment',
+        'shipment',
+        {
+          // The shipment number is assigned on create (SHP-000001).
+          carrier: literal('Counter'),
+          shipping_reference_kind: literal(null),
+          shipping_reference: literal(null),
+          state: literal(id('option', 'shipment_state_draft')),
+          kind: literal(id('option', 'shipment_kind_initial')),
+          effective_at: generated('instant'),
+          location_id: input('counter_location'),
+          external_reference: literal(null),
+          reason_code: literal('SHIP'),
+          reason_narrative: literal('Counter sale'),
+          ...Object.fromEntries(
+            SHIP_TO_LINES.map(([name]) => [
+              name,
+              record(field(`sales_order_${name}`)),
+            ]),
+          ),
+        },
+        { order: record('recordId') },
+      ),
+      {
+        ...create(
+          'counter_shipment_line',
+          'shipment_line',
+          {
+            line_number: selected(field('sales_order_line_line_number')),
+            item_id: selected(field('sales_order_line_item_id')),
+            quantity: selected(field('sales_order_line_ordered_quantity')),
+            unit_id: selected(field('sales_order_line_unit_id')),
+            reversal_of_movement_id: literal(null),
+          },
+          {
+            shipment: stepValue('counter_shipment', 'recordId'),
+            order_line: selected('recordId'),
+            reservation: stepValue('counter_reserve_draft', 'recordId'),
+          },
+        ),
+        each: true as const,
+      },
+      command('counter_ship', 'shipment_post', 'counter_shipment'),
+      create(
+        'counter_invoice',
+        'customer_invoice',
+        {
+          // The invoice number is assigned on create (INV-000001).
+          state: literal(id('option', 'customer_invoice_state_draft')),
+          invoice_date: generated('instant'),
+        },
+        { order: record('recordId') },
+      ),
+      command(
+        'counter_invoice_post',
+        'customer_invoice_post',
+        'counter_invoice',
+      ),
+      ...(paid
+        ? [
+            create(
+              'counter_payment',
+              'customer_payment',
+              {
+                // The payment number is assigned on create (PAY-000001).
+                state: literal(id('option', 'customer_payment_state_draft')),
+                payment_date: generated('instant'),
+                // The whole balance the invoice just posted.
+                amount: stepValue(
+                  'counter_invoice_post',
+                  field('customer_invoice_balance'),
+                ),
+                method: input('counter_method'),
+                reference: input('counter_reference'),
+              },
+              { invoice: stepValue('counter_invoice', 'recordId') },
+            ),
+            command('counter_pay', 'customer_payment_post', 'counter_payment'),
+          ]
+        : []),
+    ],
+  });
   return {
     kind: 'surfaceComposition',
     schemaVersion: 'v6',
@@ -439,6 +643,53 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
       totalColumn('charges', 'Charges', 71),
       totalColumn('tax', 'Tax', 72),
       totalColumn('total', 'Total', 73),
+      // The customer's credit (SALES-EXTRAS), stated by the read model in
+      // this order's currency across every company.
+      column(
+        'customer_credit_status',
+        'Credit',
+        74,
+        id('metric', 'customer_credit_status'),
+      ),
+      money(
+        column(
+          'customer_credit_limit',
+          'Credit limit',
+          75,
+          id('metric', 'customer_credit_limit'),
+        ),
+      ),
+      money(
+        column(
+          'customer_open_balance',
+          'Open balance',
+          76,
+          id('metric', 'customer_open_balance'),
+        ),
+      ),
+      money(
+        column(
+          'customer_on_order',
+          'Confirmed, not invoiced',
+          77,
+          id('metric', 'customer_on_order'),
+        ),
+      ),
+      money(
+        column(
+          'customer_available_credit',
+          'Available credit',
+          78,
+          id('metric', 'customer_available_credit'),
+        ),
+      ),
+      // A counter sale (SALES-EXTRAS) is an ordinary order with this flag.
+      column(
+        'counter_sale',
+        'Counter sale',
+        79,
+        field('sales_order_counter_sale'),
+      ),
     ],
     children: [
       {
@@ -503,6 +754,14 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
                 field('sales_order_line_list_price'),
               ),
             ),
+            // The price list that set the line's price (SALES-EXTRAS).
+            column(
+              'priced_price_list',
+              'Price list',
+              52,
+              field('sales_order_line_price_list_id'),
+              ['price_list_get', 'price_list_code'],
+            ),
             column(
               'priced_discount',
               'Discount %',
@@ -529,7 +788,12 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
           'priced_item',
           ['priced_unit', 'priced_unit_price', 'priced_basis'],
           ['priced_quantity', 'priced_tax', 'priced_amount'],
-          ['priced_list_price', 'priced_discount', 'priced_tax_code'],
+          [
+            'priced_list_price',
+            'priced_price_list',
+            'priced_discount',
+            'priced_tax_code',
+          ],
         ),
       },
       {
@@ -946,6 +1210,8 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
           record: selected('recordId'),
         },
       },
+      counterSale(true),
+      counterSale(false),
       {
         actionId: id('action', 'open_packing'),
         presentation: { placement: 'row' },
@@ -1035,6 +1301,20 @@ export function salesWorkspaceQueries(
     clone('sales_order_line_list', 'commercial_order_lines'),
     {},
   );
+  // A customer's credit (SALES-EXTRAS) is read wherever the application
+  // composes customers and companies: on the customer's page, and on each of
+  // its orders in that order's currency.
+  const credit =
+    queries.some((query) => query.queryId === `${namespace}:query.party_get`) &&
+    queries.some(
+      (query) => query.queryId === `${namespace}:query.legal_entity_list`,
+    );
+  const creditQueries = {
+    companies: 'legal_entity_list',
+    invoices: 'customer_invoice_list',
+    orders: 'sales_order_list',
+    lines: 'commercial_lines',
+  };
   const orderTotals = commercial(
     'order',
     clone('sales_order_get', 'commercial_order_get'),
@@ -1043,8 +1323,27 @@ export function salesWorkspaceQueries(
       shipped: 'sales_order_shipped_get',
       invoices: 'customer_invoice_list',
       invoiceLines: 'customer_invoice_line_list',
+      ...(credit
+        ? {
+            party: 'party_get',
+            companies: 'legal_entity_list',
+            orders: 'sales_order_list',
+          }
+        : {}),
     },
+    credit
+      ? [...COMMERCIAL_READ_MODEL_OUTPUTS.order, ...CREDIT_READ_MODEL_OUTPUTS]
+      : COMMERCIAL_READ_MODEL_OUTPUTS.order,
   );
+  const customerCredit = credit
+    ? [
+        commercial(
+          'customerCredit',
+          clone('party_get', 'party_credit_get'),
+          creditQueries,
+        ),
+      ]
+    : [];
   // A purchase order's priced lines and totals, the same figures read the
   // same way, when the application composes purchasing with its terms.
   const purchasing = queries.some(
@@ -1174,6 +1473,7 @@ export function salesWorkspaceQueries(
     commercialLines,
     pricedLines,
     orderTotals,
+    ...customerCredit,
     ...purchaseCommercial,
     fulfillmentLines,
   ];

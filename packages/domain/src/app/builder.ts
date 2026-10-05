@@ -5,6 +5,7 @@ import {
   packingWorkspace,
 } from '../sales/workspace.js';
 import { catalogModuleDefinition } from '../catalog/definition.js';
+import { priceListWorkspace } from '../catalog/workspace.js';
 import { inventoryModuleDefinition } from '../inventory/definition.js';
 import { locationModuleDefinition } from '../location/definition.js';
 import { partyModuleDefinition } from '../party/definition.js';
@@ -91,6 +92,8 @@ const RECORD_COMPOSITIONS: Readonly<
   shipment_detail: packingWorkspace,
   customer_invoice_detail: invoiceWorkspace,
   vendor_bill_detail: billWorkspace,
+  // A price list with its prices and customers (SALES-EXTRAS).
+  price_list_detail: priceListWorkspace,
   inventory_transaction_detail: (namespace: string) =>
     inventoryDocumentWorkspace(namespace, 'inventory_transaction'),
   stock_count_detail: (namespace: string) =>
@@ -113,6 +116,8 @@ const LINES_LEAD: ReadonlySet<string> = new Set([
 const RECORD_DATA_SOURCES: Readonly<Record<string, string>> = Object.freeze({
   sales_order_detail: 'commercial_order_get',
   purchase_order_detail: 'commercial_purchase_order_get',
+  // A customer's page states its credit (SALES-EXTRAS).
+  party_detail: 'party_credit_get',
 });
 
 /**

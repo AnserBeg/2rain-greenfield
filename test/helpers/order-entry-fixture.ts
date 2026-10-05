@@ -516,6 +516,122 @@ async function seed(
         observed: true,
       };
     }
+    if (phase === 'price_lists') {
+      // SALES-EXTRAS: a CAD price list, WHOLESALE (priority 10), pricing the
+      // demo item from 1 at 11.00 and from 10 at 9.50, assigned to the demo
+      // customer; a lower-priority RETAIL list beside it is not reached.
+      const list = async (
+        code: string,
+        priority: string,
+        breaks: readonly (readonly [string, string])[],
+      ) => {
+        const created = await create(
+          'price_list',
+          {
+            code,
+            name: `${code.charAt(0)}${code.slice(1).toLowerCase()} prices`,
+            currency: `${ns}:option.price_list_currency_cad`,
+            priority,
+            status: `${ns}:option.price_list_status_active`,
+          },
+          {},
+          false,
+        );
+        for (const [minimum, price] of breaks)
+          await create(
+            'price_list_entry',
+            { item_id: item, minimum_quantity: minimum, unit_price: price },
+            { price_list: created.recordId },
+            false,
+          );
+        await create(
+          'price_list_assignment',
+          { party_id: customer },
+          { price_list: created.recordId },
+          false,
+        );
+        return created.recordId;
+      };
+      const wholesale = await list('WHOLESALE', '10', [
+        ['1', '11'],
+        ['10', '9.5'],
+      ]);
+      await list('RETAIL', '1', [['1', '12']]);
+      return { phase, code: 'WHOLESALE', recordId: wholesale, observed: true };
+    }
+    if (phase === 'credit_order') {
+      // SALES-EXTRAS: a draft sales order for the demo customer of 4 EA at
+      // 12.50, taxed 5% -- 52.50 -- with a complete ship-to, for a browser
+      // proof to confirm against the customer's credit hold and limit.
+      const order = await create('sales_order', {
+        customer_party_id: customer,
+        order_date: new Date().toISOString(),
+        requested_date: null,
+        currency: 'CAD',
+        notes: null,
+        ...shipTo,
+      });
+      await create(
+        'sales_order_line',
+        {
+          item_id: item,
+          unit_id: 'EA',
+          line_number: '1',
+          ordered_quantity: '4',
+          unit_price: '12.5',
+          list_price: '12.5',
+          discount_percent: null,
+          tax_code_id: taxCode.recordId,
+          tax_rate_percent: '5',
+        },
+        { order: order.recordId },
+      );
+      return {
+        phase,
+        number: String(order.values[`${ns}:field.sales_order_number`]),
+        recordId: order.recordId,
+        customer,
+        scope,
+        observed: true,
+      };
+    }
+    if (phase === 'counter_order') {
+      // SALES-EXTRAS: a draft sales order for the demo customer of two lines
+      // of the demo item, 3 and 2 EA at 12.50 untaxed -- 62.50 -- with a
+      // complete ship-to, for a browser proof to sell at the counter.
+      const order = await create('sales_order', {
+        customer_party_id: customer,
+        order_date: new Date().toISOString(),
+        requested_date: null,
+        currency: 'CAD',
+        notes: null,
+        ...shipTo,
+      });
+      for (const [index, quantity] of ['3', '2'].entries())
+        await create(
+          'sales_order_line',
+          {
+            item_id: item,
+            unit_id: 'EA',
+            line_number: String(index + 1),
+            ordered_quantity: quantity,
+            unit_price: '12.5',
+            list_price: '12.5',
+            discount_percent: null,
+            tax_code_id: null,
+            tax_rate_percent: null,
+          },
+          { order: order.recordId },
+        );
+      return {
+        phase,
+        number: String(order.values[`${ns}:field.sales_order_number`]),
+        recordId: order.recordId,
+        location,
+        scope,
+        observed: true,
+      };
+    }
     if (phase === 'payables') {
       // PAYABLES: a released, priced purchase order at Net 30 with freight
       // and a fee, two of its three units received, for a browser proof to

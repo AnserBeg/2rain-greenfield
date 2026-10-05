@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { resolve } from 'node:path';
 import test from 'node:test';
+import { dropDanglingReadModels } from '../helpers/drop-dangling-read-models.js';
 
 import pg from 'pg';
 
@@ -5751,10 +5752,12 @@ function composedApplicationWithoutInventoryForTransition(): Record<
     salesModuleDefinition(APPLICATION_NAMESPACE),
     'sales',
   );
-  return withoutModuleForTransition(
-    application,
-    inventoryModuleDefinition(APPLICATION_NAMESPACE),
-    'inventory',
+  return dropDanglingReadModels(
+    withoutModuleForTransition(
+      application,
+      inventoryModuleDefinition(APPLICATION_NAMESPACE),
+      'inventory',
+    ),
   );
 }
 

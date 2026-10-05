@@ -204,6 +204,9 @@ export function displayFieldValue(
       field.options.find((option) => option.optionId === value)?.label ??
       text(value)
     );
+  // A flag reads as a word, such as a counter sale's.
+  if (field?.kind === 'booleanFieldType' && typeof value === 'boolean')
+    return value ? 'Yes' : 'No';
   const result = record.displayValues?.[fieldId] ?? text(value);
   if (
     field &&
@@ -1262,6 +1265,11 @@ interface TaskSession {
   rowIds: readonly string[];
   rowInputs: Record<string, Record<string, string>>;
   results: Record<string, SemanticRecordDto>;
+  /**
+   * Each row's own read-backs of its per-row steps, read by its later
+   * per-row steps only -- a line's reservation, then reserving it.
+   */
+  rowResults: Record<string, Record<string, SemanticRecordDto>>;
   generated: Record<string, string>;
   /**
    * The runs to make, in order, with one request key each: fixed when a
@@ -1552,6 +1560,7 @@ export async function submitCompositionAction(
       ),
       rowInputs: {},
       results: {},
+      rowResults: {},
       generated: {},
       // A multi-row Task's runs depend on the rows it confirms.
       plan: action.rows
@@ -1938,7 +1947,9 @@ export async function submitCompositionAction(
               binding.value,
               context,
               values,
-              current.results,
+              run.row === null
+                ? current.results
+                : { ...current.results, ...current.rowResults[run.row] },
               current.generated,
               `${step.stepId}${run.row === null ? '' : `@${run.row}`}:${binding.path.join('.')}`,
             );
@@ -1998,8 +2009,11 @@ export async function submitCompositionAction(
               `${compositionMessage('COMPOSITION_COMMITTED_WITHHELD', 'status')}<pre>${h(JSON.stringify(result.trust))}</pre>${back}`,
           );
         }
-        // A per-row run's read-back is its row's alone; no later step reads it.
+        // A per-row run's read-back is its row's alone: only that row's later
+        // per-row steps read it.
         if (run.row === null) current.results[step.stepId] = result.readBack;
+        else
+          (current.rowResults[run.row] ??= {})[step.stepId] = result.readBack;
       }
       return taskDocument(
         () =>

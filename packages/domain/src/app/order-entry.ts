@@ -232,6 +232,48 @@ export function orderEntrySurfaces(
         sourceFieldId: id('field', `item_price_${code}`),
       })),
     };
+    // Price lists (SALES-EXTRAS): the customer's active lists in the order's
+    // currency, highest priority first; in each, the item's price for the
+    // largest quantity break at or below the line's quantity. With none, the
+    // item's own price in the order's currency applies.
+    const priceLists = (pick?: 'table') => ({
+      tables: {
+        queryId: id('query', 'price_list_list'),
+        assignment: {
+          queryId: id('query', 'price_list_assignment_list'),
+          relationId: id('relation', 'price_list_assignment_price_list'),
+          fieldId: id('field', 'price_list_assignment_party_id'),
+          headerFieldId: id('field', `${local}_customer_party_id`),
+        },
+        match: [
+          {
+            fieldId: id('field', 'price_list_currency'),
+            headerFieldId: id('field', `${local}_currency`),
+          },
+          {
+            fieldId: id('field', 'price_list_status'),
+            value: id('option', 'price_list_status_active'),
+          },
+        ],
+        rankFieldId: id('field', 'price_list_priority'),
+        // A picked list is named by its code.
+        ...(pick
+          ? {
+              getQueryId: id('query', 'price_list_get'),
+              labelFieldId: id('field', 'price_list_code'),
+            }
+          : {}),
+      },
+      rows: {
+        queryId: id('query', 'price_list_entry_list'),
+        relationId: id('relation', 'price_list_entry_price_list'),
+        referenceFieldId: id('field', 'price_list_entry_item_id'),
+        minimumFieldId: id('field', 'price_list_entry_minimum_quantity'),
+        quantityFieldId: id('field', `${local}_line_ordered_quantity`),
+        valueFieldId: id('field', 'price_list_entry_unit_price'),
+      },
+      ...(pick ? { pick } : {}),
+    });
     const shipTo = {
       reference: {
         queryId: id('query', 'party_address_list'),
@@ -429,6 +471,7 @@ export function orderEntrySurfaces(
                 defaultFrom: {
                   referenceFieldId: id('field', `${local}_line_item_id`),
                   sourceByHeader: priceInCurrency,
+                  tiers: priceLists(),
                 },
               }),
               field(`${local}_line_list_price`, 'List price', {
@@ -437,6 +480,15 @@ export function orderEntrySurfaces(
                   referenceFieldId: id('field', `${local}_line_item_id`),
                   sourceFieldId: id('field', 'item_price_cad'),
                   sourceByHeader: priceInCurrency,
+                  tiers: priceLists(),
+                },
+              }),
+              // The price list that set the price, if one did.
+              field(`${local}_line_price_list_id`, 'Price list', {
+                presentation: {
+                  kind: 'derived',
+                  referenceFieldId: id('field', `${local}_line_item_id`),
+                  tiers: priceLists('table'),
                 },
               }),
               field(`${local}_line_discount_percent`, 'Discount %'),
@@ -511,6 +563,9 @@ export function orderEntrySurfaces(
   // customer's ship-to addresses; it has no company entry to resolve.
   const masterOwners: Readonly<Record<string, string>> = {
     party_address: 'party',
+    // A price list's prices and customers belong to its page (SALES-EXTRAS).
+    price_list_entry: 'price_list',
+    price_list_assignment: 'price_list',
   };
   return surfaces.map((surface) => {
     const name = String(surface.surfaceId).split(':surface.')[1]!;

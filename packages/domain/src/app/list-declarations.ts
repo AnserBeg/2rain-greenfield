@@ -125,6 +125,12 @@ interface OrderWork {
   };
   /** A read-model total, shown beside the currency and never sorted. */
   readonly total?: string;
+  /** A tab of the documents a flag marks, such as counter sales. */
+  readonly flagView?: {
+    readonly local: string;
+    readonly label: string;
+    readonly field: string;
+  };
 }
 
 function documentList(
@@ -261,6 +267,15 @@ function documentList(
         label,
         filters: { [lifecycle]: state(local) },
       })),
+      ...(work?.flagView
+        ? [
+            {
+              local: work.flagView.local,
+              label: work.flagView.label,
+              filters: { [field(work.flagView.field)]: 'true' },
+            },
+          ]
+        : []),
     ],
     filters: [
       {
@@ -682,6 +697,12 @@ export function composedListSpecs(
           local: 'fulfill',
           label: 'Fulfill',
           section: `${namespace}:dataset.fulfillment_lines`,
+        },
+        // Counter sales (SALES-EXTRAS) are ordinary orders, also on a tab.
+        flagView: {
+          local: 'counter',
+          label: 'Counter sales',
+          field: 'counter_sale',
         },
       },
     ),

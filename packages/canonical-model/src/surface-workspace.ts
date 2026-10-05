@@ -193,15 +193,18 @@ export function validateSurfaceWorkspaces(
         (value) => value.fieldId === presentation.referenceFieldId,
       );
       const sources = [
-        presentation.sourceFieldId,
+        ...(presentation.sourceFieldId ? [presentation.sourceFieldId] : []),
         ...(presentation.sourceByHeader?.cases ?? []).map(
           (value) => value.sourceFieldId,
         ),
       ];
+      // Only a tiered source picking its table may name no field of its own:
+      // with no table, it has no value.
       if (
         (type?.kind !== 'textFieldType' &&
           type?.kind !== 'exactDecimalFieldType') ||
         !source?.reference?.getQueryId ||
+        (!presentation.sourceFieldId && presentation.tiers?.pick !== 'table') ||
         !sources.every((id) => holds(type, fields.get(id)?.fieldType)) ||
         !selects(source.reference.queryId, sources) ||
         !reads(
@@ -215,6 +218,129 @@ export function validateSurfaceWorkspaces(
         fail(
           surface.surfaceId,
           'derived presentation requires a text or decimal field and a sibling reference whose list selects a compatible source',
+        );
+      if (presentation.tiers)
+        checkTiers(presentation.tiers, fieldId, siblings, type);
+    };
+    /**
+     * A tiered source (SALES-EXTRAS) reads declared Lists only: tables of one
+     * entity that an assignment entity ties to a header party, each matched
+     * field and the rank selected by the tables' List; rows owned by a table,
+     * their reference, minimum and value selected by the rows' List; the
+     * minimum compared with a decimal field of the same row; the value one the
+     * field can hold, or -- picking the table -- a text field long enough for
+     * a record id.
+     */
+    const checkTiers = (
+      tiers: NonNullable<
+        Extract<
+          NonNullable<(typeof editor.headerFields)[number]['presentation']>,
+          { kind: 'derived' }
+        >['tiers']
+      >,
+      fieldId: string,
+      siblings: typeof editor.headerFields,
+      type: (typeof model.fields)[number]['fieldType'] | undefined,
+    ) => {
+      const listOf = (queryId: string) => {
+        const query = queries.get(queryId);
+        return query?.queryType === 'list' ? query : undefined;
+      };
+      const tables = listOf(tiers.tables.queryId);
+      const assignment = listOf(tiers.tables.assignment.queryId);
+      const rows = listOf(tiers.rows.queryId);
+      const tableEntity = tables?.sourceEntity.targetId;
+      const rowEntity = rows?.sourceEntity.targetId;
+      const owns = (entityId: string | undefined, id: string) =>
+        entityId !== undefined && fields.get(id)?.entity.targetId === entityId;
+      const relation = (id: string) =>
+        model.relations.find((value) => value.relationId === id);
+      const assigned = relation(tiers.tables.assignment.relationId);
+      const owned = relation(tiers.rows.relationId);
+      const header = (id: string) =>
+        editor.headerFields.some((value) => value.fieldId === id);
+      const numeric = (id: string) =>
+        ['integerFieldType', 'exactDecimalFieldType'].includes(
+          fields.get(id)?.fieldType.kind ?? '',
+        );
+      const value = fields.get(tiers.rows.valueFieldId)?.fieldType;
+      const quantity = siblings.find(
+        (candidate) => candidate.fieldId === tiers.rows.quantityFieldId,
+      );
+      if (
+        !tables ||
+        !assignment ||
+        !rows ||
+        assigned?.sourceEntity.targetId !== assignment.sourceEntity.targetId ||
+        assigned.targetEntity.targetId !== tableEntity ||
+        owned?.ownership !== 'parentScopedChild' ||
+        owned.sourceEntity.targetId !== rowEntity ||
+        owned.targetEntity.targetId !== tableEntity ||
+        !owns(
+          assignment.sourceEntity.targetId,
+          tiers.tables.assignment.fieldId,
+        ) ||
+        !selects(tiers.tables.assignment.queryId, [
+          tiers.tables.assignment.fieldId,
+        ]) ||
+        !editor.headerFields.find(
+          (candidate) =>
+            candidate.fieldId === tiers.tables.assignment.headerFieldId,
+        )?.reference ||
+        tiers.tables.match.some((match) => {
+          const matched = fields.get(match.fieldId)?.fieldType;
+          return (
+            !owns(tableEntity, match.fieldId) ||
+            ('headerFieldId' in match
+              ? !header(match.headerFieldId) ||
+                // A header value matches a table value it can hold, an
+                // enumeration by its label (a currency code).
+                !holds(fields.get(match.headerFieldId)?.fieldType, matched)
+              : matched?.kind === 'enumFieldType'
+                ? !matched.options.some(
+                    (option) => option.optionId === match.value,
+                  )
+                : matched?.kind !== 'textFieldType' ||
+                  [...match.value].length > matched.maximumLength)
+          );
+        }) ||
+        !selects(tiers.tables.queryId, [
+          ...tiers.tables.match.map((match) => match.fieldId),
+          tiers.tables.rankFieldId,
+        ]) ||
+        !owns(tableEntity, tiers.tables.rankFieldId) ||
+        !numeric(tiers.tables.rankFieldId) ||
+        ![
+          tiers.rows.referenceFieldId,
+          tiers.rows.minimumFieldId,
+          tiers.rows.valueFieldId,
+        ].every((id) => owns(rowEntity, id)) ||
+        !selects(tiers.rows.queryId, [
+          tiers.rows.referenceFieldId,
+          tiers.rows.minimumFieldId,
+          tiers.rows.valueFieldId,
+        ]) ||
+        fields.get(tiers.rows.minimumFieldId)?.fieldType.kind !==
+          'exactDecimalFieldType' ||
+        !quantity ||
+        quantity.fieldId === fieldId ||
+        fields.get(quantity.fieldId)?.fieldType.kind !==
+          'exactDecimalFieldType' ||
+        (tiers.pick === 'table'
+          ? type?.kind !== 'textFieldType' ||
+            type.maximumLength < 36 ||
+            !tiers.tables.getQueryId ||
+            !tiers.tables.labelFieldId ||
+            !reads(tiers.tables.getQueryId, tiers.tables.queryId, [
+              tiers.tables.labelFieldId,
+            ])
+          : !holds(type, value) ||
+            tiers.tables.getQueryId !== undefined ||
+            tiers.tables.labelFieldId !== undefined)
+      )
+        fail(
+          surface.surfaceId,
+          'a tiered source reads declared Lists of assigned tables and their owned rows, matched by selected fields, against a decimal quantity of its row',
         );
     };
     // Whether a field of type `target` can hold a value of type `source`:
@@ -548,6 +674,14 @@ export function validateSurfaceWorkspaces(
           surface.surfaceId,
           'an editor default requires a sibling reference whose record holds a compatible selected source',
         );
+      if (declaredDefault.tiers) {
+        if (declaredDefault.tiers.pick === 'table' || fromHeader)
+          fail(
+            surface.surfaceId,
+            'a tiered default supplies a value ahead of its sibling record',
+          );
+        checkTiers(declaredDefault.tiers, field.fieldId, declared, target);
+      }
     };
     checkFields(editor.headerFields, headerQuery!.sourceEntity.targetId);
     checkFields(editor.lineFields, lineQuery!.sourceEntity.targetId);

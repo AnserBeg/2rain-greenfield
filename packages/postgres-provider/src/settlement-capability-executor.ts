@@ -23,8 +23,10 @@ import type {
 } from './capability-operation-executor-factory.js';
 import {
   chargeAmounts,
+  creditLimitCents,
   formatCents,
   lineAmounts,
+  orderTotalCents,
   parseExact,
   type LineAmounts,
 } from './commercial-amounts.js';
@@ -50,7 +52,8 @@ import { PostgresTrustService } from './trust/postgres-trust-service.js';
  * The spec names every entity, field, relation, code and message; this file
  * names no module. Each module's spec file owns its identity.
  */
-export type SettlementAction = 'post' | 'void' | 'pay' | 'credit' | 'reopen';
+export type SettlementAction =
+  'post' | 'void' | 'pay' | 'credit' | 'reopen' | 'confirm';
 
 /** Which bound entity a named operation acts on. */
 type SettlementRole = 'document' | 'payment' | 'credit' | 'order';
@@ -121,6 +124,11 @@ export interface SettlementSpec {
     amountExceedsBalance: SettlementCode;
     orderNotReopenable?: SettlementCode;
     duplicateReference?: SettlementCode;
+    orderNotConfirmable?: SettlementCode;
+    customerOnHold?: SettlementCode;
+    creditLimitExceeded?: SettlementCode;
+    creditCurrencyMismatch?: SettlementCode;
+    creditUnstated?: SettlementCode;
   }>;
   readonly messages: Readonly<{
     targetMissing: string;
@@ -144,9 +152,28 @@ export interface SettlementSpec {
     reopenSettled?: string;
     duplicateReference?: string;
     orderChanged?: string;
+    confirmState?: string;
+    confirmRequired?: string;
+    customerOnHold?: string;
+    creditLimitExceeded?: (overBy: string, currency: string) => string;
+    creditCurrencyMismatch?: (limitCurrency: string | null) => string;
+    creditUnstated?: string;
   }>;
   /** The event metadata keys for the lines a post settled and the document. */
   readonly metadataKeys: Readonly<{ lines: string; document: string }>;
+  /**
+   * Confirming a draft order (SALES-EXTRAS): the order fields it requires,
+   * none blank, and the counterparty's credit -- its hold, its limit and the
+   * limit's currency -- each local to the counterparty's master entity.
+   * Absent: the family confirms nothing.
+   */
+  readonly confirm?: Readonly<{
+    party: string;
+    limit: string;
+    hold: string;
+    currency: string;
+    required: readonly string[];
+  }>;
 }
 
 type Entity = StorageTargetPayloadV1['entities'][number];
@@ -161,6 +188,8 @@ interface Binding {
   readonly order: Entity;
   readonly orderLine: Entity;
   readonly progress: Entity;
+  /** The counterparty's master, when the family confirms orders. */
+  readonly party: Entity | null;
 }
 
 interface Prepared {
@@ -275,6 +304,7 @@ export function settlementBinding(
     order: entity(spec.entities.order),
     orderLine: entity(spec.entities.orderLine),
     progress: entity(spec.entities.progress),
+    party: spec.confirm ? entity(spec.confirm.party) : null,
   };
 }
 
@@ -741,6 +771,8 @@ class SettlementCapabilityExecutor implements RegisteredCapabilityOperationExecu
         return this.#settle(client, request, prepared);
       case 'reopen':
         return this.#reopen(client, request, prepared);
+      case 'confirm':
+        return this.#confirm(client, request, prepared);
     }
   }
 
@@ -1277,6 +1309,288 @@ class SettlementCapabilityExecutor implements RegisteredCapabilityOperationExecu
         },
       ],
       metadata: { [spec.metadataKeys.document]: documentId },
+    };
+  }
+
+  /**
+   * The cents an order totals -- its live lines' amounts and taxes, and its
+   * charges with theirs -- or `null` when any of them cannot be stated.
+   */
+  async #orderTotals(
+    client: PoolClient,
+    request: RegisteredCapabilityOperationExecutionRequest,
+    orders: readonly Row[],
+  ): Promise<ReadonlyMap<string, bigint | null>> {
+    const spec = this.#spec;
+    const b = this.#binding;
+    const totals = new Map<string, bigint | null>();
+    if (!orders.length) return totals;
+    const lineField = (name: string) =>
+      unquote(column(b.orderLine, `${spec.entities.orderLine}_${name}`));
+    const orderRelation = relation(
+      b,
+      b.orderLine,
+      spec.relations.orderLineOrder,
+    );
+    const lines = await client.query<Row & { order_id: string }>(
+      `SELECT *, ${orderRelation}::text AS order_id FROM ${table(b.orderLine)}
+        WHERE tenant_id=$1 AND environment_id=$2 AND archived_at IS NULL
+          AND ${orderRelation} = ANY($3::uuid[])`,
+      [...this.#scope(request), orders.map((order) => String(order.record_id))],
+    );
+    const byOrder = new Map<string, Row[]>();
+    for (const line of lines.rows)
+      byOrder.set(line.order_id, [...(byOrder.get(line.order_id) ?? []), line]);
+    for (const order of orders) {
+      const orderField = (name: string) =>
+        order[unquote(column(b.order, `${spec.entities.order}_${name}`))];
+      totals.set(
+        String(order.record_id),
+        orderTotalCents(
+          (byOrder.get(String(order.record_id)) ?? []).map((line) => ({
+            quantity: line[lineField('ordered_quantity')],
+            unitPrice: line[lineField('unit_price')],
+            discountPercent: line[lineField('discount_percent')],
+            taxRatePercent: frozenRate(
+              line[lineField('tax_code_id')],
+              line[lineField('tax_rate_percent')],
+            ),
+          })),
+          (['freight', 'other_fee'] as const).map((charge) => ({
+            amount: orderField(`${charge}_amount`),
+            taxRatePercent: frozenRate(
+              orderField(`${charge}_tax_code_id`),
+              orderField(`${charge}_tax_rate_percent`),
+            ),
+          })),
+        ),
+      );
+    }
+    return totals;
+  }
+
+  /**
+   * What a customer owes and will owe in one currency, across every company
+   * of the tenant (SALES-EXTRAS): its open and partially paid invoices'
+   * balances, plus each of its confirmed orders' total not yet on a live
+   * invoice (never below zero). `null` when a confirmed order's total cannot
+   * be stated. The order being confirmed is not among them.
+   */
+  async #exposure(
+    client: PoolClient,
+    request: RegisteredCapabilityOperationExecutionRequest,
+    customer: string,
+    currency: string,
+    exceptOrderId: string,
+  ): Promise<bigint | null> {
+    const spec = this.#spec;
+    const b = this.#binding;
+    const scope = this.#scope(request);
+    const documentField = (name: string) => this.#documentField(name);
+    const open = await client.query<{ balance: string | null }>(
+      `SELECT ${documentField('balance')}::text AS balance FROM ${table(b.document)}
+        WHERE tenant_id=$1 AND environment_id=$2 AND archived_at IS NULL
+          AND ${documentField(spec.fields.counterparty)}=$3
+          AND ${documentField('currency')}=$4
+          AND ${documentField('state')} IN ($5,$6)`,
+      [
+        ...scope,
+        customer,
+        currency,
+        this.#documentState('open'),
+        this.#documentState('partially_paid'),
+      ],
+    );
+    let exposure = 0n;
+    for (const row of open.rows) exposure += cents(row.balance) ?? 0n;
+    const orderField = (name: string) =>
+      column(b.order, `${spec.entities.order}_${name}`);
+    const stateColumn = column(
+      b.order,
+      `derived_state_field.machine.${spec.entities.order}_lifecycle`,
+    );
+    const released = `${b.order.entityId.split(':')[0]!}:state.${spec.entities.order}_released`;
+    const orders = await client.query<Row>(
+      `SELECT * FROM ${table(b.order)}
+        WHERE tenant_id=$1 AND environment_id=$2 AND archived_at IS NULL
+          AND ${orderField(spec.fields.counterparty)}=$3
+          AND ${orderField('currency')}=$4
+          AND ${stateColumn}=$5 AND record_id <> $6::uuid`,
+      [...scope, customer, currency, released, exceptOrderId],
+    );
+    if (!orders.rows.length) return exposure;
+    const totals = await this.#orderTotals(client, request, orders.rows);
+    const documentOrder = relation(b, b.document, spec.relations.documentOrder);
+    const invoiced = await client.query<{ order_id: string; total: string }>(
+      `SELECT ${documentOrder}::text AS order_id,
+              sum(${documentField('total')})::text AS total
+         FROM ${table(b.document)}
+        WHERE tenant_id=$1 AND environment_id=$2 AND archived_at IS NULL
+          AND ${documentOrder} = ANY($3::uuid[])
+          AND ${documentField('state')} IN ($4,$5,$6)
+        GROUP BY 1`,
+      [
+        ...scope,
+        orders.rows.map((order) => String(order.record_id)),
+        this.#documentState('open'),
+        this.#documentState('partially_paid'),
+        this.#documentState('paid'),
+      ],
+    );
+    const invoicedByOrder = new Map(
+      invoiced.rows.map((row) => [row.order_id, cents(row.total) ?? 0n]),
+    );
+    for (const order of orders.rows) {
+      const total = totals.get(String(order.record_id));
+      if (total === null || total === undefined) return null;
+      const remaining =
+        total - (invoicedByOrder.get(String(order.record_id)) ?? 0n);
+      if (remaining > 0n) exposure += remaining;
+    }
+    return exposure;
+  }
+
+  /**
+   * A draft order is confirmed (SALES-EXTRAS) when it states every field a
+   * confirmed order needs and its customer's credit allows it: the customer
+   * is not on credit hold, and -- when it has a limit -- what it already owes
+   * on open invoices and confirmed orders not yet invoiced, plus this
+   * order's total, stays within the limit, all in the limit's currency (the
+   * customer's own; nothing is converted). Every confirmation of one
+   * customer's orders takes one transaction lock on that customer before the
+   * order's row, so two orders cannot both fit under the same headroom.
+   */
+  async #confirm(
+    client: PoolClient,
+    request: RegisteredCapabilityOperationExecutionRequest,
+    prepared: Prepared,
+  ): Promise<Changed> {
+    const spec = this.#spec;
+    const b = this.#binding;
+    const confirm = spec.confirm;
+    const codes = spec.codes;
+    const messages = spec.messages;
+    const party = b.party;
+    if (
+      !confirm ||
+      !party ||
+      !codes.orderNotConfirmable ||
+      !codes.customerOnHold ||
+      !codes.creditLimitExceeded ||
+      !codes.creditCurrencyMismatch ||
+      !codes.creditUnstated ||
+      !messages.confirmState ||
+      !messages.confirmRequired ||
+      !messages.customerOnHold ||
+      !messages.creditLimitExceeded ||
+      !messages.creditCurrencyMismatch ||
+      !messages.creditUnstated
+    )
+      throw refused('INVENTORY_POSTING_INPUT_INVALID', spec.refusalReason);
+    const counterpartyColumn = column(
+      b.order,
+      `${spec.entities.order}_${spec.fields.counterparty}`,
+    );
+    const peek = await client.query<{ counterparty: string | null }>(
+      `SELECT ${counterpartyColumn}::text AS counterparty FROM ${table(b.order)}
+        WHERE tenant_id=$1 AND environment_id=$2
+          AND ${quote(b.order.legalEntity!.column)}=$3 AND record_id=$4`,
+      [...this.#scope(request), prepared.legalEntityId, prepared.recordId],
+    );
+    const customer = peek.rows[0]?.counterparty ?? null;
+    if (typeof customer === 'string' && customer !== '')
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended(
+           $1::text || ':' || $2::text || ':' || $3::text || ':credit:' ||
+           $4::text, 0))`,
+        [...this.#scope(request), spec.capabilityId, customer],
+      );
+    const order = await this.#target(client, request, prepared);
+    const orderField = (name: string) =>
+      order[unquote(column(b.order, `${spec.entities.order}_${name}`))];
+    if ((orderField(spec.fields.counterparty) ?? null) !== customer)
+      throw refused(
+        'INVENTORY_TRANSACTION_STATE_CONFLICT',
+        messages.orderChanged ?? messages.recordChanged,
+      );
+    const stateColumn = column(
+      b.order,
+      `derived_state_field.machine.${spec.entities.order}_lifecycle`,
+    );
+    const before = String(order[unquote(stateColumn)]);
+    if (!before.endsWith(`:state.${spec.entities.order}_draft`))
+      throw refused(codes.orderNotConfirmable, messages.confirmState);
+    // As the declared precondition reads them: present and not empty.
+    if (
+      confirm.required.some((name) => {
+        const value = orderField(name);
+        return typeof value !== 'string' || value === '';
+      })
+    )
+      throw refused(codes.orderNotConfirmable, messages.confirmRequired);
+    if (typeof customer === 'string' && customer !== '') {
+      const partyField = (name: string) => unquote(column(party, name));
+      // Read whatever the customer's state: an archived customer's hold
+      // and limit still stand.
+      const master = (
+        await client.query<Row>(
+          `SELECT * FROM ${table(party)}
+            WHERE tenant_id=$1 AND environment_id=$2 AND record_id::text=$3`,
+          [...this.#scope(request), customer],
+        )
+      ).rows[0];
+      if (master?.[partyField(confirm.hold)] === true)
+        throw refused(codes.customerOnHold, messages.customerOnHold);
+      const limit = creditLimitCents(master?.[partyField(confirm.limit)]);
+      if (master && limit !== null) {
+        const currency = String(orderField('currency') ?? '');
+        const stored = master[partyField(confirm.currency)];
+        const marker = `:option.${confirm.currency}_`;
+        const limitCurrency =
+          typeof stored === 'string' && stored.includes(marker)
+            ? stored.slice(stored.indexOf(marker) + marker.length).toUpperCase()
+            : null;
+        if (limitCurrency === null || limitCurrency !== currency.toUpperCase())
+          throw refused(
+            codes.creditCurrencyMismatch,
+            messages.creditCurrencyMismatch(limitCurrency),
+          );
+        const total = (await this.#orderTotals(client, request, [order])).get(
+          prepared.recordId,
+        );
+        const exposure = await this.#exposure(
+          client,
+          request,
+          customer,
+          currency,
+          prepared.recordId,
+        );
+        if (total === null || total === undefined || exposure === null)
+          throw refused(codes.creditUnstated, messages.creditUnstated);
+        if (exposure + total > limit)
+          throw refused(
+            codes.creditLimitExceeded,
+            messages.creditLimitExceeded(
+              formatCents(exposure + total - limit),
+              currency,
+            ),
+          );
+      }
+    }
+    const after = `${before.slice(0, -`${spec.entities.order}_draft`.length)}${spec.entities.order}_released`;
+    const revision = await this.#update(
+      client,
+      request,
+      b.order,
+      prepared.legalEntityId,
+      prepared.recordId,
+      prepared.expectedRevision,
+      [[stateColumn, after]],
+    );
+    return {
+      revision,
+      changes: [{ field: `${b.order.entityId}.lifecycle`, before, after }],
+      metadata: {},
     };
   }
 

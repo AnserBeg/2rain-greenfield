@@ -10,6 +10,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
+import { dropDanglingReadModels } from '../helpers/drop-dangling-read-models.js';
 
 import {
   ADOPTED_LANGUAGE_VERSION,
@@ -558,12 +559,29 @@ test('sales compiler scenarios execute input refinements and operation/storage e
   const lineCreate = operations.find((operation) =>
     operation.operationId.endsWith(':operation.sales_order_line_create'),
   );
+  // Confirm is the receivables capability's (SALES-EXTRAS: it reads the
+  // customer's credit), so the state transition exercised here is a draft's
+  // cancel, the other driven transition.
   const release = operations.find((operation) =>
+    operation.operationId.endsWith(':operation.sales_order_draft_cancel'),
+  );
+  const confirm = operations.find((operation) =>
     operation.operationId.endsWith(':operation.sales_order_release'),
   );
   assert.ok(orderCreate);
   assert.ok(lineCreate);
   assert.ok(release);
+  assert.ok(confirm);
+  assert.deepEqual(confirm.effect, {
+    capability: {
+      kind: 'capabilityReference',
+      schemaVersion: ADOPTED_LANGUAGE_VERSION,
+      targetId: 'northstar.sales:capability.receivables',
+    },
+    kind: 'registeredCapabilityEffect',
+    schemaVersion: ADOPTED_LANGUAGE_VERSION,
+  });
+  assert.deepEqual(confirm.inputContract.fields, []);
 
   // The semantic-non-empty branch is observed from compiler output, not from
   // the authored declaration: both ordinary create operations have actual
@@ -642,6 +660,8 @@ test('sales compiler scenarios execute input refinements and operation/storage e
         38,
         18,
       ),
+      // SALES-EXTRAS: the price list that priced the line.
+      salesInputField('price_list_id', 'textFieldType', false, 80, null, null),
     ],
   );
   assert.deepEqual(lineCreate.inputContract.relationInputs, [
@@ -667,11 +687,11 @@ test('sales compiler scenarios execute input refinements and operation/storage e
     schemaVersion: ADOPTED_LANGUAGE_VERSION,
     stateFieldId:
       'northstar.app:derived_state_field.machine.sales_order_lifecycle',
-    toStateId: 'northstar.app:state.sales_order_released',
+    toStateId: 'northstar.app:state.sales_order_cancelled',
     transition: {
       kind: 'transitionReference',
       schemaVersion: ADOPTED_LANGUAGE_VERSION,
-      targetId: 'northstar.app:transition.sales_order_release',
+      targetId: 'northstar.app:transition.sales_order_draft_cancel',
     },
   });
 
@@ -1785,7 +1805,7 @@ function composedApplicationWithoutSales(): Record<string, unknown> {
         !belongsToSales(collectionName, entry as Record<string, unknown>),
     );
   }
-  return definition;
+  return dropDanglingReadModels(definition);
 }
 
 function referenceTarget(value: unknown): string | null {

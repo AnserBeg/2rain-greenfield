@@ -34,6 +34,7 @@ import {
   workspaceEligible,
   workspaceList,
   workspacePrincipalKey,
+  workspaceRestricted,
   workspaceSearch,
   workspaceWithin,
 } from './workspace-entry.js';
@@ -131,6 +132,24 @@ const editable = (
     (value) => value === record.values[definition.stateFieldId],
   );
 const inputName = (row: DraftRow, field: string) => `draft:${row.id}:${field}`;
+/** An exact decimal as units at its own scale, or `null`. */
+function exactDecimal(value: string): { units: bigint; scale: number } | null {
+  const match = /^(-?)(\d+)(?:\.(\d+))?$/u.exec(value.trim());
+  if (!match) return null;
+  const fraction = match[3] ?? '';
+  const units = BigInt(`${match[2]!}${fraction}`);
+  return { units: match[1] ? -units : units, scale: fraction.length };
+}
+/** Exact decimal order: negative, zero or positive, never through a float. */
+function compareExact(left: string, right: string): number {
+  const a = exactDecimal(left);
+  const b = exactDecimal(right);
+  if (!a || !b) throw new Error('An exact decimal is required');
+  const scale = Math.max(a.scale, b.scale);
+  const x = a.units * 10n ** BigInt(scale - a.scale);
+  const y = b.units * 10n ** BigInt(scale - b.scale);
+  return x < y ? -1 : x > y ? 1 : 0;
+}
 
 async function getRecord(
   view: RequestRuntimeView,
@@ -539,6 +558,245 @@ async function editorResponse(
       fallback
     );
   };
+  /** A declaration's ranked tables, such as a customer's price lists. */
+  const tiersOf = (field: SurfaceDocumentEditor['headerFields'][number]) =>
+    field.defaultFrom?.tiers ??
+    (field.presentation?.kind === 'derived'
+      ? field.presentation.tiers
+      : undefined);
+  /** The reference whose selection a declaration follows. */
+  const triggerFieldOf = (
+    field: SurfaceDocumentEditor['headerFields'][number],
+  ) =>
+    field.presentation?.kind === 'derived'
+      ? field.presentation.referenceFieldId
+      : field.defaultFrom?.referenceFieldId;
+  /**
+   * The best of the ranked tables for one row (SALES-EXTRAS): the first of
+   * the tables the header's party is assigned to -- matching the header's
+   * values, highest rank first -- with a row for the reference's selection at
+   * or below the row's quantity (1 while none is typed); its largest minimum,
+   * the lowest value among equal ones. `undefined` when no table has such a
+   * row (the declaration's own source applies); `null` when a read is
+   * withheld or fails, which states no value rather than a guessed one. One
+   * read per request for the same inputs, under this request's authority.
+   */
+  type TierAnswer = {
+    readonly table: string;
+    readonly value: ImmutableJsonValue;
+  };
+  const tierReads = new Map<string, Promise<TierAnswer | null | undefined>>();
+  /** The label of each table a tier read named, as this request read it. */
+  const tableLabels = new Map<string, string>();
+  const tieredValue = (
+    field: SurfaceDocumentEditor['headerFields'][number],
+    header: Values,
+    rowValues: Values,
+  ): Promise<TierAnswer | null | undefined> => {
+    const tiers = tiersOf(field)!;
+    const party = header[tiers.tables.assignment.headerFieldId];
+    const selection = rowValues[triggerFieldOf(field) ?? ''];
+    if (
+      typeof party !== 'string' ||
+      !party ||
+      typeof selection !== 'string' ||
+      !selection
+    )
+      return Promise.resolve(undefined);
+    const fieldFilters: { fieldId: string; value: string }[] = [];
+    for (const match of tiers.tables.match) {
+      if ('value' in match) {
+        fieldFilters.push({ fieldId: match.fieldId, value: match.value });
+        continue;
+      }
+      const value = header[match.headerFieldId];
+      if (typeof value !== 'string' || !value)
+        return Promise.resolve(undefined);
+      // An enumeration matches the header's text by its label.
+      const options = enumerationOptions(match.fieldId);
+      const matched = options
+        ? options.find((option) => option.label === value)?.optionId
+        : value;
+      if (!matched) return Promise.resolve(undefined);
+      fieldFilters.push({ fieldId: match.fieldId, value: matched });
+    }
+    const typed = rowValues[tiers.rows.quantityFieldId];
+    const quantity =
+      typeof typed === 'string' &&
+      exactDecimal(typed) !== null &&
+      compareExact(typed, '0') > 0
+        ? typed
+        : '1';
+    const key = JSON.stringify([
+      tiers.tables.queryId,
+      tiers.rows.queryId,
+      party,
+      fieldFilters,
+      selection,
+      canonicalDecimal(quantity) ?? quantity,
+    ]);
+    let read = tierReads.get(key);
+    if (!read) {
+      read = (async (): Promise<TierAnswer | null | undefined> => {
+        try {
+          const tables = await workspaceRestricted(
+            view,
+            gateways.queryGateway,
+            tiers.tables.queryId,
+            scope,
+            {
+              relatedFilter: {
+                queryId: tiers.tables.assignment.queryId,
+                relationId: tiers.tables.assignment.relationId,
+                fieldFilters: [
+                  { fieldId: tiers.tables.assignment.fieldId, value: party },
+                ],
+              },
+              fieldFilters,
+            },
+          );
+          const rank = (table: SemanticRecordDto) => {
+            const value = table.values[tiers.tables.rankFieldId];
+            return typeof value === 'string' && exactDecimal(value) !== null
+              ? value
+              : '0';
+          };
+          tables.sort(
+            (left, right) =>
+              compareExact(rank(right), rank(left)) ||
+              (left.recordId < right.recordId
+                ? -1
+                : left.recordId > right.recordId
+                  ? 1
+                  : 0),
+          );
+          for (const table of tables) {
+            const rows = await workspaceRestricted(
+              view,
+              gateways.queryGateway,
+              tiers.rows.queryId,
+              scope,
+              {
+                parentScope: {
+                  relationId: tiers.rows.relationId,
+                  recordId: table.recordId,
+                },
+                fieldFilters: [
+                  { fieldId: tiers.rows.referenceFieldId, value: selection },
+                ],
+              },
+            );
+            let best: { minimum: string; value: string } | null = null;
+            for (const row of rows) {
+              const minimum = row.values[tiers.rows.minimumFieldId];
+              const value = row.values[tiers.rows.valueFieldId];
+              if (
+                typeof minimum !== 'string' ||
+                typeof value !== 'string' ||
+                exactDecimal(minimum) === null ||
+                exactDecimal(value) === null ||
+                compareExact(minimum, quantity) > 0
+              )
+                continue;
+              if (
+                !best ||
+                compareExact(minimum, best.minimum) > 0 ||
+                (compareExact(minimum, best.minimum) === 0 &&
+                  compareExact(value, best.value) < 0)
+              )
+                best = { minimum, value };
+            }
+            if (best) {
+              const label = tiers.tables.labelFieldId
+                ? table.values[tiers.tables.labelFieldId]
+                : undefined;
+              if (typeof label === 'string' && label)
+                tableLabels.set(table.recordId, label);
+              return { table: table.recordId, value: best.value };
+            }
+          }
+          return undefined;
+        } catch {
+          return null;
+        }
+      })();
+      tierReads.set(key, read);
+    }
+    return read;
+  };
+  /** A derived follower's value: its ranked table's, else its own source's. */
+  const derivedFollowerValue = async (
+    field: SurfaceDocumentEditor['headerFields'][number],
+    rowValues: Values,
+    record: SemanticRecordDto | null,
+    header: Values,
+  ): Promise<ImmutableJsonValue> => {
+    const presentation = field.presentation as Extract<
+      NonNullable<
+        SurfaceDocumentEditor['headerFields'][number]['presentation']
+      >,
+      { kind: 'derived' }
+    >;
+    const tiers = presentation.tiers;
+    if (tiers) {
+      const tier = await tieredValue(field, header, rowValues);
+      if (tier === null) return null;
+      if (tier !== undefined)
+        return tiers.pick === 'table' ? tier.table : tier.value;
+      if (tiers.pick === 'table') return null;
+    }
+    return derivedValue(presentation, record, header);
+  };
+  /** A default follower's value: its ranked table's, else its own source's. */
+  const defaultFollowerValue = async (
+    field: SurfaceDocumentEditor['headerFields'][number],
+    rowValues: Values,
+    record: SemanticRecordDto | null,
+    header: Values,
+  ): Promise<ImmutableJsonValue> => {
+    if (field.defaultFrom?.tiers) {
+      const tier = await tieredValue(field, header, rowValues);
+      if (tier === null) return null;
+      if (tier !== undefined) return tier.value;
+    }
+    return defaultedValue(field, record, header);
+  };
+  /** How a derived value that names a table reads: that table's label. */
+  const tableDisplay = async (
+    field: SurfaceDocumentEditor['headerFields'][number],
+    draft: DraftRow,
+  ): Promise<string | undefined> => {
+    const tiers =
+      field.presentation?.kind === 'derived'
+        ? field.presentation.tiers
+        : undefined;
+    const value = draft.values[field.fieldId];
+    if (
+      tiers?.pick !== 'table' ||
+      !tiers.tables.getQueryId ||
+      !tiers.tables.labelFieldId ||
+      typeof value !== 'string' ||
+      !value
+    )
+      return undefined;
+    const known = tableLabels.get(value);
+    if (known) return known;
+    try {
+      const table = await workspaceGet(
+        view,
+        gateways.queryGateway,
+        tiers.tables.getQueryId,
+        scope,
+        value,
+      );
+      const label = table?.values[tiers.tables.labelFieldId];
+      if (typeof label !== 'string' || !label) return '—';
+      tableLabels.set(value, label);
+      return label;
+    } catch {
+      return '—';
+    }
+  };
   /**
    * Updates every follower of a reference from the record it now selects:
    * derived values are copied (cleared when there is none), defaults reset to
@@ -572,8 +830,9 @@ async function editorResponse(
       )
         continue;
       if (follower.presentation?.kind === 'derived') {
-        const derived = derivedValue(
-          follower.presentation,
+        const derived = await derivedFollowerValue(
+          follower,
+          scratch,
           record,
           headerOf(draft, scratch),
         );
@@ -587,7 +846,12 @@ async function editorResponse(
       }
       const next =
         follower.defaultFrom?.referenceFieldId === referenceFieldId
-          ? defaultedValue(follower, record, headerOf(draft, scratch))
+          ? await defaultFollowerValue(
+              follower,
+              scratch,
+              record,
+              headerOf(draft, scratch),
+            )
           : null;
       if (!follower.reference) {
         scratch[follower.fieldId] = next;
@@ -631,6 +895,12 @@ async function editorResponse(
     referenceFieldId: string,
     record: SemanticRecordDto | null,
     keep: ReadonlySet<string> = new Set(),
+    /**
+     * What the reference held before this selection, when the caller knows:
+     * a header reference lines read themselves (a customer's price lists)
+     * moves them, as its followers do.
+     */
+    previous?: ImmutableJsonValue,
   ): Promise<void> => {
     const selection = draft.values[referenceFieldId];
     const planned: FollowerValue[] = [];
@@ -643,7 +913,13 @@ async function editorResponse(
       keep,
     );
     if (draft.values[referenceFieldId] !== selection) return;
-    const before = draft.id === buffer.header.id ? { ...draft.values } : null;
+    const before =
+      draft.id === buffer.header.id
+        ? {
+            ...draft.values,
+            ...(previous !== undefined ? { [referenceFieldId]: previous } : {}),
+          }
+        : null;
     for (const value of planned) {
       draft.values[value.fieldId] = value.value;
       if (!value.reference) continue;
@@ -654,11 +930,14 @@ async function editorResponse(
     // A header default can move a value the lines read (the currency).
     if (before)
       await followHeader(
-        new Set(
-          planned
+        new Set([
+          ...planned
             .filter((value) => (before[value.fieldId] ?? null) !== value.value)
             .map((value) => value.fieldId),
-        ),
+          ...((before[referenceFieldId] ?? null) !== (selection ?? null)
+            ? [referenceFieldId]
+            : []),
+        ]),
         before,
       );
   };
@@ -675,6 +954,15 @@ async function editorResponse(
       : []),
     ...(field.defaultFrom?.headerFieldId
       ? [field.defaultFrom.headerFieldId]
+      : []),
+    // A ranked table follows the header party and the values it matches.
+    ...(tiersOf(field)
+      ? [
+          tiersOf(field)!.tables.assignment.headerFieldId,
+          ...tiersOf(field)!.tables.match.flatMap((match) =>
+            'headerFieldId' in match ? [match.headerFieldId] : [],
+          ),
+        ]
       : []),
   ];
   /** Header values, not pickers, that priced lines read (the currency). */
@@ -731,15 +1019,36 @@ async function editorResponse(
     const dependent = definition.lineFields.filter((field) =>
       lineDependsOn(field).some((id) => changed.has(id)),
     );
-    return buffer.lines.some(
-      (line) =>
-        !line.removed &&
-        dependent.some((field) => {
-          const trigger = triggerOf(field);
-          const value = trigger ? line.values[trigger] : null;
-          return typeof value === 'string' && value !== '';
-        }),
-    );
+    const kinds = inputsOf(definition.lineFormSurfaceId);
+    for (const line of buffer.lines) {
+      if (line.removed) continue;
+      for (const field of dependent) {
+        const trigger = triggerOf(field);
+        const value = trigger ? line.values[trigger] : null;
+        if (typeof value !== 'string' || value === '') continue;
+        if (!tiersOf(field)) return true;
+        // A ranked table's value (a customer's price list) is read under
+        // the header as it is and as it would be: only a value that would
+        // move needs the page.
+        const source = definition.lineFields.find(
+          (candidate) => candidate.fieldId === trigger,
+        );
+        const chosen = source ? await selectedFor(source, line) : null;
+        const automatic = (header: Values) =>
+          field.presentation?.kind === 'derived'
+            ? derivedFollowerValue(field, line.values, chosen, header)
+            : defaultFollowerValue(field, line.values, chosen, header);
+        if (
+          !sameValue(
+            kinds.get(field.fieldId)?.kind ?? 'textFieldType',
+            await automatic(draft.values),
+            await automatic(scratch),
+          )
+        )
+          return true;
+      }
+    }
+    return false;
   };
   /**
    * Line values a header value chooses or copies -- a price in the order's
@@ -769,14 +1078,20 @@ async function editorResponse(
         if (!chosen) continue;
         const record = await selectedFor(trigger, line);
         if (field.presentation?.kind === 'derived') {
-          line.values[field.fieldId] = derivedValue(
-            field.presentation,
+          line.values[field.fieldId] = await derivedFollowerValue(
+            field,
+            line.values,
             record,
             buffer.header.values,
           );
           continue;
         }
-        const previous = defaultedValue(field, record, before);
+        const previous = await defaultFollowerValue(
+          field,
+          line.values,
+          record,
+          before,
+        );
         if (
           !sameValue(
             kinds.get(field.fieldId)?.kind ?? 'textFieldType',
@@ -785,7 +1100,12 @@ async function editorResponse(
           )
         )
           continue;
-        const next = defaultedValue(field, record, buffer.header.values);
+        const next = await defaultFollowerValue(
+          field,
+          line.values,
+          record,
+          buffer.header.values,
+        );
         if (!field.reference) {
           line.values[field.fieldId] = next;
           continue;
@@ -804,6 +1124,75 @@ async function editorResponse(
         buffer.lookups.delete(key);
         nextGeneration(key);
         await applyDerived(line, field.fieldId, selected);
+      }
+    }
+  };
+  /**
+   * A line value read from a ranked table at the line's quantity -- a price
+   * list's quantity break (SALES-EXTRAS) -- follows a change of that
+   * quantity while it is not a value the operator changed; a derived value
+   * always follows.
+   */
+  const followQuantities = async (
+    prior: ReadonlyMap<string, Values>,
+  ): Promise<void> => {
+    const affected = definition.lineFields.filter((field) => tiersOf(field));
+    if (!affected.length) return;
+    const kinds = inputsOf(definition.lineFormSurfaceId);
+    for (const line of buffer.lines) {
+      const before = prior.get(line.id);
+      if (line.removed || !before) continue;
+      for (const field of affected) {
+        const quantityFieldId = tiersOf(field)!.rows.quantityFieldId;
+        if (
+          sameValue(
+            kinds.get(quantityFieldId)?.kind ?? 'exactDecimalFieldType',
+            before[quantityFieldId] ?? null,
+            line.values[quantityFieldId] ?? null,
+          )
+        )
+          continue;
+        const triggerId = triggerOf(field);
+        const trigger = definition.lineFields.find(
+          (value) => value.fieldId === triggerId,
+        );
+        const chosen = triggerId ? line.values[triggerId] : null;
+        if (!trigger?.reference?.getQueryId || typeof chosen !== 'string')
+          continue;
+        if (!chosen) continue;
+        const record = await selectedFor(trigger, line);
+        if (field.presentation?.kind === 'derived') {
+          line.values[field.fieldId] = await derivedFollowerValue(
+            field,
+            line.values,
+            record,
+            buffer.header.values,
+          );
+          continue;
+        }
+        const previous = await defaultFollowerValue(
+          field,
+          {
+            ...line.values,
+            [quantityFieldId]: before[quantityFieldId] ?? null,
+          },
+          record,
+          buffer.header.values,
+        );
+        if (
+          !sameValue(
+            kinds.get(field.fieldId)?.kind ?? 'textFieldType',
+            line.values[field.fieldId] ?? null,
+            previous,
+          )
+        )
+          continue;
+        line.values[field.fieldId] = await defaultFollowerValue(
+          field,
+          line.values,
+          record,
+          buffer.header.values,
+        );
       }
     }
   };
@@ -1144,10 +1533,11 @@ async function editorResponse(
           statusCode = 422;
           return true;
         }
+        const previous = draft.values[field.fieldId] ?? null;
         draft.values[field.fieldId] = record.recordId;
         buffer.lookups.delete(key);
         nextGeneration(key);
-        await applyDerived(draft, field.fieldId, record);
+        await applyDerived(draft, field.fieldId, record, new Set(), previous);
         buffer.focus = controlId(rowId, field.fieldId);
       } catch (error) {
         buffer.notice = warning(operationMessageRef(error), field.label);
@@ -1156,10 +1546,11 @@ async function editorResponse(
       return true;
     }
     if (verb === 'clear') {
+      const previous = draft.values[field.fieldId] ?? null;
       draft.values[field.fieldId] = null;
       buffer.lookups.delete(key);
       nextGeneration(key);
-      await applyDerived(draft, field.fieldId, null);
+      await applyDerived(draft, field.fieldId, null, new Set(), previous);
       buffer.focus = controlId(rowId, field.fieldId);
       return true;
     }
@@ -1438,7 +1829,13 @@ async function editorResponse(
     draft.values[task.fieldId] = record.recordId;
     buffer.lookups.delete(referenceKey(task.rowId, task.fieldId));
     nextGeneration(referenceKey(task.rowId, task.fieldId));
-    await applyDerived(draft, task.fieldId, record);
+    await applyDerived(
+      draft,
+      task.fieldId,
+      record,
+      new Set(),
+      task.openedValue ?? null,
+    );
     buffer.notice = `<div role="status" class="draft-note draft-note--done" data-editor-create-selected><p>${h(create.label)} created and selected. It is its own record; saving or discarding this order does not undo it.</p></div>`;
   };
   const workspaceEntry = await requiredRead(buffer, () =>
@@ -1759,7 +2156,10 @@ async function editorResponse(
               ]
             : [
                 controlId(draft.id, dependent.fieldId),
-                renderValueControl(fieldContext(draft, dependent)),
+                renderValueControl({
+                  ...fieldContext(draft, dependent),
+                  display: await tableDisplay(dependent, draft),
+                }),
               ],
         );
       return parts;
@@ -1937,10 +2337,11 @@ async function editorResponse(
       // re-renders those lines too; otherwise it lands in place.
       if (await reachesLines(draft, declared.fieldId, record))
         return { html: '', statusCode: 409, fallback: true };
+      const previous = draft.values[declared.fieldId] ?? null;
       draft.values[declared.fieldId] = record?.recordId ?? null;
       buffer.lookups.delete(key);
       nextGeneration(key);
-      await applyDerived(draft, declared.fieldId, record);
+      await applyDerived(draft, declared.fieldId, record, new Set(), previous);
       return answer(await fieldParts(draft, declared.fieldId));
     }
     // verb === 'create'
@@ -2091,6 +2492,8 @@ async function editorResponse(
             ),
             headerBefore,
           );
+          // A line quantity the operator changed moves a price read at it.
+          await followQuantities(prior);
         }
         if (
           !buffer.pending &&
@@ -2309,7 +2712,10 @@ async function editorResponse(
         );
       }
       if (field.reference) return legacyReference(draft, field, locked);
-      return renderValueControl(base);
+      return renderValueControl({
+        ...base,
+        display: await tableDisplay(field, draft),
+      });
     };
     /**
      * An older release in the lineage may declare a reference without an exact

@@ -8,6 +8,7 @@ import {
   threeWayMatch,
   type LineAmounts,
 } from './commercial-amounts.js';
+import { creditOutputs, readCreditPosition } from './credit-read-model.js';
 import { fulfillmentProjectionIdentity } from './fulfillment.js';
 import { receivedIdentity } from './goods-receipt.js';
 import {
@@ -40,6 +41,31 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
 }) => {
   const model = definition.readModel!;
   const ns = definition.sourceEntityId.split(':')[0]!;
+  // A customer's credit (SALES-EXTRAS), on its own page: the customer is a
+  // tenant-wide record, so its figures are read company by company.
+  if (model.binding === COMMERCIAL_READ_MODEL_BINDINGS.customerCredit) {
+    const rows: SemanticRecordDto[] = [];
+    for (const row of result.records) {
+      const values: Record<string, ImmutableJsonValue> = { ...row.values };
+      const outputs = creditOutputs(
+        await readCreditPosition({
+          view,
+          gateway,
+          queries: model.queries,
+          namespace: ns,
+          party: row,
+          currency: null,
+        }),
+      );
+      for (const [key, value] of Object.entries(outputs)) {
+        const target = model.resultFields[key];
+        if (!target) throw new Error('Read-model output is undeclared');
+        values[target] = value;
+      }
+      rows.push({ ...row, values });
+    }
+    return { ...result, records: rows };
+  }
   const scope = definition.legalEntityScope;
   if (!scope || !args || typeof args !== 'object' || Array.isArray(args))
     throw new Error('Commercial read model requires explicit scope');
@@ -476,16 +502,20 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
       }
       // A unit price that differs from the list price it started from was
       // set by hand (ruling B); without a list price there is nothing to mark.
-      // A purchase line has no list price: its cost is always typed.
+      // A price a price list set reads as that (SALES-EXTRAS). A purchase
+      // line has no list price: its cost is always typed.
       if (!purchase) {
         const list = row.values[field('sales_order_line_list_price')];
         const unit = row.values[field('sales_order_line_unit_price')];
+        const priceList = row.values[field('sales_order_line_price_list_id')];
         emit(
           'price_basis',
           list === null || list === undefined || list === ''
             ? null
             : sameExact(list, unit)
-              ? 'List price'
+              ? typeof priceList === 'string' && priceList !== ''
+                ? 'Price list'
+                : 'List price'
               : 'Manual price',
         );
       }
@@ -535,6 +565,42 @@ export const commercialReadModel: SemanticQueryReadModelExecutor = async ({
           'order_to_bill',
           lines === null ? null : await toBill(row.recordId, lines),
         );
+      // The customer's credit in this order's currency (SALES-EXTRAS): what
+      // it owes, what its confirmed orders will still invoice, and what its
+      // limit leaves. A withheld customer read states none of it.
+      if (model.resultFields.customer_credit_status) {
+        let party: SemanticRecordDto | null = null;
+        const customer = row.values[field('sales_order_customer_party_id')];
+        if (typeof customer === 'string' && customer !== '')
+          try {
+            const read = await invoke('party', {
+              recordId: customer,
+              includeArchived: true,
+            });
+            party = read.outcome === 'exact' ? (read.records[0] ?? null) : null;
+          } catch (error) {
+            if (!(error instanceof SemanticQueryPolicyDeniedError)) throw error;
+          }
+        const currency = row.values[field('sales_order_currency')];
+        for (const [key, value] of Object.entries(
+          creditOutputs(
+            party
+              ? await readCreditPosition({
+                  view,
+                  gateway,
+                  queries: model.queries,
+                  namespace: ns,
+                  party,
+                  currency:
+                    typeof currency === 'string' && currency !== ''
+                      ? currency
+                      : null,
+                })
+              : null,
+          ),
+        ))
+          emit(key, value);
+      }
     } else throw new Error('Unknown commercial read-model binding');
     rows.push({ ...row, values });
   }

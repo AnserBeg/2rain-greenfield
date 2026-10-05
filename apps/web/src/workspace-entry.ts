@@ -377,3 +377,106 @@ export async function workspaceGet(
     throw new Error('Selected record unavailable');
   return result.records[0]!;
 }
+
+/**
+ * Every record of a declared List under exact restrictions -- an owned
+ * parent, a related filter, exact field values -- read now under current
+ * authority (SALES-EXTRAS: a customer's price lists and their prices). A
+ * restriction the executor did not echo was not applied, so the read is
+ * refused rather than a broader set returned; a set too large to read whole
+ * within the bounded pages is refused rather than guessed.
+ */
+export async function workspaceRestricted(
+  view: RequestRuntimeView,
+  gateway: SemanticQueryGateway,
+  queryId: string,
+  scope: string | null,
+  restriction: {
+    readonly parentScope?: {
+      readonly relationId: string;
+      readonly recordId: string;
+    };
+    readonly relatedFilter?: {
+      readonly queryId: string;
+      readonly relationId: string;
+      readonly fieldFilters: readonly {
+        readonly fieldId: string;
+        readonly value: string;
+      }[];
+    };
+    readonly fieldFilters?: readonly {
+      readonly fieldId: string;
+      readonly value: string;
+    }[];
+  },
+): Promise<SemanticRecordDto[]> {
+  const definition = registeredSemanticQueryFromPinnedView(view, queryId);
+  if (!definition || definition.queryType !== 'list')
+    throw new Error('Declared list unavailable');
+  const records: SemanticRecordDto[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < 5; page++) {
+    const result: ReturnType<
+      typeof requireSharedListResult<SemanticRecordDto>
+    > = requireSharedListResult(
+      await gateway.invoke(view, {
+        schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+        queryId,
+        arguments: {
+          includeArchived: false,
+          ...(definition.legalEntityScope
+            ? { [definition.legalEntityScope.operand.parameterId]: scope }
+            : {}),
+          list: {
+            schemaVersion: SHARED_LIST_QUERY_VERSION,
+            cursor,
+            pageSize: definition.maximumResultCount,
+            search: '',
+            matchMode: 'substring',
+            sort: [],
+            relationLabels: [],
+            ...(restriction.parentScope
+              ? { parentScope: restriction.parentScope }
+              : {}),
+            ...(restriction.relatedFilter
+              ? {
+                  relatedFilter: {
+                    ...restriction.relatedFilter,
+                    fieldFilters: [...restriction.relatedFilter.fieldFilters],
+                  },
+                }
+              : {}),
+            ...(restriction.fieldFilters?.length
+              ? { fieldFilters: [...restriction.fieldFilters] }
+              : {}),
+          },
+        },
+      }),
+    );
+    const coverage = result.listCoverage;
+    const related = coverage.relatedFilter;
+    if (
+      (restriction.parentScope &&
+        (coverage.parentScope?.relationId !==
+          restriction.parentScope.relationId ||
+          coverage.parentScope.recordId !==
+            restriction.parentScope.recordId)) ||
+      (restriction.relatedFilter &&
+        (related?.queryId !== restriction.relatedFilter.queryId ||
+          related.relationId !== restriction.relatedFilter.relationId ||
+          !sameFilters(
+            related.fieldFilters,
+            restriction.relatedFilter.fieldFilters,
+          ))) ||
+      (restriction.fieldFilters?.length &&
+        !sameFilters(coverage.fieldFilters, restriction.fieldFilters))
+    )
+      throw new Error('List restriction not applied');
+    records.push(...result.records);
+    if (!coverage.hasMore) return records;
+    if (!coverage.nextCursor || coverage.nextCursor === cursor)
+      throw new Error('Incomplete list');
+    cursor = coverage.nextCursor;
+  }
+  throw new Error('List too large to read whole');
+}
