@@ -43,7 +43,9 @@ then open the printed URL. Ctrl-C stops it and removes its container. The demo s
 3. **Correct** CNT-000001 a second time: that correction's Post is refused `INVENTORY_COUNT_COMPENSATION_CONFLICT`
    (one posted count takes one correction); **Cancel count** it.
 4. Open the correction → **Reverse**, Reason "Counted the wrong bay" → Review → Confirm: each of the correction's
-   movements is undone exactly, and Calgary reads what it held before the correction.
+   movements is undone exactly, and Calgary reads what it held before the correction. A reversal whose Post is
+   refused (the stock has left since) stays Reviewed and offers **Post** and **Cancel count**, never **Return to
+   counting**: its lines are derived from the count it reverses, not counted (SC-6).
 
 ## §4 Blind counts, quick corrections and cancelling
 
