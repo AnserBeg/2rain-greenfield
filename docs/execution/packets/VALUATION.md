@@ -1,6 +1,6 @@
 # VALUATION — derived moving average, shipment cost and landed cost
 
-Status: active — resumed by the owner. Slices 1 and 2 full CI green; slice 3 implemented, hosted validation pending. [Draft PR #12](https://github.com/AnserBeg/2rain-greenfield/pull/12) open; no integration or deployment.
+Status: evidence_ready — all three slices implemented and full CI green. [Draft PR #12](https://github.com/AnserBeg/2rain-greenfield/pull/12) open; no integration or deployment.
 Critical paths touched: none. Review: not owed — outside the Critical set.
 Base: `681f4675` on `packet/VALUATION`, stacked on `packet/PAYABLES`.
 
@@ -29,7 +29,7 @@ Base: `681f4675` on `packet/VALUATION`, stacked on `packet/PAYABLES`.
 
 1. Item cost, Inventory value and item facts: [checkpoint](VALUATION-test-it-yourself.md#1-stock-value).
 2. Shipment relief, order/invoice cost and read-only margin: [checkpoint](VALUATION-test-it-yourself.md#2-shipment-cost-and-margin).
-3. Bill charges allocated by actual billed receipt value: [checkpoint](VALUATION-test-it-yourself.md#3-vendor-landed-cost), hosted CI pending.
+3. Bill charges allocated by actual billed receipt value: [checkpoint](VALUATION-test-it-yourself.md#3-vendor-landed-cost).
 
 ## Controls
 
@@ -37,12 +37,12 @@ None owed: no Critical-set path changes.
 
 ## Gates
 
-- Focused moving-average/shipment/invoice/landed unit cases 12/12; scoped/paged/current-policy and source-lineage integration 3/3; web metadata/print contracts 2/2; release freshness `--check` PASS.
-- Compiled from the PAYABLES base envelope: one added lineage entry (6 total), 102 surfaces, 17 navigation destinations, 573 verification scenarios; coverage re-derived: 2654 obligations / 811 observed, unchanged.
-- Local typecheck, lint and formatting PASS after merging `681f4675`; focused unit/workspace/surface grammar 44/44, compiler/integration/web contracts 237/237, List 6/6, numbering PostgreSQL 2/2, item contract 1/1 and suite inventory 1/1 pass. Stored-row oracle and valuation browser passed locally and in hosted CI.
-- Slice 1 full CI [36801057149](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36801057149) green at `45b03f7f62103c5824b099c16dd4a2409de991a3`, all ten jobs including reachability. Slice 2 full CI [37256436112](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37256436112) green at `ea3898d6b0660ccb196a7e820f00ba81ec762c9b`, all ten jobs, before starting slice 3.
-- Earlier slice 2 runs exposed release-admission dependencies on original plain get IDs and one stale display-query contract; both corrected. A performance run was indeterminate at 74.2% CPU idle against required 90%, then passed without changing any bound.
-- Slice 3 local allocation/replay unit cases 12/12, declared-lineage/policy integration 3/3, typecheck and lint PASS; PostgreSQL oracle and operations browser include landed-cost witnesses. Docker recovered during slice 3; its local PostgreSQL witness is running under the exclusive lock after the schema generator released it. Earlier attempts had no Docker or exited 75 while the lock stayed busy. No timeout, threshold or readiness bound changed.
+- Local slice 3 unit cases 12/12, declared-lineage/current-policy integration 3/3, compiled web contracts 2/2, surface grammar 25/25, typecheck, lint, format and release freshness `--check` PASS.
+- Independent stored-row PostgreSQL landed-cost oracle 1/1 PASS under the exclusive lock. Focused browser journey 1/1 PASS with one worker; its reporter correctly rejects filtered execution as full-suite reachability evidence. Full CI supplies unfiltered evidence. Both local fixture containers were removed.
+- Compiled from PAYABLES `681f4675`: one added lineage entry (6 total), 102 surfaces, 17 destinations, 573 scenarios, 10 numbered fields / 10 uniqueness probes. Coverage re-derived: 2654 obligations / 811 observed. No storage was added.
+- Slice 1 full CI [36801057149](https://github.com/AnserBeg/2rain-greenfield/actions/runs/36801057149) green at `45b03f7f62103c5824b099c16dd4a2409de991a3`; slice 2 [37256436112](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37256436112) green at `ea3898d6b0660ccb196a7e820f00ba81ec762c9b`; slice 3 [37258437674](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37258437674) green at `c1f08c739d78fc61a5800bdbeeac35e97e0553f8`. All ten jobs passed per slice, including reachability, before subsequent slice work.
+- Earlier slice 2 runs exposed admission dependencies on original plain get IDs and a stale display-query assertion; both corrected. One performance run was indeterminate at 74.2% CPU idle versus required 90%, then passed with no bound change. Earlier local attempts lacked Docker or exited 75 on a busy lock; Docker recovered and the exclusive-lock gates ran. No timeout, readiness or performance bound changed.
+- `scripts/check-records.sh` PASS; no Critical arm or expected-red control owed. Program-review triggers evaluated: this unintegrated draft meets the anti-trigger; none launched.
 - Small bridges: PAYABLES numbering and composed navigation inventories measured from compilation; fixtures that remove Inventory also remove composed Catalog cost reads; navigation/composed counts are pinned to the compiled output, and the new unit/PostgreSQL files enter the suite inventories.
 
 ## Test it yourself
