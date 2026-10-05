@@ -141,8 +141,8 @@
       "name": "stale-active-binding-added",
       "claim": "An active evaluator binding naming a permission the package does not declare refuses the unchanged release as stale. Only exact compatible-extension bindings may precede their dependent declaration.",
       "file": "apps/web/release/current-policy-bindings.json",
-      "original": "        \"permissionId\": \"northstar.app:permission.stock_count_update\",\n        \"resource\": \"northstar.app:entity.stock_count\"\n      }\n    ],",
-      "replacement": "        \"permissionId\": \"northstar.app:permission.stock_count_update\",\n        \"resource\": \"northstar.app:entity.stock_count\"\n      },\n      {\n        \"action\": \"read\",\n        \"permissionId\": \"northstar.app:permission.stock_count_probe_stale\",\n        \"resource\": \"northstar.app:entity.stock_count\"\n      }\n    ],",
+      "original": "      {\n        \"action\": \"update\",\n        \"permissionId\": \"northstar.app:permission.stock_count_update\",\n        \"resource\": \"northstar.app:entity.stock_count\"\n      },\n",
+      "replacement": "      {\n        \"action\": \"update\",\n        \"permissionId\": \"northstar.app:permission.stock_count_update\",\n        \"resource\": \"northstar.app:entity.stock_count\"\n      },\n      {\n        \"action\": \"read\",\n        \"permissionId\": \"northstar.app:permission.stock_count_probe_stale\",\n        \"resource\": \"northstar.app:entity.stock_count\"\n      },\n",
       "test": {
         "files": ["test/compiler/g2-module-conformance.test.ts"],
         "namePattern": "unbound-permission acknowledgement"
