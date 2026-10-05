@@ -1838,7 +1838,7 @@ export class PostgresInventoryPostingService {
         : null;
       await client.query('SAVEPOINT inventory_posting_write');
       let transactionRevision = -1;
-      let stockCountRevision: number | null = null;
+      let sourceDocumentRevision: number | null = null;
       try {
         // The companion must exist before the movements that reference it.
         if (
@@ -1902,10 +1902,10 @@ export class PostgresInventoryPostingService {
             recordedAt,
             coverage,
           );
-          stockCountRevision = parsed.sourceRevision + 1;
+          sourceDocumentRevision = parsed.sourceRevision + 1;
         }
         if (posting.postingRole === 'shipment') {
-          stockCountRevision = await writeShipmentConsequences(
+          sourceDocumentRevision = await writeShipmentConsequences(
             client,
             this.#binding,
             context,
@@ -1917,7 +1917,7 @@ export class PostgresInventoryPostingService {
           );
         }
         if (posting.postingRole === 'vendorReturn') {
-          stockCountRevision = await writeVendorReturnConsequences(
+          sourceDocumentRevision = await writeVendorReturnConsequences(
             client,
             this.#binding,
             context,
@@ -1929,7 +1929,7 @@ export class PostgresInventoryPostingService {
           );
         }
         if (posting.postingRole === 'customerReturn') {
-          stockCountRevision = await writeCustomerReturnConsequences(
+          sourceDocumentRevision = await writeCustomerReturnConsequences(
             client,
             this.#binding,
             context,
@@ -1959,7 +1959,7 @@ export class PostgresInventoryPostingService {
           );
         }
         if (isStockCountPosting(posting)) {
-          stockCountRevision = await transitionStockCountToPosted(
+          sourceDocumentRevision = await transitionStockCountToPosted(
             client,
             this.#binding,
             context,
@@ -2111,7 +2111,7 @@ export class PostgresInventoryPostingService {
         configuration,
         resultWithoutTrust,
         ids,
-        stockCountRevision ?? transactionRevision,
+        sourceDocumentRevision ?? transactionRevision,
       );
       const result = Object.freeze({ ...resultWithoutTrust, trust });
       await insertReceipt(
@@ -7089,7 +7089,7 @@ async function writeVendorReturnConsequences(
 }
 
 /**
- * Claim V4. Every relation a vendor return writes -- the return, its
+ * Claim V6. Every relation a vendor return writes -- the return, its
  * companion transaction and lines, and each order line's received row -- read
  * back column for column before commit; the received rows against the ledger
  * recomputed from the movements after the write.
