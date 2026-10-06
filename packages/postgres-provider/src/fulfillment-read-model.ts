@@ -67,6 +67,11 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
     extra: Record<string, ImmutableJsonValue> = {},
     referenceScope?: { relationId: string; recordId: string },
     parentScope?: { relationId: string; recordId: string },
+    relationLabels: readonly {
+      relationId: string;
+      queryId: string;
+      fieldId: string;
+    }[] = [],
   ) => {
     const records: SemanticRecordDto[] = [];
     let cursor: string | null = null;
@@ -84,7 +89,7 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
             pageSize: 100,
             search: '',
             sort: [],
-            relationLabels: [],
+            relationLabels: relationLabels.map((label) => ({ ...label })),
             ...(referenceScope ? { referenceScope } : {}),
             ...(parentScope ? { parentScope } : {}),
           },
@@ -311,17 +316,89 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
     return known;
   };
   /**
+   * What placed purchase orders still have to receive of an item
+   * (RECEIVING-EXTRAS): each active line of a released order -- Place order
+   * keeps an order released -- at its ordered quantity less what it has
+   * received, never below zero, read through the queries the Sales orders
+   * List's supply sums. Without them declared, nothing is incoming.
+   */
+  const incomingStock = new Map<string, Promise<bigint>>();
+  const incomingOf = (item: string) => {
+    const orders = model.queries.incomingOrders?.targetId;
+    if (!model.queries.incomingLines || !orders) return Promise.resolve(0n);
+    let known = incomingStock.get(item);
+    if (!known) {
+      known = (async () => {
+        const toOrder = `${ns}:relation.purchase_order_line_order`;
+        const state = `${ns}:derived_state_field.machine.purchase_order_lifecycle`;
+        let incoming = 0n;
+        for (const line of await list(
+          'incomingLines',
+          {
+            fieldFilters: [
+              {
+                fieldId: `${ns}:field.purchase_order_line_item_id`,
+                value: item,
+              },
+            ],
+          },
+          undefined,
+          undefined,
+          // The order each line belongs to, labelled by its state.
+          [{ relationId: toOrder, queryId: orders, fieldId: state }],
+        )) {
+          if (
+            line.relationLabels?.[toOrder]?.label !==
+            `${ns}:state.purchase_order_released`
+          )
+            continue;
+          let received = 0n;
+          for (const row of await list(
+            'incomingReceived',
+            {},
+            {
+              relationId: `${ns}:relation.purchase_order_received_order_line`,
+              recordId: line.recordId,
+            },
+          ))
+            received += fulfillmentQuantity(
+              String(
+                row.values[
+                  `${ns}:field.purchase_order_received_received_quantity`
+                ],
+              ),
+            );
+          const open =
+            fulfillmentQuantity(
+              String(
+                line.values[`${ns}:field.purchase_order_line_ordered_quantity`],
+              ),
+            ) - received;
+          if (open > 0n) incoming += open;
+        }
+        return incoming;
+      })();
+      incomingStock.set(item, known);
+    }
+    return known;
+  };
+  /**
    * What each line of the listed order is short (ORDER-PARITY, owner ruling of
    * 2026-09-30): its open quantity its own reservations do not cover, beyond
    * the item's free stock now, allocated to the order's lines in line order --
-   * so two lines of one item share its free stock. Stated only for the lines
+   * so two lines of one item share its free stock; what placed purchase
+   * orders still have to receive of the item then covers what free stock
+   * cannot, in the same order (RECEIVING-EXTRAS). Stated only for the lines
    * of one order (the executor's echoed parent scope) and only while that
    * order is a draft or confirmed; another state has nothing short. Advisory:
    * reserving and shipping are admitted by the posting kernel alone. A read
    * current policy withholds states nothing, never a guessed shortage.
    */
   let shortage:
-    | Promise<ReadonlyMap<string, { available: bigint; short: bigint }> | null>
+    | Promise<ReadonlyMap<
+        string,
+        { available: bigint; short: bigint; incoming: bigint }
+      > | null>
     | undefined;
   const shortageOf = () =>
     (shortage ??= (async () => {
@@ -368,13 +445,18 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
                 : 1;
         });
         const unallocated = new Map<string, bigint>();
-        const figures = new Map<string, { available: bigint; short: bigint }>();
+        const unallocatedIncoming = new Map<string, bigint>();
+        const figures = new Map<
+          string,
+          { available: bigint; short: bigint; incoming: bigint }
+        >();
         for (const line of lines) {
           const item = String(
             line.values[`${ns}:field.sales_order_line_item_id`],
           );
           const available = await freeOf(item);
           let short = 0n;
+          let incoming = 0n;
           if (open) {
             const { covered, shipped, ordered } = await figuresOf(line);
             const uncovered = ordered - shipped - covered;
@@ -384,9 +466,20 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
               const allocated = uncovered < left ? uncovered : left;
               unallocated.set(item, left - allocated);
               short = uncovered - allocated;
+              // Then what is on order, allocated the same way.
+              if (short > 0n) {
+                let onOrder = unallocatedIncoming.get(item);
+                if (onOrder === undefined) {
+                  const total = await incomingOf(item);
+                  onOrder = total > 0n ? total : 0n;
+                }
+                incoming = short < onOrder ? short : onOrder;
+                unallocatedIncoming.set(item, onOrder - incoming);
+                short -= incoming;
+              }
             }
           }
-          figures.set(line.recordId, { available, short });
+          figures.set(line.recordId, { available, short, incoming });
         }
         return figures;
       } catch (error) {
@@ -412,6 +505,8 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
         const own = (await shortageOf())?.get(row.recordId);
         emit('available_now', own ? own.available : null);
         emit('short', own ? own.short : null);
+        if (model.resultFields.incoming)
+          emit('incoming', own ? own.incoming : null);
       }
     } else if (model.binding === FULFILLMENT_READ_MODEL_BINDINGS.reservation) {
       const item = row.values[`${ns}:field.reservation_item_id`]!;

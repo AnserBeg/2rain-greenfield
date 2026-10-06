@@ -144,6 +144,7 @@ const suiteDefinitions = [
       'test/postgres/purchase-order-ending.test.ts',
       'test/postgres/receivables.test.ts',
       'test/postgres/receiving-authorization.test.ts',
+      'test/postgres/receiving-extras.test.ts',
       'test/postgres/inventory-backdate-policy.test.ts',
       'test/postgres/inventory-backup-restore.test.ts',
       'test/postgres/inventory-dimension-set-replay.test.ts',
@@ -197,7 +198,7 @@ const suiteDefinitions = [
   },
   {
     discoveryPattern:
-      'test/postgres/**/@(commercial-totals|expected-receipts|fulfillment|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|purchase-approvals|purchase-order-ending|receivables|receiving-authorization).test.ts',
+      'test/postgres/**/@(commercial-totals|expected-receipts|fulfillment|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|receiving-extras).test.ts',
     expectedFiles: [
       'test/postgres/commercial-totals.test.ts',
       'test/postgres/expected-receipts.test.ts',
@@ -211,6 +212,7 @@ const suiteDefinitions = [
       'test/postgres/purchase-order-ending.test.ts',
       'test/postgres/receivables.test.ts',
       'test/postgres/receiving-authorization.test.ts',
+      'test/postgres/receiving-extras.test.ts',
     ],
     script: 'test:postgres:commercial',
   },

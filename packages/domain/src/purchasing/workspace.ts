@@ -225,6 +225,17 @@ export function purchasingWorkspace(
           // operator may choose another.
           defaultFrom: record(f('purchase_order_receiving_location_id')),
         },
+        // RECEIVING-EXTRAS: the day the goods actually arrived, starting at
+        // today; the posting kernel admits it within the company's backdate
+        // window and never after today, and refuses it in a closed period.
+        {
+          inputId: id('input', 'receive_received_on'),
+          label: 'Received on',
+          orderKey: 35,
+          type: 'instant',
+          required: true,
+          defaultNow: true,
+        },
         ...(known
           ? [
               {
@@ -282,7 +293,7 @@ export function purchasingWorkspace(
             // The receipt number is assigned by the server (RCV-000001).
             state: literal(id('option', 'goods_receipt_state_draft')),
             kind: literal(id('option', 'goods_receipt_kind_initial')),
-            effective_at: generated('instant'),
+            effective_at: input('received_on'),
             location_id: input('location'),
             reason_code: literal('RECEIVE'),
             reason_narrative: literal('Receive from purchase order'),
@@ -415,6 +426,15 @@ export function purchasingWorkspace(
           labelField: ref('fieldReference', f('location_name')),
           defaultFrom: record(f('purchase_order_receiving_location_id')),
         },
+        // RECEIVING-EXTRAS: the day the truck arrived, starting at today.
+        {
+          inputId: id('input', 'receive_lines_received_on'),
+          label: 'Received on',
+          orderKey: 45,
+          type: 'instant',
+          required: true,
+          defaultNow: true,
+        },
         ...(known
           ? [
               {
@@ -461,7 +481,7 @@ export function purchasingWorkspace(
           {
             state: literal(id('option', 'goods_receipt_state_draft')),
             kind: literal(id('option', 'goods_receipt_kind_initial')),
-            effective_at: generated('instant'),
+            effective_at: input('received_on'),
             location_id: input('location'),
             reason_code: literal('RECEIVE'),
             reason_narrative: literal('Receive from purchase order'),
@@ -1294,6 +1314,401 @@ export function purchasingWorkspace(
           'Open the connected receipt and its existing amendment/correction workflow.',
         orderKey: 30,
         datasetId: receipts,
+        presentation: { placement: 'row' },
+        conditions: [],
+        inputs: [],
+        steps: [],
+        navigate: {
+          surface: ref(
+            'surfaceReference',
+            id('surface', 'goods_receipt_detail'),
+          ),
+          query: q('goods_receipt_get'),
+          record: selected('recordId'),
+        },
+      },
+    ],
+  };
+}
+
+/**
+ * A goods receipt as a document (RECEIVING-EXTRAS): its paperwork, its lines
+ * with what each still adds to stock, the corrections and reversals posted
+ * against it, and "Correct receipt" -- taking back part of what a posted
+ * receipt received, only on the lines given a quantity, through a posted
+ * correction receipt. The posting kernel bounds it (each line at most what
+ * its movement still adds, at its own order line, item, location and unit;
+ * the order released); the read model offers only lines with something left.
+ */
+export function receiptWorkspace(namespace: string): Record<string, unknown> {
+  const id = (kind: string, name: string) => `${namespace}:${kind}.${name}`;
+  const ref = (kind: string, targetId: string) => ({
+    kind,
+    targetId,
+    schemaVersion: 'v6',
+  });
+  const q = (name: string) => ref('queryReference', id('query', name));
+  const f = (name: string) => id('field', name);
+  const metric = (name: string) => id('metric', name);
+  const record = (field: string) => ({ source: 'record', field });
+  const selected = (field: string) => ({ source: 'selected', field });
+  const literal = (value: string | null) => ({ source: 'literal', value });
+  const generated = (value: string) => ({ source: 'generated', value });
+  const bind = (path: string[], value: unknown) => ({ path, value });
+  const step = (name: string, operation: string, bindings: unknown[]) => ({
+    stepId: id('step', `receipt_${name}`),
+    operation: ref('operationReference', id('operation', operation)),
+    bindings,
+  });
+  const create = (
+    name: string,
+    entity: string,
+    values: Record<string, unknown>,
+    relations: Record<string, unknown>,
+  ) =>
+    step(name, `${entity}_create`, [
+      bind(['recordId'], generated('uuid')),
+      bind(['legalEntityId'], generated('scope')),
+      ...Object.entries(values).map(([key, value]) =>
+        bind(['values', f(`${entity}_${key}`)], value),
+      ),
+      ...Object.entries(relations).map(([key, value]) =>
+        bind(['relations', id('relation', `${entity}_${key}`)], value),
+      ),
+    ]);
+  const fromStep = (name: string, field: string) => ({
+    source: 'step',
+    stepId: id('step', `receipt_${name}`),
+    field,
+  });
+  const column = (
+    name: string,
+    label: string,
+    orderKey: number,
+    field: string,
+    lookup?: readonly [string, string],
+    role?: string,
+  ) => ({
+    columnId: id('column', `receipt_doc_${name}`),
+    label,
+    orderKey,
+    field,
+    ...(lookup
+      ? {
+          reference: {
+            query: q(lookup[0]),
+            labelField: ref('fieldReference', f(lookup[1])),
+          },
+        }
+      : {}),
+    ...(role ? { presentation: { role, priority: orderKey } } : {}),
+  });
+  const order = id('relation', 'goods_receipt_order');
+  const lines = id('dataset', 'receipt_doc_lines');
+  const corrections = id('dataset', 'receipt_doc_corrections');
+  const quantity = id('input', 'correct_receipt_quantity');
+  const reason = id('input', 'correct_receipt_reason');
+  return {
+    kind: 'surfaceComposition',
+    schemaVersion: 'v6',
+    presentation: {
+      header: {
+        title: id('column', 'receipt_doc_number'),
+        subtitle: [id('column', 'receipt_doc_order')],
+        status: id('column', 'receipt_doc_state'),
+        facts: [
+          id('column', 'receipt_doc_kind'),
+          id('column', 'receipt_doc_received_at'),
+          id('column', 'receipt_doc_location'),
+          id('column', 'receipt_doc_packing_slip'),
+        ],
+      },
+      context: {
+        label: 'Receipt',
+        description:
+          'A posted receipt is never edited: Correct receipt takes back part of it, line by line, with a correction receipt of its own.',
+      },
+      recordActions: 'progressive',
+      technicalDetails: 'progressive',
+      task: { mode: 'nativeDialog', fallback: 'page' },
+    },
+    fields: [
+      column('number', 'Receipt', 10, f('goods_receipt_number')),
+      column('order', 'Purchase order', 20, order, [
+        'purchase_order_get',
+        'purchase_order_number',
+      ]),
+      column('state', 'State', 30, f('goods_receipt_state')),
+      column('kind', 'Kind', 40, f('goods_receipt_kind')),
+      column('received_at', 'Received at', 50, f('goods_receipt_effective_at')),
+      column(
+        'location',
+        'Receiving location',
+        60,
+        f('goods_receipt_location_id'),
+        ['location_get', 'location_name'],
+      ),
+      column(
+        'packing_slip',
+        'Packing slip',
+        70,
+        f('goods_receipt_packing_slip'),
+      ),
+      // A correction or reversal names the receipt it takes back from.
+      column(
+        'supersedes',
+        'Corrects receipt',
+        80,
+        id('relation', 'goods_receipt_supersedes'),
+        ['goods_receipt_get', 'goods_receipt_number'],
+      ),
+      column('reason', 'Reason', 90, f('goods_receipt_reason_narrative')),
+      column('notes', 'Notes', 100, f('goods_receipt_notes')),
+    ],
+    children: [
+      {
+        // The lines and what each still adds to stock after the corrections
+        // already posted against it.
+        datasetId: lines,
+        label: 'Receipt lines',
+        orderKey: 10,
+        query: q('receiving_receipt_lines'),
+        presentation: {
+          selection: 'none',
+          description:
+            'Reversible is what each line still adds to stock after earlier corrections. Missing or unavailable data is not zero.',
+        },
+        parent: {
+          relationId: id('relation', 'goods_receipt_line_receipt'),
+          value: record('recordId'),
+          ownership: 'parentScopedChild',
+        },
+        sort: [
+          {
+            fieldId: f('goods_receipt_line_line_number'),
+            direction: 'ascending',
+          },
+        ],
+        columns: [
+          column(
+            'line',
+            'Line',
+            10,
+            f('goods_receipt_line_line_number'),
+            undefined,
+            'secondary',
+          ),
+          column(
+            'item',
+            'Product',
+            20,
+            f('goods_receipt_line_item_id'),
+            ['item_get', 'item_name'],
+            'primary',
+          ),
+          column(
+            'quantity',
+            'Quantity',
+            30,
+            f('goods_receipt_line_quantity'),
+            undefined,
+            'quantity',
+          ),
+          column(
+            'unit',
+            'Unit',
+            40,
+            f('goods_receipt_line_unit_id'),
+            undefined,
+            'secondary',
+          ),
+          column(
+            'reversible',
+            'Reversible',
+            50,
+            metric('reversible'),
+            undefined,
+            'quantity',
+          ),
+        ],
+      },
+      {
+        // What has been taken back from this receipt, each its own receipt.
+        datasetId: corrections,
+        label: 'Corrections and reversals',
+        orderKey: 20,
+        query: q('goods_receipt_list'),
+        presentation: {
+          selection: 'explicit',
+          selectedActions: 'row',
+          compact: 'scrollTable',
+        },
+        parent: {
+          relationId: id('relation', 'goods_receipt_supersedes'),
+          value: record('recordId'),
+          ownership: 'reference',
+        },
+        columns: [
+          column(
+            'correction',
+            'Receipt',
+            10,
+            f('goods_receipt_number'),
+            undefined,
+            'primary',
+          ),
+          column(
+            'correction_kind',
+            'Kind',
+            20,
+            f('goods_receipt_kind'),
+            undefined,
+            'secondary',
+          ),
+          column(
+            'correction_state',
+            'State',
+            30,
+            f('goods_receipt_state'),
+            undefined,
+            'secondary',
+          ),
+          column(
+            'correction_received_at',
+            'Received at',
+            40,
+            f('goods_receipt_effective_at'),
+            undefined,
+            'secondary',
+          ),
+        ],
+      },
+    ],
+    actions: [
+      {
+        actionId: id('action', 'correct_receipt'),
+        label: 'Correct receipt',
+        description:
+          'Takes back part of this receipt: each line given a quantity, at most what it still adds to stock, with a posted correction receipt. A line left empty is not changed. Refused if the stock has already left or the order is not released.',
+        orderKey: 10,
+        conditions: [
+          {
+            value: record(f('goods_receipt_state')),
+            operator: 'equals',
+            compare: id('option', 'goods_receipt_state_posted'),
+          },
+          // Only an original receipt is corrected; a correction or reversal
+          // is itself taken back from its original.
+          {
+            value: record(f('goods_receipt_kind')),
+            operator: 'equals',
+            compare: id('option', 'goods_receipt_kind_initial'),
+          },
+        ],
+        // Only the lines that still add something to stock.
+        rows: {
+          datasetId: lines,
+          conditions: [
+            {
+              value: selected(metric('reversible')),
+              operator: 'positive',
+              compare: null,
+            },
+          ],
+          fillLabel: 'Fill reversible quantities',
+        },
+        inputs: [
+          {
+            inputId: quantity,
+            label: 'Quantity to take back',
+            orderKey: 10,
+            type: 'quantity',
+            required: true,
+            perRow: {
+              fillFrom: {
+                datasetId: lines,
+                columnId: id('column', 'receipt_doc_reversible'),
+              },
+            },
+          },
+          {
+            inputId: reason,
+            label: 'Reason',
+            orderKey: 20,
+            type: 'text',
+            required: true,
+            presentation: { kind: 'multiline' },
+          },
+        ],
+        steps: [
+          create(
+            'correction',
+            'goods_receipt',
+            {
+              state: literal(id('option', 'goods_receipt_state_draft')),
+              kind: literal(id('option', 'goods_receipt_kind_correction')),
+              effective_at: generated('instant'),
+              // Where the original received: a correction takes back there.
+              location_id: record(f('goods_receipt_location_id')),
+              reason_code: literal('CORRECT'),
+              reason_narrative: { source: 'input', inputId: reason },
+              packing_slip: literal(null),
+              notes: literal(null),
+            },
+            { order: record(order), supersedes: record('recordId') },
+          ),
+          {
+            ...create(
+              'correction_line',
+              'goods_receipt_line',
+              {
+                line_number: selected(f('goods_receipt_line_line_number')),
+                item_id: selected(f('goods_receipt_line_item_id')),
+                // What the operator takes back, written as the negative
+                // movement that compensates the line's own.
+                quantity: { source: 'input', inputId: quantity, negated: true },
+                unit_id: selected(f('goods_receipt_line_unit_id')),
+                cost_status: selected(f('goods_receipt_line_cost_status')),
+                unit_cost: selected(f('goods_receipt_line_unit_cost')),
+                currency: selected(f('goods_receipt_line_currency')),
+                reversal_of_movement_id: selected(metric('movement')),
+              },
+              {
+                receipt: fromStep('correction', 'recordId'),
+                order_line: selected(metric('order_line')),
+              },
+            ),
+            each: true,
+          },
+          step('correction_post', 'goods_receipt_post', [
+            bind(['recordId'], fromStep('correction', 'recordId')),
+            bind(['expectedRevision'], fromStep('correction', 'revision')),
+          ]),
+        ],
+      },
+      {
+        actionId: id('action', 'open_receipt_order'),
+        label: 'Open purchase order',
+        description: 'Open the purchase order this receipt received against.',
+        orderKey: 20,
+        conditions: [],
+        inputs: [],
+        steps: [],
+        navigate: {
+          surface: ref(
+            'surfaceReference',
+            id('surface', 'purchase_order_detail'),
+          ),
+          query: q('commercial_purchase_order_get'),
+          record: record(order),
+        },
+      },
+      {
+        actionId: id('action', 'open_correction'),
+        label: 'Open receipt',
+        description: 'Open the correction or reversal receipt.',
+        orderKey: 30,
+        datasetId: corrections,
         presentation: { placement: 'row' },
         conditions: [],
         inputs: [],

@@ -1,0 +1,168 @@
+{
+  "version": 1,
+  "packet": "RECEIVING-EXTRAS",
+  "entries": [
+    {
+      "name": "receiving-instant-default-on-any-input",
+      "claim": "Only an instant input asked once starts at the current instant; the validator refuses a default now on any other input.",
+      "file": "packages/canonical-model/src/surface-composition.ts",
+      "original": "        if (input.defaultNow && (input.type !== 'instant' || input.perRow))\n",
+      "replacement": "        if (false && input.defaultNow)\n",
+      "test": {
+        "files": ["test/unit/canonical-model/surface-composition.test.ts"],
+        "namePattern": "an instant input starts now only when asked once"
+      },
+      "kills": [
+        {
+          "file": "test/unit/canonical-model/surface-composition.test.ts",
+          "name": "RECEIVING-EXTRAS: an instant input starts now only when asked once, a negated value takes back a quantity into a written field, and a step writes only a relation its page names",
+          "expected": "the declaration was accepted"
+        }
+      ]
+    },
+    {
+      "name": "receiving-negated-any-input",
+      "claim": "Only a quantity input is negated, and only into a field a step writes; any other negated binding is refused by name.",
+      "file": "packages/canonical-model/src/surface-composition.ts",
+      "original": "            value.source === 'input' &&\n            value.negated &&\n            (bound?.type !== 'quantity' ||\n",
+      "replacement": "            value.source === 'input' &&\n            value.negated &&\n            false &&\n            (bound?.type !== 'quantity' ||\n",
+      "test": {
+        "files": ["test/unit/canonical-model/surface-composition.test.ts"],
+        "namePattern": "an instant input starts now only when asked once"
+      },
+      "kills": [
+        {
+          "file": "test/unit/canonical-model/surface-composition.test.ts",
+          "name": "RECEIVING-EXTRAS: an instant input starts now only when asked once, a negated value takes back a quantity into a written field, and a step writes only a relation its page names",
+          "expected": "the declaration was accepted"
+        }
+      ]
+    },
+    {
+      "name": "receiving-record-relation-unnamed",
+      "claim": "A step writes a relation of its record only when the page names that relation in a column or a link, so the record's get states it.",
+      "file": "packages/canonical-model/src/surface-composition.ts",
+      "original": "              recordRelation(value.field) &&\n              (composition.fields.some(\n",
+      "replacement": "              recordRelation(value.field) &&\n              (true ||\n                composition.fields.some(\n",
+      "test": {
+        "files": ["test/unit/canonical-model/surface-composition.test.ts"],
+        "namePattern": "an instant input starts now only when asked once"
+      },
+      "kills": [
+        {
+          "file": "test/unit/canonical-model/surface-composition.test.ts",
+          "name": "RECEIVING-EXTRAS: an instant input starts now only when asked once, a negated value takes back a quantity into a written field, and a step writes only a relation its page names",
+          "expected": "the declaration was accepted"
+        }
+      ]
+    },
+    {
+      "name": "receiving-incoming-without-output",
+      "claim": "A List supply states incoming supply exactly when it sums it: incoming without its output, or the output without incoming, is refused by name.",
+      "file": "packages/canonical-model/src/surface-list.ts",
+      "original": "        (supply.incoming === undefined) !==\n        (supply.outputs.incoming === undefined)\n",
+      "replacement": "        false &&\n        (supply.incoming === undefined) !==\n          (supply.outputs.incoming === undefined)\n",
+      "test": {
+        "files": ["test/unit/canonical-model/surface-list.test.ts"],
+        "namePattern": "a List supply sums what placed purchase orders still have to receive"
+      },
+      "kills": [
+        {
+          "file": "test/unit/canonical-model/surface-list.test.ts",
+          "name": "RECEIVING-EXTRAS: a List supply sums what placed purchase orders still have to receive, stated exactly when it is summed",
+          "expected": "the declaration was accepted"
+        }
+      ]
+    },
+    {
+      "name": "receiving-received-date-starts-empty",
+      "claim": "A receive Task's received date starts at the request clock's now, in the explicit-UTC picker, until a value is submitted.",
+      "file": "apps/web/src/surface-composition.ts",
+      "original": "          current.inputs[input.inputId] === undefined && input.defaultNow\n            ? (gateways.clock?.() ?? new Date()).toISOString()\n            : (displayInputs[input.inputId] ?? ''),\n        );\n",
+      "replacement": "          false\n            ? (gateways.clock?.() ?? new Date()).toISOString()\n            : (displayInputs[input.inputId] ?? ''),\n        );\n",
+      "test": {
+        "files": ["test/integration/surface-data-binding.test.ts"],
+        "namePattern": "a truck receipt receives several lines in one receipt"
+      },
+      "kills": [
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "ORDER-PARITY: a truck receipt receives several lines in one receipt, filled from what is open, one request key per run",
+          "expected": "the received date starts at the request clock"
+        }
+      ]
+    },
+    {
+      "name": "receiving-correction-adds-what-was-entered",
+      "claim": "Correct receipt writes each line as the negative of the quantity entered on it, so a correction takes stock back rather than receiving it again.",
+      "file": "apps/web/src/surface-composition.ts",
+      "original": "        return `-${input}`;\n",
+      "replacement": "        return input;\n",
+      "test": {
+        "files": ["test/integration/surface-data-binding.test.ts"],
+        "namePattern": "a receipt page takes back part of a posted receipt"
+      },
+      "kills": [
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "RECEIVING-EXTRAS: a receipt page takes back part of a posted receipt, line by line, through the receiving routes, and a refused post reads in plain language",
+          "expected": "the correction line takes back what was entered"
+        }
+      ]
+    },
+    {
+      "name": "receiving-refusals-unreadable",
+      "claim": "The posting kernel's date, period, correction and order-state refusals read in plain language, each naming the kernel's code as its subject.",
+      "file": "apps/web/src/gateway-error-codes.ts",
+      "original": "    const readable = Object.hasOwn(READABLE_REFUSAL_CODES, error.code)\n",
+      "replacement": "    const readable = false && Object.hasOwn(READABLE_REFUSAL_CODES, error.code)\n",
+      "test": {
+        "files": ["apps/web/test/surface-runtime-contract.test.ts"],
+        "namePattern": "refusals read in plain language and keep their code"
+      },
+      "kills": [
+        {
+          "file": "apps/web/test/surface-runtime-contract.test.ts",
+          "name": "RECEIVING-EXTRAS: the posting kernel’s date and receiving refusals read in plain language and keep their code",
+          "expected": "RECEIPT_FORWARD_DATE_REFUSED reads in plain language"
+        }
+      ]
+    },
+    {
+      "name": "receiving-list-short-ignores-incoming",
+      "claim": "The Sales orders List states as short only what neither free stock nor placed purchase orders still to arrive cover, before the count, the page and the export.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "    ? `(SELECT coalesce(sum(greatest(${left} - ${qualified(supplied, 'incoming')}, 0)), 0)\n",
+      "replacement": "    ? `(SELECT coalesce(sum(${left}), 0)\n",
+      "test": {
+        "files": ["test/postgres/receiving-extras.test.ts"],
+        "namePattern": "reads On order, not short"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/receiving-extras.test.ts",
+          "name": "an item short of free stock but on a placed purchase order reads On order, not short, on the List and the order page",
+          "expected": "nine reads its Short on the List"
+        }
+      ]
+    },
+    {
+      "name": "receiving-page-short-ignores-incoming",
+      "claim": "The order page states each line's shortage net of what placed purchase orders still to arrive cover, allocated in line order, as the List does.",
+      "file": "packages/postgres-provider/src/fulfillment-read-model.ts",
+      "original": "                short -= incoming;\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/receiving-extras.test.ts"],
+        "namePattern": "reads On order, not short"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/receiving-extras.test.ts",
+          "name": "an item short of free stock but on a placed purchase order reads On order, not short, on the List and the order page",
+          "expected": "nine reads its Short on its page"
+        }
+      ]
+    }
+  ]
+}

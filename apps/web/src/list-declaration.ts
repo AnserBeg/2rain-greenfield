@@ -239,9 +239,17 @@ function supplyArgument(
       minus: Object.freeze(supply.free.minus.map(supplySumArgument)),
       plus: Object.freeze(supply.free.plus.map(supplySumArgument)),
     }),
+    // What is already on order (RECEIVING-EXTRAS), with its output.
+    ...(supply.incoming
+      ? { incoming: Object.freeze(supply.incoming.map(supplySumArgument)) }
+      : {}),
     itemFieldId: supply.item,
     ...(keep ? { keep } : {}),
-    outputs: Object.freeze({ ...supply.outputs }),
+    outputs: Object.freeze({
+      covered: supply.outputs.covered,
+      short: supply.outputs.short,
+      ...(supply.outputs.incoming ? { incoming: supply.outputs.incoming } : {}),
+    }),
     ...(supply.shortIn
       ? {
           shortIn: Object.freeze({

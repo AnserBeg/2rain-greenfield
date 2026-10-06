@@ -46,6 +46,8 @@ import {
 } from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
 import { fulfillmentProjectionIdentity } from '../../packages/postgres-provider/src/fulfillment.js';
 import { fulfillmentReadModel } from '../../packages/postgres-provider/src/fulfillment-read-model.js';
+import { RECEIVING_SURFACE_RUNTIME_EXTENSION } from '../../apps/web/src/receiving-section.js';
+import { InventoryPostingError } from '../../packages/postgres-provider/src/inventory-posting-error.js';
 import { commercialReadModel } from '../../packages/postgres-provider/src/commercial-read-model.js';
 import { purchaseOrderApprovalInput } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
 import { encodeSharedListCursor } from '../../packages/runtime/src/list-behavior/index.js';
@@ -4789,7 +4791,10 @@ class OrderEntryExecutor
       // the row's company, never below zero -- covers it, and the rest is
       // short, stated in the short states only. Covered counts each line at
       // most for what it has open. Whole units only in this witness.
-      const supplied = new Map<string, { covered: number; short: number }>();
+      const supplied = new Map<
+        string,
+        { covered: number; short: number; incoming: number }
+      >();
       const supplyOf = (row: SemanticRecordDto) => {
         const supply = progress?.supply;
         if (!progress || !supply) return null;
@@ -4911,6 +4916,9 @@ class OrderEntryExecutor
             String(row.values[supply.shortIn.fieldId]),
           );
         let short = 0;
+        // RECEIVING-EXTRAS: what is already on order covers, per item, what
+        // free stock leaves; only the rest is short.
+        let incoming = 0;
         if (stated)
           for (const [item, left] of uncovered) {
             if (left <= 0) continue;
@@ -4923,7 +4931,19 @@ class OrderEntryExecutor
                 (total, sum) => total + part(sum, item),
                 0,
               );
-            short += Math.max(left - Math.max(free, 0), 0);
+            const beyond = Math.max(left - Math.max(free, 0), 0);
+            const onOrder = Math.min(
+              beyond,
+              Math.max(
+                (supply.incoming ?? []).reduce(
+                  (total, sum) => total + part(sum, item),
+                  0,
+                ),
+                0,
+              ),
+            );
+            incoming += onOrder;
+            short += beyond - onOrder;
           }
         const answer = {
           covered: lines.reduce(
@@ -4932,6 +4952,7 @@ class OrderEntryExecutor
             0,
           ),
           short,
+          incoming,
         };
         supplied.set(row.recordId, answer);
         return answer;
@@ -5170,6 +5191,13 @@ class OrderEntryExecutor
                   ? {
                       [progress.supply.outputs.covered]: String(supply.covered),
                       [progress.supply.outputs.short]: String(supply.short),
+                      ...(progress.supply.outputs.incoming
+                        ? {
+                            [progress.supply.outputs.incoming]: String(
+                              supply.incoming,
+                            ),
+                          }
+                        : {}),
                     }
                   : {}),
               },
@@ -7481,6 +7509,7 @@ test('Milestone C: receiving inputs are derived, offered and exact, never free t
     [input('quantity')]: '2',
     [input('unit')]: 'BOX',
     [input('location')]: otherLocation,
+    [input('received_on')]: '2026-10-05T08:00',
     [input('cost')]: '2.4.5',
     [input('currency')]: 'GBP',
   });
@@ -7514,6 +7543,8 @@ test('Milestone C: receiving inputs are derived, offered and exact, never free t
     [input('quantity')]: '2',
     [input('unit')]: 'BOX',
     [input('location')]: location,
+    // RECEIVING-EXTRAS: the day it arrived, picked to the minute.
+    [input('received_on')]: '2026-10-05T08:00',
     [input('cost')]: '2.450',
     [input('currency')]: 'CAD',
     [input('packing_slip')]: ' PS-4471 ',
@@ -7539,6 +7570,11 @@ test('Milestone C: receiving inputs are derived, offered and exact, never free t
   assert.ok(receipt, 'the receipt create ran');
   const header = asRecord(asRecord(receipt.input).values);
   assert.equal(header[`${ns}:field.goods_receipt_location_id`], location);
+  // The received date in the field's canonical spelling, as it was picked.
+  assert.equal(
+    header[`${ns}:field.goods_receipt_effective_at`],
+    '2026-10-05T08:00:00.000Z',
+  );
   assert.equal(header[`${ns}:field.goods_receipt_packing_slip`], 'PS-4471');
   assert.equal(header[`${ns}:field.goods_receipt_notes`], null);
   const receiptLine = f.executor.calls.find((call) =>
@@ -9336,7 +9372,7 @@ test('ORDER-PARITY: order Lists sum their lines, link each row to its work, and 
   assert.match(
     withheld.html,
     new RegExp(
-      `data-list-progress-withheld="${id('query', 'sales_order_shipped_list')}">Ordered, Shipped, Open and Short are withheld by current policy; To ship, Blocked by supply and Reserved need them and are unavailable.<`,
+      `data-list-progress-withheld="${id('query', 'sales_order_shipped_list')}">Ordered, Shipped, Open, Short and On order are withheld by current policy; To ship, Blocked by supply and Reserved need them and are unavailable.<`,
       'u',
     ),
   );
@@ -9368,9 +9404,9 @@ test('ORDER-PARITY: order Lists sum their lines, link each row to its work, and 
     .split('\r\n');
   assert.equal(
     csv[0],
-    'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Short,Currency',
+    'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Short,On order,Currency',
   );
-  assert.ok(csv.some((line) => /^SO-OPEN,.*,,,,,CAD$/u.test(line)));
+  assert.ok(csv.some((line) => /^SO-OPEN,.*,,,,,,CAD$/u.test(line)));
   const refusedExport = await renderSurfaceRuntimeWithData(
     f.view,
     salesUrl({ view: salesView('to_ship'), export: 'csv' }),
@@ -9901,16 +9937,21 @@ test('SUPPLY-WARNINGS: the Sales orders List counts Blocked by supply and Reserv
   // The supply re-enters current policy for the List's company on every
   // request -- the page and each of the eight tab counts -- query by query.
   const calls = supplyCalls().slice(before);
+  // RECEIVING-EXTRAS: and what placed purchase orders still have to
+  // receive -- their lines, their orders' states and what each received.
   assert.deepEqual(
     [...new Set(calls.map((call) => call.permissionId))].sort(),
     [
       id('permission', 'location_read'),
       id('permission', 'posted_stock_balance_read'),
+      id('permission', 'purchase_order_line_read'),
+      id('permission', 'purchase_order_read'),
+      id('permission', 'purchase_order_received_read'),
       id('permission', 'reservation_balance_read'),
       id('permission', 'reservation_read'),
     ],
   );
-  assert.equal(calls.length, 5 * 9);
+  assert.equal(calls.length, 8 * 9);
   const scopeParameter = id('parameter', 'sales_order_list_legal_entity_scope');
   for (const call of calls) {
     const input = call.decisionInput as {
@@ -9954,10 +9995,11 @@ test('SUPPLY-WARNINGS: the Sales orders List counts Blocked by supply and Reserv
     .split('\r\n');
   assert.equal(
     csv[0],
-    'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Short,Currency',
+    'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Short,On order,Currency',
   );
   assert.equal(csv.length, 2);
-  assert.match(csv[1]!, /^SO-SHORT,.*,14,0,14,6,CAD$/u);
+  // Nothing of the valve is on order here.
+  assert.match(csv[1]!, /^SO-SHORT,.*,14,0,14,6,0,CAD$/u);
 
   // The agent path: the preset carries the supply as the argument it is.
   const preset = (
@@ -9971,8 +10013,10 @@ test('SUPPLY-WARNINGS: the Sales orders List counts Blocked by supply and Reserv
   ).listPresets.find(
     (value) => value.surfaceId === id('surface', 'sales_order_list'),
   )!;
+  // RECEIVING-EXTRAS: and what placed purchase orders cover.
   assert.deepEqual(preset.progress?.supply?.outputs, {
     covered: id('list_output', 'sales_order_list_covered'),
+    incoming: id('list_output', 'sales_order_list_incoming'),
     short: id('list_output', 'sales_order_list_short'),
   });
   assert.deepEqual(
@@ -10017,7 +10061,7 @@ test('SUPPLY-WARNINGS: the Sales orders List counts Blocked by supply and Reserv
     assert.match(
       withheld.html,
       new RegExp(
-        `data-list-supply-withheld="${id('query', queryId)}">Short is withheld by current policy; Blocked by supply and Reserved need it and are unavailable.<`,
+        `data-list-supply-withheld="${id('query', queryId)}">Short and On order are withheld by current policy; Blocked by supply and Reserved need them and are unavailable.<`,
         'u',
       ),
     );
@@ -10044,7 +10088,7 @@ test('SUPPLY-WARNINGS: the Sales orders List counts Blocked by supply and Reserv
     assert.ok(
       file
         .download!.body.split('\r\n')
-        .some((line) => /^SO-SHORT,.*,14,0,14,,CAD$/u.test(line)),
+        .some((line) => /^SO-SHORT,.*,14,0,14,,,CAD$/u.test(line)),
     );
     const refusedFile = await renderSurfaceRuntimeWithData(
       f.view,
@@ -10324,6 +10368,8 @@ function statingGateways(
 function receivingGateways(
   f: OrderEntryWitness,
   gateways: SurfaceRuntimeGateways,
+  /** A refusal the posting kernel answers a post with, when one is given. */
+  refusal: () => Error | undefined = () => undefined,
 ): SurfaceRuntimeGateways {
   const ns = f.ns;
   let numbered = 0;
@@ -10365,6 +10411,8 @@ function receivingGateways(
       f.executor.calls.push(request as never);
       if (f.executor.failAt === f.executor.calls.length)
         throw new Error('Isolated post failure');
+      const refused = refusal();
+      if (refused) throw refused;
       const cached = f.executor.receipts.get(request.idempotencyKey);
       if (cached) return cached;
       const draft = f.executor.rows.get(
@@ -10631,13 +10679,19 @@ test('ORDER-PARITY: a truck receipt receives several lines in one receipt, fille
     [lineC!, null],
     [lineD!, '3'],
   ]);
-  const gateways = receivingGateways(
-    f,
-    statingGateways(f, {
-      commercial: (key, record) =>
-        key === 'open_to_receive' ? (open.get(record.recordId) ?? null) : null,
-    }),
-  );
+  // RECEIVING-EXTRAS: the request clock the received date starts from.
+  const gateways = {
+    ...receivingGateways(
+      f,
+      statingGateways(f, {
+        commercial: (key, record) =>
+          key === 'open_to_receive'
+            ? (open.get(record.recordId) ?? null)
+            : null,
+      }),
+    ),
+    clock: () => new Date('2026-10-05T15:30:12.345Z'),
+  };
   const action = id('action', 'receive_lines_known');
   const path = `/?${new URLSearchParams({
     surface: id('surface', 'purchase_order_detail'),
@@ -10671,6 +10725,21 @@ test('ORDER-PARITY: a truck receipt receives several lines in one receipt, fille
   // Nothing else is started while the Task is open.
   assert.doesNotMatch(start.html, /data-next-action=/u);
   const token = hiddenValue(start.html, 'taskToken');
+  // RECEIVING-EXTRAS: the day the truck arrived starts at the request's now,
+  // in the explicit-UTC picker, to the second.
+  const receivedOn = id('input', 'receive_lines_received_on');
+  assert.equal(
+    controlValue(start.html, receivedOn),
+    '2026-10-05T15:30:12',
+    'the received date starts at the request clock',
+  );
+  assert.match(
+    start.html,
+    new RegExp(
+      `Received on \\(UTC\\)<input type="datetime-local" step="1" name="${regexpText(receivedOn)}" value="2026-10-05T15:30:12" required>`,
+      'u',
+    ),
+  );
   // Every line with something to arrive, and the one whose figure is withheld.
   assert.deepEqual(taskRowIds(start.html), [lineA, lineC, lineD]);
   const quantity = (line: string) =>
@@ -10706,6 +10775,8 @@ test('ORDER-PARITY: a truck receipt receives several lines in one receipt, fille
     [id('input', 'receive_lines_currency')]: 'CAD',
     [id('input', 'receive_lines_packing_slip')]: 'PS-77',
     [id('input', 'receive_lines_notes')]: '',
+    // Delivered yesterday, entered today.
+    [receivedOn]: '2026-10-04T09:15:00',
   };
 
   // Fill: each row from what is still open; the withheld line stays empty
@@ -10718,6 +10789,8 @@ test('ORDER-PARITY: a truck receipt receives several lines in one receipt, fille
     controlValue(filled.html, id('input', 'receive_lines_packing_slip')),
     'PS-77',
   );
+  // An entered date is kept, never reset to now.
+  assert.equal(controlValue(filled.html, receivedOn), '2026-10-04T09:15:00');
   // Nothing entered on any line: refused beside the rows, nothing written.
   const empty = await post({ taskStage: 'prepare', ...header });
   assert.match(empty.html, /COMPOSITION_INPUT_INVALID/u);
@@ -10794,9 +10867,8 @@ test('ORDER-PARITY: a truck receipt receives several lines in one receipt, fille
       'option',
       'goods_receipt_kind_initial',
     ),
-    [id('field', 'goods_receipt_effective_at')]: asRecord(receipt.values)[
-      id('field', 'goods_receipt_effective_at')
-    ],
+    // The entered day, in the field's canonical spelling.
+    [id('field', 'goods_receipt_effective_at')]: '2026-10-04T09:15:00.000Z',
     [id('field', 'goods_receipt_location_id')]: location,
     [id('field', 'goods_receipt_reason_code')]: 'RECEIVE',
     [id('field', 'goods_receipt_reason_narrative')]:
@@ -11085,6 +11157,301 @@ test('ORDER-PARITY: reversing a receipt reverses each line that still adds to st
     new RegExp(`value="${regexpText(action)}"`, 'u'),
   );
   assert.equal(f.executor.calls.length, 3);
+});
+
+test('RECEIVING-EXTRAS: a receipt page takes back part of a posted receipt, line by line, through the receiving routes, and a refused post reads in plain language', async () => {
+  const f = await orderEntryWitness(true);
+  const ns = f.ns;
+  const scope = f.scopes[0]!;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const location = f.executor.seed('location', {
+    [id('field', 'location_name')]: 'Receiving dock',
+  });
+  const {
+    order,
+    lines: [lineA, lineB],
+  } = seedPurchaseOrder(f, ['5', '2']);
+  const receipt = (
+    state: 'draft' | 'posted',
+    kind: 'initial' | 'correction' = 'initial',
+  ) =>
+    f.executor.seed(
+      'goods_receipt',
+      {
+        [id('field', 'goods_receipt_number')]: `RCV-${state}-${kind}`,
+        [id('field', 'goods_receipt_state')]: id(
+          'option',
+          `goods_receipt_state_${state}`,
+        ),
+        [id('field', 'goods_receipt_kind')]: id(
+          'option',
+          `goods_receipt_kind_${kind}`,
+        ),
+        [id('field', 'goods_receipt_effective_at')]: '2026-10-02T10:00:00Z',
+        [id('field', 'goods_receipt_location_id')]: location,
+        [id('field', 'goods_receipt_reason_code')]: 'RECEIVE',
+        [id('field', 'goods_receipt_reason_narrative')]: 'Truck 7',
+        [id('field', 'goods_receipt_packing_slip')]: 'PS-7',
+        [id('field', 'goods_receipt_notes')]: null,
+        [id('relation', 'goods_receipt_order')]: order,
+        [id('relation', 'goods_receipt_supersedes')]: null,
+      },
+      scope,
+    );
+  const posted = receipt('posted');
+  const receiptLine = (
+    parent: string,
+    number: string,
+    orderLine: string,
+    quantity: string,
+    known: boolean,
+  ) =>
+    f.executor.seed(
+      'goods_receipt_line',
+      {
+        [id('field', 'goods_receipt_line_line_number')]: number,
+        [id('field', 'goods_receipt_line_item_id')]: f.item,
+        [id('field', 'goods_receipt_line_quantity')]: quantity,
+        [id('field', 'goods_receipt_line_unit_id')]: 'EA',
+        [id('field', 'goods_receipt_line_cost_status')]: id(
+          'option',
+          `goods_receipt_line_cost_status_${known ? 'known' : 'absent'}`,
+        ),
+        // As the PostgreSQL provider reads a stored decimal back.
+        [id('field', 'goods_receipt_line_unit_cost')]: known
+          ? '2.500000000000000000'
+          : null,
+        [id('field', 'goods_receipt_line_currency')]: known ? 'CAD' : null,
+        [id('field', 'goods_receipt_line_reversal_of_movement_id')]: null,
+        [id('relation', 'goods_receipt_line_receipt')]: parent,
+        [id('relation', 'goods_receipt_line_order_line')]: orderLine,
+      },
+      scope,
+    );
+  const first = receiptLine(posted, '1', lineA!, '4', true);
+  const second = receiptLine(posted, '2', lineB!, '2', false);
+  // What each line still adds to stock, its movement and order line, as the
+  // receiving read model states them.
+  const movements = new Map<string, string>([
+    [first, '0b000000-0000-4000-8000-00000000000a'],
+    [second, '0b000000-0000-4000-8000-00000000000b'],
+  ]);
+  const receiving = (key: string, record: SemanticRecordDto) => {
+    if (key === 'order_line')
+      return record.recordId === first ? lineA! : lineB!;
+    if (key === 'movement') return movements.get(record.recordId) ?? null;
+    if (key === 'reversible') return record.recordId === first ? '4' : '2';
+    return record.recordId === first ? '-4' : '-2';
+  };
+  let refusal: Error | undefined;
+  const gateways = {
+    ...receivingGateways(
+      f,
+      statingGateways(f, {
+        commercial: (key) => (key === 'open_to_receive' ? '1' : null),
+        receiving,
+      }),
+      () => refusal,
+    ),
+    // The product's receiving links, as the API composition root installs them.
+    applicationExtension: RECEIVING_SURFACE_RUNTIME_EXTENSION,
+  };
+  const action = id('action', 'correct_receipt');
+  const pathFor = (record: string) =>
+    `/?${new URLSearchParams({
+      surface: id('surface', 'goods_receipt_detail'),
+      record,
+      [id('parameter', 'goods_receipt_get_legal_entity_scope')]: scope,
+    }).toString()}`;
+  const path = pathFor(posted);
+  const page = await renderSurfaceRuntimeWithData(f.view, path, gateways);
+  assert.equal(page.statusCode, 200);
+  // The receipt's own page: its lines with what each can still give back,
+  // the order it received against, and Correct receipt.
+  assert.match(
+    page.html,
+    /data-composition-dataset="northstar\.app:dataset\.receipt_doc_lines" data-resolution="ready"/u,
+  );
+  assert.match(
+    page.html,
+    new RegExp(`name="compositionAction" value="${regexpText(action)}"`, 'u'),
+  );
+  assert.match(page.html, /PO-000042/u);
+  assert.match(page.html, />Open purchase order</u);
+  // Its receiving links stay beside the document.
+  assert.match(page.html, /data-receiving-navigation/u);
+  assert.match(page.html, />Add receipt line</u);
+
+  const start = await submitSurfaceRuntimeIntent(
+    f.view,
+    path,
+    { compositionAction: action },
+    gateways,
+  );
+  const token = hiddenValue(start.html, 'taskToken');
+  assert.deepEqual(taskRowIds(start.html), [first, second]);
+  const quantity = (line: string) =>
+    `${id('input', 'correct_receipt_quantity')}@${line}`;
+  const reason = id('input', 'correct_receipt_reason');
+  const post = (values: Record<string, string>) =>
+    submitSurfaceRuntimeIntent(
+      f.view,
+      path,
+      { taskToken: token, compositionAction: action, ...values },
+      gateways,
+    );
+  // Fill offers each line's whole remainder; only part of one is taken.
+  const filled = await post({ taskStage: 'fill', [reason]: 'Damaged' });
+  assert.equal(controlValue(filled.html, quantity(first)), '4');
+  assert.equal(controlValue(filled.html, quantity(second)), '2');
+  // A negative or zero quantity is refused on its line, before anything runs.
+  const invalid = await post({
+    taskStage: 'prepare',
+    [reason]: 'Damaged',
+    [quantity(first)]: '-1',
+  });
+  assert.match(
+    invalid.html,
+    new RegExp(
+      `id="${regexpText(`${quantity(first)}-error`)}">Enter a positive exact quantity\\.<`,
+      'u',
+    ),
+  );
+  assert.equal(f.executor.calls.length, 0);
+  const review = await post({
+    taskStage: 'prepare',
+    [reason]: 'One notebook arrived damaged',
+    [quantity(first)]: '1',
+    [quantity(second)]: '',
+  });
+  assert.deepEqual(taskRowIds(review.html), [first]);
+  const done = await post({
+    taskStage: 'confirm',
+    preparedId: hiddenValue(review.html, 'preparedId'),
+  });
+  assert.match(done.html, /Correct receipt: done/u);
+  const calls = f.executor.calls;
+  assert.deepEqual(
+    calls.map((call) => call.definition.operationId),
+    [
+      id('operation', 'goods_receipt_create'),
+      id('operation', 'goods_receipt_line_create'),
+      id('operation', 'goods_receipt_post'),
+    ],
+  );
+  const header = asRecord(calls[0]!.input);
+  const values = asRecord(header.values);
+  assert.deepEqual(
+    [
+      values[id('field', 'goods_receipt_kind')],
+      values[id('field', 'goods_receipt_state')],
+      values[id('field', 'goods_receipt_location_id')],
+      values[id('field', 'goods_receipt_reason_code')],
+      values[id('field', 'goods_receipt_reason_narrative')],
+    ],
+    [
+      id('option', 'goods_receipt_kind_correction'),
+      id('option', 'goods_receipt_state_draft'),
+      location,
+      'CORRECT',
+      'One notebook arrived damaged',
+    ],
+  );
+  // The correction names the receipt's own order, read through its get.
+  assert.deepEqual(asRecord(header.relations), {
+    [id('relation', 'goods_receipt_order')]: order,
+    [id('relation', 'goods_receipt_supersedes')]: posted,
+  });
+  const line = asRecord(calls[1]!.input);
+  const lineValues = asRecord(line.values);
+  assert.deepEqual(
+    [
+      lineValues[id('field', 'goods_receipt_line_line_number')],
+      // What was entered, taken back: the negative of the entered quantity.
+      lineValues[id('field', 'goods_receipt_line_quantity')],
+      lineValues[id('field', 'goods_receipt_line_reversal_of_movement_id')],
+      lineValues[id('field', 'goods_receipt_line_cost_status')],
+      lineValues[id('field', 'goods_receipt_line_unit_cost')],
+      lineValues[id('field', 'goods_receipt_line_currency')],
+      lineValues[id('field', 'goods_receipt_line_unit_id')],
+    ],
+    [
+      '1',
+      '-1',
+      movements.get(first),
+      id('option', 'goods_receipt_line_cost_status_known'),
+      '2.5',
+      'CAD',
+      'EA',
+    ],
+    'the correction line takes back what was entered',
+  );
+  assert.deepEqual(asRecord(line.relations), {
+    [id('relation', 'goods_receipt_line_receipt')]: header.recordId,
+    [id('relation', 'goods_receipt_line_order_line')]: lineA,
+  });
+  assert.deepEqual(asRecord(calls[2]!.input), {
+    recordId: header.recordId,
+    expectedRevision: 1,
+  });
+
+  // A post the kernel refuses reads in plain language, naming its code.
+  refusal = new InventoryPostingError(
+    'RECEIPT_CORRECTION_INVALID',
+    'Correction exceeds the uncompensated receipt quantity',
+  );
+  const again = await submitSurfaceRuntimeIntent(
+    f.view,
+    path,
+    { compositionAction: action },
+    gateways,
+  );
+  const retry = (values: Record<string, string>) =>
+    submitSurfaceRuntimeIntent(
+      f.view,
+      path,
+      {
+        taskToken: hiddenValue(again.html, 'taskToken'),
+        compositionAction: action,
+        ...values,
+      },
+      gateways,
+    );
+  const beyond = await retry({
+    taskStage: 'prepare',
+    [reason]: 'Counted twice',
+    [quantity(second)]: '9',
+  });
+  const refused = await retry({
+    taskStage: 'confirm',
+    preparedId: hiddenValue(beyond.html, 'preparedId'),
+  });
+  assert.match(
+    refused.html,
+    /data-message="OPERATION_RECEIPT_CORRECTION_EXCEEDED"/u,
+  );
+  assert.match(
+    refused.html,
+    /<h2 data-message-sentence>Correction exceeds the receipt<\/h2>/u,
+  );
+  assert.match(
+    refused.html,
+    /<code data-message-subject>RECEIPT_CORRECTION_INVALID<\/code>/u,
+  );
+  refusal = undefined;
+
+  // Nothing to correct on a draft receipt, nor on a correction itself.
+  for (const other of [receipt('draft'), receipt('posted', 'correction')]) {
+    receiptLine(other, '1', lineA!, '1', false);
+    const html = (
+      await renderSurfaceRuntimeWithData(f.view, pathFor(other), gateways)
+    ).html;
+    assert.doesNotMatch(
+      html,
+      new RegExp(`value="${regexpText(action)}"`, 'u'),
+      other,
+    );
+  }
 });
 
 test('ORDER-PARITY: an order page names the lines it is short and shows where it stands, with the first next step offered now', async () => {

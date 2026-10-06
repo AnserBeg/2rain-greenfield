@@ -732,7 +732,7 @@ function parseProgress(value: ImmutableJsonValue): SharedListProgress {
     supplyValue === undefined ? undefined : parseSharedListSupply(supplyValue);
   if (
     supply &&
-    [supply.outputs.covered, supply.outputs.short].some((output) =>
+    Object.values(supply.outputs).some((output) =>
       [outputs.done, outputs.open, outputs.ordered].includes(output),
     )
   )
