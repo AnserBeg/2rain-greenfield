@@ -4957,11 +4957,14 @@ class OrderEntryExecutor
           candidate.entityId === entityOf(queryId) &&
           !candidate.archived &&
           this.owners.get(candidate.recordId) === scope;
-        const matching = (rows: { queryId: string; matchFieldId: string }) =>
+        // REPORTS-HOME: rows matched through their parent hold no id of
+        // their own; the sums below keep only those whose parent does.
+        const matching = (rows: { queryId: string; matchFieldId?: string }) =>
           [...this.rows.values()].filter(
             (candidate) =>
               live(candidate, rows.queryId) &&
-              candidate.values[rows.matchFieldId] === row.recordId,
+              (rows.matchFieldId === undefined ||
+                candidate.values[rows.matchFieldId] === row.recordId),
           );
         // A parent through a relation, or the record whose id the rows hold
         // in a reference field: a location belongs to no company (LOCATIONS).
@@ -4994,10 +4997,42 @@ class OrderEntryExecutor
         const values: Record<string, string | null> = {};
         const labels: Record<string, string | null> = {};
         const numbers = new Map<string, number | null>();
+        const today = listed.figures.today
+          ? Date.parse(listed.figures.today)
+          : null;
         for (const sum of listed.figures.sums) {
-          let total = 0;
+          let total: number | null = 0;
           for (const candidate of matching(sum.rows)) {
-            if (sum.within && !parentOf(candidate, sum.within)) continue;
+            const parent = sum.within ? parentOf(candidate, sum.within) : null;
+            if (sum.within && !parent) continue;
+            // REPORTS-HOME: matched through the parent, kept by a value,
+            // aged in whole UTC days, in the one currency asked for.
+            if (
+              sum.within?.matchFieldId !== undefined &&
+              parent!.values[sum.within.matchFieldId] !== row.recordId
+            )
+              continue;
+            if (
+              sum.where &&
+              !sum.where.values.includes(
+                String(candidate.values[sum.where.fieldId]),
+              )
+            )
+              continue;
+            if (sum.age) {
+              const dated = candidate.values[sum.age.fieldId];
+              if (typeof dated !== 'string' || today === null) continue;
+              const day = Date.parse(`${dated.slice(0, 10)}T00:00:00.000Z`);
+              const days = Math.round((today - day) / 86_400_000);
+              if (sum.age.from !== undefined && days < sum.age.from) continue;
+              if (sum.age.to !== undefined && days > sum.age.to) continue;
+            }
+            if (sum.currencyFieldId !== undefined) {
+              const own = candidate.values[sum.currencyFieldId];
+              const currency =
+                own === undefined ? parent?.values[sum.currencyFieldId] : own;
+              if (currency !== listed.figures.currency) continue;
+            }
             const quantity = sum.rows.quantityFieldId
               ? Number(candidate.values[sum.rows.quantityFieldId])
               : 0;
@@ -5015,12 +5050,29 @@ class OrderEntryExecutor
                     0,
                   )
               : 0;
-            total +=
-              sum.sum === 'rows'
-                ? quantity
-                : sum.sum === 'related'
-                  ? related
-                  : Math.max(quantity - related, 0);
+            const added =
+              sum.sum === 'count'
+                ? 1
+                : sum.sum === 'rows'
+                  ? quantity
+                  : sum.sum === 'related'
+                    ? related
+                    : Math.max(quantity - related, 0);
+            if (!sum.price) {
+              if (total !== null) total += added;
+              continue;
+            }
+            const price = candidate.values[sum.price.fieldId];
+            const discount = sum.price.discountFieldId
+              ? Number(candidate.values[sum.price.discountFieldId] ?? 0)
+              : 0;
+            if (added > 0 && (price === null || price === undefined))
+              total = null;
+            else if (total !== null)
+              total +=
+                Math.round(
+                  (added * Number(price ?? 0) * (100 - discount) * 100) / 100,
+                ) / 100;
           }
           numbers.set(sum.figureId, total);
         }
@@ -5176,6 +5228,27 @@ class OrderEntryExecutor
             }
           : projected;
       };
+      // REPORTS-HOME: a report's totals over every row kept before paging,
+      // unstated where any row's figure is -- whole units in this witness.
+      const summaryOf = (rows: readonly SemanticRecordDto[]) => {
+        const asked = request.list?.query.figures?.summary;
+        if (!asked) return {};
+        return {
+          figureSummary: Object.fromEntries(
+            asked.map((figureId) => {
+              const parts = rows.map(
+                (row) => figuresOf(row)?.values[figureId] ?? null,
+              );
+              return [
+                figureId,
+                parts.some((part) => part === null)
+                  ? null
+                  : String(parts.reduce((sum, part) => sum + Number(part), 0)),
+              ];
+            }),
+          ),
+        };
+      };
       const echoed = {
         ...(reference ? { referenceScope: reference } : {}),
         ...(fieldFilters ? { fieldFilters } : {}),
@@ -5249,6 +5322,7 @@ class OrderEntryExecutor
             parentScope: parent ?? null,
             totalCount: matching.length,
             ...echoed,
+            ...summaryOf(matching),
           },
         };
       }
@@ -5296,6 +5370,7 @@ class OrderEntryExecutor
                 ...listCoverage(request, records.length),
                 parentScope: parent ?? null,
                 ...echoed,
+                ...summaryOf(narrowed),
               },
             }
           : {}),
@@ -15142,5 +15217,309 @@ test('VALUATION: landed bill charges follow authorized bill/receipt/order lineag
   await assert.rejects(
     read('inventory_value_get', f.item),
     SemanticQueryPolicyDeniedError,
+  );
+});
+
+test('REPORTS-HOME: receivables aging and customer accounts render one currency with their totals and open the customer account; Today counts each List view it opens', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const [scope, foreign] = f.scopes as [string, string];
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const field = (local: string) => id('field', local);
+  const aging = id('surface', 'receivables_aging_list');
+  const accounts = id('surface', 'customer_account_list');
+  const parameter = (local: string) =>
+    id('parameter', `${local}_legal_entity_scope`);
+  // The request's day: 6 October 2026 (UTC).
+  const gateways = {
+    ...f.gateways,
+    clock: () => new Date('2026-10-06T09:00:00.000Z'),
+  };
+  const brook = f.executor.seedParty(
+    { [field('party_name')]: 'Brook Hardware', [field('party_number')]: 'C-2' },
+    ['customer'],
+  );
+  const supplierOnly = f.executor.seedParty(
+    { [field('party_name')]: 'Supply Only', [field('party_number')]: 'S-1' },
+    ['supplier'],
+  );
+  const invoice = (
+    customer: string,
+    currency: string,
+    due: string,
+    balance: string,
+    state = 'open',
+    company = scope,
+  ) =>
+    f.executor.seed(
+      'customer_invoice',
+      {
+        [field('customer_invoice_number')]: `INV-${randomUUID().slice(0, 6)}`,
+        [field('customer_invoice_state')]: id(
+          'option',
+          `customer_invoice_state_${state}`,
+        ),
+        [field('customer_invoice_invoice_date')]: '2026-06-01T12:00:00.000Z',
+        [field('customer_invoice_due_date')]: due,
+        [field('customer_invoice_customer_party_id')]: customer,
+        [field('customer_invoice_currency')]: currency,
+        [field('customer_invoice_total')]: balance,
+        [field('customer_invoice_paid_amount')]: '0',
+        [field('customer_invoice_credited_amount')]: '0',
+        [field('customer_invoice_balance')]: balance,
+      },
+      company,
+    );
+  // Due today (current), 1 day ago, 45 days ago and 120 days ago; a paid
+  // invoice owes nothing; USD and the other company's are never added in.
+  invoice(f.party, 'CAD', '2026-10-06T23:00:00.000Z', '100');
+  invoice(f.party, 'CAD', '2026-10-05T08:00:00.000Z', '20.5');
+  invoice(f.party, 'CAD', '2026-08-22T08:00:00.000Z', '1000');
+  invoice(f.party, 'CAD', '2026-06-08T08:00:00.000Z', '7', 'partially_paid');
+  invoice(f.party, 'CAD', '2026-06-08T08:00:00.000Z', '0', 'paid');
+  invoice(f.party, 'USD', '2026-06-08T08:00:00.000Z', '900');
+  invoice(brook, 'CAD', '2026-09-30T08:00:00.000Z', '30');
+  invoice(brook, 'CAD', '2026-09-30T08:00:00.000Z', '500', 'open', foreign);
+  const url = (
+    surface: string,
+    local: string,
+    parameters: Record<string, string> = {},
+  ) =>
+    `/?${new URLSearchParams({ surface, [parameter(local)]: scope, ...parameters }).toString()}`;
+  const cell = (html: string, recordId: string, list: string, local: string) =>
+    new RegExp(
+      `data-record-id="${recordId}"[\\s\\S]*?data-column-id="${id('list_column', `${list}_${local}`)}">([\\s\\S]*?)</td>`,
+      'u',
+    ).exec(html)?.[1];
+  const summary = (html: string) =>
+    Object.fromEntries(
+      [
+        ...html.matchAll(
+          /data-summary-figure="[^"]+_list_([a-z0-9_]+)"><dt>[^<]*<\/dt><dd data-summary-value="([^"]*)">([^<]*)<\/dd>/gu,
+        ),
+      ].map((match) => [match[1]!, match[3]!]),
+    );
+
+  const owing = await renderSurfaceRuntimeWithData(
+    f.view,
+    url(aging, 'receivables_aging_list'),
+    gateways,
+  );
+  assert.equal(owing.statusCode, 200);
+  // The default view keeps the customers who owe in CAD, the default.
+  assert.match(owing.html, /data-list-total="2"/u);
+  assert.doesNotMatch(
+    owing.html,
+    new RegExp(`data-record-id="${supplierOnly}"`, 'u'),
+  );
+  const agingCell = (recordId: string, local: string) =>
+    cell(owing.html, recordId, 'receivables_aging_list', local);
+  assert.deepEqual(
+    [
+      'current',
+      'days_1_30',
+      'days_31_60',
+      'days_61_90',
+      'over_90',
+      'owing',
+      'invoices',
+    ].map((local) => agingCell(f.party, local)),
+    ['100.00', '20.50', '1,000.00', '0.00', '7.00', '1,127.50', '4'],
+  );
+  assert.equal(
+    agingCell(f.party, 'status'),
+    '<span class="status-pill" data-status-role="attention">Past due</span>',
+  );
+  assert.equal(agingCell(brook, 'days_1_30'), '30.00');
+  // The totals add up both customers, in CAD.
+  assert.match(owing.html, /data-list-summary-currency="CAD"/u);
+  assert.deepEqual(summary(owing.html), {
+    owing: '1,157.50',
+    current: '100.00',
+    days_1_30: '50.50',
+    days_31_60: '1,000.00',
+    days_61_90: '0.00',
+    over_90: '7.00',
+  });
+  // One currency at a time, chosen from the declared ones -- never "All".
+  assert.match(
+    owing.html,
+    /<select [^>]*name="currency" data-list-currency><option value="CAD" selected>CAD<\/option><option value="USD">USD<\/option><option value="EUR">EUR<\/option><\/select>/u,
+  );
+  // A row opens the customer's account in this company, its statement at
+  // the invoices.
+  assert.match(
+    owing.html,
+    new RegExp(
+      `href="[^"]*surface=northstar\\.app%3Asurface\\.customer_account_detail[^"]*record=${f.party}[^"]*"`,
+      'u',
+    ),
+  );
+  assert.match(
+    owing.html,
+    /data-row-action="northstar\.app:list_row_action\.receivables_aging_list_statement"/u,
+  );
+  assert.match(
+    owing.html,
+    /#northstar\.app:dataset\.customer_account_invoices/u,
+  );
+  // In USD only the USD invoice, 120 days late.
+  const usd = await renderSurfaceRuntimeWithData(
+    f.view,
+    url(aging, 'receivables_aging_list', { currency: 'USD' }),
+    gateways,
+  );
+  assert.match(usd.html, /data-list-total="1"/u);
+  assert.equal(
+    cell(usd.html, f.party, 'receivables_aging_list', 'over_90'),
+    '900.00',
+  );
+  assert.equal(summary(usd.html).owing, '900.00');
+  // Past due keeps both customers here.
+  const late = await renderSurfaceRuntimeWithData(
+    f.view,
+    url(aging, 'receivables_aging_list', {
+      view: id('list_view', 'receivables_aging_list_past_due'),
+    }),
+    gateways,
+  );
+  assert.match(late.html, /data-list-total="2"/u);
+
+  // Customer accounts: customers only; a released order in CAD with lines
+  // matched through it, and its value at price less discount.
+  const order = (
+    customer: string,
+    currency: string,
+    state: string,
+    lines: readonly (readonly [string, string, string | null, string])[],
+  ) => {
+    const orderId = f.executor.seed(
+      'sales_order',
+      {
+        [field('sales_order_number')]: `SO-${randomUUID().slice(0, 6)}`,
+        [field('sales_order_customer_party_id')]: customer,
+        [field('sales_order_currency')]: currency,
+        [id('derived_state_field', 'machine.sales_order_lifecycle')]: id(
+          'state',
+          `sales_order_${state}`,
+        ),
+      },
+      scope,
+    );
+    for (const [quantity, shipped, price, discount] of lines) {
+      const lineId = f.executor.seed(
+        'sales_order_line',
+        {
+          [field('sales_order_line_item_id')]: f.item,
+          [field('sales_order_line_ordered_quantity')]: quantity,
+          [field('sales_order_line_unit_price')]: price,
+          [field('sales_order_line_discount_percent')]: discount,
+          [id('relation', 'sales_order_line_order')]: orderId,
+        },
+        scope,
+      );
+      if (shipped !== '0')
+        f.executor.seed(
+          'sales_order_shipped',
+          {
+            [field('sales_order_shipped_shipped_quantity')]: shipped,
+            [id('relation', 'sales_order_shipped_order_line')]: lineId,
+          },
+          scope,
+        );
+    }
+  };
+  order(f.party, 'CAD', 'released', [
+    ['10', '4', '10', '0'],
+    ['2', '0', '5', '50'],
+  ]);
+  order(f.party, 'CAD', 'draft', [['3', '0', '9', '0']]);
+  order(brook, 'USD', 'released', [['1', '0', null, '0']]);
+  const all = await renderSurfaceRuntimeWithData(
+    f.view,
+    url(accounts, 'customer_account_list'),
+    gateways,
+  );
+  assert.equal(all.statusCode, 200);
+  assert.doesNotMatch(
+    all.html,
+    new RegExp(`data-record-id="${supplierOnly}"`, 'u'),
+  );
+  const accountCell = (html: string, recordId: string, local: string) =>
+    cell(html, recordId, 'customer_account_list', local);
+  assert.deepEqual(
+    ['open_orders', 'ordered', 'open_units', 'open_value', 'owing'].map(
+      (local) => accountCell(all.html, f.party, local),
+    ),
+    ['1', '12', '8', '65.00', '1,127.50'],
+  );
+  assert.deepEqual(
+    ['open_orders', 'open_units', 'open_value'].map((local) =>
+      accountCell(all.html, brook, local),
+    ),
+    ['0', '0', '0.00'],
+  );
+  // In USD, Brook's open line has no price: its value is unstated, and so
+  // is the total -- never a guessed zero.
+  const usdAccounts = await renderSurfaceRuntimeWithData(
+    f.view,
+    url(accounts, 'customer_account_list', {
+      view: id('list_view', 'customer_account_list_open'),
+      currency: 'USD',
+    }),
+    gateways,
+  );
+  assert.match(usdAccounts.html, /data-list-total="1"/u);
+  assert.equal(
+    accountCell(usdAccounts.html, brook, 'open_value'),
+    '<span class="muted">—</span>',
+  );
+  assert.equal(summary(usdAccounts.html).open_value, '—');
+
+  // Without the invoice read, aging is refused, never shown as owing nothing.
+  f.deniedReads.add(id('permission', 'customer_invoice_read'));
+  const denied = await renderSurfaceRuntimeWithData(
+    f.view,
+    url(aging, 'receivables_aging_list'),
+    gateways,
+  );
+  assert.doesNotMatch(denied.html, /data-list-summary/u);
+  assert.doesNotMatch(
+    denied.html,
+    new RegExp(`data-record-id="${f.party}"`, 'u'),
+  );
+  f.deniedReads.clear();
+
+  // Today: six tiles, each its List view's count in this company.
+  f.executor.pageLists = true;
+  const today = await renderSurfaceRuntimeWithData(
+    f.view,
+    `/?${new URLSearchParams({
+      surface: id('surface', 'sales_today'),
+      [parameter('sales_order_list')]: scope,
+    }).toString()}`,
+    gateways,
+  );
+  assert.equal(
+    today.statusCode,
+    200,
+    /data-(?:diagnostic|message)-code="([^"]+)"/u.exec(today.html)?.[1],
+  );
+  const tiles = [
+    ...today.html.matchAll(
+      /data-launcher-tile="northstar\.app:launcher_tile\.sales_today_([a-z_]+)"/gu,
+    ),
+  ].map((match) => match[1]);
+  assert.deepEqual(tiles, [
+    'late_receipts',
+    'blocked_sales',
+    'approvals',
+    'receipts_due',
+    'ready_to_ship',
+    'inventory_risks',
+  ]);
+  assert.match(
+    today.html,
+    /href="[^"]*surface=northstar\.app%3Asurface\.sales_order_list[^"]*view=northstar\.app%3Alist_view\.sales_order_list_blocked/u,
   );
 });

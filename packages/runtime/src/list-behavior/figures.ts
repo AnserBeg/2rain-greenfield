@@ -45,13 +45,51 @@ export interface SharedListFigureRelated {
 /**
  * `rows` adds the rows' quantity, `related` their related rows' quantity and
  * `remaining` each row's quantity less its related rows', never below zero.
+ * The parts the progress supply adds up (SUPPLY-WARNINGS) are exactly these.
  */
-export interface SharedListFigureSum {
-  readonly figureId: string;
+export interface SharedListSumParts {
   readonly related?: SharedListFigureRelated;
   readonly rows: SharedListFigureRows;
   readonly sum: 'related' | 'remaining' | 'rows';
   readonly within?: SharedListFigureWithin;
+}
+
+/**
+ * One List figure sum: the parts above, and REPORTS-HOME's -- `count`, how
+ * many rows there are; rows matched through their parent (`within`'s
+ * `matchFieldId`, the rows then naming none); `where`, only rows whose own
+ * field holds a value; `age`, only rows dated `from`..`to` whole UTC days
+ * before the request's `today`; `currencyFieldId`, only rows (or rows whose
+ * parent is) in the request's one `currency`; `price`, each row's quantity or
+ * remainder times its price less its percentage discount, rounded half up to
+ * cents, unstated while a row with something to add has no price.
+ */
+export interface SharedListFigureSum {
+  readonly age?: {
+    readonly fieldId: string;
+    readonly from?: number;
+    readonly to?: number;
+  };
+  readonly currencyFieldId?: string;
+  readonly figureId: string;
+  readonly price?: {
+    readonly discountFieldId?: string;
+    readonly fieldId: string;
+  };
+  readonly related?: SharedListFigureRelated;
+  readonly rows: {
+    readonly matchFieldId?: string;
+    readonly queryId: string;
+    readonly quantityFieldId?: string;
+  };
+  readonly sum: 'count' | 'related' | 'remaining' | 'rows';
+  readonly where?: {
+    readonly fieldId: string;
+    readonly values: readonly string[];
+  };
+  readonly within?: SharedListFigureWithin & {
+    readonly matchFieldId?: string;
+  };
 }
 
 /** A figure declared before, or an exact decimal the listed query selects. */
@@ -137,12 +175,29 @@ export interface SharedListFigureLatest {
 export interface SharedListFigures {
   readonly bands?: readonly SharedListFigureBand[];
   readonly choices?: readonly SharedListFigureChoice[];
+  /**
+   * The one currency every currency sum adds (REPORTS-HOME): present exactly
+   * when some sum names a currency field, so no figure adds two currencies.
+   */
+  readonly currency?: string;
   readonly keep?: {
     readonly figureId: string;
     readonly values: readonly string[];
   };
   readonly latest?: readonly SharedListFigureLatest[];
+  /**
+   * Number figures added up over the whole filtered set, answered beside the
+   * count (REPORTS-HOME).
+   */
+  readonly summary?: readonly string[];
   readonly sums: readonly SharedListFigureSum[];
+  /**
+   * Midnight UTC of the request's day, as an ISO instant, from which an age
+   * counts whole days (REPORTS-HOME): present exactly when some sum ages its
+   * rows, so the release stays clock-free and a cursor minted on one day
+   * cannot page another.
+   */
+  readonly today?: string;
   readonly totals?: readonly SharedListFigureTotal[];
 }
 
@@ -387,7 +442,7 @@ function parseChoiceValue(
  */
 function parseSumParts(
   sum: Readonly<Record<string, ImmutableJsonValue | undefined>>,
-): Omit<SharedListFigureSum, 'figureId'> {
+): SharedListSumParts {
   const rows = record(
     sum.rows,
     'rows',
@@ -422,6 +477,166 @@ function parseSumParts(
   };
 }
 
+const AGE_DAYS_LIMIT = 3650;
+
+/** A whole number of days within the bound an age may name. */
+function ageDays(value: ImmutableJsonValue | undefined, name: string) {
+  if (
+    typeof value !== 'number' ||
+    !Number.isSafeInteger(value) ||
+    Math.abs(value) > AGE_DAYS_LIMIT
+  )
+    throw malformed(`list figures age ${name} is a whole number of days`);
+  return value;
+}
+
+/**
+ * One List figure sum (REPORTS-HOME): the parts a supply sum adds, `count`,
+ * rows matched through their parent, and the optional `where`, `age`,
+ * `currencyFieldId` and `price`, each closed. Exactly one of the rows and
+ * their parent holds the listed record's id; `count` adds no quantity and no
+ * related rows; a price multiplies a quantity or a remainder only.
+ */
+function parseFigureSum(
+  sum: Readonly<Record<string, ImmutableJsonValue | undefined>>,
+): Omit<SharedListFigureSum, 'figureId'> {
+  const rows = record(
+    sum.rows,
+    'rows',
+    ['queryId'],
+    ['matchFieldId', 'quantityFieldId'],
+  );
+  if (
+    sum.sum !== 'rows' &&
+    sum.sum !== 'related' &&
+    sum.sum !== 'remaining' &&
+    sum.sum !== 'count'
+  )
+    throw malformed('list figures sum is rows, related, remaining or count');
+  const quantity = sum.sum === 'rows' || sum.sum === 'remaining';
+  const related = sum.sum === 'related' || sum.sum === 'remaining';
+  if (
+    (rows.quantityFieldId !== undefined) !== quantity ||
+    (sum.related !== undefined) !== related
+  )
+    throw malformed('list figures sum names exactly the parts it adds');
+  const within =
+    sum.within === undefined
+      ? undefined
+      : (() => {
+          const matched =
+            isRecord(sum.within) && Object.hasOwn(sum.within, 'matchFieldId');
+          const { matchFieldId, ...rest } = (
+            matched ? sum.within : { ...(sum.within as object) }
+          ) as Readonly<Record<string, ImmutableJsonValue>>;
+          return Object.freeze({
+            ...parseWithin(rest),
+            ...(matched
+              ? {
+                  matchFieldId: canonicalId(
+                    matchFieldId,
+                    'within matchFieldId',
+                  ),
+                }
+              : {}),
+          });
+        })();
+  if (
+    (rows.matchFieldId === undefined) ===
+    (within?.matchFieldId === undefined)
+  )
+    throw malformed(
+      'list figures rows or their parent match the listed record, exactly one',
+    );
+  const where =
+    sum.where === undefined
+      ? undefined
+      : (() => {
+          const kept = record(sum.where, 'where', ['fieldId', 'values']);
+          return Object.freeze({
+            fieldId: canonicalId(kept.fieldId, 'where fieldId'),
+            values: strings(kept.values, 'where values', 8, false),
+          });
+        })();
+  const age =
+    sum.age === undefined
+      ? undefined
+      : (() => {
+          const aged = record(sum.age, 'age', ['fieldId'], ['from', 'to']);
+          const from =
+            aged.from === undefined ? undefined : ageDays(aged.from, 'from');
+          const to = aged.to === undefined ? undefined : ageDays(aged.to, 'to');
+          if (
+            (from === undefined && to === undefined) ||
+            (from !== undefined && to !== undefined && from > to)
+          )
+            throw malformed('list figures age names a range of days');
+          return Object.freeze({
+            fieldId: canonicalId(aged.fieldId, 'age fieldId'),
+            ...(from === undefined ? {} : { from }),
+            ...(to === undefined ? {} : { to }),
+          });
+        })();
+  const price =
+    sum.price === undefined
+      ? undefined
+      : (() => {
+          if (!quantity)
+            throw malformed('list figures price a quantity or a remainder');
+          const priced = record(
+            sum.price,
+            'price',
+            ['fieldId'],
+            ['discountFieldId'],
+          );
+          return Object.freeze({
+            fieldId: canonicalId(priced.fieldId, 'price fieldId'),
+            ...(priced.discountFieldId === undefined
+              ? {}
+              : {
+                  discountFieldId: canonicalId(
+                    priced.discountFieldId,
+                    'price discountFieldId',
+                  ),
+                }),
+          });
+        })();
+  return {
+    ...(age ? { age } : {}),
+    ...(sum.currencyFieldId === undefined
+      ? {}
+      : {
+          currencyFieldId: canonicalId(
+            sum.currencyFieldId,
+            'sum currencyFieldId',
+          ),
+        }),
+    ...(price ? { price } : {}),
+    ...(sum.related === undefined
+      ? {}
+      : { related: parseSharedListFigureRelated(sum.related) }),
+    rows: Object.freeze({
+      ...(rows.matchFieldId === undefined
+        ? {}
+        : {
+            matchFieldId: canonicalId(rows.matchFieldId, 'rows matchFieldId'),
+          }),
+      queryId: canonicalId(rows.queryId, 'rows queryId'),
+      ...(rows.quantityFieldId === undefined
+        ? {}
+        : {
+            quantityFieldId: canonicalId(
+              rows.quantityFieldId,
+              'rows quantityFieldId',
+            ),
+          }),
+    }),
+    sum: sum.sum,
+    ...(where ? { where } : {}),
+    ...(within ? { within } : {}),
+  };
+}
+
 /** Rows pointing at other rows through a relation, and the quantity added. */
 export function parseSharedListFigureRelated(
   value: ImmutableJsonValue | undefined,
@@ -444,7 +659,7 @@ export function parseSharedListFigureRelated(
  */
 export function parseSharedListSupplySum(
   value: ImmutableJsonValue | undefined,
-): Omit<SharedListFigureSum, 'figureId'> {
+): SharedListSumParts {
   const sum = record(
     value,
     'supply sum',
@@ -468,7 +683,16 @@ export function parseSharedListFigures(
     value,
     'argument',
     ['sums'],
-    ['bands', 'choices', 'keep', 'latest', 'totals'],
+    [
+      'bands',
+      'choices',
+      'currency',
+      'keep',
+      'latest',
+      'summary',
+      'today',
+      'totals',
+    ],
   );
   const ids = new Set<string>();
   const declare = (figureId: unknown) => {
@@ -484,14 +708,38 @@ export function parseSharedListFigures(
         entry,
         'sum',
         ['figureId', 'rows', 'sum'],
-        ['related', 'within'],
+        ['age', 'currencyFieldId', 'price', 'related', 'where', 'within'],
       );
       const figureId = declare(sum.figureId);
-      const parts = parseSumParts(sum);
+      const parts = parseFigureSum(sum);
       numbers.add(figureId);
       return Object.freeze({ figureId, ...parts });
     },
   );
+  // REPORTS-HOME: the one currency the currency sums add, and the day an age
+  // counts from -- each present exactly when a sum needs it.
+  const currencied = sums.some((sum) => sum.currencyFieldId !== undefined);
+  if (
+    currencied !== (figures.currency !== undefined) ||
+    (figures.currency !== undefined &&
+      (typeof figures.currency !== 'string' ||
+        figures.currency.length === 0 ||
+        figures.currency.length > 64))
+  )
+    throw malformed(
+      'list figures name one currency exactly when a sum reads one',
+    );
+  const aged = sums.some((sum) => sum.age !== undefined);
+  if (
+    aged !== (figures.today !== undefined) ||
+    (figures.today !== undefined &&
+      (typeof figures.today !== 'string' ||
+        !/^\d{4}-\d{2}-\d{2}T00:00:00\.000Z$/u.test(figures.today) ||
+        new Date(figures.today).toISOString() !== figures.today))
+  )
+    throw malformed(
+      'list figures name the midnight UTC an age counts from exactly when a sum ages its rows',
+    );
   // CATALOG-EXTRAS: computed after the sums and before the totals, so a
   // total may add a choice and a choice may take a sum.
   const choices =
@@ -703,12 +951,24 @@ export function parseSharedListFigures(
             throw malformed('list figures keep holds values of one band');
           return Object.freeze({ figureId, values });
         })();
+  // REPORTS-HOME: a report's totals add up number figures, each once.
+  const summary =
+    figures.summary === undefined
+      ? undefined
+      : strings(figures.summary, 'summary', 6, true);
+  if (summary && !summary.every((figureId) => numbers.has(figureId)))
+    throw malformed('list figures summary adds up sums, choices and totals');
   return Object.freeze({
     ...(bands ? { bands: Object.freeze(bands) } : {}),
     ...(choices ? { choices: Object.freeze(choices) } : {}),
+    ...(figures.currency === undefined
+      ? {}
+      : { currency: figures.currency as string }),
     ...(keep ? { keep } : {}),
     ...(latest ? { latest: Object.freeze(latest) } : {}),
+    ...(summary ? { summary } : {}),
     sums: Object.freeze(sums),
+    ...(figures.today === undefined ? {} : { today: figures.today as string }),
     ...(totals ? { totals: Object.freeze(totals) } : {}),
   });
 }

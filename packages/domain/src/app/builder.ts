@@ -39,6 +39,7 @@ import { itemStockWorkspace } from '../inventory/item-stock-workspace.js';
 import { locationWorkspace } from '../location/workspace.js';
 import { periodLockWorkspace } from '../inventory/period-lock-workspace.js';
 import { warehouseSurface } from '../inventory/warehouse-workspace.js';
+import { customerAccountSurface, todaySurface } from './reports-home.js';
 
 const version = 'v6' as const;
 const normalizationProfileVersion = 'northstar.normalization/v6' as const;
@@ -380,13 +381,17 @@ export function composedApplicationDefinition(): Record<string, unknown> {
     ),
   });
   // Warehouse mode (WAREHOUSE-MODE): a launcher over the Lists above, declared
-  // beside them with its own workspace; then internal cost facts on the
-  // shipment and invoice pages (VALUATION).
+  // beside them with its own workspace; the customer account page the two
+  // customer Lists open and the Today launcher (REPORTS-HOME), each with its
+  // own workspace too; then internal cost facts on the shipment and invoice
+  // pages (VALUATION).
   return withShipmentValuation(APPLICATION_NAMESPACE, {
     ...application,
     surfaces: [
       ...application.surfaces,
       warehouseSurface(APPLICATION_NAMESPACE),
+      customerAccountSurface(APPLICATION_NAMESPACE),
+      todaySurface(APPLICATION_NAMESPACE),
     ],
   });
 }

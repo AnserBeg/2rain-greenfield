@@ -46,6 +46,7 @@ import {
   declaredListParameters,
   declaredRowAction,
   figureBandLabel,
+  moneyText,
   orderedColumns,
   orderedFilters,
   orderedViews,
@@ -555,7 +556,16 @@ function renderDataGrid(context: SurfaceComponentContext): string {
     data.declaredList &&
     data.result?.listCoverage
   ) {
-    const detail = relatedSurface(context, 'record');
+    // REPORTS-HOME: a List naming its own record page opens its rows there.
+    const declaredRecord = context.surface.list.record;
+    const detail =
+      declaredRecord !== undefined
+        ? (context.surfaces ?? []).find(
+            (candidate) =>
+              candidate.surfaceId === declaredRecord &&
+              candidate.lifecycle === 'active',
+          )
+        : relatedSurface(context, 'record');
     const recordLabel = entityLabel(context.surface);
     const formId = bulkSelectionFormId(context.surface);
     const binding = readCompiledSurfaceDataBinding(
@@ -653,7 +663,9 @@ function renderBulkActions(context: SurfaceComponentContext): string {
 }
 
 function renderTaskDecision(context: SurfaceComponentContext): string {
-  if (!taskUsesAggregateQuery(context)) {
+  // A launcher's decision is where to go, whatever read its Task binds -- a
+  // lookup (the Warehouse) or a List (Today, REPORTS-HOME).
+  if (!context.surface.launcher && !taskUsesAggregateQuery(context)) {
     return renderReferencedComponent(context);
   }
   const data = context.data ?? { status: 'UNBOUND' as const };
@@ -686,7 +698,7 @@ function renderTaskDecision(context: SurfaceComponentContext): string {
 }
 
 function renderTaskScanInput(context: SurfaceComponentContext): string {
-  if (!taskUsesAggregateQuery(context)) {
+  if (!context.surface.launcher && !taskUsesAggregateQuery(context)) {
     return renderReferencedComponent(context);
   }
   // A launcher scans a code to open, never the lookup's raw parameters.
@@ -733,7 +745,7 @@ function renderTaskScanInput(context: SurfaceComponentContext): string {
 }
 
 function renderTaskPrimaryAction(context: SurfaceComponentContext): string {
-  if (!taskUsesAggregateQuery(context)) {
+  if (!context.surface.launcher && !taskUsesAggregateQuery(context)) {
     return renderReferencedComponent(context);
   }
   if (context.surface.launcher)
@@ -2529,6 +2541,44 @@ function renderDeclaredListViews(
     .join('')}</ul></nav>`;
 }
 
+/**
+ * A List's summary (REPORTS-HOME): each total the statement added up beside
+ * its count, labelled and formatted as the column showing the figure, with
+ * the currency the List is read in. A total the statement left unstated
+ * reads "—", never 0.
+ */
+function renderFigureSummary(
+  list: SurfaceList,
+  state: DeclaredListState,
+  coverage: SharedListCoverage,
+): string {
+  const summary = list.figures?.summary;
+  const answered = coverage.figureSummary;
+  if (!summary || !answered) return '';
+  const items = summary
+    .map((figureId) => {
+      const column = orderedColumns(list).find(
+        (candidate) => candidate.field === figureId,
+      );
+      const value = answered[figureId];
+      const text =
+        value === null || value === undefined
+          ? '—'
+          : column?.format === 'money'
+            ? moneyText(value)
+            : value;
+      return `<div class="list-figure-summary__item" data-summary-figure="${escapeHtml(figureId)}"><dt>${escapeHtml(column?.label ?? figureId)}</dt><dd data-summary-value="${escapeHtml(value ?? '')}">${escapeHtml(text)}</dd></div>`;
+    })
+    .join('');
+  const currency =
+    list.figures?.currency && state.currency !== null
+      ? (list.figures.currency.options.find(
+          (option) => option.value === state.currency,
+        )?.label ?? state.currency)
+      : null;
+  return `<section class="list-figure-summary" data-list-summary aria-label="${escapeHtml(currency ? `Totals in ${currency}` : 'Totals')}">${currency ? `<p class="muted" data-list-summary-currency="${escapeHtml(state.currency ?? '')}">${escapeHtml(`Totals in ${currency}`)}</p>` : ''}<dl>${items}</dl></section>`;
+}
+
 function renderDeclaredList(input: DeclaredListRenderInput): string {
   const { list, state, coverage, base } = input;
   const columns = orderedColumns(input.list);
@@ -2553,6 +2603,7 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
         name !== 'page' &&
         name !== 'sort' &&
         name !== 'dir' &&
+        !(name === 'currency' && list.figures?.currency !== undefined) &&
         !list.filters.some((filter) => filter.filterId === name),
     )
     .map(
@@ -2575,6 +2626,16 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
           .join('')}</select></div>`,
     )
     .join('');
+  // REPORTS-HOME: the one currency the List's figures are read in -- a
+  // choice of the declared currencies, never "All": two are never added.
+  const currencyControl = list.figures?.currency
+    ? `<div class="form-field"><label for="${controlId('currency')}">${escapeHtml(list.figures.currency.label)}</label><select id="${controlId('currency')}" name="currency" data-list-currency>${list.figures.currency.options
+        .map(
+          (option) =>
+            `<option value="${escapeHtml(option.value)}"${state.currency === option.value ? ' selected' : ''}>${escapeHtml(option.label)}</option>`,
+        )
+        .join('')}</select></div>`
+    : '';
   const sortable = orderedColumns(list).filter((column) => column.sortable);
   const current = state.sort[0];
   const sortControls =
@@ -2589,7 +2650,7 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
           )}</select></div><div class="form-field"><label for="${controlId('dir')}">Order</label><select id="${controlId('dir')}" name="dir"><option value="asc"${current?.direction === 'descending' ? '' : ' selected'}>Ascending</option><option value="desc"${current?.direction === 'descending' ? ' selected' : ''}>Descending</option></select></div>`
       : '';
   const clearHref = `/?${declaredListParameters(state, base, { filterValues: {}, page: 1, search: '' }).toString()}`;
-  const controls = `<form class="list-controls" data-list-search method="get" action="/">${formHidden}<div class="form-field list-controls__search"><label><span>Search ${escapeHtml(input.recordLabel.toLowerCase())}</span><input type="search" name="q" value="${escapeHtml(state.search)}" maxlength="240" autocomplete="off"></label></div>${filterControls}${sortControls}<div class="list-controls__actions"><button type="submit">Apply</button>${narrowed ? `<a class="secondary-action" href="${escapeHtml(clearHref)}">Clear</a>` : ''}</div></form>`;
+  const controls = `<form class="list-controls" data-list-search method="get" action="/">${formHidden}<div class="form-field list-controls__search"><label><span>Search ${escapeHtml(input.recordLabel.toLowerCase())}</span><input type="search" name="q" value="${escapeHtml(state.search)}" maxlength="240" autocomplete="off"></label></div>${currencyControl}${filterControls}${sortControls}<div class="list-controls__actions"><button type="submit">Apply</button>${narrowed ? `<a class="secondary-action" href="${escapeHtml(clearHref)}">Clear</a>` : ''}</div></form>`;
   const sortState = new Map(
     state.sort.map((sort) => [sort.columnId, sort.direction]),
   );
@@ -2702,5 +2763,9 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
     input.progressWithheld,
     input.supplyWithheld,
   );
-  return `<section class="panel data-panel" data-data-state="exact" data-list-result="${escapeHtml(coverage.schemaVersion)}" data-declared-list="true"${anchor}><div class="panel__heading"><div><h2>${escapeHtml(input.recordLabel)}</h2></div><div class="list-summary"><span class="status-pill" data-status-role="success" data-list-total="${String(coverage.totalCount)}">${escapeHtml(count)}</span>${range ? `<span class="muted">${escapeHtml(range)}</span>` : ''}${exportControl}</div></div>${withheld}${controls}${empty}${input.records.length > 0 ? `<div class="data-table-wrap" data-list-rendering="responsive-single"><table><thead><tr>${input.selectionCell ? '<th scope="col">Select</th>' : ''}${header}${rowActions ? '<th scope="col">Actions</th>' : ''}</tr></thead><tbody>${body}</tbody></table></div>` : ''}${paging}</section>`;
+  // REPORTS-HOME: a report's totals over every row the view, filters and
+  // search keep -- the statement's own sums, under each showing column's
+  // label and format, in the one currency the List is read in.
+  const summary = renderFigureSummary(list, state, coverage);
+  return `<section class="panel data-panel" data-data-state="exact" data-list-result="${escapeHtml(coverage.schemaVersion)}" data-declared-list="true"${anchor}><div class="panel__heading"><div><h2>${escapeHtml(input.recordLabel)}</h2></div><div class="list-summary"><span class="status-pill" data-status-role="success" data-list-total="${String(coverage.totalCount)}">${escapeHtml(count)}</span>${range ? `<span class="muted">${escapeHtml(range)}</span>` : ''}${exportControl}</div></div>${withheld}${controls}${summary}${empty}${input.records.length > 0 ? `<div class="data-table-wrap" data-list-rendering="responsive-single"><table><thead><tr>${input.selectionCell ? '<th scope="col">Select</th>' : ''}${header}${rowActions ? '<th scope="col">Actions</th>' : ''}</tr></thead><tbody>${body}</tbody></table></div>` : ''}${paging}</section>`;
 }

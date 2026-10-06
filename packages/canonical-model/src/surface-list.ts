@@ -10,7 +10,10 @@ import {
   compareCodeUnits,
   diagnostic,
 } from './diagnostics.js';
-import { searchChildProblem } from './picker-eligibility.js';
+import {
+  pickerEligibilityProblem,
+  searchChildProblem,
+} from './picker-eligibility.js';
 
 /**
  * A declared List is cross-reference checked against the surface's own list
@@ -130,10 +133,12 @@ export function validateSurfaceLists(
       const figure = figureKinds.get(column.field);
       if (figure) {
         // Computed in the statement: shown as it is, never sorted, formatted
-        // or labelled like a field. A band reads as its row's status.
+        // or labelled like a field -- but a number figure may read as money
+        // (REPORTS-HOME). A band reads as its row's status.
         if (
           column.sortable ||
-          column.format ||
+          (column.format !== undefined &&
+            !(figure === 'number' && column.format === 'money')) ||
           column.reference ||
           column.overdue ||
           (figure === 'band'
@@ -654,18 +659,122 @@ export function validateSurfaceLists(
         return source;
       };
       const numbers = new Set<string>();
+      // A text field holding a record id: 36 characters at least.
+      const recordIdField = (
+        source: ReturnType<typeof read>,
+        fieldId: string,
+      ) => {
+        const field = fields.get(fieldId);
+        return (
+          selects(source, fieldId) &&
+          field?.entity.targetId === source.sourceEntity.targetId &&
+          field.fieldType.kind === 'textFieldType' &&
+          field.fieldType.maximumLength >= 36
+        );
+      };
       for (const sum of figures.sums) {
-        const rows = matched(sum.rows);
-        // `rows` adds a quantity, `related` related rows, `remaining` both.
-        const quantity = sum.sum !== 'related';
-        const related = sum.sum !== 'rows';
+        // REPORTS-HOME: the rows hold the listed record's id, or their parent
+        // does (`within.match`) -- exactly one of them.
+        const parentMatch =
+          sum.within && 'match' in sum.within ? sum.within.match : undefined;
+        if ((sum.rows.match === undefined) === (parentMatch === undefined))
+          fail(
+            id,
+            "a figure's rows or their parent hold the listed record's id, exactly one",
+          );
+        const rows =
+          sum.rows.match !== undefined
+            ? matched({ query: sum.rows.query, match: sum.rows.match })
+            : read(sum.rows.query.targetId);
+        // `rows` adds a quantity, `related` related rows, `remaining` both,
+        // `count` nothing but how many rows there are.
+        const quantity = sum.sum === 'rows' || sum.sum === 'remaining';
+        const related = sum.sum === 'related' || sum.sum === 'remaining';
         if (
           (sum.rows.quantity !== undefined) !== quantity ||
           (sum.related !== undefined) !== related
         )
           fail(id, 'a figure names exactly the parts its sum adds up');
         if (sum.rows.quantity !== undefined) decimal(rows, sum.rows.quantity);
-        if (sum.within) parentOf(rows, sum.within);
+        const parent = sum.within ? parentOf(rows, sum.within) : undefined;
+        if (parentMatch !== undefined && !recordIdField(parent!, parentMatch))
+          fail(
+            id,
+            "a figure's parent holds the listed record's id in a text field its query selects",
+          );
+        if (sum.where) {
+          unique(sum.where.values, id, 'figure where values');
+          const kept = fields.get(sum.where.field)?.fieldType;
+          if (
+            !selects(rows, sum.where.field) ||
+            fields.get(sum.where.field)?.entity.targetId !==
+              rows.sourceEntity.targetId ||
+            !(kept?.kind === 'enumFieldType'
+              ? sum.where.values.every((value) =>
+                  kept.options.some((option) => option.optionId === value),
+                )
+              : kept?.kind === 'textFieldType' &&
+                sum.where.values.every(
+                  (value) => value.length <= kept.maximumLength,
+                ))
+          )
+            fail(
+              id,
+              "a figure keeps rows by values of an enumeration or text field its rows' query selects",
+            );
+        }
+        if (sum.age) {
+          const dated = fields.get(sum.age.field)?.fieldType;
+          if (
+            !selects(rows, sum.age.field) ||
+            fields.get(sum.age.field)?.entity.targetId !==
+              rows.sourceEntity.targetId ||
+            !(
+              dated?.kind === 'dateFieldType' ||
+              (dated?.kind === 'dateTimeFieldType' &&
+                dated.timezoneSemantics === 'utcInstant')
+            )
+          )
+            fail(
+              id,
+              "a figure's age reads a date or UTC instant its rows' query selects",
+            );
+          if (
+            (sum.age.from === undefined && sum.age.to === undefined) ||
+            (sum.age.from !== undefined &&
+              sum.age.to !== undefined &&
+              sum.age.from > sum.age.to)
+          )
+            fail(id, "a figure's age names a range of days, from before to");
+        }
+        if (sum.currency !== undefined) {
+          const currency = sum.currency;
+          if (!figures.currency)
+            fail(id, 'a currency figure needs the List to declare currencies');
+          // The rows' own currency, or -- matched through it -- their
+          // parent's, as an order line is in its order's currency.
+          const holder = [rows, ...(parent ? [parent] : [])].find(
+            (source) =>
+              fields.get(currency)?.entity.targetId ===
+              source.sourceEntity.targetId,
+          );
+          if (
+            !holder ||
+            !selects(holder, currency) ||
+            fields.get(currency)?.fieldType.kind !== 'textFieldType'
+          )
+            fail(
+              id,
+              "a figure's currency is a text field its rows' or their parent's query selects",
+            );
+        }
+        if (sum.price) {
+          if (sum.sum !== 'rows' && sum.sum !== 'remaining')
+            fail(id, 'a priced figure adds its rows or what remains of them');
+          decimal(rows, sum.price.field, 'a figure prices with');
+          if (sum.price.discount !== undefined)
+            decimal(rows, sum.price.discount, 'a figure discounts by');
+        }
         if (sum.related) {
           const pointing = read(sum.related.query.targetId);
           const relation = relations.get(sum.related.relation);
@@ -839,8 +948,59 @@ export function validateSurfaceLists(
             'a latest label reads a selected field of an active unscoped q0 list query',
           );
       }
+      // REPORTS-HOME: the currencies a List's currency sums are read in, one
+      // at a time, and only where some sum is read in one.
+      if (figures.currency) {
+        unique(
+          figures.currency.options.map((option) => option.value),
+          id,
+          'currency values',
+        );
+        if (!figures.sums.some((sum) => sum.currency !== undefined))
+          fail(id, 'a List declares currencies for its currency figures');
+      }
+      // A report's totals: number figures added up over the whole filtered
+      // set, each once.
+      if (figures.summary) {
+        unique(figures.summary, id, 'summary figures');
+        if (!figures.summary.every((figure) => numbers.has(figure)))
+          fail(id, "a List's summary adds up its sums, choices and totals");
+        // Each total reads under the label, and as the money, of the column
+        // that shows the figure on every row.
+        if (
+          !figures.summary.every((figure) =>
+            list.columns.some((column) => column.field === figure),
+          )
+        )
+          fail(id, "a List's summary adds up figures its columns show");
+      }
     };
     if (list.figures) validateFigures(list.figures);
+    // REPORTS-HOME: only the rows a related entity points at, as a picker's
+    // eligibility keeps them.
+    if (list.eligibility) {
+      const problem = pickerEligibilityProblem(
+        model,
+        list.eligibility,
+        String(query.sourceEntity.targetId),
+      );
+      if (problem) fail(id, problem);
+    }
+    // REPORTS-HOME: the record page a List opens its rows in, when its
+    // entity has another: an active record page over the List's entity.
+    if (list.record !== undefined) {
+      const page = model.surfaces.find(
+        (candidate) => String(candidate.surfaceId) === list.record,
+      );
+      if (
+        !page ||
+        page.lifecycle !== 'active' ||
+        page.surfaceRole !== 'record' ||
+        queries.get(String(page.dataSource.targetId))?.sourceEntity.targetId !==
+          query.sourceEntity.targetId
+      )
+        fail(id, "a List's record page is an active record page of its rows");
+    }
     // CATALOG-EXTRAS: a search that also finds a row through its children,
     // each through its own relation once.
     if (list.searchChildren) {
@@ -871,10 +1031,13 @@ export function validateSurfaceLists(
       // The page a row links to: the record surfaces over the List's records.
       // A section is a dataset of every one of them, so the link lands where
       // it says whichever page the runtime opens.
+      // A List that names its record page links there alone (REPORTS-HOME).
       const records = model.surfaces.filter(
         (candidate) =>
           candidate.surfaceRole === 'record' &&
           candidate.lifecycle === 'active' &&
+          (list.record === undefined ||
+            String(candidate.surfaceId) === list.record) &&
           queries.get(String(candidate.dataSource.targetId))?.sourceEntity
             .targetId === query.sourceEntity.targetId,
       );

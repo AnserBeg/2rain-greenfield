@@ -2548,6 +2548,12 @@ main{width:min(1200px,100%);margin:0 auto;padding:var(--page-padding) var(--page
 .list-controls__search{flex:1 1 16rem}
 .list-controls__actions{display:flex;gap:var(--space-2);align-items:center;min-height:44px}
 .list-summary{display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:center;justify-content:flex-end}
+.list-figure-summary{margin:0 0 var(--space-3)}
+.list-figure-summary p{margin:0 0 var(--space-2)}
+.list-figure-summary dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:var(--space-2);margin:0}
+.list-figure-summary__item{padding:var(--space-3);border:1px solid var(--line);border-radius:var(--radius-container);background:var(--surface-panel)}
+.list-figure-summary dt{color:var(--ink-muted);font-size:var(--text-micro);font-weight:var(--weight-emphasis);text-transform:uppercase;letter-spacing:.07em}
+.list-figure-summary dd{margin:var(--space-1) 0 0;font-size:var(--text-section);font-weight:var(--weight-emphasis);font-variant-numeric:tabular-nums}
 .list-sort{display:inline-flex;gap:var(--space-1);align-items:center;min-height:44px;color:inherit;text-decoration:none}
 .list-page-status{color:var(--ink-muted);font-size:var(--text-body)}
 .list-page-jump{display:inline-flex;gap:var(--space-2);align-items:center}
