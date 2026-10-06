@@ -16,7 +16,7 @@ test('kegs go out to a customer against a deposit, come back or are forfeited, a
 }, testInfo) => {
   test.setTimeout(480_000);
   page.setDefaultTimeout(30_000);
-  await fixture(async (url) => {
+  await fixture(async (url, measure) => {
     const dialog = page.getByRole('dialog');
     const surface = (local: string, record?: string) => {
       const target = new URL(url);
@@ -52,6 +52,57 @@ test('kegs go out to a customer against a deposit, come back or are forfeited, a
     };
     const task = (label: string) =>
       page.getByRole('button', { name: label, exact: true });
+
+    // Two companies and no saved company: the customer's page serves with
+    // a Company bar, asks for a company before it reads returnables, and
+    // offers Issue returnables only once one is entered. Choosing a company
+    // keeps the customer. Nothing has been opened in a company before this.
+    const second = (await measure('second_company')).companyId;
+    const scopeParameter = `${ns}:parameter.returnable_custody_list_legal_entity_scope`;
+    await page.goto(surface('party_detail', alpine));
+    await expect(
+      page.getByRole('heading', { name: 'Alpine Office Supply', level: 1 }),
+    ).toBeVisible();
+    expect(new URL(page.url()).searchParams.get(scopeParameter)).toBeNull();
+    const companies = page.getByRole('navigation', {
+      name: 'Company',
+      exact: true,
+    });
+    await expect(companies.getByRole('link')).toHaveCount(2);
+    await expect(companies.locator('[aria-current="true"]')).toHaveCount(0);
+    await expect(dataset('party_returnables')).toHaveAttribute(
+      'data-resolution',
+      'unscoped',
+    );
+    await expect(dataset('party_returnables')).toContainText(
+      'Legal entity required',
+    );
+    await expect(task('Issue returnables')).toHaveCount(0);
+    await capture(page, testInfo, 'party-no-company');
+    await companies
+      .getByRole('link', { name: 'Second company', exact: true })
+      .click();
+    let entered = new URL(page.url());
+    expect(entered.searchParams.get('record')).toBe(alpine);
+    expect(entered.searchParams.get(scopeParameter)).toBe(second);
+    await expect(
+      page.getByRole('heading', { name: 'Alpine Office Supply', level: 1 }),
+    ).toBeVisible();
+    await expect(dataset('party_returnables')).toHaveAttribute(
+      'data-resolution',
+      'empty',
+    );
+    await expect(task('Issue returnables')).toBeVisible();
+    // Back to the fixture's own company, which the rest of this journey uses.
+    await companies
+      .locator(`a:not([data-legal-entity-id="${second}"])`)
+      .click();
+    entered = new URL(page.url());
+    expect(entered.searchParams.get('record')).toBe(alpine);
+    expect(entered.searchParams.get(scopeParameter)).not.toBe(second);
+    await expect(
+      companies.locator('[aria-current="true"]'),
+    ).not.toHaveAttribute('data-legal-entity-id', second);
 
     // Party lists the returnable types and both Returnables Lists.
     await page.goto(url);
@@ -270,32 +321,64 @@ async function capture(
   await page.setViewportSize({ width: 1280, height: 800 });
 }
 
-/** The order-entry fixture, served. */
-async function fixture(run: (url: string) => Promise<void>) {
+/**
+ * The order-entry fixture, served, with its measuring channel: `measure`
+ * asks the fixture for one named arrangement (a second company here) and
+ * answers what it observed.
+ */
+async function fixture(
+  run: (
+    url: string,
+    measure: (phase: string) => Promise<{ companyId: string }>,
+  ) => Promise<void>,
+) {
   const child = spawn(
     process.execPath,
-    ['--import', 'tsx', 'test/helpers/order-entry-fixture.ts', '--serve'],
+    [
+      '--import',
+      'tsx',
+      'test/helpers/order-entry-fixture.ts',
+      '--serve',
+      '--verify',
+    ],
     {
       cwd: fileURLToPath(new URL('../../../../', import.meta.url)),
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
     },
   );
   let output = '';
+  let consumed = '';
+  let answer: ((value: { companyId: string }) => void) | null = null;
   const exited = once(child, 'exit');
   const ready = new Promise<string>((resolve, reject) => {
     child.stdout.on('data', (chunk: Buffer) => {
       output += chunk.toString();
       const match = /ORDER_ENTRY_URL=(.*)/.exec(output);
       if (match) resolve(match[1]!);
+      consumed += chunk.toString();
+      const lines = consumed.split('\n');
+      consumed = lines.pop()!;
+      for (const line of lines)
+        if (line.startsWith('ORDER_ENTRY_MEASURED=')) {
+          answer?.(JSON.parse(line.slice('ORDER_ENTRY_MEASURED='.length)));
+          answer = null;
+        }
     });
     child.stderr.on('data', (chunk: Buffer) => {
       output += chunk.toString();
     });
     child.once('exit', () => reject(new Error(output)));
   });
+  const measure = (phase: string) =>
+    new Promise<{ companyId: string }>((resolve, reject) => {
+      answer = resolve;
+      child.once('exit', () => reject(new Error(output)));
+      child.stdin.write(JSON.stringify({ phase }) + '\n');
+    });
   try {
-    await run(await ready);
+    await run(await ready, measure);
   } finally {
+    child.stdin.end();
     child.kill('SIGTERM');
     const [code] = await exited;
     expect(code, output).toBe(0);

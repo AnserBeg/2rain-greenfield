@@ -81,7 +81,7 @@ function returnablesKit(fixture: Fixture) {
         asset_type_id: typeId,
         currency: option('returnable_custody', 'currency', currency),
       },
-      { party: fixture.customer },
+      { party: fixture.customer, asset_type: typeId },
     );
   const draft = (
     custodyId: string,
@@ -249,6 +249,7 @@ function returnablesKit(fixture: Fixture) {
     });
   };
   return {
+    option,
     value,
     type,
     custody,
@@ -464,6 +465,14 @@ test('returnables: deposits on issue, bounded returns and forfeits, refunds boun
           [`${ns}:field.returnable_custody_issued_quantity`]: '100',
         },
       }),
+      refusedWith('MODULE_FIELD_UNSUPPORTED'),
+    );
+    await assert.rejects(
+      fixture.invoke('returnable_custody_update', {
+        recordId: issued.recordId,
+        expectedRevision: issued.revision,
+        patch: { [`${ns}:field.returnable_custody_notes`]: 'edited' },
+      }),
       refusedWith('MODULE_OPERATION_PRECONDITION_REFUSED'),
     );
     // A posted event does not post again.
@@ -533,7 +542,7 @@ test('returnables: a party holds our returnables only as an active customer, and
           asset_type_id: crate.recordId,
           currency: `${ns}:option.returnable_custody_currency_cad`,
         },
-        { party: stranger.recordId },
+        { party: stranger.recordId, asset_type: crate.recordId },
       );
       await assert.rejects(
         kit.post(custody.recordId, 'issue', { quantity: '1', method: 'cash' }),
@@ -551,11 +560,287 @@ test('returnables: a party holds our returnables only as an active customer, and
         asset_type_id: crate.recordId,
         currency: `${ns}:option.returnable_custody_currency_cad`,
       },
-      { party: fixture.customer },
+      { party: fixture.customer, asset_type: crate.recordId },
     );
     await assert.rejects(
       kit.post(mismatched.recordId, 'issue', { quantity: '1', method: 'cash' }),
       refusedWith('RETURNABLES_CUSTODY_INVALID'),
     );
+    // So is one whose type link and type field differ.
+    const pallet = await kit.type('PALLET-1', { cad: '12' });
+    const retyped = await fixture.create(
+      'returnable_custody',
+      {
+        state: `${ns}:option.returnable_custody_state_new`,
+        party_id: fixture.customer,
+        direction: `${ns}:option.returnable_custody_direction_out`,
+        asset_type_id: crate.recordId,
+        currency: `${ns}:option.returnable_custody_currency_cad`,
+      },
+      { party: fixture.customer, asset_type: pallet.recordId },
+    );
+    await assert.rejects(
+      kit.post(retyped.recordId, 'issue', { quantity: '1', method: 'cash' }),
+      refusedWith('RETURNABLES_CUSTODY_INVALID'),
+    );
+  });
+});
+
+test('returnables: only the capability writes a custody’s figures, an in-use returnable type is not archived, and overlapping first Issues and refunds serialize', async () => {
+  await withOrderEntryFixture(async (fixture) => {
+    const kit = returnablesKit(fixture);
+    const figure = (name: string) => `${ns}:field.returnable_custody_${name}`;
+    const keg = await kit.type('KEG-30', { cad: '25' });
+
+    // F1. A New custody holds no figure, and no generic write can state one:
+    // the figures are outside every generic create's and update's writable
+    // set, so only a posted event moves them.
+    const fresh = await kit.custody(keg.recordId, 'out');
+    for (const [name, value] of [
+      ['outstanding_quantity', '1.5'],
+      ['deposit_refundable', '999'],
+      ['unit_deposit', '25'],
+    ] as const)
+      await assert.rejects(
+        fixture.invoke('returnable_custody_update', {
+          recordId: fresh.recordId,
+          expectedRevision: fresh.revision,
+          patch: { [figure(name)]: value },
+        }),
+        (error: unknown) => refusedWith('MODULE_FIELD_UNSUPPORTED')(error),
+        `a generic update stating ${name} is refused`,
+      );
+    await assert.rejects(
+      fixture.create(
+        'returnable_custody',
+        {
+          state: kit.option('returnable_custody', 'state', 'new'),
+          party_id: fixture.customer,
+          direction: kit.option('returnable_custody', 'direction', 'out'),
+          asset_type_id: keg.recordId,
+          currency: kit.option('returnable_custody', 'currency', 'usd'),
+          outstanding_quantity: '4',
+        },
+        { party: fixture.customer, asset_type: keg.recordId },
+      ),
+      refusedWith('MODULE_FIELD_UNSUPPORTED'),
+    );
+    // A writable field still edits a New custody, which stays the canonical
+    // empty image: New, with every figure absent.
+    const noted = await fixture.invoke('returnable_custody_update', {
+      recordId: fresh.recordId,
+      expectedRevision: fresh.revision,
+      patch: { [figure('notes')]: 'Kegs for the spring order' },
+    });
+    assert.equal(noted.outcome, 'succeeded');
+    const empty = await kit.reread('returnable_custody', fresh.recordId);
+    assert.match(
+      String(kit.value(empty, 'returnable_custody', 'state')),
+      /returnable_custody_state_new$/u,
+    );
+    for (const name of [
+      'unit_deposit',
+      'issued_quantity',
+      'returned_quantity',
+      'forfeited_quantity',
+      'outstanding_quantity',
+      'deposit_taken',
+      'deposit_refunded',
+      'deposit_forfeited',
+      'deposit_held',
+      'deposit_refundable',
+    ])
+      assert.equal(
+        kit.value(empty, 'returnable_custody', name) ?? null,
+        null,
+        `${name} is absent on a New custody`,
+      );
+    // An event's attribution is the capability's too.
+    await assert.rejects(
+      fixture.create(
+        'returnable_event',
+        {
+          state: kit.option('returnable_event', 'state', 'draft'),
+          kind: kit.option('returnable_event', 'kind', 'issue'),
+          event_date: new Date().toISOString(),
+          quantity: '1',
+          reason: 'attributed by hand',
+          recorded_by: 'someone else',
+        },
+        { custody: fresh.recordId },
+      ),
+      refusedWith('MODULE_FIELD_UNSUPPORTED'),
+    );
+
+    // F3. A custody names its type through a restrict link: the type is not
+    // archived while a live custody names it, and an archived type starts no
+    // custody. Once the New custody is archived, the type may be.
+    const archiveType = (record: { recordId: string; revision: number }) =>
+      fixture.invoke('returnable_asset_type_archive', {
+        recordId: record.recordId,
+        expectedRevision: record.revision,
+      });
+    const spare = await kit.type('KEG-SPARE', { cad: '10' });
+    const lonely = await kit.custody(spare.recordId, 'out');
+    await assert.rejects(
+      archiveType(spare),
+      refusedWith('MODULE_ARCHIVE_RESTRICTED'),
+    );
+    const parked = await fixture.invoke('returnable_custody_archive', {
+      recordId: lonely.recordId,
+      expectedRevision: lonely.revision,
+    });
+    assert.equal(parked.outcome, 'succeeded');
+    assert.equal((await archiveType(spare)).outcome, 'succeeded');
+    await assert.rejects(
+      kit.custody(spare.recordId, 'held'),
+      refusedWith('MODULE_RELATION_VIOLATION'),
+    );
+
+    // Evidence: two first Issues of DIFFERENT custody records for the same
+    // company, party, type, direction and currency, held at the custody
+    // key's transaction lock until both wait there: exactly one posts, and
+    // the other is refused naming it.
+    const scope = [
+      fixture.app.runtime.identity.tenantId,
+      fixture.app.runtime.identity.environmentId,
+    ];
+    const barrier = async (
+      hold: (client: import('pg').PoolClient) => Promise<unknown>,
+      posts: () => Promise<unknown>[],
+      what: string,
+    ) => {
+      const client = await fixture.pool.connect();
+      try {
+        await client.query('BEGIN');
+        await hold(client);
+        const racing = posts();
+        const settled = Promise.allSettled(racing);
+        let waiting = 0;
+        for (let attempt = 0; attempt < 200 && waiting < 2; attempt++) {
+          const done = await Promise.race([
+            settled.then(() => true),
+            new Promise<false>((resolve) =>
+              setTimeout(() => resolve(false), 100),
+            ),
+          ]);
+          waiting = Number(
+            (
+              await fixture.pool.query<{ count: string }>(
+                `SELECT count(DISTINCT pid)::text AS count FROM pg_locks
+                  WHERE NOT granted AND pid <> $1`,
+                [(client as unknown as { processID: number }).processID],
+              )
+            ).rows[0]!.count,
+          );
+          if (done) break;
+        }
+        assert.equal(
+          waiting,
+          2,
+          `both ${what} wait at the serialization point`,
+        );
+        await client.query('COMMIT');
+        return await settled;
+      } finally {
+        client.release();
+      }
+    };
+    const first = await kit.custody(keg.recordId, 'out');
+    const second = await kit.custody(keg.recordId, 'out');
+    const firstDraft = await kit.draft(first.recordId, 'issue', {
+      quantity: '2',
+      method: 'cash',
+    });
+    const secondDraft = await kit.draft(second.recordId, 'issue', {
+      quantity: '3',
+      method: 'cheque',
+    });
+    const postDraft = (event: { recordId: string; revision: number }) =>
+      fixture.invoke('returnable_event_post', {
+        recordId: event.recordId,
+        expectedRevision: event.revision,
+      });
+    const firstIssues = await barrier(
+      (client) =>
+        client.query(
+          `SELECT pg_advisory_xact_lock(hashtextextended(
+             $1::text || ':' || $2::text || ':' || $3::text || ':' || $4::text
+             || ':' || $5::text || ':' || $6::text || ':' || $7::text || ':' || $8::text, 0))`,
+          [
+            ...scope,
+            'northstar.party:capability.returnables',
+            fixture.scope,
+            fixture.customer,
+            keg.recordId,
+            'out',
+            'cad',
+          ],
+        ),
+      () => [postDraft(firstDraft), postDraft(secondDraft)],
+      'first Issues',
+    );
+    assert.equal(
+      firstIssues.filter((outcome) => outcome.status === 'fulfilled').length,
+      1,
+      'exactly one first Issue posts',
+    );
+    const winner = firstIssues[0]!.status === 'fulfilled' ? first : second;
+    assert.ok(
+      firstIssues.some(
+        (outcome) =>
+          outcome.status === 'rejected' &&
+          refusedWith('RETURNABLES_CUSTODY_DUPLICATE')(outcome.reason) &&
+          String((outcome.reason as Error).message).includes(
+            String(kit.value(winner, 'returnable_custody', 'number')),
+          ),
+      ),
+      'the other is refused, naming the custody that posted',
+    );
+
+    // Evidence: two refunds of one custody, each within what is refundable
+    // and together beyond it, held at the custody row until both wait there:
+    // exactly one posts.
+    await kit.post(winner.recordId, 'return', { quantity: '2' });
+    const refundable = (await kit.figures(winner.recordId)).refundable;
+    assert.equal(refundable, '50.00');
+    const refunds = [
+      await kit.draft(winner.recordId, 'refund', {
+        amount: '30',
+        method: 'cash',
+      }),
+      await kit.draft(winner.recordId, 'refund', {
+        amount: '30',
+        method: 'bank_transfer',
+      }),
+    ];
+    const custodyTable = fulfillmentTable(
+      (await governedStorageTarget()).entities.find(
+        (entity) => entity.entityId === `${ns}:entity.returnable_custody`,
+      )!,
+    );
+    const racedRefunds = await barrier(
+      (client) =>
+        client.query(
+          `SELECT 1 FROM ${custodyTable} WHERE record_id = $1 FOR UPDATE`,
+          [winner.recordId],
+        ),
+      () => refunds.map(postDraft),
+      'refunds',
+    );
+    assert.equal(
+      racedRefunds.filter((outcome) => outcome.status === 'fulfilled').length,
+      1,
+      'exactly one refund posts',
+    );
+    assert.ok(
+      racedRefunds.some(
+        (outcome) =>
+          outcome.status === 'rejected' &&
+          refusedWith('RETURNABLES_REFUND_EXCEEDS_DEPOSIT')(outcome.reason),
+      ),
+    );
+    const after = await kit.figures(winner.recordId);
+    assert.deepEqual([after.refunded, after.refundable], ['30.00', '20.00']);
   });
 });
