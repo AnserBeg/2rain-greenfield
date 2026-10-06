@@ -284,8 +284,10 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // its lines, payments and credits (twelve), + REPLENISHMENT's Stock by item
   // and Buying worklist, + CATALOG-EXTRAS' item aliases (three), +
   // WAREHOUSE-MODE's Warehouse, + VALUATION's Inventory value List, +
-  // APPROVALS' approval requests and settings (five).
-  assert.equal(groupedManifest.surfaces.length, 113);
+  // APPROVALS' approval requests and settings (five), + REPORTS-HOME's
+  // Receivables aging and Customer accounts Lists, the customer account page
+  // and the Today launcher (four).
+  assert.equal(groupedManifest.surfaces.length, 117);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -317,8 +319,11 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // item's inventory policy and the merge Task's choice that leaves the item
   // out (CATALOG-EXTRAS) require 20; the Sales orders List's supply, its
   // Blocked by supply and Reserved views and its "Post shipment"
-  // (SUPPLY-WARNINGS) require 21.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 21);
+  // (SUPPLY-WARNINGS) require 21; the receivables aging buckets, one-currency
+  // figures, report totals, customer eligibility and the customer account
+  // page as the customer Lists' record page (REPORTS-HOME) require 27
+  // (22-26 are other packets' rungs).
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 27);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.
@@ -329,7 +334,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // Catalog's Lists, join Inventory's group. WAREHOUSE-MODE: the Warehouse
   // launcher joins Inventory, the one Task navigation names. VALUATION: the
   // Inventory value List. APPROVALS: approvals and settings join Purchasing.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 22);
+  // REPORTS-HOME: Receivables aging, Customer accounts and Today join Sales.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 25);
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
@@ -990,8 +996,43 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
     'sales',
   );
   return withPlainItemPage(
-    withoutItemStockLists(withoutInventoryValuation(composed)),
+    withoutItemStockLists(
+      withoutReportsHome(withoutInventoryValuation(composed)),
+    ),
   );
+}
+
+/**
+ * REPORTS-HOME: Receivables aging and Customer accounts are Lists over
+ * Party's records that add up Sales' invoices and orders, and the customer
+ * account page reads them; without Sales the three go, with the two Lists'
+ * queries. Today is Sales' own surface and left with its module.
+ */
+function withoutReportsHome(
+  composed: Record<string, unknown>,
+): Record<string, unknown> {
+  const ids = (kind: string, locals: readonly string[]) =>
+    new Set(locals.map((local) => `northstar.app:${kind}.${local}`));
+  const lists = ['receivables_aging_list', 'customer_account_list'];
+  const surfaces = ids('surface', [...lists, 'customer_account_detail']);
+  const queries = ids('query', lists);
+  const declaredSurfaces = composed.surfaces;
+  const declared = composed.queries;
+  assert.ok(Array.isArray(declaredSurfaces));
+  assert.ok(Array.isArray(declared));
+  assert.equal(
+    declaredSurfaces.filter((surface) => surfaces.has(surface.surfaceId))
+      .length,
+    3,
+    'flat fixture must find the three Party REPORTS-HOME surfaces exactly once',
+  );
+  return {
+    ...composed,
+    surfaces: declaredSurfaces.filter(
+      (surface) => !surfaces.has(surface.surfaceId),
+    ),
+    queries: declared.filter((query) => !queries.has(query.queryId)),
+  };
 }
 
 /**

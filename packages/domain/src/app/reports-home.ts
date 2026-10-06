@@ -21,6 +21,13 @@ import { CUSTOMER_ACCOUNT_PAGE } from './list-declarations.js';
  */
 const version = 'v6';
 
+/**
+ * Surface ids order navigation and the landing page (the first active
+ * surface): `a_` puts Today first in Sales and makes it the page the
+ * application opens on, as the shell's own `a_home` leads it.
+ */
+export const TODAY = 'a_today';
+
 function ids(namespace: string) {
   const id = (kind: string, name: string) => `${namespace}:${kind}.${name}`;
   const ref = (kind: string, targetId: string) => ({
@@ -226,7 +233,7 @@ export function todaySurface(namespace: string): Record<string, unknown> {
     list: string,
     view: string,
   ) => ({
-    tileId: id('launcher_tile', `sales_today_${name}`),
+    tileId: id('launcher_tile', `today_${name}`),
     label,
     description,
     orderKey,
@@ -295,12 +302,12 @@ export function todaySurface(namespace: string): Record<string, unknown> {
     module: ref('moduleReference', id('module', 'sales')),
     schemaVersion: version,
     slots: [
-      slot('sales_today', 'decision', 10),
-      slot('sales_today', 'scanInput', 20),
-      slot('sales_today', 'primaryAction', 30),
+      slot(TODAY, 'decision', 10),
+      slot(TODAY, 'scanInput', 20),
+      slot(TODAY, 'primaryAction', 30),
     ],
     statusRoles: [],
-    surfaceId: id('surface', 'sales_today'),
+    surfaceId: id('surface', TODAY),
     // A destination of its own in the Sales group, entered with the caller's
     // company and authorized by the Sales orders List's query.
     workspace: { membership: 'operational', entry: entry('sales_order_list') },

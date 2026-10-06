@@ -369,7 +369,9 @@ test('REPORTS-HOME: an answer must carry exactly the requested summary, each a d
     sent(accounts, 'customer_account_list'),
     'customer_account_list',
   )!;
-  const { summary: _ignored, ...unsummed } = plain.figures!;
+  const unsummed = Object.fromEntries(
+    Object.entries(plain.figures!).filter(([key]) => key !== 'summary'),
+  ) as typeof plain.figures;
   const withoutSummary = { ...plain, figures: unsummed };
   assert.doesNotThrow(() =>
     requireSharedListEcho(

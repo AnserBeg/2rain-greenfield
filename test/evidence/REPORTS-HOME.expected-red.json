@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "packet": "REPORTS-HOME",
+  "entries": [
+    {
+      "name": "reports-aging-from-inclusive",
+      "claim": "R2: an aging bucket keeps an invoice on its first day. Comparing days past due strictly above the bucket's lower bound drops an invoice one day late from 1-30 days, so the boundary walk fails on its first step past due -- the day the due-on-receipt invoice turns one day late.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "      conditions.push(`${days} >= ${String(sum.age.from)}`);\n",
+      "replacement": "      conditions.push(`${days} > ${String(sum.age.from)}`);\n",
+      "test": {
+        "files": ["test/postgres/reports-home.test.ts"],
+        "namePattern": "receivables aging buckets"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/reports-home.test.ts",
+          "name": "REPORTS-HOME: receivables aging buckets each balance by whole UTC calendar days past due, one currency at a time, in one company, and is refused without the invoice read",
+          "expected": "customer at 1 days"
+        }
+      ]
+    },
+    {
+      "name": "reports-aging-to-inclusive",
+      "claim": "R2: an aging bucket keeps an invoice on its last day. Comparing days past due strictly below the upper bound drops an invoice due today from Current, so the walk fails on its first day.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "      conditions.push(`${days} <= ${String(sum.age.to)}`);\n",
+      "replacement": "      conditions.push(`${days} < ${String(sum.age.to)}`);\n",
+      "test": {
+        "files": ["test/postgres/reports-home.test.ts"],
+        "namePattern": "receivables aging buckets"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/reports-home.test.ts",
+          "name": "REPORTS-HOME: receivables aging buckets each balance by whole UTC calendar days past due, one currency at a time, in one company, and is refused without the invoice read",
+          "expected": "customer at 0 days"
+        }
+      ]
+    },
+    {
+      "name": "reports-aging-calendar-days",
+      "claim": "R2: days past due are whole UTC calendar days, not elapsed 24-hour periods. Counting elapsed time from an invoice due at 23:30 leaves it current a minute after midnight, so the walk fails the day it should turn one day late.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "        : `(${today} - (${dated} AT TIME ZONE 'UTC')::date)`;\n",
+      "replacement": "        : `floor(extract(epoch FROM ((${today})::timestamp - (${dated} AT TIME ZONE 'UTC'))) / 86400)::int`;\n",
+      "test": {
+        "files": ["test/postgres/reports-home.test.ts"],
+        "namePattern": "receivables aging buckets"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/reports-home.test.ts",
+          "name": "REPORTS-HOME: receivables aging buckets each balance by whole UTC calendar days past due, one currency at a time, in one company, and is refused without the invoice read",
+          "expected": "customer at 1 days"
+        }
+      ]
+    },
+    {
+      "name": "reports-figure-rows-company-scope",
+      "claim": "R4: a figure adds only the rows of the company the List is read in. Dropping the issued read scope from the figure rows lets another company's aging List add this company's invoices, so the second company sees balances it has none of.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "          AND ${qualified(alias, rows.entity.archive.archivedAtColumn)} IS NULL${legalEntityReadScopeJoinConjunction(rows.entity, readScope, values, alias)}`;\n",
+      "replacement": "          AND ${qualified(alias, rows.entity.archive.archivedAtColumn)} IS NULL`;\n",
+      "test": {
+        "files": ["test/postgres/reports-home.test.ts"],
+        "namePattern": "receivables aging buckets"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/reports-home.test.ts",
+          "name": "REPORTS-HOME: receivables aging buckets each balance by whole UTC calendar days past due, one currency at a time, in one company, and is refused without the invoice read",
+          "expected": "another company sees none of these balances"
+        }
+      ]
+    },
+    {
+      "name": "reports-figure-one-currency",
+      "claim": "R3: a currency figure adds only the rows in the one currency the List is read in. Without that condition the USD invoice is added into the CAD buckets, so the first day of the walk reads 2620 where 1570 is owed in CAD.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "    conditions.push(\n      `${qualified(sum.currency.on === 'rows' ? aliases.rows : aliases.parent, sum.currency.column)}::text = ${parameter(values, context.currency)}::text`,\n    );\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/reports-home.test.ts"],
+        "namePattern": "receivables aging buckets"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/reports-home.test.ts",
+          "name": "REPORTS-HOME: receivables aging buckets each balance by whole UTC calendar days past due, one currency at a time, in one company, and is refused without the invoice read",
+          "expected": "customer at 0 days"
+        }
+      ]
+    },
+    {
+      "name": "reports-customer-eligibility",
+      "claim": "R5: Customer accounts lists customers only. A web List that stops sending its eligibility as the related filter lists a supplier-only party among the customers.",
+      "file": "apps/web/src/list-declaration.ts",
+      "original": "  const relatedFilter = list.eligibility\n",
+      "replacement": "  const relatedFilter = false && list.eligibility\n",
+      "test": {
+        "files": ["test/postgres/reports-home.test.ts"],
+        "namePattern": "customer accounts count released orders"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/reports-home.test.ts",
+          "name": "REPORTS-HOME: customer accounts count released orders, open units and open value in one currency, for customers only; Today counts the Lists it opens",
+          "expected": "customers only"
+        }
+      ]
+    }
+  ]
+}

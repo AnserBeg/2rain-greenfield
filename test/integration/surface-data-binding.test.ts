@@ -15495,7 +15495,7 @@ test('REPORTS-HOME: receivables aging and customer accounts render one currency 
   const today = await renderSurfaceRuntimeWithData(
     f.view,
     `/?${new URLSearchParams({
-      surface: id('surface', 'sales_today'),
+      surface: id('surface', 'a_today'),
       [parameter('sales_order_list')]: scope,
     }).toString()}`,
     gateways,
@@ -15507,7 +15507,7 @@ test('REPORTS-HOME: receivables aging and customer accounts render one currency 
   );
   const tiles = [
     ...today.html.matchAll(
-      /data-launcher-tile="northstar\.app:launcher_tile\.sales_today_([a-z_]+)"/gu,
+      /data-launcher-tile="northstar\.app:launcher_tile\.today_([a-z_]+)"/gu,
     ),
   ].map((match) => match[1]);
   assert.deepEqual(tiles, [

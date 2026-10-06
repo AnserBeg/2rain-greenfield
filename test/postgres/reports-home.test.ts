@@ -508,7 +508,11 @@ test(
         now: at(91),
         view: 'owing',
       });
-      assert.equal(elsewhere.records.length, 0);
+      assert.equal(
+        elsewhere.records.length,
+        0,
+        'another company sees none of these balances',
+      );
       assert.equal(elsewhere.listCoverage.totalCount, 0);
       assert.equal(
         elsewhere.listCoverage.figureSummary![
@@ -726,7 +730,7 @@ test(
       // Customers only: the supplier-only party is never listed.
       assert.ok(ids.includes(fixture.customer));
       assert.ok(ids.includes(brook));
-      assert.ok(!ids.includes(supplier));
+      assert.ok(!ids.includes(supplier), 'customers only');
       assert.deepEqual(
         figures(
           all.records.find((record) => record.recordId === fixture.customer),
@@ -766,7 +770,11 @@ test(
         now,
         view: 'open',
       });
-      assert.equal(elsewhere.listCoverage.totalCount, 0);
+      assert.equal(
+        elsewhere.listCoverage.totalCount,
+        0,
+        'another company has none of these orders',
+      );
       // Without the order read the List is refused by that query's name.
       await fixture.measure('deny', undefined, undefined, 'sales_order_read');
       const refused = await readList(fixture, ACCOUNTS, company, {
@@ -782,7 +790,7 @@ test(
 
       // Today: each tile shows its List view's count, as that List counts it.
       const today = new URL(fixture.app.baseUrl);
-      today.searchParams.set('surface', `${ns}:surface.sales_today`);
+      today.searchParams.set('surface', `${ns}:surface.a_today`);
       today.searchParams.set(
         `${ns}:parameter.sales_order_list_legal_entity_scope`,
         company,
@@ -793,7 +801,7 @@ test(
       const tiles = Object.fromEntries(
         [
           ...launcher.matchAll(
-            /data-launcher-tile="northstar\.app:launcher_tile\.sales_today_([a-z_]+)"[^>]*>[\s\S]*?<span class="launcher-tile__count" data-launcher-count>(\d+)<\/span>/gu,
+            /data-launcher-tile="northstar\.app:launcher_tile\.today_([a-z_]+)"[^>]*>[\s\S]*?<span class="launcher-tile__count" data-launcher-count>(\d+)<\/span>/gu,
           ),
         ].map((match) => [match[1]!, Number(match[2]!)]),
       );
