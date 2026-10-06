@@ -86,3 +86,39 @@ and `reports-aging-to-inclusive` (claim 2, bucket bounds), `reports-aging-calend
 - Figure columns are unsortable (as every figure); PaneFlow sorts aging by the oldest bucket.
 
 Review: not owed — outside the Critical set.
+
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1",
+  "packet": "REPORTS-HOME",
+  "base": "8c8cfab1c54ac1b51b4617e45f8e2f0ddd1dfa1b",
+  "head": "ed6bd95153d26faa8f7b7c3b3679c32590281026",
+  "changedPaths": [
+    "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts",
+    "apps/web/src/list-declaration.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts",
+    "apps/web/test/browser/receivables-reports-home.spec.ts", "package.json", "packages/canonical-model/src/schemas.ts",
+    "packages/canonical-model/src/surface-list.ts", "packages/compiler/src/projections.ts", "packages/domain/src/app/builder.ts",
+    "packages/domain/src/app/list-declarations.ts", "packages/domain/src/app/reports-home.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts",
+    "packages/runtime/src/list-behavior/figures.ts", "packages/runtime/src/list-behavior/index.ts", "packages/runtime/src/list-behavior/supply.ts",
+    "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/repository-hygiene.test.ts",
+    "test/architecture/surface-grammar-conformance.test.ts", "test/compiler/g2-module-conformance.test.ts", "test/evidence/REPORTS-HOME.expected-red.json",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/reachability-producers.ts", "test/integration/surface-data-binding.test.ts",
+    "test/postgres/composed-application.test.ts", "test/postgres/reports-home.test.ts", "test/unit/canonical-model/surface-list.test.ts",
+    "test/unit/reports-home.test.ts"
+  ],
+  "symbols": [
+    {"path": "apps/web/src/component-registry.ts", "name": "renderFigureSummary"},
+    {"path": "packages/canonical-model/src/schemas.ts", "name": "listFigureSumWithin"},
+    {"path": "packages/canonical-model/src/schemas.ts", "name": "listFigureSumRows"},
+    {"path": "packages/canonical-model/src/surface-list.ts", "name": "validateSurfaceLists"},
+    {"path": "packages/domain/src/app/list-declarations.ts", "name": "receivablesAgingList"},
+    {"path": "packages/domain/src/app/list-declarations.ts", "name": "customerAccountList"},
+    {"path": "packages/domain/src/app/reports-home.ts", "name": "customerAccountSurface"},
+    {"path": "packages/domain/src/app/reports-home.ts", "name": "todaySurface"},
+    {"path": "packages/postgres-provider/src/module-runtime-interpreter.ts", "name": "figureSumSql"},
+    {"path": "packages/postgres-provider/src/module-runtime-interpreter.ts", "name": "supplyMatchColumn"},
+    {"path": "packages/runtime/src/list-behavior/figures.ts", "name": "parseFigureSum"},
+    {"path": "packages/runtime/src/list-behavior/figures.ts", "name": "SharedListSumParts"}
+  ]
+}
+```
