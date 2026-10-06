@@ -624,7 +624,7 @@ test('the output limit covers the final release manifest as well as staged leave
 });
 
 /**
- * STRUCTURAL-LIMITS-RAISE (ADR-0070, PENDING owner ruling): the compiler's own
+ * STRUCTURAL-LIMITS-RAISE (ADR-0070, owner ruling 2026-10-05): the compiler's own
  * decode (`decodeNormalizedPackage`) admits a package of exactly the 4 MiB
  * normalized maximum and compiles it, and refuses one byte more at
  * `decodeSchemaCheck` with one deterministic diagnostic, before any lowering.

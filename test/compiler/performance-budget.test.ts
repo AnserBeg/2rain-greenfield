@@ -92,8 +92,8 @@ const maximumFieldBytes = (() => {
 })();
 
 /**
- * THE PACKAGE-BYTE ENVELOPE (STRUCTURAL-LIMITS-RAISE, ADR-0070 -- PENDING owner
- * ruling). `compiler-slos.md` requires every package-byte bounds raise to rerun
+ * THE PACKAGE-BYTE ENVELOPE (STRUCTURAL-LIMITS-RAISE, ADR-0070 -- owner ruling
+ * 2026-10-05). `compiler-slos.md` requires every package-byte bounds raise to rerun
  * this gate at the new ceiling. The field envelope above stays the family
  * stress; this one is the byte stress, shaped like the real application rather
  * than padded with long strings, because a padded package compiles far faster

@@ -229,8 +229,9 @@ export const IMMUTABLE_DEFAULTS_V0 = Object.freeze({
  * security control: they are outside `limitsDigest`, no request path or storage
  * column depends on them, and raising them only admits more. Raised from
  * 2,097,152 (2 MiB) to 4,194,304 (4 MiB) by STRUCTURAL-LIMITS-RAISE under
- * ADR-0070 (PENDING owner ruling); `canonical-language-v0.md` T10 records the
- * values and `compiler-slos.md` the compile budget re-measured at this size.
+ * ADR-0070 (owner ruling 2026-10-05, "raise it"); `canonical-language-v0.md` T10
+ * records the values and `compiler-slos.md` the compile budget re-measured at
+ * this size.
  */
 export const STRUCTURAL_LIMITS_V0 = Object.freeze({
   maximumAuthoredBytes: 4_194_304,

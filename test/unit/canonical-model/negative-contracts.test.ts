@@ -1418,7 +1418,7 @@ test('family, collection, and authored-byte bounds fail with stable codes', () =
 });
 
 /**
- * STRUCTURAL-LIMITS-RAISE (ADR-0070, PENDING owner ruling): the 4 MiB maximum
+ * STRUCTURAL-LIMITS-RAISE (ADR-0070, owner ruling 2026-10-05): the 4 MiB maximum
  * admits exactly its value and refuses one byte more, with one deterministic
  * diagnostic, at each of the four places the package bytes are measured. The
  * maximum is the pinned literal, not the constant, so a silent move reds here.
