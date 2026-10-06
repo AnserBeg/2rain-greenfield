@@ -5,7 +5,10 @@ import {
   displayFieldValue,
   renderCompositionPrintDocument,
 } from './surface-composition.js';
-import { resolveWorkspaceEntry } from './workspace-entry.js';
+import {
+  resolveWorkspaceEntry,
+  workspaceEntryParameter,
+} from './workspace-entry.js';
 import { documentEditor } from './document-editor.js';
 import {
   declaredListArguments,
@@ -1224,7 +1227,36 @@ async function loadWorkspaceContextBar(
   legalEntitySelection: readonly string[],
   currentUrl: URL,
 ): Promise<WorkspaceContextBar | null> {
-  if (!selectedBinding.query.legalEntityScope) return null;
+  if (!selectedBinding.query.legalEntityScope) {
+    // A tenant-level record's page that enters a company for its
+    // company-owned children (a party's returnables) shows the company its
+    // entry resolved, under the entry's own parameter, and switching keeps
+    // the same record on the same page.
+    const entered = workspaceEntryParameter(view, selection.selected);
+    if (!entered?.tenantRecord) return null;
+    const entry = await resolveWorkspaceEntry(
+      view,
+      selection.selected,
+      new URL(currentUrl),
+      queryGateway,
+    );
+    if (!entry) return null;
+    const chosen = currentUrl.searchParams.getAll(entered.parameter);
+    const record = currentUrl.searchParams.get('record');
+    return Object.freeze({
+      options: entry.options,
+      parameterId: entered.parameter,
+      preservedParameters: Object.freeze(
+        record ? ([['record', record]] as const) : [],
+      ),
+      selectedRecordId:
+        chosen.length === 1 &&
+        entry.options.some((option) => option.recordId === chosen[0])
+          ? chosen[0]!
+          : null,
+      targetSurfaceId: selection.selected.surfaceId,
+    });
+  }
   const entityNamespace = selectedBinding.query.sourceEntityId.split(
     ':entity.',
     1,

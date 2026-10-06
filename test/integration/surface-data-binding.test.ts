@@ -10991,26 +10991,38 @@ test('RETURNABLE-ASSETS: a party page enters a company for the custody records i
     f.gateways,
   );
   assert.equal(unentered.statusCode, 200);
-  assert.deepEqual(companyBar(unentered.html), [
-    {
-      label: 'Company 1',
-      current: false,
-      surface: id('surface', 'party_detail'),
-      record: f.party,
-      company: scope,
-    },
-    {
-      label: 'Company 2',
-      current: false,
-      surface: id('surface', 'party_detail'),
-      record: f.party,
-      company: other,
-    },
-  ]);
-  assert.equal(returnables(unentered.html), 'unscoped');
+  assert.deepEqual(
+    companyBar(unentered.html),
+    [
+      {
+        label: 'Company 1',
+        current: false,
+        surface: id('surface', 'party_detail'),
+        record: f.party,
+        company: scope,
+      },
+      {
+        label: 'Company 2',
+        current: false,
+        surface: id('surface', 'party_detail'),
+        record: f.party,
+        company: other,
+      },
+    ],
+    'the party page shows a Company bar that keeps the party in either company',
+  );
+  assert.equal(
+    returnables(unentered.html),
+    'unscoped',
+    'the section asks for a company',
+  );
   assert.match(unentered.html, /Legal entity required/u);
   assert.doesNotMatch(unentered.html, /RTN-00000/u);
-  assert.equal(offers(unentered.html, 'party_issue_returnables'), false);
+  assert.equal(
+    offers(unentered.html, 'party_issue_returnables'),
+    false,
+    'Issue returnables waits for a company',
+  );
   assert.ok(offers(unentered.html, 'party_add_role'));
 
   // Entered in a company: that company's custody records of this party, each
@@ -11110,7 +11122,11 @@ test('RETURNABLE-ASSETS: a party page enters a company for the custody records i
     partyPath(scope),
     f.gateways,
   );
-  assert.equal(returnables(withOrphan.html), 'ready');
+  assert.equal(
+    returnables(withOrphan.html),
+    'ready',
+    'one unreadable type label keeps the section and its rows',
+  );
   for (const number of ['RTN-000001', 'RTN-000002', 'RTN-000004'])
     assert.match(withOrphan.html, new RegExp(number, 'u'));
   assert.match(
