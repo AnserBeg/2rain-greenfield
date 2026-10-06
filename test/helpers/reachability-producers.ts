@@ -48,6 +48,7 @@ export const reachabilityProducers = [
     'test/unit/observability.test.ts',
     'test/unit/party-definition.test.ts',
     'test/unit/purchasing-definition.test.ts',
+    'test/unit/reports-home.test.ts',
     'test/unit/sales-definition.test.ts',
     'test/unit/web-surface-hex-literal-ratchet.test.ts',
     'test/unit/workspace-contract.test.ts',
@@ -92,7 +93,7 @@ export const reachabilityProducers = [
   // and so do the commercial document workflows, each under the same bound,
   // so no job nears it.
   nodeProducer('postgres', 'postgres', 'test:postgres', [
-    'test/postgres/**/!(commercial-totals|composed-application|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|replenishment|stock-serializer).test.ts',
+    'test/postgres/**/!(commercial-totals|composed-application|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|replenishment|reports-home|stock-serializer).test.ts',
   ]),
   nodeProducer(
     'postgres-composed',
@@ -117,6 +118,7 @@ export const reachabilityProducers = [
       'test/postgres/purchase-order-ending.test.ts',
       'test/postgres/receivables.test.ts',
       'test/postgres/receiving-authorization.test.ts',
+      'test/postgres/reports-home.test.ts',
     ],
   ),
   // The inventory files run in a job of their own as well (INTEGRATION: the

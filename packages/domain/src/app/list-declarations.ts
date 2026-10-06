@@ -122,6 +122,17 @@ export interface ListSpec {
     readonly relation: string;
     readonly field: string;
   }[];
+  /**
+   * Only rows another entity's active records point at, holding these
+   * values -- parties with an active customer role (REPORTS-HOME).
+   */
+  readonly eligibility?: {
+    readonly query: string;
+    readonly relation: string;
+    readonly filters: Readonly<Record<string, string>>;
+  };
+  /** The record page this List opens its rows in (REPORTS-HOME). */
+  readonly record?: string;
 }
 
 /** Rows of a list query that hold the listed record's id as text. */
@@ -166,15 +177,40 @@ type ListFigureChoiceValueSpec =
 interface ListFiguresSpec {
   readonly sums: readonly {
     readonly figureId: string;
-    readonly rows: ListFigureRowsSpec;
-    readonly within?: ListFigureWithinSpec;
+    /** No `match` when the rows' parent holds the id (`within.match`). */
+    readonly rows: Omit<ListFigureRowsSpec, 'match'> & {
+      readonly match?: string;
+    };
+    readonly within?: ListFigureWithinSpec & { readonly match?: string };
     readonly related?: {
       readonly query: string;
       readonly relation: string;
       readonly quantity: string;
     };
-    readonly sum: 'rows' | 'related' | 'remaining';
+    readonly sum: 'rows' | 'related' | 'remaining' | 'count';
+    /** REPORTS-HOME: rows kept by their own value. */
+    readonly where?: {
+      readonly field: string;
+      readonly values: readonly string[];
+    };
+    /** REPORTS-HOME: rows dated `from`..`to` whole UTC days before today. */
+    readonly age?: {
+      readonly field: string;
+      readonly from?: number;
+      readonly to?: number;
+    };
+    /** REPORTS-HOME: rows (or rows whose parent is) in the List's currency. */
+    readonly currency?: string;
+    /** REPORTS-HOME: quantity or remainder × price less its discount. */
+    readonly price?: { readonly field: string; readonly discount?: string };
   }[];
+  /** REPORTS-HOME: the currencies the currency sums are read in. */
+  readonly currency?: {
+    readonly label: string;
+    readonly options: readonly (readonly [value: string, label: string])[];
+  };
+  /** REPORTS-HOME: figures added up over the whole filtered set. */
+  readonly summary?: readonly string[];
   /** By the row's own enumeration, the first case holding it (CATALOG-EXTRAS). */
   readonly choices?: readonly {
     readonly figureId: string;
@@ -925,6 +961,14 @@ function expectedReceiptList(namespace: string): ListSpec {
 
 /** The Expected receipts List surface and the query it reads, by local id. */
 export const EXPECTED_RECEIPT_LIST = 'expected_receipt_list';
+/**
+ * REPORTS-HOME: two Lists over the parties read in one company -- what each
+ * customer owes by how late it is, and each customer's open orders -- and
+ * the record page they both open, the customer's account in that company.
+ */
+export const RECEIVABLES_AGING_LIST = 'receivables_aging_list';
+export const CUSTOMER_ACCOUNT_LIST = 'customer_account_list';
+export const CUSTOMER_ACCOUNT_PAGE = 'customer_account_detail';
 
 /** Stock by item and the Buying worklist (REPLENISHMENT), by local id. */
 export const ITEM_STOCK_LIST = 'item_stock_list';
@@ -1239,6 +1283,340 @@ function itemFigureList(
   };
 }
 
+/** The currencies an order or an invoice may be in (ruling B), each its code. */
+const FIGURE_CURRENCIES = {
+  label: 'Currency',
+  options: CURRENCIES,
+} as const;
+
+/**
+ * Receivables aging (REPORTS-HOME; PaneFlow `lib/server/reports.ts`
+ * `arAging`): per customer, what its invoices still owe in the one currency
+ * the List is read in, by how many whole days past their due date they are
+ * today -- Current (not yet due, or due today), 1-30, 31-60, 61-90 and over
+ * 90 -- with the total, the open invoices and the totals of the whole set.
+ * An invoice's balance is the figure its posting keeps current: a paid or
+ * void invoice owes nothing and a draft has no balance yet. Amounts are
+ * never converted (ruling B): each currency is read on its own.
+ */
+function receivablesAgingList(namespace: string): ListSpec {
+  const field = (name: string) => `${namespace}:field.${name}`;
+  const figure = (name: string) =>
+    `${namespace}:list_figure.${RECEIVABLES_AGING_LIST}_${name}`;
+  const band = (name: string) =>
+    `${namespace}:list_band.${RECEIVABLES_AGING_LIST}_${name}`;
+  const invoices = {
+    query: `${namespace}:query.customer_invoice_list`,
+    match: field('customer_invoice_customer_party_id'),
+  };
+  const owed = (
+    name: string,
+    age?: { readonly from?: number; readonly to?: number },
+  ) => ({
+    figureId: figure(name),
+    rows: { ...invoices, quantity: field('customer_invoice_balance') },
+    sum: 'rows' as const,
+    currency: field('customer_invoice_currency'),
+    ...(age
+      ? { age: { field: field('customer_invoice_due_date'), ...age } }
+      : {}),
+  });
+  const buckets = [
+    ['current', 'Current', { to: 0 }],
+    ['days_1_30', '1-30 days', { from: 1, to: 30 }],
+    ['days_31_60', '31-60 days', { from: 31, to: 60 }],
+    ['days_61_90', '61-90 days', { from: 61, to: 90 }],
+    ['over_90', 'Over 90 days', { from: 91 }],
+  ] as const;
+  const money = (name: string, label: string): ListColumnSpec => ({
+    local: name,
+    label,
+    field: figure(name),
+    sortable: false,
+    format: 'money',
+  });
+  return {
+    pageSize: 50,
+    columns: [
+      {
+        local: 'customer',
+        label: 'Customer',
+        field: field('party_name'),
+        role: 'title',
+      },
+      { local: 'number', label: 'Number', field: field('party_number') },
+      {
+        local: 'invoices',
+        label: 'Open invoices',
+        field: figure('invoices'),
+        sortable: false,
+      },
+      ...buckets.map(([name, label]) => money(name, label)),
+      money('owing', 'Total owing'),
+      {
+        local: 'status',
+        label: 'Status',
+        field: figure('due'),
+        sortable: false,
+        role: 'status',
+        statusRoles: {
+          [band('current')]: 'success',
+          [band('past_due')]: 'attention',
+        },
+      },
+    ],
+    defaultSort: [{ column: 'customer', direction: 'ascending' }],
+    views: [
+      {
+        local: 'owing',
+        label: 'Owing',
+        filters: {},
+        band: { figure: figure('standing'), values: [band('owing')] },
+      },
+      {
+        local: 'past_due',
+        label: 'Past due',
+        filters: {},
+        band: { figure: figure('due'), values: [band('past_due')] },
+      },
+    ],
+    filters: [],
+    export: true,
+    figures: {
+      sums: [
+        ...buckets.map(([name, , age]) => owed(name, age)),
+        owed('owing'),
+        {
+          figureId: figure('invoices'),
+          rows: invoices,
+          sum: 'count',
+          currency: field('customer_invoice_currency'),
+          where: {
+            field: field('customer_invoice_state'),
+            values: [
+              `${namespace}:option.customer_invoice_state_open`,
+              `${namespace}:option.customer_invoice_state_partially_paid`,
+            ],
+          },
+        },
+      ],
+      totals: [
+        {
+          figureId: figure('past_due_total'),
+          plus: buckets
+            .filter(([name]) => name !== 'current')
+            .map(([name]) => ({ figure: figure(name) })),
+          minus: [],
+        },
+      ],
+      bands: [
+        {
+          figureId: figure('standing'),
+          of: figure('owing'),
+          cases: [
+            {
+              value: band('settled'),
+              label: 'Settled',
+              atMost: { value: '0' },
+            },
+          ],
+          otherwise: { value: band('owing'), label: 'Owing' },
+        },
+        {
+          figureId: figure('due'),
+          of: figure('past_due_total'),
+          cases: [
+            {
+              value: band('current'),
+              label: 'Current',
+              atMost: { value: '0' },
+            },
+          ],
+          otherwise: { value: band('past_due'), label: 'Past due' },
+        },
+      ],
+      currency: FIGURE_CURRENCIES,
+      summary: [figure('owing'), ...buckets.map(([name]) => figure(name))],
+    },
+    // The customer's statement: its invoices in this company, printable.
+    rowActions: [
+      {
+        local: 'statement',
+        label: 'Statement',
+        section: `${namespace}:dataset.customer_account_invoices`,
+      },
+    ],
+    record: `${namespace}:surface.${CUSTOMER_ACCOUNT_PAGE}`,
+  };
+}
+
+/**
+ * Customer accounts (REPORTS-HOME; PaneFlow's CRM accounts and its open
+ * orders by customer, `openOrdersByCustomer`): every party with an active
+ * customer role, with its released orders in the one currency the List is
+ * read in, the units their lines order and still have open (ordered less
+ * shipped, never below zero per line), the open lines' value at their price
+ * less their discount -- unstated while an open line has no price -- and
+ * what its invoices still owe. A released order stays open until it is
+ * closed. Nothing is converted between currencies (ruling B).
+ */
+function customerAccountList(namespace: string): ListSpec {
+  const field = (name: string) => `${namespace}:field.${name}`;
+  const figure = (name: string) =>
+    `${namespace}:list_figure.${CUSTOMER_ACCOUNT_LIST}_${name}`;
+  const band = (name: string) =>
+    `${namespace}:list_band.${CUSTOMER_ACCOUNT_LIST}_${name}`;
+  const lifecycle = `${namespace}:derived_state_field.machine.sales_order_lifecycle`;
+  const released = [`${namespace}:state.sales_order_released`];
+  // A released order's lines, counted for the customer the order names, in
+  // the order's currency.
+  const lines = {
+    rows: {
+      query: `${namespace}:query.commercial_lines`,
+      quantity: field('sales_order_line_ordered_quantity'),
+    },
+    within: {
+      relation: `${namespace}:relation.sales_order_line_order`,
+      query: `${namespace}:query.sales_order_list`,
+      field: lifecycle,
+      values: released,
+      match: field('sales_order_customer_party_id'),
+    },
+    currency: field('sales_order_currency'),
+  };
+  const shipped = {
+    query: `${namespace}:query.sales_order_shipped_list`,
+    relation: `${namespace}:relation.sales_order_shipped_order_line`,
+    quantity: field('sales_order_shipped_shipped_quantity'),
+  };
+  const shown = (
+    name: string,
+    label: string,
+    format?: 'money',
+  ): ListColumnSpec => ({
+    local: name,
+    label,
+    field: figure(name),
+    sortable: false,
+    ...(format ? { format } : {}),
+  });
+  return {
+    pageSize: 50,
+    columns: [
+      {
+        local: 'customer',
+        label: 'Customer',
+        field: field('party_name'),
+        role: 'title',
+      },
+      { local: 'number', label: 'Number', field: field('party_number') },
+      {
+        local: 'contact',
+        label: 'Contact',
+        field: field('party_contact_summary'),
+        sortable: false,
+      },
+      shown('open_orders', 'Open orders'),
+      shown('ordered', 'Ordered units'),
+      shown('open_units', 'Open units'),
+      shown('open_value', 'Open value', 'money'),
+      shown('owing', 'Owing', 'money'),
+    ],
+    defaultSort: [{ column: 'customer', direction: 'ascending' }],
+    views: [
+      { local: 'all', label: 'All customers', filters: {} },
+      {
+        local: 'open',
+        label: 'With open orders',
+        filters: {},
+        band: { figure: figure('activity'), values: [band('open')] },
+      },
+    ],
+    filters: [],
+    export: true,
+    figures: {
+      sums: [
+        {
+          figureId: figure('open_orders'),
+          rows: {
+            query: `${namespace}:query.sales_order_list`,
+            match: field('sales_order_customer_party_id'),
+          },
+          sum: 'count',
+          where: { field: lifecycle, values: released },
+          currency: field('sales_order_currency'),
+        },
+        { figureId: figure('ordered'), ...lines, sum: 'rows' },
+        {
+          figureId: figure('open_units'),
+          ...lines,
+          related: shipped,
+          sum: 'remaining',
+        },
+        {
+          figureId: figure('open_value'),
+          ...lines,
+          related: shipped,
+          sum: 'remaining',
+          price: {
+            field: field('sales_order_line_unit_price'),
+            discount: field('sales_order_line_discount_percent'),
+          },
+        },
+        {
+          figureId: figure('owing'),
+          rows: {
+            query: `${namespace}:query.customer_invoice_list`,
+            match: field('customer_invoice_customer_party_id'),
+            quantity: field('customer_invoice_balance'),
+          },
+          sum: 'rows',
+          currency: field('customer_invoice_currency'),
+        },
+      ],
+      bands: [
+        {
+          figureId: figure('activity'),
+          of: figure('open_orders'),
+          cases: [
+            {
+              value: band('none'),
+              label: 'No open orders',
+              atMost: { value: '0' },
+            },
+          ],
+          otherwise: { value: band('open'), label: 'Open orders' },
+        },
+      ],
+      currency: FIGURE_CURRENCIES,
+      summary: [
+        figure('open_orders'),
+        figure('open_units'),
+        figure('open_value'),
+        figure('owing'),
+      ],
+    },
+    // Only parties with an active customer role, before the count and the
+    // page, as the order's customer picker offers them.
+    eligibility: {
+      query: `${namespace}:query.party_role_list`,
+      relation: `${namespace}:relation.party_role_party`,
+      filters: {
+        [field('party_role_kind')]: `${namespace}:option.customer`,
+        [field('party_role_status')]: `${namespace}:option.active`,
+      },
+    },
+    rowActions: [
+      {
+        local: 'orders',
+        label: 'Orders',
+        section: `${namespace}:dataset.customer_account_orders`,
+      },
+    ],
+    record: `${namespace}:surface.${CUSTOMER_ACCOUNT_PAGE}`,
+  };
+}
+
 /**
  * The locations (LOCATIONS): each with its type and inventory status, the
  * status shown as a status and filtered by value, so what is in quarantine or
@@ -1411,6 +1789,24 @@ const WORKLISTS: Readonly<Record<string, Worklist>> = Object.freeze({
     inCompany: {
       navigationModule: 'inventory',
       authorization: 'posted_stock_balance_list',
+    },
+  },
+  // REPORTS-HOME: parties read in one company, listed under Sales and
+  // entered like the Lists whose records they add up.
+  [RECEIVABLES_AGING_LIST]: {
+    source: 'party_list',
+    label: 'Receivables aging',
+    inCompany: {
+      navigationModule: 'sales',
+      authorization: 'customer_invoice_list',
+    },
+  },
+  [CUSTOMER_ACCOUNT_LIST]: {
+    source: 'party_list',
+    label: 'Customer accounts',
+    inCompany: {
+      navigationModule: 'sales',
+      authorization: 'sales_order_list',
     },
   },
 });
@@ -1777,6 +2173,9 @@ export function composedListSpecs(
     vendor_bill_list: settlementList(namespace, BILL_LIST),
     // Stock documents, recorded in the draft editor (INVENTORY-PARITY).
     inventory_transaction_list: inventoryTransactionList(namespace),
+    // Receivables aging and customer accounts (REPORTS-HOME).
+    [RECEIVABLES_AGING_LIST]: receivablesAgingList(namespace),
+    [CUSTOMER_ACCOUNT_LIST]: customerAccountList(namespace),
     // Stock by item and the Buying worklist (REPLENISHMENT).
     [ITEM_STOCK_LIST]: itemFigureList(namespace, ITEM_STOCK_LIST),
     [ITEM_BUYING_LIST]: itemFigureList(namespace, ITEM_BUYING_LIST),
@@ -1928,6 +2327,18 @@ function lowerList(namespace: string, listLocal: string, spec: ListSpec) {
         }
       : {}),
     ...(spec.figures ? { figures: lowerFigures(spec.figures) } : {}),
+    ...(spec.eligibility
+      ? {
+          eligibility: {
+            queryId: spec.eligibility.query,
+            relationId: spec.eligibility.relation,
+            filters: Object.entries(spec.eligibility.filters).map(
+              ([fieldId, value]) => ({ fieldId, value }),
+            ),
+          },
+        }
+      : {}),
+    ...(spec.record ? { record: spec.record } : {}),
     ...(spec.searchChildren
       ? {
           searchChildren: spec.searchChildren.map((child) => ({
@@ -2060,10 +2471,17 @@ function lowerFigures(figures: ListFiguresSpec) {
       figureId: sum.figureId,
       rows: {
         query: queryReference(sum.rows.query),
-        match: sum.rows.match,
+        ...(sum.rows.match ? { match: sum.rows.match } : {}),
         ...(sum.rows.quantity ? { quantity: sum.rows.quantity } : {}),
       },
-      ...(sum.within ? { within: within(sum.within) } : {}),
+      ...(sum.within
+        ? {
+            within: {
+              ...within(sum.within),
+              ...(sum.within.match ? { match: sum.within.match } : {}),
+            },
+          }
+        : {}),
       ...(sum.related
         ? {
             related: {
@@ -2074,7 +2492,25 @@ function lowerFigures(figures: ListFiguresSpec) {
           }
         : {}),
       sum: sum.sum,
+      ...(sum.where
+        ? { where: { field: sum.where.field, values: [...sum.where.values] } }
+        : {}),
+      ...(sum.age ? { age: { ...sum.age } } : {}),
+      ...(sum.currency ? { currency: sum.currency } : {}),
+      ...(sum.price ? { price: { ...sum.price } } : {}),
     })),
+    ...(figures.currency
+      ? {
+          currency: {
+            label: figures.currency.label,
+            options: figures.currency.options.map(([value, label]) => ({
+              value,
+              label,
+            })),
+          },
+        }
+      : {}),
+    ...(figures.summary ? { summary: [...figures.summary] } : {}),
     ...(figures.choices
       ? {
           choices: figures.choices.map((choice) => ({

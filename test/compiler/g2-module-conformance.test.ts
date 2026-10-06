@@ -1857,6 +1857,19 @@ function composedApplicationWithoutSales(): Record<string, unknown> {
       String(query.queryId),
     ),
   );
+  // REPORTS-HOME: the customer account page is Party's record read with
+  // Sales' invoices and orders; without Sales it has nothing to show, so it
+  // goes too, as a List whose figures read Sales does.
+  definition.surfaces = (
+    definition.surfaces as Array<Record<string, unknown>>
+  ).filter((surface) => {
+    const children =
+      (surface.composition as { children?: unknown[] } | undefined)?.children ??
+      [];
+    return [...JSON.stringify(children).matchAll(/"targetId":"([^"]+)"/gu)]
+      .filter(([, targetId]) => targetId!.includes(':query.'))
+      .every(([, queryId]) => queryIds.has(queryId!));
+  });
   definition.surfaces = (
     definition.surfaces as Array<Record<string, unknown>>
   ).map((surface) => {

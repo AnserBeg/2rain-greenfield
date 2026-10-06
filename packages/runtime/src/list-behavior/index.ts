@@ -37,6 +37,7 @@ export {
   type SharedListFigures,
   type SharedListFigureSum,
   type SharedListFigureThreshold,
+  type SharedListSumParts,
   type SharedListFigureTotal,
   type SharedListFigureWithin,
 } from './figures.js';
@@ -271,6 +272,12 @@ export interface SharedListCoverage {
   readonly progress?: SharedListProgress;
   /** Echoed and REQUIRED to match, as progress is: a band kept is a count. */
   readonly figures?: SharedListFigures;
+  /**
+   * The figures' summary (REPORTS-HOME): each requested figure added up over
+   * the whole filtered set, as a canonical decimal, or `null` where any row's
+   * value is unstated. Present exactly when the figures ask for a summary.
+   */
+  readonly figureSummary?: Readonly<Record<string, string | null>>;
   /**
    * Echoed and REQUIRED to match: an executor that searched without the
    * children would miss every row found only through one of them.
@@ -603,6 +610,27 @@ export function requireSharedListEcho(
       'the list result did not apply the requested progress, figures, before filters or searched children',
     );
   }
+  // A report's totals answer exactly the figures asked for, each a decimal
+  // or unstated (REPORTS-HOME): a missing or extra total is never guessed.
+  const asked = query.figures?.summary;
+  const answered = listCoverage.figureSummary;
+  if (
+    (asked === undefined) !== (answered === undefined) ||
+    (asked !== undefined &&
+      answered !== undefined &&
+      (Object.keys(answered).length !== asked.length ||
+        !asked.every(
+          (figureId) =>
+            Object.hasOwn(answered, figureId) &&
+            (answered[figureId] === null ||
+              (typeof answered[figureId] === 'string' &&
+                /^-?\d+(?:\.\d+)?$/u.test(answered[figureId]))),
+        )))
+  )
+    throw new SharedListContractError(
+      'LIST_RESULT_MALFORMED',
+      'the list result did not answer the requested figure summary',
+    );
 }
 
 export function requireSharedListResult<RecordValue>(

@@ -2528,6 +2528,16 @@ function listSupplyPlan(
 
 const PROGRESS_ALIAS = 'table_progress';
 
+/** A supply sum's rows always hold the item's id themselves. */
+function supplyMatchColumn(sum: FigureSumPlan): string {
+  if (sum.rows.matchColumn === null)
+    throw failure(
+      'MODULE_LIST_RESULT_INVALID',
+      "a supply sum's rows hold the item's id",
+    );
+  return sum.rows.matchColumn;
+}
+
 /**
  * Per listed row, one lateral answer: the sum of its active lines' quantity,
  * the sum of the active done rows of those same lines, and the open remainder
@@ -2666,7 +2676,7 @@ function listSupplyFromSql(
       (alias) =>
         `${qualified(alias, 'tenant_id')} = ${qualified(sourceAlias, 'tenant_id')}
           AND ${qualified(alias, 'environment_id')} = ${qualified(sourceAlias, 'environment_id')}
-          AND ${qualified(alias, sum.rows.matchColumn)}::text = ${item}
+          AND ${qualified(alias, supplyMatchColumn(sum))}::text = ${item}
           AND ${qualified(alias, sum.rows.entity.archive.archivedAtColumn)} IS NULL${sameCompanySql(alias, sum.rows.entity, sourceAlias, entity)}${legalEntityReadScopeJoinConjunction(sum.rows.entity, readScope, values, alias)}`,
       readScope,
       values,
@@ -2751,8 +2761,11 @@ type StorageColumn = StorageEntity['columns'][number];
 
 interface FigureRowsPlan {
   readonly entity: StorageEntity;
-  /** The rows' text column that holds the listed record's id. */
-  readonly matchColumn: string;
+  /**
+   * The rows' text column that holds the listed record's id; `null` when
+   * their parent holds it instead (REPORTS-HOME, `within.matchColumn`).
+   */
+  readonly matchColumn: string | null;
   readonly quantityColumn: string | null;
 }
 
@@ -2768,6 +2781,11 @@ interface FigureWithinPlan {
   readonly through: 'reference' | 'relation';
   readonly stateColumn: StorageColumn;
   readonly values: readonly string[];
+  /**
+   * The parent's text column holding the listed record's id, when the rows
+   * are matched through their parent (REPORTS-HOME); otherwise `null`.
+   */
+  readonly matchColumn: string | null;
 }
 
 interface FigureRelatedPlan {
@@ -2777,12 +2795,34 @@ interface FigureRelatedPlan {
   readonly quantityColumn: string;
 }
 
-/** One sum's parts: rows, their parent, related rows and what it adds. */
+/**
+ * One sum's parts: rows, their parent, related rows and what it adds -- and,
+ * for a List figure (REPORTS-HOME), the rows it keeps by their own value,
+ * their age in whole UTC days, their currency (of the rows or their parent)
+ * and the price a quantity is valued at. A supply sum has none of these.
+ */
 interface FigureSumPlan {
   readonly rows: FigureRowsPlan;
   readonly within: FigureWithinPlan | null;
   readonly related: FigureRelatedPlan | null;
-  readonly sum: 'related' | 'remaining' | 'rows';
+  readonly sum: 'count' | 'related' | 'remaining' | 'rows';
+  readonly where: {
+    readonly column: string;
+    readonly values: readonly string[];
+  } | null;
+  readonly age: {
+    readonly column: StorageColumn;
+    readonly from: number | null;
+    readonly to: number | null;
+  } | null;
+  readonly currency: {
+    readonly on: 'parent' | 'rows';
+    readonly column: string;
+  } | null;
+  readonly price: {
+    readonly column: string;
+    readonly discountColumn: string | null;
+  } | null;
 }
 
 type FigureOperandPlan =
@@ -2858,6 +2898,14 @@ interface ListFiguresPlan {
     readonly figureId: string;
     readonly values: readonly string[];
   } | null;
+  /**
+   * The request's midnight UTC an age counts from, the one currency the
+   * currency sums add, and the number figures added up over the whole
+   * filtered set beside the count (REPORTS-HOME).
+   */
+  readonly today: string | null;
+  readonly currency: string | null;
+  readonly summary: readonly string[];
   /** Every figure id, in the order the statement computes and projects them. */
   readonly order: readonly {
     readonly figureId: string;
@@ -2909,15 +2957,19 @@ function figurePartsPlanner(
   };
   const rowsPlan = (
     queryId: string,
-    matchFieldId: string,
+    matchFieldId: string | undefined,
     quantityFieldId?: string,
     matchMessage = 'a figure matches the listed record by a compiled text column',
   ): FigureRowsPlan => {
     const target = entityOf(queryId);
     return Object.freeze({
       entity: target,
-      matchColumn: column(target, matchFieldId, ['textFieldType'], matchMessage)
-        .physicalName,
+      // REPORTS-HOME: none when the rows' parent holds the listed id.
+      matchColumn:
+        matchFieldId === undefined
+          ? null
+          : column(target, matchFieldId, ['textFieldType'], matchMessage)
+              .physicalName,
       quantityColumn:
         quantityFieldId === undefined
           ? null
@@ -2931,7 +2983,7 @@ function figurePartsPlanner(
   };
   const withinPlan = (
     rows: FigureRowsPlan,
-    within: SharedListFigureWithin,
+    within: SharedListFigureWithin & { readonly matchFieldId?: string },
   ): FigureWithinPlan => {
     const parent = entityOf(within.queryId);
     const through = (): Pick<
@@ -2978,6 +3030,16 @@ function figurePartsPlanner(
       ...reached,
       stateColumn,
       values: within.values,
+      // REPORTS-HOME: the parent holds the listed record's id as text.
+      matchColumn:
+        within.matchFieldId === undefined
+          ? null
+          : column(
+              parent,
+              within.matchFieldId,
+              ['textFieldType'],
+              "a figure's parent holds the listed record's id in a compiled text column",
+            ).physicalName,
     });
   };
   const relatedPlan = (
@@ -3019,11 +3081,100 @@ function figurePartsPlanner(
     );
     // Related rows resolve before the parent, as the figures always have.
     const related = sum.related ? relatedPlan(sum.related, rows) : null;
+    const within = sum.within ? withinPlan(rows, sum.within) : null;
+    // Exactly one of the rows and their parent holds the listed record's id.
+    if ((rows.matchColumn === null) === (within?.matchColumn == null))
+      refuse(
+        sum.rows.queryId,
+        "a figure's rows or their parent hold the listed record's id, exactly one",
+      );
+    // REPORTS-HOME: what the sum keeps, ages and prices by are compiled
+    // columns of its rows; its currency is the rows' own compiled text
+    // column or, failing that, their parent's.
+    const where = sum.where
+      ? Object.freeze({
+          column: column(
+            rows.entity,
+            sum.where.fieldId,
+            ['enumFieldType', 'textFieldType'],
+            'a figure keeps rows by a compiled enumeration or text column',
+          ).physicalName,
+          values: sum.where.values,
+        })
+      : null;
+    const age = sum.age
+      ? (() => {
+          const dated = column(
+            rows.entity,
+            sum.age.fieldId,
+            ['dateFieldType', 'dateTimeFieldType'],
+            "a figure's age reads a compiled date or UTC instant column",
+          );
+          if (
+            dated.fieldContract.fieldKind === 'dateTimeFieldType' &&
+            dated.fieldContract.temporal.timezoneSemantics !== 'utcInstant'
+          )
+            refuse(
+              sum.age.fieldId,
+              "a figure's age reads a compiled date or UTC instant column",
+            );
+          return Object.freeze({
+            column: dated,
+            from: sum.age.from ?? null,
+            to: sum.age.to ?? null,
+          });
+        })()
+      : null;
+    const currency =
+      sum.currencyFieldId === undefined
+        ? null
+        : (() => {
+            const own = rows.entity.columns.some(
+              (candidate) => candidate.canonicalFieldId === sum.currencyFieldId,
+            );
+            if (!own && !within)
+              refuse(
+                sum.currencyFieldId,
+                "a figure's currency is a compiled text column of its rows or their parent",
+              );
+            return Object.freeze({
+              on: own ? ('rows' as const) : ('parent' as const),
+              column: column(
+                own ? rows.entity : within!.parent,
+                sum.currencyFieldId,
+                ['textFieldType'],
+                "a figure's currency is a compiled text column of its rows or their parent",
+              ).physicalName,
+            });
+          })();
+    const price = sum.price
+      ? Object.freeze({
+          column: column(
+            rows.entity,
+            sum.price.fieldId,
+            ['exactDecimalFieldType'],
+            'a figure prices with a compiled exact decimal column',
+          ).physicalName,
+          discountColumn:
+            sum.price.discountFieldId === undefined
+              ? null
+              : column(
+                  rows.entity,
+                  sum.price.discountFieldId,
+                  ['exactDecimalFieldType'],
+                  'a figure discounts by a compiled exact decimal column',
+                ).physicalName,
+        })
+      : null;
     return Object.freeze({
       rows,
-      within: sum.within ? withinPlan(rows, sum.within) : null,
+      within,
       related,
       sum: sum.sum,
+      where,
+      age,
+      currency,
+      price,
     });
   };
   return {
@@ -3220,6 +3371,9 @@ function listFiguresPlan(
     bands,
     latest,
     keep: requested.keep ?? null,
+    today: requested.today ?? null,
+    currency: requested.currency ?? null,
+    summary: Object.freeze([...(requested.summary ?? [])]),
     order: Object.freeze(
       [...sharedListFigureKinds(requested)].map(([figureId, kind]) =>
         Object.freeze({ figureId, kind }),
@@ -3303,9 +3457,17 @@ function figureSumSql(
     readonly parent: string;
     readonly related: string;
   },
-  match: (rowsAlias: string) => string,
+  match: (rowsAlias: string, parentAlias: string) => string,
   readScope: VerifiedLegalEntityReadScope | null,
   values: unknown[],
+  /**
+   * The request's midnight UTC an age counts whole days from, and the one
+   * currency a currency sum adds (REPORTS-HOME); `null` where none is asked.
+   */
+  context: {
+    readonly today: string | null;
+    readonly currency: string | null;
+  } = { today: null, currency: null },
 ): string {
   const quantity = sum.rows.quantityColumn
     ? qualified(aliases.rows, sum.rows.quantityColumn)
@@ -3320,15 +3482,67 @@ function figureSumSql(
         values,
       )
     : null;
-  const term =
-    sum.sum === 'rows'
-      ? quantity!
-      : sum.sum === 'related'
-        ? related!
-        : `greatest(${quantity!} - ${related!}, 0)`;
-  return `(SELECT coalesce(sum(${term}), 0)
+  const base =
+    sum.sum === 'count'
+      ? '1'
+      : sum.sum === 'rows'
+        ? quantity!
+        : sum.sum === 'related'
+          ? related!
+          : `greatest(${quantity!} - ${related!}, 0)`;
+  const conditions = [match(aliases.rows, aliases.parent)];
+  // REPORTS-HOME: only rows whose own value is one of these.
+  if (sum.where)
+    conditions.push(
+      `${qualified(aliases.rows, sum.where.column)}::text = ANY(${parameter(values, [...sum.where.values])}::text[])`,
+    );
+  // Only rows dated `from`..`to` whole calendar days (UTC) before today; a
+  // row without a date is in no range.
+  if (sum.age) {
+    if (context.today === null)
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        "a figure's age counts from the request's today",
+        sum.age.column.canonicalFieldId,
+      );
+    const today = `(${parameter(values, context.today)}::timestamptz AT TIME ZONE 'UTC')::date`;
+    const dated = qualified(aliases.rows, sum.age.column.physicalName);
+    const days =
+      sum.age.column.fieldContract.fieldKind === 'dateFieldType'
+        ? `(${today} - ${dated})`
+        : `(${today} - (${dated} AT TIME ZONE 'UTC')::date)`;
+    if (sum.age.from !== null)
+      conditions.push(`${days} >= ${String(sum.age.from)}`);
+    if (sum.age.to !== null)
+      conditions.push(`${days} <= ${String(sum.age.to)}`);
+  }
+  // Only rows in the request's one currency: two are never added together.
+  if (sum.currency) {
+    if (context.currency === null)
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        'a currency figure adds the rows of one requested currency',
+        sum.currency.column,
+      );
+    conditions.push(
+      `${qualified(sum.currency.on === 'rows' ? aliases.rows : aliases.parent, sum.currency.column)}::text = ${parameter(values, context.currency)}::text`,
+    );
+  }
+  // A priced sum values each row's quantity or remainder at its price less
+  // its percentage discount, rounded half up to cents per row; any row with
+  // something to add and no statable price leaves the whole sum unstated.
+  const total = (() => {
+    if (!sum.price) return `coalesce(sum(${base}), 0)`;
+    const price = qualified(aliases.rows, sum.price.column);
+    const discount = sum.price.discountColumn
+      ? `coalesce(${qualified(aliases.rows, sum.price.discountColumn)}, 0)`
+      : '0';
+    return `(CASE WHEN bool_or((${base}) > 0 AND (${price} IS NULL OR ${price} < 0 OR ${discount} < 0 OR ${discount} > 100)) THEN NULL
+              ELSE coalesce(sum(round((${base}) * ${price} * (100 - ${discount}) / 100, 2)), 0) END)`;
+  })();
+  return `(SELECT ${total}
          FROM north_star_module.${quoted(sum.rows.entity.physicalTableName)} AS ${quoted(aliases.rows)}${sum.within ? figureParentJoinSql(sum.within, sum.rows, aliases.rows, aliases.parent, readScope, values) : ''}
-        WHERE ${match(aliases.rows)})`;
+        WHERE ${conditions.join('\n          AND ')})`;
 }
 
 /**
@@ -3347,11 +3561,33 @@ function listFiguresFromSql(
   readScope: VerifiedLegalEntityReadScope | null,
   values: unknown[],
 ): string {
-  const matching = (rows: FigureRowsPlan, alias: string) =>
-    `${qualified(alias, 'tenant_id')} = ${qualified(sourceAlias, 'tenant_id')}
+  // The rows hold the listed record's id, or -- REPORTS-HOME -- their parent
+  // does, joined through the rows' relation and pinned as every parent is.
+  const matching = (
+    rows: FigureRowsPlan,
+    alias: string,
+    parent: {
+      readonly within: FigureWithinPlan | null;
+      readonly alias: string;
+    },
+  ) => {
+    const holder =
+      rows.matchColumn !== null
+        ? qualified(alias, rows.matchColumn)
+        : parent.within?.matchColumn != null
+          ? qualified(parent.alias, parent.within.matchColumn)
+          : null;
+    if (holder === null)
+      throw failure(
+        'MODULE_LIST_RESULT_INVALID',
+        "a figure's rows or their parent hold the listed record's id",
+        rows.entity.entityId,
+      );
+    return `${qualified(alias, 'tenant_id')} = ${qualified(sourceAlias, 'tenant_id')}
           AND ${qualified(alias, 'environment_id')} = ${qualified(sourceAlias, 'environment_id')}
-          AND ${qualified(alias, rows.matchColumn)}::text = ${qualified(sourceAlias, entity.recordIdentity.column)}::text
+          AND ${holder}::text = ${qualified(sourceAlias, entity.recordIdentity.column)}::text
           AND ${qualified(alias, rows.entity.archive.archivedAtColumn)} IS NULL${legalEntityReadScopeJoinConjunction(rows.entity, readScope, values, alias)}`;
+  };
   const parentJoin = (
     within: FigureWithinPlan,
     rows: FigureRowsPlan,
@@ -3367,9 +3603,14 @@ function listFiguresFromSql(
           parent: `table_figure_${String(index)}_parent`,
           related: `table_figure_${String(index)}_related`,
         },
-        (alias) => matching(sum.rows, alias),
+        (alias, parentAlias) =>
+          matching(sum.rows, alias, {
+            within: sum.within,
+            alias: parentAlias,
+          }),
         readScope,
         values,
+        { today: plan.today, currency: plan.currency },
       )} AS ${quoted(`sum_${String(index)}`)}`,
   );
   const latestColumns = plan.latest.map((figure, index) => {
@@ -3377,7 +3618,7 @@ function listFiguresFromSql(
     const parentAlias = `table_latest_${String(index)}_parent`;
     return `(SELECT ${qualified(parentAlias, figure.valueColumn)}::text
          FROM north_star_module.${quoted(figure.rows.entity.physicalTableName)} AS ${quoted(rowsAlias)}${parentJoin(figure.within, figure.rows, rowsAlias, parentAlias)}
-        WHERE ${matching(figure.rows, rowsAlias)}
+        WHERE ${matching(figure.rows, rowsAlias, { within: null, alias: parentAlias })}
         ORDER BY ${qualified(parentAlias, figure.byColumn)} DESC NULLS LAST,
                  ${qualified(parentAlias, figure.within.parent.recordIdentity.column)} DESC
         LIMIT 1) AS ${quoted(`latest_${String(index)}`)}`;
@@ -3897,11 +4138,43 @@ async function listSharedRecords(
     predicates,
   );
   const whereSql = predicates.length > 0 ? predicates.join(' AND ') : 'true';
-  const count = await client.query<{ total_count: string }>(
-    `SELECT count(*)::text AS total_count ${fromSql} WHERE ${whereSql}`,
+  // REPORTS-HOME: a report's totals, beside the count over the same set --
+  // each number figure added up over every row the view, filters and search
+  // keep, unstated where any row's value is.
+  const summaryColumns = (figures?.summary ?? []).map((figureId, index) => {
+    const figure = figureColumns.find(
+      (column) => column.figureId === figureId && column.kind === 'number',
+    );
+    if (!figure)
+      throw new SharedListContractError(
+        'LIST_FIELD_NOT_AUTHORIZED',
+        "a List's summary adds up a number figure the statement computes",
+        figureId,
+      );
+    return `(CASE WHEN bool_or(${figure.value} IS NULL) THEN NULL
+              ELSE coalesce(sum(${figure.value}), 0) END)::text AS ${quoted(`summary_${String(index)}`)}`;
+  });
+  const count = await client.query<Record<string, string | null>>(
+    `SELECT ${['count(*)::text AS total_count', ...summaryColumns].join(',\n           ')} ${fromSql} WHERE ${whereSql}`,
     values,
   );
   const totalCount = Number(count.rows[0]?.total_count ?? '0');
+  const figureSummary =
+    figures && figures.summary.length > 0
+      ? Object.freeze(
+          Object.fromEntries(
+            figures.summary.map((figureId, index) => {
+              const value = count.rows[0]?.[`summary_${String(index)}`];
+              return [
+                figureId,
+                value === null || value === undefined
+                  ? null
+                  : canonicalProgressDecimal(value),
+              ];
+            }),
+          ),
+        )
+      : undefined;
   if (!Number.isSafeInteger(totalCount) || totalCount < 0) {
     throw failure(
       'MODULE_LIST_RESULT_INVALID',
@@ -3962,6 +4235,7 @@ async function listSharedRecords(
       ? { progress: list.query.progress }
       : {}),
     ...(figures && list.query.figures ? { figures: list.query.figures } : {}),
+    ...(figureSummary ? { figureSummary } : {}),
     // Echoed when applied, and when there was no text to apply them to.
     ...(list.query.searchChildren &&
     (searchChildren !== null || list.query.search.trim() === '')
