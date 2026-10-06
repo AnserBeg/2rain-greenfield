@@ -160,14 +160,30 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.query]: {
     capabilityId: 'northstar.runtime:capability.query-catalog',
-    maximumSupportedVersion: 1,
+    maximumSupportedVersion: 2,
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.surface]: {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    // 3 because this runtime understands `fields` (per-field kinds) and renders
-    // a control per declared kind. Raised from 2 by `profile-v2-adoption`, the
-    // packet that made the compiler start emitting them.
-    maximumSupportedVersion: 3,
+    // 8 adds declared workspaces and the shared scoped draft document editor.
+    // 9 adds picker eligibility and typed Task input presentation.
+    // 10 adds declared Lists: columns, saved views, filters, sort and export.
+    // 11 adds editor defaults and scoped pickers.
+    // 12 adds List progress, open and before-today views and overdue dates.
+    // 13 adds List row actions and supplementary (omitted-when-denied) progress.
+    // 14 adds record alerts and progression, multi-row Tasks and record
+    // columns and links that name a relation of their record.
+    // 15 adds composition datasets scoped by a field of their own entity.
+    // 16 adds a draft editor's create values.
+    // 17 adds List figures, views keeping a band, and Record form references.
+    // 18 adds a launcher Task's tiles and scan box (WAREHOUSE-MODE).
+    // 19 adds a Record form's omitted fields and a figure's parent reached
+    // through a reference field (LOCATIONS).
+    // 20 adds searches through children, figure choices, band cases by an
+    // enumeration or against a figure, and Task inputs leaving the record out
+    // (CATALOG-EXTRAS).
+    // 21 adds a List progress's supply and the views and row actions that
+    // keep covered or short rows (SUPPLY-WARNINGS).
+    maximumSupportedVersion: 21,
   },
 });
 

@@ -21,15 +21,16 @@ const legacyNodeVersion = z.enum(['v0-experimental', 'v1', 'v2']);
 // the node schema admits both; `CANON_VERSION_MIXED` in normalize.ts is what
 // keeps a package's nodes on the package's own version, exactly as it already
 // does for the `nodeVersion` enum above.
-const v3PlusNodeVersion = z.enum(['v3', 'v4', 'v5']);
+const v3PlusNodeVersion = z.enum(['v3', 'v4', 'v5', 'v6']);
 const v3NodeVersion = z.literal('v3');
 // The v4 family's own node spelling. v5 reads every v4 node -- it changes no
 // node shape, only what normalization DERIVES -- so the family schema admits
 // both and `CANON_VERSION_MIXED` keeps a package on its own version, exactly
 // as `v3PlusNodeVersion` already does one line above.
-const v4PlusNodeVersion = z.enum(['v4', 'v5']);
+const v4PlusNodeVersion = z.enum(['v4', 'v5', 'v6']);
 const v4NodeVersion = z.literal('v4');
 const v5NodeVersion = z.literal('v5');
+const v6NodeVersion = z.literal('v6');
 const boundedOrderKey = z.int().min(0).max(1_000_000);
 const boundedCount = z.int().min(1).max(1_000_000);
 const positiveVersion = z.int().min(1).max(1_000_000);
@@ -144,7 +145,7 @@ export type PredicateExpression = PredicateExpressionShape<
   CanonicalScalar
 >;
 export type PredicateExpressionV3 = PredicateExpressionShape<
-  'v3' | 'v4' | 'v5',
+  'v3' | 'v4' | 'v5' | 'v6',
   V3PredicateOperator,
   CanonicalScalar | QueryParameterReference
 >;
@@ -155,7 +156,7 @@ export type VersionedPredicateExpression =
 export interface QueryParameterReference {
   readonly kind: 'queryParameterReference';
   readonly parameterId: z.infer<typeof CanonicalIdSchema>;
-  readonly schemaVersion: 'v3' | 'v4' | 'v5';
+  readonly schemaVersion: 'v3' | 'v4' | 'v5' | 'v6';
 }
 
 export type CanonicalScalar =
@@ -695,6 +696,1206 @@ const authoredSurfaceDefinition = normalizedSurfaceDefinition.extend({
   lifecycle: z.enum(['active', 'retired']).optional(),
 });
 
+/** v6 composition: data and actions are authored, grammar remains platform-owned. */
+const compositionReference = <T extends string>(kind: T) =>
+  z.strictObject({
+    kind: z.literal(kind),
+    schemaVersion: v6NodeVersion,
+    targetId: CanonicalIdSchema,
+  });
+const compositionValue = z.discriminatedUnion('source', [
+  z.strictObject({
+    source: z.literal('literal'),
+    value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
+  }),
+  z.strictObject({ source: z.literal('record'), field: z.string().min(1) }),
+  z.strictObject({
+    source: z.literal('selected'),
+    field: z.string().min(1),
+    datasetId: CanonicalIdSchema.optional(),
+  }),
+  z.strictObject({ source: z.literal('input'), inputId: CanonicalIdSchema }),
+  z.strictObject({
+    source: z.literal('step'),
+    stepId: CanonicalIdSchema,
+    field: z.string().min(1),
+  }),
+  z.strictObject({
+    source: z.literal('generated'),
+    value: z.enum(['uuid', 'instant', 'scope']),
+  }),
+]);
+const compositionColumn = z.strictObject({
+  columnId: CanonicalIdSchema,
+  label: LabelSchema,
+  orderKey: boundedOrderKey,
+  field: z.string().min(1),
+  /**
+   * `money`: an exact decimal shown with grouped digits and at least two
+   * decimals, never rounded. Optional v6 key; absence keeps historical bytes.
+   */
+  format: z.literal('money').optional(),
+  presentation: z
+    .strictObject({
+      role: z.enum(['primary', 'secondary', 'quantity', 'detail']),
+      priority: boundedOrderKey,
+    })
+    .optional(),
+  reference: z
+    .strictObject({
+      query: compositionReference('queryReference'),
+      labelField: compositionReference('fieldReference'),
+    })
+    .optional(),
+});
+const compositionCondition = z.strictObject({
+  value: compositionValue,
+  operator: z.enum(['equals', 'notEquals', 'positive']),
+  compare: z.union([z.string(), z.number(), z.boolean(), z.null()]),
+});
+const compositionTaskColumn = z.strictObject({
+  datasetId: CanonicalIdSchema,
+  columnId: CanonicalIdSchema,
+});
+/**
+ * How a Task presents one of its text inputs, reusing the draft editor's
+ * vocabulary. `choice` offers a fixed set (optionally defaulting to a stored
+ * record value that is itself offered); `derived` is read on the server from
+ * the selected row's declared column and never from the submission; both are
+ * presentation policy over the input, never a domain rule.
+ */
+// A choice may offer an enumeration's option ids, which are canonical ids of up
+// to 180 characters; a shorter bound refused them under a longer namespace.
+const compositionInputPresentation = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('multiline') }),
+  z.strictObject({
+    kind: z.literal('choice'),
+    options: z
+      .array(
+        z.strictObject({
+          value: z.string().min(1).max(180),
+          label: LabelSchema,
+        }),
+      )
+      .min(1)
+      .max(20),
+    defaultValue: z.string().min(1).max(180).optional(),
+    defaultFrom: z
+      .strictObject({ source: z.literal('record'), field: z.string().min(1) })
+      .optional(),
+  }),
+  z.strictObject({ kind: z.literal('derived'), column: compositionTaskColumn }),
+]);
+/**
+ * Which records a picker may offer: those an active record of another entity
+ * points at through a declared relation, matching exact values -- for example
+ * parties with an active customer role. Applied by the list query before
+ * paging, and to every selection route.
+ */
+const pickerEligibility = z.strictObject({
+  queryId: CanonicalIdSchema,
+  relationId: CanonicalIdSchema,
+  filters: z
+    .array(
+      z.strictObject({
+        fieldId: CanonicalIdSchema,
+        value: z.string().min(1).max(200),
+      }),
+    )
+    .min(1)
+    .max(4),
+});
+const compositionInput = z.strictObject({
+  inputId: CanonicalIdSchema,
+  label: LabelSchema,
+  orderKey: boundedOrderKey,
+  type: z.enum(['text', 'quantity', 'instant', 'reference']),
+  required: z.boolean(),
+  query: compositionReference('queryReference').optional(),
+  labelField: compositionReference('fieldReference').optional(),
+  presentation: compositionInputPresentation.optional(),
+  /** A reference input's eligibility, as a draft editor picker declares it. Optional v6 key. */
+  eligibility: pickerEligibility.optional(),
+  /**
+   * A reference input over the record's own entity that never offers the
+   * record itself -- the item a duplicate is merged into. Optional v6 key
+   * (CATALOG-EXTRAS).
+   */
+  excludeRecord: z.literal(true).optional(),
+  /**
+   * A reference input's starting choice: the record's stored value of a field
+   * its query selects, preselected only when that record is offered -- an
+   * order's receiving location. Optional v6 key (ADR-0047 §7).
+   */
+  defaultFrom: z
+    .strictObject({ source: z.literal('record'), field: z.string().min(1) })
+    .optional(),
+  /**
+   * Asked once for each row of the Task's declared `rows`, such as the
+   * quantity received on each line of a truck: rows start empty, a row left
+   * empty is skipped, and `fillFrom` lets one control fill every row from a
+   * column of that row -- its open quantity. Optional v6 key (ADR-0047 §7).
+   */
+  perRow: z
+    .strictObject({ fillFrom: compositionTaskColumn.optional() })
+    .optional(),
+});
+const compositionStep = z.strictObject({
+  stepId: CanonicalIdSchema,
+  operation: compositionReference('operationReference'),
+  bindings: z
+    .array(
+      z.strictObject({
+        path: z.array(z.string().min(1)).min(1).max(3),
+        value: compositionValue,
+      }),
+    )
+    .min(1)
+    .max(60),
+  /**
+   * Runs once for each row the Task includes, in the dataset's order, reading
+   * that row as `selected` and its per-row inputs; one request key per run.
+   * Optional v6 key (ADR-0047 §7).
+   */
+  each: z.literal(true).optional(),
+});
+const compositionTaskValue = z.discriminatedUnion('source', [
+  z.strictObject({ source: z.literal('input'), inputId: CanonicalIdSchema }),
+  compositionTaskColumn.extend({ source: z.literal('column') }),
+]);
+const compositionAction = z.strictObject({
+  presentation: z
+    .strictObject({
+      placement: z.enum(['selection', 'row']),
+      task: z
+        .strictObject({
+          summary: z.strictObject({
+            identity: compositionTaskColumn,
+            secondary: compositionTaskColumn.optional(),
+            context: compositionTaskColumn.optional(),
+            quantity: z
+              .strictObject({
+                value: compositionTaskColumn,
+                unit: compositionTaskColumn,
+                label: LabelSchema,
+              })
+              .optional(),
+          }),
+          confirmation: z.strictObject({
+            title: LabelSchema,
+            reviewLabel: LabelSchema,
+            confirmLabel: LabelSchema,
+            quantity: compositionTaskValue,
+            unit: compositionTaskColumn,
+            context: compositionTaskValue.optional(),
+          }),
+        })
+        .optional(),
+    })
+    .optional(),
+  actionId: CanonicalIdSchema,
+  label: LabelSchema,
+  description: LabelSchema,
+  orderKey: boundedOrderKey,
+  datasetId: CanonicalIdSchema.optional(),
+  conditions: z.array(compositionCondition).max(12),
+  inputs: z.array(compositionInput).max(12),
+  steps: z.array(compositionStep).max(5),
+  /**
+   * The rows a multi-row Task works through: every loaded row of the dataset
+   * whose conditions hold, each read as that row's `selected` values -- an
+   * order's lines with something still to arrive, or a receipt's lines that
+   * can still be reversed. `fillLabel` names the one control that fills every
+   * row's per-row inputs from their declared columns. Optional v6 key.
+   */
+  rows: z
+    .strictObject({
+      datasetId: CanonicalIdSchema,
+      conditions: z.array(compositionCondition).max(4),
+      fillLabel: LabelSchema.optional(),
+    })
+    .optional(),
+  navigate: z
+    .strictObject({
+      surface: compositionReference('surfaceReference'),
+      query: compositionReference('queryReference'),
+      record: compositionValue,
+    })
+    .optional(),
+});
+const compositionDataset = z.strictObject({
+  presentation: z
+    .strictObject({
+      description: LabelSchema.optional(),
+      selection: z.enum(['explicit', 'none']),
+      selectedActions: z.literal('row').optional(),
+      compact: z.literal('scrollTable').optional(),
+    })
+    .optional(),
+  datasetId: CanonicalIdSchema,
+  label: LabelSchema,
+  orderKey: boundedOrderKey,
+  query: compositionReference('queryReference'),
+  sort: z
+    .array(
+      z.strictObject({
+        fieldId: CanonicalIdSchema,
+        direction: z.enum(['ascending', 'descending']),
+      }),
+    )
+    .max(3)
+    .optional(),
+  parent: z
+    .strictObject({
+      relationId: CanonicalIdSchema,
+      value: compositionValue,
+      ownership: z.enum(['parentScopedChild', 'reference']),
+    })
+    .optional(),
+  /**
+   * The rows of the dataset's own entity that hold the record's id in one of
+   * their text fields, where no declared relation reaches the record -- an
+   * item's stock balances and movements hold the item as plain text. Applied
+   * by the list query as an exact field filter before the count and the page,
+   * and echoed back. A dataset declares this or `parent`, never both.
+   * Optional v6 key (ADR-0047 §7).
+   */
+  fieldScope: z
+    .strictObject({
+      fieldId: CanonicalIdSchema,
+      value: z.strictObject({
+        source: z.literal('record'),
+        field: z.literal('recordId'),
+      }),
+    })
+    .optional(),
+  columns: z.array(compositionColumn).min(1).max(30),
+});
+export const SurfaceCompositionSchema = z.strictObject({
+  presentation: z
+    .strictObject({
+      header: z.strictObject({
+        title: CanonicalIdSchema,
+        subtitle: z.array(CanonicalIdSchema).max(4),
+        facts: z.array(CanonicalIdSchema).max(6),
+        status: CanonicalIdSchema.optional(),
+      }),
+      context: z
+        .strictObject({ label: LabelSchema, description: LabelSchema })
+        .optional(),
+      recordActions: z.literal('progressive'),
+      technicalDetails: z.literal('progressive'),
+      task: z
+        .strictObject({
+          mode: z.literal('nativeDialog'),
+          fallback: z.literal('page'),
+        })
+        .optional(),
+      /**
+       * A printable document of this record: the header, the named datasets
+       * in full and an optional note column, printed or saved as PDF by the
+       * browser (owner ruling G). Optional v6 key (ADR-0047 §7).
+       */
+      print: z
+        .strictObject({
+          label: LabelSchema,
+          datasets: z.array(CanonicalIdSchema).min(1).max(4),
+          note: CanonicalIdSchema.optional(),
+          /**
+           * Declared columns printed as labelled totals, such as subtotal, tax
+           * and total; an invoice adds what is paid, credited and owed.
+           */
+          totals: z.array(CanonicalIdSchema).min(1).max(8).optional(),
+        })
+        .optional(),
+      /**
+       * Labelled blocks of declared columns read as one set of lines, such as
+       * a ship-to address: one card in the record's details, one block when
+       * printed. Optional v6 key (ADR-0047 §7).
+       */
+      blocks: z
+        .array(
+          z.strictObject({
+            label: LabelSchema,
+            columns: z.array(CanonicalIdSchema).min(1).max(8),
+          }),
+        )
+        .max(3)
+        .optional(),
+      /**
+       * An exception banner: shown while any loaded row of the dataset states
+       * a positive value in the column, listing those rows by their primary
+       * cell and that value -- an order's lines short of stock. A presence
+       * test over governed cells, never a derived total. Optional v6 key.
+       */
+      alerts: z
+        .array(
+          z.strictObject({
+            label: LabelSchema,
+            description: LabelSchema,
+            datasetId: CanonicalIdSchema,
+            columnId: CanonicalIdSchema,
+          }),
+        )
+        .min(1)
+        .max(3)
+        .optional(),
+      /**
+       * The record's progress through its lifecycle: ordered steps, each
+       * complete, current, needing attention, stopped or upcoming by
+       * conditions over the record's own values, with a dataset's rows as its
+       * connected documents; and the first next entry offered now, an action
+       * of this composition or an operation the record page offers. Optional
+       * v6 key (ADR-0047 §7).
+       */
+      progression: z
+        .strictObject({
+          title: LabelSchema,
+          steps: z
+            .array(
+              z.strictObject({
+                label: LabelSchema,
+                current: z.array(compositionCondition).max(4),
+                complete: z.array(compositionCondition).max(4),
+                attention: z
+                  .array(compositionCondition)
+                  .min(1)
+                  .max(4)
+                  .optional(),
+                stopped: z.array(compositionCondition).min(1).max(4).optional(),
+                documents: CanonicalIdSchema.optional(),
+              }),
+            )
+            .min(2)
+            .max(8),
+          next: z
+            .array(
+              z.union([
+                z.strictObject({ action: CanonicalIdSchema }),
+                z.strictObject({
+                  operation: compositionReference('operationReference'),
+                }),
+              ]),
+            )
+            .max(6),
+        })
+        .optional(),
+    })
+    .optional(),
+  kind: z.literal('surfaceComposition'),
+  schemaVersion: v6NodeVersion,
+  fields: z.array(compositionColumn).max(30),
+  children: z.array(compositionDataset).max(8),
+  actions: z.array(compositionAction).max(12),
+});
+export type SurfaceComposition = z.infer<typeof SurfaceCompositionSchema>;
+/** Optional v6 workspace declarations; absence preserves historical bytes. */
+export const SurfaceWorkspaceSchema = z.strictObject({
+  membership: z.enum(['operational', 'setup', 'contextual']),
+  ownerSurfaceId: CanonicalIdSchema.optional(),
+  /**
+   * The module whose navigation group lists this navigation List when that is
+   * not the List's own module -- a List over Catalog's items that is an
+   * Inventory destination. Compiled into the navigation tree only. Optional
+   * v6 key (ADR-0047 §7).
+   */
+  navigationModuleId: CanonicalIdSchema.optional(),
+  entry: z
+    .strictObject({
+      companyQueryId: CanonicalIdSchema,
+      authorizationQueryId: CanonicalIdSchema,
+      companyNameFieldId: CanonicalIdSchema,
+      companyStateFieldId: CanonicalIdSchema,
+      activeStateId: CanonicalIdSchema,
+      policy: z.literal('authorizedSingleOrPreference'),
+    })
+    .optional(),
+});
+export type SurfaceWorkspace = z.infer<typeof SurfaceWorkspaceSchema>;
+/**
+ * How the draft editor presents one declared field. Every variant is an EDITOR
+ * policy, never a domain rule: the field keeps its own type and server-side
+ * admission, so UI, API and agent writes stay subject to the same validation.
+ * `choice` in particular offers a fixed set; it does not narrow what the domain
+ * admits, and a stored value outside the set is preserved rather than replaced.
+ */
+/**
+ * A source field chosen by the value a header field holds, such as the item
+ * price in the order's currency. With none matching there is no value -- a
+ * price in another currency is never offered in its place.
+ */
+const sourceByHeader = z.strictObject({
+  headerFieldId: CanonicalIdSchema,
+  cases: z
+    .array(
+      z.strictObject({
+        value: z.string().min(1).max(64),
+        sourceFieldId: CanonicalIdSchema,
+      }),
+    )
+    .min(1)
+    .max(8),
+});
+const editorPresentation = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('multiline') }),
+  z.strictObject({
+    kind: z.literal('choice'),
+    // As long as a canonical id: a choice over an enumeration offers option
+    // ids. The workspace validator still holds each value to its field -- text
+    // that fits it, or an option it declares.
+    options: z
+      .array(
+        z.strictObject({
+          value: z.string().min(1).max(180),
+          label: LabelSchema,
+        }),
+      )
+      .min(1)
+      .max(20),
+    defaultValue: z.string().min(1).max(180).optional(),
+  }),
+  z.strictObject({
+    kind: z.literal('derived'),
+    /** A sibling reference field in the same row whose record supplies the value. */
+    referenceFieldId: CanonicalIdSchema,
+    /** A field selected by that reference's list query. */
+    sourceFieldId: CanonicalIdSchema,
+    /** The source instead chosen by a header value. Optional v6 key (ADR-0047 §7). */
+    sourceByHeader: sourceByHeader.optional(),
+  }),
+]);
+/**
+ * An in-context create flow for a reference: an ordered set of existing
+ * governed create operations. Collected fields route to the step whose entity
+ * owns them; `fixed` values and `relations` bind the steps together. The record
+ * created by `selectStep` becomes the selected value of the originating field.
+ */
+const editorCreate = z.strictObject({
+  label: LabelSchema,
+  explanation: z.string().min(1).max(500),
+  fields: z
+    .array(
+      z.strictObject({
+        fieldId: CanonicalIdSchema,
+        label: LabelSchema,
+        presentation: editorPresentation.optional(),
+      }),
+    )
+    .min(1)
+    .max(8),
+  steps: z
+    .array(
+      z.strictObject({
+        operationId: CanonicalIdSchema,
+        fixed: z
+          .array(
+            z.strictObject({
+              fieldId: CanonicalIdSchema,
+              value: z.string().min(1).max(200),
+            }),
+          )
+          .max(8)
+          .optional(),
+        relations: z
+          .array(
+            z.strictObject({
+              relationId: CanonicalIdSchema,
+              step: z.number().int().min(0).max(3),
+            }),
+          )
+          .max(4)
+          .optional(),
+      }),
+    )
+    .min(1)
+    .max(4),
+  selectStep: z.number().int().min(0).max(3),
+});
+const editorField = z.strictObject({
+  fieldId: CanonicalIdSchema,
+  label: LabelSchema,
+  presentation: editorPresentation.optional(),
+  reference: z
+    .strictObject({
+      queryId: CanonicalIdSchema,
+      /**
+       * The exact read for one selected record, so the picker can label and
+       * derive from a selection without scanning the list. Optional only so
+       * older releases in the lineage still parse; the validator requires it
+       * wherever search, detail, create or derivation is declared.
+       */
+      getQueryId: CanonicalIdSchema.optional(),
+      labelFieldIds: z.array(CanonicalIdSchema).min(1).max(3),
+      /** Secondary text shown under each result, such as SKU and base unit. */
+      detailFieldIds: z.array(CanonicalIdSchema).min(1).max(3).optional(),
+      /** Which records may be chosen (see `pickerEligibility`). */
+      eligibility: pickerEligibility.optional(),
+      /**
+       * Only records whose declared relation points at the record a sibling
+       * reference selects -- for example the chosen customer's ship-to
+       * addresses. Changing that sibling clears this selection unless a
+       * default re-selects one. Optional v6 key (ADR-0047 §7).
+       */
+      within: z
+        .strictObject({
+          referenceFieldId: CanonicalIdSchema,
+          relationId: CanonicalIdSchema,
+        })
+        .optional(),
+      /**
+       * The search also finds a record through its children -- an item by
+       * one of its aliases: records with an active child, through the
+       * child's parentScopedChild relation to them, holding the search text
+       * in a text field the child's unscoped list query selects. Optional v6
+       * key (CATALOG-EXTRAS).
+       */
+      searchChildren: z
+        .array(
+          z.strictObject({
+            queryId: CanonicalIdSchema,
+            relationId: CanonicalIdSchema,
+            fieldId: CanonicalIdSchema,
+          }),
+        )
+        .min(1)
+        .max(2)
+        .optional(),
+      create: editorCreate.optional(),
+    })
+    .optional(),
+  /**
+   * An editable default read from the record a sibling reference selects.
+   * Each change of that selection resets this field to the record's value, or
+   * to the field's own declared default when the record has none; the user
+   * may then change it. Optional v6 key (ADR-0047 §7).
+   */
+  defaultFrom: z
+    .strictObject({
+      referenceFieldId: CanonicalIdSchema,
+      /** A field of the record the sibling selects. */
+      sourceFieldId: CanonicalIdSchema.optional(),
+      /** That record's field chosen by a header value, such as the order currency. */
+      sourceByHeader: sourceByHeader.optional(),
+      /**
+       * Instead of the record, the header's current value of this field -- a
+       * line's tax code from the order's, taken when its product is chosen.
+       */
+      headerFieldId: CanonicalIdSchema.optional(),
+    })
+    .optional(),
+  /**
+   * A never-saved document's starting value for a UTC date-time field: that
+   * many days after the day the draft opens, at midnight UTC -- a requested
+   * date three weeks out. The user may change it; a saved record keeps what it
+   * stores. Optional v6 key (ADR-0047 §7).
+   */
+  defaultDaysFromToday: z.number().int().min(0).max(366).optional(),
+  /**
+   * A never-saved document's starting value for a UTC date-time field: the
+   * instant the draft opens, to the second -- a stock document's effective
+   * time, so stock received earlier that day is already on hand. The user may
+   * change it; a saved record keeps what it stores. Optional v6 key
+   * (ADR-0047 §7).
+   */
+  defaultNow: z.literal(true).optional(),
+});
+export const SurfaceDocumentEditorSchema = z.strictObject({
+  headerLabel: LabelSchema.optional(),
+  linesLabel: LabelSchema.optional(),
+  saveDescription: z.string().min(1).max(2000).optional(),
+  kind: z.literal('draftDocumentEditor'),
+  headerFormSurfaceId: CanonicalIdSchema,
+  recordSurfaceId: CanonicalIdSchema,
+  lineFormSurfaceId: CanonicalIdSchema,
+  lineQueryId: CanonicalIdSchema,
+  parentRelationId: CanonicalIdSchema,
+  stateFieldId: CanonicalIdSchema,
+  editableStateIds: z.array(CanonicalIdSchema).min(1),
+  // 30, widened from 20 (a document the narrower bound admitted is still
+  // admitted): a sales order's header carries its ship-to and its charges.
+  headerFields: z.array(editorField).min(1).max(30),
+  lineFields: z.array(editorField).min(1).max(15),
+  lineNumberFieldId: CanonicalIdSchema,
+  saveMode: z.literal('sequential'),
+  /**
+   * Values a never-saved document's first create also writes, in header
+   * fields the editor does not offer: a literal (a draft state, a source
+   * type), the document's own record id (a stock document naming itself as
+   * its posting source), the save's instant, or the saving principal. An
+   * update never sends them. Optional v6 key (ADR-0047 §7).
+   */
+  createValues: z
+    .array(
+      z.strictObject({
+        fieldId: CanonicalIdSchema,
+        value: z.discriminatedUnion('source', [
+          z.strictObject({
+            source: z.literal('literal'),
+            value: z.string().min(1).max(200),
+          }),
+          z.strictObject({
+            source: z.literal('record'),
+            field: z.literal('recordId'),
+          }),
+          z.strictObject({
+            source: z.literal('generated'),
+            value: z.literal('instant'),
+          }),
+          z.strictObject({
+            source: z.literal('actor'),
+            field: z.literal('principalId'),
+          }),
+        ]),
+      }),
+    )
+    .min(1)
+    .max(8)
+    .optional(),
+});
+export type SurfaceDocumentEditor = z.infer<typeof SurfaceDocumentEditorSchema>;
+export type SurfaceEditorField = SurfaceDocumentEditor['headerFields'][number];
+export type SurfaceEditorPresentation = NonNullable<
+  SurfaceEditorField['presentation']
+>;
+export type SurfaceEditorReference = NonNullable<
+  SurfaceEditorField['reference']
+>;
+export type SurfaceEditorCreate = NonNullable<SurfaceEditorReference['create']>;
+/**
+ * Optional v6 List presentation over the surface's own list query. Every
+ * column, view, filter and sort names a field that query selects -- or a label
+ * read through another declared list query -- so each one is an argument the
+ * query gateway re-authorizes on every request, never a client computation.
+ * Absence preserves historical bytes (ADR-0047 §7).
+ */
+const listColumn = z.strictObject({
+  columnId: CanonicalIdSchema,
+  label: LabelSchema,
+  orderKey: boundedOrderKey,
+  field: CanonicalIdSchema,
+  role: z.enum(['title', 'value', 'status']),
+  priority: boundedOrderKey,
+  sortable: z.boolean(),
+  /**
+   * `date`: a date or instant shown as its calendar date (UTC). `money`: an
+   * exact decimal shown with grouped digits and at least two decimals, never
+   * rounded (the CSV keeps the stored value).
+   */
+  format: z.enum(['date', 'money']).optional(),
+  reference: z
+    .strictObject({
+      query: compositionReference('queryReference'),
+      labelField: compositionReference('fieldReference'),
+    })
+    .optional(),
+  statusRoles: z
+    .array(
+      z.strictObject({
+        value: z.string().min(1).max(240),
+        role: z.enum(['success', 'attention', 'blocked', 'inProgress']),
+      }),
+    )
+    .max(12)
+    .optional(),
+  /**
+   * A date cell marked "N days late" when its row meets the named view's
+   * conditions -- that view keeps rows whose date is before today -- judged
+   * from server-projected values and the request's own anchor. Optional v6
+   * key (ADR-0047 §7).
+   */
+  overdue: z.strictObject({ view: CanonicalIdSchema }).optional(),
+});
+const listFieldValue = z.strictObject({
+  field: CanonicalIdSchema,
+  value: z.string().min(1).max(240),
+});
+/**
+ * The rows of a declared list query that hold the listed record's id in one of
+ * their own text fields -- an item's stock balances, reservations and order
+ * lines hold the item as plain text -- and, when summed, their quantity.
+ */
+const listFigureRows = z.strictObject({
+  query: compositionReference('queryReference'),
+  match: CanonicalIdSchema,
+  quantity: CanonicalIdSchema.optional(),
+});
+/**
+ * Only rows whose parent -- through the rows' relation to it -- holds one of
+ * these values in a field its own list query selects, such as order lines of
+ * released orders. A parent may instead be the record whose id the rows hold
+ * in one of their own text fields (`reference`), as a stock balance holds its
+ * location: only stock at a usable location (LOCATIONS; optional v6 key).
+ */
+const listFigureWithin = z.union([
+  z.strictObject({
+    relation: CanonicalIdSchema,
+    query: compositionReference('queryReference'),
+    field: CanonicalIdSchema,
+    values: z.array(z.string().min(1).max(240)).min(1).max(8),
+  }),
+  z.strictObject({
+    reference: CanonicalIdSchema,
+    query: compositionReference('queryReference'),
+    field: CanonicalIdSchema,
+    values: z.array(z.string().min(1).max(240)).min(1).max(8),
+  }),
+]);
+/** Rows pointing at each figure row through a relation, and their quantity. */
+const listFigureRelated = z.strictObject({
+  query: compositionReference('queryReference'),
+  relation: CanonicalIdSchema,
+  quantity: CanonicalIdSchema,
+});
+/**
+ * One part of an item's free stock: rows holding the item's id, added up as a
+ * figure sum adds them -- their quantity, their related rows' quantity, or
+ * what remains of each -- only where their parent holds one of `within`'s
+ * values, as stock at a usable location.
+ */
+const listSupplySum = z.strictObject({
+  rows: listFigureRows,
+  within: listFigureWithin.optional(),
+  related: listFigureRelated.optional(),
+  sum: z.enum(['rows', 'related', 'remaining']),
+});
+/**
+ * Per List row, what reservations still hold for its open lines and what
+ * those lines are short of now (SUPPLY-WARNINGS, owner ruling R1), computed
+ * by the list statement beside the progress it extends, before the count and
+ * the page. A line's coverage is what the `coverage` rows pointing at it still
+ * hold through their related rows -- a reservation of the line and what its
+ * balance still holds. A line's uncovered quantity is its open quantity (its
+ * progress quantity less its done rows') less its coverage, never below zero.
+ * `item` is the lines' text field holding the id of what a line asks for; the
+ * free stock of an item is its `free.plus` sums less its `free.minus` sums --
+ * on hand at usable locations less what live reservations hold there. Per
+ * item, the free stock (never below zero) is allocated to the row's uncovered
+ * quantity in line order and what it cannot cover is short, so two lines of
+ * one item share it; incoming supply is not counted. Outputs: `covered`, the
+ * coverage of lines with something open, each at most what the line has
+ * open; `short`, what the row is short in `shortIn` states, 0 in any other.
+ * Shown, never sorted, searched or filtered but by a view's `supply`.
+ * Optional v6 key (ADR-0047 §7).
+ */
+const listProgressSupply = z.strictObject({
+  coverage: z.strictObject({
+    query: compositionReference('queryReference'),
+    relation: CanonicalIdSchema,
+    related: listFigureRelated,
+  }),
+  item: CanonicalIdSchema,
+  free: z.strictObject({
+    plus: z.array(listSupplySum).min(1).max(4),
+    minus: z.array(listSupplySum).max(4),
+  }),
+  shortIn: z
+    .strictObject({
+      field: CanonicalIdSchema,
+      values: z.array(z.string().min(1).max(240)).min(1).max(8),
+    })
+    .optional(),
+  outputs: z.strictObject({
+    covered: CanonicalIdSchema,
+    short: CanonicalIdSchema,
+  }),
+  /**
+   * `omit`: supplementary, as progress may be. When current policy denies a
+   * query the supply reads, the List is read without it -- its columns read
+   * "—" -- and only a view that keeps covered or short rows is refused.
+   */
+  whenDenied: z.literal('omit').optional(),
+});
+/** A declared list query and the relation and quantity its rows add up. */
+const listProgressSource = z.strictObject({
+  query: compositionReference('queryReference'),
+  relation: CanonicalIdSchema,
+  quantity: CanonicalIdSchema,
+});
+/**
+ * Per List row, what its active lines order and what their active done rows
+ * record, summed by the list statement before the count and the page, and the
+ * open remainder between them. `openIn` names the row states in which anything
+ * is open; in any other state open reads 0. The outputs are the ids the row's
+ * values carry them under: shown, never sorted, searched or filtered but by
+ * a view's `open`. Optional v6 key (ADR-0047 §7).
+ */
+const listProgress = z.strictObject({
+  lines: listProgressSource,
+  done: listProgressSource,
+  openIn: z
+    .strictObject({
+      field: CanonicalIdSchema,
+      values: z.array(z.string().min(1).max(240)).min(1).max(8),
+    })
+    .optional(),
+  outputs: z.strictObject({
+    ordered: CanonicalIdSchema,
+    done: CanonicalIdSchema,
+    open: CanonicalIdSchema,
+  }),
+  /**
+   * `omit`: the figures are supplementary. When current policy denies either
+   * summed query, the List is read without them -- its progress columns read
+   * "—" -- and only a view that keeps open rows is refused. Absent, a denial
+   * refuses the whole List, as a List whose progress is its purpose must.
+   * Optional v6 key (ADR-0047 §7).
+   */
+  whenDenied: z.literal('omit').optional(),
+  supply: listProgressSupply.optional(),
+});
+/**
+ * A link from a List row to its record page, at one of the page's dataset
+ * sections. The first action (by order) whose condition holds is the row's,
+ * judged from server-projected values as an overdue date is; the record page
+ * re-checks everything it offers there. Optional v6 key (ADR-0047 §7).
+ */
+const listRowAction = z.strictObject({
+  actionId: CanonicalIdSchema,
+  label: LabelSchema,
+  orderKey: boundedOrderKey,
+  /**
+   * Exact stored values the row must hold, something open when `open`, and
+   * something covered or short by its progress's supply when `supply`
+   * (optional v6 key, SUPPLY-WARNINGS).
+   */
+  when: z
+    .strictObject({
+      filters: z.array(listFieldValue).max(3).optional(),
+      open: z.literal(true).optional(),
+      supply: z.enum(['covered', 'short']).optional(),
+    })
+    .optional(),
+  /** A dataset of the record page's composition, opened at its section. */
+  section: CanonicalIdSchema.optional(),
+});
+/**
+ * One per-row sum: `rows` adds the rows' quantity, `related` the related rows'
+ * quantity, and `remaining` each row's quantity less its related rows',
+ * never below zero per row -- what is still to arrive on a released order line.
+ */
+const listFigureSum = z.strictObject({
+  figureId: CanonicalIdSchema,
+  rows: listFigureRows,
+  within: listFigureWithin.optional(),
+  related: listFigureRelated.optional(),
+  sum: z.enum(['rows', 'related', 'remaining']),
+});
+/** A figure declared before, or an exact decimal the List's own query selects. */
+const listFigureOperand = z.union([
+  z.strictObject({ figure: CanonicalIdSchema }),
+  z.strictObject({ field: CanonicalIdSchema }),
+]);
+/**
+ * A signed total of figures and row fields; an unstated field leaves the total
+ * unstated rather than zero. `floor: 'zero'` never reads below zero.
+ */
+const listFigureTotal = z.strictObject({
+  figureId: CanonicalIdSchema,
+  plus: z.array(listFigureOperand).min(1).max(6),
+  minus: z.array(listFigureOperand).max(6),
+  floor: z.literal('zero').optional(),
+});
+/**
+ * A row field, a fixed decimal, or -- an optional v6 member (CATALOG-EXTRAS)
+ * -- a number figure declared before the band, a figure is compared with.
+ */
+const listFigureThreshold = z.union([
+  z.strictObject({ field: CanonicalIdSchema }),
+  z.strictObject({ value: CanonicalSignedDecimalStringSchema }),
+  z.strictObject({ figure: CanonicalIdSchema }),
+]);
+/**
+ * Names a figure's range: the first case whose comparison holds, else the
+ * otherwise value. A comparison with an unstated field never holds. Values
+ * are what the statement compares and a view keeps; labels are what a person
+ * reads, and never reach the statement.
+ */
+const listFigureBand = z.strictObject({
+  figureId: CanonicalIdSchema,
+  of: CanonicalIdSchema,
+  cases: z
+    .array(
+      z.strictObject({
+        value: CanonicalIdSchema,
+        label: LabelSchema,
+        below: listFigureThreshold.optional(),
+        atMost: listFigureThreshold.optional(),
+        /**
+         * Instead of a comparison, the row's own value of an enumeration the
+         * List selects is one of these -- an item that is not kept in stock.
+         * Optional v6 key (CATALOG-EXTRAS).
+         */
+        when: z
+          .strictObject({
+            field: CanonicalIdSchema,
+            values: z.array(z.string().min(1).max(240)).min(1).max(8),
+          })
+          .optional(),
+      }),
+    )
+    .min(1)
+    .max(4),
+  otherwise: z.strictObject({ value: CanonicalIdSchema, label: LabelSchema }),
+});
+/**
+ * The record id a parent of the most recent matching row holds -- by the
+ * parent's own date, newest first, then its record id -- named through an
+ * unscoped list query's label field, such as an item's last supplier.
+ */
+const listFigureLatest = z.strictObject({
+  figureId: CanonicalIdSchema,
+  rows: z.strictObject({
+    query: compositionReference('queryReference'),
+    match: CanonicalIdSchema,
+  }),
+  within: listFigureWithin,
+  by: CanonicalIdSchema,
+  value: CanonicalIdSchema,
+  label: z.strictObject({
+    query: compositionReference('queryReference'),
+    field: CanonicalIdSchema,
+  }),
+});
+/**
+ * What a choice takes: an exact decimal the List selects, a number figure
+ * declared before it, or a percentage of either by an exact decimal of the
+ * List's own company -- the legal entity it is read in -- read through an
+ * unscoped list query of the companies, never stored on the row.
+ */
+const listFigureChoiceValue = z.union([
+  z.strictObject({ field: CanonicalIdSchema }),
+  z.strictObject({ figure: CanonicalIdSchema }),
+  z.strictObject({
+    percent: z.strictObject({
+      of: listFigureOperand,
+      company: z.strictObject({
+        query: compositionReference('queryReference'),
+        field: CanonicalIdSchema,
+      }),
+    }),
+  }),
+]);
+/**
+ * Per row, the first case whose values hold the row's own value of an
+ * enumeration the List selects, else `otherwise`; a case or otherwise without
+ * a value leaves the figure unstated. An item's reorder point: its own, or
+ * the company's percentage of its reorder-up-to level (CATALOG-EXTRAS).
+ */
+const listFigureChoice = z.strictObject({
+  figureId: CanonicalIdSchema,
+  by: CanonicalIdSchema,
+  cases: z
+    .array(
+      z.strictObject({
+        values: z.array(z.string().min(1).max(240)).min(1).max(8),
+        value: listFigureChoiceValue.optional(),
+      }),
+    )
+    .min(1)
+    .max(4),
+  otherwise: listFigureChoiceValue.optional(),
+});
+/**
+ * Per List row, figures the list statement computes before the count and the
+ * page -- sums over rows that hold the row's id, choices between row values,
+ * totals of them, bands that name their ranges and the latest of a parent's
+ * values -- so a view keeping one band counts, pages and exports exactly that
+ * set. Shown, never sorted or searched. Optional v6 key (ADR-0047 §7);
+ * `choices` is an optional v6 key of its own (CATALOG-EXTRAS).
+ */
+const listFigures = z.strictObject({
+  sums: z.array(listFigureSum).min(1).max(8),
+  choices: z.array(listFigureChoice).max(2).optional(),
+  totals: z.array(listFigureTotal).max(6).optional(),
+  bands: z.array(listFigureBand).max(2).optional(),
+  latest: z.array(listFigureLatest).max(2).optional(),
+});
+/**
+ * A child entity whose records also answer the List's search: a row matches
+ * when one of its active children, through their parentScopedChild relation
+ * to it, holds the search text in a text field their unscoped list query
+ * selects -- an item found by an alias. Authorized and echoed per request.
+ * Optional v6 key (CATALOG-EXTRAS).
+ */
+const listSearchChild = z.strictObject({
+  query: compositionReference('queryReference'),
+  relation: CanonicalIdSchema,
+  field: CanonicalIdSchema,
+});
+export const SurfaceListSchema = z.strictObject({
+  kind: z.literal('surfaceList'),
+  schemaVersion: v6NodeVersion,
+  pageSize: z.int().min(1).max(100),
+  columns: z.array(listColumn).min(1).max(12),
+  defaultSort: z
+    .array(
+      z.strictObject({
+        columnId: CanonicalIdSchema,
+        direction: z.enum(['ascending', 'descending']),
+      }),
+    )
+    .max(3),
+  views: z
+    .array(
+      z.strictObject({
+        viewId: CanonicalIdSchema,
+        label: LabelSchema,
+        orderKey: boundedOrderKey,
+        filters: z.array(listFieldValue).max(3),
+        /** Only rows whose declared progress leaves something open. */
+        open: z.literal(true).optional(),
+        /**
+         * Only rows whose date is before a symbolic anchor. The release stays
+         * clock-free: the runtime turns the anchor into an instant when the
+         * request is made -- `startOfTodayUtc` is midnight UTC of that day.
+         */
+        before: z
+          .strictObject({
+            field: CanonicalIdSchema,
+            anchor: z.literal('startOfTodayUtc'),
+          })
+          .optional(),
+        /**
+         * Only rows whose band figure holds one of these values, judged by
+         * the list statement before the count and the page. Optional v6 key
+         * (ADR-0047 §7).
+         */
+        band: z
+          .strictObject({
+            figure: CanonicalIdSchema,
+            values: z.array(CanonicalIdSchema).min(1).max(4),
+          })
+          .optional(),
+        /**
+         * Only rows whose declared supply leaves something covered by
+         * reservations (`covered`) or something short (`short`), judged by
+         * the list statement before the count and the page. Optional v6 key
+         * (SUPPLY-WARNINGS, ADR-0047 §7).
+         */
+        supply: z.enum(['covered', 'short']).optional(),
+      }),
+    )
+    .max(8),
+  filters: z
+    .array(
+      z.strictObject({
+        filterId: CanonicalIdSchema,
+        label: LabelSchema,
+        orderKey: boundedOrderKey,
+        field: CanonicalIdSchema,
+        options: z
+          .array(
+            z.strictObject({
+              value: z.string().min(1).max(240),
+              label: LabelSchema,
+            }),
+          )
+          .min(1)
+          .max(20),
+      }),
+    )
+    .max(4),
+  export: z.strictObject({ format: z.literal('csv') }).optional(),
+  progress: listProgress.optional(),
+  rowActions: z.array(listRowAction).min(1).max(3).optional(),
+  figures: listFigures.optional(),
+  searchChildren: z.array(listSearchChild).min(1).max(2).optional(),
+});
+export type SurfaceList = z.infer<typeof SurfaceListSchema>;
+export type SurfaceListProgress = NonNullable<SurfaceList['progress']>;
+export type SurfaceListFigures = NonNullable<SurfaceList['figures']>;
+export type SurfaceListSupply = NonNullable<SurfaceListProgress['supply']>;
+export type SurfaceListRowAction = NonNullable<
+  SurfaceList['rowActions']
+>[number];
+/**
+ * A Record form's presentation of fields that hold another record's id, such
+ * as an item's preferred location: each is chosen from the records of an
+ * unscoped list query and shown by its label field, while the stored value
+ * stays the record id the field's own type admits. Optional v6 key (ADR-0047
+ * §7); a reader without it would ask for the id as free text.
+ */
+export const SurfaceFormSchema = z.strictObject({
+  kind: z.literal('surfaceForm'),
+  schemaVersion: v6NodeVersion,
+  references: z
+    .array(
+      z.strictObject({
+        field: CanonicalIdSchema,
+        query: compositionReference('queryReference'),
+        labelField: compositionReference('fieldReference'),
+      }),
+    )
+    .min(1)
+    .max(8)
+    .optional(),
+  /**
+   * Fields the form leaves out because a declared Task of the record's page
+   * sets them, such as a location's inventory status with its reason: the
+   * form neither shows nor sends them, so neither a create nor an update from
+   * it states one. Optional v6 key (LOCATIONS, ADR-0047 §7).
+   */
+  omit: z.array(CanonicalIdSchema).min(1).max(8).optional(),
+});
+export type SurfaceForm = z.infer<typeof SurfaceFormSchema>;
+/**
+ * A launcher on a Task surface: large tiles, each opening a declared List at
+ * one of its views and showing that view's count, and a scan box that opens
+ * the record a scanned or typed code names -- the first target, in declared
+ * order, whose resolve query matches the code exactly as an identifier. The
+ * launcher reads only through declared queries under current policy, posts
+ * nothing, and every destination re-authorizes itself: the warehouse view
+ * floor staff open first. Optional v6 key (ADR-0047 §7).
+ */
+export const SurfaceLauncherSchema = z.strictObject({
+  kind: z.literal('surfaceLauncher'),
+  schemaVersion: v6NodeVersion,
+  tiles: z
+    .array(
+      z.strictObject({
+        tileId: CanonicalIdSchema,
+        label: LabelSchema,
+        description: LabelSchema,
+        orderKey: boundedOrderKey,
+        /** A List surface with a declared List. */
+        surface: CanonicalIdSchema,
+        /** One of that List's declared views, opened and counted. */
+        view: CanonicalIdSchema.optional(),
+      }),
+    )
+    .min(1)
+    .max(6),
+  scan: z
+    .strictObject({
+      label: LabelSchema,
+      actionLabel: LabelSchema,
+      targets: z
+        .array(
+          z.strictObject({
+            /** A resolve query with an identifier match key. */
+            query: CanonicalIdSchema,
+            /** The record page that opens the resolved record. */
+            surface: CanonicalIdSchema,
+          }),
+        )
+        .min(1)
+        .max(8),
+    })
+    .optional(),
+});
+export type SurfaceLauncher = z.infer<typeof SurfaceLauncherSchema>;
+const normalizedV6SurfaceDefinition = normalizedSurfaceDefinition.extend({
+  composition: SurfaceCompositionSchema.optional(),
+  workspace: SurfaceWorkspaceSchema.optional(),
+  documentEditor: SurfaceDocumentEditorSchema.optional(),
+  list: SurfaceListSchema.optional(),
+  form: SurfaceFormSchema.optional(),
+  launcher: SurfaceLauncherSchema.optional(),
+});
+const authoredV6SurfaceDefinition = normalizedV6SurfaceDefinition.extend({
+  lifecycle: z.enum(['active', 'retired']).optional(),
+});
+
 const querySelection = z.strictObject({
   field: CanonicalReferenceSchema,
   kind: z.literal('querySelection'),
@@ -1147,6 +2348,75 @@ const v5NormalizedShape = {
   languageVersion: v5NodeVersion,
 } as const;
 
+export const QueryReadModelSchema = z.strictObject({
+  capability: compositionReference('capabilityReference'),
+  binding: CanonicalIdSchema,
+  queries: z.record(z.string().min(1), compositionReference('queryReference')),
+  resultFields: z.record(z.string().min(1), CanonicalIdSchema),
+});
+export type QueryReadModel = z.infer<typeof QueryReadModelSchema>;
+/**
+ * A document number the server assigns when the record is created: the next
+ * value of one named sequence per tenant and environment, `PREFIX-000001`.
+ * The field leaves every operation's writable inputs, so a typed number is
+ * refused and an assigned one never changes; its unique business key keeps
+ * an archived record's number reserved. Optional v6 key (ADR-0047 §7).
+ */
+export const FieldNumberingSchema = z.strictObject({
+  kind: z.literal('documentSequence'),
+  sequenceId: CanonicalIdSchema,
+  prefix: z.string().regex(/^[A-Z][A-Z0-9]{0,7}$/u),
+  minimumDigits: z.int().min(1).max(12),
+  start: z.int().min(1).max(1_000_000_000),
+});
+export type FieldNumbering = z.infer<typeof FieldNumberingSchema>;
+/**
+ * The words a command renders with (for example "Confirm" for an operation
+ * whose stable id ends in `_release`). Presentation only: the id, permission,
+ * precondition and effect are unchanged. Optional v6 key (ADR-0047 §7); absent,
+ * the renderer derives a label from the id as before.
+ */
+const operationLabel = LabelSchema.optional();
+const normalizedV6OperationDefinition = normalizedV3OperationDefinition.extend({
+  label: operationLabel,
+});
+const authoredV6OperationDefinition = authoredV3OperationDefinition.extend({
+  label: operationLabel,
+});
+const normalizedV6FieldDefinition = normalizedV3FieldDefinition.extend({
+  numbering: FieldNumberingSchema.optional(),
+});
+const authoredV6FieldDefinition = authoredV3FieldDefinition.extend({
+  numbering: FieldNumberingSchema.optional(),
+});
+// A list query may declare the most rows one export statement returns. It is a
+// query property, not a screen one, because the agent path reads the query.
+const exportMaximumResultCount = z.int().min(1).max(10_000).optional();
+const normalizedV6QueryDefinition = z.union([
+  normalizedV4RowQueryDefinition.extend({
+    readModel: QueryReadModelSchema.optional(),
+    exportMaximumResultCount,
+  }),
+  normalizedV4AggregateQueryDefinition,
+]);
+const authoredV6QueryDefinition = z.union([
+  authoredV4RowQueryDefinition.extend({
+    readModel: QueryReadModelSchema.optional(),
+    exportMaximumResultCount,
+  }),
+  authoredV4AggregateQueryDefinition,
+]);
+
+const v6NormalizedShape = {
+  ...v5NormalizedShape,
+  fields: z.array(normalizedV6FieldDefinition),
+  operations: z.array(normalizedV6OperationDefinition),
+  queries: z.array(normalizedV6QueryDefinition),
+  languageVersion: v6NodeVersion,
+  surfaces: z.array(normalizedV6SurfaceDefinition),
+} as const;
+const V6NormalizedApplicationPackageSchema = z.strictObject(v6NormalizedShape);
+
 const V3NormalizedApplicationPackageSchema = z.strictObject(v3NormalizedShape);
 const V4NormalizedApplicationPackageSchema = z.strictObject(v4NormalizedShape);
 const V5NormalizedApplicationPackageSchema = z.strictObject(v5NormalizedShape);
@@ -1212,6 +2482,7 @@ export const VersionedNormalizedApplicationPackageSchema =
       V3NormalizedApplicationPackageSchema,
       V4NormalizedApplicationPackageSchema,
       V5NormalizedApplicationPackageSchema,
+      V6NormalizedApplicationPackageSchema,
     ]),
   );
 export const NormalizedApplicationPackageSchema =
@@ -1263,6 +2534,16 @@ const v5AuthoredShape = {
   languageVersion: v5NodeVersion,
 } as const;
 
+const v6AuthoredShape = {
+  ...v5AuthoredShape,
+  fields: z.array(authoredV6FieldDefinition),
+  operations: z.array(authoredV6OperationDefinition),
+  queries: z.array(authoredV6QueryDefinition),
+  languageVersion: v6NodeVersion,
+  surfaces: z.array(authoredV6SurfaceDefinition),
+} as const;
+const V6AuthoredApplicationPackageSchema = z.strictObject(v6AuthoredShape);
+
 const LegacyAuthoredApplicationPackageSchema =
   z.strictObject(legacyAuthoredShape);
 const V3AuthoredApplicationPackageSchema = z.strictObject(v3AuthoredShape);
@@ -1275,6 +2556,7 @@ export const VersionedAuthoredApplicationPackageSchema = withNodeVersionPurity(
     V3AuthoredApplicationPackageSchema,
     V4AuthoredApplicationPackageSchema,
     V5AuthoredApplicationPackageSchema,
+    V6AuthoredApplicationPackageSchema,
   ]),
 );
 export const AuthoredApplicationPackageSchema =
@@ -1305,17 +2587,25 @@ export type V5AuthoredApplicationPackage = z.infer<
 export type V5NormalizedApplicationPackage = z.infer<
   typeof V5NormalizedApplicationPackageSchema
 >;
+export type V6AuthoredApplicationPackage = z.infer<
+  typeof V6AuthoredApplicationPackageSchema
+>;
+export type V6NormalizedApplicationPackage = z.infer<
+  typeof V6NormalizedApplicationPackageSchema
+>;
 export type QueryLegalEntityScope = z.infer<typeof queryLegalEntityScope>;
 export type VersionedAuthoredApplicationPackage =
   | AuthoredApplicationPackage
   | V3AuthoredApplicationPackage
   | V4AuthoredApplicationPackage
-  | V5AuthoredApplicationPackage;
+  | V5AuthoredApplicationPackage
+  | V6AuthoredApplicationPackage;
 export type VersionedNormalizedApplicationPackage =
   | NormalizedApplicationPackage
   | V3NormalizedApplicationPackage
   | V4NormalizedApplicationPackage
-  | V5NormalizedApplicationPackage;
+  | V5NormalizedApplicationPackage
+  | V6NormalizedApplicationPackage;
 export type CanonicalId = z.infer<typeof CanonicalIdSchema>;
 
 function isValidIsoDate(value: string): boolean {

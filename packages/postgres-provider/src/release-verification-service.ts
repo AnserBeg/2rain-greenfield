@@ -1,6 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import { canonicalize } from '@north-star/canonical-model';
+import {
+  canonicalize,
+  inspectPredicateForExecution,
+  unicodeCaseFold,
+} from '@north-star/canonical-model';
 import {
   PROJECTION_FAMILY_IDS,
   executeVerificationPlan,
@@ -70,11 +74,13 @@ import {
   type SemanticQueryExecutionContext,
   type SemanticQueryExecutor,
   type SemanticQueryResultEnvelope,
+  type SemanticRecordDto,
 } from '../../runtime/src/semantic-query-gateway.js';
 import {
   type ModuleProviderErrorMapping,
   ModuleRuntimeInterpreterError,
   PostgresModuleRuntimeInterpreter,
+  verificationSentinelNumber,
 } from './module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 import { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
@@ -353,10 +359,15 @@ export class PostgresReleaseVerificationService {
   ): Promise<DurableReleaseVerificationEvidence> {
     const snapshot = snapshotExecutionCommand(command);
     const actorIssuer = verificationActorIssuer();
+    // Verification's arranged records take sentinel document numbers, so an
+    // activation never consumes a tenant's real `SO-000123` sequence.
     const interpreter = new PostgresModuleRuntimeInterpreter(
       this.pool,
       actorIssuer,
       this.providerErrorMappings,
+      undefined,
+      undefined,
+      { documentNumbers: 'verificationSentinel' },
     );
     return this.#executeSemanticCandidateWithExecutorAndPersist(
       context,
@@ -779,6 +790,14 @@ export function verificationConstructibilityFindings(
         constructibleColumns.add(relation.relationColumn.physicalName);
       }
     }
+    // A server-assigned document number is written by the create itself, so
+    // its required column needs no caller input.
+    for (const assigned of operation.inputContract.assignedFields ?? []) {
+      const column = entity.columns.find(
+        (candidate) => candidate.canonicalFieldId === assigned.fieldId,
+      );
+      if (column) constructibleColumns.add(column.physicalName);
+    }
     const systemInput = operation.inputContract.systemInput;
     if (
       systemInput &&
@@ -1060,6 +1079,8 @@ interface VerificationOperationContract {
           | 'updateRecordEffect';
       };
   readonly inputContract: {
+    /** A create's server-assigned document numbers: never a caller's input. */
+    readonly assignedFields?: readonly { readonly fieldId: string }[];
     readonly fields: readonly VerificationFieldContract[];
     readonly relationInputs: readonly {
       readonly relationId: string;
@@ -1079,6 +1100,10 @@ interface VerificationOperationContract {
 }
 
 interface VerificationQueryContractBase {
+  /** The declared predicate; see `gatewayExecutes`. */
+  readonly filter: unknown;
+  /** A Q1 query's compiled filter plan, which the gateway executes. */
+  readonly filterPlan?: unknown;
   readonly legalEntityScope?: {
     readonly cardinality: 'exactlyOne' | 'nonEmptySet';
     readonly kind: 'queryLegalEntityScope';
@@ -1089,14 +1114,18 @@ interface VerificationQueryContractBase {
     };
     readonly schemaVersion: string;
   };
+  readonly lifecycle: 'active' | 'retired';
   readonly parameters?: readonly { readonly parameterId: string }[];
   readonly queryId: string;
+  /** Present when a read model states figures on read; see `#queryForEntity`. */
+  readonly readModel?: unknown;
   readonly resolveMatchKeys: readonly {
     readonly authority: string;
     readonly fieldId: string;
   }[];
   readonly selections: readonly { readonly fieldId: string }[];
   readonly sourceEntityId: string;
+  readonly tier: 'q0' | 'q1';
 }
 
 interface VerificationAggregateQueryContract extends VerificationQueryContractBase {
@@ -1361,26 +1390,68 @@ class SemanticVerificationExecutor {
     }
   }
 
+  /**
+   * Archives every record verification created, newest first, reading each
+   * through its entity's first plain get that returns any live record by id
+   * (`returnsAnyLiveRecordById`). A record it cannot read -- no such get, or an
+   * answer that is neither the record nor `not-found` -- is refused by name,
+   * not skipped, once every record that can be read is archived.
+   */
   async archiveProbeRecords(): Promise<void> {
+    const unreadable: string[] = [];
     for (const record of [...this.#createdRecords].reverse()) {
-      const get = this.#queryForEntity(record.entityId, 'get');
+      const get = this.#findQueryForEntity(
+        record.entityId,
+        'get',
+        returnsAnyLiveRecordById,
+      );
+      if (!get) {
+        unreadable.push(
+          `${record.recordId} of ${record.entityId}, which has no get that returns any live record by id`,
+        );
+        continue;
+      }
       const current = await this.#invokeQuery(
         get,
         { recordId: record.recordId },
         record,
       );
+      // The get runs, so it finds a live record by id: `not-found` means a
+      // probe archived the record already, and nothing else does. Any other
+      // answer is no evidence of that.
+      if (
+        isRecord(current) &&
+        current.outcome === 'not-found' &&
+        Array.isArray(current.records) &&
+        current.records.length === 0
+      ) {
+        continue;
+      }
       const row =
-        isRecord(current) && Array.isArray(current.records)
+        isRecord(current) &&
+        current.outcome === 'exact' &&
+        Array.isArray(current.records)
           ? current.records.find(
               (candidate) =>
                 isRecord(candidate) && candidate.recordId === record.recordId,
             )
           : null;
-      if (!isRecord(row) || !Number.isSafeInteger(row.revision)) continue;
+      if (!isRecord(row) || !Number.isSafeInteger(row.revision)) {
+        unreadable.push(
+          `${record.recordId} of ${record.entityId} through ${get.queryId} (${queryAnswer(current)})`,
+        );
+        continue;
+      }
       await this.#invokeEffect(record.entityId, 'archiveRecordEffect', {
         expectedRevision: row.revision,
         recordId: record.recordId,
       });
+    }
+    if (unreadable.length > 0) {
+      throw failure(
+        'VERIFICATION_PROBE_RECORD_UNREADABLE',
+        `verification could not read its probe records to archive them: ${unreadable.join('; ')}`,
+      );
     }
   }
 
@@ -1554,7 +1625,6 @@ class SemanticVerificationExecutor {
       {},
       relationOverrides,
     );
-    const search = this.#queryForEntity(scenario.entityId, 'search');
     const excludedValue = record.values[scenario.subjectId];
     if (excludedValue === undefined) {
       throw failure(
@@ -1562,8 +1632,15 @@ class SemanticVerificationExecutor {
         'search exclusion probe could not populate its subject field',
       );
     }
+    const witness = await this.#searchWitness(scenario.entityId, record);
+    if (!hasRecord(witness.included, record.recordId)) {
+      throw failure(
+        'VERIFICATION_SEARCH_POSITIVE_FAILED',
+        `searchable field ${witness.positiveFieldId} did not return record ${record.recordId} through ${witness.search.queryId}: ${canonicalize(witness.included)}`,
+      );
+    }
     const excluded = await this.#invokeQuery(
-      search,
+      witness.search,
       { text: String(excludedValue) },
       record,
     );
@@ -1573,56 +1650,114 @@ class SemanticVerificationExecutor {
         `excluded field value was searchable: ${scenario.subjectId}`,
       );
     }
-    const selectedFieldIds = new Set(
-      search.selections.map((selection) => selection.fieldId),
-    );
-    const positiveField = this.#createOperation(
-      scenario.entityId,
-    ).inputContract.fields.find(
-      (field) =>
-        selectedFieldIds.has(field.fieldId) &&
-        (field.fieldKind === 'textFieldType' ||
-          field.fieldKind === 'enumFieldType') &&
-        !this.#excludedFieldsByEntity
-          .get(scenario.entityId)
-          ?.has(field.fieldId),
-    );
-    if (!positiveField) {
-      throw failure(
-        'VERIFICATION_SEARCHABLE_FIELD_MISSING',
-        'search exclusion probe has no same-entity positive searchable field',
-      );
-    }
-    const included = await this.#invokeQuery(
-      search,
-      {
-        text: String(record.values[positiveField.fieldId]),
-      },
-      record,
-    );
-    if (!hasRecord(included, record.recordId)) {
-      throw failure(
-        'VERIFICATION_SEARCH_POSITIVE_FAILED',
-        `searchable field ${positiveField.fieldId} did not return record ${record.recordId}: ${canonicalize(included)}`,
-      );
-    }
     return {
       negativeProbe: excluded,
       positiveProbe: {
         constructibilityFindings: this.constructibilityFindings,
         searchWitness: {
           entityId: scenario.entityId,
-          fieldId: positiveField.fieldId,
+          fieldId: witness.positiveFieldId,
           recordObserved: true,
         },
       },
     };
   }
 
+  /**
+   * The search a search-exclusion probe reads through, the arranged record's
+   * positive field for it, and the search's answer for that field's value.
+   * A candidate is a plain search of the entity that the gateway executes
+   * and that selects a positive field: a text or enum input, or an assigned
+   * number, that the plan does not exclude from search. The first candidate
+   * with the literal `true` filter is used, its answer returned whatever it
+   * is. Without one, the filtered candidates are read in catalog order and
+   * the first that returns the record is used; when none does, no search can
+   * witness the probe.
+   */
+  async #searchWitness(
+    entityId: string,
+    record: VerificationRecord,
+  ): Promise<{
+    readonly included:
+      SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope;
+    readonly positiveFieldId: string;
+    readonly search: VerificationQueryContract;
+  }> {
+    const executed = this.#queries.filter(
+      (candidate) =>
+        candidate.sourceEntityId === entityId &&
+        candidate.queryType === 'search' &&
+        candidate.readModel === undefined &&
+        gatewayExecutes(candidate),
+    );
+    if (executed.length === 0) {
+      throw failure(
+        'VERIFICATION_QUERY_MISSING',
+        `compiled search query of ${entityId} that gatewayExecutes admits is missing`,
+      );
+    }
+    const excludedFieldIds = this.#excludedFieldsByEntity.get(entityId);
+    const createOperation = this.#createOperation(entityId);
+    const candidates = executed.flatMap((search) => {
+      const selectedFieldIds = new Set(
+        search.selections.map((selection) => selection.fieldId),
+      );
+      const positiveFieldId =
+        createOperation.inputContract.fields.find(
+          (field) =>
+            selectedFieldIds.has(field.fieldId) &&
+            (field.fieldKind === 'textFieldType' ||
+              field.fieldKind === 'enumFieldType') &&
+            !excludedFieldIds?.has(field.fieldId),
+        )?.fieldId ??
+        // A server-assigned number is text the create stored and read back.
+        createOperation.inputContract.assignedFields?.find(
+          (assigned) =>
+            selectedFieldIds.has(assigned.fieldId) &&
+            !excludedFieldIds?.has(assigned.fieldId),
+        )?.fieldId;
+      return positiveFieldId ? [{ positiveFieldId, search }] : [];
+    });
+    if (candidates.length === 0) {
+      throw failure(
+        'VERIFICATION_SEARCHABLE_FIELD_MISSING',
+        'search exclusion probe has no same-entity positive searchable field',
+      );
+    }
+    const read = async (candidate: (typeof candidates)[number]) => ({
+      ...candidate,
+      included: await this.#invokeQuery(
+        candidate.search,
+        { text: String(record.values[candidate.positiveFieldId]) },
+        record,
+      ),
+    });
+    const unfiltered = candidates.find(
+      (candidate) =>
+        inspectPredicateForExecution(candidate.search.filter).outcome ===
+        'accepted',
+    );
+    if (unfiltered) return read(unfiltered);
+    const tried: string[] = [];
+    for (const candidate of candidates) {
+      const witness = await read(candidate);
+      if (hasRecord(witness.included, record.recordId)) return witness;
+      tried.push(
+        `${candidate.search.queryId} (${queryAnswer(witness.included)})`,
+      );
+    }
+    throw failure(
+      'VERIFICATION_SEARCH_WITNESS_UNCONSTRUCTABLE',
+      `no search of ${entityId} that the gateway executes returns the record verification arranged, ${record.recordId}, by its positive field; tried ${tried.join('; ')}`,
+    );
+  }
+
   async #typedErrorSurface(scenario: VerificationScenario, token: string) {
     const record = await this.#create(scenario.entityId, token);
+    // The get's answer is recorded as the positive probe and nothing is
+    // asserted of it, so any get the gateway executes serves.
     const get = await this.#invokeQuery(
-      this.#queryForEntity(scenario.entityId, 'get'),
+      this.#queryForEntity(scenario.entityId, 'get', gatewayExecutes),
       { recordId: record.recordId },
       record,
     );
@@ -1647,9 +1782,15 @@ class SemanticVerificationExecutor {
   }
 
   async #uniquenessFold(scenario: VerificationScenario, token: string) {
-    const field = this.#createOperation(
-      scenario.entityId,
-    ).inputContract.fields.find(
+    const operation = this.#createOperation(scenario.entityId);
+    if (
+      operation.inputContract.assignedFields?.some(
+        (assigned) => assigned.fieldId === scenario.subjectId,
+      )
+    ) {
+      return this.#assignedUniqueness(scenario, operation, token);
+    }
+    const field = operation.inputContract.fields.find(
       (candidate) => candidate.fieldId === scenario.subjectId,
     );
     if (!field || field.fieldKind !== 'textFieldType') {
@@ -1675,6 +1816,75 @@ class SemanticVerificationExecutor {
       ['MODULE_UNIQUE_VIOLATION'],
     );
     return { negativeProbe: rejected, positiveProbe: accepted };
+  }
+
+  /**
+   * A server-assigned business key (a document number) has no caller-written
+   * value, so no caller can offer its key two values that fold together. The
+   * probe shows the uniqueness a caller can observe: two creates store values
+   * that differ under the key's case fold, and a create supplying the first
+   * value in another case is refused as input, naming the field, before it
+   * can reach the key. How the key folds stored numbers, and the allocator's
+   * agreement with it, are exercised by the document-numbering suite.
+   */
+  async #assignedUniqueness(
+    scenario: VerificationScenario,
+    operation: VerificationOperationContract,
+    token: string,
+  ) {
+    const first = await this.#create(scenario.entityId, `${token}-first`);
+    const second = await this.#create(scenario.entityId, `${token}-second`);
+    const firstValue = String(first.values[scenario.subjectId]);
+    const secondValue = String(second.values[scenario.subjectId]);
+    if (unicodeCaseFold(firstValue) === unicodeCaseFold(secondValue)) {
+      throw failure(
+        'VERIFICATION_ASSIGNED_VALUES_COLLIDED',
+        `two creates were assigned the same ${scenario.subjectId}: ${firstValue}`,
+      );
+    }
+    const variant =
+      firstValue.toLowerCase() === firstValue
+        ? firstValue.toUpperCase()
+        : firstValue.toLowerCase();
+    if (
+      variant === firstValue ||
+      unicodeCaseFold(variant) !== unicodeCaseFold(firstValue)
+    ) {
+      throw failure(
+        'VERIFICATION_ASSIGNED_VARIANT_INVALID',
+        `assigned ${scenario.subjectId} has no case variant: ${firstValue}`,
+      );
+    }
+    const input = await this.#createInput(
+      scenario.entityId,
+      `${token}-supplied`,
+    );
+    const rejected = await this.#captureRejection(
+      this.#invokeOperation(operation, {
+        ...input,
+        values: {
+          ...(input.values as Record<string, unknown>),
+          [scenario.subjectId]: variant,
+        },
+      }),
+      ['MODULE_FIELD_UNSUPPORTED'],
+    );
+    if (rejected.subjectId !== scenario.subjectId) {
+      throw failure(
+        'VERIFICATION_ASSIGNED_INPUT_REFUSAL_INVALID',
+        `a supplied ${scenario.subjectId} was refused for ${String(rejected.subjectId)}`,
+      );
+    }
+    return {
+      negativeProbe: rejected,
+      positiveProbe: {
+        assignedFieldId: scenario.subjectId,
+        records: [
+          { recordId: first.recordId, value: firstValue },
+          { recordId: second.recordId, value: secondValue },
+        ],
+      },
+    };
   }
 
   async #archiveRestrict(scenario: VerificationScenario, token: string) {
@@ -1726,7 +1936,6 @@ class SemanticVerificationExecutor {
       arrangementPath,
     );
     const operation = this.#createOperation(entityId);
-    await this.#invokeOperation(operation, input);
     const systemInput = operation.inputContract.systemInput;
     const legalEntityId = systemInput ? input[systemInput.argumentKey] : null;
     if (legalEntityId !== null && typeof legalEntityId !== 'string') {
@@ -1735,15 +1944,125 @@ class SemanticVerificationExecutor {
         'verification arranged a record with an invalid system input value',
       );
     }
-    const record = Object.freeze({
+    const created = await this.#invokeOperation(operation, input);
+    // Registered for archiving the moment it exists: whatever fails below,
+    // `archiveProbeRecords` still archives it.
+    const arranged: VerificationRecord = Object.freeze({
       entityId,
       legalEntityId,
       recordId: String(input.recordId),
       relations: input.relations as Readonly<Record<string, string>>,
-      values: input.values as Readonly<Record<string, unknown>>,
+      values: Object.freeze({
+        ...(input.values as Readonly<Record<string, unknown>>),
+      }),
     });
-    this.#createdRecords.push(record);
+    const registered = this.#createdRecords.push(arranged) - 1;
+    const assignedFields = operation.inputContract.assignedFields ?? [];
+    if (assignedFields.length === 0) return arranged;
+    // A server-assigned number is not in the input; the probes that search,
+    // resolve or compare it use the value the create stored.
+    const assignedValues: Record<string, string> = {};
+    for (const assigned of assignedFields) {
+      const value = await this.#assignedWitness(
+        operation,
+        assigned.fieldId,
+        arranged,
+        created.readBack,
+      );
+      assignedValues[assigned.fieldId] = value;
+    }
+    const record = Object.freeze({
+      ...arranged,
+      values: Object.freeze({ ...arranged.values, ...assignedValues }),
+    });
+    this.#createdRecords[registered] = record;
     return record;
+  }
+
+  /**
+   * The value a create assigned to one of its numbered fields. Verification's
+   * creates take sentinel numbers, so the value is known without a read
+   * (`verificationSentinelNumber`); it is still read wherever the release lets
+   * a caller read it by record id -- the create's read-back when that
+   * projection selects the field, else a plain get that selects it and that
+   * returns any live record by id (`returnsAnyLiveRecordById`) -- and must be that
+   * sentinel. A read-back is a declared projection, not the record: one that
+   * omits the field says nothing about the assignment. Only when no such read
+   * selects the field is the sentinel used unread.
+   */
+  async #assignedWitness(
+    operation: VerificationOperationContract,
+    fieldId: string,
+    record: VerificationRecord,
+    readBack: SemanticRecordDto | null,
+  ): Promise<string> {
+    const column = this.#requiredStorageEntity(record.entityId).columns.find(
+      (candidate) => candidate.canonicalFieldId === fieldId,
+    );
+    if (!column) {
+      throw failure(
+        'VERIFICATION_STORAGE_FIELD_MISSING',
+        `compiled verification field has no storage column: ${fieldId}`,
+      );
+    }
+    const sentinel = verificationSentinelNumber(
+      record.recordId,
+      fieldId,
+      column.fieldContract.bounds.maximumLength,
+    );
+    let observed: unknown;
+    let source: string;
+    if (readBack !== null && Object.hasOwn(readBack.values, fieldId)) {
+      observed = readBack.values[fieldId];
+      source = 'read-back';
+    } else {
+      // The first plain get that selects the field and that returns any live
+      // record by id (`returnsAnyLiveRecordById`); one the gateway would answer
+      // `unsupported` without reading is no reader, and a read-model get is
+      // never the read (`#findQueryForEntity`). Once such a get has run,
+      // anything but the record's sentinel fails.
+      const get = this.#queries.find(
+        (candidate) =>
+          candidate.sourceEntityId === record.entityId &&
+          candidate.queryType === 'get' &&
+          candidate.readModel === undefined &&
+          returnsAnyLiveRecordById(candidate) &&
+          candidate.selections.some(
+            (selection) => selection.fieldId === fieldId,
+          ),
+      );
+      if (!get) return sentinel;
+      const read = await this.#invokeQuery(
+        get,
+        { recordId: record.recordId },
+        record,
+      );
+      const row =
+        isRecord(read) &&
+        read.outcome === 'exact' &&
+        Array.isArray(read.records)
+          ? read.records.find(
+              (candidate) =>
+                isRecord(candidate) && candidate.recordId === record.recordId,
+            )
+          : undefined;
+      observed =
+        isRecord(row) && isRecord(row.values) ? row.values[fieldId] : undefined;
+      source = `query ${get.queryId} answered ${queryAnswer(read)}`;
+    }
+    if (typeof observed !== 'string' || observed.length === 0) {
+      throw failure(
+        'VERIFICATION_ASSIGNED_VALUE_MISSING',
+        `create ${operation.operationId} did not read back its assigned ${fieldId} (${source})`,
+      );
+    }
+    if (observed !== sentinel) {
+      throw failure(
+        'VERIFICATION_ASSIGNED_VALUE_MISMATCH',
+        `create ${operation.operationId} assigned ${fieldId} ${observed} (${source}), not its verification sentinel ${sentinel}: release verification must not consume real document numbers`,
+      );
+    }
+    return observed;
   }
 
   async #createInput(
@@ -2141,19 +2460,41 @@ class SemanticVerificationExecutor {
   #queryForEntity(
     entityId: string,
     queryType: VerificationQueryContract['queryType'],
+    admits: (query: VerificationQueryContract) => boolean,
   ): VerificationQueryContract {
-    const query = this.#queries.find(
-      (candidate) =>
-        candidate.sourceEntityId === entityId &&
-        candidate.queryType === queryType,
-    );
+    const query = this.#findQueryForEntity(entityId, queryType, admits);
     if (!query) {
       throw failure(
         'VERIFICATION_QUERY_MISSING',
-        `compiled ${queryType} query is missing for ${entityId}`,
+        `compiled ${queryType} query of ${entityId} that ${admits.name} admits is missing`,
       );
     }
     return query;
+  }
+
+  /**
+   * The entity's first plain query of the type that `admits` admits: one the
+   * gateway executes (`gatewayExecutes`) for a probe that reads through the
+   * query's own filter, or a get that returns any live record by id
+   * (`returnsAnyLiveRecordById`) for a read that must find its record.
+   */
+  #findQueryForEntity(
+    entityId: string,
+    queryType: VerificationQueryContract['queryType'],
+    admits: (query: VerificationQueryContract) => boolean,
+  ): VerificationQueryContract | undefined {
+    // Verification's gateway registers no read-model executors, so it reads
+    // its records through the entity's plain query of that type. A read-model
+    // query of the same type, such as an order read with its totals, presents
+    // the same records; it sorts wherever its id falls and is never the read.
+    // Nor is a query `admits` refuses, wherever it sorts.
+    return this.#queries.find(
+      (candidate) =>
+        candidate.sourceEntityId === entityId &&
+        admits(candidate) &&
+        candidate.queryType === queryType &&
+        candidate.readModel === undefined,
+    );
   }
 
   #token(label: string): string {
@@ -2552,6 +2893,45 @@ function hasRecord(value: unknown, recordId: string): boolean {
       (record) => isRecord(record) && record.recordId === recordId,
     )
   );
+}
+
+/**
+ * Whether the query gateway executes this query rather than answering it
+ * `unsupported` without a read, as `SemanticQueryGateway.invoke` decides: the
+ * query is active, and either Q0 with a filter the gateway's execution fence
+ * (`inspectPredicateForExecution`) accepts -- only the literal `true` -- or
+ * Q1 with a compiled filter plan, which the gateway hands to the executor.
+ * The compiler admits any boolean Q0 filter, so a declared Q0 query can carry
+ * `false` and never run; a Q1 plan applies the query's own filter.
+ */
+function gatewayExecutes(query: VerificationQueryContract): boolean {
+  if (query.lifecycle !== 'active') return false;
+  return query.tier === 'q0'
+    ? inspectPredicateForExecution(query.filter).outcome === 'accepted'
+    : Boolean(query.filterPlan);
+}
+
+/**
+ * Whether a get returns any live record by id: the gateway executes it
+ * (`gatewayExecutes`) and its filter is the literal `true`, which the
+ * gateway's execution fence accepts -- a Q0 get, or a Q1 get whose compiled
+ * plan then restricts nothing. Cleanup and the number witness read only
+ * through such gets: any other filter could hide a live record, which cleanup
+ * would take as archived.
+ */
+function returnsAnyLiveRecordById(query: VerificationQueryContract): boolean {
+  return (
+    gatewayExecutes(query) &&
+    inspectPredicateForExecution(query.filter).outcome === 'accepted'
+  );
+}
+
+/** A query result's outcome, with the gateway's reason when it has one. */
+function queryAnswer(result: unknown): string {
+  if (!isRecord(result)) return 'no result';
+  return typeof result.unsupportedReason === 'string'
+    ? `${String(result.outcome)}: ${result.unsupportedReason}`
+    : String(result.outcome);
 }
 
 function verificationActorIssuer(): TrustedActorEnvelopeIssuer {

@@ -95,24 +95,55 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     selectedEntity = legalEntityId,
   ) => {
     const queryRole = role === 'list' ? 'list' : 'get';
+    // The order page reads its totals query (ruling B), so its company is
+    // that query's parameter.
+    const query =
+      local === 'sales_order' && role === 'detail' ? 'commercial_order' : local;
     const parameters = new URLSearchParams({
       surface: `northstar.app:surface.${local}_${role}`,
-      [`northstar.app:parameter.${local}_${queryRole}_legal_entity_scope`]:
+      [`northstar.app:parameter.${query}_${queryRole}_legal_entity_scope`]:
         selectedEntity,
     });
     if (recordId) parameters.set('record', recordId);
     return `${baseUrl}/?${parameters}`;
   };
   const field = async (local: string, name: string, value: string) => {
-    await page
-      .locator(`[name="value:northstar.app:field.${local}_${name}"]`)
-      .fill(value);
+    const control = page.locator(
+      `[name="value:northstar.app:field.${local}_${name}"], [name^="draft:"][name$=":field.${local}_${name}"]`,
+    );
+    const tag = await control.evaluate((element) => element.tagName);
+    if (tag === 'SELECT') await control.selectOption(value);
+    // A draft-editor reference carries its record id in a hidden input; the
+    // server accepts a changed id only after an authorized exact read.
+    else if ((await control.getAttribute('type')) === 'hidden')
+      await control.evaluate((element, id) => {
+        (element as HTMLInputElement).value = id;
+      }, value);
+    // A datetime-local input normalizes ":00" seconds away, so a value typed
+    // to the second at the top of a minute reads back as malformed; the
+    // journey needs the minute, not the second.
+    else
+      await control.fill(
+        (await control.getAttribute('type')) === 'datetime-local'
+          ? value.slice(0, 16)
+          : value,
+      );
   };
   const save = async () => {
-    const id = await page
-      .locator('form#surface-record-form input[name="recordId"]')
-      .inputValue();
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    const editor = page.locator('#draft-editor-form');
+    const id = (await editor.count())
+      ? (await page
+          .locator('[name^="draft:"][name$=":field.sales_order_currency"]')
+          .getAttribute('name'))!.split(':')[1]!
+      : await page
+          .locator('form#surface-record-form input[name="recordId"]')
+          .inputValue();
+    await page
+      .getByRole('button', {
+        name: (await editor.count()) ? 'Save draft' : 'Save',
+        exact: true,
+      })
+      .click();
     return id;
   };
   const snapshot = async () => {
@@ -137,60 +168,85 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   const navigation = page.getByRole('navigation', {
     name: 'Release navigation',
   });
-  const more = navigation
-    .locator('.navigation-tree > li')
-    .getByRole('group')
-    .filter({ hasText: 'More' });
-  await more.getByText('More', { exact: true }).click();
-  const sales = more.getByRole('group').filter({ hasText: 'Sales' });
-  await sales.getByText('Sales', { exact: true }).click();
-  await sales.getByRole('link', { name: 'Sales order', exact: true }).click();
+  // Sales is a group of its orders and invoices; open it, then its orders.
+  await navigation.getByText('Sales', { exact: true }).click();
+  await navigation
+    .getByRole('link', { name: 'Sales orders', exact: true })
+    .click();
   await expect(
-    page.getByRole('heading', { name: 'Sales order', exact: true }),
+    page.getByRole('heading', { name: 'Sales orders', level: 1, exact: true }),
   ).toBeVisible();
 
-  const suffix = randomUUID().slice(0, 8);
+  // The customer carrier is accepted only for a party with an active customer
+  // role (re-checked on every selection route), so the role exists first.
+  await page.goto(
+    `${baseUrl}/?${new URLSearchParams({ surface: 'northstar.app:surface.party_role_form' })}`,
+  );
+  await page
+    .locator('[name="value:northstar.app:field.party_role_kind"]')
+    .selectOption({ label: 'Customer' });
+  await page
+    .locator('[name="value:northstar.app:field.party_role_status"]')
+    .selectOption({ label: 'Active' });
+  await page
+    .locator('[name="relation:northstar.app:relation.party_role_party"]')
+    .selectOption(customerPartyId);
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Create complete');
+
   await page.goto(url('sales_order', 'form'));
-  await field('sales_order', 'number', `SO-${suffix}`);
+  // The order number is assigned by the server on first save.
   await field('sales_order', 'customer_party_id', customerPartyId);
   await field('sales_order', 'order_date', new Date().toISOString());
   await field('sales_order', 'requested_date', new Date().toISOString());
   await field('sales_order', 'currency', 'CAD');
   await field('sales_order', 'notes', 'Initial sales order');
-  const orderId = await save();
-  await expect(page.getByRole('status')).toContainText('Create complete');
-  expect(await snapshot()).toEqual(initialStock);
-
-  await page.goto(url('sales_order_line', 'form'));
-  await field('sales_order_line', 'line_number', '1');
+  // Confirm needs a complete ship-to (ruling E); this customer has no address
+  // book, so the order's own lines are typed. Submitted with the customer, they
+  // are kept rather than reset to the customer's (absent) default.
+  await field('sales_order', 'ship_to_street', '100 Industrial Way');
+  await field('sales_order', 'ship_to_city', 'Calgary');
+  await field('sales_order', 'ship_to_postal_code', 'T2P 0A1');
+  await field('sales_order', 'ship_to_country', 'Canada');
+  // The unit is derived from the selected product's base unit, not entered.
   await field('sales_order_line', 'item_id', itemId);
-  await field('sales_order_line', 'unit_id', 'EA');
   await field('sales_order_line', 'ordered_quantity', '10');
   await field('sales_order_line', 'unit_price', '12.5');
-  await page
-    .locator(
-      'select[name="relation:northstar.app:relation.sales_order_line_order"]',
-    )
-    .selectOption(orderId);
-  const lineId = await save();
-  await expect(page.getByRole('status')).toContainText('Create complete');
+  const orderId = await save();
+  const orderNumber = (
+    await page.locator('.composition-header h1').innerText()
+  ).trim();
+  expect(orderNumber).toMatch(/^SO-\d{6}$/u);
+  const parent = target.relations.find(
+    (value) =>
+      value.relationId === 'northstar.app:relation.sales_order_line_order',
+  )!.relationColumn.physicalName;
+  const savedLines = await pool.query(
+    `SELECT record_id FROM ${receiptTable(salesOrderLine)} WHERE tenant_id=$1 AND environment_id=$2 AND ${q(salesOrderLine.legalEntity!.column)}=$3 AND ${q(parent)}=$4`,
+    [...scopeValues, legalEntityId, orderId],
+  );
+  expect(savedLines.rows).toHaveLength(1);
+  const lineId = String(savedLines.rows[0]!.record_id);
   expect(await snapshot()).toEqual(initialStock);
 
   const orderFormUrl = url('sales_order', 'form', orderId);
   await page.goto(orderFormUrl);
-  await field('sales_order', 'notes', 'Edited while draft');
   const staleUpdate = await formPayload(page);
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Update complete');
+  staleUpdate.draftAction = 'save';
+  await page.goto(orderFormUrl);
+  await field('sales_order', 'notes', 'Edited while draft');
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  // An edit never changes the assigned number.
+  await expect(page.locator('.composition-header h1')).toHaveText(orderNumber);
   expect(await snapshot()).toEqual(initialStock);
 
   staleUpdate.idempotencyKey = randomUUID();
-  staleUpdate[`value:northstar.app:field.sales_order_notes`] =
+  staleUpdate[`draft:${orderId}:northstar.app:field.sales_order_notes`] =
     'Stale revision must not persist';
   const staleResponse = await page.request.post(orderFormUrl, {
     form: staleUpdate,
   });
-  expect(await staleResponse.text()).toContain('MODULE_REVISION_CONFLICT');
+  expect(await staleResponse.text()).toContain('DRAFT_EDITOR_CONFLICT');
 
   await page.goto(orderFormUrl);
   const deniedStateBefore = await businessState();
@@ -203,7 +259,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     [...scopeValues, scope.role_id],
   );
   await field('sales_order', 'notes', 'This denied value must not persist');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(
     page.locator('[data-diagnostic-code="OPERATION_PERMISSION_DENIED"]'),
   ).toHaveCount(1);
@@ -214,20 +270,28 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await page.goto(lineFormUrl);
   const releasedLineAttempt = await formPayload(page);
   await page.goto(url('sales_order', 'detail', orderId));
+  const lineRow = page.locator(
+    `[data-composition-dataset$="dataset.fulfillment_lines"] [data-record-id="${lineId}"]`,
+  );
+  for (const [label, value] of Object.entries({
+    Ordered: '10',
+    Reserved: '0',
+    Shipped: '0',
+    'Open to ship': '10',
+  }))
+    await expect(
+      lineRow.locator(`td[data-column-label="${label}"]`),
+    ).toHaveText(value);
+  await expect(lineRow.locator('[data-cell-role="primary"] strong')).toHaveText(
+    'Field notebook',
+  );
+  await expect(lineRow.locator('td[data-column-label="Line"]')).toHaveText('1');
   await expect(
-    page.locator(`[data-sales-order-line="${lineId}"] td`),
-  ).toHaveText([
-    '1',
-    itemId,
-    '10',
-    '0',
-    '0',
-    '10',
-    'EA',
-    '12.500000000000000000',
-  ]);
-  await page.getByRole('button', { name: 'Release', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Release complete');
+    lineRow.locator('[data-cell-role="primary"] .composition-cell-secondary'),
+  ).toContainText('Unit EA');
+  await page.locator('.composition-record-actions > summary').click();
+  await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Confirm complete');
   expect(await snapshot()).toEqual(initialStock);
 
   releasedLineAttempt.idempotencyKey = randomUUID();
@@ -243,11 +307,13 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     'MODULE_OPERATION_PRECONDITION_REFUSED',
   );
   await page.goto(lineFormUrl);
+  // The stored 10 at scale 18, shown in canonical spelling (REPLENISHMENT):
+  // the form saves the same exact value it shows.
   await expect(
     page.locator(
       '[name="value:northstar.app:field.sales_order_line_ordered_quantity"]',
     ),
-  ).toHaveValue('10.000000000000000000');
+  ).toHaveValue('10');
   expect(await businessState()).toEqual({
     lineQuantity: '10.000000000000000000',
     notes: 'Edited while draft',
@@ -256,6 +322,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   expect(await snapshot()).toEqual(initialStock);
 
   await page.goto(url('sales_order', 'detail', orderId));
+  await page.locator('.composition-record-actions > summary').click();
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page
     .getByRole('button', { name: 'Confirm Cancel', exact: true })
@@ -279,7 +346,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   const foreignEntity = randomUUID();
   await page.goto(url('sales_order', 'list', undefined, foreignEntity));
   await expect(
-    page.locator('[data-diagnostic-code="QUERY_PERMISSION_DENIED"]'),
+    page.locator('[data-diagnostic-code="WORKSPACE_COMPANY_UNAVAILABLE"]'),
   ).toHaveCount(1);
   expect(await businessState()).toEqual({
     lineQuantity: '10.000000000000000000',
@@ -321,7 +388,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
 async function formPayload(page: Page): Promise<Record<string, string>> {
   return Object.fromEntries(
     await page
-      .locator('form#surface-record-form')
+      .locator('form#surface-record-form, form#draft-editor-form')
       .evaluate((form) =>
         [...new FormData(form as HTMLFormElement).entries()].map(
           ([key, value]) => [key, String(value)],

@@ -1,3 +1,13 @@
+import { VALUATION_CAPABILITY_ID } from '../../domain/src/inventory/valuation.js';
+import {
+  inventoryValuationReadModel,
+  commercialReadModelWithInventoryCost,
+} from './inventory-valuation-read-model.js';
+import { FULFILLMENT_CAPABILITY_ID } from './fulfillment.js';
+import { COMMERCIAL_CAPABILITY_ID } from '../../domain/src/sales/definition.js';
+import { fulfillmentReadModel } from './fulfillment-read-model.js';
+import { receivingReadModel } from './receiving-read-model.js';
+import { RECEIVING_CAPABILITY_ID } from './goods-receipt.js';
 import { createHash, randomUUID } from 'node:crypto';
 
 import {
@@ -84,6 +94,7 @@ import {
   type CurrentPolicyPermissionBinding,
 } from './current-policy.js';
 import { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
+import { localDemoActor } from '../../runtime/src/local-demo-actor.js';
 
 const compiledApplicationVersion =
   'northstar.web:compiled-application-release/v1' as const;
@@ -164,6 +175,8 @@ export interface ComposedApplicationRuntime {
   readonly freshTenantInstallEvidence: FreshTenantInstallEvidence | null;
   readonly identity: AuthenticatedIdentity;
   readonly identityMode: 'FAIL_CLOSED' | 'LOCAL_DEMO' | 'VERIFIED_EXTERNAL';
+  readonly localDemoActors:
+    readonly { key: 'buyer' | 'manager'; label: string }[] | null;
   /** Registered-query ladder evidence for this runtime; see ADR-0032 §2. */
   readonly metrics: ObservabilityMetrics;
   readonly operationGateway: SemanticOperationGateway;
@@ -209,6 +222,7 @@ interface PersistedReleaseIdentity {
 }
 
 interface ScopeIdentities {
+  readonly manager: AuthenticatedIdentity;
   readonly approver: AuthenticatedIdentity;
   readonly authorityOperatorId: string;
   readonly runtime: AuthenticatedIdentity;
@@ -642,7 +656,21 @@ export async function createComposedApplicationRuntime(
       await provisionLocalDemoAuthorization(
         adminPool,
         identities.runtime,
+        applicationPolicyBindings.filter(
+          (binding) =>
+            !binding.permissionId.endsWith(
+              ':permission.purchase_order_approve',
+            ) &&
+            !/:permission\.purchasing_settings_(?:create|update|archive|restore)$/u.test(
+              binding.permissionId,
+            ),
+        ),
+      );
+      await provisionLocalDemoAuthorization(
+        adminPool,
+        identities.manager,
         applicationPolicyBindings,
+        'local-demo-manager',
       );
     }
     const policy = new PostgresCurrentPolicyGateway(
@@ -669,6 +697,13 @@ export async function createComposedApplicationRuntime(
         options.monotonicMilliseconds,
       ),
       new PostgresSemanticQueryDenialRecorder(runtimePool, actorIssuer),
+      {
+        [FULFILLMENT_CAPABILITY_ID]: fulfillmentReadModel,
+        [COMMERCIAL_CAPABILITY_ID]: commercialReadModelWithInventoryCost,
+        [VALUATION_CAPABILITY_ID]: inventoryValuationReadModel,
+        // A receipt's lines with what each can still reverse (ORDER-PARITY).
+        [RECEIVING_CAPABILITY_ID]: receivingReadModel,
+      },
     );
     const capabilityExecutors = createRegisteredCapabilityExecutors(
       options.capabilityOperationExecutorFactories ?? [],
@@ -700,7 +735,10 @@ export async function createComposedApplicationRuntime(
     const entry = new AuthenticatedRequestRuntimeEntryAdapter(
       new AuthenticatedRequestEntryAdapter(
         options.localDemoIdentity
-          ? async () => identities.runtime
+          ? async (request) =>
+              localDemoActor(request.headers?.cookie) === 'manager'
+                ? identities.manager
+                : identities.runtime
           : (options.authenticateRequest ?? (async () => null)),
       ),
       new PostgresRequestRuntimeViewService(runtimePool),
@@ -719,6 +757,12 @@ export async function createComposedApplicationRuntime(
       entry,
       freshTenantInstallEvidence,
       identity: identities.runtime,
+      localDemoActors: options.localDemoIdentity
+        ? Object.freeze([
+            { key: 'buyer' as const, label: 'Buyer' },
+            { key: 'manager' as const, label: 'Manager' },
+          ])
+        : null,
       identityMode: options.localDemoIdentity
         ? ('LOCAL_DEMO' as const)
         : options.authenticateRequest
@@ -1034,6 +1078,11 @@ async function ensureScope(
     }),
     authorityOperatorId: stableUuid(`${tenantId}:authority-operator`),
     runtime: Object.freeze({ environmentId, principalId, tenantId }),
+    manager: Object.freeze({
+      environmentId,
+      principalId: stableUuid(`${tenantId}:local-manager`),
+      tenantId,
+    }),
     system: Object.freeze({
       environmentId,
       principalId: SYSTEM_EXECUTION_PRINCIPAL.principalId,
@@ -1046,9 +1095,10 @@ async function provisionLocalDemoAuthorization(
   pool: pg.Pool,
   identity: AuthenticatedIdentity,
   applicationBindings: readonly CurrentPolicyPermissionBinding[],
+  roleKey = 'local-demo-full-release',
 ): Promise<void> {
   const roleId = stableUuid(
-    `${identity.tenantId}:${identity.environmentId}:local-demo-role`,
+    `${identity.tenantId}:${identity.environmentId}:${roleKey === 'local-demo-full-release' ? 'local-demo-role' : roleKey}`,
   );
   const membershipId = stableUuid(
     `${identity.tenantId}:${identity.environmentId}:${identity.principalId}:local-demo-membership`,
@@ -1059,10 +1109,10 @@ async function provisionLocalDemoAuthorization(
     await client.query(
       `INSERT INTO platform.current_policy_roles (
          tenant_id, environment_id, role_id, role_key, revoked_at
-       ) VALUES ($1,$2,$3,'local-demo-full-release',NULL)
+       ) VALUES ($1,$2,$3,$4,NULL)
        ON CONFLICT (tenant_id, environment_id, role_id)
        DO UPDATE SET role_key = EXCLUDED.role_key, revoked_at = NULL`,
-      [identity.tenantId, identity.environmentId, roleId],
+      [identity.tenantId, identity.environmentId, roleId, roleKey],
     );
     for (const binding of [
       ...CURRENT_POLICY_RUNTIME_BINDINGS,

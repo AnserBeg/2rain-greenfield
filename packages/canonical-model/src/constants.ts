@@ -9,6 +9,7 @@ export const LANGUAGE_VERSIONS = Object.freeze({
   v3: 'v3',
   v4: 'v4',
   v5: 'v5',
+  v6: 'v6',
 } as const);
 
 export const LEGACY_LANGUAGE_VERSION = LANGUAGE_VERSIONS.experimentalV0;
@@ -17,7 +18,7 @@ export const PREVIOUS_LANGUAGE_VERSION = LANGUAGE_VERSIONS.v1;
 // this name is stable and does not mean "latest supported".
 export const LANGUAGE_VERSION = LANGUAGE_VERSIONS.v2;
 /** The newest readable version. Readable is not the same as adopted. */
-export const LATEST_LANGUAGE_VERSION = LANGUAGE_VERSIONS.v5;
+export const LATEST_LANGUAGE_VERSION = LANGUAGE_VERSIONS.v6;
 /**
  * The version the default compiler profile selects. Moved to v5 by
  * `LANG-ADOPT-v5`, and to v4 by `LANG-ADOPT` before it: adoption is an
@@ -38,7 +39,7 @@ export const LATEST_LANGUAGE_VERSION = LANGUAGE_VERSIONS.v5;
  * looks done and is not; moving them without this constant reds the
  * composed-package assertion in `canonical-contracts-purity`.
  */
-export const ADOPTED_LANGUAGE_VERSION = LANGUAGE_VERSIONS.v5;
+export const ADOPTED_LANGUAGE_VERSION = LANGUAGE_VERSIONS.v6;
 export const SUPPORTED_LANGUAGE_VERSIONS = Object.freeze([
   LEGACY_LANGUAGE_VERSION,
   PREVIOUS_LANGUAGE_VERSION,
@@ -46,6 +47,7 @@ export const SUPPORTED_LANGUAGE_VERSIONS = Object.freeze([
   LANGUAGE_VERSIONS.v3,
   LANGUAGE_VERSIONS.v4,
   LANGUAGE_VERSIONS.v5,
+  LANGUAGE_VERSIONS.v6,
 ] as const);
 export type CanonicalLanguageVersion =
   (typeof SUPPORTED_LANGUAGE_VERSIONS)[number];
@@ -58,6 +60,7 @@ export const NORMALIZATION_PROFILE_VERSIONS = Object.freeze({
   v3: 'northstar.normalization/v3',
   v4: 'northstar.normalization/v4',
   v5: 'northstar.normalization/v5',
+  v6: 'northstar.normalization/v6',
 } as const);
 
 export const LEGACY_NORMALIZATION_PROFILE_VERSION =
@@ -67,10 +70,10 @@ export const PREVIOUS_NORMALIZATION_PROFILE_VERSION =
 // Compatibility authority paired with LANGUAGE_VERSION; not the latest reader.
 export const NORMALIZATION_PROFILE_VERSION = NORMALIZATION_PROFILE_VERSIONS.v2;
 export const LATEST_NORMALIZATION_PROFILE_VERSION =
-  NORMALIZATION_PROFILE_VERSIONS.v5;
+  NORMALIZATION_PROFILE_VERSIONS.v6;
 /** Paired with ADOPTED_LANGUAGE_VERSION; see that constant. */
 export const ADOPTED_NORMALIZATION_PROFILE_VERSION =
-  NORMALIZATION_PROFILE_VERSIONS.v5;
+  NORMALIZATION_PROFILE_VERSIONS.v6;
 export const SUPPORTED_NORMALIZATION_PROFILE_VERSIONS = Object.freeze([
   LEGACY_NORMALIZATION_PROFILE_VERSION,
   PREVIOUS_NORMALIZATION_PROFILE_VERSION,
@@ -78,12 +81,14 @@ export const SUPPORTED_NORMALIZATION_PROFILE_VERSIONS = Object.freeze([
   NORMALIZATION_PROFILE_VERSIONS.v3,
   NORMALIZATION_PROFILE_VERSIONS.v4,
   NORMALIZATION_PROFILE_VERSIONS.v5,
+  NORMALIZATION_PROFILE_VERSIONS.v6,
 ] as const);
 export type CanonicalNormalizationProfileVersion =
   (typeof SUPPORTED_NORMALIZATION_PROFILE_VERSIONS)[number];
 
 export interface CanonicalLanguageProfile {
-  readonly featureLevel: 'v0-experimental' | 'v1' | 'v2' | 'v3' | 'v4' | 'v5';
+  readonly featureLevel:
+    'v0-experimental' | 'v1' | 'v2' | 'v3' | 'v4' | 'v5' | 'v6';
   readonly normalizationProfileVersion: CanonicalNormalizationProfileVersion;
 }
 
@@ -119,6 +124,10 @@ export const CANONICAL_LANGUAGE_PROFILES: Readonly<
     featureLevel: 'v5',
     normalizationProfileVersion: NORMALIZATION_PROFILE_VERSIONS.v5,
   }),
+  [LANGUAGE_VERSIONS.v6]: Object.freeze({
+    featureLevel: 'v6',
+    normalizationProfileVersion: NORMALIZATION_PROFILE_VERSIONS.v6,
+  }),
 });
 
 /**
@@ -128,21 +137,26 @@ export const CANONICAL_LANGUAGE_PROFILES: Readonly<
  */
 export function languageHasV3Features(
   languageVersion: CanonicalLanguageVersion,
-): languageVersion is 'v3' | 'v4' | 'v5' {
+): languageVersion is 'v3' | 'v4' | 'v5' | 'v6' {
   const featureLevel =
     CANONICAL_LANGUAGE_PROFILES[languageVersion].featureLevel;
   return (
-    featureLevel === 'v3' || featureLevel === 'v4' || featureLevel === 'v5'
+    featureLevel === 'v3' ||
+    featureLevel === 'v4' ||
+    featureLevel === 'v5' ||
+    featureLevel === 'v6'
   );
 }
 
 /** v4 admits the legal-entity query operand; no earlier version does. */
 export function languageHasLegalEntityQueryScope(
   languageVersion: CanonicalLanguageVersion,
-): languageVersion is 'v4' | 'v5' {
+): languageVersion is 'v4' | 'v5' | 'v6' {
   const featureLevel =
     CANONICAL_LANGUAGE_PROFILES[languageVersion].featureLevel;
-  return featureLevel === 'v4' || featureLevel === 'v5';
+  return (
+    featureLevel === 'v4' || featureLevel === 'v5' || featureLevel === 'v6'
+  );
 }
 
 /**
@@ -159,7 +173,7 @@ export function languageHasLegalEntityQueryScope(
  * output before and after this change, which is why every recorded release root
  * still reproduces.
  *
- * CUMULATIVE, and it was not. This tested `featureLevel === 'v5'` exactly while
+ * CUMULATIVE, and it was not. This tested `featureLevel === 'v5' || featureLevel === 'v6'` exactly while
  * its own comment claimed a v6 cut could not drop the rule -- which was false,
  * and is the sixth instance of this packet's named finding: a version written by
  * hand where it was derivable.

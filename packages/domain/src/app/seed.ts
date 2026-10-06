@@ -24,6 +24,8 @@ export interface ComposedApplicationSeedRecord {
   readonly operationId: string;
   readonly recordId: string;
   readonly values: Readonly<Record<string, string>>;
+  /** Relation inputs by relation id, for records that belong to another. */
+  readonly relations?: Readonly<Record<string, string>>;
 }
 
 export type ComposedApplicationSeedProfile = 'demo' | 'distributor';
@@ -115,6 +117,77 @@ const distributorParties = [
   ['Beaumont Municipal Works', 'Customer · works@beaumontmuni.example'],
   ['Chestermere Dental Group', 'Customer · admin@chestermeredental.example'],
 ] as const;
+
+/**
+ * Salespeople for the distributor profile (owner ruling E): parties holding
+ * an active salesperson role, assigned to customers as their default.
+ */
+const distributorSalespeople = [
+  ['SP-01', 'Avery Chen', 'Salesperson · avery@rain-distribution.example'],
+  ['SP-02', 'Jordan Blake', 'Salesperson · jordan@rain-distribution.example'],
+  ['SP-03', 'Priya Natarajan', 'Salesperson · priya@rain-distribution.example'],
+] as const;
+
+/**
+ * Sales tax codes for the distributor profile (owner ruling B): a code's rate
+ * never changes, so a new rate is a new code.
+ */
+const distributorTaxCodes = [
+  ['GST', 'GST 5%', '5'],
+  ['GST-PST-BC', 'GST 5% + BC PST 7%', '12'],
+  ['HST-ON', 'Ontario HST 13%', '13'],
+  ['EXEMPT', 'Tax exempt', '0'],
+] as const;
+const taxCodeId = (index: number) => record(8001 + index, '', {}).recordId;
+/** A customer's default tax code follows its delivery province. */
+const provinceTaxCode: Readonly<Record<string, number>> = { AB: 0, BC: 1 };
+
+/**
+ * An exact price in cents as a canonical decimal string (no trailing zeros,
+ * as exact-decimal fields require): 550 -> `5.5`, 595 -> `5.95`, 500 -> `5`.
+ */
+const price = (cents: number) => {
+  const whole = String(Math.floor(cents / 100));
+  const fraction = String(cents % 100)
+    .padStart(2, '0')
+    .replace(/0+$/u, '');
+  return fraction ? `${whole}.${fraction}` : whole;
+};
+
+/**
+ * Each customer's one ship-to address, keyed by name: city, province, postal
+ * code. Invented delivery addresses in the customers' own towns.
+ */
+const customerAddresses: Readonly<
+  Record<string, readonly [string, string, string]>
+> = {
+  'Lethbridge Millwork': ['Lethbridge', 'AB', 'T1J 0A1'],
+  'Grande Cache Mining Services': ['Grande Cache', 'AB', 'T0E 0Y0'],
+  'Airdrie Auto Group': ['Airdrie', 'AB', 'T4B 0A1'],
+  'Sherwood Park Facilities': ['Sherwood Park', 'AB', 'T8A 0A1'],
+  'Canmore Hospitality Group': ['Canmore', 'AB', 'T1W 0A1'],
+  'Red Deer Fabrication': ['Red Deer', 'AB', 'T4N 0A1'],
+  'Medicine Hat Greenhouses': ['Medicine Hat', 'AB', 'T1A 0A1'],
+  'Fort Saskatchewan Utilities': ['Fort Saskatchewan', 'AB', 'T8L 0A1'],
+  'Kelowna Property Care': ['Kelowna', 'BC', 'V1Y 0A1'],
+  'Nanaimo Marine Works': ['Nanaimo', 'BC', 'V9R 0A1'],
+  'Whitecourt Forestry': ['Whitecourt', 'AB', 'T7S 0A1'],
+  'Brooks Food Processing': ['Brooks', 'AB', 'T1R 0A1'],
+  'Camrose School Division': ['Camrose', 'AB', 'T4V 0A1'],
+  'Drumheller Tourism Board': ['Drumheller', 'AB', 'T0J 0Y0'],
+  'Hinton Pulp Services': ['Hinton', 'AB', 'T7V 0A1'],
+  'Leduc Aviation Support': ['Leduc', 'AB', 'T9E 0A1'],
+  'Cochrane Ranch Supply': ['Cochrane', 'AB', 'T4C 0A1'],
+  'Vernon Cold Storage': ['Vernon', 'BC', 'V1T 0A1'],
+  'Squamish Adventure Rentals': ['Squamish', 'BC', 'V8B 0A1'],
+  'Yellowhead Transport': ['Edson', 'AB', 'T7E 0A1'],
+  'Strathmore Irrigation': ['Strathmore', 'AB', 'T1P 0A1'],
+  'Ponoka Livestock Equipment': ['Ponoka', 'AB', 'T4J 0A1'],
+  'Revelstoke Ski Operations': ['Revelstoke', 'BC', 'V0E 2S0'],
+  'Slave Lake Contracting': ['Slave Lake', 'AB', 'T0G 2A0'],
+  'Beaumont Municipal Works': ['Beaumont', 'AB', 'T4X 0A1'],
+  'Chestermere Dental Group': ['Chestermere', 'AB', 'T1X 0A1'],
+};
 
 /**
  * Item families expanded into variants. Authoring families rather than 136
@@ -415,6 +488,18 @@ export function composedApplicationSeed(
   ];
   if (profile === 'demo') return Object.freeze(records);
 
+  const terms = APPLICATION_IDS.party.paymentTermOptionIds;
+  const currencies = APPLICATION_IDS.party.currencyOptionIds;
+  const termCycle = [
+    terms.net30,
+    terms.net15,
+    terms.dueOnReceipt,
+    terms.net45,
+    terms.net60,
+  ];
+  const salespersonId = (index: number) =>
+    record(7001 + (index % distributorSalespeople.length), '', {}).recordId;
+  const addressId = (index: number) => record(6001 + index, '', {}).recordId;
   records.push(
     ...distributorParties.map(([name, contactSummary], index) =>
       partyRecord(
@@ -422,14 +507,106 @@ export function composedApplicationSeed(
         `P-${String(2001 + index)}`,
         name,
         contactSummary,
+        // A customer carries the defaults its orders start from (ruling E).
+        contactSummary.startsWith('Customer')
+          ? {
+              [APPLICATION_IDS.party.fieldIds.defaultCurrency]:
+                index % 5 === 4 ? currencies.usd : currencies.cad,
+              [APPLICATION_IDS.party.fieldIds.paymentTerms]:
+                termCycle[index % termCycle.length]!,
+              [APPLICATION_IDS.party.fieldIds.defaultSalespersonPartyId]:
+                salespersonId(index),
+              [APPLICATION_IDS.party.fieldIds.defaultShipToAddressId]:
+                addressId(index),
+              [APPLICATION_IDS.party.fieldIds.defaultTaxCodeId]: taxCodeId(
+                provinceTaxCode[customerAddresses[name]?.[1] ?? 'AB'] ?? 0,
+              ),
+            }
+          : {},
       ),
+    ),
+    ...distributorSalespeople.map(([number, name, contactSummary], index) =>
+      partyRecord(7001 + index, number, name, contactSummary),
+    ),
+    ...distributorTaxCodes.map(([code, name, ratePercent], index) =>
+      record(8001 + index, APPLICATION_IDS.taxCode.createOperationId, {
+        [APPLICATION_IDS.taxCode.fieldIds.code]: code,
+        [APPLICATION_IDS.taxCode.fieldIds.name]: name,
+        [APPLICATION_IDS.taxCode.fieldIds.ratePercent]: ratePercent,
+      }),
     ),
     ...distributorItems(),
     ...distributorLocations.map(([code, name, locationType], index) =>
       locationRecord(3001 + index, code, name, locationType),
     ),
+    // Each trading partner holds the active role its description states, so
+    // customer and vendor pickers offer exactly the parties they should.
+    ...distributorParties.map(([, contactSummary], index) =>
+      partyRoleRecord(
+        5001 + index,
+        record(1001 + index, '', {}).recordId,
+        contactSummary.startsWith('Supplier') ? 'supplier' : 'customer',
+      ),
+    ),
+    ...distributorSalespeople.map((_, index) =>
+      partyRoleRecord(
+        7101 + index,
+        record(7001 + index, '', {}).recordId,
+        'salesperson',
+      ),
+    ),
+    ...distributorParties.flatMap(([name], index) => {
+      const place = customerAddresses[name];
+      return place
+        ? [
+            addressRecord(
+              6001 + index,
+              record(1001 + index, '', {}).recordId,
+              name,
+              place,
+            ),
+          ]
+        : [];
+    }),
   );
   return Object.freeze(records);
+}
+
+function addressRecord(
+  ordinal: number,
+  partyRecordId: string,
+  name: string,
+  [city, region, postalCode]: readonly [string, string, string],
+): ComposedApplicationSeedRecord {
+  const address = APPLICATION_IDS.party.address;
+  return Object.freeze({
+    ...record(ordinal, address.createOperationId, {
+      [address.fieldIds.label]: 'Main delivery',
+      [address.fieldIds.recipient]: `${name} receiving`,
+      [address.fieldIds.street]:
+        `${String(100 + (ordinal % 900))} Industrial Way`,
+      [address.fieldIds.city]: city,
+      [address.fieldIds.region]: region,
+      [address.fieldIds.postalCode]: postalCode,
+      [address.fieldIds.country]: 'Canada',
+    }),
+    relations: Object.freeze({ [address.partyRelationId]: partyRecordId }),
+  });
+}
+
+function partyRoleRecord(
+  ordinal: number,
+  partyRecordId: string,
+  kind: 'customer' | 'salesperson' | 'supplier',
+): ComposedApplicationSeedRecord {
+  const role = APPLICATION_IDS.party.role;
+  return Object.freeze({
+    ...record(ordinal, role.createOperationId, {
+      [role.fieldIds.kind]: role.optionIds[kind],
+      [role.fieldIds.status]: role.optionIds.active,
+    }),
+    relations: Object.freeze({ [role.partyRelationId]: partyRecordId }),
+  });
 }
 
 function distributorItems(): readonly ComposedApplicationSeedRecord[] {
@@ -444,6 +621,7 @@ function distributorItems(): readonly ComposedApplicationSeedRecord[] {
           `${family.name} — ${variant}`,
           family.descriptionOf(variant),
           family.baseUnit,
+          sellingPrices(ordinal),
         ),
       );
       ordinal += 1;
@@ -457,11 +635,13 @@ function partyRecord(
   number: string,
   name: string,
   contactSummary: string,
+  defaults: Readonly<Record<string, string>> = {},
 ): ComposedApplicationSeedRecord {
   return record(ordinal, APPLICATION_IDS.party.createOperationId, {
     [APPLICATION_IDS.party.fieldIds.contactSummary]: contactSummary,
     [APPLICATION_IDS.party.fieldIds.name]: name,
     [APPLICATION_IDS.party.fieldIds.number]: number,
+    ...defaults,
   });
 }
 
@@ -471,13 +651,29 @@ function itemRecord(
   name: string,
   description: string,
   baseUnit: string,
+  prices: Readonly<Record<string, string>> = {},
 ): ComposedApplicationSeedRecord {
   return record(ordinal, APPLICATION_IDS.catalog.createOperationId, {
     [APPLICATION_IDS.catalog.fieldIds.baseUnit]: baseUnit,
     [APPLICATION_IDS.catalog.fieldIds.description]: description,
     [APPLICATION_IDS.catalog.fieldIds.name]: name,
     [APPLICATION_IDS.catalog.fieldIds.sku]: sku,
+    ...prices,
   });
+}
+
+/**
+ * A distributor item's selling price in each order currency (ruling B):
+ * a deterministic CAD list, with USD and EUR list prices beside it.
+ */
+function sellingPrices(ordinal: number): Readonly<Record<string, string>> {
+  const cad = (5 + (ordinal % 45)) * 100 + (ordinal % 2 === 0 ? 50 : 95);
+  const catalog = APPLICATION_IDS.catalog.fieldIds;
+  return {
+    [catalog.priceCad]: price(cad),
+    [catalog.priceUsd]: price(Math.round((cad * 74) / 100)),
+    [catalog.priceEur]: price(Math.round((cad * 68) / 100)),
+  };
 }
 
 function locationRecord(

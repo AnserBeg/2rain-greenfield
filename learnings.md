@@ -717,3 +717,43 @@ How to apply: scope derived-section refresh to the receiving commands that need 
 Date: 2026-09-05
 Why: the real receiving gateway's unchanged retry conflicted after grant restoration because the version-5 digest includes the policy revision.
 How to apply: authorize every retry against current policy, but reconstruct a historical digest using its immutable recorded authorization evidence; never rewrite its business input or persisted digest. Exercise revocation, restoration and same-key retry together. See `docs/execution/packets/RECEIPT.md`.
+
+## Refresh protected task displays independently of retry state
+Date: 2026-09-15
+Why: RAIN-META-SALES P1 reproduced cached root/child disclosure after read revocation, including a committed-withheld response.
+How to apply: reload actual display dependencies through governed reads; redact the complete response on failure while preserving committed status, receipts and frozen execution state. See [P1/P2 correction](docs/execution/packets/RAIN-META-SALES.md).
+
+## Bind confirmation to the exact prepared generation
+Date: 2026-09-15
+Why: RAIN-META-SALES P2 reproduced an old review form dispatching replacement inputs from the same task session.
+How to apply: bind an immutable normalized preparation to a server-issued identity, reject stale confirmation before dispatch, and use deterministic barriers to prove delayed validation cannot overwrite newer or confirmed state. See [P1/P2 correction](docs/execution/packets/RAIN-META-SALES.md).
+
+## Retain plain entity reads beside derived document queries
+Date: 2026-10-04
+Why: VALUATION slice-two CI refused release admission after shipment and invoice gets gained read models; verification deliberately executes plain queries only.
+How to apply: preserve the original plain get identity for every costed entity and its declared probes; use a separate derived display query and assert both in the compiled artifact in the metadata contract. See [VALUATION](docs/execution/packets/VALUATION.md).
+
+## Derive source-shape fixtures from retained kernel facts
+Date: 2026-10-04
+Why: VALUATION's transfer fixture used identical source lines, while the kernel retains distinct `:in`/`:out` lines; legitimate transfer history would be refused.
+How to apply: match the stored source shape in replay tests and require the signed pair. See [VALUATION](docs/execution/packets/VALUATION-design.md).
+
+## Classify tests by what they launch, not their directory
+Date: 2026-09-30
+Why: APPROVALS ran dependency-boundary tests directly beside a locked schema replay; the file's PostgreSQL leak/cleanup controls briefly created additional Docker containers before cleaning them up.
+How to apply: run `test/architecture/dependency-boundaries.test.ts` under the exclusive test lock, just like PostgreSQL and browser suites; inspect a focused suite's subprocesses before treating it as container-free. See [APPROVALS](docs/execution/packets/APPROVALS.md).
+
+## Exercise declared Task inputs through the semantic gateway
+Date: 2026-09-30
+Why: APPROVALS rendered Place order correctly, but its scalar argument binding was refused by the compiled closed input contract; a gateway round trip reproduced the browser failure without PostgreSQL.
+How to apply: accompany new Task bindings with a compiled-surface prepare/confirm test using the real semantic gateway, including blank optional inputs; assert the admitted input and completion. See [APPROVALS](docs/execution/packets/APPROVALS.md).
+
+## Finish release generation before starting release consumers
+Date: 2026-10-01
+Why: an APPROVALS browser fixture started while the lineage was being rebuilt and pinned PAYABLES root `0f7ed4e6`, which lacks the approval setting operation, rather than the completed APPROVALS head.
+How to apply: serialize the complete base-envelope rebuild and its checks before launching fixtures, PostgreSQL tests or browser tests; a run that consumed an intermediate generated artifact is not acceptance evidence. See [APPROVALS](docs/execution/packets/APPROVALS.md).
+
+## Exercise denied-role Task offers as well as denied effects
+Date: 2026-10-04
+Why: APPROVALS' PostgreSQL test refused Buyer approval correctly, while the browser still showed Buyer an Approve button because shared Tasks checked record conditions but not current permission.
+How to apply: test permitted, denied and unavailable-policy Task offers through the shared runtime; keep previews advisory and test that execution still requires its own confirmation and current authorization. See [APPROVALS](docs/execution/packets/APPROVALS.md).

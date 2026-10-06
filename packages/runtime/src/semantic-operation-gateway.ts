@@ -69,6 +69,8 @@ interface RegisteredOperationDefinitionBase {
     readonly recordIdentity: 'canonicalUuid';
   };
   readonly inputContract?: RegisteredOperationInputContract;
+  /** Declared command words; presentation only. */
+  readonly label?: string;
   readonly lifecycle: 'active' | 'retired';
   readonly operationId: string;
   readonly permissionId: string;
@@ -191,7 +193,20 @@ export interface RegisteredOperationInputContract {
     | 'northstar.module-input-contract/v3'
     | 'northstar.module-input-contract/v4';
   readonly systemInput?: RegisteredOperationSystemInput;
+  /** Fields a create assigns on the server; none of them is an input. */
+  readonly assignedFields?: readonly RegisteredOperationAssignedField[];
   readonly writableFieldIds: readonly string[];
+}
+
+/** One server-assigned document number: `PREFIX-` plus the sequence's next value. */
+export interface RegisteredOperationAssignedField {
+  readonly classification: 'INTERNAL' | 'PUBLIC';
+  readonly fieldId: string;
+  readonly kind: 'documentSequence';
+  readonly minimumDigits: number;
+  readonly prefix: string;
+  readonly sequenceId: string;
+  readonly start: number;
 }
 
 export interface RegisteredOperationSystemInput {
@@ -633,6 +648,82 @@ export class SemanticOperationGateway {
       registrations.set(executor.capabilityId, executor);
     }
     this.#capabilityExecutors = registrations;
+  }
+
+  /**
+   * Whether current policy would let this principal START each named
+   * operation, asked without executing anything: no input is parsed, no record
+   * is read or written, no evidence is recorded and no grant is minted. The
+   * boundary and per-operation permissions `invoke` checks are evaluated
+   * against an eligibility-only decision input that carries the company scope,
+   * if any. `eligible` is not authority -- `invoke` decides again against the
+   * submitted input, so a later revocation is still refused there. A missing,
+   * retired or confirmation-gated operation is `ineligible`; a policy failure
+   * throws, and a caller must then withhold the claim rather than assume.
+   */
+  async previewEligibility(
+    view: IssuedRequestRuntimeView,
+    operationIds: readonly string[],
+    legalEntityId: string | null,
+  ): Promise<'eligible' | 'ineligible'> {
+    return this.#previewEligibility(view, operationIds, legalEntityId, false);
+  }
+
+  /**
+   * Advisory permission preview for a declared Task, whose own review/confirm
+   * flow may require human confirmation. This grants no invocation authority:
+   * invoke still requires its exact server-issued grant and current policy.
+   * Missing/retired operations and an empty Task remain ineligible.
+   */
+  async previewTaskEligibility(
+    view: IssuedRequestRuntimeView,
+    operationIds: readonly string[],
+    legalEntityId: string | null,
+  ): Promise<'eligible' | 'ineligible'> {
+    assertRequestRuntimeView(view);
+    if (operationIds.length === 0) return 'ineligible';
+    return this.#previewEligibility(view, operationIds, legalEntityId, true);
+  }
+
+  async #previewEligibility(
+    view: IssuedRequestRuntimeView,
+    operationIds: readonly string[],
+    legalEntityId: string | null,
+    taskWillConfirm: boolean,
+  ): Promise<'eligible' | 'ineligible'> {
+    assertRequestRuntimeView(view);
+    const catalog = readPinnedOperationCatalog(view);
+    const allows = async (permissionId: string, operationId: string) =>
+      (
+        await authorizeCurrentPolicy(
+          this.currentPolicy,
+          view,
+          permissionId,
+          Object.freeze({
+            input: Object.freeze(
+              legalEntityId === null ? {} : { legalEntityId },
+            ),
+            kind: 'semanticOperationEligibilityPolicyInput',
+            operationId,
+            requestId: view.requestId,
+            schemaVersion: OPERATION_POLICY_INPUT_VERSION,
+          }),
+        )
+      ).decision === 'ALLOW';
+    for (const operationId of operationIds) {
+      const definition = catalog.find(
+        (candidate) => candidate.operationId === operationId,
+      );
+      if (
+        !definition ||
+        definition.lifecycle !== 'active' ||
+        (!taskWillConfirm && definition.confirmation === 'humanRequired') ||
+        !(await allows(OPERATION_BOUNDARY_PERMISSION_ID, operationId)) ||
+        !(await allows(definition.permissionId, operationId))
+      )
+        return 'ineligible';
+    }
+    return 'eligible';
   }
 
   async invoke(
@@ -1225,15 +1316,24 @@ export function assertPinnedOperationDefinition(
   ];
   const hasInfrastructure = Object.hasOwn(value, 'infrastructure');
   const hasInputContract = Object.hasOwn(value, 'inputContract');
+  const hasLabel = Object.hasOwn(value, 'label');
   assertExactKeys(
     value,
     [
       ...expectedKeys,
       ...(hasInfrastructure ? ['infrastructure'] : []),
       ...(hasInputContract ? ['inputContract'] : []),
+      ...(hasLabel ? ['label'] : []),
     ],
     invalid,
   );
+  if (
+    hasLabel &&
+    (typeof value.label !== 'string' ||
+      value.label.trim().length === 0 ||
+      value.label.length > 240)
+  )
+    throw invalid('pinned operation label must be a bounded non-blank string');
   assertCanonicalId(value.operationId, 'operationId', invalid);
   assertCanonicalId(value.permissionId, 'permissionId', invalid);
   assertCanonicalId(value.readBackQueryId, 'readBackQueryId', invalid);
@@ -1583,9 +1683,11 @@ function assertOperationInputContract(
     throw invalid('pinned operation input contract must be an object');
   }
   const hasSystemInput = Object.hasOwn(value, 'systemInput');
+  const hasAssignedFields = Object.hasOwn(value, 'assignedFields');
   assertExactKeys(
     value,
     [
+      ...(hasAssignedFields ? ['assignedFields'] : []),
       'closedArgumentKeys',
       'fields',
       'relationInputs',
@@ -1595,6 +1697,43 @@ function assertOperationInputContract(
     ],
     invalid,
   );
+  if (hasAssignedFields) {
+    const assigned = value.assignedFields;
+    if (!Array.isArray(assigned) || assigned.length === 0)
+      throw invalid('pinned assigned fields must be a non-empty array');
+    for (const entry of assigned) {
+      if (!isRecord(entry))
+        throw invalid('pinned assigned field must be an object');
+      assertExactKeys(
+        entry,
+        [
+          'classification',
+          'fieldId',
+          'kind',
+          'minimumDigits',
+          'prefix',
+          'sequenceId',
+          'start',
+        ],
+        invalid,
+      );
+      if (
+        typeof entry.fieldId !== 'string' ||
+        (entry.classification !== 'INTERNAL' &&
+          entry.classification !== 'PUBLIC') ||
+        entry.kind !== 'documentSequence' ||
+        typeof entry.sequenceId !== 'string' ||
+        typeof entry.prefix !== 'string' ||
+        !/^[A-Z][A-Z0-9]{0,7}$/u.test(entry.prefix) ||
+        !Number.isSafeInteger(entry.minimumDigits) ||
+        Number(entry.minimumDigits) < 1 ||
+        Number(entry.minimumDigits) > 12 ||
+        !Number.isSafeInteger(entry.start) ||
+        Number(entry.start) < 1
+      )
+        throw invalid('pinned assigned field has an invalid shape');
+    }
+  }
   if (
     (value.schemaVersion !== 'northstar.module-input-contract/v1' &&
       value.schemaVersion !== 'northstar.module-input-contract/v2' &&

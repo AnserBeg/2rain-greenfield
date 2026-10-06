@@ -17,6 +17,7 @@ import {
   parseNormalizedApplicationPackageJson,
 } from '../../packages/canonical-model/src/index.js';
 import {
+  COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
   GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   HASH_ALGORITHM,
@@ -79,6 +80,7 @@ import {
   type RequestRuntimeView,
 } from '../../packages/runtime/src/request-runtime-view.js';
 import { compilerInput, fixtureBytes } from '../compiler/helpers.js';
+import { assertComposedInventoryCollection } from '../helpers/assert-composed-inventory.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 import {
   admitEmptyPlanRelease,
@@ -142,7 +144,7 @@ test('the capability comparison binds the family to its capability, then compare
   const surface = PROJECTION_FAMILY_IDS.surfaceManifest;
   const requirement = {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    minimumVersion: 3,
+    minimumVersion: 5,
   };
   const registryAt = (maximumSupportedVersion: number) => ({
     [surface]: {
@@ -154,19 +156,19 @@ test('the capability comparison binds the family to its capability, then compare
   // The one the orchestrator named: the SAME floor that serves in production
   // must refuse against a runtime declaring less.
   assert.match(
-    unsupportedRuntimeCapability(surface, requirement, registryAt(2)) ?? '',
-    /requires version 3 and this runtime supports 2/,
+    unsupportedRuntimeCapability(surface, requirement, registryAt(4)) ?? '',
+    /requires version 5 and this runtime supports 4/,
   );
 
   // Admission twins at the boundary, so the refusal is discriminating rather
   // than a wall: equal serves, and greater serves, because a floor is a MINIMUM
   // and support is cumulative.
   assert.equal(
-    unsupportedRuntimeCapability(surface, requirement, registryAt(3)),
+    unsupportedRuntimeCapability(surface, requirement, registryAt(5)),
     null,
   );
   assert.equal(
-    unsupportedRuntimeCapability(surface, requirement, registryAt(4)),
+    unsupportedRuntimeCapability(surface, requirement, registryAt(6)),
     null,
   );
 
@@ -186,7 +188,7 @@ test('the capability comparison binds the family to its capability, then compare
         minimumVersion: 1,
       },
       {
-        ...registryAt(3),
+        ...registryAt(4),
         [PROJECTION_FAMILY_IDS.semanticModel]: {
           capabilityId: 'northstar.runtime:capability.semantic-model',
           maximumSupportedVersion: 1,
@@ -207,7 +209,7 @@ test('the capability comparison binds the family to its capability, then compare
   // capability on one side alone reds here rather than in production.
   assert.deepEqual(SUPPORTED_RUNTIME_CAPABILITIES[surface], {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    maximumSupportedVersion: 3,
+    maximumSupportedVersion: 21,
   });
 });
 
@@ -279,7 +281,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
 
       const runtimePool = new pg.Pool({
         ...connection,
-        max: 6,
+        max: 7,
         user: 'north_star_runtime',
       });
       const identities = new Map<string, AuthenticatedIdentity>([
@@ -680,7 +682,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
         );
 
         await t.test(
-          'persisted grouped surface payload propagates its v1 artifact version',
+          'persisted grouped surface payload propagates its v2 artifact version',
           async () => {
             await activateRelease(
               runtimePool,
@@ -696,12 +698,12 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
             ).load(versionContext);
             assert.equal(
               loaded.projections.surface.payloadSchemaVersion,
-              GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
+              COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
             );
             const payload = mutableRecord(loaded.projections.surface.payload);
             assert.equal(
               payload.schemaVersion,
-              GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
+              COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
             );
             assert.ok(payload.navigation);
           },
@@ -780,7 +782,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               loaded.projections.surface.requiredRuntimeCapability,
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                minimumVersion: 3,
+                minimumVersion: 21,
               },
             );
             // All FIVE loaded families carry their requirement, not just the
@@ -808,7 +810,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               ],
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                maximumSupportedVersion: 3,
+                maximumSupportedVersion: 21,
               },
             );
           },
@@ -832,7 +834,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                   versionContext,
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
-              /requires version 999 and this runtime supports 3/,
+              /requires version 999 and this runtime supports 21/,
             );
           },
         );
@@ -861,7 +863,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                   versionContext,
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
-              /requires version 999 and this runtime supports 3/,
+              /requires version 999 and this runtime supports 21/,
             );
           },
         );
@@ -1605,7 +1607,12 @@ function mustCompile(bytes: Uint8Array): CompileSuccess {
 
 function groupedNavigationDefinitionBytes(): Uint8Array {
   const definition = structuredClone(composedApplicationDefinition());
-  const inventory = inventoryModuleDefinition('northstar.app');
+  // As the product mounts it: with stock documents (INVENTORY-PARITY)
+  // and a company's reorder rule (CATALOG-EXTRAS).
+  const inventory = inventoryModuleDefinition('northstar.app', {
+    companyReorderRule: true,
+    documentEntry: true,
+  });
   for (const collectionName of [
     'assertions',
     'entities',
@@ -1622,15 +1629,12 @@ function groupedNavigationDefinitionBytes(): Uint8Array {
     const source = inventory[collectionName];
     assert.ok(Array.isArray(target));
     assert.ok(Array.isArray(source));
-    for (const entry of source) {
-      assert.equal(
-        target.filter(
-          (candidate) => canonicalize(candidate) === canonicalize(entry),
-        ).length,
-        1,
-        `composed application must contain each inventory ${collectionName} entry exactly once`,
-      );
-    }
+    assertComposedInventoryCollection(
+      collectionName,
+      target,
+      source,
+      'northstar.app',
+    );
   }
   const modules = definition.modules;
   const inventoryModules = inventory.modules;

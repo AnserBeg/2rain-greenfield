@@ -63,6 +63,7 @@ import {
   APPLICATION_NAMESPACE,
   composedApplicationDefinition,
 } from '../../packages/domain/src/app/builder.js';
+import { catalogModuleDefinition } from '../../packages/domain/src/catalog/index.js';
 import {
   narrowAcknowledgementToDeclared,
   readAcknowledgementDocument,
@@ -615,6 +616,33 @@ test('sales compiler scenarios execute input refinements and operation/storage e
         38,
         18,
       ),
+      // SALES-PARITY (ruling B): the list price, discount, tax code and the
+      // rate frozen from it -- optional inputs of the line.
+      salesInputField(
+        'list_price',
+        'exactDecimalFieldType',
+        false,
+        null,
+        38,
+        18,
+      ),
+      salesInputField(
+        'discount_percent',
+        'exactDecimalFieldType',
+        false,
+        null,
+        38,
+        18,
+      ),
+      salesInputField('tax_code_id', 'textFieldType', false, 80, null, null),
+      salesInputField(
+        'tax_rate_percent',
+        'exactDecimalFieldType',
+        false,
+        null,
+        38,
+        18,
+      ),
     ],
   );
   assert.deepEqual(lineCreate.inputContract.relationInputs, [
@@ -632,18 +660,18 @@ test('sales compiler scenarios execute input refinements and operation/storage e
   assert.deepEqual(release.effect, {
     entity: {
       kind: 'entityReference',
-      schemaVersion: 'v5',
+      schemaVersion: ADOPTED_LANGUAGE_VERSION,
       targetId: 'northstar.app:entity.sales_order',
     },
     fromStateId: 'northstar.app:state.sales_order_draft',
     kind: 'transitionStateEffect',
-    schemaVersion: 'v5',
+    schemaVersion: ADOPTED_LANGUAGE_VERSION,
     stateFieldId:
       'northstar.app:derived_state_field.machine.sales_order_lifecycle',
     toStateId: 'northstar.app:state.sales_order_released',
     transition: {
       kind: 'transitionReference',
-      schemaVersion: 'v5',
+      schemaVersion: ADOPTED_LANGUAGE_VERSION,
       targetId: 'northstar.app:transition.sales_order_release',
     },
   });
@@ -1758,6 +1786,110 @@ function composedApplicationWithoutSales(): Record<string, unknown> {
         !belongsToSales(collectionName, entry as Record<string, unknown>),
     );
   }
+  // INVENTORY-PARITY: the item page's stock reads what Sales' reservations
+  // still hold, through Sales' fulfillment read model over its own copy of
+  // the posted stock list. Without Sales that read model has no reservation
+  // query to read, so the copy goes with Sales (read models do not nest, so
+  // one pass finds every such query), and the item page is Catalog's plain
+  // record page, as it was before.
+  const queries = definition.queries as Array<Record<string, unknown>>;
+  const remaining = new Set(queries.map((query) => String(query.queryId)));
+  definition.queries = queries.filter((query) =>
+    Object.values(
+      (query.readModel as { queries?: Record<string, unknown> } | undefined)
+        ?.queries ?? {},
+    ).every((dependency) => remaining.has(referenceTarget(dependency) ?? '')),
+  );
+  // REPLENISHMENT: Stock by item and the Buying worklist add up Sales' order
+  // lines and reservations. Without Sales they go too, with the queries they
+  // read through, as the builder cuts a List whose figures' queries are not
+  // composed.
+  const kept = new Set(
+    (definition.queries as Array<Record<string, unknown>>).map((query) =>
+      String(query.queryId),
+    ),
+  );
+  const figured = (
+    definition.surfaces as Array<Record<string, unknown>>
+  ).filter((surface) => {
+    const figures = (surface.list as { figures?: unknown } | undefined)
+      ?.figures;
+    return (
+      figures !== undefined &&
+      [...JSON.stringify(figures).matchAll(/"targetId":"([^"]+)"/gu)].some(
+        ([, queryId]) => !kept.has(queryId!),
+      )
+    );
+  });
+  const cut = new Set(figured.map((surface) => String(surface.surfaceId)));
+  const cutQueries = new Set(
+    figured.map((surface) => referenceTarget(surface.dataSource) ?? ''),
+  );
+  definition.surfaces = (
+    definition.surfaces as Array<Record<string, unknown>>
+  ).filter((surface) => !cut.has(String(surface.surfaceId)));
+  definition.queries = (
+    definition.queries as Array<Record<string, unknown>>
+  ).filter((query) => !cutQueries.has(String(query.queryId)));
+  const itemPage = `${APPLICATION_NAMESPACE}:surface.item_detail`;
+  const plainItemPage = (
+    catalogModuleDefinition(APPLICATION_NAMESPACE, { sellingPrices: true })
+      .surfaces as Array<Record<string, unknown>>
+  ).find((surface) => surface.surfaceId === itemPage);
+  assert.ok(plainItemPage);
+  definition.surfaces = (
+    definition.surfaces as Array<Record<string, unknown>>
+  ).map((surface) =>
+    surface.surfaceId === itemPage
+      ? { ...plainItemPage, workspace: { membership: 'contextual' } }
+      : surface,
+  );
+  // WAREHOUSE-MODE: the warehouse launcher's Pick and ship tile and its
+  // sales order and shipment scan targets open Sales' pages; without Sales
+  // it keeps the tiles and targets whose Lists, queries and pages remain.
+  const surfaceIds = new Set(
+    (definition.surfaces as Array<Record<string, unknown>>).map((surface) =>
+      String(surface.surfaceId),
+    ),
+  );
+  const queryIds = new Set(
+    (definition.queries as Array<Record<string, unknown>>).map((query) =>
+      String(query.queryId),
+    ),
+  );
+  definition.surfaces = (
+    definition.surfaces as Array<Record<string, unknown>>
+  ).map((surface) => {
+    const launcher = surface.launcher as
+      | {
+          tiles: Array<{ surface: string }>;
+          scan?: { targets: Array<{ query: string; surface: string }> };
+        }
+      | undefined;
+    return launcher
+      ? {
+          ...surface,
+          launcher: {
+            ...launcher,
+            tiles: launcher.tiles.filter((tile) =>
+              surfaceIds.has(tile.surface),
+            ),
+            ...(launcher.scan
+              ? {
+                  scan: {
+                    ...launcher.scan,
+                    targets: launcher.scan.targets.filter(
+                      (target) =>
+                        queryIds.has(target.query) &&
+                        surfaceIds.has(target.surface),
+                    ),
+                  },
+                }
+              : {}),
+          },
+        }
+      : surface;
+  });
   return definition;
 }
 
@@ -2591,10 +2723,10 @@ function composedPermission(
     permissionId,
     resource: {
       kind: 'entityReference',
-      schemaVersion: 'v5',
+      schemaVersion: ADOPTED_LANGUAGE_VERSION,
       targetId: resource,
     },
-    schemaVersion: 'v5',
+    schemaVersion: ADOPTED_LANGUAGE_VERSION,
   };
 }
 

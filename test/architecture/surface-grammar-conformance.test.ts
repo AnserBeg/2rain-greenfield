@@ -1,3 +1,4 @@
+import { withoutInventoryValuation } from '../helpers/without-inventory-valuation.js';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -29,7 +30,7 @@ import {
 import {
   DEFAULT_COMPILER_LIMITS,
   DEFAULT_COMPILER_PROFILE,
-  FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
+  COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   MODULE_COMPILER_PROFILE,
   PROJECTION_FAMILY_IDS,
@@ -47,6 +48,7 @@ import {
 } from '../../packages/domain/src/index.js';
 import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/index.js';
 import { purchasingModuleDefinition } from '../../packages/domain/src/purchasing/index.js';
+import { withPurchaseOrderApprovals } from '../../packages/domain/src/purchasing/approvals.js';
 import { salesModuleDefinition } from '../../packages/domain/src/sales/index.js';
 import { PRODUCT_SURFACE_GRAMMAR_BASELINE } from './surface-grammar-conformance.baseline.js';
 import {
@@ -220,11 +222,15 @@ test('compiled navigation stays flat within budget and groups mounted modules be
     flatManifest.surfaces,
     flatManifest.navigation,
   );
-  assert.equal(flatManifest.surfaces.length, 12);
+  // Party, Catalog and Location; SALES-PARITY adds Party's ship-to address
+  // book, contextual to the Party list, and Catalog's tax codes (list,
+  // detail, form each); CATALOG-EXTRAS an item's aliases, contextual to the
+  // Items List (list, detail, form).
+  assert.equal(flatManifest.surfaces.length, 21);
   assert.equal(flatManifest.navigation, null);
   assert.equal(
     flatManifest.payloadSchemaVersion,
-    FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
+    COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   );
   // 1 -> 3 BY `profile-v2-adoption`, and this is a real compatibility move
   // rather than a re-derived digest. The floor is
@@ -242,9 +248,18 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // the provider persists the value and the web reader passes it through, and
   // no consumer refuses a manifest whose floor exceeds what it supports. So the
   // number is currently a declaration, not a gate. Filed, not fixed -- see
-  // `current-plan.md`, `runtime-capability-floor-unenforced`.
-  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 3);
-  assert.equal(flatCompact.navigationEntryIds.length, 4);
+  // `current-plan.md`, `runtime-capability-floor-unenforced`. This flat
+  // fixture keeps Party, whose customer workspace (SALES-PARITY) offers a
+  // salesperson Task input with declared eligibility, which requires 11,
+  // Catalog, whose item form chooses the preferred location from the
+  // location list (a Record form reference, REPLENISHMENT), which requires 17,
+  // Location, whose form leaves the inventory status to its page's "Change
+  // status" (a Record form's omitted fields, LOCATIONS), which requires 19,
+  // and whose Items List also searches the items' aliases (CATALOG-EXTRAS),
+  // which requires 20.
+  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 20);
+  // SALES-PARITY: Catalog's tax codes are a fifth setup List, still flat.
+  assert.equal(flatCompact.navigationEntryIds.length, 5);
   assert.deepEqual(
     navigationRuleIds(
       checkSurfaceGrammarConformance(
@@ -262,11 +277,18 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   const grouped = groupedManifest.navigation;
   assert.ok(grouped);
   const compact = projectCompactSurfaces(groupedManifest.surfaces, grouped);
-  // 34 + RECEIPT's seventeen Purchasing surfaces + Sales' nineteen surfaces.
-  assert.equal(groupedManifest.surfaces.length, 70);
+  // 34 + RECEIPT's seventeen Purchasing surfaces + Sales' nineteen surfaces,
+  // + Party's three ship-to address and Catalog's three tax code surfaces
+  // (SALES-PARITY), + the invoice, its lines, payments and credits (twelve),
+  // + PURCHASING-PARITY's Expected receipts List, + PAYABLES' vendor bill,
+  // its lines, payments and credits (twelve), + REPLENISHMENT's Stock by item
+  // and Buying worklist, + CATALOG-EXTRAS' item aliases (three), +
+  // WAREHOUSE-MODE's Warehouse, + VALUATION's Inventory value List, +
+  // APPROVALS' approval requests and settings (five).
+  assert.equal(groupedManifest.surfaces.length, 113);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
-    GROUPED_SURFACE_MANIFEST_PAYLOAD_VERSION,
+    COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
   );
   // 2 -> 3 BY `profile-v2-adoption`. The grouped arm read 2 because
   // `navigation` bumped it; field kinds outrank that, so both arms now read 3
@@ -278,20 +300,46 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // behaviour itself is still gated -- by `payloadSchemaVersion` immediately
   // above and by `navigationSurfaceIds` immediately below -- so no property is
   // left unguarded, but this particular assertion is now weaker than it reads.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 3);
-  // 13 + Purchasing's six lists + Sales' seven lists.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 26);
-  // Sales is the sixth module, so the compiler groups Purchasing and Sales
-  // under the fifth compact entry rather than exceeding the navigation budget.
+  // Draft document editing and workspace entry require reader 8; picker
+  // eligibility and typed Task inputs require 9; declared Lists require 10;
+  // editor defaults, scoped pickers and Task input eligibility require 11;
+  // List progress, open and before-today views and overdue dates require 12;
+  // List row actions and supplementary progress (ORDER-PARITY) require 13;
+  // record alerts and progression, multi-row Tasks and record columns naming
+  // a relation (ORDER-PARITY increment B) require 14; the item page's
+  // field-scoped stock and movements (INVENTORY-PARITY) require 15; a stock
+  // document's create values require 16; List figures, views keeping a band
+  // and the item form's location choice (REPLENISHMENT) require 17; the
+  // Warehouse launcher's tiles and scan box (WAREHOUSE-MODE) require 18; the
+  // location form's omitted status and the usable figures' parent reached
+  // through a reference field (LOCATIONS) require 19; searches through an
+  // item's aliases, the reorder point chosen by an item's rule, bands by an
+  // item's inventory policy and the merge Task's choice that leaves the item
+  // out (CATALOG-EXTRAS) require 20; the Sales orders List's supply, its
+  // Blocked by supply and Reserved views and its "Post shipment"
+  // (SUPPLY-WARNINGS) require 21.
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 21);
+  // Workspace owners and setup lists are in navigation; contextual document,
+  // fulfillment, line and lookup surfaces remain reachable in their documents
+  // and by record/deep link.
+  // SALES-PARITY: Catalog's tax codes list joins the supporting masters, and
+  // the Invoices list joins Sales beside its orders. PURCHASING-PARITY:
+  // Expected receipts joins Purchasing beside its orders; PAYABLES: so does
+  // the Bills list. REPLENISHMENT: Stock by item and the Buying worklist,
+  // Catalog's Lists, join Inventory's group. WAREHOUSE-MODE: the Warehouse
+  // launcher joins Inventory, the one Task navigation names. VALUATION: the
+  // Inventory value List. APPROVALS: approvals and settings join Purchasing.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 22);
+  // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
-    ['Party', 'Catalog', 'Location', 'Inventory', 'More'],
+    ['Sales', 'Purchasing', 'Inventory', 'Party', 'More'],
   );
   assert.deepEqual(compact.navigationEntryIds, [
-    'northstar.app:module.party',
-    'northstar.app:module.catalog',
-    'northstar.app:module.location',
+    'northstar.app:module.sales',
+    'northstar.app:module.purchasing',
     'northstar.app:module.inventory',
+    'northstar.app:module.party',
     'northstar.app:navigation.more',
   ]);
   assert.deepEqual(
@@ -311,13 +359,13 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   assert.ok(inventory);
   assert.deepEqual(navigationSurfaceIds([inventory]), [
     'northstar.app:surface.inventory_movement_list',
-    'northstar.app:surface.inventory_on_hand_lookup',
     'northstar.app:surface.inventory_period_lock_list',
-    'northstar.app:surface.inventory_transaction_line_list',
     'northstar.app:surface.inventory_transaction_list',
+    'northstar.app:surface.inventory_warehouse',
+    'northstar.app:surface.item_buying_list',
+    'northstar.app:surface.item_stock_list',
     'northstar.app:surface.legal_entity_list',
     'northstar.app:surface.posted_stock_balance_list',
-    'northstar.app:surface.stock_count_line_list',
     'northstar.app:surface.stock_count_list',
   ]);
 
@@ -842,7 +890,12 @@ function compileDefinition(
 
 function composedApplicationWithInventory(): Record<string, unknown> {
   const composed = structuredClone(composedApplicationDefinition());
-  const inventory = inventoryModuleDefinition('northstar.app');
+  // As the product mounts it: with stock documents (INVENTORY-PARITY)
+  // and a company's reorder rule (CATALOG-EXTRAS).
+  const inventory = inventoryModuleDefinition('northstar.app', {
+    companyReorderRule: true,
+    documentEntry: true,
+  });
   for (const collectionName of [
     'assertions',
     'entities',
@@ -860,11 +913,17 @@ function composedApplicationWithInventory(): Record<string, unknown> {
     assert.ok(Array.isArray(target));
     assert.ok(Array.isArray(source));
     for (const sourceEntry of source) {
+      const matches: unknown[] =
+        collectionName === 'surfaces'
+          ? target.filter(
+              (candidate) => candidate.surfaceId === sourceEntry.surfaceId,
+            )
+          : target.filter(
+              (candidate) =>
+                JSON.stringify(candidate) === JSON.stringify(sourceEntry),
+            );
       assert.equal(
-        target.filter(
-          (candidate) =>
-            JSON.stringify(candidate) === JSON.stringify(sourceEntry),
-        ).length,
+        matches.length,
         1,
         `composed application must contain each inventory ${collectionName} entry exactly once`,
       );
@@ -906,12 +965,23 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
   let composed = composedApplicationWithInventory();
   composed = withoutModule(
     composed,
-    inventoryModuleDefinition('northstar.app'),
+    inventoryModuleDefinition('northstar.app', {
+      companyReorderRule: true,
+      documentEntry: true,
+    }),
     'inventory',
   );
   composed = withoutModule(
     composed,
-    purchasingModuleDefinition('northstar.app'),
+    // As the product composes it: with its commercial terms (PURCHASING-PARITY)
+    // and its payables (PAYABLES).
+    withPurchaseOrderApprovals(
+      purchasingModuleDefinition('northstar.app', {
+        commercialTerms: true,
+        payables: true,
+      }),
+      'northstar.app',
+    ),
     'purchasing',
   );
   composed = withoutModule(
@@ -919,7 +989,75 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
     salesModuleDefinition('northstar.app'),
     'sales',
   );
-  return composed;
+  return withPlainItemPage(
+    withoutItemStockLists(withoutInventoryValuation(composed)),
+  );
+}
+
+/**
+ * REPLENISHMENT: Stock by item and the Buying worklist are Catalog's Lists,
+ * listed in Inventory's group, that add up Inventory, Sales and Purchasing
+ * rows. Without those modules they go, with their queries, as the builder
+ * cuts a List whose figures' queries are not composed. The item form keeps
+ * its location choice: Location stays.
+ */
+function withoutItemStockLists(
+  composed: Record<string, unknown>,
+): Record<string, unknown> {
+  const lists = new Set([
+    'northstar.app:surface.item_stock_list',
+    'northstar.app:surface.item_buying_list',
+  ]);
+  const queries = new Set([
+    'northstar.app:query.item_stock_list',
+    'northstar.app:query.item_buying_list',
+  ]);
+  const surfaces = composed.surfaces;
+  const declared = composed.queries;
+  assert.ok(Array.isArray(surfaces));
+  assert.ok(Array.isArray(declared));
+  assert.equal(
+    surfaces.filter((surface) => lists.has(surface.surfaceId)).length,
+    2,
+    'flat fixture must find both item Lists exactly once',
+  );
+  return {
+    ...composed,
+    surfaces: surfaces.filter((surface) => !lists.has(surface.surfaceId)),
+    queries: declared.filter((query) => !queries.has(query.queryId)),
+  };
+}
+
+/**
+ * INVENTORY-PARITY: the item page shows Inventory's stock and movements with
+ * Sales' reservations, entered through Inventory's Posted stock List. Without
+ * those modules it is the plain record page it was before: Catalog's own
+ * surface in its contextual workspace.
+ */
+function withPlainItemPage(
+  composed: Record<string, unknown>,
+): Record<string, unknown> {
+  const surfaceId = 'northstar.app:surface.item_detail';
+  const surfaces = composed.surfaces;
+  assert.ok(Array.isArray(surfaces));
+  const plain = (
+    catalogModuleDefinition('northstar.app', { sellingPrices: true })
+      .surfaces as Record<string, unknown>[]
+  ).find((surface) => surface.surfaceId === surfaceId);
+  assert.ok(plain);
+  assert.equal(
+    surfaces.filter((surface) => surface.surfaceId === surfaceId).length,
+    1,
+    'flat fixture must find the item page exactly once',
+  );
+  return {
+    ...composed,
+    surfaces: surfaces.map((surface) =>
+      surface.surfaceId === surfaceId
+        ? { ...plain, workspace: { membership: 'contextual' } }
+        : surface,
+    ),
+  };
 }
 
 function withoutModule(
@@ -943,17 +1081,31 @@ function withoutModule(
     const source = module[collectionName];
     assert.ok(Array.isArray(target));
     assert.ok(Array.isArray(source));
+    const idKey = {
+      assertions: 'assertionId',
+      entities: 'entityId',
+      fields: 'fieldId',
+      operations: 'operationId',
+      permissions: 'permissionId',
+      queries: 'queryId',
+      relations: 'relationId',
+      stateMachines: 'machineId',
+      storageMappings: 'storageMappingId',
+      surfaces: 'surfaceId',
+    }[collectionName];
+    const ids = new Set(source.map((entry) => entry[idKey]));
+    for (const id of ids)
+      assert.equal(
+        target.filter((candidate) => candidate[idKey] === id).length,
+        1,
+        `flat fixture must identify each ${label} ${collectionName} entry exactly once`,
+      );
+    // Composition may change presentation/query bodies and add module-owned dependencies.
+    // Remove by canonical identity and declared module ownership, never byte equality.
     composed[collectionName] = target.filter(
       (candidate) =>
-        !source.some(
-          (sourceEntry) =>
-            JSON.stringify(candidate) === JSON.stringify(sourceEntry),
-        ),
-    );
-    assert.equal(
-      target.length - (composed[collectionName] as unknown[]).length,
-      source.length,
-      `flat fixture must remove every ${label} ${collectionName} entry exactly once`,
+        !ids.has(candidate[idKey]) &&
+        candidate.module?.targetId !== `northstar.app:module.${label}`,
     );
   }
   const modules = composed.modules;

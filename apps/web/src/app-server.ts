@@ -7,11 +7,16 @@ import {
 } from '@north-star/runtime/request-context';
 import { RequestRuntimeViewRefusalError } from '@north-star/runtime/request-runtime-view';
 import type { AuthenticatedRequestRuntimeEntryAdapter } from '@north-star/runtime/request-runtime-view';
+import { SURFACE_CLIENT_CSP_HASH } from './surface-client.js';
+import { localDemoActor } from '../../../packages/runtime/src/local-demo-actor.js';
 
 import {
+  FRAGMENT_REQUEST_HEADER,
   renderApplicationDiagnostic,
   renderSurfaceRuntime,
+  withLocalDemoIdentity,
   renderSurfaceRuntimeWithData,
+  submitSurfaceRuntimeFragment,
   submitSurfaceRuntimeIntent,
   type SurfaceRuntimeGateways,
   type SurfaceRuntimeResponse,
@@ -23,9 +28,10 @@ export type { SurfaceRuntimeApplicationExtension } from './surface-runtime.js';
 export function createSurfaceRuntimeServer(
   entry: AuthenticatedRequestRuntimeEntryAdapter,
   gateways?: SurfaceRuntimeGateways,
+  demoActors?: readonly { key: 'buyer' | 'manager'; label: string }[] | null,
 ): Server {
   return createServer((request, response) => {
-    void handleRequest(entry, gateways, request, response);
+    void handleRequest(entry, gateways, request, response, demoActors);
   });
 }
 
@@ -34,11 +40,14 @@ async function handleRequest(
   gateways: SurfaceRuntimeGateways | undefined,
   request: IncomingMessage,
   response: ServerResponse,
+  demoActors?: readonly { key: 'buyer' | 'manager'; label: string }[] | null,
 ): Promise<void> {
   response.setHeader('cache-control', 'no-store');
   response.setHeader(
     'content-security-policy',
-    `default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action ${gateways ? "'self'" : "'none'"}; frame-ancestors 'none'`,
+    // `connect-src 'self'` admits only the owned script's same-origin fragment
+    // POSTs (ADR-0036 behaviour 7); script, style and form rules are unchanged.
+    `default-src 'none'; script-src '${SURFACE_CLIENT_CSP_HASH}'; style-src 'unsafe-inline'; img-src data:; connect-src ${gateways ? "'self'" : "'none'"}; base-uri 'none'; form-action ${gateways ? "'self'" : "'none'"}; frame-ancestors 'none'`,
   );
   response.setHeader('x-content-type-options', 'nosniff');
 
@@ -65,9 +74,86 @@ async function handleRequest(
     return;
   }
 
+  // A fragment is the owned script's same-origin POST: it must carry the custom
+  // header (which a cross-site form cannot set) and prove its origin -- by
+  // same-origin fetch metadata where the browser sends it, otherwise by an
+  // Origin naming this server. Anything else is an ordinary request.
+  const fragment =
+    request.method === 'POST' &&
+    gateways !== undefined &&
+    request.headers[FRAGMENT_REQUEST_HEADER] === '1';
+  if (fragment) {
+    const site = request.headers['sec-fetch-site'];
+    response.setHeader(FRAGMENT_REQUEST_HEADER, 'fragment');
+    const fallback = () => {
+      response.setHeader(`${FRAGMENT_REQUEST_HEADER}-fallback`, 'page');
+      writeHtml(response, { html: '', statusCode: 409 });
+    };
+    const origin = request.headers.origin;
+    let sameOrigin = site === 'same-origin';
+    if (site === undefined && typeof origin === 'string') {
+      try {
+        sameOrigin = new URL(origin).host === request.headers.host;
+      } catch {
+        sameOrigin = false;
+      }
+    }
+    if (!sameOrigin) {
+      writeHtml(response, { html: '', statusCode: 403 });
+      return;
+    }
+    try {
+      const submission = await readFormSubmission(request);
+      const result = await entry.run({ headers: request.headers }, (view) =>
+        submitSurfaceRuntimeFragment(view, url.href, submission, gateways),
+      );
+      if (result.fallback) fallback();
+      else writeHtml(response, result);
+    } catch {
+      fallback();
+    }
+    return;
+  }
+
   try {
     const submission =
       request.method === 'POST' ? await readFormSubmission(request) : null;
+    if (
+      demoActors &&
+      submission &&
+      Object.hasOwn(submission, 'localDemoActAs')
+    ) {
+      const actor = demoActors.find(
+        (candidate) => candidate.key === submission.localDemoActAs,
+      );
+      if (!actor) {
+        writeHtml(response, { statusCode: 400, html: '' });
+        return;
+      }
+      // A cross-site form cannot switch the fixture's selected identity.
+      const origin = request.headers.origin;
+      if (
+        request.headers['sec-fetch-site'] !== 'same-origin' &&
+        (typeof origin !== 'string' ||
+          new URL(origin).host !== request.headers.host)
+      ) {
+        writeHtml(response, { statusCode: 403, html: '' });
+        return;
+      }
+      response.setHeader(
+        'set-cookie',
+        `northstar-demo-actor=${actor.key}; Path=/; HttpOnly; SameSite=Strict`,
+      );
+      // Return to the page, dropping any prepared Task owned by the prior actor.
+      for (const name of [...url.searchParams.keys()])
+        if (name.toLowerCase().includes('task')) url.searchParams.delete(name);
+      writeHtml(response, {
+        statusCode: 303,
+        html: '',
+        location: `${url.pathname}${url.search}`,
+      });
+      return;
+    }
     const result = gateways
       ? await entry.run({ headers: request.headers }, (view) =>
           submission
@@ -77,7 +163,14 @@ async function handleRequest(
       : await entry.run({ headers: request.headers }, (view) =>
           renderSurfaceRuntime(view, url.href),
         );
-    writeHtml(response, result);
+    writeHtml(
+      response,
+      withLocalDemoIdentity(
+        result,
+        demoActors,
+        localDemoActor(request.headers.cookie),
+      ),
+    );
   } catch (error) {
     if (error instanceof AuthenticationRequiredError) {
       writeHtml(
@@ -151,6 +244,16 @@ function writeHtml(
   result: SurfaceRuntimeResponse,
 ): void {
   response.statusCode = result.statusCode;
+  if (result.location) response.setHeader('location', result.location);
+  if (result.download) {
+    response.setHeader('content-type', result.download.contentType);
+    response.setHeader(
+      'content-disposition',
+      `attachment; filename="${result.download.fileName}"`,
+    );
+    response.end(result.download.body);
+    return;
+  }
   response.setHeader('content-type', 'text/html; charset=utf-8');
   response.end(result.html);
 }

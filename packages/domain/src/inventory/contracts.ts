@@ -166,8 +166,11 @@ export const LEGAL_ENTITY_FAMILY_MAP_V1 = Object.freeze([
   { classification: 'tenantShared', familyId: 'legal_entity' },
   { classification: 'tenantShared', familyId: 'party' },
   { classification: 'tenantShared', familyId: 'party_role' },
+  { classification: 'tenantShared', familyId: 'party_address' },
   { classification: 'tenantShared', familyId: 'item' },
+  { classification: 'tenantShared', familyId: 'item_alias' },
   { classification: 'tenantShared', familyId: 'location' },
+  { classification: 'tenantShared', familyId: 'tax_code' },
   { classification: 'entityOwned', familyId: 'inventory_movement' },
   { classification: 'entityOwned', familyId: 'inventory_transaction' },
   { classification: 'entityOwned', familyId: 'inventory_transaction_line' },
@@ -179,6 +182,8 @@ export const LEGAL_ENTITY_FAMILY_MAP_V1 = Object.freeze([
   { classification: 'entityOwned', familyId: 'goods_receipt_line' },
   { classification: 'entityOwned', familyId: 'purchase_order_received' },
   { classification: 'entityOwned', familyId: 'purchase_order_amendment' },
+  { classification: 'entityOwned', familyId: 'purchase_order_approval' },
+  { classification: 'tenantShared', familyId: 'purchasing_settings' },
   { classification: 'entityOwned', familyId: 'sales_order' },
   { classification: 'entityOwned', familyId: 'sales_order_line' },
   { classification: 'entityOwned', familyId: 'reservation' },
@@ -186,11 +191,24 @@ export const LEGAL_ENTITY_FAMILY_MAP_V1 = Object.freeze([
   { classification: 'entityOwned', familyId: 'shipment' },
   { classification: 'entityOwned', familyId: 'shipment_line' },
   { classification: 'entityOwned', familyId: 'sales_order_shipped' },
+  { classification: 'entityOwned', familyId: 'customer_invoice' },
+  { classification: 'entityOwned', familyId: 'customer_invoice_line' },
+  { classification: 'entityOwned', familyId: 'customer_payment' },
+  { classification: 'entityOwned', familyId: 'customer_credit' },
+  { classification: 'entityOwned', familyId: 'vendor_bill' },
+  { classification: 'entityOwned', familyId: 'vendor_bill_line' },
+  { classification: 'entityOwned', familyId: 'vendor_payment' },
+  { classification: 'entityOwned', familyId: 'vendor_credit' },
   { classification: 'entityOwned', familyId: 'stock_count' },
   { classification: 'entityOwned', familyId: 'stock_count_line' },
 ] as const satisfies readonly LegalEntityFamilyRuleV1[]);
 
 export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'purchase_order_approval',
+    targetFamilyId: 'purchase_order',
+  },
   {
     semantics: 'sameEntity',
     sourceFamilyId: 'inventory_movement',
@@ -215,6 +233,16 @@ export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
     semantics: 'crossEntityAllowed',
     sourceFamilyId: 'party_role',
     targetFamilyId: 'party',
+  },
+  {
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'party_address',
+    targetFamilyId: 'party',
+  },
+  {
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'item_alias',
+    targetFamilyId: 'item',
   },
   {
     semantics: 'sameEntity',
@@ -298,6 +326,56 @@ export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
   },
   {
     semantics: 'sameEntity',
+    sourceFamilyId: 'customer_invoice',
+    targetFamilyId: 'sales_order',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'customer_invoice_line',
+    targetFamilyId: 'customer_invoice',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'customer_invoice_line',
+    targetFamilyId: 'sales_order_line',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'customer_payment',
+    targetFamilyId: 'customer_invoice',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'customer_credit',
+    targetFamilyId: 'customer_invoice',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_bill',
+    targetFamilyId: 'purchase_order',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_bill_line',
+    targetFamilyId: 'vendor_bill',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_bill_line',
+    targetFamilyId: 'purchase_order_line',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_payment',
+    targetFamilyId: 'vendor_bill',
+  },
+  {
+    semantics: 'sameEntity',
+    sourceFamilyId: 'vendor_credit',
+    targetFamilyId: 'vendor_bill',
+  },
+  {
+    semantics: 'sameEntity',
     sourceFamilyId: 'inventory_transaction_line',
     targetFamilyId: 'inventory_transaction',
   },
@@ -320,6 +398,13 @@ export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
     semantics: 'sameEntity',
     sourceFamilyId: 'stock_count_line',
     targetFamilyId: 'inventory_transaction_line',
+  },
+  // LOCATIONS: a location inside another, such as a bin in its warehouse;
+  // both are shared by every company.
+  {
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'location',
+    targetFamilyId: 'location',
   },
 ] as const satisfies readonly LegalEntityRelationRuleV1[]);
 
@@ -444,7 +529,7 @@ export interface InventoryContractDefinitionV1 {
     readonly movementAmountFields: 'forbidden';
     readonly movementDerivedMonetaryArtifacts: 'compileFailure';
     readonly receiptCostOwner: 'G4';
-    readonly valuationCapability: 'unsupported';
+    readonly valuationCapability: 'registeredSourceCostReadModel';
   };
   readonly movement: {
     readonly fields: readonly {
@@ -803,7 +888,7 @@ export const INVENTORY_CONTRACT_V1 = Object.freeze({
     movementAmountFields: 'forbidden',
     movementDerivedMonetaryArtifacts: 'compileFailure',
     receiptCostOwner: 'G4',
-    valuationCapability: 'unsupported',
+    valuationCapability: 'registeredSourceCostReadModel',
   },
   movement: {
     fields: [
