@@ -1,14 +1,19 @@
-# ADR-0070: The v0 package-byte maximums are 4 MiB
+# ADR-0070: The v0 package-byte maximums are 4 MiB, and six composition bounds rise for parity
 
-Date: 2026-10-05 (proposed). Owner ruling: **PENDING (YYYY-MM-DD)**.
-Status: **Proposed — pending owner ruling.** Prepared by the serial bridge
-packet `STRUCTURAL-LIMITS-RAISE`; it must not merge before the owner rules.
+Date: 2026-10-05. Owner ruling: **2026-10-05**.
+Status: **Accepted** (owner ruling 2026-10-05). The byte maximums ship in the
+serial bridge packet `STRUCTURAL-LIMITS-RAISE` (PR #30, against `main`); the
+composition bounds ship in `COMPOSITION-BOUNDS-RAISE`, a separate draft PR on
+`packet/INTEGRATION`, because they exist only there. The owner merges.
 Tier: Behavioral — a frozen shared contract (Freeze A, canonical language T10)
 changes, so it goes through a serial bridge packet (G1-P0, AGENTS.md §5). It is
 outside the AGENTS.md §4 Critical set, so no review arm is owed; the owner's
 ruling is the gate.
 
-Owner's words: "**PENDING**"
+Owner's words: "**raise it**" — in answer to the orchestrator's table: package
+bytes 2 MiB -> 4 MiB (authored and normalized); record page fields 30 -> 48;
+page actions 12 -> 24; Task steps 5 -> 12; page children 8 -> 12; header
+facts 6 -> 8; List columns 12 -> 16; List views stays 8.
 
 ## Context
 
@@ -104,6 +109,48 @@ cold full-compile budget is unchanged and must hold at the new ceiling.
   the open branches (numbers in Context).
 - Boundary and budget measurements: `docs/execution/packets/STRUCTURAL-LIMITS-RAISE.md`.
 
+## Composition bounds (added 2026-10-05; same ruling)
+
+INTEGRATION found a second language bound that full parity exceeds, so the
+owner rules on both at once. A census measured every `.max(n)`/`.min(n)` in
+`packages/canonical-model/src/schemas.ts` and every `STRUCTURAL_LIMITS_V0`
+bound: each application was built with its own ref's code, in memory, for
+`packet/INTEGRATION` (`8c8cfab1`) and the pending leaves SALES-EXTRAS, UNITS,
+SPECIAL-ORDER, STOCK-COUNTS, RETURNS, RETURNABLE-ASSETS, SALES-PARITY and
+LOCATIONS-2. For counted members the measure is INTEGRATION plus what each
+leaf adds over its merge-base with INTEGRATION, because a single ref cannot
+show two leaves adding to the same page.
+
+Exceeded at parity, or full with a named parity item still to come. All are v6
+composition nodes (`SurfaceCompositionSchema`, `compositionAction`,
+`SurfaceListSchema`); lines are INTEGRATION's:
+
+| Bound (schemas.ts) | Was | Needed now | Raised to | Why that value |
+|---|---|---|---|---|
+| record page `fields` (1087) | 30 | 34: sales order, INTEGRATION 28 + SALES-EXTRAS' credit facts and counter flag | **48** | approvals and the received-on date add about 4 more; leaves about a quarter spare |
+| record page `actions` (1089) | 12 | 16: purchase order (SPECIAL-ORDER +3, STOCK-COUNTS +1); sales order 15 | **24** | approvals add submit, approve and reject on the sales order, about 19 |
+| Task `steps` (903) | 5 | 11: SALES-EXTRAS' counter sale | **12** | the value SALES-EXTRAS already sets in its own branch, so the leaf merges unchanged |
+| record page `children` (1088) | 8 | 8 of 8 on both order pages | **12** | approval history and lot datasets would be the 9th and 10th |
+| header key `facts` (980) | 6 | 6 of 6 on five record pages | **8** | the item page's stock and valuation figures |
+| List `columns` (1729) | 12 | 12 of 12 on the item stock and sales order Lists | **16** | valuation columns on stock, received-on on purchase orders |
+
+Left unchanged on purpose: List saved `views` (8; the sales order List needs 9,
+solved by moving Counter sales to its own worklist), List `rowActions` (3 of
+3, no parity item adds one), dataset `columns` (18 of 30), print `totals`
+(7 of 8), progression `next` (5 of 6), block `columns` (6 of 8), figure `sums`
+(6 of 8), band `cases` (3 of 4), launcher scan `targets` (6 of 8),
+`LabelSchema` (232 of 240, one long description that can be shortened), and
+the decimal precision 38 and scale 18 (71 quantity fields use the maximum by
+design, not by growth). Every `STRUCTURAL_LIMITS_V0` family count is under a
+quarter of its bound; the byte maximums are the subject above. Next to watch:
+document-editor `lineFields`, 11 of 15 once units on lines and lot land.
+
+Like the byte raise, these only admit more: every package valid before is
+valid after with byte-identical output. A page with all six at their new
+maximums at once normalizes and compiles. The bounds stay finite because they
+are what keeps a record page a page; the UX grammar's density guidance still
+applies inside them.
+
 ## Enforcement
 
 - `packages/canonical-model/src/constants.ts` (`STRUCTURAL_LIMITS_V0`), read
@@ -118,3 +165,7 @@ cold full-compile budget is unchanged and must hold at the new ceiling.
   package of at least 85% of the maximum, built from a frozen snapshot of the
   real application (`test/fixtures/g1/compiler/package-byte-envelope.authored.json`).
 - `canonical-language-v0.md` T10 and its correction note record the values.
+- `test/unit/canonical-model/surface-composition.test.ts` (in
+  `COMPOSITION-BOUNDS-RAISE`): the six composition bounds as literals; for each, a page at exactly the maximum normalizes and
+  one more is refused with the same `CANON_SCHEMA_INVALID` diagnostic at that
+  bound's path, twice. The former twelve-action test now pins 24.

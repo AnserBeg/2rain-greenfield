@@ -35,7 +35,7 @@ budget does not authorize a second compiler or runtime patch path: it creates
 evidence for the tracked incremental/memoization packet, whose output must be
 bit-identical to a cold compile.
 
-### Package-byte envelope — amended by STRUCTURAL-LIMITS-RAISE (PENDING owner ruling)
+### Package-byte envelope — amended by STRUCTURAL-LIMITS-RAISE (owner ruling 2026-10-05)
 
 [ADR-0070](../decisions/ADR-0070-the-v0-package-byte-maximums-are-4-mib.md)
 raises both package-byte maximums from 2,097,152 to 4,194,304. As the paragraph

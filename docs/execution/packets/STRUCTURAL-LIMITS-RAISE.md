@@ -1,12 +1,12 @@
 # STRUCTURAL-LIMITS-RAISE — the canonical package-byte maximums move from 2 MiB to 4 MiB
 
-Status: **PREPARED — PENDING OWNER RULING. DO NOT MERGE.** Serial bridge packet
-for a frozen shared contract (Freeze A, `canonical-language-v0.md` T10; G1-P0,
-AGENTS.md §5). Tier: Behavioral, outside the AGENTS.md §4 Critical set.
-Stops: 1 — STOP list (a), a one-way door once a release above 2 MiB is
-recorded; the owner rules ([ADR-0070](../../decisions/ADR-0070-the-v0-package-byte-maximums-are-4-mib.md),
-status Proposed). Base `fe97b63b`, executable head `0bc34b6d`, draft PR
-[#30](https://github.com/AnserBeg/2rain-greenfield/pull/30).
+Status: **ruled — owner ruling 2026-10-05, "raise it"; [ADR-0070](../../decisions/ADR-0070-the-v0-package-byte-maximums-are-4-mib.md)
+Accepted.** Draft PR [#30](https://github.com/AnserBeg/2rain-greenfield/pull/30)
+against `main`; **the owner merges it, this lane does not.** Serial bridge
+packet for a frozen shared contract (Freeze A, T10; G1-P0, AGENTS.md §5).
+Tier: Behavioral, outside the AGENTS.md §4 Critical set. Stops: 1 — STOP list
+(a), resolved by the ruling. Base `fe97b63b`, executable head `88150455`. The
+same ruling's six composition raises ship in `COMPOSITION-BOUNDS-RAISE`.
 
 ## Claims
 
@@ -24,6 +24,8 @@ status Proposed). Base `fe97b63b`, executable head `0bc34b6d`, draft PR
    recorded lineage entry moved.
 5. The unchanged 5,000 ms cold compile budget holds at a package of at least
    85% of the new maximum, shaped like the real application.
+6. The dependency audit is clean at the `high` gate: the `brace-expansion`
+   override is 5.0.11, byte-identical to INTEGRATION's `edaebdf2`.
 
 ## Decisions
 
@@ -36,13 +38,19 @@ status Proposed). Base `fe97b63b`, executable head `0bc34b6d`, draft PR
 - Its input is a FROZEN snapshot (`package-byte-envelope.authored.json`, byte copy of `app.authored.json` at `fe97b63b`): the live-file version broke on an INTEGRATION trial merge (copies shrank to shells, then 66 > 64 modules); the snapshot passed there unchanged.
 - Copies leave out identity-pinned entities (the compiler's own resolvers), then any copied entity the compiler reports missing a projection; any other refusal fails the gate.
 - Compacting `app.authored.json` (ADR-0070 option 4) is not done here: it is the generator's change and a separate packet (precedent `3e89d9aa`).
-- No ledger, lane or review-log row: those are written at integration, after the ruling.
+- No ledger, lane or review-log row: written when the owner merges and INTEGRATION folds this in.
+- Composition census: every schema bound and every `STRUCTURAL_LIMITS_V0` bound, each app built with its ref's own code; counted members as INTEGRATION plus each leaf's additions over its merge-base.
+- List saved views (8; the sales order List needs 9) stay: Counter sales moves to its own worklist (coordinator).
+- Task steps take SALES-EXTRAS' own value 12, so that leaf's identical line merges cleanly.
+- The composition raises sit on INTEGRATION-only code, so they ship as `COMPOSITION-BOUNDS-RAISE`, a separate draft PR on `packet/INTEGRATION` (coordinator); this PR keeps `main` as its base.
+- `brace-expansion` 5.0.9 failed CI's audit on every `main`-based branch; cherry-picked INTEGRATION's one-commit fix (`edaebdf2`, -x) so it merges back cleanly.
 - Review: not owed — outside the Critical set. The owner's ruling is the gate.
 
 ## Slices
 
 1. Constant + boundary tests + perf envelope — executable commits `6b53ba60`, `0bc34b6d`; "Test it yourself" steps 1-3.
 2. T10 note, `compiler-slos.md` amendment, ADR-0070, this record — docs only; step 4.
+3. Owner ruling recorded (comments `88150455`, docs) and the audit fix `30b4f319`.
 
 ## Gates
 
@@ -90,7 +98,8 @@ git diff --stat --diff-filter=MDR origin/main HEAD -- apps/web/release test/fixt
 Expect: both constants read `4_194_304`; each test prints `ok 1` (a package
 of exactly 4,194,304 bytes is accepted and compiles; one byte more is refused
 with "must not exceed 4194304"); `RELEASES-UNCHANGED` prints; the last command
-prints nothing. Then open ADR-0070 and the T10 note: both still say PENDING.
+prints nothing. Then open ADR-0070 and the T10 note: both record the
+2026-10-05 ruling, "raise it".
 
 Optional, about a minute on a quiet machine (it reports INDETERMINATE, never
 green, if the CPU is under 90% idle):
@@ -104,12 +113,10 @@ and `wall_ms` well under `budget_ms=5000`.
 - Language compaction (ADR-0070 option 2: surface slots, selection sets, bare ids) for the next language event.
 - `inventory-contract.cases.ts` honesty control matches an assertion message by regex, so it reds under `FORCE_COLOR`; pre-existing on main.
 
-## Remaining to land (after the owner rules yes)
+## Landing
 
-1. ADR-0070: fill the ruling date and the owner's words; status -> accepted.
-2. T10 note in `canonical-language-v0.md`: replace both PENDING markers.
-3. This record: status line, CI rows; then merge into INTEGRATION with the
-   three one-line rows. If the owner rules no, close the PR unmerged.
+The owner merges PR #30; the INTEGRATION agent folds it into
+`packet/INTEGRATION` with the three one-line rows. This lane merges nothing.
 
 Review: not owed — outside the Critical set.
 
@@ -118,9 +125,11 @@ Review: not owed — outside the Critical set.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "STRUCTURAL-LIMITS-RAISE",
   "base": "fe97b63baedf8bdd42146318bb89d4be1aa948f6",
-  "head": "0bc34b6dfefef04ba89c764bb0f38c9e3b5cb487",
+  "head": "881504555ce819fef62ddcfa83375759a2b0856f",
   "changedPaths": [
     "packages/canonical-model/src/constants.ts",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
     "test/compiler/freeze-b.test.ts",
     "test/compiler/performance-budget.test.ts",
     "test/fixtures/g1/compiler/package-byte-envelope.authored.json",
