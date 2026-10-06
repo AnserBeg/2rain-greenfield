@@ -1084,11 +1084,12 @@ async function seed(
         expectedRevision: invoice.revision,
       });
       assert.equal(invoiced.outcome, 'succeeded');
-      // Asking for more than is free: 12 (3 of them reserved) and 9. On hand
-      // is the opening 10 and the 7 received, less the 2 shipped; 4 are held
-      // elsewhere and 3 by this order, so 8 are free: line 1 is 1 short and
-      // line 2 all 9, until the receipt is reversed.
-      const short = await salesOrder(['12', '9']);
+      // Asking for more than is free and on order: 25 (3 of them reserved)
+      // and 9. On hand is the opening 10 and the 7 received, less the 2
+      // shipped; 4 are held elsewhere and 3 by this order, so 8 are free; the
+      // truck's 11 and the delivered order's 2 are still to arrive, so 13 are
+      // on order (RECEIVING-EXTRAS): line 1 is 1 short and line 2 all 9.
+      const short = await salesOrder(['25', '9']);
       await reserve(short.lines[0]!, '3');
       const lineIds = (lines: readonly { recordId: string }[]) =>
         lines.map((line) => line.recordId);

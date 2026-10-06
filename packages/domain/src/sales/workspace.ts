@@ -598,19 +598,20 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
             // this line's reservations, free stock now nor placed purchase
             // orders cover (RECEIVING-EXTRAS).
             column('short', 'Short', 80, id('metric', 'short')),
+            // What placed purchase orders still to arrive cover of it, read
+            // beside Short.
+            column('incoming', 'On order', 85, id('metric', 'incoming')),
             column(
               'available_now',
               'Free stock now',
               90,
               id('metric', 'available_now'),
             ),
-            // What placed purchase orders still to arrive cover of it.
-            column('incoming', 'On order', 95, id('metric', 'incoming')),
           ],
           'item',
           ['sku', 'unit', 'unit_price'],
-          ['ordered', 'coverage', 'shipped', 'open', 'short'],
-          ['available_now', 'incoming'],
+          ['ordered', 'coverage', 'shipped', 'open', 'short', 'incoming'],
+          ['available_now'],
         ),
       },
       {

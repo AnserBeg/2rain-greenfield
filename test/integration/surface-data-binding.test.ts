@@ -4791,7 +4791,10 @@ class OrderEntryExecutor
       // the row's company, never below zero -- covers it, and the rest is
       // short, stated in the short states only. Covered counts each line at
       // most for what it has open. Whole units only in this witness.
-      const supplied = new Map<string, { covered: number; short: number }>();
+      const supplied = new Map<
+        string,
+        { covered: number; short: number; incoming: number }
+      >();
       const supplyOf = (row: SemanticRecordDto) => {
         const supply = progress?.supply;
         if (!progress || !supply) return null;
@@ -4913,6 +4916,9 @@ class OrderEntryExecutor
             String(row.values[supply.shortIn.fieldId]),
           );
         let short = 0;
+        // RECEIVING-EXTRAS: what is already on order covers, per item, what
+        // free stock leaves; only the rest is short.
+        let incoming = 0;
         if (stated)
           for (const [item, left] of uncovered) {
             if (left <= 0) continue;
@@ -4925,7 +4931,19 @@ class OrderEntryExecutor
                 (total, sum) => total + part(sum, item),
                 0,
               );
-            short += Math.max(left - Math.max(free, 0), 0);
+            const beyond = Math.max(left - Math.max(free, 0), 0);
+            const onOrder = Math.min(
+              beyond,
+              Math.max(
+                (supply.incoming ?? []).reduce(
+                  (total, sum) => total + part(sum, item),
+                  0,
+                ),
+                0,
+              ),
+            );
+            incoming += onOrder;
+            short += beyond - onOrder;
           }
         const answer = {
           covered: lines.reduce(
@@ -4934,6 +4952,7 @@ class OrderEntryExecutor
             0,
           ),
           short,
+          incoming,
         };
         supplied.set(row.recordId, answer);
         return answer;
@@ -5172,6 +5191,13 @@ class OrderEntryExecutor
                   ? {
                       [progress.supply.outputs.covered]: String(supply.covered),
                       [progress.supply.outputs.short]: String(supply.short),
+                      ...(progress.supply.outputs.incoming
+                        ? {
+                            [progress.supply.outputs.incoming]: String(
+                              supply.incoming,
+                            ),
+                          }
+                        : {}),
                     }
                   : {}),
               },
@@ -9346,7 +9372,7 @@ test('ORDER-PARITY: order Lists sum their lines, link each row to its work, and 
   assert.match(
     withheld.html,
     new RegExp(
-      `data-list-progress-withheld="${id('query', 'sales_order_shipped_list')}">Ordered, Shipped, Open and Short are withheld by current policy; To ship, Blocked by supply and Reserved need them and are unavailable.<`,
+      `data-list-progress-withheld="${id('query', 'sales_order_shipped_list')}">Ordered, Shipped, Open, Short and On order are withheld by current policy; To ship, Blocked by supply and Reserved need them and are unavailable.<`,
       'u',
     ),
   );
@@ -9378,9 +9404,9 @@ test('ORDER-PARITY: order Lists sum their lines, link each row to its work, and 
     .split('\r\n');
   assert.equal(
     csv[0],
-    'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Short,Currency',
+    'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Short,On order,Currency',
   );
-  assert.ok(csv.some((line) => /^SO-OPEN,.*,,,,,CAD$/u.test(line)));
+  assert.ok(csv.some((line) => /^SO-OPEN,.*,,,,,,CAD$/u.test(line)));
   const refusedExport = await renderSurfaceRuntimeWithData(
     f.view,
     salesUrl({ view: salesView('to_ship'), export: 'csv' }),
@@ -9911,16 +9937,21 @@ test('SUPPLY-WARNINGS: the Sales orders List counts Blocked by supply and Reserv
   // The supply re-enters current policy for the List's company on every
   // request -- the page and each of the eight tab counts -- query by query.
   const calls = supplyCalls().slice(before);
+  // RECEIVING-EXTRAS: and what placed purchase orders still have to
+  // receive -- their lines, their orders' states and what each received.
   assert.deepEqual(
     [...new Set(calls.map((call) => call.permissionId))].sort(),
     [
       id('permission', 'location_read'),
       id('permission', 'posted_stock_balance_read'),
+      id('permission', 'purchase_order_line_read'),
+      id('permission', 'purchase_order_read'),
+      id('permission', 'purchase_order_received_read'),
       id('permission', 'reservation_balance_read'),
       id('permission', 'reservation_read'),
     ],
   );
-  assert.equal(calls.length, 5 * 9);
+  assert.equal(calls.length, 8 * 9);
   const scopeParameter = id('parameter', 'sales_order_list_legal_entity_scope');
   for (const call of calls) {
     const input = call.decisionInput as {
@@ -9964,10 +9995,11 @@ test('SUPPLY-WARNINGS: the Sales orders List counts Blocked by supply and Reserv
     .split('\r\n');
   assert.equal(
     csv[0],
-    'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Short,Currency',
+    'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Short,On order,Currency',
   );
   assert.equal(csv.length, 2);
-  assert.match(csv[1]!, /^SO-SHORT,.*,14,0,14,6,CAD$/u);
+  // Nothing of the valve is on order here.
+  assert.match(csv[1]!, /^SO-SHORT,.*,14,0,14,6,0,CAD$/u);
 
   // The agent path: the preset carries the supply as the argument it is.
   const preset = (
@@ -9981,8 +10013,10 @@ test('SUPPLY-WARNINGS: the Sales orders List counts Blocked by supply and Reserv
   ).listPresets.find(
     (value) => value.surfaceId === id('surface', 'sales_order_list'),
   )!;
+  // RECEIVING-EXTRAS: and what placed purchase orders cover.
   assert.deepEqual(preset.progress?.supply?.outputs, {
     covered: id('list_output', 'sales_order_list_covered'),
+    incoming: id('list_output', 'sales_order_list_incoming'),
     short: id('list_output', 'sales_order_list_short'),
   });
   assert.deepEqual(
@@ -10027,7 +10061,7 @@ test('SUPPLY-WARNINGS: the Sales orders List counts Blocked by supply and Reserv
     assert.match(
       withheld.html,
       new RegExp(
-        `data-list-supply-withheld="${id('query', queryId)}">Short is withheld by current policy; Blocked by supply and Reserved need it and are unavailable.<`,
+        `data-list-supply-withheld="${id('query', queryId)}">Short and On order are withheld by current policy; Blocked by supply and Reserved need them and are unavailable.<`,
         'u',
       ),
     );
@@ -10054,7 +10088,7 @@ test('SUPPLY-WARNINGS: the Sales orders List counts Blocked by supply and Reserv
     assert.ok(
       file
         .download!.body.split('\r\n')
-        .some((line) => /^SO-SHORT,.*,14,0,14,,CAD$/u.test(line)),
+        .some((line) => /^SO-SHORT,.*,14,0,14,,,CAD$/u.test(line)),
     );
     const refusedFile = await renderSurfaceRuntimeWithData(
       f.view,
