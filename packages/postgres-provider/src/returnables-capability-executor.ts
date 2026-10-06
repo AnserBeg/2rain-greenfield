@@ -674,16 +674,22 @@ class ReturnablesCapabilityExecutor implements RegisteredCapabilityOperationExec
       );
     const custodyValue = (name: string) => custody[unquote(custodyField(name))];
     const partyId = String(custodyValue('party_id'));
-    if (
-      String(
-        custody[
-          unquote(relationColumn(b, b.custody, 'returnable_custody_party'))
-        ],
-      ) !== partyId
-    )
+    const link = (local: string) =>
+      String(custody[unquote(relationColumn(b, b.custody, local))]);
+    if (link('returnable_custody_party') !== partyId)
       throw refused(
         'RETURNABLES_CUSTODY_INVALID',
         "The custody record's party and its party link differ",
+      );
+    // The type link is what keeps the type from being archived under a live
+    // custody; the field is what the Lists label and the key reads.
+    if (
+      link('returnable_custody_asset_type') !==
+      String(custodyValue('asset_type_id'))
+    )
+      throw refused(
+        'RETURNABLES_CUSTODY_INVALID',
+        "The custody record's returnable type and its type link differ",
       );
     const direction = ['out', 'held'].find(
       (value) =>

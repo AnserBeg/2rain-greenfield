@@ -64,6 +64,8 @@ type Spec = readonly [
     readonly businessKey?: boolean;
     readonly numberedAs?: string;
     readonly choices?: Choices;
+    /** Written only by the returnables capability (`maintainedBy`). */
+    readonly maintained?: boolean;
   },
 ];
 
@@ -75,8 +77,11 @@ export const RETURNABLE_ENTITIES = [
 ] as const;
 
 /**
- * The custody figures are written by the capability from the custody's posted
- * events whenever one posts; a custody record that has posted nothing is New.
+ * The custody figures -- the unit deposit frozen at the first Issue and every
+ * quantity and deposit total -- are maintained by the capability: it restates
+ * them from the custody's posted events whenever one posts, and no generic
+ * create or update names them. A custody record that has posted nothing is
+ * New and holds none of them. An event's attribution is the capability's too.
  */
 export const RETURNABLE_FIELDS: Readonly<Record<string, readonly Spec[]>> = {
   returnable_asset_type: [
@@ -118,16 +123,25 @@ export const RETURNABLE_FIELDS: Readonly<Record<string, readonly Spec[]>> = {
       { length: 80, searchable: true },
     ],
     ['currency', 'Currency', 'choice', { choices: RETURNABLE_CURRENCIES }],
-    ['unit_deposit', 'Unit deposit', 'decimal', { optional: true }],
-    ['issued_quantity', 'Issued', 'decimal', { optional: true }],
-    ['returned_quantity', 'Returned', 'decimal', { optional: true }],
-    ['forfeited_quantity', 'Forfeited', 'decimal', { optional: true }],
-    ['outstanding_quantity', 'Outstanding', 'decimal', { optional: true }],
-    ['deposit_taken', 'Deposit taken', 'decimal', { optional: true }],
-    ['deposit_refunded', 'Deposit refunded', 'decimal', { optional: true }],
-    ['deposit_forfeited', 'Deposit kept', 'decimal', { optional: true }],
-    ['deposit_held', 'Deposit held', 'decimal', { optional: true }],
-    ['deposit_refundable', 'Refundable now', 'decimal', { optional: true }],
+    ...(
+      [
+        ['unit_deposit', 'Unit deposit'],
+        ['issued_quantity', 'Issued'],
+        ['returned_quantity', 'Returned'],
+        ['forfeited_quantity', 'Forfeited'],
+        ['outstanding_quantity', 'Outstanding'],
+        ['deposit_taken', 'Deposit taken'],
+        ['deposit_refunded', 'Deposit refunded'],
+        ['deposit_forfeited', 'Deposit kept'],
+        ['deposit_held', 'Deposit held'],
+        ['deposit_refundable', 'Refundable now'],
+      ] as const
+    ).map(([name, label]): Spec => [
+      name,
+      label,
+      'decimal',
+      { optional: true, maintained: true },
+    ]),
     ['notes', 'Notes', 'text', { length: 1000, optional: true }],
   ],
   returnable_event: [
@@ -154,7 +168,12 @@ export const RETURNABLE_FIELDS: Readonly<Record<string, readonly Spec[]>> = {
     ],
     ['reference', 'Reference', 'text', { length: 120, optional: true }],
     ['reason', 'Reason', 'text', { length: 1000, searchable: true }],
-    ['recorded_by', 'Recorded by', 'text', { length: 240, optional: true }],
+    [
+      'recorded_by',
+      'Recorded by',
+      'text',
+      { length: 240, optional: true, maintained: true },
+    ],
   ],
 };
 
@@ -198,8 +217,9 @@ export function returnablesDeclarations(
       value: option(local, name, value),
     },
   });
-  // Generic writes of a custody record only while it has posted nothing, of
-  // an event only while a draft; each event posts once through the capability.
+  // Generic writes of a custody record only while it is New -- the canonical
+  // empty image, since no generic write names a figure -- and of an event only
+  // while a draft; each event posts once through the capability.
   const guards: Readonly<Record<string, Record<string, unknown> | undefined>> =
     {
       returnable_asset_type: undefined,
@@ -247,6 +267,14 @@ export function returnablesDeclarations(
       return {
         ...(options.businessKey || options.numberedAs
           ? { businessKey: 'tenantEnvironmentCaseInsensitiveUnique' }
+          : {}),
+        ...(options.maintained
+          ? {
+              maintainedBy: ref(
+                'capabilityReference',
+                RETURNABLES_CAPABILITY_ID,
+              ),
+            }
           : {}),
         ...(options.numberedAs
           ? {
@@ -529,8 +557,9 @@ export function returnablesDeclarations(
     operations,
     permissions,
     queries,
-    // A custody record names its party, which lists it on its page; an event
-    // belongs to its custody record.
+    // A custody record names its party, which lists it on its page, and its
+    // returnable type, which is not archived while a live custody names it
+    // (restrict); an event belongs to its custody record.
     relations: [
       relation(
         'returnable_custody_party',
@@ -538,6 +567,13 @@ export function returnablesDeclarations(
         'party',
         'reference',
         30,
+      ),
+      relation(
+        'returnable_custody_asset_type',
+        'returnable_custody',
+        'returnable_asset_type',
+        'reference',
+        35,
       ),
       // A reference, not an owned child: an owned child is written only
       // while its parent's own writes are admitted, and a custody record

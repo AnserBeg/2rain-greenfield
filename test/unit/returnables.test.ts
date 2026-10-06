@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import {
+  CanonicalModelError,
+  normalizeApplicationPackage,
+} from '../../packages/canonical-model/src/index.js';
 import { composedApplicationDefinition } from '../../packages/domain/src/app/builder.js';
 import { composedListSpecs } from '../../packages/domain/src/app/list-declarations.js';
 import { partyModuleDefinition } from '../../packages/domain/src/party/definition.js';
@@ -125,8 +129,9 @@ test('a custody record is RTN-numbered and company-owned; its events post once f
     guardedOn('returnable_event_post'),
     /returnable_event_state_draft/u,
   );
-  // A custody names its party; an event names its custody, which is no
-  // owning parent: the custody takes events after it stops admitting writes.
+  // A custody names its party and its type; an event names its custody,
+  // which is no owning parent: the custody takes events after it stops
+  // admitting writes. Every link restricts its target's archive.
   assert.deepEqual(
     (definition.relations as Json[])
       .filter((value) => String(value.relationId).includes('returnable'))
@@ -134,20 +139,131 @@ test('a custody record is RTN-numbered and company-owned; its events post once f
         value.relationId,
         (value.targetEntity as Json).targetId,
         value.ownership,
+        value.archiveBehavior,
       ]),
     [
       [
         `${ns}:relation.returnable_custody_party`,
         `${ns}:entity.party`,
         'reference',
+        'restrict',
+      ],
+      [
+        `${ns}:relation.returnable_custody_asset_type`,
+        `${ns}:entity.returnable_asset_type`,
+        'reference',
+        'restrict',
       ],
       [
         `${ns}:relation.returnable_event_custody`,
         `${ns}:entity.returnable_custody`,
         'reference',
+        'restrict',
       ],
     ],
   );
+});
+
+test('the custody figures and an event’s attribution are maintained by the returnables capability alone, and a maintenance the runtime could not honour is refused by name', () => {
+  type App = Json & { fields: Json[]; surfaces: Json[] };
+  const application = () =>
+    structuredClone(composedApplicationDefinition()) as App;
+  const field = (app: App, local: string) =>
+    app.fields.find((value) => value.fieldId === `${ns}:field.${local}`)!;
+  const maintainedBy = {
+    kind: 'capabilityReference',
+    schemaVersion: 'v6',
+    targetId: RETURNABLES_CAPABILITY_ID,
+  };
+  const normalized = normalizeApplicationPackage(
+    composedApplicationDefinition() as never,
+  );
+  assert.deepEqual(
+    normalized.fields
+      .flatMap((value) => {
+        const by = (value as { maintainedBy?: { targetId: string } })
+          .maintainedBy;
+        return by ? [[value.fieldId, by.targetId]] : [];
+      })
+      .sort(),
+    [
+      ...[
+        'deposit_forfeited',
+        'deposit_held',
+        'deposit_refundable',
+        'deposit_refunded',
+        'deposit_taken',
+        'forfeited_quantity',
+        'issued_quantity',
+        'outstanding_quantity',
+        'returned_quantity',
+        'unit_deposit',
+      ].map((name) => `${ns}:field.returnable_custody_${name}`),
+      `${ns}:field.returnable_event_recorded_by`,
+    ].map((fieldId) => [fieldId, RETURNABLES_CAPABILITY_ID]),
+  );
+  const refused = (mutate: (app: App) => void): string => {
+    const app = application();
+    mutate(app);
+    try {
+      normalizeApplicationPackage(app as never);
+    } catch (error) {
+      assert.ok(error instanceof CanonicalModelError, String(error));
+      return error.diagnostics.map((diagnostic) => diagnostic.rule).join(' ');
+    }
+    assert.fail('the maintenance was accepted');
+  };
+  const cases: Array<[string, (app: App) => void]> = [
+    [
+      'names a capability this package requires with the recordMutation effect',
+      (app) => {
+        field(app, 'returnable_custody_outstanding_quantity').maintainedBy = {
+          ...maintainedBy,
+          targetId: 'northstar.party:capability.undeclared',
+        };
+      },
+    ],
+    [
+      'a maintained field is optional',
+      (app) => {
+        field(app, 'returnable_custody_party_id').maintainedBy = maintainedBy;
+      },
+    ],
+    [
+      'a maintained field is not a business key',
+      (app) => {
+        Object.assign(field(app, 'returnable_asset_type_code'), {
+          presence: 'optional',
+          defaultSemantics: 'nullable',
+          maintainedBy,
+        });
+      },
+    ],
+    [
+      'a maintained figure is not a composition input',
+      (app) => {
+        const party = app.surfaces.find((surface) =>
+          String(surface.surfaceId).endsWith(':surface.party_detail'),
+        )!;
+        const action = (
+          (party.composition as Json).actions as Array<
+            Json & { steps: Array<{ bindings: unknown[] }> }
+          >
+        ).find((value) =>
+          String(value.actionId).endsWith(':action.party_issue_returnables'),
+        )!;
+        action.steps[0]!.bindings.push({
+          path: [
+            'values',
+            `${ns}:field.returnable_custody_outstanding_quantity`,
+          ],
+          value: { source: 'literal', value: '6' },
+        });
+      },
+    ],
+  ];
+  for (const [rule, mutate] of cases)
+    assert.match(refused(mutate), new RegExp(rule, 'u'), rule);
 });
 
 test('Returnables out and Returnables held keep their direction in every view', () => {

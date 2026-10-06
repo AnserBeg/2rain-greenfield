@@ -8953,6 +8953,11 @@
       "searchable": false
     },
     {
+      "maintainedBy": {
+        "kind": "capabilityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.party:capability.returnables"
+      },
       "classification": "internal",
       "collation": "binary",
       "defaultSemantics": "nullable",
@@ -8978,6 +8983,11 @@
       "searchable": false
     },
     {
+      "maintainedBy": {
+        "kind": "capabilityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.party:capability.returnables"
+      },
       "classification": "internal",
       "collation": "binary",
       "defaultSemantics": "nullable",
@@ -9003,6 +9013,11 @@
       "searchable": false
     },
     {
+      "maintainedBy": {
+        "kind": "capabilityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.party:capability.returnables"
+      },
       "classification": "internal",
       "collation": "binary",
       "defaultSemantics": "nullable",
@@ -9028,6 +9043,11 @@
       "searchable": false
     },
     {
+      "maintainedBy": {
+        "kind": "capabilityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.party:capability.returnables"
+      },
       "classification": "internal",
       "collation": "binary",
       "defaultSemantics": "nullable",
@@ -9053,6 +9073,11 @@
       "searchable": false
     },
     {
+      "maintainedBy": {
+        "kind": "capabilityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.party:capability.returnables"
+      },
       "classification": "internal",
       "collation": "binary",
       "defaultSemantics": "nullable",
@@ -9078,6 +9103,11 @@
       "searchable": false
     },
     {
+      "maintainedBy": {
+        "kind": "capabilityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.party:capability.returnables"
+      },
       "classification": "internal",
       "collation": "binary",
       "defaultSemantics": "nullable",
@@ -9103,6 +9133,11 @@
       "searchable": false
     },
     {
+      "maintainedBy": {
+        "kind": "capabilityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.party:capability.returnables"
+      },
       "classification": "internal",
       "collation": "binary",
       "defaultSemantics": "nullable",
@@ -9128,6 +9163,11 @@
       "searchable": false
     },
     {
+      "maintainedBy": {
+        "kind": "capabilityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.party:capability.returnables"
+      },
       "classification": "internal",
       "collation": "binary",
       "defaultSemantics": "nullable",
@@ -9153,6 +9193,11 @@
       "searchable": false
     },
     {
+      "maintainedBy": {
+        "kind": "capabilityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.party:capability.returnables"
+      },
       "classification": "internal",
       "collation": "binary",
       "defaultSemantics": "nullable",
@@ -9178,6 +9223,11 @@
       "searchable": false
     },
     {
+      "maintainedBy": {
+        "kind": "capabilityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.party:capability.returnables"
+      },
       "classification": "internal",
       "collation": "binary",
       "defaultSemantics": "nullable",
@@ -9481,6 +9531,11 @@
       "searchable": true
     },
     {
+      "maintainedBy": {
+        "kind": "capabilityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.party:capability.returnables"
+      },
       "classification": "internal",
       "collation": "unicodeCaseInsensitive",
       "defaultSemantics": "nullable",
@@ -42185,6 +42240,32 @@
       },
       "joinEligibility": "query",
       "kind": "relationDefinition",
+      "orderKey": 35,
+      "ownership": "reference",
+      "relationId": "northstar.app:relation.returnable_custody_asset_type",
+      "required": true,
+      "schemaVersion": "v6",
+      "sourceEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.returnable_custody"
+      },
+      "targetEntity": {
+        "kind": "entityReference",
+        "schemaVersion": "v6",
+        "targetId": "northstar.app:entity.returnable_asset_type"
+      }
+    },
+    {
+      "archiveBehavior": "restrict",
+      "cardinality": "manyToOne",
+      "foreignKeyActions": {
+        "onDelete": "restrict",
+        "onUpdate": "restrict",
+        "schemaVersion": "v6"
+      },
+      "joinEligibility": "query",
+      "kind": "relationDefinition",
       "orderKey": 40,
       "ownership": "reference",
       "relationId": "northstar.app:relation.returnable_event_custody",
@@ -59678,6 +59759,16 @@
                       "northstar.app:relation.returnable_custody_party"
                     ],
                     "value": { "source": "record", "field": "recordId" }
+                  },
+                  {
+                    "path": [
+                      "relations",
+                      "northstar.app:relation.returnable_custody_asset_type"
+                    ],
+                    "value": {
+                      "source": "input",
+                      "inputId": "northstar.app:input.party_returnable_type"
+                    }
                   }
                 ]
               },
@@ -61023,7 +61114,7 @@
             "columnId": "northstar.app:column.custody_type",
             "label": "Returnable type",
             "orderKey": 25,
-            "field": "northstar.app:field.returnable_custody_asset_type_id",
+            "field": "northstar.app:relation.returnable_custody_asset_type",
             "reference": {
               "query": {
                 "kind": "queryReference",

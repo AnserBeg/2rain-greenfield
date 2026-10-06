@@ -427,6 +427,11 @@
         "targetFamilyId": "party"
       },
       {
+        "semantics": "crossEntityAllowed",
+        "sourceFamilyId": "returnable_custody",
+        "targetFamilyId": "returnable_asset_type"
+      },
+      {
         "semantics": "sameEntity",
         "sourceFamilyId": "returnable_event",
         "targetFamilyId": "returnable_custody"
@@ -537,7 +542,7 @@
     ],
     "kind": "quantityOnlyMovement"
   },
-  "releaseRoot": "05fc9ffb208f32faa3000dcd6134ced4bb7c5618671acbd880ee0443337d4774",
+  "releaseRoot": "d4a82dda13c5ccb24b2038437d13681a1100448ebfd657c2701885fa2e99892e",
   "storageTargetPayloadVersions": {
     "entityOwned": "northstar.storage-target-payload/v3",
     "tenantShared": "northstar.storage-target-payload/v1"

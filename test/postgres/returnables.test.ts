@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import type { PoolClient } from 'pg';
+
 import {
   formatCents,
   parseExact,
@@ -706,7 +708,7 @@ test('returnables: only the capability writes a custody’s figures, an in-use r
       fixture.app.runtime.identity.environmentId,
     ];
     const barrier = async (
-      hold: (client: import('pg').PoolClient) => Promise<unknown>,
+      hold: (client: PoolClient) => Promise<unknown>,
       posts: () => Promise<unknown>[],
       what: string,
     ) => {
@@ -839,6 +841,7 @@ test('returnables: only the capability writes a custody’s figures, an in-use r
           outcome.status === 'rejected' &&
           refusedWith('RETURNABLES_REFUND_EXCEEDS_DEPOSIT')(outcome.reason),
       ),
+      'the other is refused for exceeding what is refundable',
     );
     const after = await kit.figures(winner.recordId);
     assert.deepEqual([after.refunded, after.refundable], ['30.00', '20.00']);

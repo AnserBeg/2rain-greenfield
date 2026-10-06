@@ -592,6 +592,10 @@ export function partyWorkspace(namespace: string): Record<string, unknown> {
               ['relations', id('relation', 'returnable_custody_party')],
               record('recordId'),
             ),
+            bind(
+              ['relations', id('relation', 'returnable_custody_asset_type')],
+              input('returnable_type'),
+            ),
           ]),
           step('returnable_issue', 'returnable_event_create', [
             bind(['recordId'], { source: 'generated', value: 'uuid' }),
@@ -816,10 +820,16 @@ export function returnableCustodyWorkspace(
         'party_get',
         'party_name',
       ]),
-      column('type', 'Returnable type', 25, custody('asset_type_id'), [
-        'returnable_asset_type_get',
-        'returnable_asset_type_name',
-      ]),
+      // The type through the custody's type link, stated by its get and
+      // labelled through the type's own get: "—" when that read is withheld
+      // or the type is gone, never a failed page.
+      column(
+        'type',
+        'Returnable type',
+        25,
+        id('relation', 'returnable_custody_asset_type'),
+        ['returnable_asset_type_get', 'returnable_asset_type_name'],
+      ),
       column('direction', 'Direction', 30, custody('direction')),
       column('currency', 'Currency', 35, custody('currency')),
       money(

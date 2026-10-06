@@ -370,6 +370,11 @@ export const LEGAL_ENTITY_RELATION_SEMANTICS_V1 = Object.freeze([
     targetFamilyId: 'party',
   },
   {
+    semantics: 'crossEntityAllowed',
+    sourceFamilyId: 'returnable_custody',
+    targetFamilyId: 'returnable_asset_type',
+  },
+  {
     semantics: 'sameEntity',
     sourceFamilyId: 'returnable_event',
     targetFamilyId: 'returnable_custody',

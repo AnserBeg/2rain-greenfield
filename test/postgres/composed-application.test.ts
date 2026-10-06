@@ -3607,12 +3607,15 @@ async function assertBoundedFreshTenantInstallEvidence(
   // compiled plan: vendor bill (23), bill line (17), vendor payment (17) and
   // vendor credit (15) -- the receivables documents' shapes; the supplier's
   // invoice number is searchable, so it adds no search exclusion.
-  // RETURNABLE-ASSETS adds 61, measured from the compiled plan: returnable
-  // type (14), custody (27) and event (20).
+  // RETURNABLE-ASSETS adds 62, measured from the compiled plan: returnable
+  // type (14), custody (28: its type link restricts the type's archive, one
+  // more archive-restrict scenario) and event (20). The custody figures and
+  // an event's attribution leave every generic writable set, which moves no
+  // scenario: search exclusions still count every non-searchable field.
   assert.equal(
     servingScenarioCount,
-    634,
-    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, and 61 for returnables',
+    635,
+    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, and 62 for returnables',
   );
   await assertFreshInstallLineageEvidence(
     pool,
@@ -5977,13 +5980,13 @@ async function assertExactPartitionEvidence(
   // on the purchase order, its line, the goods receipt and the amendment
   // request, each with a generic create: 501, 424. PAYABLES' 72 execute too
   // (each vendor document has a generic create, replayed by this oracle over
-  // the compiled head): 573, 496. RETURNABLE-ASSETS' 61 execute as well (the
+  // the compiled head): 573, 496. RETURNABLE-ASSETS' 62 execute as well (the
   // returnable type, custody record and event each have a generic create):
-  // 634, 557.
+  // 635, 558.
   assert.equal(
     evidence.results.length,
-    557,
-    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72, and returnables 61',
+    558,
+    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72, and returnables 62',
   );
   assert.equal(
     derivations.length,
