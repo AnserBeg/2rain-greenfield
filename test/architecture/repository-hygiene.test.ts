@@ -144,13 +144,6 @@ const suiteDefinitions = [
       'test/postgres/purchase-order-ending.test.ts',
       'test/postgres/receivables.test.ts',
       'test/postgres/receiving-authorization.test.ts',
-    ],
-    expectedFiles: [
-      'test/postgres/catalog-extras.test.ts',
-      'test/postgres/catalog-runtime.test.ts',
-      'test/postgres/current-policy.test.ts',
-      'test/postgres/declared-list.test.ts',
-      'test/postgres/document-numbering.test.ts',
       'test/postgres/inventory-backdate-policy.test.ts',
       'test/postgres/inventory-backup-restore.test.ts',
       'test/postgres/inventory-dimension-set-replay.test.ts',
@@ -163,6 +156,16 @@ const suiteDefinitions = [
       'test/postgres/inventory-terminal-state.test.ts',
       'test/postgres/inventory-valuation.test.ts',
       'test/postgres/item-stock.test.ts',
+      'test/postgres/period-lock-commands.test.ts',
+      'test/postgres/replenishment.test.ts',
+      'test/postgres/stock-serializer.test.ts',
+    ],
+    expectedFiles: [
+      'test/postgres/catalog-extras.test.ts',
+      'test/postgres/catalog-runtime.test.ts',
+      'test/postgres/current-policy.test.ts',
+      'test/postgres/declared-list.test.ts',
+      'test/postgres/document-numbering.test.ts',
       'test/postgres/location-runtime.test.ts',
       'test/postgres/locations.test.ts',
       'test/postgres/migrations.test.ts',
@@ -171,7 +174,6 @@ const suiteDefinitions = [
       'test/postgres/module-storage-transition.test.ts',
       'test/postgres/observability-health.test.ts',
       'test/postgres/party-runtime.test.ts',
-      'test/postgres/period-lock-commands.test.ts',
       'test/postgres/predicate-absent-semantics.test.ts',
       'test/postgres/predicate-parity-corpus.test.ts',
       'test/postgres/query-aggregate-semantics.test.ts',
@@ -179,10 +181,8 @@ const suiteDefinitions = [
       'test/postgres/release-activation.test.ts',
       'test/postgres/release-approval.test.ts',
       'test/postgres/releases.test.ts',
-      'test/postgres/replenishment.test.ts',
       'test/postgres/request-runtime-view.test.ts',
       'test/postgres/saved-filter.test.ts',
-      'test/postgres/stock-serializer.test.ts',
       'test/postgres/storage-payload-family.test.ts',
       'test/postgres/table-behavior.test.ts',
       'test/postgres/tenant-isolation.test.ts',
@@ -213,6 +213,28 @@ const suiteDefinitions = [
       'test/postgres/receiving-authorization.test.ts',
     ],
     script: 'test:postgres:commercial',
+  },
+  {
+    discoveryPattern:
+      'test/postgres/**/@(inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|period-lock-commands|replenishment|stock-serializer).test.ts',
+    expectedFiles: [
+      'test/postgres/inventory-backdate-policy.test.ts',
+      'test/postgres/inventory-backup-restore.test.ts',
+      'test/postgres/inventory-dimension-set-replay.test.ts',
+      'test/postgres/inventory-documents.test.ts',
+      'test/postgres/inventory-onhand.test.ts',
+      'test/postgres/inventory-posting.test.ts',
+      'test/postgres/inventory-reconciliation.test.ts',
+      'test/postgres/inventory-stock-count.test.ts',
+      'test/postgres/inventory-storage.test.ts',
+      'test/postgres/inventory-terminal-state.test.ts',
+      'test/postgres/inventory-valuation.test.ts',
+      'test/postgres/item-stock.test.ts',
+      'test/postgres/period-lock-commands.test.ts',
+      'test/postgres/replenishment.test.ts',
+      'test/postgres/stock-serializer.test.ts',
+    ],
+    script: 'test:postgres:inventory',
   },
 ] as const;
 
@@ -686,6 +708,7 @@ test('CI runs every scaffold gate from a frozen install', () => {
     'corepack pnpm test:postgres',
     'corepack pnpm test:postgres:composed',
     'corepack pnpm test:postgres:commercial',
+    'corepack pnpm test:postgres:inventory',
     'corepack pnpm test:locale',
     'corepack pnpm test:browser',
     'corepack pnpm test:browser:operations',
@@ -703,6 +726,7 @@ test('CI runs every scaffold gate from a frozen install', () => {
   assert.match(workflow, /^ {2}postgres:$/mu);
   assert.match(workflow, /^ {2}postgres-composed:$/mu);
   assert.match(workflow, /^ {2}postgres-commercial:$/mu);
+  assert.match(workflow, /^ {2}postgres-inventory:$/mu);
   assert.match(workflow, /^ {2}browser:$/mu);
   assert.match(workflow, /^ {2}browser-operations:$/mu);
   assert.match(workflow, /^ {2}browser-inventory:$/mu);

@@ -92,7 +92,7 @@ export const reachabilityProducers = [
   // and so do the commercial document workflows, each under the same bound,
   // so no job nears it.
   nodeProducer('postgres', 'postgres', 'test:postgres', [
-    'test/postgres/**/!(composed-application|commercial-totals|expected-receipts|fulfillment|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|purchase-approvals|purchase-order-ending|receivables|receiving-authorization).test.ts',
+    'test/postgres/**/!(commercial-totals|composed-application|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|replenishment|stock-serializer).test.ts',
   ]),
   nodeProducer(
     'postgres-composed',
@@ -117,6 +117,30 @@ export const reachabilityProducers = [
       'test/postgres/purchase-order-ending.test.ts',
       'test/postgres/receivables.test.ts',
       'test/postgres/receiving-authorization.test.ts',
+    ],
+  ),
+  // The inventory files run in a job of their own as well (INTEGRATION: the
+  // union's PostgreSQL job ran 21-27 minutes of its 30-minute bound).
+  nodeProducer(
+    'postgres-inventory',
+    'postgres-inventory',
+    'test:postgres:inventory',
+    [
+      'test/postgres/inventory-backdate-policy.test.ts',
+      'test/postgres/inventory-backup-restore.test.ts',
+      'test/postgres/inventory-dimension-set-replay.test.ts',
+      'test/postgres/inventory-documents.test.ts',
+      'test/postgres/inventory-onhand.test.ts',
+      'test/postgres/inventory-posting.test.ts',
+      'test/postgres/inventory-reconciliation.test.ts',
+      'test/postgres/inventory-stock-count.test.ts',
+      'test/postgres/inventory-storage.test.ts',
+      'test/postgres/inventory-terminal-state.test.ts',
+      'test/postgres/inventory-valuation.test.ts',
+      'test/postgres/item-stock.test.ts',
+      'test/postgres/period-lock-commands.test.ts',
+      'test/postgres/replenishment.test.ts',
+      'test/postgres/stock-serializer.test.ts',
     ],
   ),
   // The browser suite runs as four jobs under the same bound, split by file
