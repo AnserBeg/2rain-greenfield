@@ -80,7 +80,10 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     // work rather than an order-entry-specific renderer rewrite.
     // SALES-PARITY declares the purchase-order List with saved views, so its
     // savedViews slot is present: SG003 + SG009 there close, 57 - 2 = 55.
-    violationCount: 55,
+    // RECEIVING-EXTRAS composes the goods receipt page (its lines, its
+    // corrections and Correct receipt), which supplies its childTables slot:
+    // SG003 + SG009 there close, 55 - 2 = 53. Measured by compiling.
+    violationCount: 53,
   }),
   Object.freeze({
     moduleId: 'northstar.sales:module.sales',

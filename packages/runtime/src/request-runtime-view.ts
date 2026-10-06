@@ -183,7 +183,11 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // (CATALOG-EXTRAS).
     // 21 adds a List progress's supply and the views and row actions that
     // keep covered or short rows (SUPPLY-WARNINGS).
-    maximumSupportedVersion: 21,
+    // 22-25 are held for leaves still to be integrated (INTEGRATION's floor
+    // numbering); no release of this runtime declares one.
+    // 26 adds a Task instant input starting now, a negated quantity binding
+    // and a List supply's incoming supply (RECEIVING-EXTRAS).
+    maximumSupportedVersion: 26,
   },
 });
 

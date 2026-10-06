@@ -83,22 +83,40 @@ export const MAPPED_OPERATION_ERROR_NAMES = Object.freeze([
 export type MappedOperationErrorName =
   (typeof MAPPED_OPERATION_ERROR_NAMES)[number];
 
+/**
+ * The provider refusals read in plain language (RECEIVING-EXTRAS): the
+ * posting kernel's date window, a closed period, a correction beyond what a
+ * receipt still adds, and an order that is not released. The kernel's code
+ * stays the subject, so the operator and support still see it.
+ */
+const READABLE_REFUSAL_CODES = Object.freeze({
+  INVENTORY_BACKDATE_LIMIT_EXCEEDED: 'OPERATION_DATE_BEFORE_WINDOW',
+  INVENTORY_FORWARD_DATE_REFUSED: 'OPERATION_DATE_AFTER_TODAY',
+  INVENTORY_PERIOD_CLOSED: 'OPERATION_PERIOD_CLOSED',
+  RECEIPT_CORRECTION_INVALID: 'OPERATION_RECEIPT_CORRECTION_EXCEEDED',
+  RECEIPT_FORWARD_DATE_REFUSED: 'OPERATION_DATE_AFTER_TODAY',
+  RECEIPT_ORDER_NOT_RELEASED: 'OPERATION_ORDER_NOT_RELEASED',
+} as const);
+
+type ReadableRefusalCode =
+  (typeof READABLE_REFUSAL_CODES)[keyof typeof READABLE_REFUSAL_CODES];
+
+type CodesWithSubject =
+  'OPERATION_LEGAL_ENTITY_INACTIVE' | 'OPERATION_REFUSED' | ReadableRefusalCode;
+
 export type OperationMessageRef =
   | {
-      readonly code: Exclude<
-        OperationDiagnosticCode,
-        'OPERATION_LEGAL_ENTITY_INACTIVE' | 'OPERATION_REFUSED'
-      >;
+      readonly code: Exclude<OperationDiagnosticCode, CodesWithSubject>;
       readonly subject?: undefined;
     }
   | {
-      readonly code: 'OPERATION_LEGAL_ENTITY_INACTIVE' | 'OPERATION_REFUSED';
+      readonly code: CodesWithSubject;
       readonly subject: string;
     };
 
-type SubjectlessOperationDiagnosticCode = Exclude<
+export type SubjectlessOperationDiagnosticCode = Exclude<
   OperationDiagnosticCode,
-  'OPERATION_LEGAL_ENTITY_INACTIVE' | 'OPERATION_REFUSED'
+  CodesWithSubject
 >;
 
 const OPERATION_ERROR_MESSAGE_CODES: Readonly<
@@ -168,7 +186,14 @@ export function operationMessageRef(error: unknown): OperationMessageRef {
         subject: error.subjectId,
       };
     }
-    return { code: 'OPERATION_REFUSED', subject: error.code };
+    const readable = Object.hasOwn(READABLE_REFUSAL_CODES, error.code)
+      ? READABLE_REFUSAL_CODES[
+          error.code as keyof typeof READABLE_REFUSAL_CODES
+        ]
+      : undefined;
+    return readable
+      ? { code: readable, subject: error.code }
+      : { code: 'OPERATION_REFUSED', subject: error.code };
   }
   const name = errorName(error);
   const code = isMappedOperationErrorName(name)

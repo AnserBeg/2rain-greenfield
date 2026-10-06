@@ -2340,12 +2340,18 @@ interface ListSupplyPlan {
     readonly plus: readonly FigureSumPlan[];
     readonly minus: readonly FigureSumPlan[];
   };
+  /** What is already on order of the item (RECEIVING-EXTRAS), if summed. */
+  readonly incoming: readonly FigureSumPlan[] | null;
   readonly shortIn: {
     readonly column: StorageEntity['columns'][number];
     readonly values: readonly string[];
   } | null;
   readonly keep: 'covered' | 'short' | null;
-  readonly outputs: { readonly covered: string; readonly short: string };
+  readonly outputs: {
+    readonly covered: string;
+    readonly incoming?: string;
+    readonly short: string;
+  };
   /** Every entity the supply reads, for the read-scope verification. */
   readonly entities: readonly StorageEntity[];
 }
@@ -2508,6 +2514,10 @@ function listSupplyPlan(
     plus: Object.freeze(supply.free.plus.map(part)),
     minus: Object.freeze(supply.free.minus.map(part)),
   });
+  // Supply already on order (RECEIVING-EXTRAS): sums like free stock's.
+  const incoming = supply.incoming
+    ? Object.freeze(supply.incoming.map(part))
+    : null;
   return Object.freeze({
     coverage: Object.freeze({
       entity: covering,
@@ -2516,6 +2526,7 @@ function listSupplyPlan(
     }),
     itemColumn: item.physicalName,
     free,
+    incoming,
     shortIn:
       states && stateColumn
         ? Object.freeze({ column: stateColumn, values: states.values })
@@ -2601,10 +2612,14 @@ const SUPPLY_ALIAS = 'table_supply';
  * rows holding the item's id, never below zero -- is allocated to the row's
  * uncovered quantity, and what is left is short. Allocated in line order,
  * the lines of one item share the stock exactly so: their total short is
- * what their total uncovered quantity exceeds it by. It sits in FROM, so the
- * count, the page and the export read the same figures and a kept `covered`
- * or `short` filters before all three. Every joined row is pinned to the
- * listed row's tenant, environment and company and to the issued read scope.
+ * what their total uncovered quantity exceeds it by. Supply already on
+ * order (`incoming`, RECEIVING-EXTRAS) -- its sums, never below zero --
+ * covers per item what free stock leaves, and only the rest is short:
+ * `incoming` states the part it covers, in the same states as `short`. It
+ * sits in FROM, so the count, the page and the export read the same figures
+ * and a kept `covered` or `short` filters before all three. Every joined row
+ * is pinned to the listed row's tenant, environment and company and to the
+ * issued read scope.
  */
 function listSupplyFromSql(
   entity: StorageEntity,
@@ -2681,19 +2696,53 @@ function listSupplyFromSql(
         (sum, index) => `- ${part(sum, `minus_${String(index)}`)}`,
       ),
     ].join(' ');
+  const incoming = () =>
+    [
+      '0',
+      ...(supply.incoming ?? []).map(
+        (sum, index) => `+ ${part(sum, `incoming_${String(index)}`)}`,
+      ),
+    ].join(' ');
   const uncovered = qualified(items, 'uncovered');
-  const shortTotal = `(SELECT coalesce(sum(CASE WHEN ${uncovered} > 0 THEN greatest(${uncovered} - greatest((${free()}), 0), 0) ELSE 0 END), 0)
-          FROM (SELECT ${qualified(lines, 'item')} AS ${quoted('item')},
+  const itemTotals = `(SELECT ${qualified(lines, 'item')} AS ${quoted('item')},
                        sum(greatest(${qualified(lines, 'open')} - ${qualified(lines, 'covered')}, 0)) AS ${quoted('uncovered')}
                   FROM (${lineRows()}) AS ${quoted(lines)}
-                 GROUP BY ${qualified(lines, 'item')}) AS ${quoted(items)})`;
-  const short = supply.shortIn
-    ? `CASE WHEN ${qualified(sourceAlias, supply.shortIn.column.physicalName)}::text = ANY(${parameter(values, [...supply.shortIn.values])}::text[]) THEN ${shortTotal} ELSE 0 END`
-    : shortTotal;
+                 GROUP BY ${qualified(lines, 'item')}) AS ${quoted(items)}`;
+  // Per item with something uncovered: its free stock and what is on order,
+  // each never below zero, read once.
+  const supplied = 'table_supply_supplied';
+  const short = (total: string) =>
+    supply.shortIn
+      ? `CASE WHEN ${qualified(sourceAlias, supply.shortIn.column.physicalName)}::text = ANY(${parameter(values, [...supply.shortIn.values])}::text[]) THEN ${total} ELSE 0 END`
+      : total;
+  const left = `greatest(${qualified(supplied, 'uncovered')} - ${qualified(supplied, 'free')}, 0)`;
+  const suppliedRows = `(SELECT ${uncovered} AS ${quoted('uncovered')},
+                       greatest((${free()}), 0) AS ${quoted('free')}${
+                         supply.incoming
+                           ? `,
+                       greatest((${incoming()}), 0) AS ${quoted('incoming')}`
+                           : ''
+                       }
+                  FROM ${itemTotals}
+                 WHERE ${uncovered} > 0) AS ${quoted(supplied)}`;
+  const shortTotal = supply.incoming
+    ? `(SELECT coalesce(sum(greatest(${left} - ${qualified(supplied, 'incoming')}, 0)), 0)
+          FROM ${suppliedRows})`
+    : `(SELECT coalesce(sum(${left}), 0)
+          FROM ${suppliedRows})`;
+  const incomingTotal = supply.incoming
+    ? `(SELECT coalesce(sum(least(${left}, ${qualified(supplied, 'incoming')})), 0)
+          FROM ${suppliedRows})`
+    : null;
   return `CROSS JOIN LATERAL (
     SELECT (SELECT coalesce(sum(least(${qualified(lines, 'covered')}, greatest(${qualified(lines, 'open')}, 0))), 0)
               FROM (${lineRows()}) AS ${quoted(lines)}) AS ${quoted('covered_total')},
-           ${short} AS ${quoted('short_total')}
+           ${short(shortTotal)} AS ${quoted('short_total')}${
+             incomingTotal
+               ? `,
+           ${short(incomingTotal)} AS ${quoted('incoming_total')}`
+               : ''
+           }
   ) AS ${quoted(SUPPLY_ALIAS)}`;
 }
 
@@ -3912,7 +3961,7 @@ async function listSharedRecords(
   const limitSql = parameter(pageValues, list.query.effectivePageSize + 1);
   const offsetSql = parameter(pageValues, list.query.pageOffset);
   const rows = await client.query<QueryResultRow>(
-    `SELECT ${listSelectList(entity, sourceAlias, selectedColumns, relationPlans, progress !== null, figureColumns, Boolean(progress?.supply))}
+    `SELECT ${listSelectList(entity, sourceAlias, selectedColumns, relationPlans, progress !== null, figureColumns, progress?.supply ?? null)}
        ${fromSql}
       WHERE ${whereSql}
       ORDER BY ${listOrderBy(
@@ -4125,7 +4174,7 @@ function listSelectList(
   relations: readonly ListRelationPlan[],
   progress = false,
   figures: ReturnType<typeof listFigureColumns> = [],
-  supply = false,
+  supply: ListSupplyPlan | null = null,
 ): string {
   const rawColumns = [
     entity.recordIdentity.column,
@@ -4148,7 +4197,11 @@ function listSelectList(
       )
     : [];
   const supplyValues = supply
-    ? (['covered', 'short'] as const).map(
+    ? [
+        'covered' as const,
+        'short' as const,
+        ...(supply.incoming ? (['incoming'] as const) : []),
+      ].map(
         (figure) =>
           `${qualified(SUPPLY_ALIAS, `${figure}_total`)}::text AS ${quoted(`nsm_table_supply_${figure}`)}`,
       )
@@ -4257,6 +4310,13 @@ function toListDto(
                 [progress.supply.outputs.short]: canonicalProgressDecimal(
                   row.nsm_table_supply_short,
                 ),
+                // What is already on order covers (RECEIVING-EXTRAS).
+                ...(progress.supply.outputs.incoming
+                  ? {
+                      [progress.supply.outputs.incoming]:
+                        canonicalProgressDecimal(row.nsm_table_supply_incoming),
+                    }
+                  : {}),
               }
             : {}),
         }),

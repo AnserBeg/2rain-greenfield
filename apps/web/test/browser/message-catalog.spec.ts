@@ -61,7 +61,16 @@ const CENSUS_LEGAL_ENTITY_SUBJECT = '74000000-0000-4000-8000-000000000099';
 const CENSUS_RELATION_SUBJECT = 'northstar.inventory:relation.line_transaction';
 const CENSUS_OPERATION_REFUSAL_SUBJECT = 'MODULE_REQUIRED_FIELD_MISSING';
 const CENSUS_RUNTIME_VIEW_REFUSAL_SUBJECT = 'UNSUPPORTED_RUNTIME_CAPABILITY';
+// RECEIVING-EXTRAS: each readable provider refusal names the kernel's code.
+const CENSUS_READABLE_REFUSAL_SUBJECTS = Object.freeze({
+  OPERATION_DATE_AFTER_TODAY: 'RECEIPT_FORWARD_DATE_REFUSED',
+  OPERATION_DATE_BEFORE_WINDOW: 'INVENTORY_BACKDATE_LIMIT_EXCEEDED',
+  OPERATION_ORDER_NOT_RELEASED: 'RECEIPT_ORDER_NOT_RELEASED',
+  OPERATION_PERIOD_CLOSED: 'INVENTORY_PERIOD_CLOSED',
+  OPERATION_RECEIPT_CORRECTION_EXCEEDED: 'RECEIPT_CORRECTION_INVALID',
+});
 const CENSUS_SUBJECTS = Object.freeze({
+  ...CENSUS_READABLE_REFUSAL_SUBJECTS,
   OPERATION_LEGAL_ENTITY_INACTIVE: CENSUS_LEGAL_ENTITY_SUBJECT,
   OPERATION_REFUSED: CENSUS_OPERATION_REFUSAL_SUBJECT,
   RELATION_ENUMERATION_UNAVAILABLE: CENSUS_RELATION_SUBJECT,
@@ -75,6 +84,12 @@ function censusMessageRef(code: SurfaceMessageCode): SurfaceMessageRef {
       return { code, subject: CENSUS_LEGAL_ENTITY_SUBJECT };
     case 'OPERATION_REFUSED':
       return { code, subject: CENSUS_OPERATION_REFUSAL_SUBJECT };
+    case 'OPERATION_DATE_AFTER_TODAY':
+    case 'OPERATION_DATE_BEFORE_WINDOW':
+    case 'OPERATION_ORDER_NOT_RELEASED':
+    case 'OPERATION_PERIOD_CLOSED':
+    case 'OPERATION_RECEIPT_CORRECTION_EXCEEDED':
+      return { code, subject: CENSUS_READABLE_REFUSAL_SUBJECTS[code] };
     case 'RELATION_ENUMERATION_UNAVAILABLE':
       return { code, subject: CENSUS_RELATION_SUBJECT };
     case 'REQUEST_RUNTIME_VIEW_REFUSED':
@@ -776,6 +791,26 @@ const DECLARED_NO_REAL_PATH_DRIVER: Readonly<
     'surface-data-binding.spec.ts. That file owns the compiled form and ' +
     'stateful executor needed to submit one invalid field while preserving ' +
     'every other write precondition.',
+  OPERATION_DATE_AFTER_TODAY:
+    'Write path: a receive Task dated tomorrow, refused by the posting ' +
+    'kernel, in receiving-extras.spec.ts against the composed PostgreSQL ' +
+    'release; this census observes the registered text.',
+  OPERATION_DATE_BEFORE_WINDOW:
+    'Write path: a receive Task dated past the seven-day backdate window, ' +
+    'refused by the posting kernel, in receiving-extras.spec.ts against the ' +
+    'composed PostgreSQL release; this census observes the registered text.',
+  OPERATION_ORDER_NOT_RELEASED:
+    'Write path: a staged correction posted while its order is closed, in ' +
+    'receiving.composed-application.spec.ts against the composed PostgreSQL ' +
+    'release; this census observes the registered text.',
+  OPERATION_PERIOD_CLOSED:
+    'Write path: a stock document posted inside a closed period, in ' +
+    'inventory-warehouse-mode.spec.ts against the composed PostgreSQL ' +
+    'release; this census observes the registered text.',
+  OPERATION_RECEIPT_CORRECTION_EXCEEDED:
+    'Write path: Correct receipt taking back more than a line still adds, ' +
+    'refused by the posting kernel, in receiving-extras.spec.ts against the ' +
+    'composed PostgreSQL release; this census observes the registered text.',
   OPERATION_UNAVAILABLE:
     'Write path, same gateway fixture, plus an executor that fails the ' +
     'operation after it is accepted. Reached through the residual branch of ' +

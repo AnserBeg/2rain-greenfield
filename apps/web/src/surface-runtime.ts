@@ -64,8 +64,8 @@ import { escapeHtml, shortIdentity } from './html.js';
 import {
   operationMessageRef,
   queryMessageCode,
+  type SubjectlessOperationDiagnosticCode,
 } from './gateway-error-codes.js';
-import type { OperationDiagnosticCode } from './message-catalog.js';
 import {
   messageAttributes,
   messageBody,
@@ -501,9 +501,11 @@ export async function renderSurfaceRuntimeWithData(
           );
         }
       }
+      // A record page's application data, composed or not: a composed page
+      // keeps what its application adds beside the composition
+      // (RECEIVING-EXTRAS: a receipt page keeps its receiving links).
       if (
         data.status === 'READY' &&
-        !selection.selected.composition &&
         selection.selected.surfaceRole === 'record' &&
         gateways.applicationExtension
       ) {
@@ -2050,10 +2052,7 @@ export function semanticOperationRequestFor(
 }
 
 function operationDiagnostic(
-  code: Exclude<
-    OperationDiagnosticCode,
-    'OPERATION_LEGAL_ENTITY_INACTIVE' | 'OPERATION_REFUSED'
-  >,
+  code: SubjectlessOperationDiagnosticCode,
   statusCode: number,
 ): SurfaceRuntimeResponse {
   return renderApplicationDiagnostic(statusCode, { code });

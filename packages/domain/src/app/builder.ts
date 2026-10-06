@@ -32,6 +32,7 @@ import {
 import {
   billWorkspace,
   purchasingWorkspace,
+  receiptWorkspace,
   receivingWorkspaceQueries,
 } from '../purchasing/workspace.js';
 import { inventoryDocumentWorkspace } from '../inventory/workspace.js';
@@ -135,6 +136,8 @@ const RECORD_COMPOSITIONS: Readonly<
   shipment_detail: packingWorkspace,
   customer_invoice_detail: invoiceWorkspace,
   vendor_bill_detail: billWorkspace,
+  // A receipt's lines, its corrections and Correct receipt (RECEIVING-EXTRAS).
+  goods_receipt_detail: receiptWorkspace,
   inventory_transaction_detail: (namespace: string) =>
     inventoryDocumentWorkspace(namespace, 'inventory_transaction'),
   stock_count_detail: (namespace: string) =>

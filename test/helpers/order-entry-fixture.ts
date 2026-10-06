@@ -1797,6 +1797,133 @@ async function seed(
         observed: true,
       };
     }
+    if (phase === 'incoming_supply') {
+      // RECEIVING-EXTRAS: the Task lamp (OFF-210), with nothing on hand.
+      // A placed purchase order for 6, 2 of which arrived -- 2 free, 4 still
+      // on order; a draft purchase order for 50 and a placed one cancelled
+      // before anything arrived count nothing. Then sales orders of lamps:
+      // NINE (confirmed, 9: 2 free, 4 on order, 3 short), SIX (confirmed, 6:
+      // 2 free, 4 on order, nothing short) and TWENTY (a draft, 20: 2 free,
+      // 4 on order, 14 short). Each step through its governed operation.
+      const lamp = '71000000-0000-4000-8000-000000000013';
+      const at = () => new Date().toISOString();
+      const succeeded = async (
+        local: string,
+        input: Record<string, ImmutableJsonValue>,
+      ) => assert.equal((await invoke(local, input)).outcome, 'succeeded');
+      const purchase = async (quantity: string, place: boolean) => {
+        const order = await create('purchase_order', {
+          supplier_party_id: customer,
+          order_date: at(),
+          expected_date: null,
+          currency: 'CAD',
+          notes: null,
+        });
+        const line = await create(
+          'purchase_order_line',
+          {
+            line_number: '1',
+            item_id: lamp,
+            ordered_quantity: quantity,
+            unit_price: null,
+          },
+          { order: order.recordId },
+        );
+        if (place)
+          await succeeded('purchase_order_release', {
+            recordId: order.recordId,
+            expectedRevision: order.revision,
+          });
+        return { order, line };
+      };
+      const placed = await purchase('6', true);
+      const receipt = await create(
+        'goods_receipt',
+        {
+          state: `${ns}:option.goods_receipt_state_draft`,
+          kind: `${ns}:option.goods_receipt_kind_initial`,
+          effective_at: at(),
+          location_id: location,
+          reason_code: 'RECEIVE',
+          reason_narrative: 'Two lamps arrived',
+        },
+        { order: placed.order.recordId },
+      );
+      await create(
+        'goods_receipt_line',
+        {
+          line_number: '1',
+          item_id: lamp,
+          quantity: '2',
+          unit_id: 'EA',
+          cost_status: `${ns}:option.goods_receipt_line_cost_status_absent`,
+          unit_cost: null,
+          currency: null,
+          reversal_of_movement_id: null,
+        },
+        { receipt: receipt.recordId, order_line: placed.line.recordId },
+      );
+      await succeeded('goods_receipt_post', {
+        recordId: receipt.recordId,
+        expectedRevision: receipt.revision,
+      });
+      const draft = await purchase('50', false);
+      const cancelled = await purchase('30', true);
+      const [current] = (await stored('purchase_order')).filter(
+        (row) => row.record_id === cancelled.order.recordId,
+      );
+      await succeeded('purchase_order_cancel', {
+        recordId: cancelled.order.recordId,
+        expectedRevision: Number(current!.revision),
+      });
+      const sale = async (quantity: string, confirm: boolean) => {
+        const order = await create('sales_order', {
+          customer_party_id: customer,
+          order_date: at(),
+          requested_date: at(),
+          currency: 'CAD',
+          notes: null,
+          ...shipTo,
+        });
+        const line = await create(
+          'sales_order_line',
+          {
+            item_id: lamp,
+            line_number: '1',
+            ordered_quantity: quantity,
+            unit_id: 'EA',
+            unit_price: null,
+          },
+          { order: order.recordId },
+        );
+        if (confirm)
+          await succeeded('sales_order_release', {
+            recordId: order.recordId,
+            expectedRevision: order.revision,
+          });
+        return {
+          number: String(order.values[`${ns}:field.sales_order_number`]),
+          recordId: order.recordId,
+          line: line.recordId,
+        };
+      };
+      return {
+        phase,
+        lamp,
+        purchases: {
+          placed: placed.order.recordId,
+          draft: draft.order.recordId,
+          cancelled: cancelled.order.recordId,
+        },
+        orders: {
+          nine: await sale('9', true),
+          six: await sale('6', true),
+          twenty: await sale('20', false),
+        },
+        scope,
+        observed: true,
+      };
+    }
     if (phase === 'catalog_extras') {
       // CATALOG-EXTRAS, over the replenishment scenario: the Field notebook
       // known by a barcode and by Alpine's own code, Shipping labels made

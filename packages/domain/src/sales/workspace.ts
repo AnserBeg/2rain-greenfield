@@ -323,7 +323,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         {
           label: 'Fulfillment exception',
           description:
-            'Open quantity that neither this order’s reservations nor free stock now cover. Incoming purchase orders are not counted.',
+            'Open quantity that neither this order’s reservations, free stock now nor placed purchase orders still to arrive cover.',
           datasetId: lines,
           columnId: id('column', 'short'),
         },
@@ -595,7 +595,8 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
             column('shipped', 'Shipped', 60, id('metric', 'shipped')),
             column('open', 'Open to ship', 70, id('metric', 'open_to_ship')),
             // Advisory (owner ruling of 2026-09-30): open quantity neither
-            // this line's reservations nor free stock now cover.
+            // this line's reservations, free stock now nor placed purchase
+            // orders cover (RECEIVING-EXTRAS).
             column('short', 'Short', 80, id('metric', 'short')),
             column(
               'available_now',
@@ -603,11 +604,13 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
               90,
               id('metric', 'available_now'),
             ),
+            // What placed purchase orders still to arrive cover of it.
+            column('incoming', 'On order', 95, id('metric', 'incoming')),
           ],
           'item',
           ['sku', 'unit', 'unit_price'],
           ['ordered', 'coverage', 'shipped', 'open', 'short'],
-          ['available_now'],
+          ['available_now', 'incoming'],
         ),
       },
       {
@@ -1202,16 +1205,33 @@ export function salesWorkspaceQueries(
   // The order page's Fulfillment lines: the same line figures, and what each
   // line is short, allocated over the order's lines (ORDER-PARITY). Its own
   // query, so no other reader of the lines pays for the stock reads.
+  // With purchasing composed, what placed purchase orders still have to
+  // receive covers what free stock cannot, before anything is short
+  // (RECEIVING-EXTRAS): the very queries the Sales orders List's supply sums.
   const fulfillmentLines = {
     ...clone('sales_order_line_list', 'fulfillment_order_lines'),
     readModel: fulfillment(
       'line',
-      ['coverage', 'shipped', 'open_to_ship', 'available_now', 'short'],
+      [
+        'coverage',
+        'shipped',
+        'open_to_ship',
+        'available_now',
+        'short',
+        ...(purchasing ? ['incoming'] : []),
+      ],
       {
         ...dependencies,
         ...locations,
         orderLines: 'commercial_lines',
         order: 'sales_order_get',
+        ...(purchasing
+          ? {
+              incomingLines: 'purchase_order_line_list',
+              incomingOrders: 'purchase_order_list',
+              incomingReceived: 'purchase_order_received_list',
+            }
+          : {}),
       },
     ),
   };

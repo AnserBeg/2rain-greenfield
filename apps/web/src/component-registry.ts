@@ -1120,8 +1120,15 @@ function renderKeyFacts(context: SurfaceComponentContext): string {
 }
 
 function renderSections(context: SurfaceComponentContext): string {
+  // A composed record keeps the links its application adds (a receipt's
+  // receiving links), after the composition's own sections.
   if (context.data?.status === 'READY' && context.data.composition)
-    return renderCompositionFields(context.surface, context.data.composition);
+    return (
+      renderCompositionFields(context.surface, context.data.composition) +
+      (context.data.receivingNavigation
+        ? renderReceivingNavigation(context.data.receivingNavigation)
+        : '')
+    );
   const data = context.data ?? { status: 'UNBOUND' as const };
   if (data.status === 'UNBOUND') {
     return slotPanel(context, '', 'sections-slot');
@@ -2488,7 +2495,9 @@ function withheldFiguresNote(
 ): string {
   const progress = list.progress;
   if (!progress) return '';
-  const supplyOutputs = Object.values(progress.supply?.outputs ?? {});
+  const supplyOutputs = Object.values(progress.supply?.outputs ?? {}).flatMap(
+    (output) => (output === undefined ? [] : [output]),
+  );
   if (progressWithheld !== null)
     return withheldNote(
       list,
