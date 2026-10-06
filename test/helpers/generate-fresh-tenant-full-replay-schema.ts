@@ -11,9 +11,10 @@ import { FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
 import { RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receivables-capability-executor.js';
 import { PAYABLES_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/payables-capability-executor.js';
+import { RETURNABLES_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/returnables-capability-executor.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import { captureSchemaSnapshot } from '../../packages/postgres-provider/src/migrations.js';
-import { withEphemeralPostgres } from './postgres.js';
+import { LINEAGE_INSTALL_VOLUME, withEphemeralPostgres } from './postgres.js';
 
 const compiledArtifactPath = resolve('apps/web/release/app.compiled.json');
 const migrationsDirectory = resolve('db/migrations');
@@ -51,6 +52,7 @@ async function main(): Promise<void> {
             FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY,
             RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY,
             PAYABLES_CAPABILITY_EXECUTOR_FACTORY,
+            RETURNABLES_CAPABILITY_EXECUTOR_FACTORY,
           ],
           compiledApplication: {
             applications: compiledApplication.applications.slice(0, index + 1),
@@ -81,7 +83,7 @@ async function main(): Promise<void> {
     },
     // Every lineage entry's install keeps its release artifacts and their
     // write-ahead log; nineteen entries overflow the default 256 MB.
-    { dataSizeMegabytes: 1024 },
+    LINEAGE_INSTALL_VOLUME,
   );
 }
 

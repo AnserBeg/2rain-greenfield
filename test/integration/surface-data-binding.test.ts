@@ -44,6 +44,7 @@ import {
   SEMANTIC_OPERATION_RESULT_VERSION,
   SemanticOperationGateway,
   SemanticOperationMediationAuthority,
+  parsePinnedOperationCatalog,
   type RegisteredCapabilityOperationExecutor,
   type SemanticOperationExecutionRequest,
   type SemanticOperationExecutor,
@@ -10795,4 +10796,475 @@ test('PAYABLES (PY-G): each order line shows its three-way match as the read mod
   assert.equal(fact(withheld.html), '—');
   assert.match(withheld.html, /BILL-000007/u);
   f.deniedReads.delete(id('permission', 'purchase_order_read'));
+});
+
+test('RETURNABLE-ASSETS: a party page enters a company for the custody records it is in, and a custody page offers each event only where its figures admit it', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const [scope, other] = f.scopes as [string, string];
+  const typeValues = (code: string, name: string) => ({
+    [id('field', 'returnable_asset_type_code')]: code,
+    [id('field', 'returnable_asset_type_name')]: name,
+    [id('field', 'returnable_asset_type_asset_class')]: id(
+      'option',
+      'returnable_asset_type_asset_class_pallet',
+    ),
+    [id('field', 'returnable_asset_type_deposit_cad')]: '15',
+    [id('field', 'returnable_asset_type_deposit_usd')]: null,
+    [id('field', 'returnable_asset_type_deposit_eur')]: null,
+  });
+  const type = f.executor.seed(
+    'returnable_asset_type',
+    typeValues('PAL-EURO', 'Euro pallet'),
+  );
+  const custody = (
+    number: string,
+    state: string,
+    figures: { outstanding: string; refundable: string },
+    company: string,
+    typeId = type,
+  ) =>
+    f.executor.seed(
+      'returnable_custody',
+      {
+        [id('field', 'returnable_custody_number')]: number,
+        [id('field', 'returnable_custody_state')]: id(
+          'option',
+          `returnable_custody_state_${state}`,
+        ),
+        [id('field', 'returnable_custody_party_id')]: f.party,
+        [id('field', 'returnable_custody_direction')]: id(
+          'option',
+          'returnable_custody_direction_out',
+        ),
+        [id('field', 'returnable_custody_asset_type_id')]: typeId,
+        [id('field', 'returnable_custody_currency')]: id(
+          'option',
+          'returnable_custody_currency_cad',
+        ),
+        [id('field', 'returnable_custody_unit_deposit')]: '15',
+        [id('field', 'returnable_custody_issued_quantity')]: '6',
+        [id('field', 'returnable_custody_returned_quantity')]: '2',
+        [id('field', 'returnable_custody_forfeited_quantity')]: '0',
+        [id('field', 'returnable_custody_outstanding_quantity')]:
+          figures.outstanding,
+        [id('field', 'returnable_custody_deposit_taken')]: '90',
+        [id('field', 'returnable_custody_deposit_refunded')]: '0',
+        [id('field', 'returnable_custody_deposit_forfeited')]: '0',
+        [id('field', 'returnable_custody_deposit_held')]: '90',
+        [id('field', 'returnable_custody_deposit_refundable')]:
+          figures.refundable,
+        [id('field', 'returnable_custody_notes')]: null,
+        [id('relation', 'returnable_custody_party')]: f.party,
+        [id('relation', 'returnable_custody_asset_type')]: typeId,
+      },
+      company,
+    );
+  const open = custody(
+    'RTN-000001',
+    'open',
+    { outstanding: '4', refundable: '0' },
+    scope,
+  );
+  const awaiting = custody(
+    'RTN-000002',
+    'awaiting_refund',
+    { outstanding: '0', refundable: '30' },
+    scope,
+  );
+  custody('RTN-000003', 'open', { outstanding: '2', refundable: '0' }, other);
+  f.executor.seed(
+    'returnable_event',
+    {
+      [id('field', 'returnable_event_state')]: id(
+        'option',
+        'returnable_event_state_posted',
+      ),
+      [id('field', 'returnable_event_kind')]: id(
+        'option',
+        'returnable_event_kind_issue',
+      ),
+      [id('field', 'returnable_event_event_date')]: '2026-10-05T09:00:00.000Z',
+      [id('field', 'returnable_event_quantity')]: '6',
+      [id('field', 'returnable_event_amount')]: '90',
+      [id('field', 'returnable_event_method')]: id(
+        'option',
+        'returnable_event_method_cheque',
+      ),
+      [id('field', 'returnable_event_reference')]: 'CHQ-7001',
+      [id('field', 'returnable_event_reason')]: 'Opening delivery',
+      [id('field', 'returnable_event_recorded_by')]: 'operator',
+      [id('relation', 'returnable_event_custody')]: open,
+    },
+    scope,
+  );
+
+  // F1: the custody figures and an event's attribution are the returnables
+  // capability's alone. No generic create or update names them, so a form
+  // never offers them and a stated value is outside the writable set.
+  const catalog = parsePinnedOperationCatalog(
+    f.view.projections.operation.payload,
+  );
+  const writable = (local: string) =>
+    catalog.find(
+      (operation) => operation.operationId === id('operation', local),
+    )?.inputContract?.writableFieldIds ?? [];
+  const figures = [
+    'unit_deposit',
+    'issued_quantity',
+    'returned_quantity',
+    'forfeited_quantity',
+    'outstanding_quantity',
+    'deposit_taken',
+    'deposit_refunded',
+    'deposit_forfeited',
+    'deposit_held',
+    'deposit_refundable',
+  ].map((name) => id('field', `returnable_custody_${name}`));
+  for (const action of ['create', 'update']) {
+    assert.deepEqual(
+      writable(`returnable_custody_${action}`).filter((field) =>
+        figures.includes(field),
+      ),
+      [],
+      `returnable_custody_${action} writes no capability figure`,
+    );
+    assert.ok(
+      writable(`returnable_custody_${action}`).includes(
+        id('field', 'returnable_custody_notes'),
+      ),
+    );
+    assert.equal(
+      writable(`returnable_event_${action}`).includes(
+        id('field', 'returnable_event_recorded_by'),
+      ),
+      false,
+      `returnable_event_${action} writes no attribution`,
+    );
+  }
+
+  const enters = id('parameter', 'returnable_custody_list_legal_entity_scope');
+  const partyPath = (company?: string) =>
+    `/?${new URLSearchParams({
+      surface: id('surface', 'party_detail'),
+      record: f.party,
+      ...(company ? { [enters]: company } : {}),
+    }).toString()}`;
+  const returnables = (html: string) =>
+    new RegExp(
+      `data-composition-dataset="${regexpText(id('dataset', 'party_returnables'))}" data-resolution="([a-z]+)"`,
+      'u',
+    ).exec(html)?.[1];
+  const offers = (html: string, local: string) =>
+    html.includes(`value="${id('action', local)}"`);
+  /** The Company bar's choices: each the party page again, in that company. */
+  const companyBar = (html: string) =>
+    [
+      ...(
+        /<nav class="workspace-context-bar"[^>]*>([\s\S]*?)<\/nav>/u.exec(
+          html,
+        )?.[1] ?? ''
+      ).matchAll(/<a [^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/gu),
+    ].map((match) => {
+      const url = new URL(
+        match[1]!.replaceAll('&amp;', '&'),
+        'http://fixture.local',
+      );
+      return {
+        label: match[2]!,
+        current: match[0].includes('aria-current="true"'),
+        surface: url.searchParams.get('surface'),
+        record: url.searchParams.get('record'),
+        company: url.searchParams.get(enters),
+      };
+    });
+
+  // F2: two companies and none chosen, no saved preference. The party serves
+  // with a Company bar that keeps the party in either company; its
+  // company-owned section reads nothing and asks for a company rather than
+  // showing an empty list; Issue returnables waits for a company; the party's
+  // own tasks stay offered.
+  const unentered = await renderSurfaceRuntimeWithData(
+    f.view,
+    partyPath(),
+    f.gateways,
+  );
+  assert.equal(unentered.statusCode, 200);
+  assert.deepEqual(
+    companyBar(unentered.html),
+    [
+      {
+        label: 'Company 1',
+        current: false,
+        surface: id('surface', 'party_detail'),
+        record: f.party,
+        company: scope,
+      },
+      {
+        label: 'Company 2',
+        current: false,
+        surface: id('surface', 'party_detail'),
+        record: f.party,
+        company: other,
+      },
+    ],
+    'the party page shows a Company bar that keeps the party in either company',
+  );
+  assert.equal(
+    returnables(unentered.html),
+    'unscoped',
+    'the section asks for a company',
+  );
+  assert.match(unentered.html, /Legal entity required/u);
+  assert.doesNotMatch(unentered.html, /RTN-00000/u);
+  assert.equal(
+    offers(unentered.html, 'party_issue_returnables'),
+    false,
+    'Issue returnables waits for a company',
+  );
+  assert.ok(offers(unentered.html, 'party_add_role'));
+
+  // Entered in a company: that company's custody records of this party, each
+  // opened in the same company, and the bar marks the company entered.
+  const entered = await renderSurfaceRuntimeWithData(
+    f.view,
+    partyPath(scope),
+    f.gateways,
+  );
+  assert.equal(entered.statusCode, 200);
+  assert.deepEqual(
+    companyBar(entered.html).map((choice) => [choice.company, choice.current]),
+    [
+      [scope, true],
+      [other, false],
+    ],
+  );
+  assert.equal(returnables(entered.html), 'ready');
+  assert.match(entered.html, /RTN-000001/u);
+  assert.match(entered.html, /RTN-000002/u);
+  assert.doesNotMatch(entered.html, /RTN-000003/u);
+  assert.ok(offers(entered.html, 'party_issue_returnables'));
+  const opened = [
+    ...entered.html.matchAll(
+      /<a class="button" href="([^"]+)">Open custody<\/a>/gu,
+    ),
+  ].map(
+    (match) =>
+      new URL(match[1]!.replaceAll('&amp;', '&'), 'http://fixture.local'),
+  );
+  assert.deepEqual(
+    opened.map((url) => url.searchParams.get('record')).toSorted(),
+    [open, awaiting].toSorted(),
+  );
+  for (const url of opened) {
+    assert.equal(
+      url.searchParams.get('surface'),
+      id('surface', 'returnable_custody_detail'),
+    );
+    assert.equal(
+      url.searchParams.get(
+        id('parameter', 'returnable_custody_get_legal_entity_scope'),
+      ),
+      scope,
+    );
+  }
+
+  // A company the caller may not enter is refused by name.
+  const foreign = await renderSurfaceRuntimeWithData(
+    f.view,
+    partyPath(randomUUID()),
+    f.gateways,
+  );
+  assert.equal(foreign.statusCode, 422);
+  assert.match(foreign.html, /WORKSPACE_COMPANY_UNAVAILABLE/u);
+
+  // One company the caller may enter: the page pins it, as a List does, and
+  // its bar shows the company it pinned.
+  f.allowed.delete(other);
+  const single = await renderSurfaceRuntimeWithData(
+    f.view,
+    partyPath(),
+    f.gateways,
+  );
+  assert.equal(single.statusCode, 303);
+  const pinned = new URL(single.location!, 'http://fixture.local');
+  assert.equal(pinned.searchParams.get(enters), scope);
+  assert.equal(pinned.searchParams.get('record'), f.party);
+  const pinnedPage = await renderSurfaceRuntimeWithData(
+    f.view,
+    pinned.pathname + pinned.search,
+    f.gateways,
+  );
+  f.allowed.add(other);
+  assert.deepEqual(
+    companyBar(pinnedPage.html).map((choice) => [choice.label, choice.current]),
+    [['Company 1', true]],
+  );
+
+  // F3: one custody whose type can no longer be read (archived here, as no
+  // live custody's type can be once archive is restricted) shows "—" for that
+  // label; the section keeps every row.
+  const gone = f.executor.seed(
+    'returnable_asset_type',
+    typeValues('KEG-OLD', 'Old keg'),
+  );
+  f.executor.rows.set(gone, { ...f.executor.rows.get(gone)!, archived: true });
+  const orphan = custody(
+    'RTN-000004',
+    'open',
+    { outstanding: '1', refundable: '0' },
+    scope,
+    gone,
+  );
+  const withOrphan = await renderSurfaceRuntimeWithData(
+    f.view,
+    partyPath(scope),
+    f.gateways,
+  );
+  assert.equal(
+    returnables(withOrphan.html),
+    'ready',
+    'one unreadable type label keeps the section and its rows',
+  );
+  for (const number of ['RTN-000001', 'RTN-000002', 'RTN-000004'])
+    assert.match(withOrphan.html, new RegExp(number, 'u'));
+  assert.match(
+    withOrphan.html,
+    new RegExp(
+      `data-record-id="${regexpText(orphan)}"[\\s\\S]*?data-column-label="Returnable type"[^>]*>—</td>`,
+      'u',
+    ),
+  );
+  assert.match(withOrphan.html, /Euro pallet/u);
+
+  // A custody record offers Return and Forfeit while something is
+  // outstanding, Refund deposit while a deposit is refundable, Issue always.
+  const custodyPath = (record: string) =>
+    `/?${new URLSearchParams({
+      surface: id('surface', 'returnable_custody_detail'),
+      record,
+      [id('parameter', 'returnable_custody_get_legal_entity_scope')]: scope,
+    }).toString()}`;
+  const tasks = (html: string) =>
+    [
+      'custody_issue',
+      'custody_return',
+      'custody_forfeit',
+      'custody_refund',
+    ].filter((local) => offers(html, local));
+  const openPage = await renderSurfaceRuntimeWithData(
+    f.view,
+    custodyPath(open),
+    f.gateways,
+  );
+  assert.equal(openPage.statusCode, 200);
+  assert.deepEqual(tasks(openPage.html), [
+    'custody_issue',
+    'custody_return',
+    'custody_forfeit',
+  ]);
+  assert.match(
+    openPage.html,
+    new RegExp(
+      `data-composition-dataset="${regexpText(id('dataset', 'custody_events'))}" data-resolution="ready"`,
+      'u',
+    ),
+  );
+  assert.match(openPage.html, /CHQ-7001/u);
+  assert.match(openPage.html, /Opening delivery/u);
+  assert.match(openPage.html, /Euro pallet/u);
+  const awaitingPage = await renderSurfaceRuntimeWithData(
+    f.view,
+    custodyPath(awaiting),
+    f.gateways,
+  );
+  assert.deepEqual(tasks(awaitingPage.html), [
+    'custody_issue',
+    'custody_refund',
+  ]);
+  // The custody page names its type through its type link: an unreadable
+  // type reads "—" in the header rather than failing the page.
+  const orphanPage = await renderSurfaceRuntimeWithData(
+    f.view,
+    custodyPath(orphan),
+    f.gateways,
+  );
+  assert.equal(orphanPage.statusCode, 200);
+  assert.doesNotMatch(orphanPage.html, /COMPOSITION_CHILD_FAILED/u);
+  assert.match(orphanPage.html, /RTN-000004/u);
+});
+
+test('RETURNABLE-ASSETS (F4, inherited, fixed separately by COMPANY-BOUND-WRITES): a generic archive posted through one company’s custody URL names only the record, so it still acts on another company’s record', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const [scope, other] = f.scopes as [string, string];
+  const type = f.executor.seed('returnable_asset_type', {
+    [id('field', 'returnable_asset_type_code')]: 'CRATE-1',
+    [id('field', 'returnable_asset_type_name')]: 'Crate',
+  });
+  // A New custody record of the second company: nothing issued yet.
+  const theirs = f.executor.seed(
+    'returnable_custody',
+    {
+      [id('field', 'returnable_custody_number')]: 'RTN-000009',
+      [id('field', 'returnable_custody_state')]: id(
+        'option',
+        'returnable_custody_state_new',
+      ),
+      [id('field', 'returnable_custody_party_id')]: f.party,
+      [id('field', 'returnable_custody_direction')]: id(
+        'option',
+        'returnable_custody_direction_out',
+      ),
+      [id('field', 'returnable_custody_asset_type_id')]: type,
+      [id('field', 'returnable_custody_currency')]: id(
+        'option',
+        'returnable_custody_currency_cad',
+      ),
+      [id('relation', 'returnable_custody_party')]: f.party,
+      [id('relation', 'returnable_custody_asset_type')]: type,
+    },
+    other,
+  );
+  // Posted to the custody page entered in the FIRST company.
+  const url = `/?${new URLSearchParams({
+    surface: id('surface', 'returnable_custody_detail'),
+    record: theirs,
+    [id('parameter', 'returnable_custody_get_legal_entity_scope')]: scope,
+  }).toString()}`;
+  const submission = {
+    idempotencyKey: randomUUID(),
+    operationId: id('operation', 'returnable_custody_archive'),
+    recordId: theirs,
+    expectedRevision: '1',
+  };
+  const preview = await submitSurfaceRuntimeIntent(
+    f.view,
+    url,
+    submission,
+    f.gateways,
+  );
+  const archived = await submitSurfaceRuntimeIntent(
+    f.view,
+    url,
+    {
+      ...submission,
+      confirmationGrant: hiddenValue(preview.html, 'confirmationGrant'),
+    },
+    f.gateways,
+  );
+  // What reaches the operation gateway names the record and its revision and
+  // no company: the page's company is not compared with the record's. This
+  // documents today's inherited behaviour; COMPANY-BOUND-WRITES makes it a
+  // refusal, and this assertion flips there.
+  const call = f.executor.calls.at(-1)!;
+  assert.equal(
+    call.definition.operationId,
+    id('operation', 'returnable_custody_archive'),
+  );
+  assert.deepEqual(call.input, { expectedRevision: 1, recordId: theirs });
+  assert.equal(f.executor.rows.get(theirs)!.archived, true);
+  assert.notEqual(archived.statusCode, 422);
 });

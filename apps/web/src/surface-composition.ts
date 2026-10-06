@@ -30,6 +30,7 @@ import {
 } from './surface-contract.js';
 import { escapeHtml as h } from './html.js';
 import { moneyText } from './list-declaration.js';
+import { workspaceEntryParameter } from './workspace-entry.js';
 import {
   DECIMAL_KINDS,
   admitsChoice,
@@ -46,6 +47,15 @@ const compositionMessage = (
 ) =>
   `<div ${role ? `role="${role}"` : ''} ${messageAttributes({ code })}>${messageBody({ code }, 'Workspace', 'h2')}</div>`;
 
+/**
+ * What a section without rows says: no records, or -- for a company-owned
+ * dataset on a page entered in no company -- choose a company first.
+ */
+const noRows = (status: 'empty' | 'unscoped') =>
+  status === 'unscoped'
+    ? `<div ${messageAttributes({ code: 'QUERY_LEGAL_ENTITY_SCOPE_REQUIRED' })}>${messageBody({ code: 'QUERY_LEGAL_ENTITY_SCOPE_REQUIRED' }, 'Workspace', 'h2')}</div>`
+    : compositionMessage('COMPOSITION_CHILD_EMPTY');
+
 type Column = SurfaceComposition['fields'][number];
 type Action = SurfaceComposition['actions'][number];
 type Value = Action['steps'][number]['bindings'][number]['value'];
@@ -60,7 +70,11 @@ export interface CompositionData {
   children: {
     definition: SurfaceComposition['children'][number];
     rows: Row[];
-    status: 'ready' | 'empty' | 'failed';
+    /**
+     * `unscoped`: the dataset is company-owned and the page (a tenant-level
+     * record's) is entered in no company, so nothing was read.
+     */
+    status: 'ready' | 'empty' | 'failed' | 'unscoped';
     error?: string;
   }[];
   selections: Record<string, SemanticRecordDto>;
@@ -243,10 +257,18 @@ async function present(
    * that can itself be read.
    */
   related: ReadonlySet<string> = new Set(),
+  /**
+   * A child dataset's row: a label its referenced record cannot give --
+   * withheld under current policy, or gone -- reads "—" in that one cell, so
+   * one unreadable label never empties the section around it. A read that
+   * fails outright still fails the section.
+   */
+  row = false,
 ): Promise<Row> {
   const cells: Record<string, string> = {};
   for (const column of columns) {
     const value = recordValue(record, column.field);
+    const tolerant = row || related.has(column.field);
     if (!column.reference || value === null) {
       cells[column.columnId] =
         column.format === 'money' && typeof value === 'string'
@@ -266,17 +288,14 @@ async function present(
         { recordId: value, includeArchived: false },
       );
     } catch (error) {
-      if (
-        related.has(column.field) &&
-        error instanceof SemanticQueryPolicyDeniedError
-      ) {
+      if (tolerant && error instanceof SemanticQueryPolicyDeniedError) {
         cells[column.columnId] = text(null);
         continue;
       }
       throw error;
     }
     if (
-      related.has(column.field) &&
+      tolerant &&
       (result.outcome !== 'exact' || result.records.length !== 1)
     ) {
       cells[column.columnId] = text(null);
@@ -301,6 +320,10 @@ export async function loadSurfaceComposition(
 ): Promise<CompositionData> {
   const composition = surface.composition!;
   const url = new URL(requestUrl, 'http://surface-runtime.local');
+  const pageScoped = Boolean(
+    registeredSemanticQueryFromPinnedView(view, surface.dataSourceQueryId)
+      ?.legalEntityScope,
+  );
   const data: CompositionData = {
     record,
     fields: { record, cells: {} },
@@ -348,6 +371,13 @@ export async function loadSurfaceComposition(
       );
       if (!registered || registered.queryType !== 'list')
         throw new Error('Child query must be a registered list.');
+      // A tenant-level page entered in no company reads no company-owned
+      // child: nothing is read and nothing failed, and the section asks for
+      // a company rather than claiming there are no records.
+      if (registered.legalEntityScope && !scope && !pageScoped) {
+        child.status = 'unscoped';
+        continue;
+      }
       let cursor: string | null = null;
       do {
         const scopeKey =
@@ -383,7 +413,15 @@ export async function loadSurfaceComposition(
           throw new Error('The query did not apply its exact record scope.');
         for (const row of result.records)
           child.rows.push(
-            await present(view, gateways, scope, row, definition.columns),
+            await present(
+              view,
+              gateways,
+              scope,
+              row,
+              definition.columns,
+              new Set(),
+              true,
+            ),
           );
         if (
           result.listCoverage.hasMore &&
@@ -492,12 +530,23 @@ function taskRows(action: Action, data: CompositionData): Row[] {
     ),
   );
 }
+/** Whether a Task writes in the page's company (`generated: scope`). */
+const writesInCompany = (action: Action) =>
+  action.steps.some((step) =>
+    step.bindings.some(
+      (binding) =>
+        binding.value.source === 'generated' && binding.value.value === 'scope',
+    ),
+  );
 function applicable(action: Action, data: CompositionData): boolean {
   if (
     action.datasetId &&
     (!data.selected || action.datasetId !== data.selectedDatasetId)
   )
     return false;
+  // A Task that writes in the page's company is offered once the page is
+  // entered in one: a tenant-level record's page (a party's) may have none.
+  if (!data.scope && writesInCompany(action)) return false;
   if (!action.conditions.every((condition) => holds(condition, data)))
     return false;
   // A link opens a stated record; a multi-row Task needs a row to work on.
@@ -793,8 +842,8 @@ function renderPresentedChild(
   const body =
     child.status === 'failed'
       ? compositionMessage('COMPOSITION_CHILD_FAILED', 'alert')
-      : child.status === 'empty'
-        ? compositionMessage('COMPOSITION_CHILD_EMPTY')
+      : child.status === 'empty' || child.status === 'unscoped'
+        ? noRows(child.status)
         : `<div class="data-table-wrap"${definition.presentation?.compact ? ` data-compact="${h(definition.presentation.compact)}" tabindex="0" role="region" aria-label="${h(definition.label)} table; scroll for all columns"` : ''}><table><thead><tr>${displayed.map((column) => `<th scope="col" class="${column.presentation?.role === 'quantity' ? 'composition-quantity' : ''}">${h(column.label)}</th>`).join('')}${detail.length ? '<th scope="col">Details</th>' : ''}${definition.presentation?.selection !== 'none' || rowActions.length ? '<th scope="col">Actions</th>' : ''}</tr></thead><tbody>${child.rows
             .map((row) => {
               const selected =
@@ -869,7 +918,10 @@ export function renderCompositionPrintDocument(
   );
   if (
     data.fieldsFailed ||
-    printed.some((child) => !child || child.status === 'failed')
+    printed.some(
+      (child) =>
+        !child || child.status === 'failed' || child.status === 'unscoped',
+    )
   )
     return {
       complete: false,
@@ -979,8 +1031,8 @@ export function renderCompositionChildren(
       return `<section class="panel data-panel" data-composition-dataset="${h(child.definition.datasetId)}" data-resolution="${child.status}"><h2>${h(child.definition.label)}</h2>${
         child.status === 'failed'
           ? compositionMessage('COMPOSITION_CHILD_FAILED', 'alert')
-          : child.status === 'empty'
-            ? compositionMessage('COMPOSITION_CHILD_EMPTY')
+          : child.status === 'empty' || child.status === 'unscoped'
+            ? noRows(child.status)
             : `<div class="data-table-wrap"><table><thead><tr><th>Select</th>${columns.map((column) => `<th scope="col">${h(column.label)}</th>`).join('')}</tr></thead><tbody>${child.rows
                 .map((row) => {
                   const url = new URL(data.url, 'http://surface-runtime.local');
@@ -1514,9 +1566,14 @@ export async function submitCompositionAction(
       view,
       surface.dataSourceQueryId,
     );
+    // A tenant-level record's page acts in the company its URL pins for its
+    // company-owned children (a party's returnables); entry validated it.
+    const entered = workspaceEntryParameter(view, surface);
     const scope = definition?.legalEntityScope
       ? url.searchParams.get(definition.legalEntityScope.operand.parameterId)
-      : null;
+      : entered?.tenantRecord
+        ? url.searchParams.get(entered.parameter)
+        : null;
     const result = await query(
       view,
       gateways,

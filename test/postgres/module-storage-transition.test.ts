@@ -13,6 +13,7 @@ import {
 import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/definition.js';
 import { purchasingModuleDefinition } from '../../packages/domain/src/purchasing/definition.js';
 import { salesModuleDefinition } from '../../packages/domain/src/sales/definition.js';
+import { withoutReturnables } from '../helpers/without-returnables.js';
 
 import {
   CANONICALIZATION_PROFILE_VERSION,
@@ -5751,8 +5752,10 @@ function composedApplicationWithoutInventoryForTransition(): Record<
     salesModuleDefinition(APPLICATION_NAMESPACE),
     'sales',
   );
+  // Party's returnables are company-owned (RETURNABLE-ASSETS), so they
+  // leave with Inventory's legal-entity master as well.
   return withoutModuleForTransition(
-    application,
+    withoutReturnables(application),
     inventoryModuleDefinition(APPLICATION_NAMESPACE),
     'inventory',
   );

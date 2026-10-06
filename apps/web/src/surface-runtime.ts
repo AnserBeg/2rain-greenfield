@@ -5,7 +5,10 @@ import {
   displayFieldValue,
   renderCompositionPrintDocument,
 } from './surface-composition.js';
-import { resolveWorkspaceEntry } from './workspace-entry.js';
+import {
+  resolveWorkspaceEntry,
+  workspaceEntryParameter,
+} from './workspace-entry.js';
 import { documentEditor } from './document-editor.js';
 import {
   declaredListArguments,
@@ -386,7 +389,12 @@ export async function renderSurfaceRuntimeWithData(
             selection.selected,
             data.records[0],
             requestUrl,
-            legalEntitySelection[0] ?? null,
+            // A tenant-level record's page reads its company-owned children
+            // in the company its entry resolved (a party's returnables).
+            legalEntitySelection[0] ??
+              (binding.query.legalEntityScope
+                ? null
+                : (entry?.selected ?? null)),
             gateways,
           ),
         };
@@ -1219,7 +1227,36 @@ async function loadWorkspaceContextBar(
   legalEntitySelection: readonly string[],
   currentUrl: URL,
 ): Promise<WorkspaceContextBar | null> {
-  if (!selectedBinding.query.legalEntityScope) return null;
+  if (!selectedBinding.query.legalEntityScope) {
+    // A tenant-level record's page that enters a company for its
+    // company-owned children (a party's returnables) shows the company its
+    // entry resolved, under the entry's own parameter, and switching keeps
+    // the same record on the same page.
+    const entered = workspaceEntryParameter(view, selection.selected);
+    if (!entered?.tenantRecord) return null;
+    const entry = await resolveWorkspaceEntry(
+      view,
+      selection.selected,
+      new URL(currentUrl),
+      queryGateway,
+    );
+    if (!entry) return null;
+    const chosen = currentUrl.searchParams.getAll(entered.parameter);
+    const record = currentUrl.searchParams.get('record');
+    return Object.freeze({
+      options: entry.options,
+      parameterId: entered.parameter,
+      preservedParameters: Object.freeze(
+        record ? ([['record', record]] as const) : [],
+      ),
+      selectedRecordId:
+        chosen.length === 1 &&
+        entry.options.some((option) => option.recordId === chosen[0])
+          ? chosen[0]!
+          : null,
+      targetSurfaceId: selection.selected.surfaceId,
+    });
+  }
   const entityNamespace = selectedBinding.query.sourceEntityId.split(
     ':entity.',
     1,
@@ -2253,7 +2290,7 @@ main{width:min(1200px,100%);margin:0 auto;padding:var(--page-padding) var(--page
 .task-decision output{display:block;margin:var(--space-3) 0;font-family:var(--font-sans);font-size:var(--text-title);font-weight:var(--weight-emphasis)}
 .task-primary-action{display:flex;justify-content:flex-end}
 .task-primary-action button{min-width:192px;min-height:44px}
-.data-table-wrap{margin-top:var(--space-4);overflow-x:auto}
+.data-table-wrap{position:relative;margin-top:var(--space-4);overflow-x:auto}
 .data-table-wrap table{width:100%;border-collapse:collapse;text-align:left;font-size:var(--text-body)}
 .data-table-wrap th{height:var(--row-header-height);padding:0 var(--space-3);border-bottom:1px solid var(--line);color:var(--ink-muted);font-size:var(--text-micro);text-transform:uppercase;letter-spacing:.08em;vertical-align:middle}
 .data-table-wrap td{height:var(--row-height);padding:0 var(--space-3);border-bottom:1px solid var(--line);vertical-align:middle}

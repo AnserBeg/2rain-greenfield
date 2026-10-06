@@ -39,6 +39,7 @@ const suiteDefinitions = [
       'test/unit/observability.test.ts',
       'test/unit/party-definition.test.ts',
       'test/unit/purchasing-definition.test.ts',
+      'test/unit/returnables.test.ts',
       'test/unit/sales-definition.test.ts',
       'test/unit/web-surface-hex-literal-ratchet.test.ts',
       'test/unit/workspace-contract.test.ts',
@@ -138,6 +139,7 @@ const suiteDefinitions = [
       'test/postgres/purchase-order-ending.test.ts',
       'test/postgres/receivables.test.ts',
       'test/postgres/receiving-authorization.test.ts',
+      'test/postgres/returnables.test.ts',
     ],
     expectedFiles: [
       'test/postgres/catalog-runtime.test.ts',
@@ -184,7 +186,7 @@ const suiteDefinitions = [
   },
   {
     discoveryPattern:
-      'test/postgres/**/@(commercial-totals|expected-receipts|fulfillment|order-lists|order-pages|packing-retrieval|payables|purchase-order-ending|receivables|receiving-authorization).test.ts',
+      'test/postgres/**/@(commercial-totals|expected-receipts|fulfillment|order-lists|order-pages|packing-retrieval|payables|purchase-order-ending|receivables|receiving-authorization|returnables).test.ts',
     expectedFiles: [
       'test/postgres/commercial-totals.test.ts',
       'test/postgres/expected-receipts.test.ts',
@@ -196,6 +198,7 @@ const suiteDefinitions = [
       'test/postgres/purchase-order-ending.test.ts',
       'test/postgres/receivables.test.ts',
       'test/postgres/receiving-authorization.test.ts',
+      'test/postgres/returnables.test.ts',
     ],
     script: 'test:postgres:commercial',
   },

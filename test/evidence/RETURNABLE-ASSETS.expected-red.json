@@ -1,0 +1,168 @@
+{
+  "version": 1,
+  "packet": "RETURNABLE-ASSETS",
+  "entries": [
+    {
+      "name": "returnables-custody-figures-maintained",
+      "claim": "F1: the ten custody figures declare maintainedBy the returnables capability, so no generic create or update of a custody names them.",
+      "file": "packages/domain/src/party/returnables.ts",
+      "original": "      { optional: true, maintained: true },\n",
+      "replacement": "      { optional: true },\n",
+      "test": {
+        "files": ["test/integration/surface-data-binding.test.ts"],
+        "namePattern": "RETURNABLE-ASSETS: a party page"
+      },
+      "kills": [
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "RETURNABLE-ASSETS: a party page enters a company for the custody records it is in, and a custody page offers each event only where its figures admit it",
+          "expected": "returnable_custody_create writes no capability figure"
+        }
+      ]
+    },
+    {
+      "name": "returnables-maintained-fields-leave-generic-inputs",
+      "claim": "F1: the compiler leaves every maintained field out of a generic create's and update's writable inputs.",
+      "file": "packages/compiler/src/projections.ts",
+      "original": "    (field) => !numberingOf(field) && !maintained(field),\n",
+      "replacement": "    (field) => !numberingOf(field),\n",
+      "test": {
+        "files": ["test/integration/surface-data-binding.test.ts"],
+        "namePattern": "RETURNABLE-ASSETS: a party page"
+      },
+      "kills": [
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "RETURNABLE-ASSETS: a party page enters a company for the custody records it is in, and a custody page offers each event only where its figures admit it",
+          "expected": "returnable_custody_create writes no capability figure"
+        }
+      ]
+    },
+    {
+      "name": "returnables-tenant-page-company-bar",
+      "claim": "F2: a tenant-level record page whose workspace enters a company shows the Company bar under the entry's parameter, each choice keeping the record.",
+      "file": "apps/web/src/surface-runtime.ts",
+      "original": "    if (!entered?.tenantRecord) return null;\n",
+      "replacement": "    return null;\n",
+      "test": {
+        "files": ["test/integration/surface-data-binding.test.ts"],
+        "namePattern": "RETURNABLE-ASSETS: a party page"
+      },
+      "kills": [
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "RETURNABLE-ASSETS: a party page enters a company for the custody records it is in, and a custody page offers each event only where its figures admit it",
+          "expected": "the party page shows a Company bar that keeps the party in either company"
+        }
+      ]
+    },
+    {
+      "name": "returnables-company-tasks-wait-for-a-company",
+      "claim": "F2: a Task that writes in the page's company is not offered on a page entered in no company.",
+      "file": "apps/web/src/surface-composition.ts",
+      "original": "  if (!data.scope && writesInCompany(action)) return false;\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/integration/surface-data-binding.test.ts"],
+        "namePattern": "RETURNABLE-ASSETS: a party page"
+      },
+      "kills": [
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "RETURNABLE-ASSETS: a party page enters a company for the custody records it is in, and a custody page offers each event only where its figures admit it",
+          "expected": "Issue returnables waits for a company"
+        }
+      ]
+    },
+    {
+      "name": "returnables-unentered-section-asks-for-a-company",
+      "claim": "F2: a company-owned section on a page entered in no company asks for a company instead of reading as empty.",
+      "file": "apps/web/src/surface-composition.ts",
+      "original": "        child.status = 'unscoped';\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/integration/surface-data-binding.test.ts"],
+        "namePattern": "RETURNABLE-ASSETS: a party page"
+      },
+      "kills": [
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "RETURNABLE-ASSETS: a party page enters a company for the custody records it is in, and a custody page offers each event only where its figures admit it",
+          "expected": "the section asks for a company"
+        }
+      ]
+    },
+    {
+      "name": "returnables-unreadable-row-label-keeps-the-section",
+      "claim": "F3: a child row's label that cannot be read reads as a dash in that cell; the section keeps its rows.",
+      "file": "apps/web/src/surface-composition.ts",
+      "original": "    const tolerant = row || related.has(column.field);\n",
+      "replacement": "    const tolerant = related.has(column.field);\n",
+      "test": {
+        "files": ["test/integration/surface-data-binding.test.ts"],
+        "namePattern": "RETURNABLE-ASSETS: a party page"
+      },
+      "kills": [
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "RETURNABLE-ASSETS: a party page enters a company for the custody records it is in, and a custody page offers each event only where its figures admit it",
+          "expected": "one unreadable type label keeps the section and its rows"
+        }
+      ]
+    },
+    {
+      "name": "returnables-custody-type-link-checked",
+      "claim": "F3: the capability refuses a custody whose type link and type field differ.",
+      "file": "packages/postgres-provider/src/returnables-capability-executor.ts",
+      "original": "      link('returnable_custody_asset_type') !==\n      String(custodyValue('asset_type_id'))\n",
+      "replacement": "      false\n",
+      "test": {
+        "files": ["test/postgres/returnables.test.ts"],
+        "namePattern": "a party holds our returnables only as an active customer"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/returnables.test.ts",
+          "name": "returnables: a party holds our returnables only as an active customer, and we hold a supplier’s only as an active supplier",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "returnables-first-issue-key-lock",
+      "claim": "Two first Issues of different custody records for one company, party, type, direction and currency serialize on the custody key's transaction lock.",
+      "file": "packages/postgres-provider/src/returnables-capability-executor.ts",
+      "original": "        await client.query(\n          `SELECT pg_advisory_xact_lock(hashtextextended(\n             $1::text || ':' || $2::text || ':' || $3::text || ':' || $4::text\n             || ':' || $5::text || ':' || $6::text || ':' || $7::text || ':' || $8::text, 0))`,\n          [\n            ...scope,\n            RETURNABLES_CAPABILITY_ID,\n            le,\n            partyId,\n            String(custodyValue('asset_type_id')),\n            direction,\n            currency,\n          ],\n        );\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/returnables.test.ts"],
+        "namePattern": "only the capability writes a custody"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/returnables.test.ts",
+          "name": "returnables: only the capability writes a custody’s figures, an in-use returnable type is not archived, and overlapping first Issues and refunds serialize",
+          "expected": "both first Issues wait at the serialization point"
+        }
+      ]
+    },
+    {
+      "name": "returnables-custody-row-lock",
+      "claim": "Two refunds of one custody serialize on the custody row, so the second reads the first's figures and is refused for exceeding what is refundable.",
+      "file": "packages/postgres-provider/src/returnables-capability-executor.ts",
+      "original": "          AND ${quote(entity.legalEntity!.column)}=$3 AND record_id::text=$4\n        FOR NO KEY UPDATE`,\n",
+      "replacement": "          AND ${quote(entity.legalEntity!.column)}=$3 AND record_id::text=$4`,\n",
+      "test": {
+        "files": ["test/postgres/returnables.test.ts"],
+        "namePattern": "only the capability writes a custody"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/returnables.test.ts",
+          "name": "returnables: only the capability writes a custody’s figures, an in-use returnable type is not archived, and overlapping first Issues and refunds serialize",
+          "expected": "the other is refused for exceeding what is refundable"
+        }
+      ]
+    }
+  ]
+}

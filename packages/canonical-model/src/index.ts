@@ -52,6 +52,8 @@ export {
   type SurfaceListRowAction,
   FieldNumberingSchema,
   type FieldNumbering,
+  FieldMaintenanceSchema,
+  type FieldMaintenance,
   SurfaceDocumentEditorSchema,
   type SurfaceDocumentEditor,
   type V6AuthoredApplicationPackage,
@@ -155,6 +157,7 @@ export {
   unicodeCaseFold,
 } from './unicode-case-fold.js';
 export { VERIFICATION_SENTINEL_PREFIX } from './field-numbering.js';
+export { validateFieldMaintenance } from './field-maintenance.js';
 
 export const platformContract = Object.freeze({
   authority: 'canonical-model',

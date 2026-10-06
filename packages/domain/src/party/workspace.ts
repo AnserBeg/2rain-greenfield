@@ -1,4 +1,9 @@
 import { PAYMENT_TERMS } from './definition.js';
+import {
+  RETURNABLE_CURRENCIES,
+  RETURNABLE_DIRECTIONS,
+  RETURNABLE_METHODS,
+} from './returnables.js';
 
 /**
  * The customer workspace on a Party record (owner ruling E): the roles it
@@ -80,6 +85,8 @@ export function partyWorkspace(namespace: string): Record<string, unknown> {
   });
   const roles = id('dataset', 'party_roles');
   const addresses = id('dataset', 'party_addresses');
+  const returnables = id('dataset', 'party_returnables');
+  const custody = (name: string) => field(`returnable_custody_${name}`);
   const address = (name: string) => field(`party_address_${name}`);
   return {
     kind: 'surfaceComposition',
@@ -226,6 +233,54 @@ export function partyWorkspace(namespace: string): Record<string, unknown> {
             'detail',
             70,
           ),
+        ],
+      },
+      // RETURNABLE-ASSETS: the custody records this party is in, either way,
+      // read in the company the page is entered with.
+      {
+        datasetId: returnables,
+        presentation: {
+          selection: 'none',
+          compact: 'scrollTable',
+          description:
+            'Pallets, kegs and crates out with this customer or held from this supplier, and the deposit on them.',
+        },
+        label: 'Returnables',
+        orderKey: 30,
+        query: q('returnable_custody_list'),
+        sort: [{ fieldId: custody('number'), direction: 'ascending' }],
+        parent: {
+          relationId: id('relation', 'returnable_custody_party'),
+          value: record('recordId'),
+          ownership: 'reference',
+        },
+        columns: [
+          column('returnable_number', 'Custody', 10, custody('number')),
+          column(
+            'returnable_type',
+            'Returnable type',
+            20,
+            custody('asset_type_id'),
+            ['returnable_asset_type_get', 'returnable_asset_type_name'],
+          ),
+          column('returnable_direction', 'Direction', 30, custody('direction')),
+          column(
+            'returnable_outstanding',
+            'Outstanding',
+            40,
+            custody('outstanding_quantity'),
+          ),
+          {
+            ...column(
+              'returnable_held',
+              'Deposit held',
+              50,
+              custody('deposit_held'),
+            ),
+            format: 'money' as const,
+          },
+          column('returnable_currency', 'Currency', 60, custody('currency')),
+          column('returnable_state', 'State', 70, custody('state')),
         ],
       },
     ],
@@ -431,6 +486,468 @@ export function partyWorkspace(namespace: string): Record<string, unknown> {
             default_ship_to_address_id: selected('recordId'),
           }),
         ],
+      },
+      {
+        actionId: id('action', 'party_open_returnable'),
+        label: 'Open custody',
+        description:
+          'Open the custody record with its events: issue more, record a return, a forfeit or a deposit refund.',
+        orderKey: 60,
+        datasetId: returnables,
+        presentation: { placement: 'row' },
+        conditions: [],
+        inputs: [],
+        steps: [],
+        navigate: {
+          surface: ref(
+            'surfaceReference',
+            id('surface', 'returnable_custody_detail'),
+          ),
+          query: q('returnable_custody_get'),
+          record: selected('recordId'),
+        },
+      },
+      {
+        // A new custody record and its first Issue: the deposit is taken at
+        // the type's unit deposit in the chosen currency, by the method
+        // entered here. A type this party already holds is issued from its
+        // custody record; the capability refuses a second one.
+        actionId: id('action', 'party_issue_returnables'),
+        label: 'Issue returnables',
+        description:
+          'Starts a custody record of one returnable type and records its first issue with the deposit taken. Stock is not moved. To issue more of a type already in custody, open its record.',
+        orderKey: 70,
+        conditions: [],
+        inputs: [
+          {
+            inputId: id('input', 'party_returnable_type'),
+            label: 'Returnable type',
+            orderKey: 10,
+            type: 'reference',
+            required: true,
+            query: q('returnable_asset_type_list'),
+            labelField: ref(
+              'fieldReference',
+              field('returnable_asset_type_name'),
+            ),
+          },
+          text('returnable_direction', 'Direction', 20, true, {
+            kind: 'choice',
+            options: RETURNABLE_DIRECTIONS.map(([value, label]) => ({
+              value: id('option', `returnable_custody_direction_${value}`),
+              label,
+            })),
+            defaultValue: id('option', 'returnable_custody_direction_out'),
+          }),
+          text('returnable_currency', 'Deposit currency', 30, true, {
+            kind: 'choice',
+            options: RETURNABLE_CURRENCIES.map(([value, label]) => ({
+              value: id('option', `returnable_custody_currency_${value}`),
+              label,
+            })),
+            defaultValue: id('option', 'returnable_custody_currency_cad'),
+          }),
+          {
+            inputId: id('input', 'party_returnable_quantity'),
+            label: 'Quantity',
+            orderKey: 40,
+            type: 'quantity',
+            required: true,
+          },
+          text('returnable_method', 'Deposit paid by', 50, true, {
+            kind: 'choice',
+            options: RETURNABLE_METHODS.map(([value, label]) => ({
+              value: id('option', `returnable_event_method_${value}`),
+              label,
+            })),
+            defaultValue: id('option', 'returnable_event_method_bank_transfer'),
+          }),
+          text(
+            'returnable_reference',
+            'Reference (cheque or transfer number)',
+            60,
+            false,
+          ),
+          text('returnable_reason', 'Reason', 70, true, { kind: 'multiline' }),
+        ],
+        steps: [
+          step('returnable_custody', 'returnable_custody_create', [
+            bind(['recordId'], { source: 'generated', value: 'uuid' }),
+            bind(['legalEntityId'], { source: 'generated', value: 'scope' }),
+            bind(
+              ['values', custody('state')],
+              literal(id('option', 'returnable_custody_state_new')),
+            ),
+            bind(['values', custody('party_id')], record('recordId')),
+            bind(
+              ['values', custody('direction')],
+              input('returnable_direction'),
+            ),
+            bind(
+              ['values', custody('asset_type_id')],
+              input('returnable_type'),
+            ),
+            bind(['values', custody('currency')], input('returnable_currency')),
+            bind(
+              ['relations', id('relation', 'returnable_custody_party')],
+              record('recordId'),
+            ),
+            bind(
+              ['relations', id('relation', 'returnable_custody_asset_type')],
+              input('returnable_type'),
+            ),
+          ]),
+          step('returnable_issue', 'returnable_event_create', [
+            bind(['recordId'], { source: 'generated', value: 'uuid' }),
+            bind(['legalEntityId'], { source: 'generated', value: 'scope' }),
+            bind(
+              ['values', field('returnable_event_state')],
+              literal(id('option', 'returnable_event_state_draft')),
+            ),
+            bind(
+              ['values', field('returnable_event_kind')],
+              literal(id('option', 'returnable_event_kind_issue')),
+            ),
+            bind(['values', field('returnable_event_event_date')], {
+              source: 'generated',
+              value: 'instant',
+            }),
+            bind(
+              ['values', field('returnable_event_quantity')],
+              input('returnable_quantity'),
+            ),
+            bind(
+              ['values', field('returnable_event_method')],
+              input('returnable_method'),
+            ),
+            bind(
+              ['values', field('returnable_event_reference')],
+              input('returnable_reference'),
+            ),
+            bind(
+              ['values', field('returnable_event_reason')],
+              input('returnable_reason'),
+            ),
+            bind(['relations', id('relation', 'returnable_event_custody')], {
+              source: 'step',
+              stepId: id('step', 'party_returnable_custody'),
+              field: 'recordId',
+            }),
+          ]),
+          step('returnable_issue_post', 'returnable_event_post', [
+            bind(['recordId'], {
+              source: 'step',
+              stepId: id('step', 'party_returnable_issue'),
+              field: 'recordId',
+            }),
+            bind(['expectedRevision'], {
+              source: 'step',
+              stepId: id('step', 'party_returnable_issue'),
+              field: 'revision',
+            }),
+          ]),
+        ],
+      },
+    ],
+  };
+}
+
+/**
+ * A returnable custody record (RETURNABLE-ASSETS): what one party holds of
+ * ours, or we of a supplier's, in one returnable type, with the deposit on
+ * it and every event that moved it. Each Task writes a draft event and posts
+ * it through the returnables capability, which bounds it and restates the
+ * figures: return plus forfeit never exceeds what was issued, and a refund
+ * never exceeds the deposit taken on what came back. Nothing moves stock.
+ */
+export function returnableCustodyWorkspace(
+  namespace: string,
+): Record<string, unknown> {
+  const id = (type: string, name: string) => `${namespace}:${type}.${name}`;
+  const ref = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: 'v6',
+    targetId,
+  });
+  const q = (name: string) => ref('queryReference', id('query', name));
+  const custody = (name: string) => id('field', `returnable_custody_${name}`);
+  const event = (name: string) => id('field', `returnable_event_${name}`);
+  const column = (
+    name: string,
+    label: string,
+    orderKey: number,
+    value: string,
+    lookup?: readonly [string, string],
+  ) => ({
+    columnId: id('column', `custody_${name}`),
+    label,
+    orderKey,
+    field: value,
+    ...(lookup
+      ? {
+          reference: {
+            query: q(lookup[0]),
+            labelField: ref('fieldReference', id('field', lookup[1])),
+          },
+        }
+      : {}),
+  });
+  const money = <T extends object>(value: T) => ({
+    ...value,
+    format: 'money' as const,
+  });
+  const record = (name: string) => ({ source: 'record', field: name });
+  const literal = (value: string | null) => ({ source: 'literal', value });
+  const generated = (value: string) => ({ source: 'generated', value });
+  const input = (name: string) => ({
+    source: 'input',
+    inputId: id('input', `custody_${name}`),
+  });
+  const bind = (path: string[], value: unknown) => ({ path, value });
+  const step = (name: string, operation: string, bindings: unknown[]) => ({
+    stepId: id('step', `custody_${name}`),
+    operation: ref('operationReference', id('operation', operation)),
+    bindings,
+  });
+  const fromStep = (name: string, value: 'recordId' | 'revision') => ({
+    source: 'step',
+    stepId: id('step', `custody_${name}`),
+    field: value,
+  });
+  /** Writes a draft event of this custody record and posts it. */
+  const recordEvent = (
+    kind: 'issue' | 'return' | 'forfeit' | 'refund',
+    values: Record<string, unknown>,
+  ) => [
+    step(`${kind}_draft`, 'returnable_event_create', [
+      bind(['recordId'], generated('uuid')),
+      bind(['legalEntityId'], generated('scope')),
+      bind(
+        ['values', event('state')],
+        literal(id('option', 'returnable_event_state_draft')),
+      ),
+      bind(
+        ['values', event('kind')],
+        literal(id('option', `returnable_event_kind_${kind}`)),
+      ),
+      bind(['values', event('event_date')], generated('instant')),
+      ...Object.entries(values).map(([name, value]) =>
+        bind(['values', event(name)], value),
+      ),
+      bind(
+        ['relations', id('relation', 'returnable_event_custody')],
+        record('recordId'),
+      ),
+    ]),
+    step(`${kind}_post`, 'returnable_event_post', [
+      bind(['recordId'], fromStep(`${kind}_draft`, 'recordId')),
+      bind(['expectedRevision'], fromStep(`${kind}_draft`, 'revision')),
+    ]),
+  ];
+  const quantity = (label: string) => ({
+    inputId: id('input', 'custody_quantity'),
+    label,
+    orderKey: 10,
+    type: 'quantity',
+    required: true,
+  });
+  const method = (label: string) => ({
+    inputId: id('input', 'custody_method'),
+    label,
+    orderKey: 20,
+    type: 'text',
+    required: true,
+    presentation: {
+      kind: 'choice',
+      options: RETURNABLE_METHODS.map(([value, optionLabel]) => ({
+        value: id('option', `returnable_event_method_${value}`),
+        label: optionLabel,
+      })),
+      defaultValue: id('option', 'returnable_event_method_bank_transfer'),
+    },
+  });
+  const reference = {
+    inputId: id('input', 'custody_reference'),
+    label: 'Reference (cheque or transfer number)',
+    orderKey: 30,
+    type: 'text',
+    required: false,
+  };
+  const reason = {
+    inputId: id('input', 'custody_reason'),
+    label: 'Reason',
+    orderKey: 40,
+    type: 'text',
+    required: true,
+    presentation: { kind: 'multiline' },
+  };
+  const positive = (name: string) => ({
+    value: record(custody(name)),
+    operator: 'positive',
+    compare: null,
+  });
+  const events = id('dataset', 'custody_events');
+  return {
+    kind: 'surfaceComposition',
+    schemaVersion: 'v6',
+    presentation: {
+      header: {
+        title: id('column', 'custody_number'),
+        subtitle: [id('column', 'custody_party')],
+        status: id('column', 'custody_state'),
+        facts: [
+          id('column', 'custody_type'),
+          id('column', 'custody_direction'),
+          id('column', 'custody_outstanding'),
+          id('column', 'custody_held'),
+          id('column', 'custody_refundable'),
+          id('column', 'custody_currency'),
+        ],
+      },
+      context: {
+        label: 'Custody and deposit',
+        description:
+          'Returnable assets out with a customer or held from a supplier, and the deposit taken on them. Sellable stock is not moved.',
+      },
+      recordActions: 'progressive',
+      technicalDetails: 'progressive',
+      task: { mode: 'nativeDialog', fallback: 'page' },
+    },
+    fields: [
+      column('number', 'Custody', 10, custody('number')),
+      column('state', 'Custody state', 15, custody('state')),
+      column('party', 'Party', 20, custody('party_id'), [
+        'party_get',
+        'party_name',
+      ]),
+      // The type through the custody's type link, stated by its get and
+      // labelled through the type's own get: "—" when that read is withheld
+      // or the type is gone, never a failed page.
+      column(
+        'type',
+        'Returnable type',
+        25,
+        id('relation', 'returnable_custody_asset_type'),
+        ['returnable_asset_type_get', 'returnable_asset_type_name'],
+      ),
+      column('direction', 'Direction', 30, custody('direction')),
+      column('currency', 'Currency', 35, custody('currency')),
+      money(
+        column('unit_deposit', 'Unit deposit', 40, custody('unit_deposit')),
+      ),
+      column('issued', 'Issued', 45, custody('issued_quantity')),
+      column('returned', 'Returned', 50, custody('returned_quantity')),
+      column('forfeited', 'Forfeited', 55, custody('forfeited_quantity')),
+      column('outstanding', 'Outstanding', 60, custody('outstanding_quantity')),
+      ...[
+        column('taken', 'Deposit taken', 65, custody('deposit_taken')),
+        column('refunded', 'Deposit refunded', 70, custody('deposit_refunded')),
+        column('kept', 'Deposit kept', 75, custody('deposit_forfeited')),
+        column('held', 'Deposit held', 80, custody('deposit_held')),
+        column(
+          'refundable',
+          'Refundable now',
+          85,
+          custody('deposit_refundable'),
+        ),
+      ].map(money),
+      column('notes', 'Notes', 90, custody('notes')),
+    ],
+    children: [
+      {
+        datasetId: events,
+        presentation: { selection: 'none', compact: 'scrollTable' },
+        label: 'Events',
+        orderKey: 10,
+        query: q('returnable_event_list'),
+        sort: [{ fieldId: event('event_date'), direction: 'ascending' }],
+        parent: {
+          relationId: id('relation', 'returnable_event_custody'),
+          value: record('recordId'),
+          ownership: 'reference',
+        },
+        columns: [
+          column('event_date', 'Date', 10, event('event_date')),
+          column('event_kind', 'Event', 20, event('kind')),
+          column('event_quantity', 'Quantity', 30, event('quantity')),
+          money(column('event_amount', 'Amount', 40, event('amount'))),
+          column('event_method', 'Method', 50, event('method')),
+          column('event_reference', 'Reference', 60, event('reference')),
+          column('event_reason', 'Reason', 70, event('reason')),
+          column('event_recorded_by', 'Recorded by', 80, event('recorded_by')),
+          column('event_state', 'State', 90, event('state')),
+        ],
+      },
+    ],
+    actions: [
+      {
+        actionId: id('action', 'custody_issue'),
+        label: 'Issue',
+        description:
+          'Records more of this type handed over -- to the customer, or received from the supplier -- and the deposit taken on them at the unit deposit.',
+        orderKey: 10,
+        conditions: [],
+        inputs: [
+          quantity('Quantity'),
+          method('Deposit paid by'),
+          reference,
+          reason,
+        ],
+        steps: recordEvent('issue', {
+          quantity: input('quantity'),
+          method: input('method'),
+          reference: input('reference'),
+          reason: input('reason'),
+        }),
+      },
+      {
+        actionId: id('action', 'custody_return'),
+        label: 'Return',
+        description:
+          'Records assets that came back. It may not exceed what is outstanding; the deposit on them becomes refundable.',
+        orderKey: 20,
+        conditions: [positive('outstanding_quantity')],
+        inputs: [quantity('Quantity returned'), { ...reason, orderKey: 20 }],
+        steps: recordEvent('return', {
+          quantity: input('quantity'),
+          reason: input('reason'),
+        }),
+      },
+      {
+        actionId: id('action', 'custody_forfeit'),
+        label: 'Forfeit',
+        description:
+          'Records assets that will not come back: the deposit on them is kept and is no longer refundable. It may not exceed what is outstanding.',
+        orderKey: 30,
+        conditions: [positive('outstanding_quantity')],
+        inputs: [quantity('Quantity forfeited'), { ...reason, orderKey: 20 }],
+        steps: recordEvent('forfeit', {
+          quantity: input('quantity'),
+          reason: input('reason'),
+        }),
+      },
+      {
+        actionId: id('action', 'custody_refund'),
+        label: 'Refund deposit',
+        description:
+          'Records the deposit paid back on returned assets. It may not exceed what is refundable now.',
+        orderKey: 40,
+        conditions: [positive('deposit_refundable')],
+        inputs: [
+          {
+            ...quantity('Amount refunded'),
+            inputId: id('input', 'custody_amount'),
+          },
+          method('Refunded by'),
+          reference,
+          reason,
+        ],
+        steps: recordEvent('refund', {
+          amount: input('amount'),
+          method: input('method'),
+          reference: input('reference'),
+          reason: input('reason'),
+        }),
       },
     ],
   };
