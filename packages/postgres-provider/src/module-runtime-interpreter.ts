@@ -20,6 +20,7 @@ import type {
   BusinessValueStateInput,
   EvidenceMetadataInput,
   AcceptedMutationCommand,
+  IdempotentMutationBinding,
 } from '../../platform-runtime/src/trust/contracts.js';
 import { POLICY_DECISION_EVIDENCE_VERSION } from '../../platform-runtime/src/trust/contracts.js';
 import type {
@@ -35,8 +36,11 @@ import type {
   SemanticOperationResultEnvelope,
 } from '../../runtime/src/semantic-operation-gateway.js';
 import {
+  RECORD_LEGAL_ENTITY_BINDING_ARGUMENT_KEY,
   SEMANTIC_OPERATION_RESULT_VERSION,
+  admittedOperationArgumentKeys,
   evaluateRegisteredOperationPrecondition,
+  unboundRecordInputDigest,
 } from '../../runtime/src/semantic-operation-gateway.js';
 import type {
   RegisteredAggregateQueryDefinition,
@@ -98,6 +102,12 @@ interface ArtifactRow {
 
 interface MutationInput {
   expectedRevision: number | null;
+  /**
+   * COMPANY-BOUND-WRITES: the legal entity a write naming an existing record
+   * was entered in, or `null` when the caller named none. Compared with the
+   * persisted row by `requireRecordLegalEntityBinding`.
+   */
+  legalEntityBinding: string | null;
   patch: Readonly<Record<string, ImmutableJsonValue>>;
   recordId: string;
   relations: Readonly<Record<string, string>>;
@@ -327,15 +337,23 @@ export class PostgresModuleRuntimeInterpreter
   ): Promise<SemanticOperationResultEnvelope> {
     const parsedInput = parseMutationInput(request.definition, request.input);
     const actor = await this.actorIssuer.issue(request.context);
+    const binding = Object.freeze({
+      actionId: request.definition.operationId,
+      idempotencyKey: request.idempotencyKey,
+      inputDigest: request.inputDigest,
+      releaseContentHash: request.view.release.contentHash,
+      releaseId: request.view.release.releaseId,
+    });
     const receipt = await this.#trust.executeIdempotentAcceptedMutation(
       request.context,
       actor,
       Object.freeze({
-        actionId: request.definition.operationId,
-        idempotencyKey: request.idempotencyKey,
-        inputDigest: request.inputDigest,
-        releaseContentHash: request.view.release.contentHash,
-        releaseId: request.view.release.releaseId,
+        ...binding,
+        inputDigest: await this.#recordedDigestForReplay(
+          request,
+          parsedInput,
+          binding,
+        ),
       }),
       async (client) => {
         const currentStorage = await this.#loadPinnedStorageTarget(
@@ -419,6 +437,48 @@ export class PostgresModuleRuntimeInterpreter
       }),
       unsupportedReason: null,
     });
+  }
+
+  /**
+   * COMPANY-BOUND-WRITES. A company-bound write is digested with its company
+   * operand, so a request key recorded before writes carried one -- or by a
+   * caller that sent none -- holds the digest of the same input without it.
+   * That receipt still replays, and only when the record it wrote is in the
+   * company this request names; otherwise the replay is refused exactly as a
+   * fresh write would be. Every other request keeps its own digest. A receipt
+   * is never updated or deleted, so the digest read here is the one the trust
+   * service re-reads under the request key's lock.
+   */
+  async #recordedDigestForReplay(
+    request: SemanticOperationExecutionRequest,
+    input: MutationInput,
+    binding: IdempotentMutationBinding,
+  ): Promise<string> {
+    if (input.legalEntityBinding === null) return request.inputDigest;
+    const unbound = unboundRecordInputDigest(request.definition, request.input);
+    if (
+      unbound === null ||
+      (await this.#trust.recordedIdempotencyInputDigest(
+        request.context,
+        binding,
+      )) !== unbound
+    )
+      return request.inputDigest;
+    await withTrustedRequestTransaction(
+      this.pool,
+      request.context,
+      async (client) => {
+        const storage = await this.#loadPinnedStorageTarget(client, request);
+        const entity = requiredEntity(
+          storage,
+          request.definition.effect.entity.targetId,
+        );
+        await withModuleRuntimeRole(client, () =>
+          requireRecordLegalEntityBinding(client, entity, input),
+        );
+      },
+    );
+    return unbound;
   }
 
   #loadPinnedStorageTarget(
@@ -771,50 +831,33 @@ async function executeMutationOnClient(
   readBackSelections: readonly { readonly fieldId: string }[],
 ): Promise<SemanticRecordDto> {
   const definition = request.definition;
-  switch (definition.effect.kind) {
-    case 'createRecordEffect':
-      await insertRecord(client, storage, entity, input, request.parentGuards);
-      break;
-    case 'updateRecordEffect':
-      await requireExistingParentGuards(
-        client,
-        storage,
-        entity,
-        input.recordId,
-        request.parentGuards,
-      );
-      await updateRecord(client, entity, input);
-      break;
-    case 'archiveRecordEffect':
-      await requireExistingParentGuards(
-        client,
-        storage,
-        entity,
-        input.recordId,
-        request.parentGuards,
-      );
-      await setArchiveState(client, storage, entity, input, true);
-      break;
-    case 'restoreRecordEffect':
-      await requireExistingParentGuards(
-        client,
-        storage,
-        entity,
-        input.recordId,
-        request.parentGuards,
-      );
-      await setArchiveState(client, storage, entity, input, false);
-      break;
-    case 'transitionStateEffect':
-      await requireExistingParentGuards(
-        client,
-        storage,
-        entity,
-        input.recordId,
-        request.parentGuards,
-      );
-      await transitionRecordState(client, entity, request.definition, input);
-      break;
+  if (definition.effect.kind === 'createRecordEffect') {
+    await insertRecord(client, storage, entity, input, request.parentGuards);
+  } else {
+    await requireExistingParentGuards(
+      client,
+      storage,
+      entity,
+      input.recordId,
+      request.parentGuards,
+    );
+    // After the parent guards and before the writer, so the record's lock is
+    // taken in the order every writer already takes it (parent, then record).
+    await requireRecordLegalEntityBinding(client, entity, input);
+    switch (definition.effect.kind) {
+      case 'updateRecordEffect':
+        await updateRecord(client, entity, input);
+        break;
+      case 'archiveRecordEffect':
+        await setArchiveState(client, storage, entity, input, true);
+        break;
+      case 'restoreRecordEffect':
+        await setArchiveState(client, storage, entity, input, false);
+        break;
+      case 'transitionStateEffect':
+        await transitionRecordState(client, entity, request.definition, input);
+        break;
+    }
   }
   const record = await loadRawRecord(client, entity, input.recordId, true, []);
   if (!record) {
@@ -1236,6 +1279,53 @@ async function setArchiveState(
     values,
   );
   requireMutation(result.rowCount);
+}
+
+/**
+ * COMPANY-BOUND-WRITES. A write that names an existing record and carries the
+ * company it was entered in acts only on a record of that company. The
+ * persisted company is read from the row itself, in the write's transaction,
+ * under the same `FOR NO KEY UPDATE` lock the writer's compare-and-increment of
+ * the revision then runs under -- never from the request, and never from an
+ * earlier read. A record's company does not change after creation; the lock
+ * makes this check and the write one decision even if that ever stopped
+ * holding. A binding on a tenant-level record is refused by name: it would
+ * otherwise scope a company grant onto a record no company owns.
+ */
+async function requireRecordLegalEntityBinding(
+  client: PoolClient,
+  entity: StorageEntity,
+  input: MutationInput,
+): Promise<void> {
+  if (input.legalEntityBinding === null) return;
+  const requirement = legalEntityReadScopeRequirement(entity);
+  if (!requirement) {
+    throw failure(
+      'MODULE_LEGAL_ENTITY_BINDING_UNSUPPORTED',
+      'a tenant-level record is not bound to a legal entity',
+      entity.entityId,
+    );
+  }
+  const persisted = await client.query<{ legal_entity_id: string }>(
+    `SELECT ${quoted(requirement.column)}::text AS legal_entity_id
+       FROM north_star_module.${quoted(entity.physicalTableName)}
+      WHERE tenant_id = north_star_internal.trusted_tenant_id()
+        AND environment_id = north_star_internal.trusted_environment_id()
+        AND ${quoted(entity.recordIdentity.column)} = $1
+      FOR NO KEY UPDATE`,
+    [input.recordId],
+  );
+  const row = persisted.rows[0];
+  if (!row) {
+    throw failure('MODULE_RECORD_NOT_FOUND', 'module record was not found');
+  }
+  if (row.legal_entity_id.toLowerCase() !== input.legalEntityBinding) {
+    throw failure(
+      'MODULE_LEGAL_ENTITY_BINDING_MISMATCH',
+      'record belongs to a different legal entity than the request names',
+      entity.entityId,
+    );
+  }
 }
 
 async function lockLifecycleRecord(
@@ -5444,15 +5534,17 @@ export function parseMutationInput(
       assertAllowedKeys(input, contract.closedArgumentKeys);
       return validateMutationInput(contract, {
         expectedRevision: null,
+        legalEntityBinding: null,
         patch: immutableRecord(input.values, 'values'),
         recordId,
         relations: uuidRecord(input.relations, 'relations'),
         systemInput: requiredSystemInput(contract, input),
       });
     case 'updateRecordEffect':
-      assertAllowedKeys(input, contract.closedArgumentKeys);
+      assertAllowedKeys(input, admittedOperationArgumentKeys(definition));
       return validateMutationInput(contract, {
         expectedRevision: requiredRevision(input.expectedRevision),
+        legalEntityBinding: optionalLegalEntityBinding(input),
         patch: immutableRecord(input.patch, 'patch'),
         recordId,
         relations: Object.freeze({}),
@@ -5467,9 +5559,10 @@ export function parseMutationInput(
     case 'archiveRecordEffect':
     case 'restoreRecordEffect':
     case 'transitionStateEffect':
-      assertAllowedKeys(input, contract.closedArgumentKeys);
+      assertAllowedKeys(input, admittedOperationArgumentKeys(definition));
       return validateMutationInput(contract, {
         expectedRevision: requiredRevision(input.expectedRevision),
+        legalEntityBinding: optionalLegalEntityBinding(input),
         patch: Object.freeze({}),
         recordId,
         relations: Object.freeze({}),
@@ -5535,6 +5628,22 @@ function validateMutationInput(
     }
   }
   return input;
+}
+
+/**
+ * The company a write naming an existing record is bound to. Absent means
+ * unbound; present must be a UUID, and is compared in lower case because the
+ * persisted column is read back as canonical lower-case text.
+ */
+function optionalLegalEntityBinding(
+  input: Readonly<Record<string, ImmutableJsonValue>>,
+): string | null {
+  return Object.hasOwn(input, RECORD_LEGAL_ENTITY_BINDING_ARGUMENT_KEY)
+    ? requiredUuid(
+        input[RECORD_LEGAL_ENTITY_BINDING_ARGUMENT_KEY],
+        RECORD_LEGAL_ENTITY_BINDING_ARGUMENT_KEY,
+      ).toLowerCase()
+    : null;
 }
 
 function requiredSystemInput(
