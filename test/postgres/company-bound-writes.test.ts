@@ -234,8 +234,12 @@ test(
           key,
         );
 
-      const countA = await createCount(companyA, 'BIND-A-1');
-      const countB = await createCount(companyB, 'BIND-B-1');
+      // Each subtest writes records of its own, so a failure in one cannot
+      // become a failure in the next.
+      const pair = async (tag: string) => ({
+        a: await createCount(companyA, `${tag}-A`),
+        b: await createCount(companyB, `${tag}-B`),
+      });
       const formIn = (company: string, recordId: string) =>
         page(fixture, 'stock_count_form', {
           record: recordId,
@@ -250,7 +254,8 @@ test(
       await t.test(
         "an edit posted through a page entered in A does not change B's record",
         async () => {
-          const opened = await read(formIn(companyA, countA));
+          const { a, b } = await pair('EDIT');
+          const opened = await read(formIn(companyA, a));
           assert.equal(opened.status, 200);
           const form = renderedForm(opened.html, fixture.app.baseUrl);
           assert.equal(
@@ -258,16 +263,16 @@ test(
             companyA,
             "the form posts back to the page's company",
           );
-          const before = await stored(countB);
+          const before = await stored(b);
           const response = await post(form.action, {
             ...form.fields,
-            recordId: countB,
+            recordId: b,
             expectedRevision: before.revision,
             [`value:${field('stock_count_number')}`]: 'MOVED-BY-A',
           });
           // The persisted row first: it is the fact, the page only reports it.
           assert.deepEqual(
-            await stored(countB),
+            await stored(b),
             before,
             "B's record must not be written through A's page",
           );
@@ -281,17 +286,18 @@ test(
       );
 
       await t.test('the same edit in its own company saves', async () => {
-        const opened = await read(formIn(companyA, countA));
+        const { a } = await pair('OWN');
+        const opened = await read(formIn(companyA, a));
         const form = renderedForm(opened.html, fixture.app.baseUrl);
-        const before = await stored(countA);
+        const before = await stored(a);
         const response = await post(form.action, {
           ...form.fields,
-          [`value:${field('stock_count_number')}`]: 'BIND-A-1-EDITED',
+          [`value:${field('stock_count_number')}`]: 'OWN-A-EDITED',
         });
         assert.equal(response.status, 200, diagnostic(response.html) ?? '');
-        assert.deepEqual(await stored(countA), {
+        assert.deepEqual(await stored(a), {
           ...before,
-          number: 'BIND-A-1-EDITED',
+          number: 'OWN-A-EDITED',
           revision: String(Number(before.revision) + 1),
         });
       });
@@ -299,6 +305,7 @@ test(
       await t.test(
         'archive and restore are bound to the entered company',
         async () => {
+          const { a, b } = await pair('LIFE');
           const lifecycle = async (
             company: string,
             recordId: string,
@@ -321,33 +328,35 @@ test(
             });
           };
 
-          const activeB = await stored(countB);
-          const archiveBInA = await lifecycle(companyA, countB, 'archive');
+          const activeB = await stored(b);
+          const archiveBInA = await lifecycle(companyA, b, 'archive');
           assert.equal(
             diagnostic(archiveBInA.html),
             'OPERATION_LEGAL_ENTITY_MISMATCH',
+            "archiving B's record through A's page must be refused",
           );
-          assert.deepEqual(await stored(countB), activeB);
+          assert.deepEqual(await stored(b), activeB);
 
-          const archiveAInA = await lifecycle(companyA, countA, 'archive');
+          const archiveAInA = await lifecycle(companyA, a, 'archive');
           assert.equal(archiveAInA.status, 200);
-          assert.equal((await stored(countA)).archived, true);
+          assert.equal((await stored(a)).archived, true);
 
-          const archiveBInB = await lifecycle(companyB, countB, 'archive');
+          const archiveBInB = await lifecycle(companyB, b, 'archive');
           assert.equal(archiveBInB.status, 200);
-          const archivedB = await stored(countB);
+          const archivedB = await stored(b);
           assert.equal(archivedB.archived, true);
 
-          const restoreBInA = await lifecycle(companyA, countB, 'restore');
+          const restoreBInA = await lifecycle(companyA, b, 'restore');
           assert.equal(
             diagnostic(restoreBInA.html),
             'OPERATION_LEGAL_ENTITY_MISMATCH',
+            "restoring B's record through A's page must be refused",
           );
-          assert.deepEqual(await stored(countB), archivedB);
+          assert.deepEqual(await stored(b), archivedB);
 
           for (const [company, recordId] of [
-            [companyA, countA],
-            [companyB, countB],
+            [companyA, a],
+            [companyB, b],
           ] as const) {
             const restored = await lifecycle(company, recordId, 'restore');
             assert.equal(restored.status, 200);
@@ -410,8 +419,8 @@ test(
           // reads, a direct transaction moves one anyway and holds the row
           // while the A-bound edit arrives; the edit must wait for it and then
           // judge the row it is about to write, not the one it saw first.
-          const recordId = await createCount(companyA, 'BIND-A-LOCK');
-          const before = await stored(recordId);
+          const { a } = await pair('LOCK');
+          const before = await stored(a);
           const mover = await fixture.pool.connect();
           try {
             await mover.query('BEGIN');
@@ -425,9 +434,9 @@ test(
                   SET "${count.legalEntity!.column}" = $4
                 WHERE tenant_id = $1 AND environment_id = $2
                   AND "${count.recordIdentity.column}" = $3`,
-              [tenantId, environmentId, recordId, companyB],
+              [tenantId, environmentId, a, companyB],
             );
-            const edit = update(recordId, before.revision, 'MOVED-IN-FLIGHT', {
+            const edit = update(a, before.revision, 'MOVED-IN-FLIGHT', {
               legalEntityId: companyA,
             }).then(
               (result) => ({ result }),
@@ -436,91 +445,77 @@ test(
             await waitUntilBlockedBy(fixture, moverPid);
             await mover.query('COMMIT');
             const settled = await edit;
-            assert.ok('error' in settled, 'the in-flight edit must be refused');
+            assert.ok(
+              'error' in settled,
+              'the in-flight edit of a record moved to B must be refused',
+            );
             refused('MODULE_LEGAL_ENTITY_BINDING_MISMATCH')(settled.error);
           } finally {
             mover.release();
           }
-          assert.deepEqual(await stored(recordId), {
-            ...before,
-            company: companyB,
-          });
+          assert.deepEqual(await stored(a), { ...before, company: companyB });
         },
       );
 
       await t.test(
         'a request key recorded without the company still replays, and only in its own company',
         async () => {
+          const { a, b } = await pair('REPLAY');
           // What every write sent before this packet: no company operand.
-          const revisionA = (await stored(countA)).revision;
+          const revisionA = (await stored(a)).revision;
           const keyA = randomUUID();
-          const firstA = await update(countA, revisionA, 'REPLAY-A', {}, keyA);
+          const firstA = await update(a, revisionA, 'REPLAY-A', {}, keyA);
           assert.equal(firstA.outcome, 'succeeded');
-          const afterA = await stored(countA);
+          const afterA = await stored(a);
           const replayA = await update(
-            countA,
+            a,
             revisionA,
             'REPLAY-A',
             { legalEntityId: companyA },
             keyA,
           );
           assert.deepEqual(replayA.trust, firstA.trust, 'replayed, not rerun');
-          assert.deepEqual(await stored(countA), afterA);
+          assert.deepEqual(await stored(a), afterA);
 
-          const revisionB = (await stored(countB)).revision;
+          const revisionB = (await stored(b)).revision;
           const keyB = randomUUID();
-          const firstB = await update(countB, revisionB, 'REPLAY-B', {}, keyB);
+          const firstB = await update(b, revisionB, 'REPLAY-B', {}, keyB);
           assert.equal(firstB.outcome, 'succeeded');
-          const afterB = await stored(countB);
+          const afterB = await stored(b);
           await assert.rejects(
-            update(
-              countB,
-              revisionB,
-              'REPLAY-B',
-              { legalEntityId: companyA },
-              keyB,
-            ),
+            update(b, revisionB, 'REPLAY-B', { legalEntityId: companyA }, keyB),
             refused('MODULE_LEGAL_ENTITY_BINDING_MISMATCH'),
           );
           const replayB = await update(
-            countB,
+            b,
             revisionB,
             'REPLAY-B',
             { legalEntityId: companyB },
             keyB,
           );
           assert.deepEqual(replayB.trust, firstB.trust);
-          assert.deepEqual(await stored(countB), afterB);
+          assert.deepEqual(await stored(b), afterB);
 
           // A key recorded WITH its company is bound to it.
           const keyBound = randomUUID();
-          const revision = (await stored(countA)).revision;
+          const revision = (await stored(a)).revision;
           const bound = await update(
-            countA,
+            a,
             revision,
             'REPLAY-A-BOUND',
             { legalEntityId: companyA },
             keyBound,
           );
           assert.equal(bound.outcome, 'succeeded');
-          await assert.rejects(
-            update(
-              countA,
-              revision,
-              'REPLAY-A-BOUND',
-              { legalEntityId: companyB },
-              keyBound,
-            ),
-            refused('SEMANTIC_OPERATION_IDEMPOTENCY_CONFLICT'),
-          );
-          await assert.rejects(
-            update(countA, revision, 'REPLAY-A-BOUND', {}, keyBound),
-            refused('SEMANTIC_OPERATION_IDEMPOTENCY_CONFLICT'),
-          );
+          for (const other of [{ legalEntityId: companyB }, {}])
+            await assert.rejects(
+              update(a, revision, 'REPLAY-A-BOUND', other, keyBound),
+              refused('SEMANTIC_OPERATION_IDEMPOTENCY_CONFLICT'),
+            );
           assert.deepEqual(
             (
               await update(
-                countA,
+                a,
                 revision,
                 'REPLAY-A-BOUND',
                 { legalEntityId: companyA },
@@ -535,7 +530,9 @@ test(
       await t.test(
         "a principal granted only company A writes A's records and no others",
         async () => {
-          // Narrow the local operator's one role to company A.
+          const { a, b } = await pair('SCOPED');
+          // Narrow the local operator's one role to company A. Last, because
+          // every later write would be judged under it.
           const narrowed = await fixture.pool.query(
             `UPDATE platform.current_policy_memberships AS membership
                 SET legal_entity_id = $3
@@ -549,38 +546,38 @@ test(
             [tenantId, environmentId, companyA],
           );
           assert.ok((narrowed.rowCount ?? 0) >= 1);
-          const revisionA = (await stored(countA)).revision;
+          const revisionA = (await stored(a)).revision;
           // Unbound, the write names no company, so a company grant cannot
           // authorize it -- as before this packet.
           await assert.rejects(
-            update(countA, revisionA, 'SCOPED-UNBOUND', {}),
+            update(a, revisionA, 'SCOPED-UNBOUND', {}),
             refused('SEMANTIC_OPERATION_POLICY_DENIED'),
           );
           // Bound to A, the company grant authorizes it.
           assert.equal(
             (
-              await update(countA, revisionA, 'SCOPED-A', {
+              await update(a, revisionA, 'SCOPED-A', {
                 legalEntityId: companyA,
               })
             ).outcome,
             'succeeded',
           );
-          assert.equal((await stored(countA)).number, 'SCOPED-A');
-          const beforeB = await stored(countB);
+          assert.equal((await stored(a)).number, 'SCOPED-A');
+          const beforeB = await stored(b);
           // Naming A does not reach B's record; naming B is not authorized.
           await assert.rejects(
-            update(countB, beforeB.revision, 'SCOPED-INTO-B', {
+            update(b, beforeB.revision, 'SCOPED-INTO-B', {
               legalEntityId: companyA,
             }),
             refused('MODULE_LEGAL_ENTITY_BINDING_MISMATCH'),
           );
           await assert.rejects(
-            update(countB, beforeB.revision, 'SCOPED-INTO-B', {
+            update(b, beforeB.revision, 'SCOPED-INTO-B', {
               legalEntityId: companyB,
             }),
             refused('SEMANTIC_OPERATION_POLICY_DENIED'),
           );
-          assert.deepEqual(await stored(countB), beforeB);
+          assert.deepEqual(await stored(b), beforeB);
         },
       );
     });
