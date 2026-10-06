@@ -54,10 +54,10 @@ same ruling's six composition raises ship in `COMPOSITION-BOUNDS-RAISE`.
 
 ## Gates
 
-- Local at `0bc34b6d` (indicative; Docker paused): `format`, `lint`,
-  `typecheck`, `check:app-release`, `check:demo-release`, `check:boundaries`,
-  `check:expected-red` PASS; unit 164/164, compiler 176/176, integration
-  150/150, contracts 29/29 PASS.
+- Local at `99fb12f5` (indicative): `format`, `lint`, `typecheck`,
+  `check:app-release`, `check:demo-release`, `check:boundaries`,
+  `check:expected-red` PASS; unit 164/164, compiler 176/176 PASS. Earlier at
+  `0bc34b6d`: integration 150/150, contracts 29/29 PASS.
 - Local notes: `test:compiler` showed 175/176 under this shell's
   `FORCE_COLOR=3`; the red (`posted stock ... temporal limit`) also reds on
   untouched `origin/main` and passes with color off. `check:language-coverage`
@@ -70,16 +70,16 @@ same ruling's six composition raises ship in `COMPOSITION-BOUNDS-RAISE`.
   limit.
 - Performance (best of five cold compiles; budget 5,000 ms, unchanged):
   package-byte envelope 4,186,810 bytes (99.8%), 8 copies + 3 modules —
-  **CI 1,429.5 ms** (official), local 1,977.4 ms at `0bc34b6d` and
+  **CI 1,500.8 ms at `99fb12f5`** and 1,429.5 ms earlier (official), local 1,977.4 ms at `0bc34b6d` and
   2,071.6 ms on an INTEGRATION trial merge (indicative). Field envelope CI
   1,327.2 ms, local 1,818.9 ms. Table in `compiler-slos.md`.
 - Local controls (evidence only): limit -1 on each constant, both back to
   2 MiB, and `>` -> `>=` at each of the four checks — all 7 red the boundary
   tests; restored clean.
-- CI: performance job PASS in run
-  [37365925021](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37365925021)
-  at `cb0f51a2`; the full matrix is the run at the PR tip.
-  `scripts/check-records.sh`: PASS.
+- CI: run [37420415000](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37420415000)
+  at `99fb12f5` — all 7 jobs green, including browser, the dependency scans
+  and reachability; package-byte envelope 1,500.8 ms, field envelope
+  1,348.8 ms. `scripts/check-records.sh`: PASS.
 
 ## Test it yourself
 

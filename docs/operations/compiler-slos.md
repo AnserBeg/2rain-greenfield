@@ -77,6 +77,7 @@ output 8,879,326 bytes = 53% of the 16 MiB output cap):
 | Local WSL2 at `0bc34b6d`, indicative only (CPU idle 97.9%) | **1,977.4 ms** | 2,040.6, 2,048.8, 1,977.4, 1,987.3, 2,084.3 | 1,818.9 ms | within budget |
 | Local, same tests on a trial merge into `packet/INTEGRATION`, indicative only | 2,071.6 ms | 2,723.7, 2,182.4, 2,071.6, 2,142.0, 2,127.1 | 1,802.3 ms | within budget |
 | **GitHub `ubuntu-24.04` CI, official**: run [37365925021](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37365925021) at `cb0f51a2` (code identical to `0bc34b6d`), CPU idle 95.8% | **1,429.5 ms** | 1,444.0, 1,459.4, 1,429.5, 1,437.1, 1,437.6 | 1,327.2 ms | **within budget** |
+| **GitHub `ubuntu-24.04` CI, official**: run [37420415000](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37420415000) at `99fb12f5` (the ruled packet), CPU idle 98.3% | **1,500.8 ms** | 1,546.1, 1,530.9, 1,500.8, 1,525.8, 1,508.4 | 1,348.8 ms | **within budget** |
 
 **The 5,000 ms budget holds at the 4 MiB ceiling**: about 3.5x headroom on the
 official CI runner and about 2.5x locally. The budget was not changed.
