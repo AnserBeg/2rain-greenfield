@@ -1,0 +1,172 @@
+{
+  "version": 1,
+  "packet": "COMPANY-BOUND-WRITES",
+  "entries": [
+    {
+      "name": "company-binding-comparison-dropped",
+      "claim": "A write naming an existing company-owned record and carrying the entered company is refused when the persisted record belongs to another company: through a form, archive and restore, in flight, on a replay of an unbound receipt, and for a principal granted only the entered company.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "  if (row.legal_entity_id.toLowerCase() !== input.legalEntityBinding) {\n    throw failure(\n      'MODULE_LEGAL_ENTITY_BINDING_MISMATCH',\n      'record belongs to a different legal entity than the request names',\n      entity.entityId,\n    );\n  }\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/company-bound-writes.test.ts"],
+        "namePattern": "COMPANY-BOUND-WRITES"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/company-bound-writes.test.ts",
+          "name": "an edit posted through a page entered in A does not change B's record",
+          "expected": "B's record must not be written through A's page"
+        },
+        {
+          "file": "test/postgres/company-bound-writes.test.ts",
+          "name": "archive and restore are bound to the entered company",
+          "expected": "archiving B's record through A's page must be refused"
+        },
+        {
+          "file": "test/postgres/company-bound-writes.test.ts",
+          "name": "the comparison reads the persisted row under its lock",
+          "expected": "the in-flight edit of a record moved to B must be refused"
+        },
+        {
+          "file": "test/postgres/company-bound-writes.test.ts",
+          "name": "a request key recorded without the company still replays, and only in its own company",
+          "expected": "Missing expected rejection"
+        },
+        {
+          "file": "test/postgres/company-bound-writes.test.ts",
+          "name": "a principal granted only company A writes A's records and no others",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "company-binding-compares-the-operand",
+      "claim": "The company the write is compared with is read from the persisted row, not taken from the request: comparing the operand with itself admits every company.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "  if (row.legal_entity_id.toLowerCase() !== input.legalEntityBinding) {",
+      "replacement": "  if (input.legalEntityBinding.toLowerCase() !== input.legalEntityBinding) {",
+      "test": {
+        "files": ["test/postgres/company-bound-writes.test.ts"],
+        "namePattern": "COMPANY-BOUND-WRITES"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/company-bound-writes.test.ts",
+          "name": "an edit posted through a page entered in A does not change B's record",
+          "expected": "B's record must not be written through A's page"
+        },
+        {
+          "file": "test/postgres/company-bound-writes.test.ts",
+          "name": "archive and restore are bound to the entered company",
+          "expected": "archiving B's record through A's page must be refused"
+        },
+        {
+          "file": "test/postgres/company-bound-writes.test.ts",
+          "name": "the comparison reads the persisted row under its lock",
+          "expected": "the in-flight edit of a record moved to B must be refused"
+        },
+        {
+          "file": "test/postgres/company-bound-writes.test.ts",
+          "name": "a request key recorded without the company still replays, and only in its own company",
+          "expected": "Missing expected rejection"
+        },
+        {
+          "file": "test/postgres/company-bound-writes.test.ts",
+          "name": "a principal granted only company A writes A's records and no others",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "company-binding-read-without-lock",
+      "claim": "The persisted company is read under the record's FOR NO KEY UPDATE lock, so a write the comparison admits is the write that lands: without it, a record moved to another company while the write waited is written anyway.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "        AND ${quoted(entity.recordIdentity.column)} = $1\n      FOR NO KEY UPDATE`,\n    [input.recordId],",
+      "replacement": "        AND ${quoted(entity.recordIdentity.column)} = $1`,\n    [input.recordId],",
+      "test": {
+        "files": ["test/postgres/company-bound-writes.test.ts"],
+        "namePattern": "COMPANY-BOUND-WRITES"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/company-bound-writes.test.ts",
+          "name": "the comparison reads the persisted row under its lock",
+          "expected": "the in-flight edit of a record moved to B must be refused"
+        }
+      ]
+    },
+    {
+      "name": "company-binding-unbound-replay-unchecked",
+      "claim": "A bound retry of a request key recorded without the company replays only when the record it wrote is in the named company.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "    await withTrustedRequestTransaction(\n      this.pool,\n      request.context,\n      async (client) => {\n        const storage = await this.#loadPinnedStorageTarget(client, request);\n        const entity = requiredEntity(\n          storage,\n          request.definition.effect.entity.targetId,\n        );\n        await withModuleRuntimeRole(client, () =>\n          requireRecordLegalEntityBinding(client, entity, input),\n        );\n      },\n    );\n    return unbound;",
+      "replacement": "    return unbound;",
+      "test": {
+        "files": ["test/postgres/company-bound-writes.test.ts"],
+        "namePattern": "COMPANY-BOUND-WRITES"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/company-bound-writes.test.ts",
+          "name": "a request key recorded without the company still replays, and only in its own company",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "company-binding-unbound-replay-removed",
+      "claim": "A request key recorded before writes carried the company (its digest is the unbound input's) still replays for a bound retry instead of conflicting.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "    if (input.legalEntityBinding === null) return request.inputDigest;",
+      "replacement": "    if (input.legalEntityBinding !== undefined) return request.inputDigest;",
+      "test": {
+        "files": ["test/postgres/company-bound-writes.test.ts"],
+        "namePattern": "COMPANY-BOUND-WRITES"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/company-bound-writes.test.ts",
+          "name": "a request key recorded without the company still replays, and only in its own company",
+          "expected": "already bound to different canonical input"
+        }
+      ]
+    },
+    {
+      "name": "company-binding-on-tenant-record-admitted",
+      "claim": "A company named on a write of a tenant-level record is refused by name before any write, so a company grant is never scoped onto a record no company owns.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "  if (!requirement) {\n    throw failure(\n      'MODULE_LEGAL_ENTITY_BINDING_UNSUPPORTED',\n      'a tenant-level record is not bound to a legal entity',\n      entity.entityId,\n    );\n  }\n",
+      "replacement": "  if (!requirement) return;\n",
+      "test": {
+        "files": ["test/postgres/company-bound-writes.test.ts"],
+        "namePattern": "COMPANY-BOUND-WRITES"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/company-bound-writes.test.ts",
+          "name": "a tenant-level record is unaffected",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "company-binding-web-update-unbound",
+      "claim": "The web runtime's update of a company-owned record carries the company the page was entered in, as archive and restore do.",
+      "file": "apps/web/src/surface-runtime.ts",
+      "original": "    ? { expectedRevision, ...binding, patch: values, recordId }",
+      "replacement": "    ? { expectedRevision, patch: values, recordId }",
+      "test": {
+        "files": ["test/integration/surface-data-binding.test.ts"],
+        "namePattern": "COMPANY-BOUND-WRITES"
+      },
+      "kills": [
+        {
+          "file": "test/integration/surface-data-binding.test.ts",
+          "name": "COMPANY-BOUND-WRITES: a scoped update, archive and restore carry the URL company, and a tenant-level one carries none",
+          "expected": "every write naming an existing record carries the page's company"
+        }
+      ]
+    }
+  ]
+}

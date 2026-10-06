@@ -1097,6 +1097,94 @@ function parseSemanticOperationRequest(
   });
 }
 
+/**
+ * COMPANY-BOUND-WRITES. The operand that binds a generic write naming an
+ * existing record -- update, archive, restore, transition -- to the legal
+ * entity the caller entered it in. It is the key a scoped create already
+ * carries, so current policy authorizes it exactly as it authorizes a create's,
+ * and it is part of the canonical input, so it is part of the idempotency
+ * digest. It is optional: a caller that names no company sends none and needs
+ * the unscoped authority it always needed. The provider compares it with the
+ * persisted row, under that row's lock, before it writes.
+ */
+export const RECORD_LEGAL_ENTITY_BINDING_ARGUMENT_KEY =
+  'legalEntityId' as const;
+
+function namesExistingGenericRecord(
+  definition: RegisteredOperationDefinition,
+): boolean {
+  switch (definition.effect.kind) {
+    case 'archiveRecordEffect':
+    case 'restoreRecordEffect':
+    case 'transitionStateEffect':
+    case 'updateRecordEffect':
+      return true;
+    case 'createRecordEffect':
+    case 'registeredCapabilityEffect':
+      return false;
+  }
+}
+
+/**
+ * The argument keys an operation admits: its compiled closed keys, plus the
+ * company binding on a generic write that names an existing record. The
+ * gateway and the provider fence with this one list, so the binding cannot be
+ * admitted by one and refused by the other.
+ */
+export function admittedOperationArgumentKeys(
+  definition: RegisteredOperationDefinition,
+): readonly string[] {
+  const closed = definition.inputContract?.closedArgumentKeys ?? [];
+  return namesExistingGenericRecord(definition)
+    ? [...closed, RECORD_LEGAL_ENTITY_BINDING_ARGUMENT_KEY]
+    : closed;
+}
+
+/**
+ * Whether a caller that entered a company binds this write to it: the write
+ * names an existing record and that record is company-owned. A pinned view
+ * carries no storage, so ownership is read from the write's compiled
+ * read-back, a get of the same entity; a company-owned get cannot execute
+ * without a legal-entity scope, so a company-owned write's read-back declares
+ * one. The provider still decides against storage: it refuses a binding on a
+ * tenant-level record by name, so a wrong answer here fails visibly.
+ */
+export function operationBindsRecordLegalEntity(
+  view: IssuedRequestRuntimeView,
+  definition: RegisteredOperationDefinition,
+): boolean {
+  return (
+    namesExistingGenericRecord(definition) &&
+    registeredQueryFromPinnedView(view, definition.readBackQueryId)
+      ?.legalEntityScope !== undefined
+  );
+}
+
+/**
+ * The digest the same write had before it carried a company binding: its
+ * canonical input without the operand. `null` when the input carries none or
+ * the operation is not a generic write naming an existing record. The provider
+ * uses it only to recognize a receipt recorded without the binding.
+ */
+export function unboundRecordInputDigest(
+  definition: RegisteredOperationDefinition,
+  input: ImmutableJsonValue,
+): string | null {
+  if (
+    !namesExistingGenericRecord(definition) ||
+    !isRecord(input) ||
+    !Object.hasOwn(input, RECORD_LEGAL_ENTITY_BINDING_ARGUMENT_KEY)
+  )
+    return null;
+  return digestOperationInput(
+    Object.fromEntries(
+      Object.entries(input).filter(
+        ([key]) => key !== RECORD_LEGAL_ENTITY_BINDING_ARGUMENT_KEY,
+      ),
+    ) as ImmutableJsonValue,
+  );
+}
+
 function assertClosedOperationArguments(
   definition: RegisteredOperationDefinition,
   value: ImmutableJsonValue,
@@ -1108,7 +1196,7 @@ function assertClosedOperationArguments(
       'semantic operation input must be an object',
     );
   }
-  const admitted = new Set(contract.closedArgumentKeys);
+  const admitted = new Set(admittedOperationArgumentKeys(definition));
   if (Object.keys(value).some((key) => !admitted.has(key))) {
     throw new MalformedSemanticOperationRequestError(
       'semantic operation input contains a key outside its compiled contract',

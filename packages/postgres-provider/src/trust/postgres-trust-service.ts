@@ -161,6 +161,23 @@ export class PostgresTrustService {
     });
   }
 
+  /**
+   * The canonical input digest a request key is already recorded with, or
+   * `null`. Read-only and outside the key's lock: a receipt is never updated
+   * or deleted, so a digest read here is still the recorded one when
+   * `executeIdempotentAcceptedMutation` re-reads it under the lock.
+   */
+  async recordedIdempotencyInputDigest(
+    context: TrustedRequestContext,
+    binding: IdempotentMutationBinding,
+  ): Promise<string | null> {
+    validateIdempotencyBinding(binding);
+    return withTrustedRequestTransaction(this.pool, context, async (client) => {
+      const existing = await findIdempotencyReceipt(client, context, binding);
+      return existing?.input_digest ?? null;
+    });
+  }
+
   async executeIdempotentAcceptedMutation<TMutationResult>(
     context: TrustedRequestContext,
     actorEnvelope: TrustedActorEnvelope,

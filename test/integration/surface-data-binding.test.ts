@@ -1603,6 +1603,142 @@ test('an unscoped create refuses a supplied URL operand beside its admitted twin
 });
 
 /**
+ * COMPANY-BOUND-WRITES (RETURNABLE-ASSETS round 1, F4). Update, archive and
+ * restore of a company-owned record carry the company the page was entered
+ * in, exactly as a scoped create does, and policy authorizes that operand. The
+ * provider compares it with the persisted row; this pins the web half.
+ */
+test('COMPANY-BOUND-WRITES: a scoped update, archive and restore carry the URL company, and a tenant-level one carries none', async () => {
+  const compiled = compileFixture();
+  const scopeParameterId = `${FIXTURE_IDS.namespace}:parameter.master_get_legal_entity_scope`;
+  const company = 'ac000000-0000-4000-8000-00000000000c';
+  const other = 'ad000000-0000-4000-8000-00000000000d';
+  const formSurface = `${FIXTURE_IDS.namespace}:surface.master_form`;
+  const recordSurface = `${FIXTURE_IDS.namespace}:surface.master_record`;
+  const writes = async (scoped: boolean) => {
+    const policy = new RecordingPolicy('ALLOW');
+    const executor = new InMemoryGenericExecutor();
+    const recordId = executor.seed(tenantA, 'Bound master');
+    const view = await issuedView(
+      runtimeEntry(
+        compiled,
+        policy,
+        { a: identity(tenantA, environmentA, principalA) },
+        scoped
+          ? (projections) =>
+              scopedCreateProjections(projections, scopeParameterId, true)
+          : undefined,
+      ),
+      'a',
+    );
+    const gateways = semanticGateways(policy, executor);
+    const submit = async (
+      surfaceId: string,
+      selection: readonly string[],
+      submission: Record<string, string>,
+    ) => {
+      const url = new URL('http://surface-runtime.local');
+      url.searchParams.set('surface', surfaceId);
+      for (const legalEntityId of selection)
+        url.searchParams.append(scopeParameterId, legalEntityId);
+      const requestUrl = `${url.pathname}${url.search}`;
+      const mediated = {
+        idempotencyKey: randomUUID(),
+        recordId,
+        ...submission,
+      };
+      const first = await submitSurfaceRuntimeIntent(
+        view,
+        requestUrl,
+        mediated,
+        gateways,
+      );
+      if (!first.html.includes('data-confirmation-step="preview"'))
+        return first;
+      return submitSurfaceRuntimeIntent(
+        view,
+        requestUrl,
+        {
+          ...mediated,
+          confirmationGrant: hiddenValue(first.html, 'confirmationGrant'),
+        },
+        gateways,
+      );
+    };
+    const selection = scoped ? [company] : [];
+    const update = await submit(formSurface, selection, {
+      [`empty:${FIXTURE_IDS.fieldIds.parentName}`]: 'emptyText',
+      expectedRevision: '1',
+      operationId: `${FIXTURE_IDS.namespace}:operation.master_update`,
+      [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Bound edit',
+    });
+    assert.equal(
+      update.statusCode,
+      200,
+      /data-diagnostic-code="([A-Z_]+)"/u.exec(update.html)?.[1],
+    );
+    for (const [revision, operation] of [
+      ['2', 'master_archive'],
+      ['3', 'master_restore'],
+    ] as const) {
+      const response = await submit(recordSurface, selection, {
+        expectedRevision: revision,
+        operationId: `${FIXTURE_IDS.namespace}:operation.${operation}`,
+      });
+      assert.equal(response.statusCode, 200);
+    }
+    return { executor, policy, submit };
+  };
+
+  const scoped = await writes(true);
+  assert.deepEqual(
+    scoped.executor.operationCalls.map((call) => [
+      call.definition.effect.kind,
+      asRecord(call.input).legalEntityId,
+    ]),
+    [
+      ['updateRecordEffect', company],
+      ['archiveRecordEffect', company],
+      ['restoreRecordEffect', company],
+    ],
+    "every write naming an existing record carries the page's company",
+  );
+  assert.deepEqual(
+    scoped.policy.calls
+      .map((call) => call.decisionInput)
+      .filter(
+        (input) =>
+          isRecord(input) &&
+          input.kind === 'registeredSemanticOperationPolicyInput',
+      )
+      .map((input) => asRecord(asRecord(input).input).legalEntityId),
+    [company, company, company],
+    'the registered operation permission authorizes the bound company',
+  );
+  // Entered in no single company, a company-owned write is refused before it
+  // is invoked rather than sent unbound.
+  for (const selection of [[], [company, other]]) {
+    const response = await scoped.submit(formSurface, selection, {
+      [`empty:${FIXTURE_IDS.fieldIds.parentName}`]: 'emptyText',
+      expectedRevision: '4',
+      operationId: `${FIXTURE_IDS.namespace}:operation.master_update`,
+      [`value:${FIXTURE_IDS.fieldIds.parentName}`]: 'Unbound edit',
+    });
+    assert.equal(response.statusCode, 422);
+    assert.match(
+      response.html,
+      /data-diagnostic-code="OPERATION_INPUT_INVALID"/u,
+    );
+  }
+  assert.equal(scoped.executor.operationCalls.length, 3);
+
+  const tenantLevel = await writes(false);
+  assert.equal(tenantLevel.executor.operationCalls.length, 3);
+  for (const call of tenantLevel.executor.operationCalls)
+    assert.equal(Object.hasOwn(asRecord(call.input), 'legalEntityId'), false);
+});
+
+/**
  * An unselected relation is OMITTED, not sent as "". Posting "" would reach the
  * provider's `uuidRecord` and fail as a malformed uuid, which is a different
  * and less honest refusal than the declared MODULE_REQUIRED_RELATION_MISSING.

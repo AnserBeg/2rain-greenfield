@@ -168,6 +168,8 @@ export function operationMessageRef(error: unknown): OperationMessageRef {
         subject: error.subjectId,
       };
     }
+    if (error.code === 'MODULE_LEGAL_ENTITY_BINDING_MISMATCH')
+      return { code: 'OPERATION_LEGAL_ENTITY_MISMATCH' };
     return { code: 'OPERATION_REFUSED', subject: error.code };
   }
   const name = errorName(error);

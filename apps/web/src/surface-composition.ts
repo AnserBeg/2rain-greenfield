@@ -8,7 +8,9 @@ import {
   type SemanticQueryGateway,
 } from '../../../packages/runtime/src/semantic-query-gateway.js';
 import {
+  operationBindsRecordLegalEntity,
   parsePinnedOperationCatalog,
+  RECORD_LEGAL_ENTITY_BINDING_ARGUMENT_KEY,
   SEMANTIC_OPERATION_REQUEST_VERSION,
   type SemanticOperationGateway,
   type SemanticOperationMediationAuthority,
@@ -2147,6 +2149,15 @@ export async function submitCompositionAction(
                     typeof value === 'string'
                   ? (canonicalDecimal(value) ?? value)
                   : value;
+          }
+          // COMPANY-BOUND-WRITES: a step that writes an existing
+          // company-owned record is bound to the company this Task was opened
+          // in, as a form's write is to its page's. Fixed with the step's
+          // input, so a retry replays the same binding.
+          if (operationBindsRecordLegalEntity(view, operation)) {
+            if (!current.data.scope) throw new Error('Choose a legal entity.');
+            object[RECORD_LEGAL_ENTITY_BINDING_ARGUMENT_KEY] =
+              current.data.scope;
           }
           input = object;
           current.stepInputs[current.next] = input;
