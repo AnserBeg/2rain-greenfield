@@ -1310,10 +1310,21 @@ function verificationPlanPayload(
   const materializedStateFieldIds = new Set(
     packageRevision.stateMachines.map((machine) => machine.stateField.fieldId),
   );
+  // A maintained figure is the same shape: only its registered capability
+  // writes it, so the generic create cannot populate it and neither probe is
+  // planned for it.
+  const maintainedFieldIds = new Set(
+    packageRevision.fields.flatMap((entry) =>
+      'maintainedBy' in entry && entry.maintainedBy !== undefined
+        ? [entry.fieldId]
+        : [],
+    ),
+  );
   for (const field of packageRevision.fields.filter(
     (entry) =>
       entry.lifecycle === 'active' &&
-      !materializedStateFieldIds.has(entry.fieldId),
+      !materializedStateFieldIds.has(entry.fieldId) &&
+      !maintainedFieldIds.has(entry.fieldId),
   )) {
     if (field.fieldType.kind === 'enumFieldType') {
       addScenario({

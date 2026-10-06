@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -473,5 +474,52 @@ test('a custody states New, Open, Awaiting refund and Closed from its figures', 
   assert.equal(
     custodyStatement({ ...none, issued: 3n, returned: 3n }, 0n).state,
     'closed',
+  );
+});
+
+test('release verification plans a probe that populates a field through the create only for a field the create writes', () => {
+  // The checked-in release (check:app-release holds it to the source): its
+  // head entry's verification plan and operation catalog.
+  const release = JSON.parse(
+    readFileSync('apps/web/release/app.compiled.json', 'utf8'),
+  ) as {
+    applications: Array<{ artifacts: Array<{ canonicalBytesBase64: string }> }>;
+  };
+  const payloads = release.applications
+    .at(-1)!
+    .artifacts.map(
+      (artifact) =>
+        JSON.parse(
+          Buffer.from(artifact.canonicalBytesBase64, 'base64').toString('utf8'),
+        ) as Json,
+    );
+  const plan = payloads.find((payload) => Array.isArray(payload.scenarios))!
+    .scenarios as Array<{ entityId: string; kind: string; subjectId: string }>;
+  const operations = payloads.find(
+    (payload) => payload.kind === 'operationCatalogPayload',
+  )!.operations as Array<{
+    effect: { kind: string; entity?: { targetId: string } };
+    inputContract?: { writableFieldIds: string[] };
+  }>;
+  const created = new Map(
+    operations
+      .filter((operation) => operation.effect.kind === 'createRecordEffect')
+      .map((operation) => [
+        operation.effect.entity!.targetId,
+        new Set(operation.inputContract?.writableFieldIds ?? []),
+      ]),
+  );
+  const unpopulated = plan
+    .filter(
+      (scenario) =>
+        ['searchableExclusion', 'enumReject'].includes(scenario.kind) &&
+        created.has(scenario.entityId) &&
+        !created.get(scenario.entityId)!.has(scenario.subjectId),
+    )
+    .map((scenario) => `${scenario.kind} ${scenario.subjectId}`);
+  assert.deepEqual(
+    unpopulated,
+    [],
+    'every planned probe populates a field its entity’s create writes',
   );
 });
