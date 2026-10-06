@@ -64,12 +64,22 @@ bound; the byte maximums are PR #30.
 
 ## Gates
 
-- Local at `4f178953`: LOCAL_GATES_PENDING
+- Local at `ee53277b` (executable code as at `4f178953`): `typecheck`,
+  `format`, `lint`, `check:boundaries`, `check:expected-red`,
+  `check:app-release`, `check:demo-release` PASS; unit 248/248, compiler
+  175/175, integration 257/257, contracts 46/46 PASS. Architecture not run
+  locally (Windows free memory under the container minimum); CI runs it.
+- Recorded artifacts unchanged: `git diff 8c8cfab1 HEAD -- apps/web/release
+  test/fixtures` is empty, and `check:app-release --check` re-decodes every
+  recorded lineage entry; the compiler goldens pass.
 - Controls (evidence only, scratch copy of INTEGRATION): each bound one lower
   or back at its old value reds the boundary test, all six; restored clean.
 - A page with all six at their new maximums at once normalizes and compiles
   (scratch measurement on INTEGRATION's compiler).
-- CI: CI_PENDING. `scripts/check-records.sh`: PASS.
+- CI: run [37420461824](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37420461824)
+  at `ee53277b` — all 13 jobs green (quality with architecture, performance
+  with the field envelope at 1,002.5 ms, four browser runners, four PostgreSQL
+  jobs, scans, observability, reachability). `scripts/check-records.sh`: PASS.
 
 ## Test it yourself
 
