@@ -900,7 +900,7 @@ const compositionAction = z.strictObject({
   datasetId: CanonicalIdSchema.optional(),
   conditions: z.array(compositionCondition).max(12),
   inputs: z.array(compositionInput).max(12),
-  steps: z.array(compositionStep).max(5),
+  steps: z.array(compositionStep).max(12),
   /**
    * The rows a multi-row Task works through: every loaded row of the dataset
    * whose conditions hold, each read as that row's `selected` values -- an
@@ -977,7 +977,7 @@ export const SurfaceCompositionSchema = z.strictObject({
       header: z.strictObject({
         title: CanonicalIdSchema,
         subtitle: z.array(CanonicalIdSchema).max(4),
-        facts: z.array(CanonicalIdSchema).max(6),
+        facts: z.array(CanonicalIdSchema).max(8),
         status: CanonicalIdSchema.optional(),
       }),
       context: z
@@ -1084,9 +1084,9 @@ export const SurfaceCompositionSchema = z.strictObject({
     .optional(),
   kind: z.literal('surfaceComposition'),
   schemaVersion: v6NodeVersion,
-  fields: z.array(compositionColumn).max(30),
-  children: z.array(compositionDataset).max(8),
-  actions: z.array(compositionAction).max(12),
+  fields: z.array(compositionColumn).max(48),
+  children: z.array(compositionDataset).max(12),
+  actions: z.array(compositionAction).max(24),
 });
 export type SurfaceComposition = z.infer<typeof SurfaceCompositionSchema>;
 /** Optional v6 workspace declarations; absence preserves historical bytes. */
@@ -1726,7 +1726,7 @@ export const SurfaceListSchema = z.strictObject({
   kind: z.literal('surfaceList'),
   schemaVersion: v6NodeVersion,
   pageSize: z.int().min(1).max(100),
-  columns: z.array(listColumn).min(1).max(12),
+  columns: z.array(listColumn).min(1).max(16),
   defaultSort: z
     .array(
       z.strictObject({

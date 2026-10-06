@@ -48,6 +48,37 @@ function refused(surface: string, mutate: (value: Json, model: Json) => void) {
   }
   assert.fail('the declaration was accepted');
 }
+/**
+ * COMPOSITION-BOUNDS-RAISE (ADR-0070, owner ruling 2026-10-05, "raise it"): the
+ * composition bounds raised for parity, as literals so a silent move reds here.
+ * Measured need on 2026-10-05 across INTEGRATION and its pending leaves: 34
+ * page fields and 16 page actions (over 30 and 12), 11 steps in one Task (over
+ * 5), and 8 of 8 datasets, 6 of 6 header facts, 12 of 12 List columns used.
+ */
+const COMPOSITION_BOUNDS = Object.freeze({
+  actions: 24,
+  children: 12,
+  facts: 8,
+  fields: 48,
+  listColumns: 16,
+  steps: 12,
+});
+/** Appends copies of existing members, each with a fresh id, until `count`. */
+function padMembers(
+  members: Json[],
+  count: number,
+  idKey: string,
+  eligible: (member: Json) => boolean = () => true,
+): void {
+  const sources = members.filter(eligible);
+  for (let index = 0; members.length < count; index += 1) {
+    const copy = structuredClone(sources[index % sources.length]!);
+    copy[idKey] = String(copy[idKey]).replace(/([^.]*)$/u, `pad${index}_$1`);
+    if ('orderKey' in copy) copy.orderKey = 9_000 + index;
+    members.push(copy);
+  }
+}
+
 const condition = (
   value: Json,
   operator = 'equals',
@@ -97,17 +128,17 @@ test('APPROVAL-PO arguments are scalar capability members, never a generic recor
   );
 });
 
-test('APPROVAL-PO stays inside the existing twelve-action composition bound', () => {
+// Was "stays inside the existing twelve-action composition bound" and pinned
+// 13 actions as refused. COMPOSITION-BOUNDS-RAISE (ADR-0070, owner ruling
+// 2026-10-05) moves that bound to 24, because the parity leaves together put 16
+// actions on this page; the exact edge is pinned by the boundary test below.
+test('APPROVAL-PO stays inside the composition action bound', () => {
   const purchase = composition(normalized, 'purchase_order_detail');
-  assert.equal(purchase.actions.length, 12);
+  assert.ok(purchase.actions.length <= COMPOSITION_BOUNDS.actions);
   assert.equal(SurfaceCompositionSchema.safeParse(purchase).success, true);
-  assert.equal(
-    SurfaceCompositionSchema.safeParse({
-      ...purchase,
-      actions: [...purchase.actions, purchase.actions[0]],
-    }).success,
-    false,
-  );
+  const padded = structuredClone(purchase);
+  padMembers(padded.actions, COMPOSITION_BOUNDS.actions + 1, 'actionId');
+  assert.equal(SurfaceCompositionSchema.safeParse(padded).success, false);
 });
 
 test('the composed pages declare alerts, progression, multi-row Tasks and a related order, and validate', () => {
@@ -647,4 +678,156 @@ test('a record names a relation of its own entity only through the related get, 
     }),
     /a record names at most four related records/u,
   );
+});
+
+test('the parity composition bounds admit exactly their maximum and refuse one more', () => {
+  const authored = composedApplicationDefinition() as unknown as Json;
+  const surfaceOf = (model: Json, local: string): Json => {
+    const found = (model.surfaces as Json[]).find(
+      (value) => value.surfaceId === id('surface', local),
+    );
+    assert.ok(found, local);
+    return found;
+  };
+  const header = (value: Json): Json => value.presentation.header as Json;
+  const at = (local: string): string =>
+    `$.surfaces[${(authored.surfaces as Json[]).findIndex(
+      (value) => value.surfaceId === id('surface', local),
+    )}]`;
+  const reserveStep = (
+    surfaceOf(authored, 'sales_order_detail').composition.actions as Json[]
+  ).findIndex((value) => value.actionId === id('action', 'reserve_stock'));
+  const cases: Array<{
+    bound: number;
+    fill: (model: Json, count: number) => void;
+    name: string;
+    path: string;
+    surface: string;
+  }> = [
+    {
+      bound: COMPOSITION_BOUNDS.fields,
+      fill: (model, count) =>
+        padMembers(
+          surfaceOf(model, 'sales_order_detail').composition.fields,
+          count,
+          'columnId',
+        ),
+      name: 'record page fields',
+      path: `${at('sales_order_detail')}.composition.fields`,
+      surface: 'sales_order_detail',
+    },
+    {
+      bound: COMPOSITION_BOUNDS.actions,
+      fill: (model, count) =>
+        padMembers(
+          surfaceOf(model, 'purchase_order_detail').composition.actions,
+          count,
+          'actionId',
+        ),
+      name: 'record page actions',
+      path: `${at('purchase_order_detail')}.composition.actions`,
+      surface: 'purchase_order_detail',
+    },
+    {
+      bound: COMPOSITION_BOUNDS.children,
+      fill: (model, count) =>
+        padMembers(
+          surfaceOf(model, 'sales_order_detail').composition.children,
+          count,
+          'datasetId',
+        ),
+      name: 'record page datasets',
+      path: `${at('sales_order_detail')}.composition.children`,
+      surface: 'sales_order_detail',
+    },
+    {
+      bound: COMPOSITION_BOUNDS.steps,
+      fill: (model, count) =>
+        padMembers(
+          action(
+            surfaceOf(model, 'sales_order_detail').composition,
+            'reserve_stock',
+          ).steps,
+          count,
+          'stepId',
+        ),
+      name: 'Task steps',
+      path: `${at('sales_order_detail')}.composition.actions[${reserveStep}].steps`,
+      surface: 'sales_order_detail',
+    },
+    {
+      bound: COMPOSITION_BOUNDS.facts,
+      fill: (model, count) => {
+        const page = surfaceOf(model, 'sales_order_detail').composition;
+        const shown = header(page);
+        const used = new Set([
+          shown.title,
+          shown.status,
+          ...shown.subtitle,
+          ...shown.facts,
+          ...((page.presentation.blocks ?? []) as Json[]).flatMap(
+            (block) => block.columns as string[],
+          ),
+        ]);
+        const free = (page.fields as Json[])
+          .map((field) => field.columnId as string)
+          .filter((columnId) => !used.has(columnId));
+        while (shown.facts.length < count) shown.facts.push(free.shift());
+      },
+      name: 'header key facts',
+      path: `${at('sales_order_detail')}.composition.presentation.header.facts`,
+      surface: 'sales_order_detail',
+    },
+    {
+      bound: COMPOSITION_BOUNDS.listColumns,
+      fill: (model, count) =>
+        padMembers(
+          surfaceOf(model, 'sales_order_list').list.columns,
+          count,
+          'columnId',
+          (column) => column.role !== 'title',
+        ),
+      name: 'List columns',
+      path: `${at('sales_order_list')}.list.columns`,
+      surface: 'sales_order_list',
+    },
+  ];
+  for (const entry of cases) {
+    const atMaximum = structuredClone(authored);
+    entry.fill(atMaximum, entry.bound);
+    normalizeApplicationPackage(atMaximum as never);
+
+    const oneMore = structuredClone(authored);
+    entry.fill(oneMore, entry.bound + 1);
+    const refusals = [1, 2].map(() => {
+      try {
+        normalizeApplicationPackage(oneMore as never);
+      } catch (error) {
+        assert.ok(error instanceof CanonicalModelError, String(error));
+        return error.diagnostics;
+      }
+      return assert.fail(`${entry.name}: ${entry.bound + 1} was accepted`);
+    });
+    assert.deepEqual(
+      refusals[0],
+      [
+        {
+          acceptedAlternative:
+            'use the exported authored schema and canonical example',
+          code: 'CANON_SCHEMA_INVALID',
+          objectId: id('surface', entry.surface),
+          occurrenceIndex: 0,
+          path: entry.path,
+          phase: 'canonicalModel',
+          rule: 'value must satisfy a closed supported schema through v6',
+        },
+      ],
+      entry.name,
+    );
+    assert.deepEqual(
+      refusals[1],
+      refusals[0],
+      `${entry.name} is deterministic`,
+    );
+  }
 });
