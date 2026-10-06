@@ -776,6 +776,18 @@ test('provider refusals retain known copy and otherwise use an honest code-beari
       subject: 'legal-entity-42',
     },
   );
+  // COMPANY-BOUND-WRITES: a write naming another company's record is told
+  // so in plain words, and names neither company.
+  assert.deepEqual(
+    operationMessageRef(
+      new ModuleRuntimeInterpreterError(
+        'MODULE_LEGAL_ENTITY_BINDING_MISMATCH',
+        'mismatch',
+        'northstar.app:entity.stock_count',
+      ),
+    ),
+    { code: 'OPERATION_LEGAL_ENTITY_MISMATCH' },
+  );
   assert.deepEqual(
     operationMessageRef(
       new ModuleRuntimeInterpreterError(
@@ -2595,7 +2607,9 @@ test('the message catalog honours the vocabulary it declares', () => {
   // and the redacted partial-commit outcome.
   // SALES-PARITY adds the declared-List export refusal (never a partial file).
   // WAREHOUSE-MODE adds the two answers of a scan that opened nothing.
-  assert.equal(SURFACE_MESSAGE_CODES.length, 50);
+  // COMPANY-BOUND-WRITES adds the refusal of a write naming another
+  // company's record.
+  assert.equal(SURFACE_MESSAGE_CODES.length, 51);
 
   for (const code of SURFACE_MESSAGE_CODES) {
     const entry = SURFACE_MESSAGE_CATALOG[code];

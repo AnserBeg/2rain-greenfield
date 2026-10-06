@@ -767,6 +767,11 @@ const DECLARED_NO_REAL_PATH_DRIVER: Readonly<
     'surface-data-binding.test.ts beside its exact provider subject assertion. ' +
     'A browser driver additionally needs the composed PostgreSQL fixture and ' +
     'an archived legal-entity seed, which this catalog fixture does not own.',
+  OPERATION_LEGAL_ENTITY_MISMATCH:
+    'Write path, and driven by a real form POST through the composed ' +
+    'PostgreSQL release in test/postgres/company-bound-writes.test.ts, which ' +
+    'owns the second company and the persisted record of each that the ' +
+    'refusal compares. This catalog fixture has neither company nor record.',
   OPERATION_PERMISSION_DENIED:
     'Write path, same gateway fixture, plus a denying CurrentPolicyGateway. ' +
     'Every server in this file composes an allow-policy because the codes it ' +
