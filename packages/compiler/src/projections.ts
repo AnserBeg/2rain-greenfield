@@ -1407,7 +1407,14 @@ function operationInputContract(
       ? (field.numbering as FieldNumbering | undefined)
       : undefined;
   const allFields = allEntityFields;
-  const fields = allFields.filter((field) => !numberingOf(field));
+  // A figure a registered capability maintains is nobody's generic input
+  // either: it leaves every writable set, so a generic create or update that
+  // states it is refused and only the capability ever writes it.
+  const maintained = (field: (typeof allFields)[number]) =>
+    'maintainedBy' in field && field.maintainedBy !== undefined;
+  const fields = allFields.filter(
+    (field) => !numberingOf(field) && !maintained(field),
+  );
   const assignedFields = allFields.flatMap((field) => {
     const numbering = numberingOf(field);
     return numbering

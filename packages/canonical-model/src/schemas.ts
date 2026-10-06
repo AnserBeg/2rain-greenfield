@@ -1934,11 +1934,25 @@ const normalizedV6OperationDefinition = normalizedV3OperationDefinition.extend({
 const authoredV6OperationDefinition = authoredV3OperationDefinition.extend({
   label: operationLabel,
 });
+/**
+ * A figure only one registered capability writes: the capability restates it
+ * from the facts it posts, such as a custody record's outstanding quantity.
+ * The field leaves every generic operation's writable inputs, as a numbered
+ * field does, so a generic create or update that states it is refused and a
+ * record created generically holds no value in it until the capability
+ * writes one. Optional v6 key (ADR-0047 §7).
+ */
+export const FieldMaintenanceSchema = compositionReference(
+  'capabilityReference',
+);
+export type FieldMaintenance = z.infer<typeof FieldMaintenanceSchema>;
 const normalizedV6FieldDefinition = normalizedV3FieldDefinition.extend({
   numbering: FieldNumberingSchema.optional(),
+  maintainedBy: FieldMaintenanceSchema.optional(),
 });
 const authoredV6FieldDefinition = authoredV3FieldDefinition.extend({
   numbering: FieldNumberingSchema.optional(),
+  maintainedBy: FieldMaintenanceSchema.optional(),
 });
 // A list query may declare the most rows one export statement returns. It is a
 // query property, not a screen one, because the agent path reads the query.
