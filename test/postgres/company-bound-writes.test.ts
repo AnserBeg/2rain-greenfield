@@ -422,6 +422,7 @@ test(
           const { a } = await pair('LOCK');
           const before = await stored(a);
           const mover = await fixture.pool.connect();
+          let moved = false;
           try {
             await mover.query('BEGIN');
             const moverPid = (
@@ -444,6 +445,7 @@ test(
             );
             await waitUntilBlockedBy(fixture, moverPid);
             await mover.query('COMMIT');
+            moved = true;
             const settled = await edit;
             assert.ok(
               'error' in settled,
@@ -451,6 +453,9 @@ test(
             );
             refused('MODULE_LEGAL_ENTITY_BINDING_MISMATCH')(settled.error);
           } finally {
+            // An uncommitted move must not go back to the pool still open: a
+            // later statement on this connection would join it.
+            if (!moved) await mover.query('ROLLBACK');
             mover.release();
           }
           assert.deepEqual(await stored(a), { ...before, company: companyB });
