@@ -720,6 +720,25 @@ export function validateSurfaceCompositions(
             surface.surfaceId,
             'only reference inputs default from a declared record field',
           );
+        if (input.defaultFrom?.fallback) {
+          const fallback = input.defaultFrom.fallback;
+          const column = children
+            .get(fallback.column.datasetId)
+            ?.columns.find(
+              (entry) => entry.columnId === fallback.column.columnId,
+            );
+          if (
+            !column?.reference ||
+            !fieldsFor(column.reference.query.targetId).has(fallback.field) ||
+            (fallback.selection === 'common'
+              ? action.rows?.datasetId !== fallback.column.datasetId
+              : !selectedContext.has(fallback.column.datasetId))
+          )
+            fail(
+              surface.surfaceId,
+              'reference fallback requires a selected row lookup field, or a common field of the task rows',
+            );
+        }
         const presented = input.presentation;
         if (!presented) continue;
         if (input.type !== 'text')
@@ -894,7 +913,14 @@ export function validateSurfaceCompositions(
               );
             if (root === 'relations') {
               if (
-                effect.kind !== 'createRecordEffect' ||
+                (effect.kind !== 'createRecordEffect' &&
+                  !(
+                    effect.kind === 'updateRecordEffect' &&
+                    'relationWrites' in operation &&
+                    operation.relationWrites?.some(
+                      (write) => write.relation === binding.path[1],
+                    )
+                  )) ||
                 !model.relations.some(
                   (relation) =>
                     relation.relationId === binding.path[1] &&

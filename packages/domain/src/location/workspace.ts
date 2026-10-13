@@ -5,10 +5,10 @@
  * usable or available -- and it changes only through "Change status", which
  * requires a reason and records it with the status in one update. The generic
  * Record form leaves the three status fields out (`surface.form.omit`). A
- * location may sit inside another -- a bin in its warehouse -- chosen when it
- * is created and locked after, as every relation is: a location can only name
- * one that already exists, so containment never loops. A location's page
- * lists the locations inside it.
+ * location may sit inside another -- a bin in its warehouse -- chosen on
+ * create or changed by Move location. Its declared relation update checks
+ * ancestors under a graph lock, refusing loops. The page lists locations
+ * inside it.
  */
 export function locationWorkspace(namespace: string): Record<string, unknown> {
   const id = (kind: string, name: string) => `${namespace}:${kind}.${name}`;
@@ -117,6 +117,45 @@ export function locationWorkspace(namespace: string): Record<string, unknown> {
     ],
     actions: [
       {
+        actionId: id('action', 'location_move'),
+        label: 'Move location',
+        orderKey: 20,
+        description:
+          'Places this location inside another warehouse. Existing stock belongs to that warehouse without changing quantities or movements. A parent that creates a loop is refused.',
+        conditions: [],
+        inputs: [
+          {
+            inputId: id('input', 'location_new_parent'),
+            label: 'New warehouse',
+            orderKey: 10,
+            type: 'reference',
+            required: true,
+            query: ref(
+              'queryReference',
+              id('query', 'location_warehouse_list'),
+            ),
+            labelField: ref('fieldReference', field('name')),
+          },
+        ],
+        steps: [
+          {
+            stepId: id('step', 'location_move'),
+            operation: ref(
+              'operationReference',
+              id('operation', 'location_update'),
+            ),
+            bindings: [
+              bind(['recordId'], { source: 'record', field: 'recordId' }),
+              bind(['expectedRevision'], {
+                source: 'record',
+                field: 'revision',
+              }),
+              bind(['relations', parent], input('new_parent')),
+            ],
+          },
+        ],
+      },
+      {
         actionId: id('action', 'location_change_status'),
         label: 'Change status',
         description:
@@ -154,7 +193,7 @@ export function locationWorkspace(namespace: string): Record<string, unknown> {
             stepId: id('step', 'location_status_update'),
             operation: ref(
               'operationReference',
-              id('operation', 'location_update'),
+              id('operation', 'location_update_status'),
             ),
             bindings: [
               bind(['recordId'], { source: 'record', field: 'recordId' }),

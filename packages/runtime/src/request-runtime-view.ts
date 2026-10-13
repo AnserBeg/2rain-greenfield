@@ -178,7 +178,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // 18 is WAREHOUSE-MODE's, taken in parallel.
     // 19 adds a Record form's omitted fields and a figure's parent reached
     // through a reference field (LOCATIONS).
-    maximumSupportedVersion: 19,
+    maximumSupportedVersion: 22,
   },
 });
 

@@ -35,6 +35,17 @@ Tier: Critical (it changes compiled operation-contract output)
 
 ## Context
 
+**LOCATIONS-2 amendment, owner charter 2026-10-05:** create-only remains the default.
+An optional v6 operation `relationWrites` explicitly selects to-one reference relations
+whose targets may change on update. The compiled input contract carries
+`relationUpdates: true`, its exact relation inputs and the `relations` argument;
+the shared effect-aware parser admits that shape only on update and rejects it
+on every other effect. An `acyclic` self relation takes a tenant/environment/relation
+graph lock before source row locks and checks the proposed parent's ancestors
+inside the mutation transaction, refusing `MODULE_RELATION_CYCLE`. The existing
+revision pin, target/archive validation and trust change document cover the move.
+Historical contracts without the opt-in retain every create-only fence.
+
 A module with a required relation could not be created from any web surface.
 
 The wire existed at every layer except the last one:

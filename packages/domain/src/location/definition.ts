@@ -95,9 +95,11 @@ export function locationModuleDefinition(
     /**
      * The location that contains this one -- a warehouse holding its bins
      * (LOCATIONS slice 2). Chosen when the location is created; a location
-     * can only name one that already exists, so the containment never loops.
+     * names an existing location; movableHierarchy adds serialized cycle checks.
      */
     readonly hierarchy?: boolean;
+    /** Explicitly opt the parent relation into governed, cycle-checked updates. */
+    readonly movableHierarchy?: boolean;
   } = {},
 ): Record<string, unknown> {
   const definitionIds = ids(namespace);
@@ -105,6 +107,9 @@ export function locationModuleDefinition(
     definitionIds;
   const inventoryStatus = options.inventoryStatus === true;
   const hierarchy = options.hierarchy === true;
+  const movableHierarchy = options.movableHierarchy === true;
+  if (movableHierarchy && !hierarchy)
+    throw new TypeError('movableHierarchy requires hierarchy');
   const locationFields = [
     fieldIds.code,
     fieldIds.name,
@@ -253,7 +258,66 @@ export function locationModuleDefinition(
       },
     ],
     normalizationProfileVersion,
-    operations: entityOperations(definitionIds, 'location', entityIds.location),
+    operations: entityOperations(definitionIds, 'location', entityIds.location)
+      .map((operation) =>
+        inventoryStatus &&
+        ['createRecordEffect', 'updateRecordEffect'].includes(
+          String((operation.effect as { kind: string }).kind),
+        )
+          ? {
+              ...operation,
+              fieldWrites: [
+                fieldIds.code,
+                fieldIds.name,
+                fieldIds.locationType,
+              ].map((fieldId) => ({
+                field: reference('fieldReference', fieldId),
+                required: false,
+              })),
+            }
+          : operation,
+      )
+      .map((operation) =>
+        movableHierarchy &&
+        (operation.effect as { kind: string }).kind === 'updateRecordEffect'
+          ? {
+              ...operation,
+              relationWrites: [
+                {
+                  relation: definitionIds.relationIds.parent,
+                  acyclic: true,
+                },
+              ],
+            }
+          : operation,
+      )
+      .concat(
+        inventoryStatus
+          ? [
+              {
+                ...entityOperations(
+                  definitionIds,
+                  'location',
+                  entityIds.location,
+                )[1]!,
+                operationId: `${namespace}:operation.location_update_status`,
+                label: 'Change status',
+                presentation: 'taskOnly',
+                fieldWrites: [
+                  fieldIds.status,
+                  fieldIds.statusReason,
+                  fieldIds.statusChangedAt,
+                ].map((fieldId) => ({
+                  field: reference('fieldReference', fieldId),
+                  required: true,
+                  ...(fieldId === fieldIds.statusReason
+                    ? { nonBlank: true }
+                    : {}),
+                })),
+              },
+            ]
+          : [],
+      ),
     package: {
       kind: 'packageDefinition',
       namespace,
@@ -268,6 +332,9 @@ export function locationModuleDefinition(
       entityIds.location,
     ),
     queries: [
+      ...(movableHierarchy
+        ? [warehouseQuery(definitionIds, locationFields)]
+        : []),
       ...entityQueries(
         definitionIds,
         'location',
@@ -457,6 +524,40 @@ function entityQueries(
     sourceEntity: reference('entityReference', entityId),
     tier: 'q0',
   }));
+}
+
+function warehouseQuery(
+  ids: LocationIds,
+  fields: readonly string[],
+): Record<string, unknown> {
+  const query = entityQueries(
+    ids,
+    'location',
+    ids.entityIds.location,
+    [...fields],
+    [],
+  ).find((value) => value.queryType === 'list')!;
+  return {
+    ...query,
+    queryId: `${ids.namespace}:query.location_warehouse_list`,
+    selections: (query.selections as Array<Record<string, unknown>>).map(
+      (selection, index) => ({
+        ...selection,
+        selectionId: `${ids.namespace}:selection.location_warehouse_list_${index + 1}`,
+      }),
+    ),
+    filter: {
+      kind: 'fieldComparisonPredicate',
+      schemaVersion: version,
+      operator: 'equals',
+      field: reference('fieldReference', ids.fieldIds.locationType),
+      value: {
+        kind: 'textValue',
+        schemaVersion: version,
+        value: `${ids.namespace}:option.warehouse`,
+      },
+    },
+  };
 }
 
 function entityOperations(

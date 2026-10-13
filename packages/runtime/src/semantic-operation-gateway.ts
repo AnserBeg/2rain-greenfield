@@ -71,6 +71,7 @@ interface RegisteredOperationDefinitionBase {
   readonly inputContract?: RegisteredOperationInputContract;
   /** Declared command words; presentation only. */
   readonly label?: string;
+  readonly presentation?: 'taskOnly';
   readonly lifecycle: 'active' | 'retired';
   readonly operationId: string;
   readonly permissionId: string;
@@ -186,6 +187,7 @@ export interface RegisteredOperationInputContract {
     // artifact is still readable, and is refused if it carries the key it never
     // declared.
     readonly targetEntityId?: string;
+    readonly acyclic?: true;
   }[];
   readonly schemaVersion:
     | 'northstar.module-input-contract/v1'
@@ -196,6 +198,12 @@ export interface RegisteredOperationInputContract {
   /** Fields a create assigns on the server; none of them is an input. */
   readonly assignedFields?: readonly RegisteredOperationAssignedField[];
   readonly writableFieldIds: readonly string[];
+  /** Inputs that must be supplied on every invocation, including an update. */
+  readonly requiredWriteFieldIds?: readonly string[];
+  /** Required text inputs that cannot contain only whitespace. */
+  readonly nonBlankFieldIds?: readonly string[];
+  /** Explicitly opted-in update relations; absence retains create-only behavior. */
+  readonly relationUpdates?: true;
 }
 
 /** One server-assigned document number: `PREFIX-` plus the sequence's next value. */
@@ -1292,6 +1300,7 @@ export function assertPinnedOperationDefinition(
   const hasInfrastructure = Object.hasOwn(value, 'infrastructure');
   const hasInputContract = Object.hasOwn(value, 'inputContract');
   const hasLabel = Object.hasOwn(value, 'label');
+  const hasPresentation = Object.hasOwn(value, 'presentation');
   assertExactKeys(
     value,
     [
@@ -1299,6 +1308,7 @@ export function assertPinnedOperationDefinition(
       ...(hasInfrastructure ? ['infrastructure'] : []),
       ...(hasInputContract ? ['inputContract'] : []),
       ...(hasLabel ? ['label'] : []),
+      ...(hasPresentation ? ['presentation'] : []),
     ],
     invalid,
   );
@@ -1309,6 +1319,8 @@ export function assertPinnedOperationDefinition(
       value.label.length > 240)
   )
     throw invalid('pinned operation label must be a bounded non-blank string');
+  if (hasPresentation && value.presentation !== 'taskOnly')
+    throw invalid('pinned operation presentation is unsupported');
   assertCanonicalId(value.operationId, 'operationId', invalid);
   assertCanonicalId(value.permissionId, 'permissionId', invalid);
   assertCanonicalId(value.readBackQueryId, 'readBackQueryId', invalid);
@@ -1455,6 +1467,7 @@ export interface PinnedRelationInput {
   readonly archiveBehavior: 'restrict' | 'retainReference';
   readonly relationId: string;
   readonly required: boolean;
+  readonly acyclic?: true;
   readonly targetEntityId: string | null;
 }
 
@@ -1510,6 +1523,18 @@ export function parsePinnedOperationInputContract(
   const contract = inputContract as Record<string, unknown>;
   const version = contract.schemaVersion;
   const createEffect = effectKind === 'createRecordEffect';
+  const relationUpdates = contract.relationUpdates === true;
+  if (
+    Object.hasOwn(contract, 'relationUpdates') &&
+    (!relationUpdates ||
+      effectKind !== 'updateRecordEffect' ||
+      relationInputs.length === 0)
+  )
+    throw fail(
+      'pinned relation updates require an update effect and declared relations',
+    );
+  if (relationInputs.some((relation) => relation.acyclic) && !relationUpdates)
+    throw fail('pinned acyclic relations require an explicit update contract');
 
   // ADR-0052 s4: relations are create-only, and the provider ENFORCES that by
   // hardcoding `relations: {}` on every non-create branch. Without this, a
@@ -1518,13 +1543,14 @@ export function parsePinnedOperationInputContract(
   // declaration, leaving no representable input able to satisfy any update of
   // the entity. An optional one is admitted and silently ignored. Both are
   // ADR-0041's accepted-and-ignored state.
-  if (relationInputs.length > 0 && !createEffect) {
+  if (relationInputs.length > 0 && !createEffect && !relationUpdates) {
     throw fail('pinned relation inputs are admitted only on create effects');
   }
   if (
     (version === 'northstar.module-input-contract/v3' ||
       version === 'northstar.module-input-contract/v4') &&
-    !createEffect
+    !createEffect &&
+    !relationUpdates
   ) {
     throw fail('pinned relation targets are admitted only on create effects');
   }
@@ -1559,7 +1585,10 @@ export function parsePinnedOperationInputContract(
   ) {
     throw fail('pinned operation input contract has an invalid shape');
   }
-  if (closedArgumentKeys.includes('relations') !== createEffect) {
+  if (
+    closedArgumentKeys.includes('relations') !==
+    (createEffect || relationUpdates)
+  ) {
     throw fail('pinned relation argument key and operation effect disagree');
   }
   return relationInputs;
@@ -1602,11 +1631,16 @@ function parseRelationInputEntries(
       }
       assertExactKeys(
         relation,
-        carriesTargets
-          ? ['archiveBehavior', 'relationId', 'required', 'targetEntityId']
-          : ['archiveBehavior', 'relationId', 'required'],
+        [
+          ...(carriesTargets
+            ? ['archiveBehavior', 'relationId', 'required', 'targetEntityId']
+            : ['archiveBehavior', 'relationId', 'required']),
+          ...(Object.hasOwn(relation, 'acyclic') ? ['acyclic'] : []),
+        ],
         fail,
       );
+      if (Object.hasOwn(relation, 'acyclic') && relation.acyclic !== true)
+        throw fail('pinned acyclic relation has an invalid shape');
       assertCanonicalId(
         relation.relationId,
         'inputContract.relationInputs.relationId',
@@ -1641,6 +1675,7 @@ function parseRelationInputEntries(
         archiveBehavior: relation.archiveBehavior,
         relationId: relation.relationId,
         required: relation.required,
+        ...(relation.acyclic === true ? { acyclic: true as const } : {}),
         targetEntityId: carriesTargets
           ? (relation.targetEntityId as string)
           : null,
@@ -1659,6 +1694,9 @@ function assertOperationInputContract(
   }
   const hasSystemInput = Object.hasOwn(value, 'systemInput');
   const hasAssignedFields = Object.hasOwn(value, 'assignedFields');
+  const hasRequiredWrites = Object.hasOwn(value, 'requiredWriteFieldIds');
+  const hasNonBlankFields = Object.hasOwn(value, 'nonBlankFieldIds');
+  const hasRelationUpdates = Object.hasOwn(value, 'relationUpdates');
   assertExactKeys(
     value,
     [
@@ -1666,6 +1704,9 @@ function assertOperationInputContract(
       'closedArgumentKeys',
       'fields',
       'relationInputs',
+      ...(hasRequiredWrites ? ['requiredWriteFieldIds'] : []),
+      ...(hasNonBlankFields ? ['nonBlankFieldIds'] : []),
+      ...(hasRelationUpdates ? ['relationUpdates'] : []),
       'schemaVersion',
       ...(hasSystemInput ? ['systemInput'] : []),
       'writableFieldIds',
@@ -1732,6 +1773,35 @@ function assertOperationInputContract(
   // repeated fieldId silently discards every declaration but the last -- which
   // may disagree on kind, bounds, requiredness or normalization.
   const seenFieldIds = new Set<string>();
+  for (const key of ['requiredWriteFieldIds', 'nonBlankFieldIds'] as const) {
+    if (!Object.hasOwn(value, key)) continue;
+    const ids = value[key];
+    if (
+      !Array.isArray(ids) ||
+      ids.length === 0 ||
+      new Set(ids).size !== ids.length ||
+      !ids.every(
+        (id) =>
+          typeof id === 'string' &&
+          (value.writableFieldIds as string[]).includes(id),
+      )
+    )
+      throw invalid(`pinned ${key} must name unique writable fields`);
+    for (const id of ids) {
+      const field = value.fields.find(
+        (entry) => isRecord(entry) && entry.fieldId === id,
+      );
+      if (
+        !isRecord(field) ||
+        field.required !== true ||
+        (key === 'nonBlankFieldIds' &&
+          (field.fieldKind !== 'textFieldType' ||
+            !Array.isArray(value.requiredWriteFieldIds) ||
+            !value.requiredWriteFieldIds.includes(id)))
+      )
+        throw invalid(`pinned ${key} has an invalid input requirement`);
+    }
+  }
   for (const field of value.fields) {
     if (!isRecord(field)) {
       throw invalid('pinned field input contract must be an object');

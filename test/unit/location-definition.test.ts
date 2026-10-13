@@ -17,8 +17,203 @@ import {
 import type { SemanticRecordDto } from '../../packages/runtime/src/semantic-query-gateway.js';
 import {
   compileLocationFixture,
+  locationCompilerInput,
+  mustCompile,
   projectionPayload,
 } from '../fixtures/g2/location/compiler.js';
+import {
+  parsePinnedOperationCatalog,
+  type RegisteredRecordOperationDefinition,
+} from '../../packages/runtime/src/semantic-operation-gateway.js';
+import {
+  parseMutationInput,
+  ModuleRuntimeInterpreterError,
+} from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import { CanonicalModelError } from '../../packages/canonical-model/src/index.js';
+
+test('LOCATIONS-2: generic location writes exclude status and the dedicated Task contract requires a nonblank reason', () => {
+  const definition = locationModuleDefinition(LOCATION_IDS.namespace, {
+    inventoryStatus: true,
+  });
+  const compiled = mustCompile(locationCompilerInput(definition));
+  const payload = projectionPayload(
+    compiled,
+    PROJECTION_FAMILY_IDS.operationCatalog,
+  );
+  const operations = parsePinnedOperationCatalog(payload);
+  const operation = (local: string) =>
+    operations.find(
+      (value) =>
+        value.operationId === `${LOCATION_IDS.namespace}:operation.${local}`,
+    )!;
+  const ordinary = [
+    LOCATION_IDS.fieldIds.code,
+    LOCATION_IDS.fieldIds.name,
+    LOCATION_IDS.fieldIds.locationType,
+  ].sort();
+  for (const local of ['location_create', 'location_update']) {
+    assert.deepEqual(
+      operation(local).inputContract!.writableFieldIds,
+      ordinary,
+    );
+    assert.equal(
+      operation(local).inputContract!.requiredWriteFieldIds,
+      undefined,
+    );
+  }
+  const status = operation('location_update_status');
+  assert.equal(status.presentation, 'taskOnly');
+  assert.deepEqual(
+    status.inputContract!.requiredWriteFieldIds,
+    [
+      LOCATION_IDS.fieldIds.status,
+      LOCATION_IDS.fieldIds.statusChangedAt,
+      LOCATION_IDS.fieldIds.statusReason,
+    ].sort(),
+  );
+  assert.deepEqual(status.inputContract!.nonBlankFieldIds, [
+    LOCATION_IDS.fieldIds.statusReason,
+  ]);
+  // Exercise the provider's real input fence without requiring a database.
+  const recordId = 'c34d9ac3-d3aa-4b82-bd20-3b6fbe944b0c';
+  const patch = {
+    [LOCATION_IDS.fieldIds.status]:
+      `${LOCATION_IDS.namespace}:option.location_status_quarantine`,
+    [LOCATION_IDS.fieldIds.statusReason]: 'Inspection hold',
+    [LOCATION_IDS.fieldIds.statusChangedAt]: '2026-10-05T12:00:00.000Z',
+  };
+  const parse = (
+    local: string,
+    input: Parameters<typeof parseMutationInput>[1],
+  ) =>
+    parseMutationInput(
+      operation(local) as RegisteredRecordOperationDefinition,
+      input,
+    );
+  const refuses = (code: string) => (error: unknown) =>
+    error instanceof ModuleRuntimeInterpreterError && error.code === code;
+  assert.throws(
+    () => parse('location_update', { recordId, expectedRevision: 1, patch }),
+    refuses('MODULE_FIELD_UNSUPPORTED'),
+  );
+  assert.throws(
+    () =>
+      parse('location_create', {
+        recordId,
+        values: {
+          [LOCATION_IDS.fieldIds.code]: 'TEST',
+          [LOCATION_IDS.fieldIds.name]: 'Test location',
+          [LOCATION_IDS.fieldIds.locationType]:
+            `${LOCATION_IDS.namespace}:option.warehouse`,
+          ...patch,
+        },
+      }),
+    refuses('MODULE_FIELD_UNSUPPORTED'),
+  );
+  assert.throws(
+    () =>
+      parse('location_update_status', {
+        recordId,
+        expectedRevision: 1,
+        patch: { ...patch, [LOCATION_IDS.fieldIds.statusReason]: '  ' },
+      }),
+    refuses('MODULE_FIELD_VALUE_INVALID'),
+  );
+  assert.throws(
+    () =>
+      parse('location_update_status', {
+        recordId,
+        expectedRevision: 1,
+        patch: {
+          [LOCATION_IDS.fieldIds.status]:
+            `${LOCATION_IDS.namespace}:option.location_status_quarantine`,
+        },
+      }),
+    refuses('MODULE_REQUIRED_FIELD_MISSING'),
+  );
+  assert.doesNotThrow(() =>
+    parse('location_update_status', { recordId, expectedRevision: 1, patch }),
+  );
+  const malformed = structuredClone(payload) as {
+    operations: Array<{
+      operationId: string;
+      inputContract: { nonBlankFieldIds?: string[] };
+    }>;
+  };
+  malformed.operations.find(
+    (value) => value.operationId === status.operationId,
+  )!.inputContract.nonBlankFieldIds = [LOCATION_IDS.fieldIds.name];
+  assert.throws(
+    () => parsePinnedOperationCatalog(malformed),
+    /nonBlankFieldIds must name unique writable fields/u,
+  );
+  const invalid = structuredClone(definition) as {
+    operations: Array<{
+      fieldWrites?: Array<{ field: { targetId: string }; required: boolean }>;
+    }>;
+  };
+  const writes = invalid.operations.find(
+    (value) => value.fieldWrites,
+  )?.fieldWrites;
+  assert.ok(writes);
+  writes.push(structuredClone(writes[0]!));
+  assert.throws(
+    () => locationCompilerInput(invalid),
+    (error: unknown) =>
+      error instanceof CanonicalModelError &&
+      error.diagnostics.some(
+        (entry) =>
+          entry.code === 'CANON_SCHEMA_INVALID' &&
+          entry.rule === 'fieldWrites repeats a field',
+      ),
+  );
+});
+
+test('LOCATIONS-2: relation updates are opt-in and only a declared self reference can demand acyclic moves', () => {
+  const definition = locationModuleDefinition(LOCATION_IDS.namespace, {
+    hierarchy: true,
+    inventoryStatus: true,
+    movableHierarchy: true,
+  });
+  const compiled = mustCompile(locationCompilerInput(definition));
+  const catalog = parsePinnedOperationCatalog(
+    projectionPayload(compiled, PROJECTION_FAMILY_IDS.operationCatalog),
+  );
+  const update = catalog.find((entry) =>
+    entry.operationId.endsWith('.location_update'),
+  )!;
+  assert.equal(update.inputContract!.relationUpdates, true);
+  assert.deepEqual(
+    update.inputContract!.relationInputs.map((entry) => ({
+      id: entry.relationId,
+      acyclic: entry.acyclic,
+      required: entry.required,
+    })),
+    [
+      {
+        id: `${LOCATION_IDS.namespace}:relation.location_parent`,
+        acyclic: true,
+        required: false,
+      },
+    ],
+  );
+  assert.ok(update.inputContract!.closedArgumentKeys.includes('relations'));
+  const status = catalog.find((entry) =>
+    entry.operationId.endsWith('.location_update_status'),
+  )!;
+  assert.equal(status.inputContract!.relationUpdates, undefined);
+  const malformed = structuredClone(definition) as {
+    operations: Array<{
+      operationId: string;
+      relationWrites?: Array<{ relation: string; acyclic: true }>;
+    }>;
+  };
+  malformed.operations.find((entry) =>
+    entry.operationId.endsWith('.location_update'),
+  )!.relationWrites![0]!.relation =
+    `${LOCATION_IDS.namespace}:relation.missing`;
+  assert.throws(() => locationCompilerInput(malformed), CanonicalModelError);
+});
 
 test('Location definition compiles into every walking-slice projection with lifecycle but no inventory', () => {
   const first = compileLocationFixture();

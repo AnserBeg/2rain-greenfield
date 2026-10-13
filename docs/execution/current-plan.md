@@ -29,6 +29,8 @@ substance survives in the rules above.
 
 ## Where we are — 2026-09-04
 
+**LOCATIONS-2 (owner-selected, 2026-10-05):** blocked draft checkpoint on `packet/LOCATIONS-2`; [LOCATIONS-2-VERIFICATION](packets/LOCATIONS-2-VERIFICATION.md) is the separate Critical prerequisite for release probes of Task-only status fields; no verifier bypass or Critical source edit; transfer receipt remains pending ([record](packets/LOCATIONS-2.md)).
+
 | stage | state |
 |---|---|
 | G0, G1 | complete |

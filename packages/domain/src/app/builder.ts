@@ -95,6 +95,7 @@ const MODULE_REGISTRY = Object.freeze([
       locationModuleDefinition(namespace, {
         hierarchy: true,
         inventoryStatus: true,
+        movableHierarchy: true,
       }),
     moduleName: 'location',
   }),

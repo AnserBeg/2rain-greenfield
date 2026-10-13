@@ -16,7 +16,15 @@ export interface ListColumnSpec {
   readonly role?: Role;
   readonly sortable?: boolean;
   readonly format?: 'date' | 'money';
-  readonly reference?: { readonly query: string; readonly labelField: string };
+  readonly reference?: {
+    readonly query: string;
+    readonly labelField: string;
+    readonly relation?: true;
+    readonly ancestor?: {
+      readonly field: string;
+      readonly values: readonly string[];
+    };
+  };
   readonly statusRoles?: Readonly<Record<string, StatusRole>>;
   /** The view (local id) whose rows this date marks "N days late". */
   readonly overdue?: string;
@@ -101,6 +109,10 @@ export interface ListSpec {
    * strings (REPLENISHMENT).
    */
   readonly figures?: ListFiguresSpec;
+  readonly hierarchyScope?: {
+    readonly rows?: true;
+    readonly figures?: readonly { figure: string; reference: string }[];
+  };
 }
 
 /** Rows of a list query that hold the listed record's id as text. */
@@ -985,6 +997,26 @@ function itemFigureList(
     filters: [],
     export: true,
     figures,
+    hierarchyScope: {
+      figures: [
+        {
+          figure: figure('on_hand'),
+          reference: field('posted_stock_balance_location_id'),
+        },
+        {
+          figure: figure('usable'),
+          reference: field('posted_stock_balance_location_id'),
+        },
+        {
+          figure: figure('reserved'),
+          reference: field('reservation_location_id'),
+        },
+        {
+          figure: figure('reserved_usable'),
+          reference: field('reservation_location_id'),
+        },
+      ],
+    },
   };
 }
 
@@ -1028,6 +1060,17 @@ function locationList(namespace: string): ListSpec {
       { local: 'name', label: 'Name', field: field('name') },
       { local: 'type', label: 'Type', field: field('type') },
       {
+        local: 'parent',
+        label: 'Warehouse',
+        field: `${namespace}:relation.location_parent`,
+        reference: {
+          query: `${namespace}:query.location_list`,
+          labelField: field('name'),
+          relation: true,
+          ancestor: { field: field('type'), values: [option('warehouse')] },
+        },
+      },
+      {
         local: 'status',
         label: 'Inventory status',
         field: field('status'),
@@ -1058,6 +1101,7 @@ function locationList(namespace: string): ListSpec {
       },
       { local: 'type', label: 'Type', field: field('type'), options: types },
     ],
+    hierarchyScope: { rows: true },
     // The location query declares no export limit; a short setup list.
     export: false,
   };
@@ -1434,6 +1478,10 @@ function lowerList(namespace: string, listLocal: string, spec: ListSpec) {
       ...(column.reference
         ? {
             reference: {
+              ...(column.reference.relation ? { relation: true } : {}),
+              ...(column.reference.ancestor
+                ? { ancestor: column.reference.ancestor }
+                : {}),
               query: {
                 kind: 'queryReference',
                 schemaVersion: version,
@@ -1507,6 +1555,31 @@ function lowerList(namespace: string, listLocal: string, spec: ListSpec) {
         }
       : {}),
     ...(spec.figures ? { figures: lowerFigures(spec.figures) } : {}),
+    ...(spec.hierarchyScope
+      ? {
+          hierarchyScope: {
+            ...spec.hierarchyScope,
+            selectorId: `${namespace}:list_selector.${listLocal}_warehouse`,
+            label: 'Warehouse',
+            query: {
+              kind: 'queryReference',
+              schemaVersion: version,
+              targetId: `${namespace}:query.location_list`,
+            },
+            choices: {
+              kind: 'queryReference',
+              schemaVersion: version,
+              targetId: `${namespace}:query.location_warehouse_list`,
+            },
+            labelField: `${namespace}:field.location_name`,
+            relation: `${namespace}:relation.location_parent`,
+            rootFilter: {
+              field: `${namespace}:field.location_type`,
+              value: `${namespace}:option.warehouse`,
+            },
+          },
+        }
+      : {}),
     ...(spec.rowActions
       ? {
           rowActions: spec.rowActions.map((action, index) => ({

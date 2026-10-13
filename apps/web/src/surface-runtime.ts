@@ -587,6 +587,20 @@ async function declaredListData(
       queryId: binding.query.queryId,
       schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
     });
+  if (list.hierarchyScope) {
+    const offered = await queryGateway.invoke(view, {
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      queryId: list.hierarchyScope.choices.targetId,
+      arguments: { includeArchived: false, cursor: null, limit: 100 },
+    });
+    state = {
+      ...state,
+      hierarchyChoices: offered.records.map((record) => ({
+        recordId: record.recordId,
+        label: String(record.values[list.hierarchyScope!.labelField] ?? ''),
+      })),
+    };
+  }
   const viewCounts = async (withoutProgress: boolean) => {
     const counts: Record<string, number> = {};
     for (const listView of list.views) {

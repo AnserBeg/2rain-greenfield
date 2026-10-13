@@ -97,6 +97,130 @@ import { compiledFixturePath, demoEntry, webRoot } from './helpers.js';
 const APP_SERVER_RUNTIME_VIEW_REFUSAL_IMPORT =
   "import { RequestRuntimeViewRefusalError } from '@north-star/runtime/request-runtime-view';\n";
 
+test('LOCATIONS-2: a declared relation label is sent for pages, counts and export and is read from the governed result', () => {
+  const surface = (
+    composedApplicationDefinition().surfaces as Array<Record<string, unknown>>
+  ).find((value) => value.surfaceId === 'northstar.app:surface.location_list');
+  assert.ok(surface);
+  const list = SurfaceListSchema.parse(surface.list);
+  const column = list.columns.find((value) => value.reference?.relation);
+  assert.ok(column);
+  const state = {
+    ...readDeclaredListState(list, new URL('http://list.local/')),
+    sort: [{ columnId: column.columnId, direction: 'ascending' as const }],
+  };
+  for (const mode of ['page', 'count', 'export'] as const) {
+    const sent = declaredListArguments(list, state, {
+      mode,
+      now: new Date('2026-10-05T12:00:00.000Z'),
+      queryId: 'northstar.app:query.location_list',
+      scopeArguments: {},
+    }) as unknown as {
+      list: {
+        relationLabels: unknown[];
+        referenceLabels?: unknown[];
+        sort: unknown[];
+      };
+    };
+    assert.deepEqual(sent.list.relationLabels, [
+      {
+        fieldId: 'northstar.app:field.location_name',
+        queryId: 'northstar.app:query.location_list',
+        relationId: 'northstar.app:relation.location_parent',
+        ancestor: {
+          fieldId: 'northstar.app:field.location_type',
+          values: ['northstar.app:option.warehouse'],
+        },
+      },
+    ]);
+    assert.equal(sent.list.referenceLabels, undefined);
+    assert.deepEqual(
+      sent.list.sort,
+      mode === 'count'
+        ? []
+        : [{ direction: 'ascending', fieldId: column.field }],
+    );
+  }
+  assert.equal(
+    declaredCellText(column, {
+      archived: false,
+      entityId: 'northstar.app:entity.location',
+      recordId: '73000000-0000-4000-8000-000000000001',
+      revision: 1,
+      values: {},
+      relationLabels: {
+        [column.field]: {
+          recordId: '73000000-0000-4000-8000-000000000002',
+          label: 'Warehouse two',
+        },
+      },
+    }),
+    'Warehouse two',
+  );
+});
+
+test('LOCATIONS-2: warehouse scope binds pages, counts, exports and cursors and refuses an omitted executor echo', () => {
+  const ns = 'northstar.app';
+  const source = (
+    composedApplicationDefinition().surfaces as Array<Record<string, unknown>>
+  ).find((value) => value.surfaceId === `${ns}:surface.item_stock_list`)!;
+  const list = SurfaceListSchema.parse(source.list);
+  const selector = list.hierarchyScope!;
+  const root = '73000000-0000-4000-8000-000000000002';
+  const queryId = `${ns}:query.item_stock_list`;
+  const state = readDeclaredListState(
+    list,
+    new URL(`http://list.local/?${selector.selectorId}=${root}`),
+  );
+  const send = (mode: 'page' | 'count' | 'export') =>
+    declaredListArguments(list, state, {
+      mode,
+      now: new Date('2026-10-05T12:00:00Z'),
+      queryId,
+      scopeArguments: {},
+      pageOffset: 50,
+      exportMaximumResultCount: 1000,
+    });
+  const parse = (
+    argumentsValue: Parameters<typeof listBehavior.parseSharedListArguments>[0],
+  ) =>
+    listBehavior.parseSharedListArguments(argumentsValue, {
+      declaredParameterIds: [],
+      maximumResultCount: 100,
+      exportMaximumResultCount: 1000,
+      queryId,
+    })!;
+  const page = parse(send('page'));
+  assert.equal(page.hierarchy!.rootId, root);
+  assert.equal(page.hierarchy!.figures!.length, 4);
+  assert.ok(
+    page.hierarchy!.figures!.every(
+      (entry) => !/incoming|demand/.test(entry.figureId),
+    ),
+  );
+  assert.equal(page.pageOffset, 50);
+  for (const mode of ['count', 'export'] as const)
+    assert.deepEqual(parse(send(mode)).hierarchy, page.hierarchy);
+  const forged = structuredClone(send('page')) as {
+    list: { hierarchy: { rootId: string } };
+  };
+  forged.list.hierarchy.rootId = '73000000-0000-4000-8000-000000000003';
+  assert.throws(
+    () =>
+      parse(
+        forged as Parameters<typeof listBehavior.parseSharedListArguments>[0],
+      ),
+    /cursor/u,
+  );
+  assert.throws(
+    () =>
+      listBehavior.requireSharedListEcho(page, {
+        figures: page.figures,
+      } as listBehavior.SharedListCoverage),
+    /apply/u,
+  );
+});
+
 test('script-free pages retain a CSP that exactly pins the owned Task enhancement', async () => {
   const server = createSurfaceRuntimeServer(demoEntry());
   const baseUrl = await listen(server);

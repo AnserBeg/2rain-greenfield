@@ -440,7 +440,15 @@ test('a reference Task input may start from a field its record query selects', (
   type Loose = Record<string, unknown>;
   type Input = Loose & {
     inputId: string;
-    defaultFrom?: { source: string; field: string };
+    defaultFrom?: {
+      source: string;
+      field: string;
+      fallback?: {
+        column: { datasetId: string; columnId: string };
+        field: string;
+        selection: string;
+      };
+    };
   };
   const receiveInput = (candidate: Loose, name: string) =>
     (
@@ -465,6 +473,14 @@ test('a reference Task input may start from a field its record query selects', (
   const receivingLocation = {
     source: 'record',
     field: 'northstar.app:field.purchase_order_receiving_location_id',
+    fallback: {
+      column: {
+        datasetId: 'northstar.app:dataset.purchasing_lines',
+        columnId: 'northstar.app:column.purchasing_item',
+      },
+      field: 'northstar.app:field.item_preferred_location_id',
+      selection: 'selected',
+    },
   };
   // Admitted and kept: the order's receiving location, which the workspace's
   // record query selects, on the receiving location picker.
@@ -483,6 +499,14 @@ test('a reference Task input may start from a field its record query selects', (
     receiveInput(candidate, 'location').defaultFrom!.field =
       'northstar.app:field.location_name';
   }, /only reference inputs default from a declared record field/);
+  refuse((candidate) => {
+    receiveInput(candidate, 'location').defaultFrom!.fallback!.field =
+      'northstar.app:field.party_name';
+  }, /reference fallback requires a selected row lookup field/);
+  refuse((candidate) => {
+    receiveInput(candidate, 'location').defaultFrom!.fallback!.selection =
+      'common';
+  }, /reference fallback requires a selected row lookup field/);
   // A closed declaration: the record is its only source.
   refuse((candidate) => {
     receiveInput(candidate, 'location').defaultFrom!.source = 'selected';
@@ -1950,7 +1974,9 @@ test('LOCATIONS: a location keeps an inventory status its page changes with a re
     page.composition!.presentation.header.status,
     id('column', 'location_status'),
   );
-  const [change] = page.composition!.actions;
+  const change = page.composition!.actions.find(
+    (action) => action.label === 'Change status',
+  );
   assert.equal(change!.label, 'Change status');
   assert.deepEqual(change!.conditions, []);
   assert.deepEqual(
@@ -1975,7 +2001,7 @@ test('LOCATIONS: a location keeps an inventory status its page changes with a re
   assert.equal(change!.steps.length, 1);
   assert.equal(
     change!.steps[0]!.operation.targetId,
-    id('operation', 'location_update'),
+    id('operation', 'location_update_status'),
   );
   assert.deepEqual(
     change!.steps[0]!.bindings.map((binding) => [
@@ -2079,7 +2105,10 @@ test('LOCATIONS: a location keeps an inventory status its page changes with a re
   }, /a form declares references, fields it omits, or both/);
   // The page's Task no longer setting the reason leaves it to no editor.
   refuse((candidate) => {
-    const [task] = surface(candidate, 'location_detail').composition!.actions;
+    const task = surface(
+      candidate,
+      'location_detail',
+    ).composition!.actions.find((action) => action.label === 'Change status');
     task!.steps[0]!.bindings = task!.steps[0]!.bindings.filter(
       (binding) => binding.path[1] !== id('field', 'location_status_reason'),
     );

@@ -252,8 +252,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // location list (a Record form reference, REPLENISHMENT), which requires 17,
   // and Location, whose form leaves the inventory status to its page's
   // "Change status" (a Record form's omitted fields, LOCATIONS), which
-  // requires 19.
-  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 19);
+  // requires 22 after LOCATIONS-2 write contracts.
+  assert.equal(flatManifest.requiredRuntimeCapability.minimumVersion, 22);
   // SALES-PARITY: Catalog's tax codes are a fifth setup List, still flat.
   assert.equal(flatCompact.navigationEntryIds.length, 5);
   assert.deepEqual(
@@ -305,8 +305,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // document's create values require 16; List figures, views keeping a band
   // and the item form's location choice (REPLENISHMENT) require 17; the
   // location form's omitted status and the usable figures' parent reached
-  // through a reference field (LOCATIONS) require 19 (18 is WAREHOUSE-MODE's).
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 19);
+  // through a reference field (LOCATIONS) required 19; LOCATIONS-2's hierarchy and fallback keys require 22.
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 22);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.
