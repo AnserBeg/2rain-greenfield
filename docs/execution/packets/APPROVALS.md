@@ -54,6 +54,7 @@ Follow [APPROVALS-test-it-yourself.md](APPROVALS-test-it-yourself.md): Buyer sub
 
 - Full multi-step workflow/timers belong to N2; real authentication belongs to AUTH; inventory approval changes the kernel/trust and follows RETURNS.
 - Supplier reference is displayed, not indexed for text search. The indexed declaration failed replay's column check; any necessary Critical substrate change is deferred outside this packet.
+- From INTEGRATION (PR #29, M8), for this lane to mirror: `renderCapabilityCommand` hid a bare command whenever any Task steps through its operation with the record's id; SALES-EXTRAS' counter sale Tasks step through Confirm, so the order page lost its ordinary Confirm. On the union only a one-step Task owns its operation (every case here is one step: Place order, Approve, Reject, Submit, Void); a Task chaining it with other work does not.
 
 Review: not owed — outside the Critical set. No stage boundary is integrated by this draft; no autonomous program review or integration is performed.
 
