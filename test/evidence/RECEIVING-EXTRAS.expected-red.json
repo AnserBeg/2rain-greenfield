@@ -136,7 +136,7 @@
       "replacement": "    ? `(SELECT coalesce(sum(${left}), 0)\n",
       "test": {
         "files": ["test/postgres/receiving-extras.test.ts"],
-        "namePattern": "reads On order, not short"
+        "namePattern": "a placed purchase order covers a shortage on the List and the order page alike"
       },
       "kills": [
         {
@@ -154,7 +154,7 @@
       "replacement": "",
       "test": {
         "files": ["test/postgres/receiving-extras.test.ts"],
-        "namePattern": "reads On order, not short"
+        "namePattern": "a placed purchase order covers a shortage on the List and the order page alike"
       },
       "kills": [
         {
