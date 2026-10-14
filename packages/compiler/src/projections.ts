@@ -856,6 +856,14 @@ function surfaceManifestPayload(
     // behave like a browser for that sentence to hold.
     requiredRuntimeCapability: {
       capabilityId: 'northstar.runtime:capability.surface-manifest',
+      // 27: REPORTS-HOME's List figures -- counted rows, rows kept by a value,
+      // aged in days past a date, read in one currency, priced, or matched
+      // through their parent -- a List's summary and currency choice, its
+      // eligibility and its own record page. A reader that dropped them would
+      // add every currency into one total, age nothing, list suppliers as
+      // customers or open a customer's statement on the wrong page -- wrong
+      // numbers under an exact-looking report. (22-25 are INTEGRATION's and
+      // 26 a parallel packet's; this branch carries none of them.)
       // 21: a List progress's supply -- what reservations still hold for the
       // open lines and what they are short of now -- with the views and row
       // actions that keep covered or short rows (SUPPLY-WARNINGS). A reader
@@ -918,141 +926,164 @@ function surfaceManifestPayload(
           'list' in surface
             ? (surface.list as SurfaceList | undefined)
             : undefined;
+        const figures = list?.figures;
+        const figureIds = new Set<string>([
+          ...(figures?.sums ?? []).map((sum) => sum.figureId),
+          ...(figures?.choices ?? []).map((choice) => choice.figureId),
+          ...(figures?.totals ?? []).map((total) => total.figureId),
+        ]);
         return (
-          list?.progress?.supply !== undefined ||
-          list?.views.some((view) => view.supply !== undefined) === true ||
-          list?.rowActions?.some(
-            (action) => action.when?.supply !== undefined,
+          list?.eligibility !== undefined ||
+          list?.columns.some(
+            (column) =>
+              column.format !== undefined && figureIds.has(column.field),
+          ) === true ||
+          list?.record !== undefined ||
+          figures?.currency !== undefined ||
+          figures?.summary !== undefined ||
+          figures?.sums.some(
+            (sum) =>
+              sum.sum === 'count' ||
+              sum.where !== undefined ||
+              sum.age !== undefined ||
+              sum.currency !== undefined ||
+              sum.price !== undefined ||
+              (sum.within !== undefined &&
+                'match' in sum.within &&
+                sum.within.match !== undefined),
           ) === true
         );
       })
-        ? 21
+        ? 27
         : original.surfaces.some((surface) => {
               const list =
                 'list' in surface
                   ? (surface.list as SurfaceList | undefined)
                   : undefined;
-              const editor =
-                'documentEditor' in surface
-                  ? (surface.documentEditor as
-                      SurfaceDocumentEditor | undefined)
-                  : undefined;
               return (
-                list?.searchChildren !== undefined ||
-                list?.figures?.choices !== undefined ||
-                list?.figures?.bands?.some((band) =>
-                  band.cases.some(
-                    (entry) =>
-                      entry.when !== undefined ||
-                      [entry.below, entry.atMost].some(
-                        (threshold) =>
-                          threshold !== undefined && 'figure' in threshold,
-                      ),
-                  ),
-                ) === true ||
-                [
-                  ...(editor?.headerFields ?? []),
-                  ...(editor?.lineFields ?? []),
-                ].some(
-                  (field) => field.reference?.searchChildren !== undefined,
-                ) ||
-                compositions
-                  .get(surface.surfaceId)
-                  ?.actions.some((action) =>
-                    action.inputs.some((input) => input.excludeRecord),
-                  ) === true
+                list?.progress?.supply !== undefined ||
+                list?.views.some((view) => view.supply !== undefined) ===
+                  true ||
+                list?.rowActions?.some(
+                  (action) => action.when?.supply !== undefined,
+                ) === true
               );
             })
-          ? 20
+          ? 21
           : original.surfaces.some((surface) => {
                 const list =
                   'list' in surface
                     ? (surface.list as SurfaceList | undefined)
                     : undefined;
-                const form =
-                  'form' in surface
-                    ? (surface.form as SurfaceForm | undefined)
+                const editor =
+                  'documentEditor' in surface
+                    ? (surface.documentEditor as
+                        SurfaceDocumentEditor | undefined)
                     : undefined;
                 return (
-                  form?.omit !== undefined ||
-                  [
-                    ...(list?.figures?.sums ?? []).map((sum) => sum.within),
-                    ...(list?.figures?.latest ?? []).map(
-                      (latest) => latest.within,
+                  list?.searchChildren !== undefined ||
+                  list?.figures?.choices !== undefined ||
+                  list?.figures?.bands?.some((band) =>
+                    band.cases.some(
+                      (entry) =>
+                        entry.when !== undefined ||
+                        [entry.below, entry.atMost].some(
+                          (threshold) =>
+                            threshold !== undefined && 'figure' in threshold,
+                        ),
                     ),
+                  ) === true ||
+                  [
+                    ...(editor?.headerFields ?? []),
+                    ...(editor?.lineFields ?? []),
                   ].some(
-                    (within) => within !== undefined && 'reference' in within,
-                  )
+                    (field) => field.reference?.searchChildren !== undefined,
+                  ) ||
+                  compositions
+                    .get(surface.surfaceId)
+                    ?.actions.some((action) =>
+                      action.inputs.some((input) => input.excludeRecord),
+                    ) === true
                 );
               })
-            ? 19
-            : original.surfaces.some(
-                  (surface) =>
-                    'launcher' in surface && surface.launcher !== undefined,
-                )
-              ? 18
-              : original.surfaces.some((surface) => {
-                    const list =
-                      'list' in surface
-                        ? (surface.list as SurfaceList | undefined)
-                        : undefined;
-                    return (
-                      ('form' in surface && surface.form !== undefined) ||
-                      list?.figures !== undefined ||
-                      list?.views.some((view) => view.band) === true
-                    );
-                  })
-                ? 17
-                : original.surfaces.some(
-                      (surface) =>
-                        'documentEditor' in surface &&
-                        (
-                          surface.documentEditor as
-                            SurfaceDocumentEditor | undefined
-                        )?.createValues !== undefined,
+            ? 20
+            : original.surfaces.some((surface) => {
+                  const list =
+                    'list' in surface
+                      ? (surface.list as SurfaceList | undefined)
+                      : undefined;
+                  const form =
+                    'form' in surface
+                      ? (surface.form as SurfaceForm | undefined)
+                      : undefined;
+                  return (
+                    form?.omit !== undefined ||
+                    [
+                      ...(list?.figures?.sums ?? []).map((sum) => sum.within),
+                      ...(list?.figures?.latest ?? []).map(
+                        (latest) => latest.within,
+                      ),
+                    ].some(
+                      (within) => within !== undefined && 'reference' in within,
                     )
-                  ? 16
-                  : [...compositions.values()].some((value) =>
-                        value?.children.some((child) => child.fieldScope),
+                  );
+                })
+              ? 19
+              : original.surfaces.some(
+                    (surface) =>
+                      'launcher' in surface && surface.launcher !== undefined,
+                  )
+                ? 18
+                : original.surfaces.some((surface) => {
+                      const list =
+                        'list' in surface
+                          ? (surface.list as SurfaceList | undefined)
+                          : undefined;
+                      return (
+                        ('form' in surface && surface.form !== undefined) ||
+                        list?.figures !== undefined ||
+                        list?.views.some((view) => view.band) === true
+                      );
+                    })
+                  ? 17
+                  : original.surfaces.some(
+                        (surface) =>
+                          'documentEditor' in surface &&
+                          (
+                            surface.documentEditor as
+                              SurfaceDocumentEditor | undefined
+                          )?.createValues !== undefined,
                       )
-                    ? 15
-                    : [...compositions.values()].some(
-                          (value) =>
-                            value !== undefined &&
-                            (value.presentation?.alerts !== undefined ||
-                              value.presentation?.progression !== undefined ||
-                              value.actions.some(
-                                (action) =>
-                                  action.rows !== undefined ||
-                                  action.inputs.some(
-                                    (input) => input.perRow !== undefined,
-                                  ) ||
-                                  action.steps.some(
-                                    (step) => step.each !== undefined,
-                                  ) ||
-                                  (action.navigate?.record.source ===
-                                    'record' &&
-                                    relationIds.has(
-                                      action.navigate.record.field,
-                                    )),
-                              ) ||
-                              value.fields.some((column) =>
-                                relationIds.has(column.field),
-                              )),
+                    ? 16
+                    : [...compositions.values()].some((value) =>
+                          value?.children.some((child) => child.fieldScope),
                         )
-                      ? 14
-                      : original.surfaces.some((surface) => {
-                            const list =
-                              'list' in surface
-                                ? (surface.list as SurfaceList | undefined)
-                                : undefined;
-                            return (
-                              list !== undefined &&
-                              (list.rowActions !== undefined ||
-                                list.progress?.whenDenied !== undefined)
-                            );
-                          })
-                        ? 13
+                      ? 15
+                      : [...compositions.values()].some(
+                            (value) =>
+                              value !== undefined &&
+                              (value.presentation?.alerts !== undefined ||
+                                value.presentation?.progression !== undefined ||
+                                value.actions.some(
+                                  (action) =>
+                                    action.rows !== undefined ||
+                                    action.inputs.some(
+                                      (input) => input.perRow !== undefined,
+                                    ) ||
+                                    action.steps.some(
+                                      (step) => step.each !== undefined,
+                                    ) ||
+                                    (action.navigate?.record.source ===
+                                      'record' &&
+                                      relationIds.has(
+                                        action.navigate.record.field,
+                                      )),
+                                ) ||
+                                value.fields.some((column) =>
+                                  relationIds.has(column.field),
+                                )),
+                          )
+                        ? 14
                         : original.surfaces.some((surface) => {
                               const list =
                                 'list' in surface
@@ -1060,122 +1091,139 @@ function surfaceManifestPayload(
                                   : undefined;
                               return (
                                 list !== undefined &&
-                                (list.progress !== undefined ||
-                                  list.views.some(
-                                    (view) => view.open || view.before,
-                                  ) ||
-                                  list.columns.some((column) => column.overdue))
+                                (list.rowActions !== undefined ||
+                                  list.progress?.whenDenied !== undefined)
                               );
                             })
-                          ? 12
+                          ? 13
                           : original.surfaces.some((surface) => {
-                                const editor =
-                                  'documentEditor' in surface
-                                    ? (surface.documentEditor as
-                                        SurfaceDocumentEditor | undefined)
+                                const list =
+                                  'list' in surface
+                                    ? (surface.list as SurfaceList | undefined)
                                     : undefined;
                                 return (
-                                  [
-                                    ...(editor?.headerFields ?? []),
-                                    ...(editor?.lineFields ?? []),
-                                  ].some(
-                                    (field) =>
-                                      field.defaultFrom ||
-                                      field.reference?.within ||
-                                      (field.presentation?.kind === 'derived' &&
-                                        field.presentation.sourceByHeader),
-                                  ) ||
-                                  compositions
-                                    .get(surface.surfaceId)
-                                    ?.actions.some((action) =>
-                                      action.inputs.some(
-                                        (input) => input.eligibility,
-                                      ),
-                                    ) === true
+                                  list !== undefined &&
+                                  (list.progress !== undefined ||
+                                    list.views.some(
+                                      (view) => view.open || view.before,
+                                    ) ||
+                                    list.columns.some(
+                                      (column) => column.overdue,
+                                    ))
                                 );
                               })
-                            ? 11
-                            : original.surfaces.some(
-                                  (surface) =>
-                                    'list' in surface && surface.list,
-                                )
-                              ? 10
-                              : original.surfaces.some((surface) => {
-                                    const editor =
-                                      'documentEditor' in surface
-                                        ? (surface.documentEditor as
-                                            SurfaceDocumentEditor | undefined)
-                                        : undefined;
-                                    const composition = compositions.get(
-                                      surface.surfaceId,
-                                    );
-                                    return (
-                                      [
-                                        ...(editor?.headerFields ?? []),
-                                        ...(editor?.lineFields ?? []),
-                                      ].some(
-                                        (field) => field.reference?.eligibility,
-                                      ) ||
-                                      composition?.actions.some((action) =>
+                            ? 12
+                            : original.surfaces.some((surface) => {
+                                  const editor =
+                                    'documentEditor' in surface
+                                      ? (surface.documentEditor as
+                                          SurfaceDocumentEditor | undefined)
+                                      : undefined;
+                                  return (
+                                    [
+                                      ...(editor?.headerFields ?? []),
+                                      ...(editor?.lineFields ?? []),
+                                    ].some(
+                                      (field) =>
+                                        field.defaultFrom ||
+                                        field.reference?.within ||
+                                        (field.presentation?.kind ===
+                                          'derived' &&
+                                          field.presentation.sourceByHeader),
+                                    ) ||
+                                    compositions
+                                      .get(surface.surfaceId)
+                                      ?.actions.some((action) =>
                                         action.inputs.some(
-                                          (input) => input.presentation,
+                                          (input) => input.eligibility,
                                         ),
                                       ) === true
-                                    );
-                                  })
-                                ? 9
-                                : original.surfaces.some(
-                                      (surface) =>
-                                        'workspace' in surface ||
-                                        'documentEditor' in surface,
-                                    )
-                                  ? 8
-                                  : [...compositions.values()].some(
-                                        (value) =>
-                                          value?.actions.some(
-                                            (action) =>
-                                              action.presentation?.task,
-                                          ) ||
-                                          value?.children.some(
-                                            (child) =>
-                                              child.presentation
-                                                ?.selectedActions,
+                                  );
+                                })
+                              ? 11
+                              : original.surfaces.some(
+                                    (surface) =>
+                                      'list' in surface && surface.list,
+                                  )
+                                ? 10
+                                : original.surfaces.some((surface) => {
+                                      const editor =
+                                        'documentEditor' in surface
+                                          ? (surface.documentEditor as
+                                              SurfaceDocumentEditor | undefined)
+                                          : undefined;
+                                      const composition = compositions.get(
+                                        surface.surfaceId,
+                                      );
+                                      return (
+                                        [
+                                          ...(editor?.headerFields ?? []),
+                                          ...(editor?.lineFields ?? []),
+                                        ].some(
+                                          (field) =>
+                                            field.reference?.eligibility,
+                                        ) ||
+                                        composition?.actions.some((action) =>
+                                          action.inputs.some(
+                                            (input) => input.presentation,
                                           ),
+                                        ) === true
+                                      );
+                                    })
+                                  ? 9
+                                  : original.surfaces.some(
+                                        (surface) =>
+                                          'workspace' in surface ||
+                                          'documentEditor' in surface,
                                       )
-                                    ? 7
+                                    ? 8
                                     : [...compositions.values()].some(
                                           (value) =>
-                                            value?.presentation?.task ||
+                                            value?.actions.some(
+                                              (action) =>
+                                                action.presentation?.task,
+                                            ) ||
                                             value?.children.some(
                                               (child) =>
-                                                child.sort?.length ||
-                                                child.presentation?.compact,
+                                                child.presentation
+                                                  ?.selectedActions,
                                             ),
                                         )
-                                      ? 6
+                                      ? 7
                                       : [...compositions.values()].some(
                                             (value) =>
-                                              value?.presentation ||
+                                              value?.presentation?.task ||
                                               value?.children.some(
                                                 (child) =>
-                                                  child.presentation ||
-                                                  child.columns.some(
-                                                    (column) =>
-                                                      column.presentation,
-                                                  ),
-                                              ) ||
-                                              value?.actions.some(
-                                                (action) => action.presentation,
+                                                  child.sort?.length ||
+                                                  child.presentation?.compact,
                                               ),
                                           )
-                                        ? 5
-                                        : composed
-                                          ? 4
-                                          : emitsFieldKinds
-                                            ? 3
-                                            : navigation
-                                              ? 2
-                                              : 1,
+                                        ? 6
+                                        : [...compositions.values()].some(
+                                              (value) =>
+                                                value?.presentation ||
+                                                value?.children.some(
+                                                  (child) =>
+                                                    child.presentation ||
+                                                    child.columns.some(
+                                                      (column) =>
+                                                        column.presentation,
+                                                    ),
+                                                ) ||
+                                                value?.actions.some(
+                                                  (action) =>
+                                                    action.presentation,
+                                                ),
+                                            )
+                                          ? 5
+                                          : composed
+                                            ? 4
+                                            : emitsFieldKinds
+                                              ? 3
+                                              : navigation
+                                                ? 2
+                                                : 1,
     },
   };
 }
@@ -1436,6 +1484,34 @@ function agentListPresets(original: VersionedNormalizedApplicationPackage) {
           ? {
               figureLabels: agentFigureLabels(list.figures),
               figures: agentFigures(list.figures),
+              // REPORTS-HOME: the currencies a caller reads the currency
+              // figures in, one per request (the first is the List's own
+              // default), and the symbolic day an age counts from, which the
+              // caller turns into midnight UTC of its own day as `today`.
+              ...(list.figures.currency
+                ? {
+                    figureCurrencies: list.figures.currency.options.map(
+                      (option) => option.value,
+                    ),
+                  }
+                : {}),
+              ...(list.figures.sums.some((sum) => sum.age !== undefined)
+                ? { figureAgeAnchor: 'startOfTodayUtc' }
+                : {}),
+            }
+          : {}),
+        // REPORTS-HOME: the List's eligibility, as the related filter the
+        // gateway accepts, sent on every request.
+        ...(list.eligibility
+          ? {
+              relatedFilter: {
+                fieldFilters: list.eligibility.filters.map((filter) => ({
+                  fieldId: filter.fieldId,
+                  value: filter.value,
+                })),
+                queryId: list.eligibility.queryId,
+                relationId: list.eligibility.relationId,
+              },
             }
           : {}),
         // The children a search also matches through, as the list argument
@@ -1592,11 +1668,20 @@ function agentFigures(figures: SurfaceListFigures) {
     sums: figures.sums.map((sum) => ({
       figureId: sum.figureId,
       rows: {
-        matchFieldId: sum.rows.match,
+        ...(sum.rows.match ? { matchFieldId: sum.rows.match } : {}),
         queryId: sum.rows.query.targetId,
         ...(sum.rows.quantity ? { quantityFieldId: sum.rows.quantity } : {}),
       },
-      ...(sum.within ? { within: within(sum.within) } : {}),
+      ...(sum.within
+        ? {
+            within: {
+              ...within(sum.within),
+              ...('match' in sum.within && sum.within.match
+                ? { matchFieldId: sum.within.match }
+                : {}),
+            },
+          }
+        : {}),
       ...(sum.related
         ? {
             related: {
@@ -1607,7 +1692,32 @@ function agentFigures(figures: SurfaceListFigures) {
           }
         : {}),
       sum: sum.sum,
+      // REPORTS-HOME, as the web sends them.
+      ...(sum.where
+        ? { where: { fieldId: sum.where.field, values: sum.where.values } }
+        : {}),
+      ...(sum.age
+        ? {
+            age: {
+              fieldId: sum.age.field,
+              ...(sum.age.from === undefined ? {} : { from: sum.age.from }),
+              ...(sum.age.to === undefined ? {} : { to: sum.age.to }),
+            },
+          }
+        : {}),
+      ...(sum.currency ? { currencyFieldId: sum.currency } : {}),
+      ...(sum.price
+        ? {
+            price: {
+              fieldId: sum.price.field,
+              ...(sum.price.discount
+                ? { discountFieldId: sum.price.discount }
+                : {}),
+            },
+          }
+        : {}),
     })),
+    ...(figures.summary ? { summary: figures.summary } : {}),
     ...(figures.totals
       ? {
           totals: figures.totals.map((total) => ({

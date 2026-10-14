@@ -56,6 +56,8 @@ test('the composed application declares its Lists and they normalize unchanged',
     (surface) => 'list' in surface && surface.list,
   );
   assert.deepEqual(declared.map((surface) => surface.surfaceId).sort(), [
+    // REPORTS-HOME: customers with their open orders, read in one company.
+    `${ns}:surface.customer_account_list`,
     // Ruling C: the Invoices List.
     `${ns}:surface.customer_invoice_list`,
     // PURCHASING-PARITY: what is still to arrive, beside Purchase orders.
@@ -74,6 +76,8 @@ test('the composed application declares its Lists and they normalize unchanged',
     `${ns}:surface.posted_stock_balance_list`,
     `${ns}:surface.purchase_order_approval_list`,
     `${ns}:surface.purchase_order_list`,
+    // REPORTS-HOME: what each customer owes, by how late it is.
+    `${ns}:surface.receivables_aging_list`,
     salesList,
     // PAYABLES: the Bills List, by bill state.
     `${ns}:surface.vendor_bill_list`,
@@ -1594,6 +1598,347 @@ test('List figures and band views are refused for each misuse the runtime cannot
   );
 });
 
+test('REPORTS-HOME: receivables aging and customer accounts read parties in one company with figures in one currency, a summary, an eligibility and their own record page', () => {
+  const normalized = normalizeApplicationPackage(
+    composedApplicationDefinition() as never,
+  );
+  const declared = (local: string) =>
+    (
+      normalized.surfaces.find(
+        (surface) => surface.surfaceId === `${ns}:surface.${local}`,
+      ) as unknown as { list: Json & { figures: Json } }
+    ).list;
+  const aging = declared('receivables_aging_list');
+  const accounts = declared('customer_account_list');
+  // One currency at a time, the first by default; never "all".
+  for (const list of [aging, accounts])
+    assert.deepEqual(list.figures.currency, {
+      label: 'Currency',
+      options: ['CAD', 'USD', 'EUR'].map((value) => ({ value, label: value })),
+    });
+  // Five buckets of whole days past due, then the total and the count.
+  assert.deepEqual(
+    (aging.figures.sums as Array<Json & { figureId: string }>).map((sum) => [
+      sum.figureId.split('_list_')[1],
+      sum.sum,
+      sum.age ?? null,
+    ]),
+    [
+      [
+        'current',
+        'rows',
+        { field: `${ns}:field.customer_invoice_due_date`, to: 0 },
+      ],
+      [
+        'days_1_30',
+        'rows',
+        { field: `${ns}:field.customer_invoice_due_date`, from: 1, to: 30 },
+      ],
+      [
+        'days_31_60',
+        'rows',
+        { field: `${ns}:field.customer_invoice_due_date`, from: 31, to: 60 },
+      ],
+      [
+        'days_61_90',
+        'rows',
+        { field: `${ns}:field.customer_invoice_due_date`, from: 61, to: 90 },
+      ],
+      [
+        'over_90',
+        'rows',
+        { field: `${ns}:field.customer_invoice_due_date`, from: 91 },
+      ],
+      ['owing', 'rows', null],
+      ['invoices', 'count', null],
+    ],
+  );
+  assert.equal(aging.record, `${ns}:surface.customer_account_detail`);
+  assert.equal(accounts.record, `${ns}:surface.customer_account_detail`);
+  assert.deepEqual(accounts.eligibility, {
+    queryId: `${ns}:query.party_role_list`,
+    relationId: `${ns}:relation.party_role_party`,
+    filters: [
+      {
+        fieldId: `${ns}:field.party_role_kind`,
+        value: `${ns}:option.customer`,
+      },
+      {
+        fieldId: `${ns}:field.party_role_status`,
+        value: `${ns}:option.active`,
+      },
+    ],
+  });
+  // Open lines are matched through the order that names the customer, in
+  // the order's currency, and valued at their price less their discount.
+  const openValue = (accounts.figures.sums as Json[]).find((sum) =>
+    String(sum.figureId).endsWith('_open_value'),
+  )!;
+  assert.deepEqual(
+    [
+      (openValue.rows as Json).match,
+      (openValue.within as Json).match,
+      openValue.currency,
+      openValue.price,
+      openValue.sum,
+    ],
+    [
+      undefined,
+      `${ns}:field.sales_order_customer_party_id`,
+      `${ns}:field.sales_order_currency`,
+      {
+        field: `${ns}:field.sales_order_line_unit_price`,
+        discount: `${ns}:field.sales_order_line_discount_percent`,
+      },
+      'remaining',
+    ],
+  );
+
+  type Sum = Json & {
+    figureId: string;
+    rows: Json & { match?: string; quantity?: string };
+    within?: Json & { match?: string; field: string };
+    sum: string;
+  };
+  type Figures = Json & {
+    sums: Sum[];
+    currency?: Json & { options: Json[] };
+    summary?: string[];
+  };
+  const agingId = `${ns}:surface.receivables_aging_list`;
+  const accountsId = `${ns}:surface.customer_account_list`;
+  const figures = (app: ReturnType<typeof application>, surfaceId: string) =>
+    listOf(app, surfaceId).list.figures as Figures;
+  const sum = (
+    app: ReturnType<typeof application>,
+    surfaceId: string,
+    local: string,
+  ) =>
+    figures(app, surfaceId).sums.find((value) =>
+      value.figureId.endsWith(`_list_${local}`),
+    )!;
+  const field = (local: string) => `${ns}:field.${local}`;
+  const cases: Array<[string, (app: ReturnType<typeof application>) => void]> =
+    [
+      [
+        "a figure's rows or their parent hold the listed record's id, exactly one",
+        (app) => {
+          sum(app, accountsId, 'ordered').rows.match = field(
+            'sales_order_line_item_id',
+          );
+        },
+      ],
+      [
+        "a figure's rows or their parent hold the listed record's id, exactly one",
+        (app) => {
+          delete sum(app, accountsId, 'ordered').within!.match;
+        },
+      ],
+      [
+        "a figure's parent holds the listed record's id in a text field its query selects",
+        (app) => {
+          sum(app, accountsId, 'ordered').within!.match = field(
+            'sales_order_order_date',
+          );
+        },
+      ],
+      [
+        'a figure names exactly the parts its sum adds up',
+        (app) => {
+          sum(app, agingId, 'invoices').rows.quantity = field(
+            'customer_invoice_balance',
+          );
+        },
+      ],
+      [
+        "a figure keeps rows by values of an enumeration or text field its rows' query selects",
+        (app) => {
+          (sum(app, agingId, 'invoices').where as Json).values = [
+            `${ns}:option.customer_invoice_state_overdue`,
+          ];
+        },
+      ],
+      [
+        "a figure keeps rows by values of an enumeration or text field its rows' query selects",
+        (app) => {
+          (sum(app, agingId, 'invoices').where as Json).field = field(
+            'customer_invoice_total',
+          );
+        },
+      ],
+      [
+        "a figure's age reads a date or UTC instant its rows' query selects",
+        (app) => {
+          (sum(app, agingId, 'current').age as Json).field = field(
+            'customer_invoice_balance',
+          );
+        },
+      ],
+      [
+        "a figure's age names a range of days, from before to",
+        (app) => {
+          sum(app, agingId, 'days_1_30').age = {
+            field: field('customer_invoice_due_date'),
+            from: 30,
+            to: 1,
+          };
+        },
+      ],
+      [
+        "a figure's age names a range of days, from before to",
+        (app) => {
+          sum(app, agingId, 'days_1_30').age = {
+            field: field('customer_invoice_due_date'),
+          };
+        },
+      ],
+      [
+        'a currency figure needs the List to declare currencies',
+        (app) => {
+          delete figures(app, agingId).currency;
+        },
+      ],
+      [
+        "a figure's currency is a text field its rows' or their parent's query selects",
+        (app) => {
+          sum(app, agingId, 'owing').currency = field('customer_invoice_total');
+        },
+      ],
+      [
+        "a figure's currency is a text field its rows' or their parent's query selects",
+        (app) => {
+          // The order's currency names no field of an invoice or a parent.
+          sum(app, agingId, 'owing').currency = field('sales_order_currency');
+        },
+      ],
+      [
+        'a priced figure adds its rows or what remains of them',
+        (app) => {
+          sum(app, agingId, 'invoices').price = {
+            field: field('customer_invoice_total'),
+          };
+        },
+      ],
+      [
+        'a figure prices with an exact decimal its query selects',
+        (app) => {
+          (sum(app, accountsId, 'open_value').price as Json).field = field(
+            'sales_order_line_item_id',
+          );
+        },
+      ],
+      [
+        'a figure discounts by an exact decimal its query selects',
+        (app) => {
+          (sum(app, accountsId, 'open_value').price as Json).discount = field(
+            'sales_order_line_unit_id',
+          );
+        },
+      ],
+      [
+        'a List declares currencies for its currency figures',
+        (app) => {
+          for (const value of figures(app, agingId).sums) delete value.currency;
+        },
+      ],
+      [
+        'list currency values must be unique',
+        (app) => {
+          figures(app, agingId).currency!.options.push({
+            value: 'CAD',
+            label: 'Canadian dollars',
+          });
+        },
+      ],
+      [
+        "a List's summary adds up its sums, choices and totals",
+        (app) => {
+          figures(app, agingId).summary![0] =
+            `${ns}:list_figure.receivables_aging_list_standing`;
+        },
+      ],
+      [
+        "a List's summary adds up figures its columns show",
+        (app) => {
+          figures(app, agingId).summary![0] =
+            `${ns}:list_figure.receivables_aging_list_past_due_total`;
+        },
+      ],
+      [
+        'list summary figures must be unique',
+        (app) => {
+          const summary = figures(app, agingId).summary!;
+          summary[1] = summary[0]!;
+        },
+      ],
+      [
+        'picker eligibility requires an unscoped List of an entity related to the picker entity',
+        (app) => {
+          (listOf(app, accountsId).list.eligibility as Json).queryId =
+            `${ns}:query.sales_order_list`;
+        },
+      ],
+      [
+        'picker eligibility filters require selected fields and admissible values',
+        (app) => {
+          (
+            (listOf(app, accountsId).list.eligibility as Json).filters as Json[]
+          )[0]!.value = `${ns}:option.vendor`;
+        },
+      ],
+      [
+        "a List's record page is an active record page of its rows",
+        (app) => {
+          listOf(app, agingId).list.record = `${ns}:surface.sales_order_detail`;
+        },
+      ],
+      [
+        "a row action's section is a dataset of the List's record page",
+        (app) => {
+          (
+            (listOf(app, agingId).list.rowActions as Json[])[0] as Json
+          ).section = `${ns}:dataset.party_addresses`;
+        },
+      ],
+      [
+        'a figure column is an unsorted value and a band column its status',
+        (app) => {
+          listOf(app, agingId).list.columns.find((value) =>
+            String(value.columnId).endsWith('_list_owing'),
+          )!.format = 'date';
+        },
+      ],
+    ];
+  const outcomes = cases.map(([reason, mutate]) => [reason, refused(mutate)]);
+  for (const [reason, rule] of outcomes)
+    assert.match(
+      rule!,
+      new RegExp(reason!.replace(/[()'.]/gu, '.')),
+      `${reason!} -> ${rule!}`,
+    );
+  // Closed keys and bounds: an unknown member of a currency or an age, an
+  // age past ten years or a seventh summary figure is refused, not ignored.
+  assert.match(
+    refused((app) => {
+      figures(app, agingId).currency!.default = 'USD';
+    }),
+    /closed supported schema/u,
+  );
+  assert.match(
+    refused((app) => {
+      (sum(app, agingId, 'over_90').age as Json).from = 3651;
+    }),
+    /closed supported schema/u,
+  );
+  assert.match(
+    refused((app) => {
+      const summary = figures(app, accountsId).summary!;
+      summary.push(...summary.map((value) => `${value}_again`));
+    }),
+    /closed supported schema/u,
+  );
+});
+
 test('an unknown List key is refused rather than ignored', () => {
   assert.match(
     refused((app) => {
@@ -1616,6 +1961,8 @@ test('a printable document is declared over the record composition and refused w
     return print ? [[surface.surfaceId, print.label]] : [];
   });
   assert.deepEqual(printed.sort(), [
+    // REPORTS-HOME: a customer's statement, from its account page.
+    [`${ns}:surface.customer_account_detail`, 'Statement'],
     // Ruling C: the printable invoice.
     [`${ns}:surface.customer_invoice_detail`, 'Invoice'],
     [`${ns}:surface.purchase_order_detail`, 'Purchase order'],

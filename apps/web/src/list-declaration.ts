@@ -22,6 +22,12 @@ import {
  * the browser or over a fetched page.
  */
 export interface DeclaredListState {
+  /**
+   * The one currency a List's currency figures are read in (REPORTS-HOME):
+   * a declared option, the first unless the URL names another; `null` for a
+   * List that declares none.
+   */
+  readonly currency: string | null;
   readonly filterValues: Readonly<Record<string, string>>;
   readonly includeArchived: boolean;
   readonly page: number;
@@ -84,7 +90,13 @@ export function readDeclaredListState(
       column.sortable && column.columnId === url.searchParams.get('sort'),
   );
   const page = Number(url.searchParams.get('page') ?? '1');
+  const currencies = list.figures?.currency?.options ?? [];
+  const requestedCurrency = url.searchParams.get('currency');
   return Object.freeze({
+    currency:
+      currencies.find((option) => option.value === requestedCurrency)?.value ??
+      currencies[0]?.value ??
+      null,
     filterValues: Object.freeze(filterValues),
     includeArchived: url.searchParams.get('archived') === 'yes',
     page:
@@ -117,6 +129,7 @@ export function declaredListParameters(
   const next = { ...state, ...change };
   const parameters = new URLSearchParams(base);
   if (next.viewId) parameters.set('view', next.viewId);
+  if (next.currency !== null) parameters.set('currency', next.currency);
   for (const [filterId, value] of Object.entries(next.filterValues))
     parameters.set(filterId, value);
   if (next.search.length > 0) parameters.set('q', next.search);
@@ -301,9 +314,16 @@ function progressArgument(
 function figuresArgument(
   list: SurfaceList,
   band: SurfaceList['views'][number]['band'],
+  /**
+   * REPORTS-HOME: the one currency the List is read in, and midnight UTC of
+   * the request's day, from which an age counts whole days.
+   */
+  read: { readonly currency: string | null; readonly today: string },
 ) {
   const figures = list.figures;
   if (!figures) return undefined;
+  const aged = figures.sums.some((sum) => sum.age !== undefined);
+  const currencied = figures.sums.some((sum) => sum.currency !== undefined);
   const within = (
     value: NonNullable<
       NonNullable<SurfaceList['figures']>['latest']
@@ -402,6 +422,9 @@ function figuresArgument(
           ),
         }
       : {}),
+    ...(currencied && read.currency !== null
+      ? { currency: read.currency }
+      : {}),
     ...(band
       ? {
           keep: Object.freeze({
@@ -432,10 +455,35 @@ function figuresArgument(
           ),
         }
       : {}),
+    ...(figures.summary
+      ? { summary: Object.freeze([...figures.summary]) }
+      : {}),
     sums: Object.freeze(
       figures.sums.map((entry) =>
         Object.freeze({
+          ...(entry.age
+            ? {
+                age: Object.freeze({
+                  fieldId: entry.age.field,
+                  ...(entry.age.from === undefined
+                    ? {}
+                    : { from: entry.age.from }),
+                  ...(entry.age.to === undefined ? {} : { to: entry.age.to }),
+                }),
+              }
+            : {}),
+          ...(entry.currency ? { currencyFieldId: entry.currency } : {}),
           figureId: entry.figureId,
+          ...(entry.price
+            ? {
+                price: Object.freeze({
+                  ...(entry.price.discount
+                    ? { discountFieldId: entry.price.discount }
+                    : {}),
+                  fieldId: entry.price.field,
+                }),
+              }
+            : {}),
           ...(entry.related
             ? {
                 related: Object.freeze({
@@ -446,17 +494,35 @@ function figuresArgument(
               }
             : {}),
           rows: Object.freeze({
-            matchFieldId: entry.rows.match,
+            ...(entry.rows.match ? { matchFieldId: entry.rows.match } : {}),
             queryId: entry.rows.query.targetId,
             ...(entry.rows.quantity
               ? { quantityFieldId: entry.rows.quantity }
               : {}),
           }),
           sum: entry.sum,
-          ...(entry.within ? { within: within(entry.within) } : {}),
+          ...(entry.where
+            ? {
+                where: Object.freeze({
+                  fieldId: entry.where.field,
+                  values: Object.freeze([...entry.where.values]),
+                }),
+              }
+            : {}),
+          ...(entry.within
+            ? {
+                within: Object.freeze({
+                  ...within(entry.within),
+                  ...('match' in entry.within && entry.within.match
+                    ? { matchFieldId: entry.within.match }
+                    : {}),
+                }),
+              }
+            : {}),
         }),
       ),
     ),
+    ...(aged ? { today: read.today } : {}),
     ...(figures.totals
       ? {
           totals: Object.freeze(
@@ -573,7 +639,23 @@ export function declaredListArguments(
       );
   // Figures ride every request too: a count, a page and an export read the
   // same figures, and a view's band narrows all three in the statement.
-  const figures = figuresArgument(list, view?.band);
+  const figures = figuresArgument(list, view?.band, {
+    currency: state.currency,
+    today: startOfTodayUtc(options.now).toISOString(),
+  });
+  // REPORTS-HOME: only the rows the List's eligibility keeps -- customers --
+  // on every request, so a count, a page and an export read the same set.
+  const relatedFilter = list.eligibility
+    ? Object.freeze({
+        fieldFilters: Object.freeze(
+          list.eligibility.filters.map((filter) =>
+            Object.freeze({ fieldId: filter.fieldId, value: filter.value }),
+          ),
+        ),
+        queryId: list.eligibility.queryId,
+        relationId: list.eligibility.relationId,
+      })
+    : undefined;
   const beforeFilters = Object.freeze(
     view?.before
       ? [
@@ -605,6 +687,7 @@ export function declaredListArguments(
     pageOffset: options.pageOffset ?? 0,
     parentScope: null,
     ...(fieldFilters.length > 0 ? { fieldFilters } : {}),
+    ...(relatedFilter ? { relatedFilter } : {}),
     ...(progress ? { progress } : {}),
     ...(figures ? { figures } : {}),
     ...(beforeFilters.length > 0 ? { beforeFilters } : {}),
@@ -626,6 +709,7 @@ export function declaredListArguments(
           ? encodeSharedListCursor(options.queryId, digestInput, offset)
           : null,
       ...(fieldFilters.length > 0 ? { fieldFilters } : {}),
+      ...(relatedFilter ? { relatedFilter } : {}),
       ...(progress ? { progress } : {}),
       ...(figures ? { figures } : {}),
       ...(beforeFilters.length > 0 ? { beforeFilters } : {}),

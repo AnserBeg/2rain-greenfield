@@ -380,17 +380,22 @@ test(
     // WAREHOUSE-MODE: the Warehouse's Pick and ship tile opens the To ship
     // view this variant drops, and the compiler refuses a tile whose view its
     // List no longer declares; the variation stays metadata-only by pointing
-    // that tile at a view the List keeps.
-    const warehouse = authored.surfaces.find(
-      (surface) => surface.surfaceId === `${ns}:surface.inventory_warehouse`,
-    )!;
-    for (const tile of (
-      warehouse.launcher as {
-        tiles: Array<{ surface: string; view?: string }>;
-      }
-    ).tiles)
-      if (tile.surface === `${ns}:surface.sales_order_list`)
-        tile.view = salesView('released');
+    // that tile at a view the List keeps. Today's Blocked sales orders and
+    // Ready to ship tiles (REPORTS-HOME) open dropped views too.
+    const launchers = authored.surfaces.filter(
+      (surface) =>
+        surface.surfaceId === `${ns}:surface.inventory_warehouse` ||
+        surface.surfaceId === `${ns}:surface.a_today`,
+    );
+    assert.equal(launchers.length, 2);
+    for (const launcher of launchers)
+      for (const tile of (
+        launcher.launcher as {
+          tiles: Array<{ surface: string; view?: string }>;
+        }
+      ).tiles)
+        if (tile.surface === `${ns}:surface.sales_order_list`)
+          tile.view = salesView('released');
     authored.queries.find(
       (query) => query.queryId === `${ns}:query.sales_order_list`,
     )!.exportMaximumResultCount = 5;

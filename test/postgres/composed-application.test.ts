@@ -1669,8 +1669,9 @@ async function assertRealProductDefinition(
     // REPLENISHMENT Stock by item and the Buying worklist; CATALOG-EXTRAS an
     // item's aliases (list, detail, form); WAREHOUSE-MODE the Warehouse
     // launcher; VALUATION the Inventory value List; APPROVALS five
-    // (approval requests and settings).
-    assert.equal(surfaces.length, 113);
+    // (approval requests and settings); REPORTS-HOME four (Receivables
+    // aging, Customer accounts, the customer account page and Today).
+    assert.equal(surfaces.length, 117);
     assert.ok(surfaces.includes('northstar.app:surface.item_alias_list'));
     assert.ok(surfaces.includes('northstar.app:surface.inventory_warehouse'));
     assert.ok(surfaces.includes('northstar.app:surface.inventory_value_list'));

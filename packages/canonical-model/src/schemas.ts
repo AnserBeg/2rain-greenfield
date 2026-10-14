@@ -1426,20 +1426,39 @@ const listFigureRows = z.strictObject({
  * in one of their own text fields (`reference`), as a stock balance holds its
  * location: only stock at a usable location (LOCATIONS; optional v6 key).
  */
+const listFigureWithinRelation = z.strictObject({
+  relation: CanonicalIdSchema,
+  query: compositionReference('queryReference'),
+  field: CanonicalIdSchema,
+  values: z.array(z.string().min(1).max(240)).min(1).max(8),
+});
+const listFigureWithinReference = z.strictObject({
+  reference: CanonicalIdSchema,
+  query: compositionReference('queryReference'),
+  field: CanonicalIdSchema,
+  values: z.array(z.string().min(1).max(240)).min(1).max(8),
+});
 const listFigureWithin = z.union([
-  z.strictObject({
-    relation: CanonicalIdSchema,
-    query: compositionReference('queryReference'),
-    field: CanonicalIdSchema,
-    values: z.array(z.string().min(1).max(240)).min(1).max(8),
-  }),
-  z.strictObject({
-    reference: CanonicalIdSchema,
-    query: compositionReference('queryReference'),
-    field: CanonicalIdSchema,
-    values: z.array(z.string().min(1).max(240)).min(1).max(8),
-  }),
+  listFigureWithinRelation,
+  listFigureWithinReference,
 ]);
+/**
+ * A sum's parent may instead be the record that holds the listed record's id
+ * in one of its own text fields (`match`) -- an order line counted for the
+ * customer its order names -- and its rows then name no match of their own.
+ * Optional v6 key (REPORTS-HOME).
+ */
+const listFigureParentMatch = { match: CanonicalIdSchema.optional() };
+const listFigureSumWithin = z.union([
+  listFigureWithinRelation.extend(listFigureParentMatch),
+  listFigureWithinReference.extend(listFigureParentMatch),
+]);
+/** A sum's rows: their own match, or none when their parent holds the id. */
+const listFigureSumRows = z.strictObject({
+  query: compositionReference('queryReference'),
+  match: CanonicalIdSchema.optional(),
+  quantity: CanonicalIdSchema.optional(),
+});
 /** Rows pointing at each figure row through a relation, and their quantity. */
 const listFigureRelated = z.strictObject({
   query: compositionReference('queryReference'),
@@ -1572,13 +1591,44 @@ const listRowAction = z.strictObject({
  * One per-row sum: `rows` adds the rows' quantity, `related` the related rows'
  * quantity, and `remaining` each row's quantity less its related rows',
  * never below zero per row -- what is still to arrive on a released order line.
+ * `count` (optional v6 member, REPORTS-HOME) is how many rows there are.
+ *
+ * REPORTS-HOME, each an optional v6 key: `where` keeps only rows whose own
+ * field holds one of the values; `age` only rows whose own date lies `from`
+ * to `to` whole calendar days (UTC) before the request's today -- an invoice
+ * 1 to 30 days past its due date; `currency` names the rows' (or their
+ * parent's) text field holding a currency, and the sum then adds only the
+ * rows in the List's one chosen currency (`figures.currency`), never adding
+ * two currencies together; `price` adds, per row, its quantity or what
+ * remains of it times its price less its percentage discount, rounded half
+ * up to cents -- unstated while any row with something to add has no price.
  */
 const listFigureSum = z.strictObject({
   figureId: CanonicalIdSchema,
-  rows: listFigureRows,
-  within: listFigureWithin.optional(),
+  rows: listFigureSumRows,
+  within: listFigureSumWithin.optional(),
   related: listFigureRelated.optional(),
-  sum: z.enum(['rows', 'related', 'remaining']),
+  sum: z.enum(['rows', 'related', 'remaining', 'count']),
+  where: z
+    .strictObject({
+      field: CanonicalIdSchema,
+      values: z.array(z.string().min(1).max(240)).min(1).max(8),
+    })
+    .optional(),
+  age: z
+    .strictObject({
+      field: CanonicalIdSchema,
+      from: z.int().min(-3650).max(3650).optional(),
+      to: z.int().min(-3650).max(3650).optional(),
+    })
+    .optional(),
+  currency: CanonicalIdSchema.optional(),
+  price: z
+    .strictObject({
+      field: CanonicalIdSchema,
+      discount: CanonicalIdSchema.optional(),
+    })
+    .optional(),
 });
 /** A figure declared before, or an exact decimal the List's own query selects. */
 const listFigureOperand = z.union([
@@ -1709,6 +1759,33 @@ const listFigures = z.strictObject({
   totals: z.array(listFigureTotal).max(6).optional(),
   bands: z.array(listFigureBand).max(2).optional(),
   latest: z.array(listFigureLatest).max(2).optional(),
+  /**
+   * The currencies a List's currency sums are read in, one at a time: the
+   * first option unless the person chooses another. Every request names
+   * exactly one, so no figure ever adds two currencies together (owner
+   * ruling B: no exchange rates). Optional v6 key (REPORTS-HOME).
+   */
+  currency: z
+    .strictObject({
+      label: LabelSchema,
+      options: z
+        .array(
+          z.strictObject({
+            value: z.string().min(1).max(64),
+            label: LabelSchema,
+          }),
+        )
+        .min(1)
+        .max(8),
+    })
+    .optional(),
+  /**
+   * Number figures added up over every row the List's view, filters and
+   * search keep -- not the page -- and shown above the grid: a report's
+   * totals. Unstated where any row's figure is. Optional v6 key
+   * (REPORTS-HOME).
+   */
+  summary: z.array(CanonicalIdSchema).min(1).max(6).optional(),
 });
 /**
  * A child entity whose records also answer the List's search: a row matches
@@ -1800,6 +1877,20 @@ export const SurfaceListSchema = z.strictObject({
   rowActions: z.array(listRowAction).min(1).max(3).optional(),
   figures: listFigures.optional(),
   searchChildren: z.array(listSearchChild).min(1).max(2).optional(),
+  /**
+   * Only rows an active record of another entity points at through its
+   * parentScopedChild relation while holding these exact values -- parties
+   * with an active customer role -- applied by the list query before the
+   * count and the page, as a picker's eligibility is. Optional v6 key
+   * (REPORTS-HOME).
+   */
+  eligibility: pickerEligibility.optional(),
+  /**
+   * The record page this List opens its rows in, when the entity has more
+   * than one: an active record surface over the List's own entity. Optional
+   * v6 key (REPORTS-HOME).
+   */
+  record: CanonicalIdSchema.optional(),
 });
 export type SurfaceList = z.infer<typeof SurfaceListSchema>;
 export type SurfaceListProgress = NonNullable<SurfaceList['progress']>;

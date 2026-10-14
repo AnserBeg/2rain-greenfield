@@ -733,8 +733,12 @@ function surfaceAcceptsQuery(
   surface: CompiledSurfaceDefinition,
   queryType: RegisteredSemanticQueryDefinition['queryType'],
 ): boolean {
+  // A launcher Task acts through its tiles alone and never asks the read it
+  // binds; that read only enters it in a company, so it may be a List's as
+  // well as a lookup's (Today, REPORTS-HOME).
   return surface.archetype === 'task' && surface.surfaceRole === null
-    ? queryType === 'aggregate'
+    ? queryType === 'aggregate' ||
+        (surface.launcher !== undefined && queryType === 'list')
     : surface.surfaceRole === 'list'
       ? queryType === 'list' || queryType === 'search'
       : surface.surfaceRole === 'form' || surface.surfaceRole === 'record'

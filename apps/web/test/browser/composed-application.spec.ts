@@ -1030,13 +1030,17 @@ async function inventoryNavigationJourney(
       ':scope > a > span:nth-child(2), :scope > details > summary > span:nth-child(2) > .nav-group-label',
     ),
   ).toHaveText(['Sales', 'Purchasing', 'Inventory', 'Party', 'More']);
-  // Sales lists its invoices beside its orders (ruling C), Purchasing its
+  // Sales lists its invoices beside its orders (ruling C), led by Today with
+  // Customer accounts and Receivables aging (REPORTS-HOME), Purchasing its
   // expected receipts (PURCHASING-PARITY), approvals/settings (APPROVALS) and
   // bills (PAYABLES) beside its orders, Inventory Catalog's Buying worklist and
   // Stock by item (REPLENISHMENT) and Catalog its tax codes beside its items
   // (ruling B).
   await expect(navigation.locator('a > span:nth-child(2)')).toHaveText([
+    'Today',
+    'Customer accounts',
     'Invoices',
+    'Receivables aging',
     'Sales orders',
     'Expected receipts',
     'Approvals',

@@ -1031,13 +1031,43 @@ async function authorizeSharedListProjection(
     const referenced = (within: { readonly referenceFieldId?: string }) =>
       within.referenceFieldId === undefined ? [] : [within.referenceFieldId];
     for (const sum of query.figures.sums) {
+      // REPORTS-HOME: what a sum keeps, ages and prices by are fields of its
+      // rows; its currency is a field of its rows or, where their query does
+      // not select it, of their parent -- an order line is in its order's
+      // currency. Either way the reading query must select it.
+      const rowsQuery = registeredQueryFromPinnedView(view, sum.rows.queryId);
+      const parentCurrency =
+        sum.currencyFieldId !== undefined &&
+        sum.within !== undefined &&
+        !rowsQuery?.selections.some(
+          (selection) => selection.fieldId === sum.currencyFieldId,
+        );
       use(sum.rows.queryId, [
-        sum.rows.matchFieldId,
+        ...(sum.rows.matchFieldId ? [sum.rows.matchFieldId] : []),
         ...(sum.rows.quantityFieldId ? [sum.rows.quantityFieldId] : []),
         ...(sum.within ? referenced(sum.within) : []),
+        ...(sum.where ? [sum.where.fieldId] : []),
+        ...(sum.age ? [sum.age.fieldId] : []),
+        ...(sum.price
+          ? [
+              sum.price.fieldId,
+              ...(sum.price.discountFieldId ? [sum.price.discountFieldId] : []),
+            ]
+          : []),
+        ...(sum.currencyFieldId !== undefined && !parentCurrency
+          ? [sum.currencyFieldId]
+          : []),
       ]);
       if (sum.within)
-        use(sum.within.queryId, [sum.within.fieldId], sum.within.relationId);
+        use(
+          sum.within.queryId,
+          [
+            sum.within.fieldId,
+            ...(sum.within.matchFieldId ? [sum.within.matchFieldId] : []),
+            ...(parentCurrency ? [sum.currencyFieldId!] : []),
+          ],
+          sum.within.relationId,
+        );
       if (sum.related)
         use(sum.related.queryId, [sum.related.fieldId], sum.related.relationId);
     }

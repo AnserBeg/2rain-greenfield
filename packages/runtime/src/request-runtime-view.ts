@@ -183,7 +183,10 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // (CATALOG-EXTRAS).
     // 21 adds a List progress's supply and the views and row actions that
     // keep covered or short rows (SUPPLY-WARNINGS).
-    maximumSupportedVersion: 21,
+    // 27 adds REPORTS-HOME's figures (count, where, age, currency, price, a
+    // parent's match), a List's summary, currency, eligibility and record
+    // page. 22-25 are INTEGRATION's rungs and 26 a parallel packet's.
+    maximumSupportedVersion: 27,
   },
 });
 
