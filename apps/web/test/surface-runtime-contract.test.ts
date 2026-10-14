@@ -814,6 +814,7 @@ test('RECEIVING-EXTRAS: the posting kernel’s date and receiving refusals read 
     ['INVENTORY_PERIOD_CLOSED', 'OPERATION_PERIOD_CLOSED'],
     ['RECEIPT_CORRECTION_INVALID', 'OPERATION_RECEIPT_CORRECTION_EXCEEDED'],
     ['RECEIPT_ORDER_NOT_RELEASED', 'OPERATION_ORDER_NOT_RELEASED'],
+    ['RECEIPT_QUANTITY_OUT_OF_BOUNDS', 'OPERATION_RECEIVED_OUT_OF_BOUNDS'],
   ] as const) {
     assert.deepEqual(
       operationMessageRef(new InventoryPostingError(code, 'refused')),
@@ -2633,10 +2634,11 @@ test('the message catalog honours the vocabulary it declares', () => {
   // and the redacted partial-commit outcome.
   // SALES-PARITY adds the declared-List export refusal (never a partial file).
   // WAREHOUSE-MODE adds the two answers of a scan that opened nothing.
-  // RECEIVING-EXTRAS adds five provider refusals read in plain language: a
+  // RECEIVING-EXTRAS adds six provider refusals read in plain language: a
   // date after today, a date past the backdate window, a closed period, a
-  // correction beyond its receipt and an order that is not released.
-  assert.equal(SURFACE_MESSAGE_CODES.length, 55);
+  // correction beyond its receipt, an order line's received leaving zero to
+  // ordered, and an order that is not released.
+  assert.equal(SURFACE_MESSAGE_CODES.length, 56);
 
   for (const code of SURFACE_MESSAGE_CODES) {
     const entry = SURFACE_MESSAGE_CATALOG[code];

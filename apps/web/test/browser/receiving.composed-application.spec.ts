@@ -290,10 +290,9 @@ async function journey(
     scope,
   );
   try {
-    await page.getByRole('button', { name: 'Post', exact: true }).click();
-    await page
-      .getByRole('button', { name: 'Confirm Post', exact: true })
-      .click();
+    // The receipt page is a composed document (RECEIVING-EXTRAS): its
+    // commands sit under Record actions.
+    await command('Post');
     await expect(
       page.locator('[data-diagnostic-code="OPERATION_PERMISSION_DENIED"]'),
     ).toHaveCount(1);
@@ -310,10 +309,22 @@ async function journey(
     );
   }
   await page.goto(url('goods_receipt', 'detail', receiptId));
-  await page.getByRole('button', { name: 'Post', exact: true }).click();
-  await page.getByRole('button', { name: 'Confirm Post', exact: true }).click();
+  await command('Post');
   await expect(page.getByRole('status')).toContainText('Post complete');
-  await expect(page.getByText(/Active · revision 2/)).toBeVisible();
+  // Posted, active and written once since it was created: the composed
+  // page's status and its technical details.
+  await expect(page.locator('.composition-business-status')).toHaveText(
+    'posted',
+  );
+  const technical = page.locator('details.composition-technical');
+  await technical.locator('summary').click();
+  const fact = (term: string) =>
+    technical
+      .locator('div')
+      .filter({ has: page.locator('dt', { hasText: term }) })
+      .locator('dd');
+  await expect(fact('Activity')).toHaveText('Active');
+  await expect(fact('Revision')).toHaveText('2');
   await page
     .getByRole('link', { name: 'View order progress', exact: true })
     .click();

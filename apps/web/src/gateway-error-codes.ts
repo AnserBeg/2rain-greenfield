@@ -86,8 +86,10 @@ export type MappedOperationErrorName =
 /**
  * The provider refusals read in plain language (RECEIVING-EXTRAS): the
  * posting kernel's date window, a closed period, a correction beyond what a
- * receipt still adds, and an order that is not released. The kernel's code
- * stays the subject, so the operator and support still see it.
+ * receipt still adds, an order line's received quantity leaving zero to
+ * ordered (taking back more than a line received, receiving more than is
+ * open), and an order that is not released. The kernel's code stays the
+ * subject, so the operator and support still see it.
  */
 const READABLE_REFUSAL_CODES = Object.freeze({
   INVENTORY_BACKDATE_LIMIT_EXCEEDED: 'OPERATION_DATE_BEFORE_WINDOW',
@@ -96,6 +98,7 @@ const READABLE_REFUSAL_CODES = Object.freeze({
   RECEIPT_CORRECTION_INVALID: 'OPERATION_RECEIPT_CORRECTION_EXCEEDED',
   RECEIPT_FORWARD_DATE_REFUSED: 'OPERATION_DATE_AFTER_TODAY',
   RECEIPT_ORDER_NOT_RELEASED: 'OPERATION_ORDER_NOT_RELEASED',
+  RECEIPT_QUANTITY_OUT_OF_BOUNDS: 'OPERATION_RECEIVED_OUT_OF_BOUNDS',
 } as const);
 
 type ReadableRefusalCode =

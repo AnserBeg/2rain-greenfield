@@ -320,8 +320,24 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
    * (RECEIVING-EXTRAS): each active line of a released order -- Place order
    * keeps an order released -- at its ordered quantity less what it has
    * received, never below zero, read through the queries the Sales orders
-   * List's supply sums. Without them declared, nothing is incoming.
+   * List's supply sums. An order counts by its stored state, read exactly
+   * (a relation label carries the state's display text, never its identity).
+   * Without the queries declared, nothing is incoming.
    */
+  const lifecycle = `${ns}:derived_state_field.machine.purchase_order_lifecycle`;
+  const releasedState = `${ns}:state.purchase_order_released`;
+  let releasedOrders: Promise<ReadonlySet<string>> | undefined;
+  const releasedOrderIds = () =>
+    (releasedOrders ??= (async () =>
+      new Set(
+        (
+          await list('incomingOrders', {
+            fieldFilters: [{ fieldId: lifecycle, value: releasedState }],
+          })
+        )
+          .filter((order) => order.values[lifecycle] === releasedState)
+          .map((order) => order.recordId),
+      ))());
   const incomingStock = new Map<string, Promise<bigint>>();
   const incomingOf = (item: string) => {
     const orders = model.queries.incomingOrders?.targetId;
@@ -330,7 +346,7 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
     if (!known) {
       known = (async () => {
         const toOrder = `${ns}:relation.purchase_order_line_order`;
-        const state = `${ns}:derived_state_field.machine.purchase_order_lifecycle`;
+        const released = await releasedOrderIds();
         let incoming = 0n;
         for (const line of await list(
           'incomingLines',
@@ -344,14 +360,11 @@ export const fulfillmentReadModel: SemanticQueryReadModelExecutor = async ({
           },
           undefined,
           undefined,
-          // The order each line belongs to, labelled by its state.
-          [{ relationId: toOrder, queryId: orders, fieldId: state }],
+          // The order each line belongs to, read under the orders' own query.
+          [{ relationId: toOrder, queryId: orders, fieldId: lifecycle }],
         )) {
-          if (
-            line.relationLabels?.[toOrder]?.label !==
-            `${ns}:state.purchase_order_released`
-          )
-            continue;
+          const order = line.relationLabels?.[toOrder]?.recordId;
+          if (!order || !released.has(order)) continue;
           let received = 0n;
           for (const row of await list(
             'incomingReceived',

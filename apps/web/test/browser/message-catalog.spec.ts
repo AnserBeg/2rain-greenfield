@@ -68,6 +68,7 @@ const CENSUS_READABLE_REFUSAL_SUBJECTS = Object.freeze({
   OPERATION_ORDER_NOT_RELEASED: 'RECEIPT_ORDER_NOT_RELEASED',
   OPERATION_PERIOD_CLOSED: 'INVENTORY_PERIOD_CLOSED',
   OPERATION_RECEIPT_CORRECTION_EXCEEDED: 'RECEIPT_CORRECTION_INVALID',
+  OPERATION_RECEIVED_OUT_OF_BOUNDS: 'RECEIPT_QUANTITY_OUT_OF_BOUNDS',
 });
 const CENSUS_SUBJECTS = Object.freeze({
   ...CENSUS_READABLE_REFUSAL_SUBJECTS,
@@ -89,6 +90,7 @@ function censusMessageRef(code: SurfaceMessageCode): SurfaceMessageRef {
     case 'OPERATION_ORDER_NOT_RELEASED':
     case 'OPERATION_PERIOD_CLOSED':
     case 'OPERATION_RECEIPT_CORRECTION_EXCEEDED':
+    case 'OPERATION_RECEIVED_OUT_OF_BOUNDS':
       return { code, subject: CENSUS_READABLE_REFUSAL_SUBJECTS[code] };
     case 'RELATION_ENUMERATION_UNAVAILABLE':
       return { code, subject: CENSUS_RELATION_SUBJECT };
@@ -808,9 +810,15 @@ const DECLARED_NO_REAL_PATH_DRIVER: Readonly<
     'inventory-warehouse-mode.spec.ts against the composed PostgreSQL ' +
     'release; this census observes the registered text.',
   OPERATION_RECEIPT_CORRECTION_EXCEEDED:
-    'Write path: Correct receipt taking back more than a line still adds, ' +
-    'refused by the posting kernel, in receiving-extras.spec.ts against the ' +
-    'composed PostgreSQL release; this census observes the registered text.',
+    'Write path: Correct receipt taking back more than a line still adds ' +
+    'while its order line keeps what a later receipt received, refused by ' +
+    'the posting kernel, in receiving-extras.spec.ts against the composed ' +
+    'PostgreSQL release; this census observes the registered text.',
+  OPERATION_RECEIVED_OUT_OF_BOUNDS:
+    'Write path: Correct receipt taking back more than its order line has ' +
+    'received, refused by the posting kernel, in receiving-extras.spec.ts ' +
+    'against the composed PostgreSQL release; this census observes the ' +
+    'registered text.',
   OPERATION_UNAVAILABLE:
     'Write path, same gateway fixture, plus an executor that fails the ' +
     'operation after it is accepted. Reached through the residual branch of ' +

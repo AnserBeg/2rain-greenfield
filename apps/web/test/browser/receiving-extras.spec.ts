@@ -19,13 +19,22 @@ interface Scenario {
 
 /** An instant as the explicit-UTC picker shows it, to the second. */
 const picker = (instant: Date) => instant.toISOString().slice(0, 19);
+/** An instant as every page states it: to the minute, in UTC. */
+const shown = (instant: Date) =>
+  `${new Intl.DateTimeFormat('en', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'UTC',
+  }).format(instant)} UTC`;
 
 // RECEIVING-EXTRAS in the browser, against the composed application on
 // PostgreSQL: the truck's receive Task asks the day the goods arrived,
 // starting at today; a day after today or one past the backdate window is
 // refused in plain language and receives nothing; yesterday is received as
 // yesterday. A posted receipt's own page then takes back part of one line
-// only -- never more than it still adds -- through Correct receipt.
+// only through Correct receipt -- never more than its order line received,
+// nor more than the receipt's line still adds when a later delivery received
+// the rest -- each refusal said plainly.
 test('a receive Task is dated the day goods arrived, refused in plain language outside the window, and a receipt is corrected for part of one line', async ({
   page,
 }, testInfo) => {
@@ -146,19 +155,70 @@ test('a receive Task is dated the day goods arrived, refused in plain language o
       'Receive lines with actual cost: done',
     );
     await received(['5', '0', '4']);
+    // Received at the instant entered, stated as every instant is: in UTC.
     await expect(
       dataset('purchasing_receipts')
         .locator('tbody tr')
         .filter({ hasText: 'posted' }),
-    ).toContainText(yesterday.toISOString().slice(0, 10));
+    ).toContainText(shown(yesterday));
 
-    // The delivered order's receipt, on its own page: its lines with what
-    // each still adds to stock.
-    await page.goto(
-      url('purchase_order_detail', 'commercial_purchase_order_get', {
-        record: scenario.delivered.recordId,
-      }),
+    // The delivered order (6 and 3 ordered, 4 and 3 on its one receipt): a
+    // second delivery brings the first line's last two.
+    const deliveredUrl = url(
+      'purchase_order_detail',
+      'commercial_purchase_order_get',
+      { record: scenario.delivered.recordId },
     );
+    await page.goto(deliveredUrl);
+    await page
+      .getByRole('button', {
+        name: 'Receive lines with actual cost',
+        exact: true,
+      })
+      .click();
+    await dialog
+      .getByRole('button', { name: 'Fill open quantities', exact: true })
+      .click();
+    await expect(
+      dialog.getByRole('textbox', {
+        name: 'Quantity to receive, Field notebook, Line 1',
+        exact: true,
+      }),
+    ).toHaveValue('2');
+    await dialog
+      .getByRole('textbox', {
+        name: 'Actual received unit cost, Field notebook, Line 1',
+        exact: true,
+      })
+      .fill('2.5');
+    await dialog
+      .getByRole('button', {
+        name: 'Review Receive lines with actual cost',
+        exact: true,
+      })
+      .click();
+    await dialog
+      .getByRole('button', {
+        name: 'Confirm Receive lines with actual cost',
+        exact: true,
+      })
+      .click();
+    await expect(page.getByRole('status').first()).toContainText(
+      'Receive lines with actual cost: done',
+    );
+    await page.goto(deliveredUrl);
+    for (const [line, value] of [
+      [scenario.delivered.lines[0]!, '6'],
+      [scenario.delivered.lines[1]!, '3'],
+    ] as const)
+      await expect(
+        row('purchasing_lines', line).locator(
+          'td[data-column-label="Received"]',
+        ),
+      ).toHaveText(value);
+
+    // The first receipt, on its own page: its lines with what each still
+    // adds to stock.
     await row('purchasing_receipts', scenario.delivered.receipt.recordId)
       .getByRole('link', { name: 'Open receipt', exact: true })
       .click();
@@ -210,13 +270,33 @@ test('a receive Task is dated the day goods arrived, refused in plain language o
         .getByRole('button', { name: 'Confirm Correct receipt', exact: true })
         .click();
     };
-    // More than the line still adds: refused, said plainly, nothing moves.
+    const refusal = async (code: string, sentence: string, subject: string) => {
+      const message = page.locator(`[data-message="${code}"]`);
+      await expect(message.locator('[data-message-sentence]')).toHaveText(
+        sentence,
+      );
+      await expect(message.locator('[data-message-subject]')).toHaveText(
+        subject,
+      );
+    };
+    // More than the order line has received (6): refused, said plainly,
+    // nothing moves.
+    await correct('7');
+    await refusal(
+      'OPERATION_RECEIVED_OUT_OF_BOUNDS',
+      'Quantity is beyond what was ordered or received',
+      'RECEIPT_QUANTITY_OUT_OF_BOUNDS',
+    );
+    await page.goto(receiptUrl);
+    await reversible(['4', '3']);
+    // Within what the order line received, but more than this receipt's line
+    // still adds (4): refused, said plainly, nothing moves.
     await correct('5');
-    await expect(
-      page
-        .locator('[data-message="OPERATION_RECEIPT_CORRECTION_EXCEEDED"]')
-        .locator('[data-message-sentence]'),
-    ).toHaveText('Correction exceeds the receipt');
+    await refusal(
+      'OPERATION_RECEIPT_CORRECTION_EXCEEDED',
+      'Correction exceeds the receipt',
+      'RECEIPT_CORRECTION_INVALID',
+    );
     await page.goto(receiptUrl);
     await reversible(['4', '3']);
     // One of the first line's four.
@@ -242,12 +322,12 @@ test('a receive Task is dated the day goods arrived, refused in plain language o
         await expect(dataset('receipt_doc_lines')).toBeVisible();
       },
     );
-    // The order received three on the first line and keeps the second's.
+    // The order received five on the first line and keeps the second's.
     await page
       .getByRole('link', { name: 'Open purchase order', exact: true })
       .click();
     for (const [line, value] of [
-      [scenario.delivered.lines[0]!, '3'],
+      [scenario.delivered.lines[0]!, '5'],
       [scenario.delivered.lines[1]!, '3'],
     ] as const)
       await expect(

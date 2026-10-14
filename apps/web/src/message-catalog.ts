@@ -381,6 +381,16 @@ export const SURFACE_MESSAGE_CATALOG = Object.freeze({
     sentence: 'Order is not released',
     subject: 'refusalCode',
   },
+  OPERATION_RECEIVED_OUT_OF_BOUNDS: {
+    consequence: 'blocking',
+    detail:
+      'What a purchase order line has received never falls below none or rises above what it ordered: a receipt takes at most what is still open, a correction takes back at most what the line received, ordered is never cut below received, and an order with anything received is closed rather than cancelled, once nothing is open.',
+    nextAction:
+      'Check the line’s Ordered, Received and Open quantities, or a receipt line’s Reversible, then try again.',
+    placements: ['page'],
+    sentence: 'Quantity is beyond what was ordered or received',
+    subject: 'refusalCode',
+  },
   OPERATION_REFUSED: {
     consequence: 'blocking',
     detail:
@@ -630,6 +640,7 @@ export const OPERATION_DIAGNOSTIC_CODES = Object.freeze([
   'OPERATION_PERIOD_CLOSED',
   'OPERATION_PERMISSION_DENIED',
   'OPERATION_RECEIPT_CORRECTION_EXCEEDED',
+  'OPERATION_RECEIVED_OUT_OF_BOUNDS',
   'OPERATION_REFUSED',
   'OPERATION_UNAVAILABLE',
   'OPERATION_UNSUPPORTED',

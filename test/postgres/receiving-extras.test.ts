@@ -444,7 +444,41 @@ test(
             (await stored(fixture, original.header.recordId)).movements,
             originalMovements,
           );
-          // More than a line still adds is refused, and writes nothing.
+          // More than a line still adds is refused, and writes nothing. When
+          // that is more than its order line has received, the kernel's
+          // received bounds refuse it first.
+          const belowNothing = await correction(second, '-4');
+          await assert.rejects(
+            post(belowNothing.header),
+            refusedWith('RECEIPT_QUANTITY_OUT_OF_BOUNDS'),
+          );
+          assert.deepEqual(
+            await stored(fixture, belowNothing.header.recordId),
+            { movements: [], state: 'draft' },
+          );
+          // A later delivery brings three more on the first line and two on
+          // the second (6 and 5 received): taking back four of the second
+          // from the first receipt keeps its order line above nothing, but
+          // that receipt's line adds only three, so the correction itself is
+          // refused.
+          const later = await receipt(
+            order.recordId,
+            new Date().toISOString(),
+            [
+              {
+                orderLine: lines[0]!.recordId,
+                item: fixture.item,
+                quantity: '3',
+              },
+              {
+                orderLine: lines[1]!.recordId,
+                item: fixture.item,
+                quantity: '2',
+              },
+            ],
+          );
+          assert.equal((await post(later.header)).outcome, 'succeeded');
+          assert.deepEqual(await receivedOf(order.recordId), ['6', '5']);
           const beyond = await correction(second, '-4');
           await assert.rejects(
             post(beyond.header),
@@ -454,9 +488,10 @@ test(
             movements: [],
             state: 'draft',
           });
-          // Two corrections each taking back the first line's remaining three,
-          // posted at once: one is admitted, the other refused, and the line
-          // is never taken below nothing.
+          // Two corrections each taking back the first receipt's remaining
+          // three of the first line, posted at once: one is admitted, the
+          // other refused, and the receipt's line is never taken below
+          // nothing (its order line keeps the later delivery's three).
           const racers = [
             await correction(first, '-3', '2.5'),
             await correction(first, '-3', '2.5'),
@@ -479,7 +514,7 @@ test(
             ].includes(String((lost.reason as { code?: unknown }).code)),
             String(lost.reason),
           );
-          assert.deepEqual(await receivedOf(order.recordId), ['0', '3']);
+          assert.deepEqual(await receivedOf(order.recordId), ['3', '5']);
           const settledLines = await reversible();
           assert.deepEqual(
             original.lines.map(
@@ -519,7 +554,8 @@ test(
             { receipt: reversal.recordId, order_line: rest.orderLine },
           );
           assert.equal((await post(reversal)).outcome, 'succeeded');
-          assert.deepEqual(await receivedOf(order.recordId), ['0', '0']);
+          // The later delivery's three and two are its own, untouched.
+          assert.deepEqual(await receivedOf(order.recordId), ['3', '2']);
         },
       );
 
