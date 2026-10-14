@@ -32,8 +32,9 @@ the fixture and removes its container. Under ten minutes.
    Issue with its date, 180.00, Cheque, CHQ-4410, your reason and who recorded it. Refund deposit is not offered;
    Issue always is (it records more kegs; it is not a preview).
 4. **Issue returnables** again for the same type, direction and currency from the party page: refused
-   (`RETURNABLES_CUSTODY_DUPLICATE`, naming RTN-000001); the new record it started stays **New**, with no figures
-   (archive it) — issue more from the custody record instead (**Issue**).
+   (`RETURNABLES_CUSTODY_DUPLICATE`, naming RTN-000001). The new record it started (RTN-000002) stays **New**:
+   **Open custody** on it — Outstanding, Deposit held and Refundable now read **—** (nothing a form could have typed
+   in), Events shows one **Draft** Issue. Archive it; issue more from RTN-000001 instead (**Issue**).
 5. Party → **Returnable type** → `KEG-50` → Archive: refused (`MODULE_ARCHIVE_RESTRICTED`) — a type is not archived
    while a live custody names it.
 
