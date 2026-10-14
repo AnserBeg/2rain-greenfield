@@ -1,6 +1,6 @@
 # RECEIVING-EXTRAS — receipts dated the day goods arrived, corrected line by line, and shortage net of what is on order
 
-Status: executable on [draft PR #33](https://github.com/AnserBeg/2rain-greenfield/pull/33) against `packet/INTEGRATION`; no merge, no deployment. Sole BUILD lane under the owner's standing instruction (recommended choices taken, recorded here, reported at the end).
+Status: executable on [draft PR #33](https://github.com/AnserBeg/2rain-greenfield/pull/33) against `packet/INTEGRATION`, CI and all nine controls green at `3549262d`; no merge, no deployment. Sole BUILD lane under the owner's standing instruction (recommended choices taken, recorded here, reported at the end).
 Tier: outside the Critical set — canonical v6 keys, the compiler's surface floor and agent presets, the shared List contract and gateway, the list statement, the fulfillment read model, the web runtime and domain metadata. No posting-kernel, serializer, materializer, activation, verification, trust, migration or grant change: the date window and corrections are the kernel's existing rules (POSTING-FORWARD-DATE; `assertReceiptCompensation`). Stops: none.
 Base: `origin/packet/INTEGRATION` at `8c8cfab1`. Reference: PaneFlow `d057daff` (`app/inventory-app.tsx` "Received on"; `lib/server/inventory-domain.ts` `reverseReceipt`, `salesBlockedSupply`; `lib/domain/sales-availability.ts`). Closes PURCHASING-PARITY P13's date, ORDER-PARITY OE's correction and SUPPLY-WARNINGS' deferred incoming purchase orders.
 
@@ -53,7 +53,9 @@ Surface floor grouped 21 -> 26 (flat 20, surfaces 113, navigation leaves unchang
 ## Gates
 
 - Local (no container): typecheck, prettier, eslint clean; release `--check` and demo `--check` PASS; unit 249/249; compiler 175/175; web contracts 47/47; architecture without its three Docker-backed files 150 (after the debt baseline move); expected-red static OK (177 in 16); `receiving-instant-default-on-any-input` killed and restored locally (`--run`).
-- PostgreSQL and browser: owed to CI (another lane held the exclusive lock; Windows free memory under 1.2 GB at times).
+- PostgreSQL and browser: on CI (Windows free memory under 1.2 GB locally).
+- CI green at `3549262d`: https://github.com/AnserBeg/2rain-greenfield/actions/runs/38492128412 — unit 249, compiler 175, integration 258, agent 3, architecture 200, web contracts 47, language coverage PASS (2854; 972 observed); PostgreSQL schema and isolation 159 (+ locale 1), composed 24, commercial 25, inventory 83; browser 87, operations 10, inventory 11, composed 23; performance 5; observability 11; reachability 163/163. The `01e43ffa` run's one composed-browser red (focus-ring `--b500`: "Execution context was destroyed … navigation") passed here unchanged: a flake, not this packet.
+- Expected-red controls on CI: https://github.com/AnserBeg/2rain-greenfield/actions/runs/38492128350 (evidence.yml, head `3549262d`) — all nine `receiving-*` entries at 3549262d74d5: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (1 passing; 4 passing for the two On order controls).
 
 ## Test it yourself
 
@@ -67,19 +69,20 @@ Surface floor grouped 21 -> 26 (flat 20, surfaces 113, navigation leaves unchang
 - The order page reads at most 1,000 purchase order lines of an item and 1,000 released orders; beyond that its Fulfillment lines fail rather than guess (as its stock reads already do).
 - `parseSharedListSupply`'s incoming pairing is covered by the canonical validator and the gateway path, not by its own unit test.
 
-Review: not owed — outside the Critical set.
+Review: not owed — outside the Critical set; a round-1 prompt on `3549262d` was handed to the orchestrator on request (online, never in-lane).
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "RECEIVING-EXTRAS",
   "base": "8c8cfab1c54ac1b51b4617e45f8e2f0ddd1dfa1b",
-  "head": "69c83ea4908b2eac6a03b54210bac8cd7e9382e2",
+  "head": "3549262d74d512fbe886ced20499aa471b63aaa1",
   "changedPaths": [
     "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts",
     "apps/web/src/gateway-error-codes.ts", "apps/web/src/list-declaration.ts", "apps/web/src/message-catalog.ts",
     "apps/web/src/receiving-section.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-runtime.ts",
     "apps/web/test/browser/declared-list.spec.ts", "apps/web/test/browser/message-catalog.spec.ts", "apps/web/test/browser/receiving-extras.spec.ts",
+    "apps/web/test/browser/receiving.composed-application.spec.ts",
     "apps/web/test/surface-runtime-contract.test.ts", "package.json", "packages/canonical-model/src/schemas.ts",
     "packages/canonical-model/src/surface-composition.ts", "packages/canonical-model/src/surface-list.ts", "packages/compiler/src/projections.ts",
     "packages/domain/src/app/builder.ts", "packages/domain/src/app/list-declarations.ts", "packages/domain/src/purchasing/workspace.ts",
@@ -104,6 +107,7 @@ Review: not owed — outside the Critical set.
     {"path": "packages/postgres-provider/src/fulfillment-read-model.ts", "name": "fulfillmentReadModel"},
     {"path": "packages/compiler/src/projections.ts", "name": "agentSupply"},
     {"path": "apps/web/src/gateway-error-codes.ts", "name": "operationMessageRef"},
+    {"path": "apps/web/src/list-declaration.ts", "name": "withheldSupplyQuery"},
     {"path": "apps/web/src/message-catalog.ts", "name": "SURFACE_MESSAGE_CATALOG"},
     {"path": "packages/runtime/src/request-runtime-view.ts", "name": "SUPPORTED_RUNTIME_CAPABILITIES"}
   ]
