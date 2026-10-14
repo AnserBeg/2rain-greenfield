@@ -1143,11 +1143,12 @@ export function admittedOperationArgumentKeys(
 /**
  * Whether a caller that entered a company binds this write to it: the write
  * names an existing record and that record is company-owned. A pinned view
- * carries no storage, so ownership is read from the write's compiled
+ * carries no persisted layout, so ownership is read from the write's compiled
  * read-back, a get of the same entity; a company-owned get cannot execute
  * without a legal-entity scope, so a company-owned write's read-back declares
- * one. The provider still decides against storage: it refuses a binding on a
- * tenant-level record by name, so a wrong answer here fails visibly.
+ * one. The provider still decides against the persisted row: it refuses a
+ * binding on a tenant-level record by name, so a wrong answer here fails
+ * visibly.
  */
 export function operationBindsRecordLegalEntity(
   view: IssuedRequestRuntimeView,

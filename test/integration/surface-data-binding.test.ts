@@ -14850,6 +14850,9 @@ test('WAREHOUSE-MODE: the period lock page closes the period through a UTC insta
   assert.deepEqual(advanced.input, {
     recordId: lock,
     expectedRevision: 1,
+    // COMPANY-BOUND-WRITES: the lock is company-owned, so the Task's write is
+    // bound to the company the page was entered in.
+    legalEntityId: scope,
     patch: { [closedThrough]: '2026-09-30T23:59:59.000Z' },
   });
 
@@ -14882,6 +14885,9 @@ test('WAREHOUSE-MODE: the period lock page closes the period through a UTC insta
   assert.deepEqual(reopened.input, {
     recordId: lock,
     expectedRevision: 2,
+    // COMPANY-BOUND-WRITES: the lock is company-owned, so the Task's write is
+    // bound to the company the page was entered in.
+    legalEntityId: scope,
     patch: { [closedThrough]: '2026-09-15T00:00:00.000Z' },
   });
   // The gateway executes a human-confirmed operation only with a grant for

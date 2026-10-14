@@ -100,8 +100,8 @@
       "name": "company-binding-unbound-replay-unchecked",
       "claim": "A bound retry of a request key recorded without the company replays only when the record it wrote is in the named company.",
       "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
-      "original": "    await withTrustedRequestTransaction(\n      this.pool,\n      request.context,\n      async (client) => {\n        const storage = await this.#loadPinnedStorageTarget(client, request);\n        const entity = requiredEntity(\n          storage,\n          request.definition.effect.entity.targetId,\n        );\n        await withModuleRuntimeRole(client, () =>\n          requireRecordLegalEntityBinding(client, entity, input),\n        );\n      },\n    );\n    return unbound;",
-      "replacement": "    return unbound;",
+      "original": "    await withTrustedRequestTransaction(\n      this.pool,\n      request.context,\n      async (client) => {\n        const storage = await this.#loadPinnedStorageTarget(client, request);\n        const entity = requiredEntity(\n          storage,\n          request.definition.effect.entity.targetId,\n        );\n        await withModuleRuntimeRole(client, () =>\n          requireRecordLegalEntityBinding(client, entity, input),\n        );\n      },\n    );\n    return replayed;",
+      "replacement": "    return replayed;",
       "test": {
         "files": ["test/postgres/company-bound-writes.test.ts"],
         "namePattern": "COMPANY-BOUND-WRITES"
@@ -118,8 +118,8 @@
       "name": "company-binding-unbound-replay-removed",
       "claim": "A request key recorded before writes carried the company (its digest is the unbound input's) still replays for a bound retry instead of conflicting.",
       "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
-      "original": "    if (input.legalEntityBinding === null) return request.inputDigest;",
-      "replacement": "    if (input.legalEntityBinding !== undefined) return request.inputDigest;",
+      "original": "    if (!isIdempotencyConflict(conflict)) throw conflict;",
+      "replacement": "    throw conflict;",
       "test": {
         "files": ["test/postgres/company-bound-writes.test.ts"],
         "namePattern": "COMPANY-BOUND-WRITES"

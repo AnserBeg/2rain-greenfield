@@ -21,6 +21,7 @@ import type {
   EvidenceMetadataInput,
   AcceptedMutationCommand,
   IdempotentMutationBinding,
+  TrustedActorEnvelope,
 } from '../../platform-runtime/src/trust/contracts.js';
 import { POLICY_DECISION_EVIDENCE_VERSION } from '../../platform-runtime/src/trust/contracts.js';
 import type {
@@ -82,7 +83,11 @@ import {
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 
 import { withTrustedRequestTransaction } from './request-context.js';
-import { PostgresTrustService } from './trust/postgres-trust-service.js';
+import {
+  PostgresTrustService,
+  TrustEvidenceError,
+  type AcceptedMutationReceipt,
+} from './trust/postgres-trust-service.js';
 import type { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
 
 const artifactMediaType = 'application/vnd.northstar.canonical+json';
@@ -344,17 +349,10 @@ export class PostgresModuleRuntimeInterpreter
       releaseContentHash: request.view.release.contentHash,
       releaseId: request.view.release.releaseId,
     });
-    const receipt = await this.#trust.executeIdempotentAcceptedMutation(
+    const accepted = this.#trust.executeIdempotentAcceptedMutation(
       request.context,
       actor,
-      Object.freeze({
-        ...binding,
-        inputDigest: await this.#recordedDigestForReplay(
-          request,
-          parsedInput,
-          binding,
-        ),
-      }),
+      binding,
       async (client) => {
         const currentStorage = await this.#loadPinnedStorageTarget(
           client,
@@ -423,6 +421,9 @@ export class PostgresModuleRuntimeInterpreter
         });
       },
     );
+    const receipt = await accepted.catch((error: unknown) =>
+      this.#replayUnboundReceipt(request, parsedInput, actor, binding, error),
+    );
     return Object.freeze({
       kind: 'semanticOperationResult',
       operationId: request.definition.operationId,
@@ -441,29 +442,39 @@ export class PostgresModuleRuntimeInterpreter
 
   /**
    * COMPANY-BOUND-WRITES. A company-bound write is digested with its company
-   * operand, so a request key recorded before writes carried one -- or by a
-   * caller that sent none -- holds the digest of the same input without it.
-   * That receipt still replays, and only when the record it wrote is in the
-   * company this request names; otherwise the replay is refused exactly as a
-   * fresh write would be. Every other request keeps its own digest. A receipt
-   * is never updated or deleted, so the digest read here is the one the trust
-   * service re-reads under the request key's lock.
+   * operand, so a request key recorded without one -- every write before
+   * writes carried it, or a caller that sent none -- meets its bound retry
+   * with an idempotency conflict. Only then, and only for a bound write naming
+   * an existing record, the key is presented once more with the digest of the
+   * same input without the operand: the trust service replays the receipt when
+   * it was recorded with exactly that input and otherwise refuses again, and
+   * then the first conflict stands. The replay is returned only when the
+   * record is in the company this request names; otherwise it is refused as a
+   * fresh write would be. Neither attempt writes: a key that conflicted holds
+   * a receipt, a receipt is never updated or deleted, and the second attempt's
+   * mutation refuses should it ever be reached.
    */
-  async #recordedDigestForReplay(
+  async #replayUnboundReceipt(
     request: SemanticOperationExecutionRequest,
     input: MutationInput,
+    actor: TrustedActorEnvelope,
     binding: IdempotentMutationBinding,
-  ): Promise<string> {
-    if (input.legalEntityBinding === null) return request.inputDigest;
+    conflict: unknown,
+  ): Promise<AcceptedMutationReceipt<SemanticRecordDto>> {
+    if (!isIdempotencyConflict(conflict)) throw conflict;
+    // `null` unless this is a bound write naming an existing record.
     const unbound = unboundRecordInputDigest(request.definition, request.input);
-    if (
-      unbound === null ||
-      (await this.#trust.recordedIdempotencyInputDigest(
+    if (unbound === null) throw conflict;
+    const replayed = await this.#trust
+      .executeIdempotentAcceptedMutation<SemanticRecordDto>(
         request.context,
-        binding,
-      )) !== unbound
-    )
-      return request.inputDigest;
+        actor,
+        Object.freeze({ ...binding, inputDigest: unbound }),
+        () => Promise.reject(conflict),
+      )
+      .catch((second: unknown) => {
+        throw isIdempotencyConflict(second) ? conflict : second;
+      });
     await withTrustedRequestTransaction(
       this.pool,
       request.context,
@@ -478,7 +489,7 @@ export class PostgresModuleRuntimeInterpreter
         );
       },
     );
-    return unbound;
+    return replayed;
   }
 
   #loadPinnedStorageTarget(
@@ -1279,6 +1290,14 @@ async function setArchiveState(
     values,
   );
   requireMutation(result.rowCount);
+}
+
+/** The trust service's refusal of a request key recorded with other input. */
+function isIdempotencyConflict(error: unknown): error is TrustEvidenceError {
+  return (
+    error instanceof TrustEvidenceError &&
+    error.code === 'SEMANTIC_OPERATION_IDEMPOTENCY_CONFLICT'
+  );
 }
 
 /**
