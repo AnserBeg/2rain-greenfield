@@ -317,8 +317,11 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // item's inventory policy and the merge Task's choice that leaves the item
   // out (CATALOG-EXTRAS) require 20; the Sales orders List's supply, its
   // Blocked by supply and Reserved views and its "Post shipment"
-  // (SUPPLY-WARNINGS) require 21.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 21);
+  // (SUPPLY-WARNINGS) require 21; 22-25 are held for leaves still to be
+  // integrated; the receive Tasks' received date starting now, Correct
+  // receipt's negated quantity and the supply's incoming purchase orders
+  // (RECEIVING-EXTRAS) require 26.
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 26);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.

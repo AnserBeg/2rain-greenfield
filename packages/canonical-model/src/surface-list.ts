@@ -87,7 +87,9 @@ export function validateSurfaceLists(
       list.progress
         ? [
             ...Object.values(list.progress.outputs),
-            ...Object.values(list.progress.supply?.outputs ?? {}),
+            ...Object.values(list.progress.supply?.outputs ?? {}).flatMap(
+              (output) => (output === undefined ? [] : [output]),
+            ),
           ]
         : [],
     );
@@ -459,7 +461,18 @@ export function validateSurfaceLists(
           id,
           "list supply names a line's item by a text field the lines' query selects",
         );
-      for (const sum of [...supply.free.plus, ...supply.free.minus]) {
+      // Incoming supply (RECEIVING-EXTRAS) is stated exactly when it is
+      // summed, and its parts are supply sums like free stock's.
+      if (
+        (supply.incoming === undefined) !==
+        (supply.outputs.incoming === undefined)
+      )
+        fail(id, 'list supply states incoming supply exactly when it sums it');
+      for (const sum of [
+        ...supply.free.plus,
+        ...supply.free.minus,
+        ...(supply.incoming ?? []),
+      ]) {
         const rows = reads(sum.rows.query.targetId);
         const match = fields.get(sum.rows.match);
         if (
@@ -573,7 +586,9 @@ export function validateSurfaceLists(
       unique(
         [
           ...Object.values(progress.outputs),
-          ...Object.values(progress.supply?.outputs ?? {}),
+          ...Object.values(progress.supply?.outputs ?? {}).flatMap((output) =>
+            output === undefined ? [] : [output],
+          ),
         ],
         id,
         'progress outputs',

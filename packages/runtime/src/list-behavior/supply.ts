@@ -18,9 +18,12 @@ import {
  * item a line names in `itemFieldId` is the `free.plus` sums less the
  * `free.minus` sums over rows holding that item's id; per item it is
  * allocated, never below zero, to the row's uncovered quantity, and what it
- * cannot cover is short. `covered` is the coverage of lines with something
- * open, each at most what is open; `short` is stated in `shortIn` states and
- * is 0 in any other. `keep` narrows the set to rows with something covered,
+ * cannot cover is short. Supply already on order (`incoming`, RECEIVING-
+ * EXTRAS) -- its sums over rows holding the item's id, never below zero --
+ * covers, after free stock, what free stock cannot; only what neither covers
+ * is short. `covered` is the coverage of lines with something open, each at
+ * most what is open; `short` is stated in `shortIn` states and is 0 in any
+ * other; `incoming`, in the same states, is what incoming supply covers. `keep` narrows the set to rows with something covered,
  * or something short, so a tab counts, pages and exports exactly that set.
  *
  * Every id is resolved by the gateway against the pinned query catalog and by
@@ -38,9 +41,14 @@ export interface SharedListSupply {
     readonly minus: readonly SharedListSupplySum[];
     readonly plus: readonly SharedListSupplySum[];
   };
+  readonly incoming?: readonly SharedListSupplySum[];
   readonly itemFieldId: string;
   readonly keep?: 'covered' | 'short';
-  readonly outputs: { readonly covered: string; readonly short: string };
+  readonly outputs: {
+    readonly covered: string;
+    readonly incoming?: string;
+    readonly short: string;
+  };
   readonly shortIn?: {
     readonly fieldId: string;
     readonly values: readonly string[];
@@ -97,7 +105,7 @@ export function parseSharedListSupply(
     value,
     'argument',
     ['coverage', 'free', 'itemFieldId', 'outputs'],
-    ['keep', 'shortIn'],
+    ['incoming', 'keep', 'shortIn'],
   );
   const coverage = closed(supply.coverage, 'coverage', [
     'queryId',
@@ -105,11 +113,25 @@ export function parseSharedListSupply(
     'relationId',
   ]);
   const free = closed(supply.free, 'free', ['minus', 'plus']);
-  const outputs = closed(supply.outputs, 'outputs', ['covered', 'short']);
+  const outputs = closed(
+    supply.outputs,
+    'outputs',
+    ['covered', 'short'],
+    ['incoming'],
+  );
   const covered = canonicalId(outputs.covered, 'covered output');
   const short = canonicalId(outputs.short, 'short output');
   if (covered === short)
     throw malformed('list supply outputs must be two distinct ids');
+  // Incoming supply is stated exactly when it is summed (RECEIVING-EXTRAS).
+  if ((supply.incoming === undefined) !== (outputs.incoming === undefined))
+    throw malformed('list supply states incoming exactly when it sums it');
+  const incomingOutput =
+    outputs.incoming === undefined
+      ? undefined
+      : canonicalId(outputs.incoming, 'incoming output');
+  if (incomingOutput === covered || incomingOutput === short)
+    throw malformed('list supply outputs must be distinct ids');
   if (
     supply.keep !== undefined &&
     supply.keep !== 'covered' &&
@@ -153,9 +175,16 @@ export function parseSharedListSupply(
       minus: sums(free.minus, 'free minus', 0),
       plus: sums(free.plus, 'free plus', 1),
     }),
+    ...(supply.incoming === undefined
+      ? {}
+      : { incoming: sums(supply.incoming, 'incoming', 1) }),
     itemFieldId: canonicalId(supply.itemFieldId, 'itemFieldId'),
     ...(supply.keep === undefined ? {} : { keep: supply.keep }),
-    outputs: Object.freeze({ covered, short }),
+    outputs: Object.freeze({
+      covered,
+      ...(incomingOutput === undefined ? {} : { incoming: incomingOutput }),
+      short,
+    }),
     ...(shortIn ? { shortIn } : {}),
   });
 }
@@ -195,7 +224,11 @@ export function sharedListSupplyReads(supply: SharedListSupply): ReadonlyMap<
     [supply.coverage.related.fieldId],
     supply.coverage.related.relationId,
   );
-  for (const sum of [...supply.free.plus, ...supply.free.minus]) {
+  for (const sum of [
+    ...supply.free.plus,
+    ...supply.free.minus,
+    ...(supply.incoming ?? []),
+  ]) {
     use(sum.rows.queryId, [
       sum.rows.matchFieldId,
       ...(sum.rows.quantityFieldId ? [sum.rows.quantityFieldId] : []),

@@ -252,11 +252,17 @@ interface ListSupplySpec {
     readonly plus: readonly ListSupplySumSpec[];
     readonly minus: readonly ListSupplySumSpec[];
   };
+  /** What placed purchase orders still have to receive (RECEIVING-EXTRAS). */
+  readonly incoming?: readonly ListSupplySumSpec[];
   readonly shortIn?: {
     readonly field: string;
     readonly values: readonly string[];
   };
-  readonly outputs: { readonly covered: string; readonly short: string };
+  readonly outputs: {
+    readonly covered: string;
+    readonly short: string;
+    readonly incoming?: string;
+  };
   readonly whenDenied?: 'omit';
 }
 
@@ -405,6 +411,17 @@ function documentList(
             },
           ]
         : []),
+      // What placed purchase orders cover of it (RECEIVING-EXTRAS).
+      ...(work?.supply?.spec.outputs.incoming
+        ? [
+            {
+              local: 'incoming',
+              label: 'On order',
+              field: work.supply.spec.outputs.incoming,
+              sortable: false,
+            },
+          ]
+        : []),
       // Computed from the page's own rows: shown, never sorted or counted.
       ...(work?.total
         ? [
@@ -539,8 +556,10 @@ function documentList(
  * line's coverage is what its own reservations' balances still hold; free
  * stock of an item now is its posted stock at usable locations less what
  * every live reservation of it holds there (LOCATIONS); shortage is stated for
- * draft and confirmed orders, as the page states it, and incoming purchase
- * orders are not counted.
+ * draft and confirmed orders, as the page states it. What placed purchase
+ * orders still have to receive of the item -- each released order line's
+ * ordered quantity less what it has received, never below zero -- covers
+ * what free stock leaves, and only the rest is short (RECEIVING-EXTRAS).
  */
 function salesSupply(namespace: string): ListSupplySpec {
   const field = (name: string) => `${namespace}:field.${name}`;
@@ -591,12 +610,39 @@ function salesSupply(namespace: string): ListSupplySpec {
         },
       ],
     },
+    // Placed purchase orders (Place order keeps an order released) and what
+    // each line still has to receive -- the Buying worklist's Incoming.
+    incoming: [
+      {
+        rows: {
+          query: query('purchase_order_line_list'),
+          match: field('purchase_order_line_item_id'),
+          quantity: field('purchase_order_line_ordered_quantity'),
+        },
+        within: {
+          relation: relation('purchase_order_line_order'),
+          query: query('purchase_order_list'),
+          field: `${namespace}:derived_state_field.machine.purchase_order_lifecycle`,
+          values: [`${namespace}:state.purchase_order_released`],
+        },
+        related: {
+          query: query('purchase_order_received_list'),
+          relation: relation('purchase_order_received_order_line'),
+          quantity: field('purchase_order_received_received_quantity'),
+        },
+        sum: 'remaining',
+      },
+    ],
     // The states the order page states shortage in: one list for both.
     shortIn: {
       field: `${namespace}:derived_state_field.machine.sales_order_lifecycle`,
       values: SALES_SHORTAGE_STATES.map(state),
     },
-    outputs: { covered: output('covered'), short: output('short') },
+    outputs: {
+      covered: output('covered'),
+      short: output('short'),
+      incoming: output('incoming'),
+    },
     whenDenied: 'omit',
   };
 }
@@ -2015,6 +2061,7 @@ function lowerSupply(supply: ListSupplySpec) {
       plus: supply.free.plus.map(sum),
       minus: supply.free.minus.map(sum),
     },
+    ...(supply.incoming ? { incoming: supply.incoming.map(sum) } : {}),
     ...(supply.shortIn
       ? {
           shortIn: {

@@ -178,9 +178,10 @@ test('the composed application declares its Lists and they normalize unchanged',
       ['Cancelled', null],
     ],
   );
+  // RECEIVING-EXTRAS: what placed purchase orders cover of it, after Short.
   assert.deepEqual(
-    salesOrders.list.columns.map((column) => column.label).slice(-3),
-    ['Open', 'Short', 'Currency'],
+    salesOrders.list.columns.map((column) => column.label).slice(-4),
+    ['Open', 'Short', 'On order', 'Currency'],
   );
   assert.deepEqual(
     salesOrders.list.rowActions?.map((value) => [
@@ -898,6 +899,107 @@ test('SUPPLY-WARNINGS: a List progress supply, its views and its row actions are
       new RegExp(reason!.replace(/[()']/gu, '.')),
       `${reason!} -> ${rule!}`,
     );
+});
+
+test('RECEIVING-EXTRAS: a List supply sums what placed purchase orders still have to receive, stated exactly when it is summed', () => {
+  type Sum = {
+    rows: { query: { targetId: string }; match: string; quantity?: string };
+    within?: Json;
+    related?: { relation: string };
+    sum: string;
+  };
+  type Supply = {
+    incoming?: Sum[];
+    outputs: { covered: string; short: string; incoming?: string };
+  };
+  const supply = (app: ReturnType<typeof application>) =>
+    (listOf(app).list.progress as { supply: Supply }).supply;
+  const incomingColumn = (app: ReturnType<typeof application>) =>
+    listOf(app).list.columns.find(
+      (value) =>
+        value.columnId === `${ns}:list_column.sales_order_list_incoming`,
+    )!;
+  // As declared: one part, each released order line less what it received.
+  const declared = supply(application());
+  assert.deepEqual(
+    declared.incoming?.map((sum) => [
+      sum.rows.query.targetId,
+      sum.rows.match,
+      sum.sum,
+      (sum.within as { values: string[] }).values,
+    ]),
+    [
+      [
+        `${ns}:query.purchase_order_line_list`,
+        `${ns}:field.purchase_order_line_item_id`,
+        'remaining',
+        [`${ns}:state.purchase_order_released`],
+      ],
+    ],
+  );
+  assert.equal(
+    declared.outputs.incoming,
+    `${ns}:list_output.sales_order_list_incoming`,
+  );
+  const cases: Array<[string, (app: ReturnType<typeof application>) => void]> =
+    [
+      [
+        'list supply states incoming supply exactly when it sums it',
+        (app) => {
+          delete supply(app).outputs.incoming;
+          const columns = listOf(app).list.columns;
+          columns.splice(columns.indexOf(incomingColumn(app)), 1);
+        },
+      ],
+      [
+        'list supply states incoming supply exactly when it sums it',
+        (app) => {
+          delete supply(app).incoming;
+        },
+      ],
+      [
+        'a supply sum names exactly the parts it adds up',
+        (app) => {
+          delete supply(app).incoming![0]!.related;
+        },
+      ],
+      [
+        "a supply sum's rows hold the item's id in a text field their query selects",
+        (app) => {
+          supply(app).incoming![0]!.rows.match =
+            `${ns}:field.purchase_order_line_ordered_quantity`;
+        },
+      ],
+      [
+        "a supply sum's related rows point at its rows through a relation",
+        (app) => {
+          supply(app).incoming![0]!.related!.relation =
+            `${ns}:relation.reservation_balance_reservation`;
+        },
+      ],
+      [
+        'progress outputs must be unique',
+        (app) => {
+          const outputs = supply(app).outputs;
+          outputs.incoming = outputs.short;
+          incomingColumn(app).field = outputs.short;
+        },
+      ],
+      [
+        'a progress column is an unsorted plain value',
+        (app) => {
+          incomingColumn(app).sortable = true;
+        },
+      ],
+    ];
+  for (const [reason, mutate] of cases) {
+    const rule = refused(mutate);
+    assert.match(
+      rule,
+      new RegExp(reason.replace(/[()']/gu, '.')),
+      `${reason} -> ${rule}`,
+    );
+  }
 });
 
 test('REPLENISHMENT: Stock by item and the Buying worklist read items in one company, with figures their statement adds up', () => {

@@ -714,7 +714,17 @@ const compositionValue = z.discriminatedUnion('source', [
     field: z.string().min(1),
     datasetId: CanonicalIdSchema.optional(),
   }),
-  z.strictObject({ source: z.literal('input'), inputId: CanonicalIdSchema }),
+  z.strictObject({
+    source: z.literal('input'),
+    inputId: CanonicalIdSchema,
+    /**
+     * The entered quantity taken back: a positive quantity input written as
+     * its negative, as a receipt correction's line takes back what it names.
+     * Bound only by a step, only from a quantity input. Optional v6 key
+     * (RECEIVING-EXTRAS).
+     */
+    negated: z.literal(true).optional(),
+  }),
   z.strictObject({
     source: z.literal('step'),
     stepId: CanonicalIdSchema,
@@ -830,6 +840,13 @@ const compositionInput = z.strictObject({
   defaultFrom: z
     .strictObject({ source: z.literal('record'), field: z.string().min(1) })
     .optional(),
+  /**
+   * An instant input's starting value: the current instant, to the second,
+   * when the Task opens -- the day goods arrived starts at today. The
+   * operator may change it; the posting kernel judges the date. Optional v6
+   * key (RECEIVING-EXTRAS).
+   */
+  defaultNow: z.literal(true).optional(),
   /**
    * Asked once for each row of the Task's declared `rows`, such as the
    * quantity received on each line of a truck: rows start empty, a row left
@@ -1471,10 +1488,15 @@ const listSupplySum = z.strictObject({
  * on hand at usable locations less what live reservations hold there. Per
  * item, the free stock (never below zero) is allocated to the row's uncovered
  * quantity in line order and what it cannot cover is short, so two lines of
- * one item share it; incoming supply is not counted. Outputs: `covered`, the
+ * one item share it. `incoming` (optional, RECEIVING-EXTRAS) adds up the
+ * supply already on order -- what placed purchase orders still have to
+ * receive of the item -- which covers, after free stock, what free stock
+ * cannot; only what neither covers is short. Outputs: `covered`, the
  * coverage of lines with something open, each at most what the line has
- * open; `short`, what the row is short in `shortIn` states, 0 in any other.
- * Shown, never sorted, searched or filtered but by a view's `supply`.
+ * open; `short`, what the row is short in `shortIn` states, 0 in any other;
+ * `incoming`, declared exactly with `incoming`, the part of the row's
+ * shortfall beyond free stock that incoming supply covers, in the same
+ * states. Shown, never sorted, searched or filtered but by a view's `supply`.
  * Optional v6 key (ADR-0047 §7).
  */
 const listProgressSupply = z.strictObject({
@@ -1488,6 +1510,7 @@ const listProgressSupply = z.strictObject({
     plus: z.array(listSupplySum).min(1).max(4),
     minus: z.array(listSupplySum).max(4),
   }),
+  incoming: z.array(listSupplySum).min(1).max(4).optional(),
   shortIn: z
     .strictObject({
       field: CanonicalIdSchema,
@@ -1497,6 +1520,7 @@ const listProgressSupply = z.strictObject({
   outputs: z.strictObject({
     covered: CanonicalIdSchema,
     short: CanonicalIdSchema,
+    incoming: CanonicalIdSchema.optional(),
   }),
   /**
    * `omit`: supplementary, as progress may be. When current policy denies a

@@ -136,7 +136,7 @@ test('a declared Sales List navigates views, search, sort, filters, pages and ex
     // Ruling E adds the salesperson, named like the customer; ORDER-PARITY
     // the units each order's lines order, ship and leave open.
     expect(csv[0]).toBe(
-      'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Short,Currency',
+      'Number,Customer,Salesperson,Order date,Requested,Status,Ordered,Shipped,Open,Short,On order,Currency',
     );
     expect(csv.length - 1).toBe(expected.draft);
 

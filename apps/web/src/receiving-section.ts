@@ -59,7 +59,7 @@ export function receivingNavigation(
           ],
         ],
         guidance:
-          'Add lines linked to this receipt and the matching purchase order lines, then post this receipt. Enter actual received unit cost and currency, or explicitly choose absent. To correct, create a new correction or reversal receipt linked to the posted original and identify the compensated movement on each line. Reopen a closed order first.',
+          'Add lines linked to this receipt and the matching purchase order lines, then post this receipt. Enter actual received unit cost and currency, or explicitly choose absent. To take back part of a posted receipt, use Correct receipt; Reverse receipt on the order takes back all of it. Reopen a closed order first.',
       }
     : entityId.endsWith(':entity.purchase_order_line')
       ? {
@@ -312,7 +312,10 @@ export const RECEIVING_SURFACE_RUNTIME_EXTENSION = Object.freeze({
     return {
       ...data,
       ...(navigation ? { receivingNavigation: navigation } : {}),
+      // The generic order page's receiving section; a composed order page
+      // shows its own lines and receipts.
       ...(binding.query.sourceEntityId.endsWith(':entity.purchase_order') &&
+      !surface.composition &&
       order
         ? {
             receiving: await loadReceivingSection(

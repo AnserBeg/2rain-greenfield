@@ -561,7 +561,16 @@ function resolveValue(
       // Admission refuses an empty required input, so an empty one here is an
       // optional input left blank: it is no value, never an empty string --
       // which a decimal, enumeration or date field would refuse.
-      return input === '' ? null : input;
+      if (input === '') return null;
+      // A negated quantity takes back what was entered (RECEIVING-EXTRAS):
+      // admission held it to a positive exact decimal, so its negative is
+      // exactly that decimal with a minus sign.
+      if (value.negated) {
+        if (!POSITIVE_DECIMAL.test(input))
+          throw new Error('A negated task input is a positive quantity.');
+        return `-${input}`;
+      }
+      return input;
     }
     case 'step':
       return recordValue(results[value.stepId] ?? null, value.field);
@@ -2247,9 +2256,13 @@ export async function submitCompositionAction(
         control = `<textarea name="${h(input.inputId)}" rows="3"${required}${invalid}>${h(value)}</textarea>`;
       else if (utcInstantInput(view, current.action, input)) {
         // The explicit-UTC picker, to the second; a reviewed value shows as
-        // it was entered, without the zone the label already names.
+        // it was entered, without the zone the label already names. One
+        // declared to start now does, until a value is submitted
+        // (RECEIVING-EXTRAS): the received date starts at today.
         const shown = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?)/u.exec(
-          displayInputs[input.inputId] ?? '',
+          current.inputs[input.inputId] === undefined && input.defaultNow
+            ? (gateways.clock?.() ?? new Date()).toISOString()
+            : (displayInputs[input.inputId] ?? ''),
         );
         control = `<input type="datetime-local" step="1" name="${h(input.inputId)}" value="${h(shown?.[1] ?? '')}"${required}${invalid}>`;
       } else {
@@ -2260,7 +2273,11 @@ export async function submitCompositionAction(
         const numeric =
           input.type === 'quantity' ||
           (bound !== null && DECIMAL_KINDS.includes(bound.kind));
-        control = `<input name="${h(input.inputId)}" value="${h(displayInputs[input.inputId] ?? '')}"${required}${numeric ? ' inputmode="decimal" autocomplete="off"' : ''}${invalid}>`;
+        const shown =
+          current.inputs[input.inputId] === undefined && input.defaultNow
+            ? (gateways.clock?.() ?? new Date()).toISOString()
+            : (displayInputs[input.inputId] ?? '');
+        control = `<input name="${h(input.inputId)}" value="${h(shown)}"${required}${numeric ? ' inputmode="decimal" autocomplete="off"' : ''}${invalid}>`;
       }
       // The problem describes the input (aria-describedby); it is not part of
       // its accessible name, so it sits after the label.
@@ -2400,6 +2417,8 @@ interface CompositionGateways {
   readonly queryGateway: SemanticQueryGateway;
   readonly operationGateway: SemanticOperationGateway;
   readonly operationMediation: SemanticOperationMediationAuthority;
+  /** The request clock: an instant input's default "now" (RECEIVING-EXTRAS). */
+  readonly clock?: () => Date;
 }
 interface CompositionResponse {
   readonly html: string;

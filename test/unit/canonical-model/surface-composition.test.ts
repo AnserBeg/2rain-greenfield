@@ -648,3 +648,106 @@ test('a record names a relation of its own entity only through the related get, 
     /a record names at most four related records/u,
   );
 });
+
+test('RECEIVING-EXTRAS: an instant input starts now only when asked once, a negated value takes back a quantity into a written field, and a step writes only a relation its page names', () => {
+  const receive = (value: Json) => action(value, 'receive_known');
+  const truck = (value: Json) => action(value, 'receive_lines_known');
+  const correct = (value: Json) => action(value, 'correct_receipt');
+  const input = (task: Json, local: string) =>
+    (task.inputs as Json[]).find(
+      (candidate) => candidate.inputId === id('input', local),
+    )!;
+  const binding = (task: Json, step: number, path: string) =>
+    ((task.steps as Json[])[step]!.bindings as Json[]).find(
+      (candidate) => (candidate.path as string[]).join('.') === path,
+    )!;
+  // As declared: both receive Tasks ask the received date, starting now, and
+  // write it as the receipt's effective date; the correction takes back the
+  // quantity entered on each line, into the line's quantity.
+  for (const [task, local] of [
+    [receive, 'receive_received_on'],
+    [truck, 'receive_lines_received_on'],
+  ] as const) {
+    const asked = input(
+      task(composition(normalized, 'purchase_order_detail')),
+      local,
+    );
+    assert.equal(asked.type, 'instant');
+    assert.equal(asked.defaultNow, true);
+    assert.deepEqual(
+      binding(
+        task(composition(normalized, 'purchase_order_detail')),
+        0,
+        `values.${id('field', 'goods_receipt_effective_at')}`,
+      ).value,
+      { source: 'input', inputId: id('input', local) },
+    );
+  }
+  assert.deepEqual(
+    binding(
+      correct(composition(normalized, 'goods_receipt_detail')),
+      1,
+      `values.${id('field', 'goods_receipt_line_quantity')}`,
+    ).value,
+    {
+      source: 'input',
+      inputId: id('input', 'correct_receipt_quantity'),
+      negated: true,
+    },
+  );
+  // Only an instant input starts now, and only one asked once.
+  assert.match(
+    refused('purchase_order_detail', (value) => {
+      input(receive(value), 'receive_quantity').defaultNow = true;
+    }),
+    /only an instant input asked once starts at the current instant/u,
+  );
+  assert.match(
+    refused('goods_receipt_detail', (value) => {
+      const quantity = input(correct(value), 'correct_receipt_quantity');
+      quantity.type = 'instant';
+      quantity.defaultNow = true;
+    }),
+    /only an instant input asked once starts at the current instant|per-row inputs are typed quantities or text/u,
+  );
+  // Only a quantity input is negated, and only into a field a step writes.
+  assert.match(
+    refused('goods_receipt_detail', (value) => {
+      binding(
+        correct(value),
+        0,
+        `values.${id('field', 'goods_receipt_reason_narrative')}`,
+      ).value.negated = true;
+    }),
+    /only a quantity input is negated, into a written field/u,
+  );
+  assert.match(
+    refused('goods_receipt_detail', (value) => {
+      binding(
+        correct(value),
+        1,
+        `relations.${id('relation', 'goods_receipt_line_order_line')}`,
+      ).value = {
+        source: 'input',
+        inputId: id('input', 'correct_receipt_quantity'),
+        negated: true,
+      };
+    }),
+    /only a quantity input is negated, into a written field/u,
+  );
+  // The correction names its receipt's order through the order the page
+  // shows; a relation the page does not name is no value of this record.
+  assert.match(
+    refused('goods_receipt_detail', (value) => {
+      value.fields = (value.fields as Json[]).filter(
+        (column) => column.columnId !== id('column', 'receipt_doc_order'),
+      );
+      value.presentation.header.subtitle = [];
+      value.actions = (value.actions as Json[]).filter(
+        (candidate) =>
+          candidate.actionId !== id('action', 'open_receipt_order'),
+      );
+    }),
+    /record mapping requires a selected field/u,
+  );
+});

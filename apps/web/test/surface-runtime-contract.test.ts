@@ -25,6 +25,7 @@ import {
 
 import * as listBehavior from '../../../packages/runtime/src/list-behavior/index.js';
 import { ModuleRuntimeInterpreterError } from '../../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import { InventoryPostingError } from '../../../packages/postgres-provider/src/inventory-posting-error.js';
 import {
   AuthenticatedRequestEntryAdapter,
   type UntrustedRequestInput,
@@ -803,6 +804,44 @@ test('provider refusals retain known copy and otherwise use an honest code-beari
   assert.deepEqual(operationMessageRef(new Error('failure without identity')), {
     code: 'OPERATION_UNAVAILABLE',
   });
+});
+
+test('RECEIVING-EXTRAS: the posting kernel’s date and receiving refusals read in plain language and keep their code', () => {
+  for (const [code, readable] of [
+    ['RECEIPT_FORWARD_DATE_REFUSED', 'OPERATION_DATE_AFTER_TODAY'],
+    ['INVENTORY_FORWARD_DATE_REFUSED', 'OPERATION_DATE_AFTER_TODAY'],
+    ['INVENTORY_BACKDATE_LIMIT_EXCEEDED', 'OPERATION_DATE_BEFORE_WINDOW'],
+    ['INVENTORY_PERIOD_CLOSED', 'OPERATION_PERIOD_CLOSED'],
+    ['RECEIPT_CORRECTION_INVALID', 'OPERATION_RECEIPT_CORRECTION_EXCEEDED'],
+    ['RECEIPT_ORDER_NOT_RELEASED', 'OPERATION_ORDER_NOT_RELEASED'],
+    ['RECEIPT_QUANTITY_OUT_OF_BOUNDS', 'OPERATION_RECEIVED_OUT_OF_BOUNDS'],
+  ] as const) {
+    assert.deepEqual(
+      operationMessageRef(new InventoryPostingError(code, 'refused')),
+      { code: readable, subject: code },
+      `${code} reads in plain language`,
+    );
+    // Each is a write-path code with its own subject: the kernel's code.
+    assert.ok(OPERATION_DIAGNOSTIC_CODES.includes(readable), readable);
+    assert.equal(SURFACE_MESSAGE_CATALOG[readable].subject, 'refusalCode');
+  }
+  // Any other kernel refusal keeps the code-bearing residual.
+  assert.deepEqual(
+    operationMessageRef(
+      new InventoryPostingError('INVENTORY_STOCK_NEGATIVE', 'refused'),
+    ),
+    { code: 'OPERATION_REFUSED', subject: 'INVENTORY_STOCK_NEGATIVE' },
+  );
+  // A refusal code inherited from the object prototype is no mapping.
+  assert.deepEqual(
+    operationMessageRef(
+      Object.assign(new Error('refused'), {
+        name: 'InventoryPostingError',
+        code: 'toString',
+      }),
+    ),
+    { code: 'OPERATION_REFUSED', subject: 'toString' },
+  );
 });
 
 test('closed registry returns diagnostics for unknown and failing components', async () => {
@@ -2102,6 +2141,57 @@ test('a declared List sends its supply with its progress, keeps each supply tab,
     withheldProgressQuery(list, deniedFor(id('query', 'stock'))),
     null,
   );
+  // RECEIVING-EXTRAS: what is on order is supply too, so a refusal of its
+  // rows, its orders or its received rows withholds the supply whole.
+  const onOrder = SurfaceListSchema.parse({
+    ...list,
+    progress: {
+      ...list.progress,
+      supply: {
+        ...list.progress!.supply,
+        incoming: [
+          {
+            rows: {
+              query: ref(id('query', 'purchase_lines')),
+              match: id('field', 'purchase_line_item_id'),
+              quantity: id('field', 'purchase_line_quantity'),
+            },
+            within: {
+              relation: id('relation', 'purchase_line_order'),
+              query: ref(id('query', 'purchases')),
+              field: id('field', 'purchase_state'),
+              values: [id('option', 'purchase_state_placed')],
+            },
+            related: {
+              query: ref(id('query', 'purchase_received')),
+              relation: id('relation', 'purchase_received_line'),
+              quantity: id('field', 'purchase_received_quantity'),
+            },
+            sum: 'remaining',
+          },
+        ],
+        outputs: {
+          ...list.progress!.supply!.outputs,
+          incoming: output('incoming'),
+        },
+      },
+    },
+  });
+  for (const local of [
+    'purchase_lines',
+    'purchases',
+    'purchase_received',
+    'stock',
+  ])
+    assert.equal(
+      withheldSupplyQuery(onOrder, deniedFor(id('query', local))),
+      id('query', local),
+      local,
+    );
+  assert.equal(
+    withheldSupplyQuery(list, deniedFor(id('query', 'purchase_lines'))),
+    null,
+  );
   const purpose = SurfaceListSchema.parse({
     ...list,
     progress: {
@@ -2595,7 +2685,11 @@ test('the message catalog honours the vocabulary it declares', () => {
   // and the redacted partial-commit outcome.
   // SALES-PARITY adds the declared-List export refusal (never a partial file).
   // WAREHOUSE-MODE adds the two answers of a scan that opened nothing.
-  assert.equal(SURFACE_MESSAGE_CODES.length, 50);
+  // RECEIVING-EXTRAS adds six provider refusals read in plain language: a
+  // date after today, a date past the backdate window, a closed period, a
+  // correction beyond its receipt, an order line's received leaving zero to
+  // ordered, and an order that is not released.
+  assert.equal(SURFACE_MESSAGE_CODES.length, 56);
 
   for (const code of SURFACE_MESSAGE_CODES) {
     const entry = SURFACE_MESSAGE_CATALOG[code];

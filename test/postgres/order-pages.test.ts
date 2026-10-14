@@ -128,7 +128,11 @@ async function stored(
     name.startsWith('relation.')
       ? target.relations.find((value) => value.relationId === `${ns}:${name}`)!
           .relationColumn.physicalName
-      : fulfillmentColumn(entity, `${local}_${name}`);
+      : // A derived state is named as itself, not under its entity.
+        fulfillmentColumn(
+          entity,
+          name.startsWith('derived_state_field.') ? name : `${local}_${name}`,
+        );
   const selected = Object.entries(columns)
     .map(([alias, name]) => `"${column(name)}"::text AS "${alias}"`)
     .join(', ');
@@ -178,7 +182,9 @@ const received = async (fixture: Fixture, line: string) => {
  * never through the read model under test (owner ruling of 2026-09-30): the
  * open quantity its own live reservations do not cover, beyond the item's
  * free stock now -- on hand at every location less every live reservation's
- * remainder -- allocated to the order's lines in line order.
+ * remainder -- and then beyond what placed purchase orders still have to
+ * receive of the item (RECEIVING-EXTRAS), each allocated to the order's
+ * lines in line order. `onOrder` is what that covers, line by line.
  */
 async function expectedShort(fixture: Fixture, orderId: string) {
   const lines = (
@@ -207,8 +213,34 @@ async function expectedShort(fixture: Fixture, orderId: string) {
     balances
       .filter((row) => row.reservation === reservationId)
       .reduce((total, row) => total + units(row.remaining), 0n);
+  // Released purchase orders' lines, each at ordered less received.
+  const released = new Set(
+    (
+      await stored(fixture, 'purchase_order', {
+        state: 'derived_state_field.machine.purchase_order_lifecycle',
+      })
+    )
+      .filter((row) => row.state === `${ns}:state.purchase_order_released`)
+      .map((row) => row.record_id!),
+  );
+  const purchaseLines = (
+    await stored(fixture, 'purchase_order_line', {
+      order: 'relation.purchase_order_line_order',
+      item: 'item_id',
+      ordered: 'ordered_quantity',
+    })
+  ).filter((row) => released.has(row.order!));
+  const incoming = new Map<string, bigint>();
+  for (const line of purchaseLines) {
+    const open =
+      units(line.ordered) - (await received(fixture, line.record_id!));
+    if (open > 0n)
+      incoming.set(line.item!, (incoming.get(line.item!) ?? 0n) + open);
+  }
   const left = new Map<string, bigint>();
+  const onOrderLeft = new Map<string, bigint>();
   const result = new Map<string, bigint>();
+  const onOrder = new Map<string, bigint>();
   for (const line of lines) {
     const item = line.item!;
     if (!left.has(item)) {
@@ -228,9 +260,14 @@ async function expectedShort(fixture: Fixture, orderId: string) {
     if (short < 0n) short = 0n;
     const allocated = short < left.get(item)! ? short : left.get(item)!;
     left.set(item, left.get(item)! - allocated);
-    result.set(line.record_id!, short - allocated);
+    const beyond = short - allocated;
+    const pending = onOrderLeft.get(item) ?? incoming.get(item) ?? 0n;
+    const expected = beyond < pending ? beyond : pending;
+    onOrderLeft.set(item, pending - expected);
+    result.set(line.record_id!, beyond - expected);
+    onOrder.set(line.record_id!, expected);
   }
-  return result;
+  return Object.assign(result, { onOrder });
 }
 /** A presented dataset row's cell, by its dataset and column label. */
 function cell(html: string, local: string, recordId: string, label: string) {
@@ -282,6 +319,10 @@ test(
           [input('receive_lines_currency')]: 'CAD',
           [input('receive_lines_packing_slip')]: 'PS-TRUCK',
           [input('receive_lines_notes')]: '',
+          // RECEIVING-EXTRAS: the day it arrived, as the dialog submits it.
+          [input('receive_lines_received_on')]: new Date()
+            .toISOString()
+            .slice(0, 19),
           [`${input('receive_lines_quantity')}@${first}`]: '5',
           [`${input('receive_lines_cost')}@${first}`]: '2.40',
           [`${input('receive_lines_quantity')}@${third}`]: '3',
@@ -372,12 +413,19 @@ test(
         const truth = await expectedShort(fixture, scenario.short.recordId);
         const page = await read(salesPage);
         assert.equal(page.status, 200);
-        for (const line of scenario.short.lines)
+        for (const line of scenario.short.lines) {
           assert.equal(
             cell(page.html, 'fulfillment_lines', line, 'Short'),
             text(truth.get(line)!),
             line,
           );
+          // RECEIVING-EXTRAS: what placed purchase orders cover of it.
+          assert.equal(
+            cell(page.html, 'fulfillment_lines', line, 'On order'),
+            text(truth.onOrder.get(line)!),
+            line,
+          );
+        }
         const banner =
           /<section class="composition-alert"[^>]*>([\s\S]*?)<\/section>/u.exec(
             page.html,
@@ -392,6 +440,13 @@ test(
       };
       const shortBefore = await assertShortage();
       assert.ok([...shortBefore.values()].some((value) => value > 0n));
+      // The truck's open 3 and the delivered order's 2 are on order.
+      assert.deepEqual(
+        scenario.short.lines.map((line) =>
+          text(shortBefore.onOrder.get(line)!),
+        ),
+        ['5', '0'],
+      );
 
       // Reversing the delivered order's latest receipt: every line of it,
       // each at exactly what it received, compensating its own movement.
@@ -473,11 +528,17 @@ test(
         after.html,
         new RegExp(`value="${ns}:action\\.reverse_receipt"`, 'u'),
       );
-      // Less stock now: the order is shorter, and still matches its truth.
+      // Less stock now, but what the reversal took back is expected again:
+      // the order is no shorter, the 7 are on order, and the page still
+      // matches its truth (RECEIVING-EXTRAS; before it, the order was
+      // shorter by what left the stock).
       const shortAfter = await assertShortage();
-      assert.ok(
-        [...shortAfter.values()].reduce((total, value) => total + value, 0n) >
-          [...shortBefore.values()].reduce((total, value) => total + value, 0n),
+      const sum = (values: Iterable<bigint>) =>
+        [...values].reduce((total, value) => total + value, 0n);
+      assert.equal(sum(shortAfter.values()), sum(shortBefore.values()));
+      assert.equal(
+        sum(shortAfter.onOrder.values()) - sum(shortBefore.onOrder.values()),
+        units('7'),
       );
 
       // The invoice names the order it bills and opens it; without order

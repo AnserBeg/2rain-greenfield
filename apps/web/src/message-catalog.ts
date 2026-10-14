@@ -333,6 +333,64 @@ export const SURFACE_MESSAGE_CATALOG = Object.freeze({
     sentence: 'Legal entity unavailable for new work',
     subject: 'legalEntityId',
   },
+  // RECEIVING-EXTRAS: the posting kernel's date and receiving refusals read
+  // in plain language; the kernel's own code is the subject.
+  OPERATION_DATE_AFTER_TODAY: {
+    consequence: 'blocking',
+    detail:
+      'Stock is never posted on a business day after the company’s today.',
+    nextAction: 'Use today’s date or an earlier one, then try again.',
+    placements: ['page'],
+    sentence: 'Date is after today',
+    subject: 'refusalCode',
+  },
+  OPERATION_DATE_BEFORE_WINDOW: {
+    consequence: 'blocking',
+    detail:
+      'The company posts stock dated at most a set number of business days before today.',
+    nextAction: 'Use a more recent date, then try again.',
+    placements: ['page'],
+    sentence: 'Date is too far back',
+    subject: 'refusalCode',
+  },
+  OPERATION_PERIOD_CLOSED: {
+    consequence: 'blocking',
+    detail:
+      'The date falls on or before the date the inventory period is closed through.',
+    nextAction:
+      'Use a later date, or ask a manager to reopen the period, then try again.',
+    placements: ['page'],
+    sentence: 'Period is closed',
+    subject: 'refusalCode',
+  },
+  OPERATION_RECEIPT_CORRECTION_EXCEEDED: {
+    consequence: 'blocking',
+    detail:
+      'A correction takes back at most what each receipt line still adds to stock, at its own order line, product, location and unit.',
+    nextAction:
+      'Take back at most each line’s Reversible quantity, then try again.',
+    placements: ['page'],
+    sentence: 'Correction exceeds the receipt',
+    subject: 'refusalCode',
+  },
+  OPERATION_ORDER_NOT_RELEASED: {
+    consequence: 'blocking',
+    detail: 'Goods are received or corrected only against a released order.',
+    nextAction: 'Reopen the order, then try again.',
+    placements: ['page'],
+    sentence: 'Order is not released',
+    subject: 'refusalCode',
+  },
+  OPERATION_RECEIVED_OUT_OF_BOUNDS: {
+    consequence: 'blocking',
+    detail:
+      'What a purchase order line has received never falls below none or rises above what it ordered: a receipt takes at most what is still open, a correction takes back at most what the line received, ordered is never cut below received, and an order with anything received is closed rather than cancelled, once nothing is open.',
+    nextAction:
+      'Check the line’s Ordered, Received and Open quantities, or a receipt line’s Reversible, then try again.',
+    placements: ['page'],
+    sentence: 'Quantity is beyond what was ordered or received',
+    subject: 'refusalCode',
+  },
   OPERATION_REFUSED: {
     consequence: 'blocking',
     detail:
@@ -574,9 +632,15 @@ export type QueryDiagnosticCode = (typeof QUERY_DIAGNOSTIC_CODES)[number];
 export const OPERATION_DIAGNOSTIC_CODES = Object.freeze([
   'OPERATION_CONFIRMATION_REQUIRED',
   'OPERATION_CONFIRMATION_STALE',
+  'OPERATION_DATE_AFTER_TODAY',
+  'OPERATION_DATE_BEFORE_WINDOW',
   'OPERATION_INPUT_INVALID',
   'OPERATION_LEGAL_ENTITY_INACTIVE',
+  'OPERATION_ORDER_NOT_RELEASED',
+  'OPERATION_PERIOD_CLOSED',
   'OPERATION_PERMISSION_DENIED',
+  'OPERATION_RECEIPT_CORRECTION_EXCEEDED',
+  'OPERATION_RECEIVED_OUT_OF_BOUNDS',
   'OPERATION_REFUSED',
   'OPERATION_UNAVAILABLE',
   'OPERATION_UNSUPPORTED',

@@ -719,6 +719,13 @@ export function validateSurfaceCompositions(
             surface.surfaceId,
             "only a reference input over the record's own entity leaves the record out",
           );
+        // An instant input may start at the current instant (RECEIVING-
+        // EXTRAS): the day goods arrived starts at today. Asked once.
+        if (input.defaultNow && (input.type !== 'instant' || input.perRow))
+          fail(
+            surface.surfaceId,
+            'only an instant input asked once starts at the current instant',
+          );
         // A reference input may start from a value the record itself stores,
         // read from a field the surface's record query selects.
         if (
@@ -954,6 +961,18 @@ export function validateSurfaceCompositions(
               : undefined;
           if (value.source === 'input' && !bound)
             fail(surface.surfaceId, 'step input must be declared');
+          // A negated value takes back what a quantity input names, written
+          // into a field of the record a step writes (RECEIVING-EXTRAS).
+          if (
+            value.source === 'input' &&
+            value.negated &&
+            (bound?.type !== 'quantity' ||
+              !['values', 'patch'].includes(binding.path[0]!))
+          )
+            fail(
+              surface.surfaceId,
+              'only a quantity input is negated, into a written field',
+            );
           // A per-row value exists only in the run for its row.
           if (bound?.perRow && !step.each)
             fail(
@@ -982,9 +1001,24 @@ export function validateSurfaceCompositions(
                 'no step reads the read-back of a per-row step',
               );
           }
+          // A relation of the record is read as the record id its get
+          // states, so only one the page already names -- a column or a
+          // link -- is written by a step (RECEIVING-EXTRAS: a correction
+          // receipt names its receipt's order).
           if (
             value.source === 'record' &&
-            !fieldsFor(surface.dataSource.targetId).has(value.field)
+            !fieldsFor(surface.dataSource.targetId).has(value.field) &&
+            !(
+              recordRelation(value.field) &&
+              (composition.fields.some(
+                (column) => column.field === value.field,
+              ) ||
+                composition.actions.some(
+                  (candidate) =>
+                    candidate.navigate?.record.source === 'record' &&
+                    candidate.navigate.record.field === value.field,
+                ))
+            )
           )
             fail(surface.surfaceId, 'record mapping requires a selected field');
           if (value.source === 'selected') {
