@@ -12,7 +12,9 @@ and Enter; Ctrl-C stops it and removes its container. The phases add, through th
 - sales orders of lamps: **9** and **6** (confirmed) and **20** (a draft), told apart by quantity.
 
 All instants read in UTC, as everywhere in Rain; "today" for the posting window is the company's business day in
-Calgary. The window is seven business days back, never after today, never inside a closed period.
+Edmonton (America/Edmonton). The window is seven business days back, never after today, never inside a closed period.
+So at 7 pm in Edmonton, Received on starts at tomorrow's UTC date: leave it and the receipt is booked today; changing
+it to today's date would book it yesterday evening.
 
 ## §1 The day the goods arrived
 
@@ -23,21 +25,27 @@ Calgary. The window is seven business days back, never after today, never inside
    code `RECEIPT_FORWARD_DATE_REFUSED` under it. Back on the order, Received still reads 0 on every line.
 4. Again with a date nine days back: "**Date is too far back**" (`INVENTORY_BACKDATE_LIMIT_EXCEEDED`); nothing received.
 5. Again with yesterday: "Receive lines with actual cost: done". Received reads 5, 0 and 4, and the posted receipt in
-   **Connected receipts** reads yesterday's date under Received at.
+   **Connected receipts** reads yesterday's date and the time you entered, in UTC, under Received at
+   (for example "Oct 12, 2026, 7:05 PM UTC").
 6. The two refused attempts each left a **draft** receipt in Connected receipts (Filed below); a draft can be opened,
    its Received at edited and Post used, or left alone — it moves no stock.
 
 ## §2 Correct part of a receipt
 
-1. Open the delivered order. In **Connected receipts**, on its posted receipt, **Open receipt**.
-2. The receipt's page: its order (with **Open purchase order**), state, kind, Received at, location and packing slip;
-   **Receipt lines** with Reversible **4** and **3**; **Corrections and reversals** (empty); the receiving links below.
-3. **Correct receipt** → **Fill reversible quantities** (4 and 3). Set line 1 to **5**, empty line 2, give a reason,
-   **Review**, **Confirm**: "**Correction exceeds the receipt**" (`RECEIPT_CORRECTION_INVALID`); nothing moves.
-4. **Correct receipt** again: line 1 **1**, line 2 empty, a reason. Review shows one line; Confirm → "Correct receipt:
+1. Open the delivered order (Received 4 and 3). A second delivery: **Receive lines with actual cost** → **Fill open
+   quantities** (only line 1 is offered, 2), unit cost **2.5**, **Review**, **Confirm**. Received reads **6** and **3**.
+2. In **Connected receipts**, on the first posted receipt (the one of 4 and 3), **Open receipt**.
+3. The receipt's page: its order (with **Open purchase order**), state *posted*, kind, Received at, location and packing
+   slip; **Receipt lines** with Reversible **4** and **3**; **Corrections and reversals** (empty); the receiving links
+   below; Post and the rest under **Record actions**.
+4. **Correct receipt** → **Fill reversible quantities** (4 and 3). Set line 1 to **7**, empty line 2, give a reason,
+   **Review**, **Confirm**: "**Quantity is beyond what was ordered or received**" (`RECEIPT_QUANTITY_OUT_OF_BOUNDS`):
+   the order line has only received 6. Nothing moves; Reversible still reads 4 and 3.
+5. Again with line 1 **5**: "**Correction exceeds the receipt**" (`RECEIPT_CORRECTION_INVALID`): the order line has
+   6, but this receipt's line only added 4. Nothing moves.
+6. **Correct receipt** again: line 1 **1**, line 2 empty, a reason. Review shows one line; Confirm → "Correct receipt:
    done". Reversible now reads **3** and **3**; Corrections and reversals lists a posted *correction*.
-5. **Open purchase order**: Received reads **3** and **3**. Reverse receipt on that order still takes back all that is
-   left (3 and 3), as before.
+7. **Open purchase order**: Received reads **5** and **3**.
 
 ## §3 Short, unless it is on order
 

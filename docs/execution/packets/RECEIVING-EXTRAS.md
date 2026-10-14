@@ -9,12 +9,12 @@ Base: `origin/packet/INTEGRATION` at `8c8cfab1`. Reference: PaneFlow `d057daff` 
 1. Both receive Tasks (one line; a truck of lines) ask **Received on** — an instant input that starts at the request clock's now, in the explicit-UTC picker, to the second — and write it as the receipt's `effective_at`; an entered value is kept. The kernel admits it up to seven business days back, never after the company's today and never in a closed period; a refused date writes no movement.
 2. `compositionInput.defaultNow` (optional v6 key): only on an `instant` input asked once; anything else is refused by name.
 3. The goods receipt page is a composition: number, purchase order (opened by **Open purchase order**), state, kind, received at, location, packing slip, the receipt it corrects; **Receipt lines** with Reversible from the receiving read model; **Corrections and reversals** (receipts superseding it); the receiving links stay below.
-4. **Correct receipt** (on a posted initial receipt): rows are the lines with something reversible, each with "Quantity to take back" (filled from Reversible), a required reason; it creates a draft receipt of kind `correction` superseding the receipt, at its location and order, one line per entered row compensating that line's movement at the negative of the entered quantity with the line's item, unit and cost, then posts it through `goods_receipt_post`. A line left empty is untouched. The kernel refuses more than a line still adds (`RECEIPT_CORRECTION_INVALID`) and a closed order; two racing corrections admit one.
+4. **Correct receipt** (on a posted initial receipt): rows are the lines with something reversible, each with "Quantity to take back" (filled from Reversible), a required reason; it creates a draft receipt of kind `correction` superseding the receipt, at its location and order, one line per entered row compensating that line's movement at the negative of the entered quantity with the line's item, unit and cost, then posts it through `goods_receipt_post`. A line left empty is untouched. The kernel refuses taking back more than the order line received (`RECEIPT_QUANTITY_OUT_OF_BOUNDS`, checked first), more than the receipt's line still adds (`RECEIPT_CORRECTION_INVALID`) and a closed order; two racing corrections admit one.
 5. A step binding may take back an input (`{source:'input', negated:true}`, optional v6 key): only a quantity input, only into `values`/`patch`; the web writes the admitted positive decimal's negative. A step may write a relation of its record only when the page names it (a column or a link), so the record's get states it.
 6. `surface.list.progress.supply.incoming` (optional v6 key, 1-4 supply sums) with `outputs.incoming`, declared together: per item, what free stock leaves uncovered is next covered by incoming supply, never below zero; `short` is what neither covers and `incoming` what it covers, both in `shortIn` states, before the count, the page and the export; the gateway authorizes the incoming queries per request like every supply read; agent presets publish them.
 7. The Sales orders List sums as incoming each active line of a **released** purchase order (Place order keeps an order released) at ordered less its received projection, never below zero; an **On order** column follows Short (12 of 12 columns); **Blocked by supply** keeps a confirmed order only if it is still short after that.
-8. The order page's Fulfillment lines state **On order** beside Short from the same queries, allocated in line order after free stock, one formula with the List; a denied incoming read states neither (the List withholds its supply whole, "Short and On order are withheld…").
-9. The posting kernel's `RECEIPT_FORWARD_DATE_REFUSED`/`INVENTORY_FORWARD_DATE_REFUSED`, `INVENTORY_BACKDATE_LIMIT_EXCEEDED`, `INVENTORY_PERIOD_CLOSED`, `RECEIPT_CORRECTION_INVALID` and `RECEIPT_ORDER_NOT_RELEASED` read as five catalog messages ("Date is after today", "Date is too far back", "Period is closed", "Correction exceeds the receipt", "Order is not released"), each naming the kernel's code as its subject; any other code keeps `OPERATION_REFUSED`.
+8. The order page's Fulfillment lines state **On order** beside Short from the same queries (released orders by an exact filter on their stored state), allocated in line order after free stock, one formula with the List; a denied incoming read states neither (the List withholds its supply whole, "Short and On order are withheld…").
+9. The posting kernel's `RECEIPT_FORWARD_DATE_REFUSED`/`INVENTORY_FORWARD_DATE_REFUSED`, `INVENTORY_BACKDATE_LIMIT_EXCEEDED`, `INVENTORY_PERIOD_CLOSED`, `RECEIPT_CORRECTION_INVALID`, `RECEIPT_QUANTITY_OUT_OF_BOUNDS` and `RECEIPT_ORDER_NOT_RELEASED` read as six catalog messages ("Date is after today", "Date is too far back", "Period is closed", "Correction exceeds the receipt", "Quantity is beyond what was ordered or received", "Order is not released"), each naming the kernel's code as its subject; any other code keeps `OPERATION_REFUSED`.
 10. Surface floor 26 when any surface declares claims 2, 5 or 6 (22-25 are held for leaves INTEGRATION has not folded in); runtime support 21 -> 26.
 
 ## Decisions
@@ -29,6 +29,12 @@ Base: `origin/packet/INTEGRATION` at `8c8cfab1`. Reference: PaneFlow `d057daff` 
 - The receiving application extension now runs for composed record pages too; the generic order page's receiving section is skipped on a composed page.
 - order_pages' short order asks 25 and 9 (was 12 and 9) so it stays short beyond the notebooks on order; its oracle counts incoming, and after the reversal the order is no shorter with the 7 on order again.
 - Release: one lineage entry over INTEGRATION's one (6,237,235 -> 12,158,028 B); storage target, verification plan, operation catalog unchanged, so no schema snapshot and no scenario pin moves.
+- CI red at `69c83ea4` (run 37480976597), order page On order: a code defect. The page judged an order released by its relation label, which carries the state's display text ("Purchase Order Released"), so the page never counted anything on order while the List did; released orders are now read by an exact filter on the stored state.
+- CI red, correction past its order line: the test expected the wrong code. The kernel checks the order line's received bounds before the correction rule, so taking back more than the line received is `RECEIPT_QUANTITY_OUT_OF_BOUNDS`; both refusals are now exercised (a later delivery keeps the line above nothing for `RECEIPT_CORRECTION_INVALID`), and the bounds refusal reads in plain language instead of "Operation refused" (the common case on Correct receipt).
+- CI red, runtime refusal text "supports 21": moved with claim 10 (26).
+- CI red, composed receiving journey: the receipt page is now a composed document (claim 3), so Post sits under Record actions and the revision in Technical details; the journey reads both there (state posted, Active, revision 2).
+- CI red, received-at text: the spec expected an ISO date, but every instant reads like "Oct 5, 2026, 2:53 PM UTC"; it now expects that exact text.
+- Time zone (checked): Received at shows UTC, as every instant in Rain does, and so does POSTING-FORWARD-DATE (its filed line); only the kernel's "today" uses the tenant calendar (America/Edmonton). Kept; showing instants in the tenant's zone touches every instant, the picker and list dates, so it is filed as its own packet.
 
 ## Slices
 
@@ -36,11 +42,11 @@ Base: `origin/packet/INTEGRATION` at `8c8cfab1`. Reference: PaneFlow `d057daff` 
 
 ## Pins moved (measured)
 
-Surface floor grouped 21 -> 26 (flat 20, surfaces 113, navigation leaves unchanged); runtime support 21 -> 26; message catalog 50 -> 55; Purchasing grammar debt 55 -> 53 (the receipt page's childTables); Sales orders List columns 11 -> 12; language coverage 2805 -> 2854 obligations, 946 -> 972 observed; expected-red 168 -> 177 entries in 15 -> 16 manifests; commercial PostgreSQL files 12 -> 13; lineage entries 1 -> 2.
+Surface floor grouped 21 -> 26 (flat 20, surfaces 113, navigation leaves unchanged); runtime support 21 -> 26; message catalog 50 -> 56; Purchasing grammar debt 55 -> 53 (the receipt page's childTables); Sales orders List columns 11 -> 12; language coverage 2805 -> 2854 obligations, 946 -> 972 observed; expected-red 168 -> 177 entries in 15 -> 16 manifests; commercial PostgreSQL files 12 -> 13; lineage entries 1 -> 2.
 
 ## Controls (`test/evidence/RECEIVING-EXTRAS.expected-red.json`)
 
-`receiving-instant-default-on-any-input` -> 2; `receiving-negated-any-input`, `receiving-record-relation-unnamed` -> 5; `receiving-incoming-without-output` -> 6; `receiving-received-date-starts-empty` -> 1; `receiving-correction-adds-what-was-entered` -> 4; `receiving-refusals-unreadable` -> 9; `receiving-list-short-ignores-incoming` -> 7; `receiving-page-short-ignores-incoming` -> 8.
+`receiving-instant-default-on-any-input` -> 2; `receiving-negated-any-input`, `receiving-record-relation-unnamed` -> 5; `receiving-incoming-without-output` -> 6; `receiving-received-date-starts-empty` -> 1; `receiving-correction-adds-what-was-entered` -> 4; `receiving-refusals-unreadable` -> 9 (now six codes); `receiving-list-short-ignores-incoming` -> 7; `receiving-page-short-ignores-incoming` -> 8.
 
 ## Gates
 
@@ -55,7 +61,8 @@ Surface floor grouped 21 -> 26 (flat 20, surfaces 113, navigation leaves unchang
 
 - A refused receive or correction leaves its draft receipt (created by the Task's earlier steps); it moves no stock and can be edited and posted or left. A pre-check before the first step would need the window in the web.
 - Incoming ignores expected dates; PaneFlow's "due by the requested date" needs a correlated date rule in the supply grammar.
-- Received on is a UTC date and time (POSTING-FORWARD-DATE's filed line): after 18:00 in Calgary the picker's default shows tomorrow's UTC date.
+- Received on is a UTC date and time (POSTING-FORWARD-DATE's filed line): at 7 pm in Edmonton the picker's default reads tomorrow's UTC date; left alone it books today, but "fixing" it to today's date books yesterday. Proposed packet: show instants in the tenant's zone.
+- The order page reads at most 1,000 purchase order lines of an item and 1,000 released orders; beyond that its Fulfillment lines fail rather than guess (as its stock reads already do).
 - `parseSharedListSupply`'s incoming pairing is covered by the canonical validator and the gateway path, not by its own unit test.
 
 Review: not owed — outside the Critical set.
