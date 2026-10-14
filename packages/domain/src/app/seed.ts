@@ -568,8 +568,56 @@ export function composedApplicationSeed(
           ]
         : [];
     }),
+    // The walk-in customer counter sales default to (SALES-EXTRAS): an
+    // ordinary customer whose ship-to is the counter it is picked up at.
+    ...counterCustomer(),
   );
   return Object.freeze(records);
+}
+
+/**
+ * The Counter customer: a party with an active customer role, paying on
+ * receipt in CAD, taxed as Alberta, whose default ship-to is the store
+ * counter -- so a counter sale confirms with a complete ship-to.
+ */
+function counterCustomer(): readonly ComposedApplicationSeedRecord[] {
+  const party = record(9001, '', {}).recordId;
+  const address = APPLICATION_IDS.party.address;
+  return [
+    partyRecord(
+      9001,
+      'P-COUNTER',
+      'Counter (walk-in)',
+      'Walk-in counter sales',
+      {
+        [APPLICATION_IDS.party.fieldIds.defaultCurrency]:
+          APPLICATION_IDS.party.currencyOptionIds.cad,
+        [APPLICATION_IDS.party.fieldIds.paymentTerms]:
+          APPLICATION_IDS.party.paymentTermOptionIds.dueOnReceipt,
+        [APPLICATION_IDS.party.fieldIds.defaultShipToAddressId]: record(
+          9201,
+          '',
+          {},
+        ).recordId,
+        [APPLICATION_IDS.party.fieldIds.defaultTaxCodeId]: taxCodeId(
+          provinceTaxCode.AB ?? 0,
+        ),
+      },
+    ),
+    partyRoleRecord(9101, party, 'customer'),
+    Object.freeze({
+      ...record(9201, address.createOperationId, {
+        [address.fieldIds.label]: 'Store counter',
+        [address.fieldIds.recipient]: 'Picked up at the counter',
+        [address.fieldIds.street]: '120 Industrial Way',
+        [address.fieldIds.city]: 'Calgary',
+        [address.fieldIds.region]: 'AB',
+        [address.fieldIds.postalCode]: 'T2P 0A1',
+        [address.fieldIds.country]: 'Canada',
+      }),
+      relations: Object.freeze({ [address.partyRelationId]: party }),
+    }),
+  ];
 }
 
 function addressRecord(

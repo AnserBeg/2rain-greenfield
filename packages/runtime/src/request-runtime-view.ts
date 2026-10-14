@@ -183,7 +183,11 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // (CATALOG-EXTRAS).
     // 21 adds a List progress's supply and the views and row actions that
     // keep covered or short rows (SUPPLY-WARNINGS).
-    maximumSupportedVersion: 21,
+    // 22 adds ranked editor defaults (a customer's price lists) and Tasks of
+    // up to twelve steps whose per-row steps read their row's read-backs
+    // (SALES-EXTRAS, which numbered it 15 in parallel; renumbered by
+    // INTEGRATION after its ADR-0066 re-baseline).
+    maximumSupportedVersion: 22,
   },
 });
 

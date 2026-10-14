@@ -227,3 +227,85 @@ function dto(recordId: string, name: string): SemanticRecordDto {
     values: { [CATALOG_IDS.fieldIds.name]: name },
   };
 }
+
+test('SALES-EXTRAS: the product Catalog declares price lists with their prices and customers; the standalone Catalog does not', () => {
+  type Definition = {
+    entities: Array<{ entityId: string }>;
+    fields: Array<{
+      entity: { targetId: string };
+      fieldId: string;
+      fieldType: { kind: string; options?: Array<{ optionId: string }> };
+      presence: string;
+    }>;
+    relations: Array<{
+      ownership: string;
+      relationId: string;
+      sourceEntity: { targetId: string };
+      targetEntity: { targetId: string };
+    }>;
+  };
+  const ns = CATALOG_IDS.namespace;
+  const product = catalogModuleDefinition(ns, {
+    sellingPrices: true,
+  }) as unknown as Definition;
+  const standalone = catalogModuleDefinition() as unknown as Definition;
+  const local = (entity: string) => `${ns}:entity.${entity}`;
+  assert.deepEqual(
+    product.entities
+      .map((entity) => entity.entityId)
+      .filter((id) => id.includes(':entity.price_list')),
+    [
+      local('price_list'),
+      local('price_list_entry'),
+      local('price_list_assignment'),
+    ],
+  );
+  assert.equal(
+    standalone.entities.some((entity) =>
+      entity.entityId.includes('price_list'),
+    ),
+    false,
+  );
+  const kind = (fieldId: string) =>
+    product.fields.find((field) => field.fieldId === `${ns}:field.${fieldId}`)
+      ?.fieldType.kind;
+  assert.deepEqual(
+    [
+      'price_list_code',
+      'price_list_currency',
+      'price_list_priority',
+      'price_list_status',
+      'price_list_entry_item_id',
+      'price_list_entry_minimum_quantity',
+      'price_list_entry_unit_price',
+      'price_list_assignment_party_id',
+    ].map(kind),
+    [
+      'textFieldType',
+      'enumFieldType',
+      'integerFieldType',
+      'enumFieldType',
+      'textFieldType',
+      'exactDecimalFieldType',
+      'exactDecimalFieldType',
+      'textFieldType',
+    ],
+  );
+  // A list's prices and customers are owned by it.
+  assert.deepEqual(
+    product.relations.map((relation) => [
+      relation.sourceEntity.targetId,
+      relation.targetEntity.targetId,
+      relation.ownership,
+    ]),
+    [
+      [local('price_list_entry'), local('price_list'), 'parentScopedChild'],
+      [
+        local('price_list_assignment'),
+        local('price_list'),
+        'parentScopedChild',
+      ],
+    ],
+  );
+  assert.deepEqual(standalone.relations, []);
+});

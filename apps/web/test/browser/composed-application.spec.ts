@@ -1030,12 +1030,14 @@ async function inventoryNavigationJourney(
       ':scope > a > span:nth-child(2), :scope > details > summary > span:nth-child(2) > .nav-group-label',
     ),
   ).toHaveText(['Sales', 'Purchasing', 'Inventory', 'Party', 'More']);
-  // Sales lists its invoices beside its orders (ruling C), Purchasing its
+  // Sales lists its counter sales (SALES-EXTRAS; INTEGRATION, decision
+  // I-M8(a)) and invoices (ruling C) beside its orders, Purchasing its
   // expected receipts (PURCHASING-PARITY), approvals/settings (APPROVALS) and
   // bills (PAYABLES) beside its orders, Inventory Catalog's Buying worklist and
-  // Stock by item (REPLENISHMENT) and Catalog its tax codes beside its items
-  // (ruling B).
+  // Stock by item (REPLENISHMENT) and Catalog its tax codes (ruling B) and
+  // price lists (SALES-EXTRAS) beside its items.
   await expect(navigation.locator('a > span:nth-child(2)')).toHaveText([
+    'Counter sales',
     'Invoices',
     'Sales orders',
     'Expected receipts',
@@ -1056,6 +1058,7 @@ async function inventoryNavigationJourney(
     'Party role',
     'Inventory value',
     'Item',
+    'Price list',
     'Tax code',
     'Location',
   ]);

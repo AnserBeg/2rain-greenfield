@@ -25,6 +25,10 @@ function ids(namespace: string) {
       defaultSalespersonPartyId: `${namespace}:field.party_default_salesperson_party_id`,
       defaultShipToAddressId: `${namespace}:field.party_default_ship_to_address_id`,
       defaultTaxCodeId: `${namespace}:field.party_default_tax_code_id`,
+      // Credit control (SALES-EXTRAS): a limit in the customer's currency and
+      // a manual hold, read when one of its orders is confirmed.
+      creditLimit: `${namespace}:field.party_credit_limit`,
+      creditHold: `${namespace}:field.party_credit_hold`,
       name: `${namespace}:field.party_name`,
       number: `${namespace}:field.party_number`,
       paymentTerms: `${namespace}:field.party_payment_terms`,
@@ -117,6 +121,8 @@ export function partyModuleDefinition(
       fieldIds.defaultSalespersonPartyId,
       fieldIds.defaultShipToAddressId,
       fieldIds.defaultTaxCodeId,
+      fieldIds.creditLimit,
+      fieldIds.creditHold,
     ]),
   ];
   const roleFields = [fieldIds.roleKind, fieldIds.roleStatus];
@@ -287,6 +293,46 @@ export function partyModuleDefinition(
           presence: 'optional',
           searchable: false,
         }),
+        // Credit control (SALES-EXTRAS): the most a customer may owe on open
+        // invoices and confirmed orders not yet invoiced, in its own currency;
+        // empty or zero sets no limit. A customer on hold has no order
+        // confirmed until the hold is released.
+        {
+          classification: 'internal',
+          collation: 'binary',
+          defaultSemantics: 'nullable',
+          entity: reference('entityReference', entityIds.party),
+          fieldId: fieldIds.creditLimit,
+          fieldType: {
+            kind: 'exactDecimalFieldType',
+            precision: 38,
+            representation: 'canonicalString',
+            scale: 18,
+            schemaVersion: version,
+          },
+          kind: 'fieldDefinition',
+          label: 'Credit limit',
+          orderKey: 160,
+          presence: 'optional',
+          reportable: true,
+          schemaVersion: version,
+          searchable: false,
+        },
+        {
+          classification: 'internal',
+          collation: 'binary',
+          defaultSemantics: 'nullable',
+          entity: reference('entityReference', entityIds.party),
+          fieldId: fieldIds.creditHold,
+          fieldType: { kind: 'booleanFieldType', schemaVersion: version },
+          kind: 'fieldDefinition',
+          label: 'On credit hold',
+          orderKey: 170,
+          presence: 'optional',
+          reportable: true,
+          schemaVersion: version,
+          searchable: false,
+        },
         ...ADDRESS_FIELDS.map(([name, label, maximumLength, required], index) =>
           textField({
             entityId: entityIds.address,

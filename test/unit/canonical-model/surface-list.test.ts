@@ -56,6 +56,8 @@ test('the composed application declares its Lists and they normalize unchanged',
     (surface) => 'list' in surface && surface.list,
   );
   assert.deepEqual(declared.map((surface) => surface.surfaceId).sort(), [
+    // SALES-EXTRAS: Counter sales, a worklist beside Sales orders.
+    `${ns}:surface.counter_sale_list`,
     // Ruling C: the Invoices List.
     `${ns}:surface.customer_invoice_list`,
     // PURCHASING-PARITY: what is still to arrive, beside Purchase orders.
@@ -182,6 +184,39 @@ test('the composed application declares its Lists and they normalize unchanged',
     salesOrders.list.columns.map((column) => column.label).slice(-3),
     ['Open', 'Short', 'Currency'],
   );
+  // SALES-EXTRAS (INTEGRATION, decision I-M8(a)): Counter sales is a
+  // worklist over its own clone of the Sales orders query -- the same
+  // columns, figures and row actions over one view of the orders whose
+  // counter flag is set -- so Sales orders keeps its eight views.
+  const counterSales = declared.find(
+    (surface) => surface.surfaceId === `${ns}:surface.counter_sale_list`,
+  ) as unknown as Declared & {
+    label: string;
+    list: { views: Array<{ filters: unknown }> };
+  };
+  assert.equal(counterSales.label, 'Counter sales');
+  assert.equal(
+    counterSales.dataSource.targetId,
+    `${ns}:query.counter_sale_list`,
+  );
+  assert.deepEqual(
+    counterSales.list.views.map((view) => [view.label, view.filters]),
+    [
+      [
+        'All',
+        [{ field: `${ns}:field.sales_order_counter_sale`, value: 'true' }],
+      ],
+    ],
+  );
+  assert.deepEqual(
+    counterSales.list.columns.map((column) => column.label),
+    salesOrders.list.columns.map((column) => column.label),
+  );
+  assert.deepEqual(
+    counterSales.list.rowActions?.map((value) => value.label),
+    salesOrders.list.rowActions?.map((value) => value.label),
+  );
+  assert.equal(counterSales.list.progress?.whenDenied, 'omit');
   assert.deepEqual(
     salesOrders.list.rowActions?.map((value) => [
       value.label,

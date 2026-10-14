@@ -3,8 +3,11 @@ import test from 'node:test';
 
 import {
   chargeAmounts,
+  creditLimitCents,
+  creditPosition,
   formatCents,
   lineAmounts,
+  orderTotalCents,
   parseExact,
   sameExact,
   threeWayMatch,
@@ -116,4 +119,97 @@ test('PAYABLES (PY-G): a purchase line three-way match compares what is billed w
   assert.deepEqual(match(null, unit), [null, null]);
   assert.deepEqual(match(unit, null), [null, null]);
   assert.deepEqual(match(null, null), [null, null]);
+});
+
+test('SALES-EXTRAS credit: a positive limit in cents sets one; an order totals its lines and charges or states nothing', () => {
+  assert.equal(creditLimitCents('100'), 10_000n);
+  assert.equal(creditLimitCents('250.005000000000000000'), 25_001n);
+  // Empty, zero, negative or unreadable: no limit.
+  for (const value of [null, undefined, '', '0', '0.000', '-5', 'ten'])
+    assert.equal(creditLimitCents(value), null, String(value));
+  // 4 × 10.00 taxed 5% = 42.00, freight 25.00 taxed 5% = 26.25.
+  assert.equal(
+    orderTotalCents(
+      [
+        {
+          quantity: '4',
+          unitPrice: '10',
+          discountPercent: null,
+          taxRatePercent: '5',
+        },
+      ],
+      [
+        { amount: '25', taxRatePercent: '5' },
+        { amount: null, taxRatePercent: undefined },
+      ],
+    ),
+    6_825n,
+  );
+  // An unpriced line, or a charge whose rate cannot be read, is no total.
+  assert.equal(
+    orderTotalCents(
+      [
+        {
+          quantity: '4',
+          unitPrice: null,
+          discountPercent: null,
+          taxRatePercent: undefined,
+        },
+      ],
+      [],
+    ),
+    null,
+  );
+  assert.equal(
+    orderTotalCents([], [{ amount: '25', taxRatePercent: null }]),
+    null,
+  );
+});
+
+test('SALES-EXTRAS credit: the position compares open balances and confirmed orders with the limit in one currency', () => {
+  const position = (input: Partial<Parameters<typeof creditPosition>[0]>) =>
+    creditPosition({
+      hold: false,
+      limitCents: 10_000n,
+      sameCurrency: true,
+      openBalanceCents: 2_100n,
+      onOrderCents: 6_300n,
+      ...input,
+    });
+  assert.deepEqual(position({}), {
+    limitCents: 10_000n,
+    openBalanceCents: 2_100n,
+    onOrderCents: 6_300n,
+    availableCents: 1_600n,
+    status: 'Within limit',
+  });
+  assert.equal(position({ onOrderCents: 8_000n }).status, 'Over limit');
+  assert.equal(position({ onOrderCents: 8_000n }).availableCents, -100n);
+  // Exactly at the limit is within it.
+  assert.equal(position({ onOrderCents: 7_900n }).status, 'Within limit');
+  assert.equal(position({ hold: true }).status, 'On hold');
+  assert.deepEqual(
+    [
+      position({ limitCents: null }).status,
+      position({ limitCents: null }).availableCents,
+    ],
+    ['No limit', null],
+  );
+  // A limit in another currency is not compared: nothing is converted.
+  assert.deepEqual(
+    [
+      position({ sameCurrency: false }).status,
+      position({ sameCurrency: false }).availableCents,
+    ],
+    ['Limit in another currency', null],
+  );
+  // A withheld or unstated figure states no availability, never a zero.
+  assert.deepEqual(
+    [
+      position({ openBalanceCents: null }).status,
+      position({ openBalanceCents: null }).availableCents,
+    ],
+    [null, null],
+  );
+  assert.equal(position({ onOrderCents: null, hold: true }).status, 'On hold');
 });

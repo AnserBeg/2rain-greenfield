@@ -172,6 +172,11 @@ interface RenderContext {
    * it with each in-place selection, so a change not yet saved is known.
    */
   readonly lineSource?: boolean;
+  /**
+   * How a derived value reads when it names a record, such as the price list
+   * that priced a line: that record's label, read under current authority.
+   */
+  readonly display?: string | undefined;
 }
 
 /** A non-reference field, routed through the platform's typed controls. */
@@ -198,9 +203,11 @@ export function renderValueControl(context: RenderContext): string {
     // it from the submission, so it cannot drift from the product it describes.
     // A decimal (a list price) reads in canonical spelling.
     const raw = text(value);
-    const shown = DECIMAL_KINDS.includes(input.kind)
-      ? (canonicalDecimal(raw) ?? raw)
-      : raw;
+    const shown =
+      context.display ??
+      (DECIMAL_KINDS.includes(input.kind)
+        ? (canonicalDecimal(raw) ?? raw)
+        : raw);
     return `<output id="${h(id)}" class="derived-value" data-derived-from="${h(presentation.referenceFieldId)}"${named}>${shown ? h(shown) : row.values[presentation.referenceFieldId] ? '<span class="derived-empty">—</span>' : '<span class="derived-empty">Select a product</span>'}</output>`;
   }
   if (input.kind === 'dateTimeFieldType') {

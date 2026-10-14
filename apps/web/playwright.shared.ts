@@ -4,15 +4,16 @@ import { devices, type PlaywrightTestConfig } from '@playwright/test';
  * The browser suite runs as four CI jobs under the same bound, split by file
  * name. The browser job (playwright.config.ts) ignores every spec this rule
  * matches: purchasing, receiving and receivables, inventory, payables, the
- * order pages and every composed-application journey. Of those, the composed
- * job (playwright.composed.config.ts) runs the composed-application journeys,
- * the inventory job (playwright.inventory.config.ts) the inventory and item
- * stock specs, and the operations job (playwright.operations.config.ts) the
- * rest, so every spec runs in exactly one job. The rule reads the file name
- * only: nothing after the matched word may be a directory.
+ * order pages, price lists (SALES-EXTRAS) and every composed-application
+ * journey. Of those, the composed job (playwright.composed.config.ts) runs the
+ * composed-application journeys, the inventory job
+ * (playwright.inventory.config.ts) the inventory and item stock specs, and the
+ * operations job (playwright.operations.config.ts) the rest, so every spec
+ * runs in exactly one job. The rule reads the file name only: nothing after
+ * the matched word may be a directory.
  */
 export const operationsBrowserSpecs =
-  /(?:purchase|receiv|inventory|payable|composed-application|expected-receipts|order-lists|order-pages|item-stock)[^/]*\.spec\.ts$/u;
+  /(?:purchase|receiv|inventory|payable|composed-application|expected-receipts|order-lists|order-pages|item-stock|price-list)[^/]*\.spec\.ts$/u;
 
 /** The composed-application journeys; every one also matches the rule above. */
 export const composedApplicationSpecs = /composed-application\.spec\.ts$/u;

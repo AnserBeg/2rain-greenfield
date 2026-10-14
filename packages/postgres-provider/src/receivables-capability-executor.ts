@@ -9,8 +9,10 @@ import {
  * credit (CM-) against one invoice, and a balance per invoice. Every figure is
  * frozen when its document posts; an invoice is void only while nothing is
  * paid or credited on it, and an order with a live invoice is not reopened
- * (ruling F). No ledger, no provider, no other currency. The settlement
- * executor runs it; this spec names what is Sales'.
+ * (ruling F). No ledger, no provider, no other currency. An order is
+ * confirmed here too (SALES-EXTRAS), the one place that reads its customer's
+ * credit hold, limit and exposure under a lock on that customer. The
+ * settlement executor runs it; this spec names what is Sales'.
  */
 export const RECEIVABLES_CAPABILITY_ID =
   'northstar.sales:capability.receivables' as const;
@@ -50,6 +52,7 @@ export const RECEIVABLES_SETTLEMENT_SPEC: SettlementSpec = Object.freeze({
     ['customer_payment_post', 'pay', 'payment'],
     ['customer_credit_post', 'credit', 'credit'],
     ['sales_order_reopen', 'reopen', 'order'],
+    ['sales_order_release', 'confirm', 'order'],
   ] as const),
   datedAtPost: false,
   codes: Object.freeze({
@@ -61,6 +64,11 @@ export const RECEIVABLES_SETTLEMENT_SPEC: SettlementSpec = Object.freeze({
     amountInvalid: 'RECEIVABLES_AMOUNT_INVALID',
     amountExceedsBalance: 'RECEIVABLES_AMOUNT_EXCEEDS_BALANCE',
     orderNotReopenable: 'RECEIVABLES_ORDER_NOT_REOPENABLE',
+    orderNotConfirmable: 'RECEIVABLES_ORDER_NOT_CONFIRMABLE',
+    customerOnHold: 'CREDIT_HOLD',
+    creditLimitExceeded: 'CREDIT_LIMIT_EXCEEDED',
+    creditCurrencyMismatch: 'CREDIT_CURRENCY_MISMATCH',
+    creditUnstated: 'CREDIT_EXPOSURE_UNSTATED',
   } as const),
   messages: Object.freeze({
     targetMissing: 'Receivables target is missing or archived',
@@ -88,10 +96,37 @@ export const RECEIVABLES_SETTLEMENT_SPEC: SettlementSpec = Object.freeze({
       `The ${kind} exceeds the invoice balance`,
     reopenState: 'Only a closed order reopens',
     reopenSettled: 'An invoiced order is not reopened; void its invoices first',
+    orderChanged: 'The order changed while it was being confirmed',
+    confirmState: 'Only a draft order is confirmed',
+    confirmRequired:
+      'Confirm needs a complete ship-to: street, city, postal code and country',
+    customerOnHold:
+      'This customer is on credit hold; release the hold before confirming its orders',
+    creditLimitExceeded: (overBy: string, currency: string) =>
+      `Confirming this order would exceed the customer's credit limit by ${overBy} ${currency}`,
+    creditCurrencyMismatch: (limitCurrency: string | null) =>
+      limitCurrency
+        ? `This customer's credit limit is in ${limitCurrency}; confirm its orders in that currency`
+        : "This customer's credit limit has no currency; set the customer's currency first",
+    creditUnstated:
+      "The customer's credit cannot be checked: price every line and state each charge's tax on this order and on its other confirmed orders",
   }),
   metadataKeys: Object.freeze({
     lines: 'invoicedOrderLineIds',
     document: 'invoiceId',
+  }),
+  // Confirm (SALES-EXTRAS): a complete ship-to, and the customer's credit.
+  confirm: Object.freeze({
+    party: 'party',
+    limit: 'party_credit_limit',
+    hold: 'party_credit_hold',
+    currency: 'party_default_currency',
+    required: Object.freeze([
+      'ship_to_street',
+      'ship_to_city',
+      'ship_to_postal_code',
+      'ship_to_country',
+    ]),
   }),
 });
 

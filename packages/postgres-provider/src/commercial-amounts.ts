@@ -161,3 +161,101 @@ export function threeWayMatch(
             : 'Matched',
   };
 }
+
+/**
+ * A credit limit in cents (SALES-EXTRAS), rounded half up like every money
+ * figure: a positive amount sets a limit; empty, zero or anything that is not
+ * a non-negative decimal sets none.
+ */
+export function creditLimitCents(value: unknown): bigint | null {
+  const parsed = parseExact(value);
+  if (!parsed || parsed.units <= 0n) return null;
+  const cents = toCents(parsed.units, parsed.scale);
+  return cents > 0n ? cents : null;
+}
+
+/**
+ * An order's total in cents -- its lines' amounts and taxes and its charges
+ * with theirs -- or `null` when any figure cannot be stated, as the
+ * commercial read model states it.
+ */
+export function orderTotalCents(
+  lines: readonly LineInput[],
+  charges: readonly {
+    readonly amount: unknown;
+    readonly taxRatePercent: string | null | undefined;
+  }[],
+): bigint | null {
+  let total = 0n;
+  for (const line of lines) {
+    const amounts = lineAmounts(line);
+    if (!amounts) return null;
+    total += amounts.amountCents + amounts.taxCents;
+  }
+  for (const charge of charges) {
+    const amounts = chargeAmounts(charge.amount, charge.taxRatePercent);
+    if (!amounts) return null;
+    total += amounts.amountCents + amounts.taxCents;
+  }
+  return total;
+}
+
+/** How a customer's credit stands, as its pages show it (SALES-EXTRAS). */
+export type CreditStatus =
+  | 'On hold'
+  | 'No limit'
+  | 'Within limit'
+  | 'Over limit'
+  | 'Limit in another currency';
+
+export interface CreditPosition {
+  readonly limitCents: bigint | null;
+  /** Open and partially paid invoice balances, in the currency. */
+  readonly openBalanceCents: bigint | null;
+  /** Confirmed orders' totals not yet on a live invoice, in the currency. */
+  readonly onOrderCents: bigint | null;
+  /** The limit less both, when there is a limit and both are stated. */
+  readonly availableCents: bigint | null;
+  readonly status: CreditStatus | null;
+}
+
+/**
+ * A customer's credit position in one currency (SALES-EXTRAS): exposure is
+ * what its open invoices still owe plus what its confirmed orders will still
+ * invoice, in that currency only -- nothing is converted. A limit set in
+ * another currency is not compared. Either figure unstated (a withheld read,
+ * an unpriced line) states no availability: nothing is guessed as zero.
+ */
+export function creditPosition(input: {
+  readonly hold: boolean;
+  readonly limitCents: bigint | null;
+  /** Whether the limit is in the currency the figures are in. */
+  readonly sameCurrency: boolean;
+  readonly openBalanceCents: bigint | null;
+  readonly onOrderCents: bigint | null;
+}): CreditPosition {
+  const limit = input.sameCurrency ? input.limitCents : null;
+  const exposure =
+    input.openBalanceCents === null || input.onOrderCents === null
+      ? null
+      : input.openBalanceCents + input.onOrderCents;
+  const available =
+    limit === null || exposure === null ? null : limit - exposure;
+  return {
+    limitCents: input.limitCents,
+    openBalanceCents: input.openBalanceCents,
+    onOrderCents: input.onOrderCents,
+    availableCents: available,
+    status: input.hold
+      ? 'On hold'
+      : input.limitCents === null
+        ? 'No limit'
+        : !input.sameCurrency
+          ? 'Limit in another currency'
+          : available === null
+            ? null
+            : available < 0n
+              ? 'Over limit'
+              : 'Within limit',
+  };
+}

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
+import { dropDanglingReadModels } from '../helpers/drop-dangling-read-models.js';
 
 import {
   CanonicalModelError,
@@ -225,7 +226,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // Party, Catalog and Location; SALES-PARITY adds Party's ship-to address
   // book, contextual to the Party list, and Catalog's tax codes (list,
   // detail, form each); CATALOG-EXTRAS an item's aliases, contextual to the
-  // Items List (list, detail, form).
+  // Items List (list, detail, form). SALES-EXTRAS' price lists are left out
+  // here (INTEGRATION, below).
   assert.equal(flatManifest.surfaces.length, 21);
   assert.equal(flatManifest.navigation, null);
   assert.equal(
@@ -284,8 +286,10 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // its lines, payments and credits (twelve), + REPLENISHMENT's Stock by item
   // and Buying worklist, + CATALOG-EXTRAS' item aliases (three), +
   // WAREHOUSE-MODE's Warehouse, + VALUATION's Inventory value List, +
-  // APPROVALS' approval requests and settings (five).
-  assert.equal(groupedManifest.surfaces.length, 113);
+  // APPROVALS' approval requests and settings (five), + SALES-EXTRAS' price
+  // list, its prices and customers (nine) and its Counter sales worklist
+  // (one; INTEGRATION, decision I-M8(a)).
+  assert.equal(groupedManifest.surfaces.length, 123);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -317,8 +321,57 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // item's inventory policy and the merge Task's choice that leaves the item
   // out (CATALOG-EXTRAS) require 20; the Sales orders List's supply, its
   // Blocked by supply and Reserved views and its "Post shipment"
-  // (SUPPLY-WARNINGS) require 21.
-  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 21);
+  // (SUPPLY-WARNINGS) require 21; ranked editor defaults
+  // (SALES-EXTRAS' price lists) and Tasks of more than five steps whose
+  // per-row steps read their own row's read-backs (its counter sales)
+  // require 22 (SALES-EXTRAS numbered it 15 in parallel; INTEGRATION).
+  assert.equal(groupedManifest.requiredRuntimeCapability.minimumVersion, 22);
+  // Each half of 22 holds it alone: without the price lists' tiers the
+  // counter sale's Tasks still require it; without both, the floor is 21.
+  const floorWithout = (counterSales: boolean) => {
+    const source = composedApplicationWithInventory() as {
+      surfaces: Array<{
+        documentEditor?: Record<
+          'headerFields' | 'lineFields',
+          Array<{
+            defaultFrom?: { tiers?: unknown };
+            presentation?: {
+              kind?: string;
+              sourceFieldId?: string;
+              tiers?: unknown;
+            };
+          }>
+        >;
+        composition?: { actions: Array<{ actionId: string }> };
+      }>;
+    };
+    for (const surface of source.surfaces) {
+      const editor = surface.documentEditor;
+      if (editor)
+        for (const key of ['headerFields', 'lineFields'] as const) {
+          // A field the tiers alone derive (the line's price list) goes.
+          editor[key] = (editor[key] ?? []).filter(
+            (field) =>
+              !(
+                field.presentation?.tiers !== undefined &&
+                field.presentation.sourceFieldId === undefined
+              ),
+          );
+          for (const field of editor[key]) {
+            delete field.defaultFrom?.tiers;
+            delete field.presentation?.tiers;
+          }
+        }
+      if (counterSales && surface.composition)
+        surface.composition.actions = surface.composition.actions.filter(
+          (action) => !action.actionId.includes(':action.counter_sale_'),
+        );
+    }
+    return compiledSurfaceManifest(compileDefinition(source))
+      .requiredRuntimeCapability.minimumVersion;
+  };
+  assert.equal(floorWithout(false), 22);
+  assert.equal(floorWithout(true), 21);
   // Workspace owners and setup lists are in navigation; contextual document,
   // fulfillment, line and lookup surfaces remain reachable in their documents
   // and by record/deep link.
@@ -329,7 +382,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // Catalog's Lists, join Inventory's group. WAREHOUSE-MODE: the Warehouse
   // launcher joins Inventory, the one Task navigation names. VALUATION: the
   // Inventory value List. APPROVALS: approvals and settings join Purchasing.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 22);
+  // SALES-EXTRAS: the Price lists join the masters, and Counter sales
+  // joins Sales beside its orders (INTEGRATION, decision I-M8(a)).
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 24);
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
@@ -367,6 +422,17 @@ test('compiled navigation stays flat within budget and groups mounted modules be
     'northstar.app:surface.legal_entity_list',
     'northstar.app:surface.posted_stock_balance_list',
     'northstar.app:surface.stock_count_list',
+  ]);
+  // Counter sales (SALES-EXTRAS) is a worklist beside Sales orders, listed
+  // in Sales with the invoices (INTEGRATION, decision I-M8(a)).
+  const sales = grouped.entries.find(
+    (entry) => entry.navigationId === 'northstar.app:module.sales',
+  );
+  assert.ok(sales);
+  assert.deepEqual(navigationSurfaceIds([sales]), [
+    'northstar.app:surface.counter_sale_list',
+    'northstar.app:surface.customer_invoice_list',
+    'northstar.app:surface.sales_order_list',
   ]);
 
   const overflowManifest = compiledSurfaceManifest(
@@ -989,9 +1055,79 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
     salesModuleDefinition('northstar.app'),
     'sales',
   );
-  return withPlainItemPage(
-    withoutItemStockLists(withoutInventoryValuation(composed)),
+  // SALES-EXTRAS' price lists are Catalog's third setup List, so Party,
+  // Catalog and Location together reach six entries -- past the flat budget,
+  // which then groups them (as the grouped arm below shows). SALES-EXTRAS
+  // left Location out here; INTEGRATION keeps it, because REPLENISHMENT's item
+  // form chooses a location and LOCATIONS' form omits its status, and leaves
+  // the price lists out instead (entities and their nine surfaces). The
+  // customer's credit reads Sales, which is gone, so its read model goes
+  // (dropDanglingReadModels).
+  return dropDanglingReadModels(
+    withoutPriceListSurfaces(
+      withPlainItemPage(
+        withoutItemStockLists(withoutInventoryValuation(composed)),
+      ),
+    ),
   );
+}
+
+/**
+ * INTEGRATION: the flat arm leaves SALES-EXTRAS' price lists out -- the
+ * price list, its prices and its customers, each an entity with its fields,
+ * relations, operations, permissions, queries, storage, walking-slice
+ * assertion and its list, detail and form -- as `withoutModule` leaves a
+ * module out, so every entity it keeps still has every mandatory projection.
+ */
+function withoutPriceListSurfaces(
+  composed: Record<string, unknown>,
+): Record<string, unknown> {
+  const priceList =
+    /^northstar\.app:(?:assertion|entity|field|operation|permission|query|relation|storage|surface)\.price_list(?:_|$)/u;
+  const idKey = {
+    assertions: 'assertionId',
+    entities: 'entityId',
+    fields: 'fieldId',
+    operations: 'operationId',
+    permissions: 'permissionId',
+    queries: 'queryId',
+    relations: 'relationId',
+    storageMappings: 'storageMappingId',
+    surfaces: 'surfaceId',
+  } as const;
+  const expected = {
+    assertions: 3,
+    entities: 3,
+    fields: 9,
+    operations: 12,
+    permissions: 15,
+    queries: 12,
+    relations: 2,
+    storageMappings: 3,
+    surfaces: 9,
+  } as const;
+  const kept: Record<string, unknown> = { ...composed };
+  for (const [collection, key] of Object.entries(idKey) as Array<
+    [keyof typeof idKey, string]
+  >) {
+    const values = composed[collection];
+    assert.ok(Array.isArray(values));
+    const left = (values as Array<Record<string, unknown>>).filter(
+      (value) => !priceList.test(String(value[key])),
+    );
+    assert.equal(
+      values.length - left.length,
+      expected[collection],
+      `flat fixture must find the price lists' ${collection}`,
+    );
+    kept[collection] = left;
+  }
+  assert.doesNotMatch(
+    JSON.stringify(kept),
+    /:entity\.price_list/u,
+    'nothing the flat fixture keeps names a price list entity',
+  );
+  return kept;
 }
 
 /**

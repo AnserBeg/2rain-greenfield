@@ -926,6 +926,9 @@ function expectedReceiptList(namespace: string): ListSpec {
 /** The Expected receipts List surface and the query it reads, by local id. */
 export const EXPECTED_RECEIPT_LIST = 'expected_receipt_list';
 
+/** Counter sales (SALES-EXTRAS), a worklist beside Sales orders, by local id. */
+export const COUNTER_SALE_LIST = 'counter_sale_list';
+
 /** Stock by item and the Buying worklist (REPLENISHMENT), by local id. */
 export const ITEM_STOCK_LIST = 'item_stock_list';
 export const ITEM_BUYING_LIST = 'item_buying_list';
@@ -1397,6 +1400,10 @@ const WORKLISTS: Readonly<Record<string, Worklist>> = Object.freeze({
     source: 'purchase_order_list',
     label: 'Expected receipts',
   },
+  [COUNTER_SALE_LIST]: {
+    source: 'sales_order_list',
+    label: 'Counter sales',
+  },
   [ITEM_STOCK_LIST]: {
     source: 'item_list',
     label: 'Stock by item',
@@ -1604,6 +1611,87 @@ function renamed(
   return JSON.parse(text) as Record<string, unknown>;
 }
 
+/**
+ * The Sales orders List: its work tabs (ORDER-PARITY), its supply tabs
+ * (SUPPLY-WARNINGS) and the lifecycle tabs -- eight saved views, the most
+ * the language admits.
+ */
+function salesOrderList(namespace: string): ListSpec {
+  return documentList(
+    namespace,
+    'sales_order',
+    { field: 'customer_party_id', label: 'Customer' },
+    [
+      { field: 'order_date', label: 'Order date' },
+      { field: 'requested_date', label: 'Requested' },
+    ],
+    [{ field: 'salesperson_party_id', label: 'Salesperson' }],
+    {
+      // The plain clone of the line list: the line list itself carries the
+      // fulfillment read model, which the statement never runs.
+      linesQuery: 'commercial_lines',
+      // Shipped per line, net of corrections, as the fulfillment kernel
+      // keeps it.
+      done: {
+        local: 'shipped',
+        label: 'Shipped',
+        query: `${namespace}:query.sales_order_shipped_list`,
+        relation: `${namespace}:relation.sales_order_shipped_order_line`,
+        quantity: `${namespace}:field.sales_order_shipped_shipped_quantity`,
+      },
+      openView: { local: 'to_ship', label: 'To ship' },
+      // Something open and nothing reserved: the order's fulfillment
+      // section, where its lines are reserved.
+      action: {
+        local: 'fulfill',
+        label: 'Fulfill',
+        section: `${namespace}:dataset.fulfillment_lines`,
+      },
+      // SUPPLY-WARNINGS: the reference's "Blocked by supply" and
+      // "Reserved", the Short column, and "Post shipment" while reserved
+      // stock is still to ship -- a link to the same section, whose
+      // reservations the page's own ship Task takes.
+      supply: {
+        spec: salesSupply(namespace),
+        shortView: { local: 'blocked', label: 'Blocked by supply' },
+        coveredView: { local: 'reserved', label: 'Reserved' },
+        action: {
+          local: 'post_shipment',
+          label: 'Post shipment',
+          section: `${namespace}:dataset.fulfillment_lines`,
+        },
+      },
+    },
+  );
+}
+
+/**
+ * Counter sales (SALES-EXTRAS): the sales orders whose counter flag is set,
+ * with the Sales orders List's columns, figures and row actions. They were a
+ * tab on that List; a ninth saved view is past the language's eight, so they
+ * are a worklist of their own (decision I-M8(a)), read through its own clone
+ * of the Sales orders query as Expected receipts is, over one view of every
+ * flagged order.
+ */
+function counterSaleList(namespace: string): ListSpec {
+  const sales = JSON.parse(
+    JSON.stringify(salesOrderList(namespace)).replaceAll(
+      `${namespace}:list_output.sales_order_list_`,
+      `${namespace}:list_output.${COUNTER_SALE_LIST}_`,
+    ),
+  ) as ListSpec;
+  return {
+    ...sales,
+    views: [
+      {
+        local: 'all',
+        label: 'All',
+        filters: { [`${namespace}:field.sales_order_counter_sale`]: 'true' },
+      },
+    ],
+  };
+}
+
 /** The declared Lists of the composed application, by List surface local id. */
 export function composedListSpecs(
   namespace: string,
@@ -1691,52 +1779,9 @@ export function composedListSpecs(
       ],
       filters: [],
     },
-    sales_order_list: documentList(
-      namespace,
-      'sales_order',
-      { field: 'customer_party_id', label: 'Customer' },
-      [
-        { field: 'order_date', label: 'Order date' },
-        { field: 'requested_date', label: 'Requested' },
-      ],
-      [{ field: 'salesperson_party_id', label: 'Salesperson' }],
-      {
-        // The plain clone of the line list: the line list itself carries the
-        // fulfillment read model, which the statement never runs.
-        linesQuery: 'commercial_lines',
-        // Shipped per line, net of corrections, as the fulfillment kernel
-        // keeps it.
-        done: {
-          local: 'shipped',
-          label: 'Shipped',
-          query: `${namespace}:query.sales_order_shipped_list`,
-          relation: `${namespace}:relation.sales_order_shipped_order_line`,
-          quantity: `${namespace}:field.sales_order_shipped_shipped_quantity`,
-        },
-        openView: { local: 'to_ship', label: 'To ship' },
-        // Something open and nothing reserved: the order's fulfillment
-        // section, where its lines are reserved.
-        action: {
-          local: 'fulfill',
-          label: 'Fulfill',
-          section: `${namespace}:dataset.fulfillment_lines`,
-        },
-        // SUPPLY-WARNINGS: the reference's "Blocked by supply" and
-        // "Reserved", the Short column, and "Post shipment" while reserved
-        // stock is still to ship -- a link to the same section, whose
-        // reservations the page's own ship Task takes.
-        supply: {
-          spec: salesSupply(namespace),
-          shortView: { local: 'blocked', label: 'Blocked by supply' },
-          coveredView: { local: 'reserved', label: 'Reserved' },
-          action: {
-            local: 'post_shipment',
-            label: 'Post shipment',
-            section: `${namespace}:dataset.fulfillment_lines`,
-          },
-        },
-      },
-    ),
+    sales_order_list: salesOrderList(namespace),
+    // Counter sales (SALES-EXTRAS) as a worklist of their own (I-M8(a)).
+    [COUNTER_SALE_LIST]: counterSaleList(namespace),
     purchase_order_list: documentList(
       namespace,
       'purchase_order',

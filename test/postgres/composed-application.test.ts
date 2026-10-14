@@ -1669,11 +1669,15 @@ async function assertRealProductDefinition(
     // REPLENISHMENT Stock by item and the Buying worklist; CATALOG-EXTRAS an
     // item's aliases (list, detail, form); WAREHOUSE-MODE the Warehouse
     // launcher; VALUATION the Inventory value List; APPROVALS five
-    // (approval requests and settings).
-    assert.equal(surfaces.length, 113);
+    // (approval requests and settings); SALES-EXTRAS the price list, its
+    // prices and its customers (list, detail, form each), and its Counter
+    // sales worklist (INTEGRATION, decision I-M8(a)).
+    assert.equal(surfaces.length, 123);
+    assert.ok(surfaces.includes('northstar.app:surface.counter_sale_list'));
     assert.ok(surfaces.includes('northstar.app:surface.item_alias_list'));
     assert.ok(surfaces.includes('northstar.app:surface.inventory_warehouse'));
     assert.ok(surfaces.includes('northstar.app:surface.inventory_value_list'));
+    assert.ok(surfaces.includes('northstar.app:surface.price_list_list'));
     assert.ok(surfaces.includes('northstar.app:surface.expected_receipt_list'));
     assert.ok(surfaces.includes('northstar.app:surface.item_stock_list'));
     assert.ok(surfaces.includes('northstar.app:surface.item_buying_list'));
@@ -3985,6 +3989,7 @@ async function assertBoundedFreshTenantInstallEvidence(
   assertSalesVerificationCoverage(compiledApplication);
   assertPayablesVerificationCoverage(compiledApplication);
   assertCatalogExtrasVerificationCoverage(compiledApplication);
+  assertPriceListVerificationCoverage(compiledApplication);
   // 174 -> 198. PUR-1 adds exactly 24, MEASURED by enumerating the compiled
   // plan rather than derived from this arithmetic: 12 declaredEvidence (six per
   // purchasing entity), 6 searchableExclusion (the two dates, notes, and the
@@ -4031,10 +4036,15 @@ async function assertBoundedFreshTenantInstallEvidence(
   // item's inventory policy and reorder rule (4: each enum's rejection and
   // search exclusion) and the company's reorder percentage (1 search
   // exclusion).
+  // SALES-EXTRAS adds 2, measured from the compiled plan: a search exclusion
+  // for each of Party's credit limit and credit hold; then 35 for price
+  // lists: the price list (14), its prices (11), its customers (9) and the
+  // search exclusion of the price list a sales line records (1); then 1 for
+  // counter sales: the search exclusion of the order's counter flag.
   assert.equal(
     servingScenarioCount,
-    633,
-    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, 6 for replenishment, 5 for locations, 17 for catalog extras and 32 for approvals (21 request, 10 settings, one supplier-reference exclusion)',
+    671,
+    'the release includes the prior 198 scenarios, 59 for receiving, 91 for Sales and fulfillment, 137 for Sales parity, 16 for purchasing parity, 72 for payables, 6 for replenishment, 5 for locations, 17 for catalog extras, 32 for approvals (21 request, 10 settings, one supplier-reference exclusion), and 38 for sales extras (2 credit control, 35 price lists, 1 counter sales)',
   );
   await assertFreshInstallLineageEvidence(
     pool,
@@ -6390,10 +6400,14 @@ async function assertExactPartitionEvidence(
   // execute through the item's generic create: 579, 502. LOCATIONS' 5 execute
   // through the location's: 584, 507. CATALOG-EXTRAS' 17 execute too: the
   // alias, the item and the legal entity each have a generic create: 601, 524.
+  // APPROVALS' 11 execute (ten settings scenarios and its supplier-reference
+  // exclusion): 633, 535. SALES-EXTRAS' 2 search exclusions on Party, which has
+  // a generic create, its price lists' 35 (each entity has one) and the counter
+  // flag's search exclusion on the sales order execute: 671, 573.
   assert.equal(
     evidence.results.length,
-    535,
-    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72, replenishment 6, locations 5, catalog extras 17 and approvals 11 (ten settings scenarios and one supplier-reference exclusion)',
+    573,
+    'fulfillment adds 47 executed scenarios to the prior 224, Sales parity 137, purchasing parity 16, payables 72, replenishment 6, locations 5, catalog extras 17, approvals 11 (ten settings scenarios and one supplier-reference exclusion), credit control 2, price lists 35 and counter sales 1',
   );
   assert.equal(
     derivations.length,
@@ -6433,8 +6447,8 @@ async function assertExactPartitionEvidence(
   const salesScenarioIds = binding.plan.scenarios
     .filter((scenario) => salesEntityIds.has(scenario.entityId))
     .map((scenario) => scenario.scenarioId);
-  // 29 + 16, as `assertSalesVerificationCoverage` pins them per entity.
-  assert.equal(salesScenarioIds.length, 45);
+  // 30 + 17, as `assertSalesVerificationCoverage` pins them per entity.
+  assert.equal(salesScenarioIds.length, 47);
   assert.equal(
     salesScenarioIds.every((scenarioId) =>
       executedScenarioIdSet.has(scenarioId),
@@ -6649,10 +6663,12 @@ function assertSalesVerificationCoverage(compiledApplication: unknown): void {
     reservation: 14,
     reservation_balance: 10,
     // SALES-PARITY: salesperson, terms, ship-to address and six ship-to lines,
-    // then the tax code and two charges with codes and frozen rates.
-    sales_order: 29,
-    // SALES-PARITY: list price, discount, tax code and frozen rate.
-    sales_order_line: 16,
+    // then the tax code and two charges with codes and frozen rates;
+    // SALES-EXTRAS: the counter flag.
+    sales_order: 30,
+    // SALES-PARITY: list price, discount, tax code and frozen rate;
+    // SALES-EXTRAS: the price list that priced it.
+    sales_order_line: 17,
     sales_order_shipped: 10,
     // SALES-PARITY: carrier, reference type and reference, then six ship-to lines.
     shipment: 29,
@@ -6726,6 +6742,28 @@ function assertCatalogExtrasVerificationCoverage(
       ).length,
       count,
       `the catalog-extras entity ${local} contributes its measured verifier scenarios`,
+    );
+  }
+}
+
+function assertPriceListVerificationCoverage(
+  compiledApplication: unknown,
+): void {
+  const { plan } = releaseVerificationBinding(
+    parseCompiledApplication(compiledApplication).application.compiled,
+  );
+  for (const [local, count] of Object.entries({
+    // SALES-EXTRAS: a price list, its prices and its customers.
+    price_list: 14,
+    price_list_entry: 11,
+    price_list_assignment: 9,
+  })) {
+    assert.equal(
+      plan.scenarios.filter(
+        (scenario) => scenario.entityId === `northstar.app:entity.${local}`,
+      ).length,
+      count,
+      `the price list entity ${local} contributes its measured verifier scenarios`,
     );
   }
 }

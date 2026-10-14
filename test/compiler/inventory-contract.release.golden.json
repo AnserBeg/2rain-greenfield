@@ -140,6 +140,18 @@
         "familyId": "tax_code"
       },
       {
+        "classification": "tenantShared",
+        "familyId": "price_list"
+      },
+      {
+        "classification": "tenantShared",
+        "familyId": "price_list_entry"
+      },
+      {
+        "classification": "tenantShared",
+        "familyId": "price_list_assignment"
+      },
+      {
         "classification": "entityOwned",
         "familyId": "inventory_movement"
       },
@@ -295,6 +307,16 @@
         "semantics": "crossEntityAllowed",
         "sourceFamilyId": "party_address",
         "targetFamilyId": "party"
+      },
+      {
+        "semantics": "crossEntityAllowed",
+        "sourceFamilyId": "price_list_entry",
+        "targetFamilyId": "price_list"
+      },
+      {
+        "semantics": "crossEntityAllowed",
+        "sourceFamilyId": "price_list_assignment",
+        "targetFamilyId": "price_list"
       },
       {
         "semantics": "crossEntityAllowed",
@@ -542,7 +564,7 @@
     ],
     "kind": "quantityOnlyMovement"
   },
-  "releaseRoot": "13ef49090cce196bb618b41ab5b3d3a07040edf493fc9fb7b7fbc2cfbaeafd82",
+  "releaseRoot": "fb071633d5af933104dcca3b768b7b79ba676fdb7e0f2040969f9934ca3ad09f",
   "storageTargetPayloadVersions": {
     "entityOwned": "northstar.storage-target-payload/v3",
     "tenantShared": "northstar.storage-target-payload/v1"

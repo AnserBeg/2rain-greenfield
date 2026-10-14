@@ -92,7 +92,7 @@ export const reachabilityProducers = [
   // and so do the commercial document workflows, each under the same bound,
   // so no job nears it.
   nodeProducer('postgres', 'postgres', 'test:postgres', [
-    'test/postgres/**/!(commercial-totals|composed-application|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|replenishment|stock-serializer).test.ts',
+    'test/postgres/**/!(commercial-totals|composed-application|counter-sale|customer-credit|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|replenishment|stock-serializer).test.ts',
   ]),
   nodeProducer(
     'postgres-composed',
@@ -106,6 +106,8 @@ export const reachabilityProducers = [
     'test:postgres:commercial',
     [
       'test/postgres/commercial-totals.test.ts',
+      'test/postgres/counter-sale.test.ts',
+      'test/postgres/customer-credit.test.ts',
       'test/postgres/expected-receipts.test.ts',
       'test/postgres/fulfillment.test.ts',
       'test/postgres/order-lists-supply.test.ts',
@@ -113,6 +115,7 @@ export const reachabilityProducers = [
       'test/postgres/order-pages.test.ts',
       'test/postgres/packing-retrieval.test.ts',
       'test/postgres/payables.test.ts',
+      'test/postgres/price-lists.test.ts',
       'test/postgres/purchase-approvals.test.ts',
       'test/postgres/purchase-order-ending.test.ts',
       'test/postgres/receivables.test.ts',

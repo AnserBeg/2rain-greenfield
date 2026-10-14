@@ -1038,19 +1038,25 @@ function renderCapabilityCommand(
 ): string {
   // A declared Task owns its operation's input/conditions. A bare command
   // must not offer a second route which omits those inputs or conditions.
+  // Only a Task of that one step owns it (Place order, Approve, Void): a Task
+  // chaining it with other work -- a counter sale confirms, then reserves,
+  // ships, invoices and takes payment (SALES-EXTRAS) -- is a different piece
+  // of work, and the order's own Confirm stays offered (INTEGRATION).
   if (
-    context.surface.composition?.actions.some((action) =>
-      action.steps.some(
-        (step) =>
-          step.operation.targetId === operation.operationId &&
-          step.bindings.some(
-            (binding) =>
-              binding.path.length === 1 &&
-              binding.path[0] === 'recordId' &&
-              binding.value.source === 'record' &&
-              binding.value.field === 'recordId',
-          ),
-      ),
+    context.surface.composition?.actions.some(
+      (action) =>
+        action.steps.length === 1 &&
+        action.steps.some(
+          (step) =>
+            step.operation.targetId === operation.operationId &&
+            step.bindings.some(
+              (binding) =>
+                binding.path.length === 1 &&
+                binding.path[0] === 'recordId' &&
+                binding.value.source === 'record' &&
+                binding.value.field === 'recordId',
+            ),
+        ),
     )
   )
     return '';
