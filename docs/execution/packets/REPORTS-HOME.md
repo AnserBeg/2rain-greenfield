@@ -78,12 +78,18 @@ Base: `packet/INTEGRATION` at `8c8cfab1`. Reference: PaneFlow `d057daff` `lib/se
 - Sizes: authored file 1,440,469 → 1,476,212 B; normalized 1,499,742 → 1,535,961 B (cap 2,097,152);
   compiled 6,237,235 → 12,238,640 B (two entries; D11 adds 104 B over the first build).
 
+- CI: https://github.com/AnserBeg/2rain-greenfield/actions/runs/38490859749 green at `05b93cda` (all 14 jobs). The
+  first run, 37482339197 at `36607419`, was red: D11, D12, the floor pins and a COMPILE_BUDGET_INDETERMINATE flake.
+
 ## Controls
 
 Non-Critical, owed by the charter: `test/evidence/REPORTS-HOME.expected-red.json` — `reports-aging-from-inclusive`
 and `reports-aging-to-inclusive` (claim 2, bucket bounds), `reports-aging-calendar-days` (claim 2, UTC calendar days),
 `reports-figure-rows-company-scope` (claim 2, company scope), `reports-figure-one-currency` (claim 2, ruling B),
 `reports-customer-eligibility` (claim 5/6, customers only).
+Expected-red controls on CI: https://github.com/AnserBeg/2rain-greenfield/actions/runs/38490859806 (evidence.yml, head
+`05b93cda`); each of the six printed: "at 05b93cdace6b: killed with the declared reason (1 declared kill(s) failed as
+declared) and restored green (1 passing)."
 
 ## Test it yourself
 
@@ -97,7 +103,7 @@ and `reports-aging-to-inclusive` (claim 2, bucket bounds), `reports-aging-calend
 - "Next requested delivery" per customer (a figure of the earliest parent date; not built).
 - Figure columns are unsortable (as every figure); PaneFlow sorts aging by the oldest bucket.
 
-Review: not owed — outside the Critical set.
+Review: not owed — outside the Critical set; a round-1 prompt was handed to the orchestrator on request (2026-10-13).
 
 ```record-claim
 {
