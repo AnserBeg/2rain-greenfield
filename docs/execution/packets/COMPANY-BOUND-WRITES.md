@@ -29,7 +29,17 @@ A tenant-wide operator posted company B's stock count id and current revision th
 
 ## Gates
 
-- (filled at freeze)
+- CI green at `aa7bd490`: https://github.com/AnserBeg/2rain-greenfield/actions/runs/38490789087 — unit 247, compiler 175, integration 258, agent 3, architecture and hygiene 200, web contracts 46; PostgreSQL schema and isolation 167 (+1 locale probe; `company-bound-writes` 7/7 among them), composed 24, commercial 21, inventory 83; browser 87, composed browser 23, operations 9, inventory browser 11; executed-file reachability green.
+- Earlier reds: `39c74f15` (run 37481071482), see Decisions; `b246280a` (run 38488244768) one left, the hygiene gate's reviewed PostgreSQL inventory did not name the new test, which the suite's glob already ran (registered in `aa7bd490`).
+- Expected-red controls on CI: https://github.com/AnserBeg/2rain-greenfield/actions/runs/38490789074 (evidence.yml, head aa7bd49018b5d6441beaac06821bdc8dcc998c28)
+  - `company-binding-comparison-dropped` at aa7bd49018b5: killed with the declared reason (5 declared kill(s) failed as declared) and restored green (8 passing).
+  - `company-binding-compares-the-operand` at aa7bd49018b5: killed with the declared reason (5 declared kill(s) failed as declared) and restored green (8 passing).
+  - `company-binding-read-without-lock` at aa7bd49018b5: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (8 passing).
+  - `company-binding-unbound-replay-unchecked` at aa7bd49018b5: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (8 passing).
+  - `company-binding-unbound-replay-removed` at aa7bd49018b5: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (8 passing).
+  - `company-binding-on-tenant-record-admitted` at aa7bd49018b5: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (8 passing).
+  - `company-binding-web-update-unbound` at aa7bd49018b5: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (1 passing).
+- Local (no container run: Windows free memory 640 MB): typecheck, lint, format; `semantic-gateways` 52/52; the period-lock and company-bound integration tests 2/2; `repository-hygiene` 11/11; agent 3/3; web contracts 46/46; app and demo release freshness; language coverage.
 
 ## Test it yourself
 
@@ -47,14 +57,14 @@ A tenant-wide operator posted company B's stock count id and current revision th
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "COMPANY-BOUND-WRITES",
   "base": "8c8cfab1c54ac1b51b4617e45f8e2f0ddd1dfa1b",
-  "head": "b434e74003f1c2218cf090534e5996621fd06ad9",
+  "head": "aa7bd49018b5d6441beaac06821bdc8dcc998c28",
   "changedPaths": [
     "apps/web/src/document-editor.ts", "apps/web/src/gateway-error-codes.ts", "apps/web/src/message-catalog.ts",
     "apps/web/src/surface-composition.ts", "apps/web/src/surface-runtime.ts", "apps/web/test/browser/composed-application.spec.ts",
     "apps/web/test/browser/message-catalog.spec.ts", "apps/web/test/surface-runtime-contract.test.ts",
     "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/runtime/src/semantic-operation-gateway.ts",
     "test/evidence/COMPANY-BOUND-WRITES.expected-red.json", "test/integration/surface-data-binding.test.ts",
-    "test/postgres/company-bound-writes.test.ts"
+    "test/architecture/repository-hygiene.test.ts", "test/postgres/company-bound-writes.test.ts"
   ],
   "symbols": [
     {"path": "apps/web/src/surface-runtime.ts", "name": "recordLegalEntityBinding"},
