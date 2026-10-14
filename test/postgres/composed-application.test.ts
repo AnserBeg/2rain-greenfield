@@ -6303,10 +6303,13 @@ function assertReturnablesVerificationCoverage(
     parseCompiledApplication(compiledApplication).application.compiled,
   );
   for (const [local, count] of Object.entries({
-    // RETURNABLE-ASSETS: the returnable type, custody record and event.
+    // RETURNABLE-ASSETS: the returnable type, custody record and event,
+    // measured from the compiled plan. The custody's type link adds an
+    // archive-restrict scenario; its ten maintained figures (custody) and an
+    // event's maintained attribution plan no search-exclusion probe.
     returnable_asset_type: 14,
-    returnable_custody: 27,
-    returnable_event: 20,
+    returnable_custody: 18,
+    returnable_event: 19,
   })) {
     assert.equal(
       plan.scenarios.filter(

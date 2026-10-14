@@ -11191,7 +11191,16 @@ test('RETURNABLE-ASSETS: a party page enters a company for the custody records i
     f.gateways,
   );
   assert.equal(orphanPage.statusCode, 200);
-  assert.doesNotMatch(orphanPage.html, /COMPOSITION_CHILD_FAILED/u);
+  assert.doesNotMatch(
+    orphanPage.html,
+    /COMPOSITION_CHILD_FAILED/u,
+    'the custody page keeps its facts when its type cannot be read',
+  );
+  assert.match(
+    orphanPage.html,
+    /<dt>Returnable type<\/dt><dd>—<\/dd>/u,
+    'the custody page reads "—" for a type it cannot read',
+  );
   assert.match(orphanPage.html, /RTN-000004/u);
 });
 

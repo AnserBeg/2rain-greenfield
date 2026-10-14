@@ -4,8 +4,14 @@ import test from 'node:test';
 
 import {
   CanonicalModelError,
+  canonicalize,
   normalizeApplicationPackage,
 } from '../../packages/canonical-model/src/index.js';
+import {
+  DEFAULT_COMPILER_LIMITS,
+  MODULE_COMPILER_PROFILE,
+  compileApplication,
+} from '../../packages/compiler/src/index.js';
 import { composedApplicationDefinition } from '../../packages/domain/src/app/builder.js';
 import { composedListSpecs } from '../../packages/domain/src/app/list-declarations.js';
 import { partyModuleDefinition } from '../../packages/domain/src/party/definition.js';
@@ -478,6 +484,39 @@ test('a custody states New, Open, Awaiting refund and Closed from its figures', 
 });
 
 test('release verification plans a probe that populates a field through the create only for a field the create writes', () => {
+  // A search-exclusion or enum probe populates its subject field through its
+  // entity's generic create, so it is planned only for a field that create
+  // writes: a machine's state field and a maintained figure are not.
+  const unpopulated = (payloads: readonly Json[]) => {
+    const plan = payloads.find((payload) => Array.isArray(payload.scenarios))!
+      .scenarios as Array<{
+      entityId: string;
+      kind: string;
+      subjectId: string;
+    }>;
+    const operations = payloads.find(
+      (payload) => payload.kind === 'operationCatalogPayload',
+    )!.operations as Array<{
+      effect: { kind: string; entity?: { targetId: string } };
+      inputContract?: { writableFieldIds: string[] };
+    }>;
+    const created = new Map(
+      operations
+        .filter((operation) => operation.effect.kind === 'createRecordEffect')
+        .map((operation) => [
+          operation.effect.entity!.targetId,
+          new Set(operation.inputContract?.writableFieldIds ?? []),
+        ]),
+    );
+    return plan
+      .filter(
+        (scenario) =>
+          ['searchableExclusion', 'enumReject'].includes(scenario.kind) &&
+          created.has(scenario.entityId) &&
+          !created.get(scenario.entityId)!.has(scenario.subjectId),
+      )
+      .map((scenario) => `${scenario.kind} ${scenario.subjectId}`);
+  };
   // The checked-in release (check:app-release holds it to the source): its
   // head entry's verification plan and operation catalog.
   const release = JSON.parse(
@@ -485,41 +524,50 @@ test('release verification plans a probe that populates a field through the crea
   ) as {
     applications: Array<{ artifacts: Array<{ canonicalBytesBase64: string }> }>;
   };
-  const payloads = release.applications
-    .at(-1)!
-    .artifacts.map(
-      (artifact) =>
-        JSON.parse(
-          Buffer.from(artifact.canonicalBytesBase64, 'base64').toString('utf8'),
-        ) as Json,
-    );
-  const plan = payloads.find((payload) => Array.isArray(payload.scenarios))!
-    .scenarios as Array<{ entityId: string; kind: string; subjectId: string }>;
-  const operations = payloads.find(
-    (payload) => payload.kind === 'operationCatalogPayload',
-  )!.operations as Array<{
-    effect: { kind: string; entity?: { targetId: string } };
-    inputContract?: { writableFieldIds: string[] };
-  }>;
-  const created = new Map(
-    operations
-      .filter((operation) => operation.effect.kind === 'createRecordEffect')
-      .map((operation) => [
-        operation.effect.entity!.targetId,
-        new Set(operation.inputContract?.writableFieldIds ?? []),
-      ]),
-  );
-  const unpopulated = plan
-    .filter(
-      (scenario) =>
-        ['searchableExclusion', 'enumReject'].includes(scenario.kind) &&
-        created.has(scenario.entityId) &&
-        !created.get(scenario.entityId)!.has(scenario.subjectId),
-    )
-    .map((scenario) => `${scenario.kind} ${scenario.subjectId}`);
   assert.deepEqual(
-    unpopulated,
+    unpopulated(
+      release.applications
+        .at(-1)!
+        .artifacts.map(
+          (artifact) =>
+            JSON.parse(
+              Buffer.from(artifact.canonicalBytesBase64, 'base64').toString(
+                'utf8',
+              ),
+            ) as Json,
+        ),
+    ),
     [],
     'every planned probe populates a field its entity’s create writes',
+  );
+  // The same application compiled from source now, so the compiler's own
+  // planning is what this asserts, not only the release it once produced.
+  const normalized = normalizeApplicationPackage(
+    composedApplicationDefinition() as never,
+  );
+  const compiled = compileApplication({
+    dependencies: [],
+    expectedActiveRelease: null,
+    kind: 'compilerInput',
+    limits: { ...DEFAULT_COMPILER_LIMITS },
+    normalizedDefinitionBytes: new TextEncoder().encode(
+      canonicalize(normalized),
+    ),
+    profile: {
+      ...MODULE_COMPILER_PROFILE,
+      languageVersion: normalized.languageVersion,
+      normalizationProfileVersion: normalized.normalizationProfileVersion,
+    },
+  });
+  assert.equal(compiled.status, 'compiled');
+  assert.deepEqual(
+    unpopulated(
+      compiled.stagedArtifacts.map(
+        (artifact) =>
+          JSON.parse(new TextDecoder().decode(artifact.canonicalBytes)) as Json,
+      ),
+    ),
+    [],
+    'compiled from source, every planned probe populates a field its entity’s create writes',
   );
 });
