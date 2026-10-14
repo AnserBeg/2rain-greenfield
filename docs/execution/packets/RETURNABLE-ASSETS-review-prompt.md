@@ -8,7 +8,8 @@ What changed since round 1, by function:
 - Language: an optional v6 field key `maintainedBy` (a capability reference). `packages/canonical-model/src/schemas.ts`
   (`FieldMaintenanceSchema`), `field-maintenance.ts` (`validateFieldMaintenance`, called from `normalize.ts`), and
   `packages/compiler/src/projections.ts` (`operationInputContract` leaves a maintained field out of a generic create's
-  and update's `fields` and `writableFieldIds`). Language coverage decisions re-derived
+  and update's `fields` and `writableFieldIds`; the verification plan no longer plans a search-exclusion or enum probe
+  for it, as for a machine's state field). Language coverage decisions re-derived
   (`test/fixtures/g2/language-conformance/coverage-decisions.json`).
 - Returnables metadata (`packages/domain/src/party/returnables.ts`, `workspace.ts`): the ten custody figures and an
   event's `recorded_by` declare `maintainedBy` the returnables capability; a new reference relation
