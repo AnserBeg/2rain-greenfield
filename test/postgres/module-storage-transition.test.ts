@@ -5791,10 +5791,18 @@ function composedApplicationWithoutInventoryForTransition(): Record<
   // that add up Inventory, Sales and Purchasing rows; without them they go,
   // with their queries, as the builder cuts a List whose figures' queries are
   // not composed.
+  // REPORTS-HOME: Receivables aging, Customer accounts and the customer
+  // account page they open are Party's, adding up and listing Sales' invoices
+  // and orders; without Sales they go too, with the Lists' queries (Today is
+  // Sales' own surface and went with it).
   const itemLists = new Set(
-    ['item_stock_list', 'item_buying_list'].map(
-      (local) => `${APPLICATION_NAMESPACE}:${local}`,
-    ),
+    [
+      'item_stock_list',
+      'item_buying_list',
+      'receivables_aging_list',
+      'customer_account_list',
+      'customer_account_detail',
+    ].map((local) => `${APPLICATION_NAMESPACE}:${local}`),
   );
   const named = (value: unknown) =>
     String(value).replace(/:(?:surface|query)\./u, ':');

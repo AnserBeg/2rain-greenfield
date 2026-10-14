@@ -15523,3 +15523,65 @@ test('REPORTS-HOME: receivables aging and customer accounts render one currency 
     /href="[^"]*surface=northstar\.app%3Asurface\.sales_order_list[^"]*view=northstar\.app%3Alist_view\.sales_order_list_blocked/u,
   );
 });
+
+test('REPORTS-HOME: three Lists read parties and the Party List keeps the party -- its rows open the party page, the party picker is served, and the customer account page leads back to Customer accounts', async () => {
+  const f = await orderEntryWitness();
+  const ns = f.ns;
+  const [scope] = f.scopes as [string];
+  const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
+  const open = (parameters: Record<string, string>) =>
+    renderSurfaceRuntimeWithData(
+      f.view,
+      `/?${new URLSearchParams(parameters).toString()}`,
+      f.gateways,
+    );
+  const linksTo = (surface: string) =>
+    new RegExp(
+      `href="[^"]*surface=northstar\\.app%3Asurface\\.${surface}[^"]*record=${f.party}`,
+      'u',
+    );
+  const breadcrumb = (html: string) =>
+    /<nav class="record-breadcrumb" aria-label="Breadcrumb">([\s\S]*?)<\/nav>/u.exec(
+      html,
+    )?.[1];
+
+  // The Party List's rows open the party's own page, never the customer
+  // account page another List names as its record page.
+  const parties = await open({ surface: id('surface', 'party_list') });
+  assert.equal(parties.statusCode, 200);
+  assert.match(parties.html, linksTo('party_detail'));
+  assert.doesNotMatch(parties.html, linksTo('customer_account_detail'));
+  // The party's page leads back to the Party List.
+  const party = await open({
+    surface: id('surface', 'party_detail'),
+    record: f.party,
+  });
+  assert.equal(party.statusCode, 200);
+  assert.match(
+    breadcrumb(party.html) ?? '',
+    /surface=northstar\.app%3Asurface\.party_list[^"]*">Party list<\/a>/u,
+  );
+  // A party picker is served by the Party List, not refused for the two
+  // customer Lists beside it.
+  const role = await open({ surface: id('surface', 'party_role_form') });
+  assert.equal(role.statusCode, 200);
+  assert.match(
+    role.html,
+    new RegExp(
+      `<select[^>]*name="relation:${ns}:relation\\.party_role_party"[\\s\\S]*?<option value="${f.party}"`,
+      'u',
+    ),
+  );
+  // The customer account page leads back to Customer accounts, the List
+  // that names it as its rows' page.
+  const account = await open({
+    surface: id('surface', 'customer_account_detail'),
+    record: f.party,
+    [id('parameter', 'customer_invoice_list_legal_entity_scope')]: scope,
+  });
+  assert.equal(account.statusCode, 200);
+  assert.match(
+    breadcrumb(account.html) ?? '',
+    /surface=northstar\.app%3Asurface\.customer_account_list[^"]*">Customer accounts<\/a>/u,
+  );
+});

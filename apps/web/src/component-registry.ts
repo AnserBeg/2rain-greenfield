@@ -1745,11 +1745,34 @@ function findRelatedSurface(
         return false;
       }
     };
-    if (role !== 'list') return surfaces.find(matches);
-    // A worklist may list the same records beside the entity's own List; the
-    // way back to "the list" is the one that owns the entity's Record.
     const candidates = surfaces.filter(matches);
+    if (role !== 'list') {
+      // Several record pages may read one entity -- a customer's account page
+      // beside the party's own (REPORTS-HOME). A List opens its rows in the
+      // page its workspace owns, else in the page a List owns (the entity's
+      // own); another page is reached where a List names it (`list.record`).
+      if (candidates.length > 1)
+        return (
+          candidates.find(
+            (candidate) =>
+              candidate.workspace?.ownerSurfaceId === surface.surfaceId,
+          ) ??
+          candidates.find(
+            (candidate) => candidate.workspace?.ownerSurfaceId !== undefined,
+          ) ??
+          candidates[0]
+        );
+      return candidates[0];
+    }
+    // A worklist may list the same records beside the entity's own List; the
+    // way back to "the list" is the one that owns the entity's Record -- or,
+    // from a record page a List names as its rows' page (`list.record`), that
+    // List (the customer account page leads back to Customer accounts).
     if (candidates.length > 1) {
+      const naming = candidates.find(
+        (candidate) => candidate.list?.record === surface.surfaceId,
+      );
+      if (naming) return naming;
       const owners = recordWorkspaceOwners(view, surfaces, entityId);
       return (
         candidates.find((candidate) => owners.has(candidate.surfaceId)) ??

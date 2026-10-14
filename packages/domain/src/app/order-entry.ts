@@ -771,8 +771,10 @@ export function orderEntrySurfaces(
     const placement = role === 'list' ? worklistPlacement(name) : null;
     // Three Lists read items now; the Items List keeps the item's page and
     // form as their workspace -- the picker, breadcrumb and navigation
-    // authority for an item (REPLENISHMENT).
-    const itemOwned = role !== 'list' && local === 'item';
+    // authority for an item (REPLENISHMENT). Three read parties too (the
+    // customer Lists, REPORTS-HOME); the Party List keeps the party's.
+    const masterOwned =
+      role !== 'list' && (local === 'item' || local === 'party') ? local : null;
     const listQueryId = String(
       (surface.dataSource as { targetId?: unknown } | undefined)?.targetId,
     );
@@ -807,8 +809,8 @@ export function orderEntrySurfaces(
           : {}),
         ...(owner || master
           ? { ownerSurfaceId: id('surface', `${owner ?? master}_list`) }
-          : itemOwned
-            ? { ownerSurfaceId: id('surface', 'item_list') }
+          : masterOwned
+            ? { ownerSurfaceId: id('surface', `${masterOwned}_list`) }
             : {}),
         ...(editor ||
         owner ||
