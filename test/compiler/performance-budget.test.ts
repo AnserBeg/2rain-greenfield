@@ -5,8 +5,21 @@ import { performance } from 'node:perf_hooks';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 
-import { STRUCTURAL_LIMITS_V0 } from '../../packages/canonical-model/src/index.js';
-import { compileApplication } from '../../packages/compiler/src/index.js';
+import {
+  CanonicalModelError,
+  STRUCTURAL_LIMITS_V0,
+} from '../../packages/canonical-model/src/index.js';
+import {
+  resolvePinnedInventoryFactStorage,
+  resolvePinnedInventoryPeriodLockStorage,
+  resolvePinnedInventoryProviderWrittenReadModel,
+} from '../../packages/compiler/src/conformance.js';
+import {
+  DEFAULT_COMPILER_LIMITS,
+  compileApplication,
+  type CompileSuccess,
+  type CompilerDiagnostic,
+} from '../../packages/compiler/src/index.js';
 import { authoredFixture, compilerInput, normalizedBytes } from './helpers.js';
 
 const FULL_COMPILE_BUDGET_MILLISECONDS = 5_000;
@@ -78,6 +91,284 @@ const maximumFieldBytes = (() => {
   return bytes;
 })();
 
+/**
+ * THE PACKAGE-BYTE ENVELOPE (STRUCTURAL-LIMITS-RAISE, ADR-0070 -- owner ruling
+ * 2026-10-05). `compiler-slos.md` requires every package-byte bounds raise to rerun
+ * this gate at the new ceiling. The field envelope above stays the family
+ * stress; this one is the byte stress, shaped like the real application rather
+ * than padded with long strings, because a padded package compiles far faster
+ * per byte than the queries and surfaces that actually fill Rain.
+ *
+ * It is a FROZEN snapshot of the application plus renamed copies of itself
+ * until the next copy would not fit (bytes or any family maximum), then one
+ * partial copy that drops whole modules from the end until it fits. The
+ * snapshot is a byte copy of `apps/web/release/app.authored.json` at `fe97b63b`
+ * (2026-10-05), frozen like the field envelope's fixture so every run measures
+ * the same input and the gate survives merges: a version built from the live
+ * file broke on the INTEGRATION trial merge, where copies of `item` and the
+ * order entities lost projections and shrank to shells. Refresh it on purpose,
+ * and say so in compiler-slos.md, when the application's shape changes a lot.
+ *
+ * A copy renames every id in the package namespace (except the package id) and
+ * shares definitions declared in other namespaces. It leaves out, with
+ * everything that names them, the entities that exist once per application:
+ * first those the compiler pins by identity (fact storage, provider-written
+ * read models, the period lock), then any copied entity the compiler reports
+ * as having lost a mandatory projection because of that. Those exclusions are
+ * learned from the compiler's diagnostics, never listed by hand; any other
+ * refusal fails here. The result must compile and land within
+ * `PACKAGE_BYTE_ENVELOPE_MINIMUM_FRACTION` of the maximum.
+ */
+const APPLICATION_SNAPSHOT_PATH =
+  'test/fixtures/g1/compiler/package-byte-envelope.authored.json';
+const PACKAGE_BYTE_ENVELOPE_MINIMUM_FRACTION = 0.85;
+const PACKAGE_BYTE_ENVELOPE_EXCLUSION_ROUNDS = 12;
+/** A copied id carries `c<copy>_` at the start of its last segment. */
+const COPY_MARKER = /c\d+_(?=[^.:]*$)/u;
+const COPIED_FAMILY_PRIMARY_KEYS = Object.freeze({
+  assertions: 'assertionId',
+  capabilityRequirements: 'capabilityId',
+  entities: 'entityId',
+  fields: 'fieldId',
+  modules: 'moduleId',
+  operations: 'operationId',
+  permissions: 'permissionId',
+  queries: 'queryId',
+  relations: 'relationId',
+  stateMachines: 'machineId',
+  storageMappings: 'storageMappingId',
+  surfaces: 'surfaceId',
+} as const);
+type CopiedFamily = keyof typeof COPIED_FAMILY_PRIMARY_KEYS;
+type AuthoredElement = Record<string, unknown>;
+type AuthoredApplication = Record<CopiedFamily, AuthoredElement[]> & {
+  readonly package: { readonly namespace: string; readonly packageId: string };
+};
+
+interface FilledPackage {
+  readonly applicationCopies: number;
+  readonly normalizedDefinitionBytes: Uint8Array;
+  readonly partialCopyModules: number;
+}
+
+interface PackageByteEnvelope extends FilledPackage {
+  readonly compiled: CompileSuccess;
+  readonly excludedEntityCount: number;
+}
+
+function packageByteEnvelope(): PackageByteEnvelope {
+  const base = JSON.parse(
+    readFileSync(APPLICATION_SNAPSHOT_PATH, 'utf8'),
+  ) as AuthoredApplication;
+  const { packageId } = base.package;
+  const excluded = new Set(
+    base.entities
+      .map((entity) => String(entity.entityId))
+      .filter(
+        (entityId) =>
+          resolvePinnedInventoryFactStorage(packageId, entityId) ||
+          resolvePinnedInventoryProviderWrittenReadModel(packageId, entityId) ||
+          resolvePinnedInventoryPeriodLockStorage(entityId),
+      ),
+  );
+  for (
+    let round = 1;
+    round <= PACKAGE_BYTE_ENVELOPE_EXCLUSION_ROUNDS;
+    round += 1
+  ) {
+    const filled = filledToMaximum(base, excluded);
+    const result = compileApplication(
+      compilerInput(filled.normalizedDefinitionBytes),
+    );
+    if (result.status === 'compiled') {
+      const maximum = STRUCTURAL_LIMITS_V0.maximumNormalizedBytes;
+      const byteLength = filled.normalizedDefinitionBytes.byteLength;
+      assert.ok(
+        byteLength <= maximum &&
+          byteLength >= maximum * PACKAGE_BYTE_ENVELOPE_MINIMUM_FRACTION,
+        `package-byte envelope is ${byteLength} bytes; it must land between ${PACKAGE_BYTE_ENVELOPE_MINIMUM_FRACTION} x ${maximum} and ${maximum}`,
+      );
+      return {
+        ...filled,
+        compiled: result,
+        excludedEntityCount: excluded.size,
+      };
+    }
+    for (const entityId of copiedEntitiesMissingProjections(
+      result.diagnostics,
+    )) {
+      excluded.add(entityId);
+    }
+  }
+  assert.fail(
+    `package-byte envelope did not compile within ${PACKAGE_BYTE_ENVELOPE_EXCLUSION_ROUNDS} exclusion rounds`,
+  );
+}
+
+/**
+ * The base entity ids whose COPIES lost a mandatory projection. Every other
+ * diagnostic is a real refusal of the envelope and fails the gate here.
+ */
+function copiedEntitiesMissingProjections(
+  diagnostics: readonly CompilerDiagnostic[],
+): string[] {
+  const learned = diagnostics.flatMap((entry) =>
+    entry.code === 'COMPILER_ENTITY_PROJECTION_MISSING' &&
+    entry.subjectId !== null &&
+    COPY_MARKER.test(entry.subjectId)
+      ? [entry.subjectId.replace(COPY_MARKER, '')]
+      : [],
+  );
+  const unexpected = diagnostics.filter(
+    (entry) =>
+      entry.code !== 'COMPILER_DIAGNOSTIC_LIMIT_REACHED' &&
+      !(
+        entry.code === 'COMPILER_ENTITY_PROJECTION_MISSING' &&
+        entry.subjectId !== null &&
+        COPY_MARKER.test(entry.subjectId)
+      ),
+  );
+  assert.deepEqual(
+    unexpected,
+    [],
+    'the package-byte envelope was refused for a reason other than a copied entity losing a projection',
+  );
+  assert.ok(learned.length > 0, JSON.stringify(diagnostics));
+  return learned;
+}
+
+function filledToMaximum(
+  base: AuthoredApplication,
+  excludedEntityIds: ReadonlySet<string>,
+): FilledPackage {
+  const moduleIds = [...base.modules]
+    .sort((left, right) => Number(left.orderKey) - Number(right.orderKey))
+    .map((module) => String(module.moduleId));
+  let current = base;
+  let currentBytes = normalizedBytesWithin(base);
+  assert.ok(currentBytes, `${APPLICATION_SNAPSHOT_PATH} must fit by itself`);
+  let applicationCopies = 1;
+  let partialCopyModules = 0;
+  for (let copy = 2; partialCopyModules === 0; copy += 1) {
+    let next: { application: AuthoredApplication; bytes: Uint8Array } | null =
+      null;
+    let kept = moduleIds.length;
+    for (; kept > 0 && !next; kept -= 1) {
+      const application = withCopy(
+        current,
+        applicationCopy(base, copy, moduleIds.slice(kept), excludedEntityIds),
+      );
+      const bytes = normalizedBytesWithin(application);
+      if (bytes) next = { application, bytes };
+    }
+    if (!next) break;
+    current = next.application;
+    currentBytes = next.bytes;
+    if (kept + 1 === moduleIds.length) applicationCopies = copy;
+    else partialCopyModules = kept + 1;
+  }
+  return {
+    applicationCopies,
+    normalizedDefinitionBytes: currentBytes,
+    partialCopyModules,
+  };
+}
+
+/** Normalized bytes, or null when (and only when) a structural maximum refuses. */
+function normalizedBytesWithin(application: unknown): Uint8Array | null {
+  try {
+    return normalizedBytes(application);
+  } catch (error) {
+    if (
+      error instanceof CanonicalModelError &&
+      error.diagnostics.every(
+        (entry) =>
+          entry.code === 'CANON_LIMIT_FAMILY_COUNT' ||
+          entry.code === 'CANON_LIMIT_PACKAGE_BYTES' ||
+          entry.code === 'CANON_LIMIT_NORMALIZED_BYTES',
+      )
+    ) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function withCopy(
+  application: AuthoredApplication,
+  copy: Record<CopiedFamily, AuthoredElement[]>,
+): AuthoredApplication {
+  const merged = { ...application };
+  for (const family of Object.keys(
+    COPIED_FAMILY_PRIMARY_KEYS,
+  ) as CopiedFamily[])
+    merged[family] = [...application[family], ...copy[family]];
+  return merged;
+}
+
+function applicationCopy(
+  base: AuthoredApplication,
+  copy: number,
+  droppedModuleIds: readonly string[],
+  excludedEntityIds: ReadonlySet<string>,
+): Record<CopiedFamily, AuthoredElement[]> {
+  const { namespace } = base.package;
+  const renamed = (id: string) =>
+    id.replace(/([^.:]*)$/u, `c${String(copy)}_$1`);
+  const idPattern = new RegExp(
+    `"(${namespace.replaceAll('.', '\\.')}:[^"]+)"`,
+    'gu',
+  );
+  const moduleOrderKeyOffset =
+    copy *
+    (Math.max(...base.modules.map((module) => Number(module.orderKey))) + 1);
+  const dropped = new Set<string>(
+    [...droppedModuleIds, ...excludedEntityIds].map((id) => renamed(id)),
+  );
+  const candidates = (
+    Object.entries(COPIED_FAMILY_PRIMARY_KEYS) as Array<[CopiedFamily, string]>
+  ).flatMap(([family, primaryKey]) =>
+    base[family]
+      .filter((element) =>
+        String(element[primaryKey]).startsWith(`${namespace}:`),
+      )
+      .map((element) => {
+        const text = JSON.stringify(element).replace(idPattern, (match, id) =>
+          String(id).startsWith(`${namespace}:package.`)
+            ? match
+            : `"${renamed(String(id))}"`,
+        );
+        const copied = JSON.parse(text) as AuthoredElement;
+        if (family === 'modules')
+          copied.orderKey = Number(copied.orderKey) + moduleOrderKeyOffset;
+        return {
+          copied,
+          family,
+          id: String(copied[primaryKey]),
+          references: [...text.matchAll(/"([a-z0-9.-]+:[^"]+)"/gu)].map(
+            (match) => match[1]!,
+          ),
+        };
+      }),
+  );
+  // Drop everything that names a dropped id, to a fixed point.
+  let kept = candidates;
+  for (let changed = true; changed;) {
+    changed = false;
+    kept = kept.filter((candidate) => {
+      if (!candidate.references.some((id) => dropped.has(id))) return true;
+      dropped.add(candidate.id);
+      changed = true;
+      return false;
+    });
+  }
+  const result = Object.fromEntries(
+    Object.keys(COPIED_FAMILY_PRIMARY_KEYS).map((family) => [family, []]),
+  ) as unknown as Record<CopiedFamily, AuthoredElement[]>;
+  for (const candidate of kept) result[candidate.family].push(candidate.copied);
+  return result;
+}
+
 if (isFullCompileProcess) {
   let invocationCount = 0;
   process.once('message', (message: CompileProcessInput) => {
@@ -125,6 +416,39 @@ if (!isFullCompileProcess) {
     );
     process.stdout.write(
       `compile-budget: estimator=best-of-${FULL_COMPILE_SAMPLE_COUNT} cpu_ms=${result.bestSample.cpuMilliseconds.toFixed(1)} wall_ms=${result.bestSample.wallMilliseconds.toFixed(1)} cpu_idle_pct=${(result.beforeCpuIdleFraction * 100).toFixed(1)} budget_ms=${FULL_COMPILE_BUDGET_MILLISECONDS} sample_wall_ms=${result.samples.map((sample) => sample.wallMilliseconds.toFixed(1)).join(',')} sample_cpu_ms=${result.samples.map((sample) => sample.cpuMilliseconds.toFixed(1)).join(',')}\n`,
+    );
+  });
+
+  test('cold full compile stays within budget at the v0 package-byte maximum', async () => {
+    const envelope = packageByteEnvelope();
+    const stagedOutputBytes = envelope.compiled.stagedArtifacts.reduce(
+      (sum, artifact) => sum + artifact.canonicalBytes.byteLength,
+      0,
+    );
+    assert.ok(stagedOutputBytes <= DEFAULT_COMPILER_LIMITS.maximumOutputBytes);
+    const measurement = await measureCompileBudget({
+      ...defaultOptions,
+      collectSamples: () =>
+        collectFreshProcessSamples(
+          envelope.normalizedDefinitionBytes,
+          FULL_COMPILE_SAMPLE_COUNT,
+        ),
+    });
+    const result = requireMeasuredWithinBudget(measurement);
+
+    assert.equal(
+      new Set(result.samples.map((sample) => sample.pid)).size,
+      FULL_COMPILE_SAMPLE_COUNT,
+      'each cold compile budget sample must come from a distinct process',
+    );
+    assert.deepEqual(
+      result.samples.map((sample) => sample.invocationCount),
+      Array.from({ length: FULL_COMPILE_SAMPLE_COUNT }, () => 1),
+      'each sample must time the first compile invocation in its process',
+    );
+    const normalizedByteLength = envelope.normalizedDefinitionBytes.byteLength;
+    process.stdout.write(
+      `compile-budget-package-bytes: normalized_bytes=${normalizedByteLength} maximum_bytes=${STRUCTURAL_LIMITS_V0.maximumNormalizedBytes} fraction_of_maximum=${(normalizedByteLength / STRUCTURAL_LIMITS_V0.maximumNormalizedBytes).toFixed(4)} application_copies=${envelope.applicationCopies} partial_copy_modules=${envelope.partialCopyModules} entities_kept_out_of_copies=${envelope.excludedEntityCount} staged_output_bytes=${stagedOutputBytes} output_cap_bytes=${DEFAULT_COMPILER_LIMITS.maximumOutputBytes} estimator=best-of-${FULL_COMPILE_SAMPLE_COUNT} cpu_ms=${result.bestSample.cpuMilliseconds.toFixed(1)} wall_ms=${result.bestSample.wallMilliseconds.toFixed(1)} cpu_idle_pct=${(result.beforeCpuIdleFraction * 100).toFixed(1)} budget_ms=${FULL_COMPILE_BUDGET_MILLISECONDS} sample_wall_ms=${result.samples.map((sample) => sample.wallMilliseconds.toFixed(1)).join(',')} sample_cpu_ms=${result.samples.map((sample) => sample.cpuMilliseconds.toFixed(1)).join(',')}\n`,
     );
   });
 
