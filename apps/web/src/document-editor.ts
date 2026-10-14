@@ -11,6 +11,9 @@ import {
   type SemanticRecordDto,
 } from '../../../packages/runtime/src/semantic-query-gateway.js';
 import {
+  operationBindsRecordLegalEntity,
+  parsePinnedOperationCatalog,
+  RECORD_LEGAL_ENTITY_BINDING_ARGUMENT_KEY,
   SEMANTIC_OPERATION_REQUEST_VERSION,
   type SemanticOperationResultEnvelope,
 } from '../../../packages/runtime/src/semantic-operation-gateway.js';
@@ -2603,6 +2606,17 @@ function plan(
     instant: new Date().toISOString(),
     principalId: trustedContextForRequestRuntimeView(view).principalId,
   };
+  // COMPANY-BOUND-WRITES: a persisted header or line is updated or archived
+  // only in the company this editor was opened in.
+  const catalog = parsePinnedOperationCatalog(
+    view.projections.operation.payload,
+  );
+  const bindsRecordLegalEntity = (operationId: string) => {
+    const bound = catalog.find(
+      (candidate) => candidate.operationId === operationId,
+    );
+    return bound !== undefined && operationBindsRecordLegalEntity(view, bound);
+  };
   const append = (
     row: DraftRow,
     surfaceId: string,
@@ -2650,6 +2664,9 @@ function plan(
       ? {
           recordId: row.id,
           expectedRevision: row.record.revision,
+          ...(bindsRecordLegalEntity(operation.operationId)
+            ? { [RECORD_LEGAL_ENTITY_BINDING_ARGUMENT_KEY]: buffer.scope }
+            : {}),
           ...(row.removed ? {} : { patch: values }),
         }
       : {

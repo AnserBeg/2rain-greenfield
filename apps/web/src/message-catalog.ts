@@ -333,6 +333,17 @@ export const SURFACE_MESSAGE_CATALOG = Object.freeze({
     sentence: 'Legal entity unavailable for new work',
     subject: 'legalEntityId',
   },
+  // COMPANY-BOUND-WRITES. No subject: naming the record's own company would
+  // disclose it to a page entered in another.
+  OPERATION_LEGAL_ENTITY_MISMATCH: {
+    consequence: 'blocking',
+    detail:
+      'This record belongs to a different company than the one this page was opened in. Nothing was changed.',
+    nextAction: 'Open the record from its own company, then try again.',
+    placements: ['page'],
+    sentence: 'Record belongs to another company',
+    subject: null,
+  },
   OPERATION_REFUSED: {
     consequence: 'blocking',
     detail:
@@ -576,6 +587,7 @@ export const OPERATION_DIAGNOSTIC_CODES = Object.freeze([
   'OPERATION_CONFIRMATION_STALE',
   'OPERATION_INPUT_INVALID',
   'OPERATION_LEGAL_ENTITY_INACTIVE',
+  'OPERATION_LEGAL_ENTITY_MISMATCH',
   'OPERATION_PERMISSION_DENIED',
   'OPERATION_REFUSED',
   'OPERATION_UNAVAILABLE',

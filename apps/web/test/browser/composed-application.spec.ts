@@ -2120,6 +2120,18 @@ async function createScopedStockCountLineWithRelations(
   await expect(page.locator('[data-relation-freeze]')).toContainText(
     'Transaction',
   );
+  // COMPANY-BOUND-WRITES: an ordinary edit of the company's own record carries
+  // the company the page was entered in, and still saves.
+  await page.getByLabel('Number', { exact: true }).fill('COUNT-SCOPE-A-EDITED');
+  await page
+    .locator('[data-platform-slot="record:commandBar"]')
+    .getByRole('button', { name: 'Save' })
+    .click();
+  await expect(page.getByRole('status')).toContainText('Update complete');
+  await expect(page.locator('[data-diagnostic-code]')).toHaveCount(0);
+  await expect(page.getByLabel('Number', { exact: true })).toHaveValue(
+    'COUNT-SCOPE-A-EDITED',
+  );
 
   const stockCountLineScopeParameterId = await loadSurfaceScopeParameterId(
     'stock_count_line_form',

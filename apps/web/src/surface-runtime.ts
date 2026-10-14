@@ -30,7 +30,12 @@ import {
 import type { SurfaceList } from '../../../packages/canonical-model/src/index.js';
 import { assertRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
-import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../../packages/runtime/src/semantic-operation-gateway.js';
+import {
+  RECORD_LEGAL_ENTITY_BINDING_ARGUMENT_KEY,
+  SEMANTIC_OPERATION_REQUEST_VERSION,
+  operationBindsRecordLegalEntity,
+  parsePinnedOperationCatalog,
+} from '../../../packages/runtime/src/semantic-operation-gateway.js';
 import type {
   SemanticOperationGateway,
   SemanticOperationMediationAuthority,
@@ -1080,6 +1085,7 @@ export async function submitSurfaceRuntimeIntent(
   let input: SurfaceOperationInput;
   try {
     input = operationInput(
+      view,
       selection.selected,
       operation,
       intent,
@@ -1768,6 +1774,7 @@ function relationInput(
 }
 
 function operationInput(
+  view: RuntimeViewContract.RequestRuntimeView,
   surface: CompiledSurfaceDefinition,
   operation: CompiledSurfaceDataBinding['operations'][number],
   intent: SurfaceOperationIntent,
@@ -1798,9 +1805,42 @@ function operationInput(
     submission.expectedRevision ?? '',
     10,
   );
+  const binding = recordLegalEntityBinding(
+    view,
+    operation.operationId,
+    legalEntitySelection,
+  );
   return intent === 'update'
-    ? { expectedRevision, patch: values, recordId }
-    : { expectedRevision, recordId };
+    ? { expectedRevision, ...binding, patch: values, recordId }
+    : { expectedRevision, ...binding, recordId };
+}
+
+/**
+ * COMPANY-BOUND-WRITES. An update, archive, restore or transition of a
+ * company-owned record carries the company the page was entered in, so the
+ * provider acts only if the record is that company's. The record id and
+ * revision are the caller's to choose; the company is the URL's, the same
+ * operand the page read the record under. A company-owned write entered in no
+ * single company is refused before invocation rather than sent unbound.
+ */
+function recordLegalEntityBinding(
+  view: RuntimeViewContract.RequestRuntimeView,
+  operationId: string,
+  legalEntitySelection: readonly string[],
+): Readonly<Record<string, string>> {
+  const definition = parsePinnedOperationCatalog(
+    view.projections.operation.payload,
+  ).find((candidate) => candidate.operationId === operationId);
+  if (!definition || !operationBindsRecordLegalEntity(view, definition))
+    return Object.freeze({});
+  if (legalEntitySelection.length !== 1) {
+    throw new InvalidSurfaceSubmissionError(
+      'a company-owned record write requires exactly one legal-entity operand',
+    );
+  }
+  return Object.freeze({
+    [RECORD_LEGAL_ENTITY_BINDING_ARGUMENT_KEY]: legalEntitySelection[0]!,
+  });
 }
 
 function createSystemInput(
