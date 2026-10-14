@@ -190,17 +190,19 @@ test('the composed application declares its Lists and they normalize unchanged',
   // counter flag is set -- so Sales orders keeps its eight views.
   const counterSales = declared.find(
     (surface) => surface.surfaceId === `${ns}:surface.counter_sale_list`,
-  ) as unknown as Declared & {
-    label: string;
-    list: { views: Array<{ filters: unknown }> };
-  };
+  ) as unknown as Declared & { label: string };
   assert.equal(counterSales.label, 'Counter sales');
   assert.equal(
     counterSales.dataSource.targetId,
     `${ns}:query.counter_sale_list`,
   );
   assert.deepEqual(
-    counterSales.list.views.map((view) => [view.label, view.filters]),
+    (
+      counterSales.list.views as unknown as Array<{
+        filters: unknown;
+        label: string;
+      }>
+    ).map((view) => [view.label, view.filters]),
     [
       [
         'All',
