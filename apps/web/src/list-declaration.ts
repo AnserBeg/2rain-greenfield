@@ -855,7 +855,12 @@ export function withheldSupplyQuery(
   const read: readonly string[] = [
     supply.coverage.query.targetId,
     supply.coverage.related.query.targetId,
-    ...[...supply.free.plus, ...supply.free.minus].flatMap((sum) => [
+    // What is on order is read the same way (RECEIVING-EXTRAS).
+    ...[
+      ...supply.free.plus,
+      ...supply.free.minus,
+      ...(supply.incoming ?? []),
+    ].flatMap((sum) => [
       sum.rows.query.targetId,
       ...(sum.within ? [sum.within.query.targetId] : []),
       ...(sum.related ? [sum.related.query.targetId] : []),

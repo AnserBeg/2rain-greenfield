@@ -2141,6 +2141,57 @@ test('a declared List sends its supply with its progress, keeps each supply tab,
     withheldProgressQuery(list, deniedFor(id('query', 'stock'))),
     null,
   );
+  // RECEIVING-EXTRAS: what is on order is supply too, so a refusal of its
+  // rows, its orders or its received rows withholds the supply whole.
+  const onOrder = SurfaceListSchema.parse({
+    ...list,
+    progress: {
+      ...list.progress,
+      supply: {
+        ...list.progress!.supply,
+        incoming: [
+          {
+            rows: {
+              query: ref(id('query', 'purchase_lines')),
+              match: id('field', 'purchase_line_item_id'),
+              quantity: id('field', 'purchase_line_quantity'),
+            },
+            within: {
+              relation: id('relation', 'purchase_line_order'),
+              query: ref(id('query', 'purchases')),
+              field: id('field', 'purchase_state'),
+              values: [id('option', 'purchase_state_placed')],
+            },
+            related: {
+              query: ref(id('query', 'purchase_received')),
+              relation: id('relation', 'purchase_received_line'),
+              quantity: id('field', 'purchase_received_quantity'),
+            },
+            sum: 'remaining',
+          },
+        ],
+        outputs: {
+          ...list.progress!.supply!.outputs,
+          incoming: output('incoming'),
+        },
+      },
+    },
+  });
+  for (const local of [
+    'purchase_lines',
+    'purchases',
+    'purchase_received',
+    'stock',
+  ])
+    assert.equal(
+      withheldSupplyQuery(onOrder, deniedFor(id('query', local))),
+      id('query', local),
+      local,
+    );
+  assert.equal(
+    withheldSupplyQuery(list, deniedFor(id('query', 'purchase_lines'))),
+    null,
+  );
   const purpose = SurfaceListSchema.parse({
     ...list,
     progress: {
