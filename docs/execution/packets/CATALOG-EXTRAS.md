@@ -72,6 +72,12 @@ Base: `packet/REPLENISHMENT` at `85bca8d0`. Reference: PaneFlow `d057daff` (`lib
 - After a merge the Task reads "Task complete": the duplicate it archived can no longer be shown.
 - An item whose Inventory policy is cleared (it is optional) is still judged stocked, but the Items List shows it only
   under All: the Stocked tab filters on the stored value.
+- From INTEGRATION (PR #29), for this lane to mirror in `inventory-catalog-aliases.spec.ts`: (1) wait for the
+  vendor's defaults (Currency `CAD`) before picking the line (`8946190a`); (2) `pick` takes the option whose
+  `<strong>` label is exactly the name (anchored, escaped regex), not a substring with `.first()` — the results on
+  focus, ordered by random ids, can list "Field notebook (duplicate)" first, and a click on an older answer's result
+  that the typed term's answer does not offer is dropped by design (`surface-client.ts`), so the journey failed now
+  and then. No assertion changed.
 
 ```record-claim
 {

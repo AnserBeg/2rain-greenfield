@@ -234,10 +234,16 @@ async function pick(page: Page, name: string, term: string, option: string) {
     (await page.locator('body[data-reference-enhanced]').count()) > 0;
   if (!enhanced)
     await field.getByRole('button', { name: 'Search', exact: true }).click();
+  // The option whose label is exactly `option`: a substring would also take
+  // "Field notebook (duplicate)", which the results on focus can list first
+  // (ordered by random ids); a result chosen from that older answer and not
+  // offered by the typed term's is dropped by design.
+  const label = new RegExp(
+    `^${option.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`,
+  );
   await field
     .getByRole('option')
-    .filter({ has: page.locator('strong') })
-    .filter({ hasText: option })
+    .filter({ has: page.locator('strong', { hasText: label }) })
     .first()
     .click();
   await expect(combo(page, name)).toHaveAttribute(
