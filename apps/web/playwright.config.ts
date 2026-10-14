@@ -1,31 +1,17 @@
-import { defineConfig, devices } from '@playwright/test';
+import { defineConfig } from '@playwright/test';
 
+import {
+  browserSuiteConfig,
+  operationsBrowserSpecs,
+} from './playwright.shared.js';
+
+// The Sales and platform specs: every spec the operations config does not run.
 export default defineConfig({
-  expect: { timeout: 5_000 },
-  fullyParallel: false,
-  reporter: [
-    ['list'],
-    [
-      'json',
-      { outputFile: '../../test-results/reachability/browser.raw.json' },
-    ],
-    ['../../test/helpers/playwright-unfiltered-reporter.ts'],
-  ],
+  ...browserSuiteConfig('browser'),
   projects: [
     {
       name: 'browser',
-      testIgnore: /composed-application\.spec\.ts/u,
-    },
-    {
-      dependencies: ['browser'],
-      name: 'composed-application',
-      testMatch: /composed-application\.spec\.ts/u,
+      testIgnore: operationsBrowserSpecs,
     },
   ],
-  testDir: './test/browser',
-  timeout: 20_000,
-  use: {
-    ...devices['Desktop Chrome'],
-    headless: true,
-  },
 });

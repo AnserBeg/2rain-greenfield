@@ -581,12 +581,22 @@ test('resolve conformance is derived from lowered text storage in both direction
       invocation?: { query?: { targetId: string } };
     }>;
     queries: Array<{ queryId: string }>;
+    surfaces: Array<{
+      launcher?: { scan?: { targets: Array<{ query: string }> } };
+    }>;
   };
   const itemResolveId = 'northstar.app:query.item_resolve';
   const itemGetId = 'northstar.app:query.item_get';
   missing.queries = missing.queries.filter(
     (query) => query.queryId !== itemResolveId,
   );
+  // The warehouse launcher scans a SKU through that resolve query
+  // (WAREHOUSE-MODE); the compiler's own refusal is the one under test.
+  for (const surface of missing.surfaces)
+    if (surface.launcher?.scan)
+      surface.launcher.scan.targets = surface.launcher.scan.targets.filter(
+        (target) => target.query !== itemResolveId,
+      );
   for (const assertion of missing.assertions) {
     if (assertion.invocation?.query?.targetId === itemResolveId) {
       assertion.invocation.query.targetId = itemGetId;

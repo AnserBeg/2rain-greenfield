@@ -51,6 +51,8 @@ import {
   type InventoryTransferLineV1,
   type InventoryTransferPostingCommandV1,
 } from '../../packages/postgres-provider/src/inventory-posting-service.js';
+import { COMMERCIAL_CAPABILITY_ID } from '../../packages/domain/src/sales/definition.js';
+import { commercialReadModel } from '../../packages/postgres-provider/src/commercial-read-model.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import {
   planStockIdentityLocks,
@@ -90,6 +92,7 @@ import {
   type CurrentPolicyGateway,
   type CurrentPolicySubject,
 } from '../../packages/runtime/src/request-runtime-view.js';
+import { assertComposedInventoryCollection } from '../helpers/assert-composed-inventory.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 import {
   amendOrderedQuantity,
@@ -101,6 +104,7 @@ import {
   reconcileReceivedQuantities,
 } from '../../packages/postgres-provider/src/received-quantity-projection.js';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
+import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
 import type { RegisteredCapabilityOperationExecutionRequest } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import { SemanticQueryGateway } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { PostgresInventoryReconciliationService } from '../../packages/postgres-provider/src/inventory-reconciliation-service.js';
@@ -2705,12 +2709,40 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
       issuer,
       INVENTORY_PROVIDER_ERROR_MAPPINGS,
     );
-    const queryGateway = new SemanticQueryGateway(policy, interpreter);
+    // The order page reads its totals query (PURCHASING-PARITY), a
+    // commercial read model.
+    const queryGateway = new SemanticQueryGateway(
+      policy,
+      interpreter,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { [COMMERCIAL_CAPABILITY_ID]: commercialReadModel },
+    );
     const fixture = await compiledFixture();
     const executor = RECEIVING_CAPABILITY_EXECUTOR_FACTORY.create({
       actorIssuer: issuer,
       pool: database.runtimePool,
       currentInstant: () => recordedAt,
+      queryGateway,
+      releaseId: database.registration.releaseId,
+      releaseContentHash: database.registration.releaseContentHash,
+      projection: (familyId) => {
+        const projection = projectionPayload<unknown>(
+          fixture.inventory,
+          familyId,
+        );
+        return {
+          payload: projection.payload,
+          contentHash: projection.contentHash,
+        };
+      },
+    });
+    const approvalExecutor = PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY.create({
+      actorIssuer: issuer,
+      currentInstant: () => recordedAt,
+      pool: database.runtimePool,
       queryGateway,
       releaseId: database.registration.releaseId,
       releaseContentHash: database.registration.releaseContentHash,
@@ -2737,6 +2769,7 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
       mediation,
       undefined,
       [
+        approvalExecutor,
         {
           capabilityId: executor.capabilityId,
           prepareAuthorization: (request) =>
@@ -3297,7 +3330,7 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
     const orderPage = await entry.run({ headers: {} }, (view) =>
       renderSurfaceRuntimeWithData(
         view,
-        `/?${new URLSearchParams({ surface: 'northstar.app:surface.purchase_order_detail', record: orderId, 'northstar.app:parameter.purchase_order_get_legal_entity_scope': legalReject })}`,
+        `/?${new URLSearchParams({ surface: 'northstar.app:surface.purchase_order_detail', record: orderId, 'northstar.app:parameter.commercial_purchase_order_get_legal_entity_scope': legalReject, dataset: 'northstar.app:dataset.purchasing_lines', selected: orderLineId, 'select:northstar.app:dataset.purchasing_lines': orderLineId })}`,
         {
           applicationExtension: RECEIVING_SURFACE_RUNTIME_EXTENSION,
           queryGateway,
@@ -3309,15 +3342,17 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
     assert.equal(orderPage.statusCode, 200);
     assert.match(
       orderPage.html,
-      /data-receiving-progress/u,
-      'purchase order exposes receiving in the actual Record surface',
+      /data-composition-dataset="northstar\.app:dataset\.purchasing_lines"/u,
+      'purchase order exposes its lines in the actual Record surface',
     );
     assert.match(
       orderPage.html,
-      /<td>10<\/td><td>7<\/td><td>3<\/td>/u,
-      'ordered, received and remaining are resolved on the server',
+      /<td[^>]*data-column-label="Ordered"[^>]*>10<\/td>/u,
+      'the selected order line retains its exact ordered quantity',
     );
-    assert.match(orderPage.html, /Create goods receipt/u);
+    assert.match(orderPage.html, /Receive with actual cost/u);
+    assert.match(orderPage.html, /Receive with cost explicitly absent/u);
+    assert.match(orderPage.html, /Connected receipts/u);
     const originalAfter = await database.adminPool.query(
       `SELECT ${quoted(receiptColumn(binding.receipt, 'goods_receipt_state'))} AS state FROM ${receiptTable(binding.receipt)} WHERE record_id=$1`,
       [first.sourceId],
@@ -4265,6 +4300,9 @@ function prepareEntityInsert(
     ),
     ...relationColumns.map((relation) => {
       const value = relationIds[relation.targetEntityId];
+      // An optional relation the seed does not name stays unset, as a
+      // location inside no other does (LOCATIONS slice 2).
+      if (value === undefined && relation.relationColumn.nullable) return null;
       assert.ok(value, `missing relation ${relation.relationId}`);
       return value;
     }),
@@ -6928,9 +6966,20 @@ async function loadInventoryDefinition(): Promise<Record<string, unknown>> {
   const definition = (
     applicationBuilder.composedApplicationDefinition as () => unknown
   )();
+  // As the product mounts it: with stock documents (INVENTORY-PARITY)
+  // and a company's reorder rule (CATALOG-EXTRAS).
   const inventory = (
-    loaded.inventoryModuleDefinition as (namespace: string) => unknown
-  )(String(applicationBuilder.APPLICATION_NAMESPACE));
+    loaded.inventoryModuleDefinition as (
+      namespace: string,
+      options: {
+        readonly companyReorderRule: boolean;
+        readonly documentEntry: boolean;
+      },
+    ) => unknown
+  )(String(applicationBuilder.APPLICATION_NAMESPACE), {
+    companyReorderRule: true,
+    documentEntry: true,
+  });
   assert.ok(isRecord(definition));
   assert.ok(isRecord(inventory));
   for (const collection of [
@@ -6951,16 +7000,12 @@ async function loadInventoryDefinition(): Promise<Record<string, unknown>> {
     const inventoryEntries: readonly unknown[] = inventory[
       collection
     ] as readonly unknown[];
-    for (const inventoryEntry of inventoryEntries) {
-      assert.equal(
-        composedEntries.filter(
-          (candidate) =>
-            JSON.stringify(candidate) === JSON.stringify(inventoryEntry),
-        ).length,
-        1,
-        `composed application must contain each inventory ${collection} entry exactly once`,
-      );
-    }
+    assertComposedInventoryCollection(
+      collection,
+      composedEntries,
+      inventoryEntries,
+      String(applicationBuilder.APPLICATION_NAMESPACE),
+    );
   }
   assert.ok(Array.isArray(definition.modules));
   assert.ok(Array.isArray(inventory.modules));

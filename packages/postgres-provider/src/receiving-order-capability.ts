@@ -32,7 +32,7 @@ export async function executeReceivingOrderState(
   context: PostgresCapabilityOperationExecutorContext,
   binding: ReceiptBinding,
   request: RegisteredCapabilityOperationExecutionRequest,
-  action: 'close' | 'reopen' | 'amend',
+  action: 'close' | 'reopen' | 'cancel' | 'amend',
   authorizedLegalEntityId: string,
 ): Promise<SemanticOperationResultEnvelope> {
   const entity = action === 'amend' ? binding.orderLine : binding.order;
@@ -83,6 +83,7 @@ export async function executeReceivingOrderState(
             'Order scope changed after authorization preparation',
           );
         let amendmentId: string | null = null;
+        let consumedRequests = 0;
         const changed =
           action === 'amend'
             ? await (async () => {
@@ -109,7 +110,23 @@ export async function executeReceivingOrderState(
                     expectedRevision,
                   ],
                 );
-                if (proposals.rows.length !== 1)
+                // A request to close the line's open remainder names no
+                // quantity of its own (PURCHASING-PARITY): the amend closes to
+                // what is received when it runs, under the line's lock, so a
+                // receipt posted since the operator looked cannot fail it, and
+                // every such request staged for this revision -- a retry, a
+                // second tab -- is the same intent and is consumed with it.
+                const closeColumn =
+                  proposal.columns.find((column) =>
+                    column.canonicalFieldId.endsWith(
+                      ':field.purchase_order_amendment_close_remainder',
+                    ),
+                  )?.physicalName ?? null;
+                const closing =
+                  closeColumn !== null &&
+                  proposals.rows.length > 0 &&
+                  proposals.rows.every((row) => row[closeColumn] === true);
+                if (!closing && proposals.rows.length !== 1)
                   throw receiptError(
                     'INVENTORY_POSTING_INPUT_INVALID',
                     'Create exactly one active amendment request for this order line revision; archive competing requests',
@@ -123,36 +140,42 @@ export async function executeReceivingOrderState(
                   legalEntityId,
                   recordId,
                   expectedRevision,
-                  String(
-                    candidate[
-                      receiptColumn(
-                        proposal,
-                        'purchase_order_amendment_quantity',
-                      )
-                    ],
-                  ),
+                  closing
+                    ? 'received'
+                    : String(
+                        candidate[
+                          receiptColumn(
+                            proposal,
+                            'purchase_order_amendment_quantity',
+                          )
+                        ],
+                      ),
                 );
                 // The immutable trust event below identifies the consumed request. The
                 // request remains persisted and restoring it cannot bypass line revision.
-                const consumed = await client.query(
-                  `UPDATE ${receiptTable(proposal)} SET archived_at=transaction_timestamp(),revision=revision+1 WHERE tenant_id=$1 AND environment_id=$2 AND legal_entity_id=$3 AND record_id=$4 RETURNING archived_at,revision`,
-                  [
-                    request.context.tenantId,
-                    request.context.environmentId,
-                    legalEntityId,
-                    amendmentId,
-                  ],
-                );
-                if (
-                  consumed.rows.length !== 1 ||
-                  consumed.rows[0]!.archived_at === null ||
-                  Number(consumed.rows[0]!.revision) !==
-                    Number(candidate.revision) + 1
-                )
-                  throw receiptError(
-                    'RECEIPT_PROJECTION_DIVERGED',
-                    'Amendment intent was not consumed',
+                const staged = closing ? proposals.rows : [candidate];
+                for (const request_ of staged) {
+                  const consumed = await client.query(
+                    `UPDATE ${receiptTable(proposal)} SET archived_at=transaction_timestamp(),revision=revision+1 WHERE tenant_id=$1 AND environment_id=$2 AND legal_entity_id=$3 AND record_id=$4 RETURNING archived_at,revision`,
+                    [
+                      request.context.tenantId,
+                      request.context.environmentId,
+                      legalEntityId,
+                      String(request_.record_id),
+                    ],
                   );
+                  if (
+                    consumed.rows.length !== 1 ||
+                    consumed.rows[0]!.archived_at === null ||
+                    Number(consumed.rows[0]!.revision) !==
+                      Number(request_.revision) + 1
+                  )
+                    throw receiptError(
+                      'RECEIPT_PROJECTION_DIVERGED',
+                      'Amendment intent was not consumed',
+                    );
+                }
+                consumedRequests = staged.length;
                 return result;
               })()
             : await changePurchaseOrderState(
@@ -170,6 +193,14 @@ export async function executeReceivingOrderState(
                 amendmentRequestId: {
                   classification: 'INTERNAL' as const,
                   value: amendmentId,
+                },
+              }
+            : {}),
+          ...(consumedRequests > 1
+            ? {
+                consumedAmendmentRequests: {
+                  classification: 'INTERNAL' as const,
+                  value: consumedRequests,
                 },
               }
             : {}),

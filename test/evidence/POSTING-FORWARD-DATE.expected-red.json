@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "packet": "POSTING-FORWARD-DATE",
+  "entries": [
+    {
+      "name": "forward-rule-call-removed",
+      "claim": "A1: the one call in #post is the only thing that refuses a family other than receipts and shipments an effective tenant business day after the recorded one. Deleting it admits an adjustment dated seven days ahead inside the seven-day scope, so the refusal the backdate test now declares never happens -- node reports the missing rejection, because assert.rejects skips its validator when nothing is thrown.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "      enforceForwardDate(posting.postingRole, businessPeriod, recordedPeriod);\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/inventory-backdate-policy.test.ts"],
+        "namePattern": "backdate window"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-backdate-policy.test.ts",
+          "name": "the configured backdate window decides which effective period a posting may carry",
+          "expected": "Missing expected rejection: seven days ahead must be refused by the forward rule"
+        }
+      ]
+    },
+    {
+      "name": "forward-rule-one-day-slack",
+      "claim": "A2: the rule has zero days of slack. Letting the effective day run one day past the recorded day admits a transfer dated 09:00 on the next Calgary business day, so the first refusal of the forward-rule test goes missing. Every other case in that test keeps its verdict under this mutation, which is what makes the red the slack's alone.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "  if (effective <= recorded) return;",
+      "replacement": "  if (effective <= recorded + 1) return;",
+      "test": {
+        "files": ["test/postgres/inventory-backdate-policy.test.ts"],
+        "namePattern": "forward rule"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-backdate-policy.test.ts",
+          "name": "the forward rule refuses the next tenant business day, counted in the tenant calendar and not in UTC",
+          "expected": "Missing expected rejection: the next tenant business day must be refused"
+        }
+      ]
+    },
+    {
+      "name": "forward-rule-utc-days",
+      "claim": "A3: 'today' is the tenant's declared business day, not the UTC date. Handing the rule the UTC dates of the two instants instead of the tenant business periods refuses a posting at 19:00 Calgary time recorded at 17:00 the same evening -- 5 August in UTC, 4 August in Calgary -- by the forward rule's own code with the UTC dates in its message. The refusal and admission cases before it keep their verdicts, because there both calendars agree.",
+      "file": "packages/postgres-provider/src/inventory-posting-service.ts",
+      "original": "      enforceForwardDate(posting.postingRole, businessPeriod, recordedPeriod);\n",
+      "replacement": "      enforceForwardDate(posting.postingRole, parsed.effectiveAt.slice(0, 10), recordedAt.slice(0, 10));\n",
+      "test": {
+        "files": ["test/postgres/inventory-backdate-policy.test.ts"],
+        "namePattern": "forward rule"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/inventory-backdate-policy.test.ts",
+          "name": "the forward rule refuses the next tenant business day, counted in the tenant calendar and not in UTC",
+          "expected": "INVENTORY_FORWARD_DATE_REFUSED: effective period 2026-08-05 is after the recorded business day 2026-08-04"
+        }
+      ]
+    }
+  ]
+}

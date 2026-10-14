@@ -1,14 +1,18 @@
 import assert from 'node:assert/strict';
 import {
+  globSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
+
+import type { PlaywrightTestConfig } from '@playwright/test';
 
 import {
   aggregateEvidence,
@@ -21,6 +25,7 @@ import {
   creditableNodeResultPath,
 } from '../helpers/node-reporter-core.mjs';
 import {
+  getPlaywrightReachabilityProducer,
   getReachabilityProducer,
   reachabilityProducers,
   type ReachabilityProducer,
@@ -167,10 +172,12 @@ test('filtered commands cannot produce evidence', () => {
     grepInvert: null,
     projects: [{ grep: /.*/, grepInvert: null, name: '' }],
     shard: null,
-  } as Parameters<typeof assertUnfilteredPlaywrightRun>[1];
+  } as Parameters<typeof assertUnfilteredPlaywrightRun>[2];
+  const browser = getReachabilityProducer('browser');
   assert.throws(
     () =>
       assertUnfilteredPlaywrightRun(
+        browser,
         [
           'test',
           '--config',
@@ -184,10 +191,31 @@ test('filtered commands cannot produce evidence', () => {
   assert.throws(
     () =>
       assertUnfilteredPlaywrightRun(
+        browser,
         ['test', '--config', 'apps/web/playwright.config.ts'],
         { ...unfilteredConfig, grep: /only-one-test/ },
       ),
     /Filtered Playwright configuration is not evidence-producing/u,
+  );
+
+  // A producer admits only its own config, so one browser job's run can never
+  // be recorded as the other's.
+  const operations = getReachabilityProducer('browser-operations');
+  assert.doesNotThrow(() =>
+    assertUnfilteredPlaywrightRun(
+      operations,
+      ['test', '--config', 'apps/web/playwright.operations.config.ts'],
+      unfilteredConfig,
+    ),
+  );
+  assert.throws(
+    () =>
+      assertUnfilteredPlaywrightRun(
+        operations,
+        ['test', '--config', 'apps/web/playwright.config.ts'],
+        unfilteredConfig,
+      ),
+    /Filtered or unrecognized Playwright arguments/u,
   );
 });
 
@@ -375,8 +403,146 @@ test('declared unfiltered producers are wired to CI and their evidence paths', (
       assert.doesNotMatch(body, nodeSelectionArguments);
     } else {
       assert.doesNotMatch(body, playwrightSelectionArguments);
+      // Evidence is prepared and normalized under the producer's own id, for
+      // exactly the invocation its reporter admits.
+      assert.ok(
+        body.endsWith(
+          `bash scripts/run-suite.sh ${producer.id} --normalize-playwright -- playwright ${producer.argv.join(' ')}`,
+        ),
+        `${producer.id} does not run its own config under its own id`,
+      );
     }
   }
+});
+
+test('the Playwright producers run every browser spec in exactly one job and report their own evidence', async () => {
+  const specs = globSync('apps/web/test/browser/**/*.spec.ts')
+    .map((path) => resolve(path))
+    .sort();
+  assert.ok(specs.length > 0, 'browser spec discovery returned zero files');
+  // Chartered and not yet written: each must reach the operations job by its
+  // file name alone.
+  const charted = [
+    'expected-receipts',
+    'order-lists',
+    'order-pages',
+    'payables',
+  ]
+    .map((name) => resolve(`apps/web/test/browser/${name}.spec.ts`))
+    // Once written, a chartered spec is discovered like any other; counting
+    // it twice would read as two jobs.
+    .filter((path) => !specs.includes(path));
+  const selectedBy = new Map<string, string[]>();
+
+  for (const { id } of reachabilityProducers.filter(
+    ({ runner }) => runner === 'playwright',
+  )) {
+    const producer = getPlaywrightReachabilityProducer(id);
+    const configPath = resolve(producer.argv[2] ?? '');
+    assert.deepEqual(producer.argv, [
+      'test',
+      '--config',
+      relative(process.cwd(), configPath),
+    ]);
+    const configDirectory = dirname(configPath);
+    const { default: config } = (await import(
+      pathToFileURL(configPath).href
+    )) as { default: PlaywrightTestConfig };
+
+    const reporters = (
+      Array.isArray(config.reporter) ? config.reporter : []
+    ).map(([name, options]: readonly unknown[]) => ({
+      name,
+      options:
+        typeof options === 'object' && options !== null
+          ? (options as Readonly<Record<string, unknown>>)
+          : {},
+    }));
+    assert.ok(
+      reporters.some(
+        ({ name, options }) =>
+          name === 'json' &&
+          typeof options.outputFile === 'string' &&
+          resolve(configDirectory, options.outputFile) ===
+            resolve(producer.rawEvidencePath),
+      ),
+      `${id} does not write its raw report to ${producer.rawEvidencePath}`,
+    );
+    assert.ok(
+      reporters.some(
+        ({ name, options }) =>
+          typeof name === 'string' &&
+          resolve(configDirectory, name) ===
+            resolve('test/helpers/playwright-unfiltered-reporter.ts') &&
+          options.producer === id,
+      ),
+      `${id} does not check and record its run as itself`,
+    );
+
+    assert.equal(
+      resolve(configDirectory, config.testDir ?? '.'),
+      resolve('apps/web/test/browser'),
+    );
+    for (const spec of [...specs, ...charted]) {
+      if (
+        (config.projects ?? []).some((project) =>
+          projectSelectsSpec(config, project, spec),
+        )
+      ) {
+        selectedBy.set(spec, [...(selectedBy.get(spec) ?? []), id]);
+      }
+    }
+  }
+
+  for (const spec of specs) {
+    assert.equal(
+      selectedBy.get(spec)?.length,
+      1,
+      `${relative(process.cwd(), spec)} runs in ${selectedBy.get(spec)?.join(' and ') ?? 'no browser job'}`,
+    );
+  }
+  for (const spec of charted) {
+    assert.deepEqual(
+      selectedBy.get(spec),
+      ['browser-operations'],
+      `${relative(process.cwd(), spec)} would not run in the operations job`,
+    );
+  }
+  // The composed application's journeys run in a job of their own, beside the
+  // operations specs rather than after them.
+  const composed = specs.filter((spec) =>
+    spec.endsWith('composed-application.spec.ts'),
+  );
+  assert.ok(composed.length > 0, 'no composed-application journey was found');
+  for (const spec of composed) {
+    assert.deepEqual(
+      selectedBy.get(spec),
+      ['browser-composed'],
+      `${relative(process.cwd(), spec)} would not run in the composed job`,
+    );
+  }
+  // The inventory and item stock specs run in a job of their own, beside the
+  // operations specs rather than after them (INTEGRATION).
+  const inventory = specs.filter((spec) =>
+    /(?:inventory|item-stock)[^/]*\.spec\.ts$/u.test(spec),
+  );
+  assert.ok(inventory.length > 0, 'no inventory spec was found');
+  for (const spec of inventory) {
+    assert.deepEqual(
+      selectedBy.get(spec),
+      ['browser-inventory'],
+      `${relative(process.cwd(), spec)} would not run in the inventory job`,
+    );
+  }
+  // A config that names no producer, or a non-Playwright one, is refused.
+  assert.throws(
+    () => getPlaywrightReachabilityProducer(undefined),
+    /A Playwright reachability producer id is required/u,
+  );
+  assert.throws(
+    () => getPlaywrightReachabilityProducer('unit'),
+    /Not a Playwright reachability producer: unit/u,
+  );
 });
 
 test('CI aggregates only after every evidence-producing job succeeds', () => {
@@ -585,6 +751,38 @@ function extractWorkflowJob(workflow: string, jobName: string): string {
     (line, index) => index > start && /^ {2}\w[\w-]*:$/u.test(line),
   );
   return lines.slice(start, end === -1 ? undefined : end).join('\n');
+}
+
+/**
+ * Whether a project runs a spec, read as Playwright 1.61 reads it: the
+ * project's pattern over the config's, each regular expression tested against
+ * the absolute path, and no testMatch meaning every spec under testDir. Only
+ * regular expressions are modelled; anything else fails rather than guessed.
+ */
+function projectSelectsSpec(
+  config: PlaywrightTestConfig,
+  project: NonNullable<PlaywrightTestConfig['projects']>[number],
+  spec: string,
+): boolean {
+  assert.equal(
+    project.testDir,
+    undefined,
+    `project ${String(project.name)} sets its own testDir`,
+  );
+  const match = project.testMatch ?? config.testMatch;
+  const ignore = project.testIgnore ?? config.testIgnore;
+  return (
+    (match === undefined || patternMatchesSpec(match, spec)) &&
+    (ignore === undefined || !patternMatchesSpec(ignore, spec))
+  );
+}
+
+function patternMatchesSpec(pattern: unknown, spec: string): boolean {
+  assert.ok(
+    pattern instanceof RegExp,
+    `unmodelled Playwright file pattern: ${String(pattern)}`,
+  );
+  return pattern.test(spec);
 }
 
 function parseAggregateScripts(command: string): string[] {

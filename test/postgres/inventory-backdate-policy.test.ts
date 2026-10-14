@@ -39,6 +39,7 @@ import {
   PostgresInventoryPostingService,
   type InventoryAdjustmentPostingCommandV1,
   type InventoryPostingRegistrationV1,
+  type InventoryTransferPostingCommandV1,
 } from '../../packages/postgres-provider/src/inventory-posting-service.js';
 import {
   loadMigrations,
@@ -56,7 +57,10 @@ import {
   type AuthenticatedIdentity,
   type TrustedRequestContext,
 } from '../../packages/runtime/src/request-context.js';
-import { withEphemeralPostgres } from '../helpers/postgres.js';
+import {
+  withEphemeralPostgres,
+  type EphemeralPostgres,
+} from '../helpers/postgres.js';
 
 const migrations = resolve('db/migrations');
 
@@ -67,6 +71,8 @@ const legalClosedWindow = '3b000000-0000-4000-8000-000000000004';
 const principalId = '7b000000-0000-4000-8000-000000000007';
 const itemId = '4b000000-0000-4000-8000-000000000004';
 const locationId = '5b000000-0000-4000-8000-000000000005';
+/** Where the forward rule's transfers move stock to. */
+const secondLocationId = '5b000000-0000-4000-8000-000000000006';
 
 /**
  * Recorded time is injected, never sampled: the policy under test is arithmetic
@@ -89,6 +95,32 @@ const beyondWindowPeriod = '2026-07-27';
 const sameDayEffectiveAt = '2026-08-04T09:00:00.000Z';
 const forwardDatedEffectiveAt = '2026-08-11T09:00:00.000Z';
 const forwardDatedPeriod = '2026-08-11';
+
+/**
+ * The forward rule's calendar is Calgary's, six hours behind UTC in August: from
+ * 18:00 to midnight local time the tenant's business day is still the previous
+ * UTC date. Every instant below is named by its Calgary wall-clock time, and the
+ * recorded instants are injected like `recordedAt` above.
+ */
+const calgaryZone = 'America/Edmonton';
+const calgaryRecordedPeriod = '2026-08-04';
+const calgaryNextPeriod = '2026-08-05';
+/** 08:00 on 4 August. */
+const calgaryEarlyMorning = '2026-08-04T14:00:00.000Z';
+/** 09:00 on 4 August: the first recorded instant. */
+const calgaryMorning = '2026-08-04T15:00:00.000Z';
+/** 15:00 on 4 August: later than 09:00, on the same business day. */
+const calgaryAfternoon = '2026-08-04T21:00:00.000Z';
+/** 17:00 on 4 August: the second recorded instant, 4 August in UTC too. */
+const calgaryEvening = '2026-08-04T23:00:00.000Z';
+/** 19:00 on 4 August, which is already 5 August in UTC. */
+const calgaryLaterEvening = '2026-08-05T01:00:00.000Z';
+/** 23:00 on 4 August: the third recorded instant, 5 August in UTC. */
+const calgaryLateNight = '2026-08-05T05:00:00.000Z';
+/** 01:00 on 5 August: the same UTC date as 23:00 the night before. */
+const calgaryAfterMidnight = '2026-08-05T07:00:00.000Z';
+/** 09:00 on 5 August: the next business day in both calendars. */
+const calgaryNextMorning = '2026-08-05T15:00:00.000Z';
 
 type StorageEntityTarget = StorageTargetPayloadV1['entities'][number];
 
@@ -126,70 +158,49 @@ interface PostedMovement {
   readonly quantityDelta: string;
 }
 
+interface ProvisionedScope {
+  readonly id: string;
+  readonly label: string;
+  readonly window: number;
+}
+
+/** The tenant calendar and the legal entities and locations it is seeded with. */
+interface PostingCalendar {
+  readonly locations: readonly string[];
+  readonly scopes: readonly ProvisionedScope[];
+  readonly timeZone: string;
+}
+
+interface PostingHarness {
+  readonly actor: Awaited<ReturnType<TrustedActorEnvelopeIssuer['issue']>>;
+  readonly binding: StorageBinding;
+  readonly context: TrustedRequestContext;
+  readonly runtimePool: Pool;
+  close(): Promise<void>;
+  /** A posting service whose recorded time is exactly `instant`. */
+  serviceAt(instant: string): PostgresInventoryPostingService;
+}
+
+const backdateCalendar: PostingCalendar = {
+  locations: [locationId],
+  scopes: [
+    { id: legalSevenDayWindow, label: '1', window: sevenDayWindow },
+    { id: legalClosedWindow, label: '2', window: closedWindow },
+  ],
+  timeZone: 'UTC',
+};
+
 test(
   'the configured backdate window decides which effective period a posting may carry',
   { timeout: 600_000 },
   async (testContext) => {
-    const fixture = await compiledFixture();
-    const binding = storageBinding(fixture.storage);
     const recordedRefusals: string[] = [];
 
     await withEphemeralPostgres('g3-r3-backdate-policy', async (database) => {
-      await migrateAndProvision(database.pool, fixture.inventory.releaseRoot);
-      const runtimePool = new pg.Pool({
-        ...database.connection,
-        application_name: 'g3-r3-backdate',
-        max: 4,
-        user: 'north_star_runtime',
-      });
-      const materializerPool = new pg.Pool({
-        ...database.connection,
-        max: 1,
-        user: 'north_star_module_materializer',
-      });
-      const moduleRuntimePool = new pg.Pool({
-        ...database.connection,
-        max: 1,
-        user: 'north_star_module_runtime',
-      });
+      const harness = await openPostingHarness(database, backdateCalendar);
       try {
-        const context = await trustedContext();
-        const releases = await persistSequence(runtimePool, context, [
-          [fixture.empty, fixture.emptyDefinition],
-          [fixture.inventory, fixture.inventoryDefinition],
-        ]);
-        await setPointer(database.pool, releases[0]!);
-        await grantExecutorAuthority(database.pool);
-        const prepared = await new PostgresModuleStorageMaterializer(
-          materializerPool,
-          moduleRuntimePool,
-        ).prepare({
-          context,
-          expiresAt: '2099-01-01T00:00:00.000Z',
-          generationId: randomUUID(),
-          initiatedBy: principalId,
-          preparationId: randomUUID(),
-          targetReleaseId: releases[1]!,
-        });
-        assert.equal(prepared.schemaState, 'APPLIED');
-        await setPointer(database.pool, releases[1]!);
-        await seedFoundation(runtimePool, context, binding);
-
-        const registration: InventoryPostingRegistrationV1 = {
-          capabilityId: INVENTORY_CONTRACT_V1.capabilityId,
-          capabilityVersion: INVENTORY_POSTING_CAPABILITY_VERSION,
-          dependencySetRoot: DECLARED_DEPENDENCY_ROOT,
-          releaseContentHash: fixture.inventory.releaseRoot,
-          releaseId: releases[1]!,
-          storageTarget: fixture.storage,
-          storageTargetContentHash: fixture.storageContentHash,
-        };
-        const service = new PostgresInventoryPostingService(
-          runtimePool,
-          registration,
-          { currentInstant: () => recordedAt },
-        );
-        const actor = await actorIssuer().issue(context);
+        const { actor, binding, context, runtimePool } = harness;
+        const service = harness.serviceAt(recordedAt);
 
         assert.deepEqual(
           await configuredBackdateWindows(database.pool),
@@ -224,12 +235,16 @@ test(
         await seedDraft(runtimePool, context, binding, beyond);
         recordedRefusals.push(
           await recordTypedRefusal(
-            `INVENTORY_BACKDATE_LIMIT_EXCEEDED: effective period ${beyondWindowPeriod} exceeds the ${String(sevenDayWindow)} day backdate window`,
             {
-              effectivePeriod: beyondWindowPeriod,
-              recordedPeriod,
+              code: 'INVENTORY_BACKDATE_LIMIT_EXCEEDED',
+              details: {
+                effectivePeriod: beyondWindowPeriod,
+                recordedPeriod,
+              },
+              message: `INVENTORY_BACKDATE_LIMIT_EXCEEDED: effective period ${beyondWindowPeriod} exceeds the ${String(sevenDayWindow)} day backdate window`,
             },
             () => service.postAdjustment(context, actor, beyond),
+            'one day beyond the window must be refused',
           ),
         );
         assert.deepEqual(
@@ -246,21 +261,48 @@ test(
           'the refusal must roll the source document back to draft, not half-post it',
         );
 
-        // 3. The policy is one-sided: it bounds backdating, never forward dating.
+        // 3. The dial bounds only backdating, and a wide window is no licence
+        //    to date forward: seven days ahead, inside the seven-day scope, is
+        //    refused by the forward rule's own code before anything is written.
         const forward = adjustmentCommand({
           effectiveAt: forwardDatedEffectiveAt,
           legalEntityId: legalSevenDayWindow,
           sourceId: 'forward-dated',
         });
         await seedDraft(runtimePool, context, binding, forward);
-        assert.equal(
-          (await service.postAdjustment(context, actor, forward)).replayed,
-          false,
+        const trustBeforeForward = await trustRowCounts(database.pool);
+        recordedRefusals.push(
+          await recordTypedRefusal(
+            {
+              code: 'INVENTORY_FORWARD_DATE_REFUSED',
+              details: {
+                effectivePeriod: forwardDatedPeriod,
+                maximumForwardDateDays: '0',
+                recordedPeriod,
+              },
+              message: `INVENTORY_FORWARD_DATE_REFUSED: effective period ${forwardDatedPeriod} is after the recorded business day ${recordedPeriod}`,
+            },
+            () => service.postAdjustment(context, actor, forward),
+            'seven days ahead must be refused by the forward rule',
+          ),
         );
         assert.deepEqual(
           await movementsBySource(database.pool, binding, forward.sourceId),
-          [{ businessPeriod: forwardDatedPeriod, quantityDelta: '2' }],
-          'a future effective period is outside this dial, which bounds only backdating',
+          [],
+          'the forward refusal must leave no movement behind',
+        );
+        assert.equal(
+          await transactionState(database.pool, binding, forward.transactionId),
+          enumOption(
+            field(binding.transaction, 'inventory_transaction_state'),
+            'draft',
+          ),
+          'the forward refusal must leave the source document a draft',
+        );
+        assert.deepEqual(
+          await trustRowCounts(database.pool),
+          trustBeforeForward,
+          'the forward refusal must write no trust row',
         );
 
         // 4. The DIAL is the cause, not the date. The command accepted at (1)
@@ -274,12 +316,16 @@ test(
         await seedDraft(runtimePool, context, binding, edgeUnderClosedWindow);
         recordedRefusals.push(
           await recordTypedRefusal(
-            `INVENTORY_BACKDATE_LIMIT_EXCEEDED: effective period ${atWindowEdgePeriod} exceeds the ${String(closedWindow)} day backdate window`,
             {
-              effectivePeriod: atWindowEdgePeriod,
-              recordedPeriod,
+              code: 'INVENTORY_BACKDATE_LIMIT_EXCEEDED',
+              details: {
+                effectivePeriod: atWindowEdgePeriod,
+                recordedPeriod,
+              },
+              message: `INVENTORY_BACKDATE_LIMIT_EXCEEDED: effective period ${atWindowEdgePeriod} exceeds the ${String(closedWindow)} day backdate window`,
             },
             () => service.postAdjustment(context, actor, edgeUnderClosedWindow),
+            'the narrower window must refuse the edge the wider one admitted',
           ),
         );
         assert.deepEqual(
@@ -309,45 +355,308 @@ test(
           'a zero-day window must still admit same-day postings',
         );
       } finally {
-        await Promise.all([
-          runtimePool.end(),
-          materializerPool.end(),
-          moduleRuntimePool.end(),
-        ]);
+        await harness.close();
       }
     });
 
-    assert.equal(recordedRefusals.length, 2);
+    assert.equal(recordedRefusals.length, 3);
     for (const refusal of recordedRefusals) {
       testContext.diagnostic(`G3-R3 EXECUTED RED: ${refusal}`);
     }
   },
 );
 
+test(
+  'the forward rule refuses the next tenant business day, counted in the tenant calendar and not in UTC',
+  { timeout: 600_000 },
+  async () => {
+    await withEphemeralPostgres('posting-forward-date', async (database) => {
+      const harness = await openPostingHarness(database, {
+        locations: [locationId, secondLocationId],
+        scopes: [
+          { id: legalSevenDayWindow, label: '1', window: sevenDayWindow },
+        ],
+        timeZone: calgaryZone,
+      });
+      try {
+        const { actor, binding, context, runtimePool } = harness;
+        const draft = enumOption(
+          field(binding.transaction, 'inventory_transaction_state'),
+          'draft',
+        );
+        const morning = harness.serviceAt(calgaryMorning);
+        const stock = adjustmentCommand({
+          effectiveAt: calgaryEarlyMorning,
+          legalEntityId: legalSevenDayWindow,
+          quantityDelta: '5',
+          sourceId: 'forward-rule-stock',
+        });
+        await seedDraft(runtimePool, context, binding, stock);
+        await morning.postAdjustment(context, actor, stock);
+
+        // 1. At 09:00 the next business day is refused -- here for a transfer,
+        //    so a second family meets the rule -- before anything is written.
+        const nextDay = transferCommand({
+          effectiveAt: calgaryNextMorning,
+          sourceId: 'forward-rule-next-day',
+        });
+        await seedTransferDraft(runtimePool, context, binding, nextDay);
+        const trustBeforeNextDay = await trustRowCounts(database.pool);
+        await recordTypedRefusal(
+          {
+            code: 'INVENTORY_FORWARD_DATE_REFUSED',
+            details: {
+              effectivePeriod: calgaryNextPeriod,
+              maximumForwardDateDays: '0',
+              recordedPeriod: calgaryRecordedPeriod,
+            },
+            message: `INVENTORY_FORWARD_DATE_REFUSED: effective period ${calgaryNextPeriod} is after the recorded business day ${calgaryRecordedPeriod}`,
+          },
+          () => morning.postTransfer(context, actor, nextDay),
+          'the next tenant business day must be refused',
+        );
+        assert.deepEqual(
+          await movementsBySource(database.pool, binding, nextDay.sourceId),
+          [],
+          'the forward refusal must leave no movement behind',
+        );
+        assert.equal(
+          await transactionState(database.pool, binding, nextDay.transactionId),
+          draft,
+          'the forward refusal must leave the transfer a draft',
+        );
+        assert.deepEqual(
+          await trustRowCounts(database.pool),
+          trustBeforeNextDay,
+          'the forward refusal must write no trust row',
+        );
+
+        // 2. ...while 15:00 the same day, six hours after the recorded instant,
+        //    is admitted: the rule compares business days, not instants.
+        const laterToday = transferCommand({
+          effectiveAt: calgaryAfternoon,
+          sourceId: 'forward-rule-later-today',
+        });
+        await seedTransferDraft(runtimePool, context, binding, laterToday);
+        assert.equal(
+          (await morning.postTransfer(context, actor, laterToday)).replayed,
+          false,
+        );
+        assert.deepEqual(
+          await movementsBySource(database.pool, binding, laterToday.sourceId),
+          [
+            { businessPeriod: calgaryRecordedPeriod, quantityDelta: '2' },
+            { businessPeriod: calgaryRecordedPeriod, quantityDelta: '-2' },
+          ],
+          'a later instant of the recorded business day must be admitted',
+        );
+
+        // 3. The day is the tenant's. At 17:00 a posting dated 19:00 the same
+        //    evening -- already 5 August in UTC -- is admitted, on 4 August.
+        const sameEvening = adjustmentCommand({
+          effectiveAt: calgaryLaterEvening,
+          legalEntityId: legalSevenDayWindow,
+          quantityDelta: '1',
+          sourceId: 'forward-rule-same-evening',
+        });
+        await seedDraft(runtimePool, context, binding, sameEvening);
+        assert.equal(
+          (
+            await harness
+              .serviceAt(calgaryEvening)
+              .postAdjustment(context, actor, sameEvening)
+          ).replayed,
+          false,
+        );
+        assert.deepEqual(
+          await movementsBySource(database.pool, binding, sameEvening.sourceId),
+          [{ businessPeriod: calgaryRecordedPeriod, quantityDelta: '1' }],
+          'a later instant of the tenant day must be admitted although UTC has moved on',
+        );
+
+        // 4. ...and at 23:00 a posting dated 01:00 is the same UTC date as the
+        //    recorded instant, and is still refused as the next Calgary day.
+        const afterMidnight = adjustmentCommand({
+          effectiveAt: calgaryAfterMidnight,
+          legalEntityId: legalSevenDayWindow,
+          quantityDelta: '1',
+          sourceId: 'forward-rule-after-midnight',
+        });
+        await seedDraft(runtimePool, context, binding, afterMidnight);
+        await recordTypedRefusal(
+          {
+            code: 'INVENTORY_FORWARD_DATE_REFUSED',
+            details: {
+              effectivePeriod: calgaryNextPeriod,
+              maximumForwardDateDays: '0',
+              recordedPeriod: calgaryRecordedPeriod,
+            },
+            message: `INVENTORY_FORWARD_DATE_REFUSED: effective period ${calgaryNextPeriod} is after the recorded business day ${calgaryRecordedPeriod}`,
+          },
+          () =>
+            harness
+              .serviceAt(calgaryLateNight)
+              .postAdjustment(context, actor, afterMidnight),
+          'the next Calgary business day must be refused on the same UTC date',
+        );
+        assert.deepEqual(
+          await movementsBySource(
+            database.pool,
+            binding,
+            afterMidnight.sourceId,
+          ),
+          [],
+        );
+      } finally {
+        await harness.close();
+      }
+    });
+  },
+);
+
 /**
- * The refusal must be the typed one, with the window it enforced and the two
- * periods it compared. Asserting only that something threw would accept a
- * refusal produced by any of the six checks that run before this one.
+ * The refusal must be the typed one, with the code, message and details it is
+ * declared with. Asserting only that something threw would accept a refusal
+ * produced by any of the checks that run before this one. `missingRefusal`
+ * names the case when nothing is refused at all.
  */
 async function recordTypedRefusal(
-  expectedMessage: string,
-  expectedDetails: Readonly<Record<string, string>>,
+  expected: {
+    readonly code: InventoryPostingError['code'];
+    readonly details: Readonly<Record<string, string>>;
+    readonly message: string;
+  },
   run: () => Promise<unknown>,
+  missingRefusal: string,
 ): Promise<string> {
   let recorded: string | undefined;
-  await assert.rejects(run, (error: unknown) => {
-    assert.ok(
-      error instanceof InventoryPostingError,
-      'the backdate refusal must be the capability-typed error',
-    );
-    assert.equal(error.code, 'INVENTORY_BACKDATE_LIMIT_EXCEEDED');
-    assert.equal(error.message, expectedMessage);
-    assert.deepEqual({ ...error.details }, { ...expectedDetails });
-    recorded = error.message;
-    return true;
-  });
+  await assert.rejects(
+    run,
+    (error: unknown) => {
+      assert.ok(
+        error instanceof InventoryPostingError,
+        'the refusal must be the capability-typed error',
+      );
+      assert.equal(error.code, expected.code);
+      assert.equal(error.message, expected.message);
+      assert.deepEqual({ ...error.details }, { ...expected.details });
+      recorded = error.message;
+      return true;
+    },
+    missingRefusal,
+  );
   assert.ok(recorded);
   return recorded;
+}
+
+/**
+ * Every trust relation a posting writes in its own transaction, counted. A
+ * refusal must leave each count where it was.
+ */
+async function trustRowCounts(pool: Pool): Promise<Record<string, number>> {
+  const counts: Record<string, number> = {};
+  for (const relation of [
+    'semantic_operation_receipts',
+    'trust_action_invocations',
+    'trust_business_change_documents',
+    'trust_domain_events',
+    'trust_outbox',
+  ]) {
+    const result = await pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM platform.${quoted(relation)}`,
+    );
+    counts[relation] = Number(result.rows[0]!.count);
+  }
+  return counts;
+}
+
+/**
+ * Migrates a fresh database, provisions `calendar`, releases the composed
+ * inventory definition into it and seeds its masters. Recorded time stays
+ * injected: every service comes from `serviceAt`.
+ */
+async function openPostingHarness(
+  database: EphemeralPostgres,
+  calendar: PostingCalendar,
+): Promise<PostingHarness> {
+  const fixture = await compiledFixture();
+  const binding = storageBinding(fixture.storage);
+  await migrateAndProvision(
+    database.pool,
+    fixture.inventory.releaseRoot,
+    calendar,
+  );
+  const runtimePool = new pg.Pool({
+    ...database.connection,
+    application_name: 'g3-r3-backdate',
+    max: 4,
+    user: 'north_star_runtime',
+  });
+  const materializerPool = new pg.Pool({
+    ...database.connection,
+    max: 1,
+    user: 'north_star_module_materializer',
+  });
+  const moduleRuntimePool = new pg.Pool({
+    ...database.connection,
+    max: 1,
+    user: 'north_star_module_runtime',
+  });
+  const close = async (): Promise<void> => {
+    await Promise.all([
+      runtimePool.end(),
+      materializerPool.end(),
+      moduleRuntimePool.end(),
+    ]);
+  };
+  try {
+    const context = await trustedContext();
+    const releases = await persistSequence(runtimePool, context, [
+      [fixture.empty, fixture.emptyDefinition],
+      [fixture.inventory, fixture.inventoryDefinition],
+    ]);
+    await setPointer(database.pool, releases[0]!);
+    await grantExecutorAuthority(database.pool);
+    const prepared = await new PostgresModuleStorageMaterializer(
+      materializerPool,
+      moduleRuntimePool,
+    ).prepare({
+      context,
+      expiresAt: '2099-01-01T00:00:00.000Z',
+      generationId: randomUUID(),
+      initiatedBy: principalId,
+      preparationId: randomUUID(),
+      targetReleaseId: releases[1]!,
+    });
+    assert.equal(prepared.schemaState, 'APPLIED');
+    await setPointer(database.pool, releases[1]!);
+    await seedFoundation(runtimePool, context, binding, calendar);
+
+    const registration: InventoryPostingRegistrationV1 = {
+      capabilityId: INVENTORY_CONTRACT_V1.capabilityId,
+      capabilityVersion: INVENTORY_POSTING_CAPABILITY_VERSION,
+      dependencySetRoot: DECLARED_DEPENDENCY_ROOT,
+      releaseContentHash: fixture.inventory.releaseRoot,
+      releaseId: releases[1]!,
+      storageTarget: fixture.storage,
+      storageTargetContentHash: fixture.storageContentHash,
+    };
+    const actor = await actorIssuer().issue(context);
+    return {
+      actor,
+      binding,
+      close,
+      context,
+      runtimePool,
+      serviceAt: (instant) =>
+        new PostgresInventoryPostingService(runtimePool, registration, {
+          currentInstant: () => instant,
+        }),
+    };
+  } catch (error) {
+    await close();
+    throw error;
+  }
 }
 
 async function configuredBackdateWindows(
@@ -411,6 +720,7 @@ async function transactionState(
 function adjustmentCommand(input: {
   readonly effectiveAt: string;
   readonly legalEntityId: string;
+  readonly quantityDelta?: string;
   readonly sourceId: string;
 }): InventoryAdjustmentPostingCommandV1 {
   return {
@@ -427,7 +737,7 @@ function adjustmentCommand(input: {
       {
         itemId,
         locationId,
-        quantityDelta: '2',
+        quantityDelta: input.quantityDelta ?? '2',
         sourceLine: '1',
         transactionLineId: randomUUID(),
         unitId: 'EA',
@@ -445,11 +755,92 @@ function adjustmentCommand(input: {
   };
 }
 
+/** Two units from the first location to the second, in the seven-day scope. */
+function transferCommand(input: {
+  readonly effectiveAt: string;
+  readonly sourceId: string;
+}): InventoryTransferPostingCommandV1 {
+  return {
+    authorization: {
+      decision: 'ALLOW',
+      evaluatorVersion: 'g3-r3-evaluator/v1',
+      policyVersion: 'g3-r3-policy/v1',
+    },
+    channel: 'API',
+    effectiveAt: input.effectiveAt,
+    idempotencyKey: randomUUID(),
+    legalEntityId: legalSevenDayWindow,
+    lines: [
+      {
+        fromLocationId: locationId,
+        itemId,
+        quantity: '2',
+        sourceLine: '1',
+        toLocationId: secondLocationId,
+        transactionLineId: randomUUID(),
+        unitId: 'EA',
+      },
+    ],
+    reason: { code: 'FORWARD-RULE', narrative: null },
+    sourceId: input.sourceId,
+    sourceRevision: 1,
+    sourceType: 'transfer',
+    stockDimensionSetVersion: 'v1',
+    transactionId: randomUUID(),
+  };
+}
+
+interface DraftLine {
+  readonly fromLocationId: string | null;
+  readonly itemId: string;
+  readonly quantity: string;
+  readonly sourceLine: string;
+  readonly toLocationId: string | null;
+  readonly transactionLineId: string;
+  readonly unitId: string;
+}
+
 async function seedDraft(
   pool: Pool,
   context: TrustedRequestContext,
   binding: StorageBinding,
   command: InventoryAdjustmentPostingCommandV1,
+): Promise<void> {
+  await insertDraft(
+    pool,
+    context,
+    binding,
+    command,
+    'adjustment',
+    command.lines.map((line) => ({
+      fromLocationId: null,
+      itemId: line.itemId,
+      quantity: line.quantityDelta,
+      sourceLine: line.sourceLine,
+      toLocationId: line.locationId,
+      transactionLineId: line.transactionLineId,
+      unitId: line.unitId,
+    })),
+  );
+}
+
+async function seedTransferDraft(
+  pool: Pool,
+  context: TrustedRequestContext,
+  binding: StorageBinding,
+  command: InventoryTransferPostingCommandV1,
+): Promise<void> {
+  await insertDraft(pool, context, binding, command, 'transfer', command.lines);
+}
+
+async function insertDraft(
+  pool: Pool,
+  context: TrustedRequestContext,
+  binding: StorageBinding,
+  command:
+    InventoryAdjustmentPostingCommandV1 | InventoryTransferPostingCommandV1,
+  type: 'adjustment' | 'transfer',
+  lines: readonly DraftLine[],
 ): Promise<void> {
   await withModuleRole(pool, context, async (client) => {
     await insertEntity(
@@ -471,24 +862,24 @@ async function seedDraft(
         ),
         inventory_transaction_type: enumOption(
           field(binding.transaction, 'inventory_transaction_type'),
-          'adjustment',
+          type,
         ),
       },
       command.transactionId,
       command.legalEntityId,
       {},
     );
-    for (const line of command.lines) {
+    for (const line of lines) {
       await insertEntity(
         client,
         binding,
         binding.transactionLine,
         {
-          inventory_transaction_line_from_location_id: null,
+          inventory_transaction_line_from_location_id: line.fromLocationId,
           inventory_transaction_line_item_id: line.itemId,
           inventory_transaction_line_line_number: Number(line.sourceLine),
-          inventory_transaction_line_quantity: line.quantityDelta,
-          inventory_transaction_line_to_location_id: line.locationId,
+          inventory_transaction_line_quantity: line.quantity,
+          inventory_transaction_line_to_location_id: line.toLocationId,
           inventory_transaction_line_unit_id: line.unitId,
         },
         line.transactionLineId,
@@ -503,17 +894,15 @@ async function seedFoundation(
   pool: Pool,
   context: TrustedRequestContext,
   binding: StorageBinding,
+  calendar: PostingCalendar,
 ): Promise<void> {
   await withModuleRole(pool, context, async (client) => {
-    for (const [index, entity] of [
-      legalSevenDayWindow,
-      legalClosedWindow,
-    ].entries()) {
+    for (const scope of calendar.scopes) {
       const present = await client.query(
         `SELECT 1 FROM ${table(binding, binding.legalEntity)}
           WHERE tenant_id=$1 AND environment_id=$2
             AND ${quoted(binding.legalEntity.recordIdColumn)}=$3`,
-        [tenantId, environmentId, entity],
+        [tenantId, environmentId, scope.id],
       );
       if (present.rowCount === 0) {
         await insertEntity(
@@ -521,15 +910,15 @@ async function seedFoundation(
           binding,
           binding.legalEntity,
           {
-            legal_entity_code: `LE-BD-${String(index + 1)}`,
+            legal_entity_code: `LE-BD-${scope.label}`,
             legal_entity_is_default: false,
-            legal_entity_name: `Backdate legal entity ${String(index + 1)}`,
+            legal_entity_name: `Backdate legal entity ${scope.label}`,
             legal_entity_status: enumOption(
               field(binding.legalEntity, 'legal_entity_status'),
               'active',
             ),
           },
-          entity,
+          scope.id,
           null,
           {},
         );
@@ -548,18 +937,20 @@ async function seedFoundation(
       null,
       {},
     );
-    await insertEntity(
-      client,
-      binding,
-      binding.location,
-      {
-        location_code: 'LOC-BACKDATE',
-        location_name: 'Backdate policy location',
-      },
-      locationId,
-      null,
-      {},
-    );
+    for (const [index, location] of calendar.locations.entries()) {
+      await insertEntity(
+        client,
+        binding,
+        binding.location,
+        {
+          location_code: `LOC-BACKDATE-${String(index + 1)}`,
+          location_name: `Backdate policy location ${String(index + 1)}`,
+        },
+        location,
+        null,
+        {},
+      );
+    }
   });
 }
 
@@ -701,6 +1092,7 @@ function profileForNormalizedBytes(
 async function migrateAndProvision(
   pool: Pool,
   contractReleaseRoot: string,
+  calendar: PostingCalendar,
 ): Promise<void> {
   const client = await pool.connect();
   try {
@@ -714,13 +1106,10 @@ async function migrateAndProvision(
        VALUES ($1,$2,'production')`,
       [tenantId, environmentId],
     );
-    for (const scope of [
-      { id: legalSevenDayWindow, label: '1', window: sevenDayWindow },
-      { id: legalClosedWindow, label: '2', window: closedWindow },
-    ]) {
+    for (const scope of calendar.scopes) {
       await client.query(
         `SELECT platform.provision_inventory_scope(
-           $1,$2,$3,$4,$5,'UTC','00:00:00',$6,
+           $1,$2,$3,$4,$5,$8,'00:00:00',$6,
            1::smallint,'reject',$7,'codeAndNarrative','codeOnly',
            'codeAndNarrative','codeAndNarrative','codeAndNarrative',
            NULL,NULL,NULL,NULL,NULL
@@ -733,6 +1122,7 @@ async function migrateAndProvision(
           `Backdate legal entity ${scope.label}`,
           contractReleaseRoot,
           scope.window,
+          calendar.timeZone,
         ],
       );
     }

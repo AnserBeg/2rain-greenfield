@@ -111,7 +111,15 @@ const recognizedDispatches: Readonly<Record<string, readonly PredicateKind[]>> =
       'allPredicate',
       'notPredicate',
     ]),
+    // SALES-PARITY's lifecycle and receivables guards add constructed
+    // any/not/all terms; the file still builds predicates and evaluates none.
     'packages/domain/src/sales/definition.ts': signature([
+      'allPredicate',
+      'anyPredicate',
+      'notPredicate',
+      'allPredicate',
+      'fieldComparisonPredicate',
+      'allPredicate',
       'fieldComparisonPredicate',
       'allPredicate',
       'notPredicate',

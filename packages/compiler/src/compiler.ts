@@ -15,6 +15,7 @@ import {
   type V3NormalizedApplicationPackage,
   type V4NormalizedApplicationPackage,
   type V5NormalizedApplicationPackage,
+  type V6NormalizedApplicationPackage,
   type VersionedNormalizedApplicationPackage,
 } from '@north-star/canonical-model';
 
@@ -1313,7 +1314,8 @@ export function languageUsesModuleProjectionShape(
     featureLevel === 'v2' ||
     featureLevel === 'v3' ||
     featureLevel === 'v4' ||
-    featureLevel === 'v5'
+    featureLevel === 'v5' ||
+    featureLevel === 'v6'
   );
 }
 
@@ -1329,7 +1331,8 @@ function isV3PlusRevision(
 ): packageRevision is
   | V3NormalizedApplicationPackage
   | V4NormalizedApplicationPackage
-  | V5NormalizedApplicationPackage {
+  | V5NormalizedApplicationPackage
+  | V6NormalizedApplicationPackage {
   return languageHasV3Features(packageRevision.languageVersion);
 }
 
@@ -1344,7 +1347,7 @@ function projectionDispatchRevision(
   ) as Omit<
     Extract<
       VersionedNormalizedApplicationPackage,
-      { languageVersion: 'v3' | 'v4' | 'v5' }
+      { languageVersion: 'v3' | 'v4' | 'v5' | 'v6' }
     >,
     'impactAnalyses'
   >;
@@ -1352,6 +1355,16 @@ function projectionDispatchRevision(
     ...common,
     fields: packageRevision.fields.map((field) => ({
       ...field,
+      // v6 adds presentation only. Keep the v5 storage scalar encoding so a
+      // language tag does not masquerade as a physical default/type change.
+      ...(packageRevision.languageVersion === 'v6' && field.defaultValue
+        ? {
+            defaultValue: {
+              ...field.defaultValue,
+              schemaVersion: 'v5' as const,
+            },
+          }
+        : {}),
       fieldType:
         field.fieldType.kind === 'enumFieldType'
           ? {
@@ -1430,6 +1443,9 @@ function decorateV3ProjectionPlans(
   const storage = storagePlan.payload;
   return plans.map((plan) => {
     if (plan.familyId === PROJECTION_FAMILY_IDS.queryCatalog) {
+      const hasReadModels = packageRevision.queries.some(
+        (query) => 'readModel' in query && query.readModel,
+      );
       const payload = plan.payload as {
         kind: string;
         queries: Array<Record<string, unknown>>;
@@ -1437,6 +1453,14 @@ function decorateV3ProjectionPlans(
       };
       return {
         ...plan,
+        ...(hasReadModels
+          ? {
+              requiredRuntimeCapability: {
+                capabilityId: 'northstar.runtime:capability.query-catalog',
+                minimumVersion: 2,
+              },
+            }
+          : {}),
         payload: {
           ...payload,
           queries: packageRevision.queries
@@ -1454,6 +1478,9 @@ function decorateV3ProjectionPlans(
                       resultType: query.aggregate.resultType,
                       selectionId: query.aggregate.selectionId,
                     },
+                    ...('readModel' in query && query.readModel
+                      ? { readModel: query.readModel }
+                      : {}),
                     filter: query.filter,
                     ...legalEntityScopeCatalogEntry(query),
                     lifecycle: query.lifecycle,
@@ -1471,6 +1498,9 @@ function decorateV3ProjectionPlans(
                     tier: query.tier,
                   }
                 : {
+                    ...('readModel' in query && query.readModel
+                      ? { readModel: query.readModel }
+                      : {}),
                     filter: query.filter,
                     ...(query.tier === 'q1' &&
                     isPredicateLoweringAdmitted(query.filter)
@@ -1491,6 +1521,13 @@ function decorateV3ProjectionPlans(
                     ...legalEntityScopeCatalogEntry(query),
                     lifecycle: query.lifecycle,
                     maximumResultCount: query.maximumResultCount,
+                    ...('exportMaximumResultCount' in query &&
+                    query.exportMaximumResultCount !== undefined
+                      ? {
+                          exportMaximumResultCount:
+                            query.exportMaximumResultCount,
+                        }
+                      : {}),
                     ...('parameters' in query
                       ? { parameters: queryParameterCatalogEntries(query) }
                       : {}),

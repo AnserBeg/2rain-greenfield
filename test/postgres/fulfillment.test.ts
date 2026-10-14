@@ -95,8 +95,8 @@ test(
             values: Record<string, ImmutableJsonValue>,
             relations: Record<string, string | null> = {},
             scoped = true,
+            recordId: string = randomUUID(),
           ) => {
-            const recordId = randomUUID();
             const result = await invoke(`${local}_create`, {
               ...(scoped ? { legalEntityId } : {}),
               recordId,
@@ -125,17 +125,34 @@ test(
             expectedRevision: number,
             key = randomUUID(),
           ) => invoke(local, { expectedRevision, recordId }, key);
+          /**
+           * A stock document as the editor saves one (INVENTORY-PARITY): the
+           * server numbers it, and it names itself as its posting source.
+           */
+          const stockDocument = (
+            values: Record<string, ImmutableJsonValue>,
+          ) => {
+            const recordId = randomUUID();
+            return create(
+              'inventory_transaction',
+              {
+                ...values,
+                actor_id: 'fulfillment-test',
+                recorded_at: new Date().toISOString(),
+                source_id: recordId,
+                source_type: 'inventoryTransaction',
+              },
+              {},
+              true,
+              recordId,
+            );
+          };
 
           const now = new Date().toISOString();
-          const stock = await create('inventory_transaction', {
-            actor_id: 'fulfillment-test',
+          const stock = await stockDocument({
             effective_at: now,
-            number: `ADJ-${randomUUID()}`,
             reason_code: 'SETUP',
             reason_narrative: 'Fulfillment concurrency stock',
-            recorded_at: now,
-            source_id: randomUUID(),
-            source_type: 'test',
             state: `${ns}:option.inventory_transaction_state_draft`,
             type: `${ns}:option.inventory_transaction_type_adjustment`,
           });
@@ -157,13 +174,22 @@ test(
             stock.revision,
           );
 
+          // Ruling E: Confirm and an initial shipment need a complete ship-to.
+          const shipTo = {
+            ship_to_name: 'Receiving dock',
+            ship_to_street: '100 Industrial Way',
+            ship_to_city: 'Calgary',
+            ship_to_region: 'AB',
+            ship_to_postal_code: 'T2P 0A1',
+            ship_to_country: 'Canada',
+          };
           const order = await create('sales_order', {
             currency: 'CAD',
             customer_party_id: customerPartyId,
             notes: 'Critical fulfillment race',
-            number: `SO-${randomUUID()}`,
             order_date: now,
             requested_date: now,
+            ...shipTo,
           });
           const line = await create(
             'sales_order_line',
@@ -300,15 +326,10 @@ test(
           );
 
           // Existing stock reducers cannot leave on-hand below live coverage.
-          const reduction = await create('inventory_transaction', {
-            actor_id: 'fulfillment-test',
+          const reduction = await stockDocument({
             effective_at: now,
-            number: `ADJ-REDUCE-${randomUUID()}`,
             reason_code: 'REDUCE',
             reason_narrative: 'Must not bypass reservation',
-            recorded_at: now,
-            source_id: randomUUID(),
-            source_type: 'test',
             state: `${ns}:option.inventory_transaction_state_draft`,
             type: `${ns}:option.inventory_transaction_type_adjustment`,
           });
@@ -352,7 +373,6 @@ test(
           const transfer = await create('inventory_transaction', {
             actor_id: 'fulfillment-test',
             effective_at: now,
-            number: `TRN-RESERVED-${randomUUID()}`,
             reason_code: 'WAREHOUSE-TRANSFER',
             reason_narrative: null,
             recorded_at: now,
@@ -448,15 +468,10 @@ test(
           } finally {
             await directRuntimePool.end();
           }
-          const secondaryStock = await create('inventory_transaction', {
-            actor_id: 'fulfillment-test',
+          const secondaryStock = await stockDocument({
             effective_at: now,
-            number: `ADJ-B-${randomUUID()}`,
             reason_code: 'SETUP',
             reason_narrative: 'Cross-location order-bound stock',
-            recorded_at: now,
-            source_id: randomUUID(),
-            source_type: 'test',
             state: `${ns}:option.inventory_transaction_state_draft`,
             type: `${ns}:option.inventory_transaction_type_adjustment`,
           });
@@ -510,10 +525,10 @@ test(
                 external_reference: randomUUID(),
                 kind: `${ns}:option.shipment_kind_${kind}`,
                 location_id: options.locationId ?? locationA,
-                number: `SHP-${randomUUID()}`,
                 reason_code: 'SHIP',
                 reason_narrative: 'Competing shipment',
                 state: `${ns}:option.shipment_state_draft`,
+                ...shipTo,
               },
               {
                 order: options.orderId ?? order.recordId,
@@ -538,19 +553,44 @@ test(
             return header;
           };
 
+          // Ruling E: an initial shipment without a complete ship-to is
+          // refused by the operation's own guard, whoever writes it.
+          await assert.rejects(
+            invoke('shipment_create', {
+              legalEntityId,
+              recordId: randomUUID(),
+              relations: { [`${ns}:relation.shipment_order`]: order.recordId },
+              values: Object.fromEntries(
+                Object.entries({
+                  effective_at: now,
+                  external_reference: randomUUID(),
+                  kind: `${ns}:option.shipment_kind_initial`,
+                  location_id: locationA,
+                  reason_code: 'SHIP',
+                  reason_narrative: 'No ship-to',
+                  state: `${ns}:option.shipment_state_draft`,
+                  ...shipTo,
+                  ship_to_city: '',
+                }).map(([name, value]) => [
+                  `${ns}:field.shipment_${name}`,
+                  value,
+                ]),
+              ),
+            }),
+            (error: unknown) =>
+              (error as { code?: unknown }).code ===
+              'MODULE_OPERATION_PRECONDITION_REFUSED',
+            'an initial shipment needs a complete ship-to',
+          );
+
           // F1 review regression. Build an independent exact five-unit loop at
           // location B, consume all coverage, permit an ordinary negative
           // adjustment while live coverage is zero, then attempt a correction
           // that would restore one unit of reservation against zero stock.
-          const trimSecondaryStock = await create('inventory_transaction', {
-            actor_id: 'fulfillment-test',
+          const trimSecondaryStock = await stockDocument({
             effective_at: now,
-            number: `ADJ-B-TRIM-${randomUUID()}`,
             reason_code: 'SETUP',
             reason_narrative: 'Leave exactly five for correction coverage',
-            recorded_at: now,
-            source_id: randomUUID(),
-            source_type: 'test',
             state: `${ns}:option.inventory_transaction_state_draft`,
             type: `${ns}:option.inventory_transaction_type_adjustment`,
           });
@@ -575,9 +615,9 @@ test(
             currency: 'CAD',
             customer_party_id: customerPartyId,
             notes: 'Resulting reservation coverage regression',
-            number: `SO-COVERAGE-${randomUUID()}`,
             order_date: now,
             requested_date: now,
+            ...shipTo,
           });
           const correctionOrderLine = await create(
             'sales_order_line',
@@ -641,15 +681,10 @@ test(
               legalEntityId,
             ],
           );
-          const negativeAdjustment = await create('inventory_transaction', {
-            actor_id: 'fulfillment-test',
+          const negativeAdjustment = await stockDocument({
             effective_at: now,
-            number: `ADJ-B-NEGATIVE-${randomUUID()}`,
             reason_code: 'NEGATIVE',
             reason_narrative: 'Native allow-with-flag control at zero coverage',
-            recorded_at: now,
-            source_id: randomUUID(),
-            source_type: 'test',
             state: `${ns}:option.inventory_transaction_state_draft`,
             type: `${ns}:option.inventory_transaction_type_adjustment`,
           });
@@ -774,15 +809,10 @@ test(
           // Replenish enough that the identical correction is now backed. A
           // failed attempt has no receipt, so the same exact key remains a
           // legitimate retry and must commit once the invariant is satisfied.
-          const backingAdjustment = await create('inventory_transaction', {
-            actor_id: 'fulfillment-test',
+          const backingAdjustment = await stockDocument({
             effective_at: now,
-            number: `ADJ-B-BACK-${randomUUID()}`,
             reason_code: 'BACKING',
             reason_narrative: 'Back valid correction coverage',
-            recorded_at: now,
-            source_id: randomUUID(),
-            source_type: 'test',
             state: `${ns}:option.inventory_transaction_state_draft`,
             type: `${ns}:option.inventory_transaction_type_adjustment`,
           });

@@ -51,12 +51,16 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     recordId?: string,
   ) => {
     const type = role === 'list' ? 'list' : 'get';
+    // The order page reads its totals query (ruling B), so its company is
+    // that query's parameter.
+    const query =
+      local === 'sales_order' && role === 'detail' ? 'commercial_order' : local;
     const parameters = new URLSearchParams({
       surface: `${namespace}:surface.${local}_${role}`,
     });
     if (!['party', 'party_role', 'item', 'location'].includes(local))
       parameters.set(
-        `${namespace}:parameter.${local}_${type}_legal_entity_scope`,
+        `${namespace}:parameter.${query}_${type}_legal_entity_scope`,
         legalEntityId,
       );
     if (recordId) parameters.set('record', recordId);
@@ -86,6 +90,10 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     return id;
   };
   const command = async (label: string, confirmed = true) => {
+    const secondary = page.locator(
+      '.composition-record-actions:not([open]) > summary',
+    );
+    if (await secondary.count()) await secondary.click();
     await page.getByRole('button', { name: label, exact: true }).click();
     if (confirmed) {
       await expect(
@@ -98,64 +106,92 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     await expect(page.getByRole('status')).toContainText(`${label} complete`);
   };
 
-  // Put stock on hand through the existing authored Inventory document and
-  // its registered posting command; fulfillment receives no setup shortcut.
+  // Draft-editor pickers: type into the field's combobox and choose an offered
+  // result -- in place with the owned script, as ordinary submits without it --
+  // then wait for the field to show the selection before the next step.
+  const pick = async (name: string, term: string, option: string) => {
+    const box = page.getByRole('combobox', { name, exact: true });
+    await box.fill(term);
+    if (!(await page.locator('body[data-reference-enhanced]').count()))
+      await page
+        .locator('[data-reference-control]')
+        .filter({ has: box })
+        .getByRole('button', { name: 'Search', exact: true })
+        .click();
+    await page
+      .getByRole('option')
+      .filter({ has: page.locator('strong', { hasText: option }) })
+      .first()
+      .click();
+    await expect(
+      page.getByRole('combobox', { name, exact: true }),
+    ).toHaveAttribute('data-selected-label', option);
+  };
+  // Confirm needs a complete ship-to (ruling E). This customer has no address
+  // book, so the order's own ship-to lines are typed after it is chosen.
+  const fillShipTo = async () => {
+    await page.getByLabel('Street', { exact: true }).fill('100 Industrial Way');
+    await page.getByLabel('City', { exact: true }).fill('Calgary');
+    await page.getByLabel('Postal code', { exact: true }).fill('T2P 0A1');
+    await page.getByLabel('Country', { exact: true }).fill('Canada');
+  };
+  // Put stock on hand through the Inventory stock document and its registered
+  // posting command; fulfillment receives no setup shortcut. The document is
+  // numbered on save, and an adjustment is its type unless another is chosen.
   await page.goto(url('inventory_transaction', 'form'));
-  await fill('inventory_transaction', 'number', `ADJ-FUL-${suffix}`);
   await page
-    .locator(`[name="value:${namespace}:field.inventory_transaction_type"]`)
-    .fill(`${namespace}:option.inventory_transaction_type_adjustment`);
-  await choose('inventory_transaction', 'state', 'draft');
-  await fill('inventory_transaction', 'reason_code', 'fulfillment-setup');
-  await fill(
-    'inventory_transaction',
-    'reason_narrative',
-    'Stock for fulfillment walkthrough',
-  );
-  await fill('inventory_transaction', 'source_type', 'walkthrough');
-  await fill('inventory_transaction', 'source_id', `setup-${suffix}`);
-  await fill('inventory_transaction', 'effective_at', instant);
-  await fill('inventory_transaction', 'recorded_at', instant);
-  await fill('inventory_transaction', 'actor_id', 'walkthrough-user');
-  const transactionId = await save();
-  await page.goto(url('inventory_transaction_line', 'form'));
-  await fill('inventory_transaction_line', 'line_number', '1');
-  await fill('inventory_transaction_line', 'item_id', itemId);
-  await fill('inventory_transaction_line', 'to_location_id', locationId);
-  await fill('inventory_transaction_line', 'quantity', '10');
-  await fill('inventory_transaction_line', 'unit_id', 'EA');
-  await relate('inventory_transaction_line_transaction', transactionId);
-  await save();
-  await page.goto(url('inventory_transaction', 'detail', transactionId));
+    .getByLabel('Reason', { exact: true })
+    .selectOption({ label: 'Found' });
+  await page
+    .getByLabel('Narrative', { exact: true })
+    .fill('Stock for fulfillment walkthrough');
+  await page
+    .getByLabel('Effective date (UTC) *', { exact: true })
+    .fill(instant.slice(0, 19));
+  await pick('Line 1 product', 'OFF-100', 'Field notebook');
+  await pick('Line 1 to location', 'Calgary', 'Calgary warehouse');
+  await page.getByLabel('Line 1 quantity', { exact: true }).fill('10');
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(page).toHaveURL(/inventory_transaction_detail/u);
+  // Titled by the number the server gave it: a stock document's page
+  // declares no header of its own.
+  await expect(
+    page.getByRole('heading', { level: 1, name: /^STK-\d{6}$/u }),
+  ).toBeVisible();
   await command('Post');
 
-  await page.goto(url('sales_order', 'form'));
-  await fill('sales_order', 'number', `SO-FUL-${suffix}`);
-  await fill('sales_order', 'customer_party_id', customerPartyId);
-  await fill('sales_order', 'order_date', instant);
-  await fill('sales_order', 'requested_date', instant);
-  await fill('sales_order', 'currency', 'CAD');
-  await fill('sales_order', 'notes', 'Partial shipment and correction');
-  const orderId = await save();
-  await page.goto(url('sales_order_line', 'form'));
-  await fill('sales_order_line', 'line_number', '1');
-  await fill('sales_order_line', 'item_id', itemId);
-  await fill('sales_order_line', 'unit_id', 'EA');
-  await fill('sales_order_line', 'ordered_quantity', '10');
-  await fill('sales_order_line', 'unit_price', '12.5');
-  await relate('sales_order_line_order', orderId);
-  const orderLineId = await save();
-  await page.goto(url('sales_order', 'detail', orderId));
-  await command('Release', false);
-
-  // Eligibility is checked from current persisted party-role facts when the
-  // reservation is activated. The released order deliberately predates this
-  // role so historical orders cannot bypass the same server-side check.
+  // The customer picker offers only parties with an active customer role, so
+  // the role exists before the order. Reservation activation still checks the
+  // current persisted party-role facts on the server.
   await page.goto(url('party_role', 'form'));
   await choose('party_role', 'kind', 'Customer');
   await choose('party_role', 'status', 'Active');
   await relate('party_role_party', customerPartyId);
   await save();
+  await page.goto(url('sales_order', 'form'));
+  // The order number is assigned by the server on first save.
+  await page.getByLabel('Order date (UTC) *').fill(instant.slice(0, 16));
+  await page.getByLabel('Requested date (UTC)').fill(instant.slice(0, 16));
+  await page.getByLabel('Notes').fill('Partial shipment and correction');
+  await pick('Customer', 'Alpine', 'Alpine Office Supply');
+  // The declared currency default; the unit follows the product's base unit.
+  await expect(page.getByLabel('Currency *')).toHaveValue('CAD');
+  await fillShipTo();
+  await pick('Line 1 product', 'OFF-100', 'Field notebook');
+  await expect(
+    page.getByRole('status', { name: 'Line 1 unit', exact: true }),
+  ).toHaveText('EA');
+  await page.getByLabel('Line 1 quantity', { exact: true }).fill('10');
+  await page.getByLabel('Line 1 unit price', { exact: true }).fill('12.5');
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(page).toHaveURL(/sales_order_detail/u);
+  const orderId = new URL(page.url()).searchParams.get('record')!;
+  const orderLineId = (await page
+    .locator('[data-composition-dataset$="dataset.fulfillment_lines"] tbody tr')
+    .filter({ hasText: 'Field notebook' })
+    .getAttribute('data-record-id'))!;
+  expect(orderLineId).toBeTruthy();
+  await command('Confirm', false);
 
   await page.goto(url('reservation', 'form'));
   await fill('reservation', 'number', `RSV-${suffix}`);
@@ -196,7 +232,6 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
 
   const initialShipment = await createShipment({
     kind: 'initial',
-    number: `SHP-${suffix}`,
     quantity: '5',
     reservationId,
   });
@@ -215,15 +250,21 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   const committedPayload = new URLSearchParams(
     (await committedRequest).postData() ?? '',
   );
-  await expect(page.locator('[data-packing-document]')).toContainText(
-    `SHP-${suffix}`,
-  );
-  await expect(page.locator('[data-packing-document] tbody tr')).toHaveCount(1);
+  // The shipment number is assigned on create (SHP-000001).
+  await expect(page.locator('.composition-header')).toContainText(/SHP-\d{6}/u);
+  await expect(
+    page.locator(
+      '[data-composition-dataset$="dataset.packing_lines"] tbody tr',
+    ),
+  ).toHaveCount(1);
   await page.goto(url('shipment', 'detail', initialShipment.shipmentId));
-  await expect(page.locator('[data-packing-document]')).toContainText(
-    `SHP-${suffix}`,
-  );
-  await expect(page.locator('[data-packing-document] tbody tr')).toHaveCount(1);
+  // The shipment number is assigned on create (SHP-000001).
+  await expect(page.locator('.composition-header')).toContainText(/SHP-\d{6}/u);
+  await expect(
+    page.locator(
+      '[data-composition-dataset$="dataset.packing_lines"] tbody tr',
+    ),
+  ).toHaveCount(1);
   const replay = await page.request.post(
     url('shipment', 'detail', initialShipment.shipmentId),
     { form: Object.fromEntries(committedPayload) },
@@ -267,7 +308,6 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
 
   const correction = await createShipment({
     kind: 'correction',
-    number: `SHP-COR-${suffix}`,
     quantity: '2',
     reservationId,
     supersedes: initialShipment.shipmentId,
@@ -286,7 +326,6 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
 
   const reversal = await createShipment({
     kind: 'reversal',
-    number: `SHP-REV-${suffix}`,
     quantity: '3',
     reservationId,
     supersedes: initialShipment.shipmentId,
@@ -302,22 +341,23 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   // A second, fully shipped order demonstrates explicit closure independently
   // of the cancelled-and-reversed order above.
   await page.goto(url('sales_order', 'form'));
-  await fill('sales_order', 'number', `SO-CLOSE-${suffix}`);
-  await fill('sales_order', 'customer_party_id', customerPartyId);
-  await fill('sales_order', 'order_date', instant);
-  await fill('sales_order', 'requested_date', instant);
-  await fill('sales_order', 'currency', 'CAD');
-  const closureOrderId = await save();
-  await page.goto(url('sales_order_line', 'form'));
-  await fill('sales_order_line', 'line_number', '1');
-  await fill('sales_order_line', 'item_id', itemId);
-  await fill('sales_order_line', 'unit_id', 'EA');
-  await fill('sales_order_line', 'ordered_quantity', '2');
-  await fill('sales_order_line', 'unit_price', '12.5');
-  await relate('sales_order_line_order', closureOrderId);
-  const closureLineId = await save();
-  await page.goto(url('sales_order', 'detail', closureOrderId));
-  await command('Release', false);
+  await page.getByLabel('Order date (UTC) *').fill(instant.slice(0, 16));
+  await page.getByLabel('Requested date (UTC)').fill(instant.slice(0, 16));
+  await pick('Customer', 'Alpine', 'Alpine Office Supply');
+  await expect(page.getByLabel('Currency *')).toHaveValue('CAD');
+  await fillShipTo();
+  await pick('Line 1 product', 'OFF-100', 'Field notebook');
+  await page.getByLabel('Line 1 quantity', { exact: true }).fill('2');
+  await page.getByLabel('Line 1 unit price', { exact: true }).fill('12.5');
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await expect(page).toHaveURL(/sales_order_detail/u);
+  const closureOrderId = new URL(page.url()).searchParams.get('record')!;
+  const closureLineId = (await page
+    .locator('[data-composition-dataset$="dataset.fulfillment_lines"] tbody tr')
+    .filter({ hasText: 'Field notebook' })
+    .getAttribute('data-record-id'))!;
+  expect(closureLineId).toBeTruthy();
+  await command('Confirm', false);
   await page.goto(url('reservation', 'form'));
   await fill('reservation', 'number', `RSV-CLOSE-${suffix}`);
   await choose('reservation', 'state', 'draft');
@@ -332,7 +372,6 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await command('Reserve');
   const closureShipment = await createShipment({
     kind: 'initial',
-    number: `SHP-CLOSE-${suffix}`,
     order: closureOrderId,
     orderLine: closureLineId,
     quantity: '2',
@@ -342,7 +381,15 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await command('Post');
   await page.goto(url('sales_order', 'detail', closureOrderId));
   await command('Close');
-  await expect(page.getByText(/sales_order_closed/)).toBeVisible();
+  await expect(
+    page.locator('.composition-header').getByText('Closed', { exact: true }),
+  ).toBeVisible();
+  // Ruling F: a closed order may be reopened (nothing is invoiced yet); it
+  // returns to the released state, confirmed like any consequential command.
+  await command('Reopen');
+  await expect(
+    page.locator('.composition-header').getByText('Released', { exact: true }),
+  ).toBeVisible();
 
   console.log(
     `SALE_FULFILLMENT_WALKTHROUGH ${JSON.stringify({ closureOrderId, closureShipmentId: closureShipment.shipmentId, correctionShipmentId: correction.shipmentId, initialShipmentId: initialShipment.shipmentId, movementId, orderId, orderLineId, packingDocument: true, partialShipment: '5', reservationId, reserveSequence: ['10/8/2', '5/3/2', '5/0/5'], shortageRefused: true, silentReservationResurrection: false })}`,
@@ -350,7 +397,6 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
 
   async function createShipment(input: {
     kind: 'initial' | 'correction' | 'reversal';
-    number: string;
     order?: string;
     orderLine?: string;
     quantity: string;
@@ -359,7 +405,6 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     reversalOfMovementId?: string;
   }) {
     await page.goto(url('shipment', 'form'));
-    await fill('shipment', 'number', input.number);
     await choose('shipment', 'state', 'draft');
     await choose('shipment', 'kind', input.kind);
     await fill('shipment', 'effective_at', instant);
@@ -367,6 +412,15 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     await fill('shipment', 'external_reference', `PICK-${suffix}`);
     await fill('shipment', 'reason_code', input.kind);
     await fill('shipment', 'reason_narrative', `${input.kind} walkthrough`);
+    // An initial shipment keeps the complete ship-to it goes to (ruling E).
+    if (input.kind === 'initial')
+      for (const [name, value] of [
+        ['ship_to_street', '100 Industrial Way'],
+        ['ship_to_city', 'Calgary'],
+        ['ship_to_postal_code', 'T2P 0A1'],
+        ['ship_to_country', 'Canada'],
+      ] as const)
+        await fill('shipment', name, value);
     await relate('shipment_order', input.order ?? orderId);
     if (input.supersedes) await relate('shipment_supersedes', input.supersedes);
     const shipmentId = await save();
@@ -467,16 +521,32 @@ async function seedPackingNoise(
 }
 
 async function expectFulfillmentRow(page: Page, values: string[]) {
-  const row = page.locator('[data-sales-order-line]').first();
-  await expect(row.locator('td').nth(2)).toHaveText(values[0]!);
-  await expect(row.locator('td').nth(3)).toHaveText(values[1]!);
-  await expect(row.locator('td').nth(4)).toHaveText(values[2]!);
-  await expect(row.locator('td').nth(5)).toHaveText(values[3]!);
+  const dataset = page.locator(
+    '[data-composition-dataset$="dataset.fulfillment_lines"]',
+  );
+  const row = dataset.locator('tbody tr').first();
+  for (const [index, label] of [
+    'Ordered',
+    'Reserved',
+    'Shipped',
+    'Open to ship',
+  ].entries())
+    await expect(row.locator(`td[data-column-label="${label}"]`)).toHaveText(
+      values[index]!,
+    );
+  await row.getByRole('link', { name: 'Select', exact: true }).click();
 }
 
 async function expectStockRow(page: Page, values: string[]) {
-  const row = page.locator('[data-stock-identity]').first();
-  await expect(row.locator('td').nth(2)).toHaveText(values[0]!);
-  await expect(row.locator('td').nth(3)).toHaveText(values[1]!);
-  await expect(row.locator('td').nth(4)).toHaveText(values[2]!);
+  const row = page
+    .locator('[data-composition-dataset$="dataset.line_reservations"] tbody tr')
+    .first();
+  for (const [index, label] of [
+    'On hand',
+    'Reserved stock',
+    'Available',
+  ].entries())
+    await expect(row.locator(`td[data-column-label="${label}"]`)).toHaveText(
+      values[index]!,
+    );
 }

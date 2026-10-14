@@ -12,6 +12,7 @@ export class SharedListContractError extends Error {
   constructor(
     readonly code:
       | 'LIST_CURSOR_INVALID'
+      | 'LIST_EXPORT_UNSUPPORTED'
       | 'LIST_FIELD_NOT_AUTHORIZED'
       | 'LIST_INPUT_MALFORMED'
       | 'LIST_RESULT_MALFORMED',

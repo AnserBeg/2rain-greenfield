@@ -89,7 +89,7 @@ class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecut
         : request.definition.operationId ===
             `${binding.orderLine.entityId.split(':')[0]}:operation.purchase_order_line_amend`
           ? binding.orderLine
-          : ['close', 'reopen'].some(
+          : ['close', 'reopen', 'cancel'].some(
                 (action) =>
                   request.definition.operationId ===
                   `${binding.order.entityId.split(':')[0]}:operation.purchase_order_${action}`,
@@ -230,6 +230,20 @@ class ReceivingCapabilityExecutor implements RegisteredCapabilityOperationExecut
         this.#binding,
         request,
         'reopen',
+        prepared.legalEntityId,
+      );
+    // A released order is cancelled here rather than by a generic transition,
+    // so its receipts can refuse the cancel (PURCHASING-PARITY).
+    if (
+      request.definition.operationId.endsWith(
+        ':operation.purchase_order_cancel',
+      )
+    )
+      return executeReceivingOrderState(
+        this.context,
+        this.#binding,
+        request,
+        'cancel',
         prepared.legalEntityId,
       );
     if (

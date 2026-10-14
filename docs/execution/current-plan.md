@@ -25,6 +25,8 @@
 The 2026-09-01 QUEUE FREEZE and the previous operating model are in the archive; their
 substance survives in the rules above.
 
+**Selected 2026-09-15: RAIN-ORDER-ENTRY** — workspace interaction completion (owner charter after the product-parity audit) at executable `d9eca60a1d4ddbac6d69aaf323e53fc423b5721a` on `packet/RAIN-ORDER-ENTRY` (PR #6), stacked on PR #5 at `3830f95`, over audited `35e3eaa1`: working Inventory destinations, role-eligible pickers and policy-aware quick create; pickers answer in place (ADR-0036 behaviour 7) without reloading the order; declared choice/derived/decimal controls in Tasks, receiving included; [draft handoff and test-it-yourself](packets/RAIN-ORDER-ENTRY.md). FORM-1..4/PAGING, editor F1/F2/F3 and Task P1/P2 preserved; ONLINE review complete (round 2 closed D1-D5, no new production defect); fresh CI / owner acceptance pending. BUILD stops at draft PR, no integration or deployment. PR #5 and its closed P1/P2 and retained demos remain the dependency.
+
 ## Where we are — 2026-09-04
 
 | stage | state |

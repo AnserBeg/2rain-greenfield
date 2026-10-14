@@ -1,0 +1,425 @@
+{
+  "version": 1,
+  "packet": "SALES-PARITY",
+  "entries": [
+    {
+      "name": "verification-takes-sentinel-document-numbers",
+      "claim": "Release verification's arranged records take V- sentinel document numbers, so a release activation never consumes a tenant's real document sequence.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "      { documentNumbers: 'verificationSentinel' },\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "document numbers are assigned by the server"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "document numbers are assigned by the server: sequential, concurrent-safe, retry-stable, never typed, never reused",
+          "expected": "release verification must not consume real document numbers"
+        }
+      ]
+    },
+    {
+      "name": "added-company-column-carries-its-update-grant",
+      "claim": "A column a later release adds to a company-scoped table receives the same per-column UPDATE grant the table's creation gives its other mutable columns, so the materialized catalog matches the expected grants.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "      if (\n        entity.legalEntity &&\n        !entity.factStorage &&\n        !entity.periodLock &&\n        entityOwnedMutableColumnNames(target, entity).includes(\n          column.physicalName,\n        )\n      ) {\n        await client.query(\n          `GRANT UPDATE (${quoted(column.physicalName)})\n             ON north_star_module.${quoted(entity.physicalTableName)}\n             TO north_star_module_runtime`,\n        );\n      }\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/composed-application.test.ts"],
+        "namePattern": "a fresh install replays a synthetic storage history"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/composed-application.test.ts",
+          "name": "a fresh install replays a synthetic storage history: every intermediate refuses serving, an added company column is granted, and a second tenant replaying the earlier create keeps that grant",
+          "expected": "missing managed column grant"
+        }
+      ]
+    },
+    {
+      "name": "replayed-create-keeps-later-column-grants",
+      "claim": "Replaying a company-scoped table's creation for another tenant revokes UPDATE at table level only when a table-level grant exists, so column grants a later release added for a tenant already serving it survive.",
+      "file": "packages/postgres-provider/src/module-storage-materializer.ts",
+      "original": "    if (tableLevel.rows[0]?.granted === true)\n",
+      "replacement": "    if (tableLevel.rows.length >= 0)\n",
+      "test": {
+        "files": ["test/postgres/composed-application.test.ts"],
+        "namePattern": "a fresh install replays a synthetic storage history"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/composed-application.test.ts",
+          "name": "a fresh install replays a synthetic storage history: every intermediate refuses serving, an added company column is granted, and a second tenant replaying the earlier create keeps that grant",
+          "expected": "missing managed column grant"
+        }
+      ]
+    },
+    {
+      "name": "verification-reads-records-through-a-plain-get",
+      "claim": "Release verification reads its probe records through the entity's plain query of each type, never a read-model query of the same type, whose executor its gateway does not register; an order read with its totals therefore cannot stop a release from activating.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "        candidate.queryType === queryType &&\n        candidate.readModel === undefined,\n",
+      "replacement": "        candidate.queryType === queryType,\n",
+      "test": {
+        "files": ["test/postgres/commercial-totals.test.ts"],
+        "namePattern": "ruling B: line amounts and order totals"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/commercial-totals.test.ts",
+          "name": "ruling B: line amounts and order totals are read exactly, half up per line, from each line and charge own frozen figures",
+          "expected": "is not registered in pinned release"
+        }
+      ]
+    },
+    {
+      "name": "numbering-reserves-the-sentinel-prefix",
+      "claim": "A document sequence may not use release verification's sentinel prefix V, so no sentinel reads as a business number of any sequence or collides with one.",
+      "file": "packages/canonical-model/src/field-numbering.ts",
+      "original": "    if (numbering.prefix === VERIFICATION_SENTINEL_PREFIX)\n      fail(\n        id,\n        `the prefix ${VERIFICATION_SENTINEL_PREFIX} is reserved for release verification sentinels`,\n      );\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/unit/canonical-model/field-numbering.test.ts"],
+        "namePattern": "a numbering the runtime could not honour is refused by name"
+      },
+      "kills": [
+        {
+          "file": "test/unit/canonical-model/field-numbering.test.ts",
+          "name": "a numbering the runtime could not honour is refused by name",
+          "expected": "the numbering was accepted"
+        }
+      ]
+    },
+    {
+      "name": "numbering-first-number-fits-its-field",
+      "claim": "A numbering whose first number (the start padded to the minimum digits) cannot fit its field is refused, not admitted to fail at insert.",
+      "file": "packages/canonical-model/src/field-numbering.ts",
+      "original": "          Math.max(numbering.minimumDigits, String(numbering.start).length)\n",
+      "replacement": "          numbering.minimumDigits\n",
+      "test": {
+        "files": ["test/unit/canonical-model/field-numbering.test.ts"],
+        "namePattern": "a numbering the runtime could not honour is refused by name"
+      },
+      "kills": [
+        {
+          "file": "test/unit/canonical-model/field-numbering.test.ts",
+          "name": "a numbering the runtime could not honour is refused by name",
+          "expected": "the numbering was accepted"
+        }
+      ]
+    },
+    {
+      "name": "numbering-scan-reads-every-digit-count",
+      "claim": "The allocator's maximum scan reads a stored number of any digit count, leading zeros included, and its own output past eighteen digits, so the next number always follows the highest.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "      [`^${unicodeCaseFold(field.prefix)}-([0-9]+)$`],\n",
+      "replacement": "      [`^$${unicodeCaseFold(field.prefix)}-([0-9]{1,18})$$`],\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "document numbers are assigned by the server"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "document numbers are assigned by the server: sequential, concurrent-safe, retry-stable, never typed, never reused",
+          "expected": "SO-000043"
+        }
+      ]
+    },
+    {
+      "name": "numbering-exhaustion-refuses-by-name",
+      "claim": "A next document number that no longer fits its field is refused as MODULE_DOCUMENT_SEQUENCE_EXHAUSTED before any write, not left to fail at insert.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "    const maximumLength = column.fieldContract.bounds.maximumLength;\n    if (maximumLength !== null && number.length > maximumLength)\n      throw failure(\n        'MODULE_DOCUMENT_SEQUENCE_EXHAUSTED',\n        'the next document number no longer fits its field',\n        field.fieldId,\n      );\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "document numbers are assigned by the server"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "document numbers are assigned by the server: sequential, concurrent-safe, retry-stable, never typed, never reused",
+          "expected": "The validation function is expected to return \"true\""
+        }
+      ]
+    },
+    {
+      "name": "numbering-sentinels-have-room",
+      "claim": "A numbered field holds at least 18 characters, so release verification's truncated V- sentinels keep 64 bits and the records one verification arranges keep distinct numbers.",
+      "file": "packages/canonical-model/src/field-numbering.ts",
+      "original": "    if (\n      field.fieldType.kind === 'textFieldType' &&\n      field.fieldType.maximumLength < VERIFICATION_SENTINEL_MINIMUM_LENGTH\n    )\n      fail(\n        id,\n        `a number field holds at least ${String(VERIFICATION_SENTINEL_MINIMUM_LENGTH)} characters, so release verification sentinels keep 64 bits`,\n      );\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/unit/canonical-model/field-numbering.test.ts"],
+        "namePattern": "a numbering the runtime could not honour is refused by name"
+      },
+      "kills": [
+        {
+          "file": "test/unit/canonical-model/field-numbering.test.ts",
+          "name": "a numbering the runtime could not honour is refused by name",
+          "expected": "the numbering was accepted"
+        }
+      ]
+    },
+    {
+      "name": "numbering-scan-folds-like-the-business-key",
+      "claim": "The allocator reads stored numbers through the business key's own fold (its stored folded companion), so a stored value the key equates with the next number (\u017fO-000016 and SO-000016) is counted instead of colliding.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "regexp_match(${foldedColumnSql(entity, column)}, $1)",
+      "replacement": "regexp_match($${quoted(column.physicalName)}, $$1, 'i')",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "document numbers are assigned by the server"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "document numbers are assigned by the server: sequential, concurrent-safe, retry-stable, never typed, never reused",
+          "expected": "module uniqueness contract rejected the value"
+        }
+      ]
+    },
+    {
+      "name": "verification-constructs-assigned-numbers",
+      "claim": "Release verification counts a create's server-assigned document number as constructed by the create, so an entity with a required numbered field and a search query executes its scenarios instead of deriving them all as unconstructable.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "    // its required column needs no caller input.\n    for (const assigned of operation.inputContract.assignedFields ?? []) {\n",
+      "replacement": "    // its required column needs no caller input.\n    for (const assigned of [] as { fieldId: string }[]) {\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "document numbers are assigned by the server"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "document numbers are assigned by the server: sequential, concurrent-safe, retry-stable, never typed, never reused",
+          "expected": "release verification executed every scenario of a numbered entity"
+        }
+      ]
+    },
+    {
+      "name": "verification-probes-assigned-uniqueness",
+      "claim": "A uniqueness-fold scenario whose subject is a server-assigned number runs the assigned-field probe (distinct stored values; a supplied case variant refused as input) instead of looking the number up among caller inputs and failing.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "      return this.#assignedUniqueness(scenario, operation, token);\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "document numbers are assigned by the server"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "document numbers are assigned by the server: sequential, concurrent-safe, retry-stable, never typed, never reused",
+          "expected": "uniqueness-fold scenario does not name a text input field"
+        }
+      ]
+    },
+    {
+      "name": "verification-reads-back-assigned-values",
+      "claim": "Each arranged record carries the numbers its create assigned, read back from the create, so probes that resolve or search by a number use the stored value.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "      assignedValues[assigned.fieldId] = value;\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "document numbers are assigned by the server"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "document numbers are assigned by the server: sequential, concurrent-safe, retry-stable, never typed, never reused",
+          "expected": "did not return an authoritative positive outcome for undefined"
+        }
+      ]
+    },
+    {
+      "name": "verification-searches-by-an-assigned-number",
+      "claim": "A search-exclusion probe whose entity's only searchable text is its assigned number (payment, credit) takes the number as its positive field.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "        createOperation.inputContract.assignedFields?.find(\n",
+      "replacement": "        ([] as { fieldId: string }[]).find(\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "document numbers are assigned by the server"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "document numbers are assigned by the server: sequential, concurrent-safe, retry-stable, never typed, never reused",
+          "expected": "search exclusion probe has no same-entity positive searchable field"
+        }
+      ]
+    },
+    {
+      "name": "verification-reads-numbers-the-read-back-omits",
+      "claim": "Release verification takes a create's assigned number from the create's read-back only when that declared projection selects it (else through a plain get that selects it, else as the record's sentinel), so a numbered entity whose create read-back omits a number activates and executes its scenarios.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "    if (readBack !== null && Object.hasOwn(readBack.values, fieldId)) {\n",
+      "replacement": "    if (readBack !== null) {\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "release verification reads assigned numbers"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "release verification reads assigned numbers its create read-back omits, and archives every record it creates",
+          "expected": "did not read back its assigned northstar\\.party:field\\.party_account_number \\(read-back\\)"
+        }
+      ]
+    },
+    {
+      "name": "verification-witness-reads-through-executed-gets",
+      "claim": "Release verification reads an assigned number the create's read-back omits only through a plain get that returns any live record by id (the gateway executes it and its filter is the literal true, Q0 or Q1), else uses the record's sentinel unread, so a compiler-admitted get the gateway answers unsupported cannot make a stored number read as missing.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "          returnsAnyLiveRecordById(candidate) &&\n",
+      "replacement": "          candidate.lifecycle === 'active' &&\n          candidate.tier === 'q0' &&\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "only through gets the gateway executes"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "release verification reads numbers and archives records only through gets the gateway executes, and refuses a probe record it cannot read",
+          "expected": "did not read back its assigned northstar\\.party:field\\.party_account_number \\(query northstar\\.party:query\\.party_account_get answered unsupported: query-filter-unsupported\\)"
+        }
+      ]
+    },
+    {
+      "name": "verification-refuses-unreadable-probe-records",
+      "claim": "Release verification's cleanup archives every probe record it can read and refuses by name (VERIFICATION_PROBE_RECORD_UNREADABLE) each one it cannot, instead of skipping it as already archived and leaving it live.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "    if (unreadable.length > 0) {\n      throw failure(\n        'VERIFICATION_PROBE_RECORD_UNREADABLE',\n        `verification could not read its probe records to archive them: ${unreadable.join('; ')}`,\n      );\n    }\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "only through gets the gateway executes"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "release verification reads numbers and archives records only through gets the gateway executes, and refuses a probe record it cannot read",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "verification-searches-through-an-executed-q1-search",
+      "claim": "Release verification's search-exclusion probe reads through the entity's first plain search its gateway executes (Q0 with a filter the gateway's fence accepts, or Q1 with a compiled filter plan, as SemanticQueryGateway.invoke decides), so a release whose plain search is an executable Q1 query ahead of a Q0 search the gateway does not run verifies instead of failing VERIFICATION_QUERY_MISSING.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "        gatewayExecutes(candidate),\n",
+      "replacement": "        candidate.tier === 'q0' &&\n        gatewayExecutes(candidate),\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "an executable Q1 search"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "release verification probes search through an executable Q1 search, ahead of a Q0 search the gateway does not run",
+          "expected": "compiled search query of northstar\\.party:entity\\.party that gatewayExecutes admits is missing"
+        }
+      ]
+    },
+    {
+      "name": "verification-archives-through-literal-true-q1-gets",
+      "claim": "Release verification's cleanup reads its probe records through a plain get that returns any live record by id -- one the gateway executes whose filter is the literal true, a Q1 get included -- so an entity whose only plain get is a literal-true Q1 get (its operations reading back through a Q0 read-model get) has its probe records archived instead of refused as VERIFICATION_PROBE_RECORD_UNREADABLE.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "    gatewayExecutes(query) &&\n    inspectPredicateForExecution(query.filter).outcome === 'accepted'\n",
+      "replacement": "    query.tier === 'q0' &&\n    gatewayExecutes(query) &&\n    inspectPredicateForExecution(query.filter).outcome === 'accepted'\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "a literal-true Q1 get"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "release verification archives its probe records through a literal-true Q1 get when the entity has no plain Q0 get",
+          "expected": "of northstar\\.party:entity\\.party, which has no get that returns any live record by id"
+        }
+      ]
+    },
+    {
+      "name": "verification-searches-through-the-first-literal-true-search",
+      "claim": "Release verification's search-exclusion probe reads through the first plain search of the entity with the literal true filter (Q0 or Q1) that the gateway executes and that selects a positive field, ahead of any earlier filtered search, so an earlier search whose filter excludes the arranged record cannot stand in for it.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "      (candidate) =>\n        inspectPredicateForExecution(candidate.search.filter).outcome ===\n        'accepted',\n",
+      "replacement": "      () => true,\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "filter excludes its record"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "release verification probes search through a later literal-true search when an earlier Q1 search's filter excludes its record",
+          "expected": "did not return record [0-9a-f-]+ through northstar\\.party:query\\.party_search:"
+        }
+      ]
+    },
+    {
+      "name": "verification-tries-filtered-searches-until-one-returns-its-record",
+      "claim": "Without a literal-true search, release verification's search-exclusion probe reads the executable filtered searches in catalog order and uses the first that returns the arranged record; when none does, it refuses as VERIFICATION_SEARCH_WITNESS_UNCONSTRUCTABLE, naming each search tried.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "      if (hasRecord(witness.included, record.recordId)) return witness;\n",
+      "replacement": "      return witness;\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "the first filtered search that returns its record|no search can witness"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "release verification probes search through the first filtered search that returns its record",
+          "expected": "did not return record [0-9a-f-]+ through northstar\\.party:query\\.party_search:"
+        },
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "release verification refuses a search probe that no search can witness, naming each search it tried",
+          "expected": "did not return record [0-9a-f-]+ through northstar\\.party:query\\.party_search:"
+        }
+      ]
+    },
+    {
+      "name": "verification-search-candidates-select-a-positive-field",
+      "claim": "Release verification's search-exclusion probe considers only searches that select a positive field, so a literal-true search selecting no searchable field (which the interpreter refuses) cannot stand in for a usable one.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "      return positiveFieldId ? [{ positiveFieldId, search }] : [];\n",
+      "replacement": "      return [{ positiveFieldId: positiveFieldId ?? '', search }];\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "the first literal-true search with a positive field"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "release verification probes search through the first literal-true search with a positive field",
+          "expected": "northstar\\.party:query\\.party_a_search has no usable lowered search column"
+        }
+      ]
+    },
+    {
+      "name": "verification-witness-reads-through-literal-true-q1-gets",
+      "claim": "Release verification's number witness reads an assigned number the create's read-back omits through a literal-true Q1 get that selects it, not only through Q0 gets, so the number is read rather than taken as its sentinel unread.",
+      "file": "packages/postgres-provider/src/release-verification-service.ts",
+      "original": "          returnsAnyLiveRecordById(candidate) &&\n",
+      "replacement": "          returnsAnyLiveRecordById(candidate) &&\n          candidate.tier === 'q0' &&\n",
+      "test": {
+        "files": ["test/postgres/document-numbering.test.ts"],
+        "namePattern": "a Q1 get whose filter is the literal true"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/document-numbering.test.ts",
+          "name": "release verification reads an assigned number through a Q1 get whose filter is the literal true",
+          "expected": "the witness read the account number through the Q1 get"
+        }
+      ]
+    }
+  ]
+}

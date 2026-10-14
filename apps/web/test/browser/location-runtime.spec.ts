@@ -27,6 +27,32 @@ test('real Location surface creates a location and archives/restores through the
     await expect(
       page.getByText(`${namespace}:option.warehouse`, { exact: true }),
     ).toBeVisible();
+    // The generic record page: its field sections with their compact
+    // disclosure and the sticky command bar. Read here since LOCATIONS gave
+    // the composed application's location page a workspace of its own.
+    await expect(
+      page.locator('[data-platform-slot="record:sections"] [data-field-id]'),
+    ).toHaveCount(3);
+    await page.setViewportSize({ height: 844, width: 390 });
+    const compactSections = page.locator(
+      '[data-platform-slot="record:sections"] details.record-section-group',
+    );
+    await expect(compactSections).toHaveAttribute('open', '');
+    await expect(
+      page.locator('[data-platform-slot="record:commandBar"] .command-bar'),
+    ).toHaveCSS('position', 'sticky');
+    const compactSectionSummary = compactSections.locator('summary');
+    await compactSectionSummary.focus();
+    await page.keyboard.press('Enter');
+    await expect(compactSections).not.toHaveAttribute('open', '');
+    await page.setViewportSize({ height: 720, width: 1280 });
+    await expect(compactSectionSummary).toBeVisible();
+    await compactSectionSummary.focus();
+    await page.keyboard.press('Enter');
+    await expect(compactSections).toHaveAttribute('open', '');
+    await expect(
+      compactSections.getByText('Browser Location', { exact: true }),
+    ).toBeVisible();
     await page.locator('details.action-overflow summary').click();
     await page.getByRole('button', { name: 'Archive' }).click();
     await expect(

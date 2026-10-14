@@ -44,6 +44,9 @@ export interface ConformanceSurface {
   readonly statusRoles: readonly string[];
   readonly surfaceId: string;
   readonly surfaceRole?: string | null;
+  readonly workspace?: {
+    readonly membership: 'contextual' | 'operational' | 'setup';
+  } | null;
 }
 
 export interface ConformanceNavigationSurface {
@@ -344,8 +347,11 @@ function navigationSurfaceIds(entry: ConformanceNavigationEntry): string[] {
 
 function isNavigationSurface(surface: ConformanceSurface): boolean {
   // Product navigation is workflow-scoped: List is an entity entry and its
-  // Record and form siblings stay reachable from within it. Home and Task are
-  // direct shell entries because neither has an in-surface parent route.
+  // Record and form siblings stay reachable from within it. A typed contextual
+  // workspace surface is reached from its owner or a deep link and therefore
+  // does not become a database-style menu entry. Home and Task are direct
+  // shell entries because neither has an in-surface parent route.
+  if (surface.workspace?.membership === 'contextual') return false;
   return (
     surface.surfaceRole === 'list' ||
     (surface.archetype === 'list' && surface.surfaceRole == null) ||

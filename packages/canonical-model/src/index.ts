@@ -40,6 +40,28 @@ export {
   type CanonicalDiagnostic,
 } from './diagnostics.js';
 export {
+  QueryReadModelSchema,
+  type QueryReadModel,
+  SurfaceCompositionSchema,
+  type SurfaceComposition,
+  SurfaceWorkspaceSchema,
+  type SurfaceWorkspace,
+  SurfaceListSchema,
+  type SurfaceList,
+  type SurfaceListProgress,
+  type SurfaceListFigures,
+  type SurfaceListSupply,
+  type SurfaceListRowAction,
+  SurfaceFormSchema,
+  type SurfaceForm,
+  SurfaceLauncherSchema,
+  type SurfaceLauncher,
+  FieldNumberingSchema,
+  type FieldNumbering,
+  SurfaceDocumentEditorSchema,
+  type SurfaceDocumentEditor,
+  type V6AuthoredApplicationPackage,
+  type V6NormalizedApplicationPackage,
   AuthoredApplicationPackageSchema,
   CanonicalDecimalStringSchema,
   CanonicalSignedDecimalStringSchema,
@@ -138,6 +160,7 @@ export {
   UNICODE_CASE_FOLD_VERSION,
   unicodeCaseFold,
 } from './unicode-case-fold.js';
+export { VERIFICATION_SENTINEL_PREFIX } from './field-numbering.js';
 
 export const platformContract = Object.freeze({
   authority: 'canonical-model',
