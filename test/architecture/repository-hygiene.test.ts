@@ -163,6 +163,7 @@ const suiteDefinitions = [
     expectedFiles: [
       'test/postgres/catalog-extras.test.ts',
       'test/postgres/catalog-runtime.test.ts',
+      'test/postgres/company-bound-writes.test.ts',
       'test/postgres/current-policy.test.ts',
       'test/postgres/declared-list.test.ts',
       'test/postgres/document-numbering.test.ts',
