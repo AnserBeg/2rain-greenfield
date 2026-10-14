@@ -506,7 +506,10 @@ export function orderEntrySurfaces(
     vendor_bill_line: 'vendor_bill',
     vendor_payment: 'vendor_bill',
     vendor_credit: 'vendor_bill',
+    // A custody record's events belong to its workspace (RETURNABLE-ASSETS).
+    returnable_event: 'returnable_custody',
   };
+  const custodyList = id('query', 'returnable_custody_list');
   // A tenant-level child belongs to its master's workspace, such as a
   // customer's ship-to addresses; it has no company entry to resolve.
   const masterOwners: Readonly<Record<string, string>> = {
@@ -555,7 +558,8 @@ export function orderEntrySurfaces(
               worklist ||
               local === 'posted_stock_balance' ||
               local === 'customer_invoice' ||
-              local === 'vendor_bill'
+              local === 'vendor_bill' ||
+              local === 'returnable_custody'
               ? 'operational'
               : owner || master
                 ? 'contextual'
@@ -563,6 +567,17 @@ export function orderEntrySurfaces(
             : 'contextual',
         ...(owner || master
           ? { ownerSurfaceId: id('surface', `${owner ?? master}_list`) }
+          : {}),
+        // A party's page reads the custody records it is in, which are
+        // company-owned, in the company it is entered with: the party itself
+        // is the tenant's (RETURNABLE-ASSETS).
+        ...(name === 'party_detail' && companyScoped.has(custodyList)
+          ? {
+              entry: {
+                ...company,
+                authorizationQueryId: custodyList,
+              },
+            }
           : {}),
         ...(editor ||
         owner ||
@@ -586,6 +601,9 @@ export function orderEntrySurfaces(
         ? { label: 'Invoices' }
         : {}),
       ...(local === 'vendor_bill' && role === 'list' ? { label: 'Bills' } : {}),
+      ...(local === 'returnable_custody' && role === 'list'
+        ? { label: 'Returnables out' }
+        : {}),
     };
   });
 }

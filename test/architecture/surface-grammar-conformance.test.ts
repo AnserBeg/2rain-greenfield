@@ -48,6 +48,7 @@ import {
 import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/index.js';
 import { purchasingModuleDefinition } from '../../packages/domain/src/purchasing/index.js';
 import { salesModuleDefinition } from '../../packages/domain/src/sales/index.js';
+import { withoutReturnables } from '../helpers/without-returnables.js';
 import { PRODUCT_SURFACE_GRAMMAR_BASELINE } from './surface-grammar-conformance.baseline.js';
 import {
   compiledSurfaceGrammarSurfaces,
@@ -272,8 +273,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // + Party's three ship-to address and Catalog's three tax code surfaces
   // (SALES-PARITY), + the invoice, its lines, payments and credits (twelve),
   // + PURCHASING-PARITY's Expected receipts List, + PAYABLES' vendor bill,
-  // its lines, payments and credits (twelve).
-  assert.equal(groupedManifest.surfaces.length, 101);
+  // its lines, payments and credits (twelve), + RETURNABLE-ASSETS' returnable
+  // type, custody and event surfaces (nine) and the Returnables held List.
+  assert.equal(groupedManifest.surfaces.length, 111);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -302,8 +304,9 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // SALES-PARITY: Catalog's tax codes list joins the supporting masters, and
   // the Invoices list joins Sales beside its orders. PURCHASING-PARITY:
   // Expected receipts joins Purchasing beside its orders; PAYABLES: so does
-  // the Bills list.
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 16);
+  // the Bills list. RETURNABLE-ASSETS: Party gains Returnable types, and the
+  // Returnables out and Returnables held Lists.
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 19);
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
@@ -949,7 +952,9 @@ function composedApplicationBelowNavigationBudget(): Record<string, unknown> {
     salesModuleDefinition('northstar.app'),
     'sales',
   );
-  return composed;
+  // RETURNABLE-ASSETS: custody records are company-owned, entered through
+  // Inventory's legal entities, so they leave with Inventory.
+  return withoutReturnables(composed);
 }
 
 function withoutModule(

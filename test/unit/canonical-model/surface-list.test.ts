@@ -60,6 +60,9 @@ test('the composed application declares its Lists and they normalize unchanged',
     expectedList,
     `${ns}:surface.posted_stock_balance_list`,
     `${ns}:surface.purchase_order_list`,
+    // RETURNABLE-ASSETS: Returnables out, and its clone Returnables held.
+    `${ns}:surface.returnable_custody_list`,
+    `${ns}:surface.returnables_held_list`,
     salesList,
     // PAYABLES: the Bills List, by bill state.
     `${ns}:surface.vendor_bill_list`,

@@ -159,6 +159,8 @@ test(
         ['shipment_create', 'SHP'],
         // PURCHASING-PARITY: a goods receipt is numbered the same way.
         ['goods_receipt_create', 'RCV'],
+        // RETURNABLE-ASSETS: so is a returnable custody record.
+        ['returnable_custody_create', 'RTN'],
       ] as const) {
         const inputContract = contract.find(
           (value) => value.operationId === `${ns}:operation.${operation}`,
@@ -202,6 +204,8 @@ test(
           'customer_payment_number',
           'goods_receipt_number',
           'purchase_order_number',
+          // RETURNABLE-ASSETS: a returnable custody record, RTN-000001.
+          'returnable_custody_number',
           'sales_order_number',
           'shipment_number',
           // PAYABLES: bills, vendor payments and vendor credits.
@@ -255,7 +259,7 @@ test(
               numbered.some((entry) => entry.fieldId === scenario.subjectId),
           )
           .map((scenario) => executed.has(scenario.scenarioId)),
-        [true, true, true, true, true, true, true, true, true, true],
+        [true, true, true, true, true, true, true, true, true, true, true],
         'each number’s uniqueness probe executed',
       );
       const derivationCodes = (

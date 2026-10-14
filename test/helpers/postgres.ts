@@ -54,6 +54,19 @@ export interface EphemeralPostgresOptions {
   dataSizeMegabytes?: number;
 }
 
+/**
+ * The one data volume for a database that installs a whole release lineage and
+ * then its successors, reverse edges or a full replay. Every such install keeps
+ * each release's artifacts and their write-ahead log: the full-replay generator
+ * filled the default 256 MB at nineteen entries (SALES-PARITY 28461658), and the
+ * lineage-advancing composed tests did the same at entries 6-8 (sqlstate 53100).
+ * Room, not a bound: no assertion, timeout or readiness wait changes, and every
+ * other test database keeps the 256 MB default. One preset instead of a literal
+ * per test, so the size is stated once (INTEGRATION).
+ */
+export const LINEAGE_INSTALL_VOLUME: Readonly<EphemeralPostgresOptions> =
+  Object.freeze({ dataSizeMegabytes: 1024 });
+
 export async function withEphemeralPostgres<T>(
   label: string,
   run: (database: EphemeralPostgres) => Promise<T>,

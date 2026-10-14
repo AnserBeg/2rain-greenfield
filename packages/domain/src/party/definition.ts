@@ -1,3 +1,5 @@
+import { returnablesDeclarations } from './returnables.js';
+
 const version = 'v6' as const;
 const normalizationProfileVersion = 'northstar.normalization/v6' as const;
 
@@ -93,11 +95,31 @@ export function partyModuleDefinition(
      * it has always compiled.
      */
     readonly salesMasterData?: boolean;
+    /**
+     * Returnable assets (RETURNABLE-ASSETS): returnable types, the custody of
+     * them a party holds or we hold of a supplier, and its deposit events.
+     * Only the product application passes it, with the sales master data.
+     */
+    readonly returnables?: boolean;
   } = {},
 ): Record<string, unknown> {
   const definitionIds = ids(namespace);
   const sales = options.salesMasterData === true;
+  if (options.returnables === true && !sales)
+    throw new TypeError(
+      'returnables require the sales master data a custody is started from',
+    );
   const when = <T>(values: readonly T[]): readonly T[] => (sales ? values : []);
+  const returnables =
+    options.returnables === true
+      ? returnablesDeclarations(
+          namespace,
+          definitionIds.moduleId,
+          definitionIds.contentCapabilityId,
+        )
+      : {};
+  const extra = (name: string): readonly Record<string, unknown>[] =>
+    returnables[name] ?? [];
   const {
     addressFieldIds,
     contentCapabilityId,
@@ -140,6 +162,7 @@ export function partyModuleDefinition(
           `${namespace}:query.party_address_get`,
         ),
       ]),
+      ...extra('assertions'),
     ],
     capabilityRequirements: [
       {
@@ -160,6 +183,7 @@ export function partyModuleDefinition(
         schemaVersion: version,
         supportStatus: 'supported',
       },
+      ...extra('capabilityRequirements'),
     ],
     entities: [
       entity(definitionIds, 'party', 'Party', entityIds.party, 10),
@@ -173,6 +197,7 @@ export function partyModuleDefinition(
           30,
         ),
       ]),
+      ...extra('entities'),
     ],
     fields: [
       textField({
@@ -299,6 +324,7 @@ export function partyModuleDefinition(
           }),
         ),
       ]),
+      ...extra('fields'),
     ],
     hashAlgorithm: 'sha256',
     impactAnalyses: [],
@@ -326,6 +352,7 @@ export function partyModuleDefinition(
       ...when(
         entityOperations(definitionIds, 'party_address', entityIds.address),
       ),
+      ...extra('operations'),
     ],
     package: {
       kind: 'packageDefinition',
@@ -341,6 +368,7 @@ export function partyModuleDefinition(
       ...when(
         entityPermissions(definitionIds, 'party_address', entityIds.address),
       ),
+      ...extra('permissions'),
     ],
     queries: [
       ...entityQueries(definitionIds, 'party', entityIds.party, partyFields, [
@@ -379,6 +407,7 @@ export function partyModuleDefinition(
           ],
         ),
       ),
+      ...extra('queries'),
     ],
     relations: [
       {
@@ -419,6 +448,7 @@ export function partyModuleDefinition(
           targetEntity: reference('entityReference', entityIds.party),
         },
       ]),
+      ...extra('relations'),
     ],
     schemaVersion: version,
     stateMachines: [],
@@ -428,6 +458,7 @@ export function partyModuleDefinition(
       ...when([
         storageMapping(definitionIds, 'party_address', entityIds.address),
       ]),
+      ...extra('storageMappings'),
     ],
     surfaces: [
       ...entitySurfaces(definitionIds, 'party', 'Party'),
@@ -435,6 +466,7 @@ export function partyModuleDefinition(
       ...when(
         entitySurfaces(definitionIds, 'party_address', 'Ship-to address'),
       ),
+      ...extra('surfaces'),
     ],
   };
 }

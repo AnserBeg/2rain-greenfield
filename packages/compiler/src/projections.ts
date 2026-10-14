@@ -1310,10 +1310,21 @@ function verificationPlanPayload(
   const materializedStateFieldIds = new Set(
     packageRevision.stateMachines.map((machine) => machine.stateField.fieldId),
   );
+  // A maintained figure is the same shape: only its registered capability
+  // writes it, so the generic create cannot populate it and neither probe is
+  // planned for it.
+  const maintainedFieldIds = new Set(
+    packageRevision.fields.flatMap((entry) =>
+      'maintainedBy' in entry && entry.maintainedBy !== undefined
+        ? [entry.fieldId]
+        : [],
+    ),
+  );
   for (const field of packageRevision.fields.filter(
     (entry) =>
       entry.lifecycle === 'active' &&
-      !materializedStateFieldIds.has(entry.fieldId),
+      !materializedStateFieldIds.has(entry.fieldId) &&
+      !maintainedFieldIds.has(entry.fieldId),
   )) {
     if (field.fieldType.kind === 'enumFieldType') {
       addScenario({
@@ -1407,7 +1418,14 @@ function operationInputContract(
       ? (field.numbering as FieldNumbering | undefined)
       : undefined;
   const allFields = allEntityFields;
-  const fields = allFields.filter((field) => !numberingOf(field));
+  // A figure a registered capability maintains is nobody's generic input
+  // either: it leaves every writable set, so a generic create or update that
+  // states it is refused and only the capability ever writes it.
+  const maintained = (field: (typeof allFields)[number]) =>
+    'maintainedBy' in field && field.maintainedBy !== undefined;
+  const fields = allFields.filter(
+    (field) => !numberingOf(field) && !maintained(field),
+  );
   const assignedFields = allFields.flatMap((field) => {
     const numbering = numberingOf(field);
     return numbering

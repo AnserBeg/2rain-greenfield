@@ -72,6 +72,12 @@ test('Sales, Purchase and shipment numbers are declared server-assigned sequence
         'PO',
         `${ns}:document_sequence.purchase_order`,
       ],
+      // RETURNABLE-ASSETS: a returnable custody record's number, RTN-000001.
+      [
+        `${ns}:field.returnable_custody_number`,
+        'RTN',
+        `${ns}:document_sequence.returnable_custody`,
+      ],
       [
         `${ns}:field.sales_order_number`,
         'SO',

@@ -308,6 +308,14 @@ const routedPressLawDebt: readonly RoutedPressLawDebt[] = [
     'northstar.sales',
     "'northstar.sales:capability.receivables' as const;",
   ),
+  // RETURNABLE-ASSETS: custody events post through Party's returnables
+  // capability, named as the other capabilities are.
+  routedIdentityDebt(
+    'packages/postgres-provider/src/returnables-capability-executor.ts',
+    'party',
+    'northstar.party',
+    "'northstar.party:capability.returnables' as const;",
+  ),
   {
     file: 'packages/postgres-provider/src/saved-filter-executor.ts',
     message:
