@@ -31,6 +31,8 @@ Base: `packet/INTEGRATION` at `8c8cfab1`. Reference: PaneFlow `d057daff` `lib/se
    the List's company; a denial refuses the List by that query's name.
 5. Web: a currency choice (never "All"), a totals strip labelled by the showing columns and the currency, rows opened
    in `list.record`; a launcher Task may bind a List query (it never asks it); its slots render tiles whatever it binds.
+   Otherwise a List opens its rows in the record page its workspace owns (else one a List owns: the entity's own),
+   and a record page a List names leads back to that List (`component-registry.ts` `findRelatedSurface`).
 6. Content: **Receivables aging** (Sales; parties in one company; Current/1-30/31-60/61-90/over 90, Total owing,
    open invoices, Status; Owing and Past due tabs; totals; Statement action); **Customer accounts** (customers only;
    open orders, ordered and open units, open value, owing; All and With open orders tabs; totals); the **Customer
@@ -53,18 +55,28 @@ Base: `packet/INTEGRATION` at `8c8cfab1`. Reference: PaneFlow `d057daff` `lib/se
   ship already counts). Inventory risks open the Buying worklist's To buy tab. Entry is authorized by Sales orders.
 - D8: Today's surface id `a_today` orders it first in Sales and makes it the landing page, as the shell's `a_home`.
 - D9: The customer account page is a second record page over Party (module party, with Sales' datasets), so Party's
-  own page is unchanged; the two Lists name it as their record page.
+  own page keeps its content; the two Lists name it as their record page.
 - D10: The two in-company Lists add no verification scenarios (no entity); the release appends one entry (2 total).
+- D11 (found on CI, 37482339197): three Lists read parties, so Party's page and form name the Party List as their
+  workspace, as the item's name the Items List (REPLENISHMENT) -- the party picker's authority, breadcrumb and
+  navigation. Without it every party picker refused (no owner among three Lists) and Party List rows opened the
+  customer account page (first record page over Party by id). Integration test "three Lists read parties" pins it.
+- D12: Two test variants follow the new surfaces, as WAREHOUSE-MODE's and REPLENISHMENT's did: the metadata-only
+  List variation points Today's dropped-view tiles at a kept view; the without-Sales transition cuts the reports.
 
 ## Gates
 
 - Local (no container unless said): tsc, eslint, prettier clean; release `--check` PASS; unit 251/251; compiler
-  175/175; integration 257/257 + REPORTS-HOME's own; web contracts 46/46; PostgreSQL `reports-home` (see below).
+  175/175; integration 259/259; web contracts 46/46; language coverage PASS; records OK. After D11/D12, in
+  containers: `request-runtime-view` 15/15, the List variation 1/1, the ABI transition 1/1; the five composed
+  browser journeys that failed on CI's first run pass 5/5 (`--workers=1`).
 - Pins moved: surfaces 113 → 117; navigation leaves 22 → 25; surface floor 21 → 27 (runtime support 21 → 27);
   verification scenarios 633 (unchanged); coverage obligations 2805 → 2832, observed 946 → 976; lineage entries
   1 → 2; suite lists gain `test/unit/reports-home.test.ts` and `test/postgres/reports-home.test.ts` (commercial job).
-- Sizes: authored file 1,440,469 → 1,476,108 B; normalized 1,499,742 → 1,535,857 B (cap 2,097,152);
-  compiled 6,237,235 → 12,238,368 B (two entries).
+- Pins moved on CI's first run (D11, D12): the five PostgreSQL surface-floor pins 21 → 27 (`request-runtime-view`,
+  as compiled); the composed navigation leaves gain Today, Customer accounts and Receivables aging.
+- Sizes: authored file 1,440,469 → 1,476,212 B; normalized 1,499,742 → 1,535,961 B (cap 2,097,152);
+  compiled 6,237,235 → 12,238,640 B (two entries; D11 adds 104 B over the first build).
 
 ## Controls
 
@@ -92,10 +104,11 @@ Review: not owed — outside the Critical set.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "REPORTS-HOME",
   "base": "8c8cfab1c54ac1b51b4617e45f8e2f0ddd1dfa1b",
-  "head": "ed6bd95153d26faa8f7b7c3b3679c32590281026",
+  "head": "6091c969f5eb7edcbfb15a24ea3f737909bef330",
   "changedPaths": [
     "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts",
-    "apps/web/src/list-declaration.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts",
+    "apps/web/src/list-declaration.ts", "apps/web/test/browser/composed-application.spec.ts", "packages/domain/src/app/order-entry.ts",
+    "test/postgres/declared-list.test.ts", "test/postgres/module-storage-transition.test.ts", "test/postgres/request-runtime-view.test.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts",
     "apps/web/test/browser/receivables-reports-home.spec.ts", "package.json", "packages/canonical-model/src/schemas.ts",
     "packages/canonical-model/src/surface-list.ts", "packages/compiler/src/projections.ts", "packages/domain/src/app/builder.ts",
     "packages/domain/src/app/list-declarations.ts", "packages/domain/src/app/reports-home.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts",
@@ -108,6 +121,7 @@ Review: not owed — outside the Critical set.
   ],
   "symbols": [
     {"path": "apps/web/src/component-registry.ts", "name": "renderFigureSummary"},
+    {"path": "apps/web/src/component-registry.ts", "name": "findRelatedSurface"},
     {"path": "packages/canonical-model/src/schemas.ts", "name": "listFigureSumWithin"},
     {"path": "packages/canonical-model/src/schemas.ts", "name": "listFigureSumRows"},
     {"path": "packages/canonical-model/src/surface-list.ts", "name": "validateSurfaceLists"},

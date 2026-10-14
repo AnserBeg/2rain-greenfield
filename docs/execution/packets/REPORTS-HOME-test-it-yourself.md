@@ -23,7 +23,10 @@ at **Calgary warehouse**. Allow about ten minutes.
 3. Change **Currency** to USD → Apply: Alpine now reads 1 order, 2 units, **200.00** — the USD order alone. Nothing
    is ever converted or added across currencies.
 4. The **With open orders** tab keeps only customers with an open order in the chosen currency. **Orders** on a row
-   opens the customer's account page at its orders.
+   opens the customer's account page at its orders; the trail above its title reads *Customer accounts / Customer
+   account*, and its first link goes back to the List.
+5. Party → **Party** → click Alpine Office Supply: this opens the party's own page (its roles and addresses), not the
+   account page; the trail reads *Party list / …*. **Party role → New**: the Party box lists every party to choose.
 
 ## §3 Receivables aging and the customer statement
 
