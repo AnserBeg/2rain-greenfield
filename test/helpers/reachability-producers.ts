@@ -106,22 +106,26 @@ export const reachabilityProducers = [
     'test:postgres:commercial',
     [
       'test/postgres/commercial-totals.test.ts',
-      'test/postgres/counter-sale.test.ts',
-      'test/postgres/customer-credit.test.ts',
       'test/postgres/expected-receipts.test.ts',
-      'test/postgres/fulfillment.test.ts',
-      'test/postgres/order-lists-supply.test.ts',
-      'test/postgres/order-lists.test.ts',
-      'test/postgres/order-pages.test.ts',
-      'test/postgres/packing-retrieval.test.ts',
       'test/postgres/payables.test.ts',
-      'test/postgres/price-lists.test.ts',
       'test/postgres/purchase-approvals.test.ts',
       'test/postgres/purchase-order-ending.test.ts',
-      'test/postgres/receivables.test.ts',
       'test/postgres/receiving-authorization.test.ts',
     ],
   ),
+  // The sales-side workflows run in a job of their own as well (INTEGRATION:
+  // SALES-EXTRAS' three files took the commercial job near its bound).
+  nodeProducer('postgres-sales', 'postgres-sales', 'test:postgres:sales', [
+    'test/postgres/counter-sale.test.ts',
+    'test/postgres/customer-credit.test.ts',
+    'test/postgres/fulfillment.test.ts',
+    'test/postgres/order-lists-supply.test.ts',
+    'test/postgres/order-lists.test.ts',
+    'test/postgres/order-pages.test.ts',
+    'test/postgres/packing-retrieval.test.ts',
+    'test/postgres/price-lists.test.ts',
+    'test/postgres/receivables.test.ts',
+  ]),
   // The inventory files run in a job of their own as well (INTEGRATION: the
   // union's PostgreSQL job ran 21-27 minutes of its 30-minute bound).
   nodeProducer(

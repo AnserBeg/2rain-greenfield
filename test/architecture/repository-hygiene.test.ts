@@ -200,25 +200,32 @@ const suiteDefinitions = [
   },
   {
     discoveryPattern:
-      'test/postgres/**/@(commercial-totals|counter-sale|customer-credit|expected-receipts|fulfillment|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization).test.ts',
+      'test/postgres/**/@(commercial-totals|expected-receipts|payables|purchase-approvals|purchase-order-ending|receiving-authorization).test.ts',
     expectedFiles: [
       'test/postgres/commercial-totals.test.ts',
+      'test/postgres/expected-receipts.test.ts',
+      'test/postgres/payables.test.ts',
+      'test/postgres/purchase-approvals.test.ts',
+      'test/postgres/purchase-order-ending.test.ts',
+      'test/postgres/receiving-authorization.test.ts',
+    ],
+    script: 'test:postgres:commercial',
+  },
+  {
+    discoveryPattern:
+      'test/postgres/**/@(counter-sale|customer-credit|fulfillment|order-lists-supply|order-lists|order-pages|packing-retrieval|price-lists|receivables).test.ts',
+    expectedFiles: [
       'test/postgres/counter-sale.test.ts',
       'test/postgres/customer-credit.test.ts',
-      'test/postgres/expected-receipts.test.ts',
       'test/postgres/fulfillment.test.ts',
       'test/postgres/order-lists-supply.test.ts',
       'test/postgres/order-lists.test.ts',
       'test/postgres/order-pages.test.ts',
       'test/postgres/packing-retrieval.test.ts',
-      'test/postgres/payables.test.ts',
       'test/postgres/price-lists.test.ts',
-      'test/postgres/purchase-approvals.test.ts',
-      'test/postgres/purchase-order-ending.test.ts',
       'test/postgres/receivables.test.ts',
-      'test/postgres/receiving-authorization.test.ts',
     ],
-    script: 'test:postgres:commercial',
+    script: 'test:postgres:sales',
   },
   {
     discoveryPattern:
@@ -714,6 +721,7 @@ test('CI runs every scaffold gate from a frozen install', () => {
     'corepack pnpm test:postgres',
     'corepack pnpm test:postgres:composed',
     'corepack pnpm test:postgres:commercial',
+    'corepack pnpm test:postgres:sales',
     'corepack pnpm test:postgres:inventory',
     'corepack pnpm test:locale',
     'corepack pnpm test:browser',
@@ -732,6 +740,7 @@ test('CI runs every scaffold gate from a frozen install', () => {
   assert.match(workflow, /^ {2}postgres:$/mu);
   assert.match(workflow, /^ {2}postgres-composed:$/mu);
   assert.match(workflow, /^ {2}postgres-commercial:$/mu);
+  assert.match(workflow, /^ {2}postgres-sales:$/mu);
   assert.match(workflow, /^ {2}postgres-inventory:$/mu);
   assert.match(workflow, /^ {2}browser:$/mu);
   assert.match(workflow, /^ {2}browser-operations:$/mu);
