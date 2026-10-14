@@ -61,6 +61,7 @@ bound; the byte maximums are PR #30.
 - The former "twelve-action" APPROVAL-PO test pinned 13 as refused; it now pins 25.
 - Separate packet from STRUCTURAL-LIMITS-RAISE because these schemas exist only on INTEGRATION (coordinator).
 - Review: not owed — outside the Critical set. The owner's ruling is the gate.
+- The aliases journey's red at `5af8b9c4` is a spec race this packet does not touch, and the rerun is green: filed for INTEGRATION, not fixed here.
 
 ## Gates
 
@@ -80,6 +81,11 @@ bound; the byte maximums are PR #30.
   at `ee53277b` — all 13 jobs green (quality with architecture, performance
   with the field envelope at 1,002.5 ms, four browser runners, four PostgreSQL
   jobs, scans, observability, reachability). `scripts/check-records.sh`: PASS.
+- CI at `5af8b9c4`: run [37479840346](https://github.com/AnserBeg/2rain-greenfield/actions/runs/37479840346)
+  attempt 1 red on two jobs: the compile budget INDETERMINATE (CPU idle
+  74.2%, the known GitHub flake) and the aliases journey's line pick (see
+  Filed). Whole-workflow rerun, attempt 2 (2026-10-13): all 13 jobs green,
+  the aliases journey passing, compile budget best of five 1,331.4 ms.
 
 ## Test it yourself
 
@@ -103,6 +109,7 @@ composition bounds admit exactly their maximum and refuse one more";
 
 - Document-editor `lineFields` is 11 of 15 at parity; units on lines and lot bring it near 15. Watch it.
 - `LabelSchema` 232 of 240 is one item-stock dataset description; shorten the prose rather than raise it.
+- INTEGRATION: `inventory-catalog-aliases.spec.ts` `pick` matches the option by substring, so "Field notebook" also takes "Field notebook (duplicate)". On focus the picker first shows the empty-term answer, ordered by record id; the duplicate's random id sorts before the notebook's `…0011` about 44% of the time. A click there is deferred until the `nb-ruled` answer, which does not offer the duplicate, so the editor drops it by design and no label lands (run 37479840346 attempt 1, line 113). Fix: match the exact label.
 
 Review: not owed — outside the Critical set.
 
