@@ -11,6 +11,10 @@ import {
 } from '../../../packages/runtime/src/list-behavior/index.js';
 import { escapeHtml } from './html.js';
 import type { SurfaceRuntimeApplicationExtension } from './app-server.js';
+import {
+  loadPurchaseOrderDocument,
+  loadPurchaseOrderWorklist,
+} from './purchasing-section.js';
 
 export interface ReceivingSection {
   readonly namespace: string;
@@ -252,18 +256,6 @@ export async function loadReceivingSection(
   };
 }
 
-export function renderReceivingSection(section: ReceivingSection): string {
-  const link = (local: string, recordId?: string) => {
-    const params = new URLSearchParams({
-      surface: `${section.namespace}:surface.${local}`,
-      [section.scopeParameterIds[local]!]: section.legalEntityId,
-    });
-    if (recordId) params.set('record', recordId);
-    return escapeHtml(`/?${params}`);
-  };
-  return `<section class="panel data-panel" data-receiving-progress><h2>Receiving</h2><p><a href="${link('goods_receipt_form')}">Create goods receipt</a> · <a href="${link('goods_receipt_list')}">View receipts and corrections</a></p><p>Receive against a released order. Close only when every active line has zero remaining. Reopen before receiving, correcting or amending a closed order.</p><table><thead><tr><th>Order line</th><th>Ordered</th><th>Received</th><th>Remaining</th></tr></thead><tbody>${section.lines.map((line) => `<tr data-order-line="${escapeHtml(line.recordId)}"><td><a href="${link('purchase_order_line_detail', line.recordId)}">${escapeHtml(line.item)}</a></td><td>${escapeHtml(line.ordered)}</td><td>${escapeHtml(line.received)}</td><td>${escapeHtml(line.remaining)}</td></tr>`).join('')}</tbody></table>${section.lines.length === 0 ? '<p>No active order lines.</p>' : ''}<p>Corrections append compensating movements; they never edit the original receipt. If a correction would make historical stock negative, correct the erroneous outbound movement first, or use the stock-count process if the discrepancy is physical.</p></section>`;
-}
-
 /** Purchasing-specific selection, loading and refresh policy. The API
  * composition root installs this contribution explicitly; SurfaceRuntime stays
  * unaware of purchasing identities. */
@@ -298,15 +290,53 @@ export const RECEIVING_SURFACE_RUNTIME_EXTENSION = Object.freeze({
       ...(binding.query.sourceEntityId.endsWith(':entity.purchase_order') &&
       order
         ? {
-            receiving: await loadReceivingSection(
+            // The purchase order Record page: lines, receiving progress and
+            // value, presented by `purchasing-section.ts`.
+            purchaseOrder: await loadPurchaseOrderDocument(
               view,
               queryGateway,
               order,
               legalEntityId,
+              new Date(),
             ),
           }
         : {}),
     };
+  },
+  /**
+   * The purchase order List page. Presentation only: when its supporting
+   * reads cannot be completed the shared grid renders the page unchanged,
+   * because a list that shows its orders is worth more than one that fails
+   * on a figure it could not total.
+   */
+  async augmentListData({
+    binding,
+    data,
+    legalEntitySelection,
+    queryGateway,
+    surface,
+    view,
+  }) {
+    if (
+      surface.surfaceRole !== 'list' ||
+      legalEntitySelection.length !== 1 ||
+      !binding.query.sourceEntityId.endsWith(':entity.purchase_order')
+    )
+      return data;
+    try {
+      return {
+        ...data,
+        purchaseOrderList: await loadPurchaseOrderWorklist(
+          view,
+          queryGateway,
+          data.records,
+          legalEntitySelection[0]!,
+          new Date(),
+        ),
+      };
+    } catch {
+      return data;
+    }
   },
   refreshAfterOperation({ binding, intent, surface, surfaces }) {
     return (

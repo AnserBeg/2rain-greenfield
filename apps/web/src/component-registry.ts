@@ -15,16 +15,24 @@ import {
 
 import { escapeHtml, shortIdentity } from './html.js';
 import {
-  renderReceivingSection,
+  renderPurchaseOrderHeading,
+  renderPurchaseOrderKeyFacts,
+  renderPurchaseOrderSections,
+  renderPurchaseOrderWorklist,
+  type ListFrame,
+  type PurchaseOrderDocument,
+  type PurchaseOrderWorklist,
+} from './purchasing-section.js';
+import {
   renderReceivingNavigation,
   type ReceivingNavigation,
-  type ReceivingSection,
 } from './receiving-section.js';
 import type {
   SalesOrderSection,
   ShipmentPackingDocument,
 } from './sales-section.js';
 import { sharedListView } from './list-runtime.js';
+import { disclosure, pageSection } from './ui/primitives.js';
 import type { QueryDiagnosticCode } from './message-catalog.js';
 import {
   messageAttributes,
@@ -101,7 +109,11 @@ export type SurfaceDataRenderState =
     }
   | {
       readonly records: readonly SemanticRecordDto[];
-      readonly receiving?: ReceivingSection;
+      // Module presentations attached by the composed application extension.
+      // Each is typed data, never markup: the slot renderers below decide
+      // where it appears, so a module cannot place content outside its slot.
+      readonly purchaseOrder?: PurchaseOrderDocument;
+      readonly purchaseOrderList?: PurchaseOrderWorklist;
       readonly receivingNavigation?: ReceivingNavigation;
       readonly salesOrder?: SalesOrderSection;
       readonly packingDocument?: ShipmentPackingDocument;
@@ -400,6 +412,20 @@ function renderDataGrid(context: SurfaceComponentContext): string {
     );
   }
   const records = data.status === 'READY' ? data.records : [];
+  if (
+    data.status === 'READY' &&
+    data.purchaseOrderList &&
+    data.result?.listCoverage
+  ) {
+    return slotPanel(
+      context,
+      `${feedbackHtml(context.feedback)}${renderPurchaseOrderWorklist(
+        data.purchaseOrderList,
+        listFrame(context, data.result),
+      )}`,
+      'data-grid-slot',
+    );
+  }
   const html =
     data.status === 'EMPTY'
       ? emptyDataPanel()
@@ -420,6 +446,11 @@ function renderDataGrid(context: SurfaceComponentContext): string {
 function renderBulkActions(context: SurfaceComponentContext): string {
   const data = context.data ?? { status: 'UNBOUND' as const };
   if (data.status === 'UNBOUND' || data.status === 'DIAGNOSTIC') {
+    return slotPanel(context, '', 'bulk-actions-slot');
+  }
+  // A module worklist renders no selection checkboxes, so a bar inviting the
+  // user to "select records" would be a control with nothing to act on.
+  if (data.status === 'READY' && data.purchaseOrderList) {
     return slotPanel(context, '', 'bulk-actions-slot');
   }
   const formId = bulkSelectionFormId(context.surface);
@@ -560,6 +591,14 @@ function renderBreadcrumb(context: SurfaceComponentContext): string {
 
 function renderTitleStatus(context: SurfaceComponentContext): string {
   const record = recordFrom(context.data);
+  const document = documentPresentation(context);
+  if (document) {
+    return slotPanel(
+      context,
+      `${renderPurchaseOrderHeading(document)}${feedbackHtml(context.feedback)}`,
+      'title-status-slot',
+    );
+  }
   const form = context.surface.surfaceRole === 'form';
   const title = form
     ? `${record ? 'Edit' : 'New'} ${entityLabel(context.surface)}`
@@ -733,6 +772,14 @@ function renderKeyFacts(context: SurfaceComponentContext): string {
     return slotPanel(context, dataDiagnostic(data.code), 'key-facts-slot');
   }
   const record = recordFrom(data);
+  const document = documentPresentation(context);
+  if (document) {
+    return slotPanel(
+      context,
+      renderPurchaseOrderKeyFacts(document),
+      'key-facts-slot',
+    );
+  }
   if (!record && context.surface.surfaceRole === 'form') {
     return slotPanel(
       context,
@@ -770,10 +817,11 @@ function renderSections(context: SurfaceComponentContext): string {
   }
   const record = recordFrom(data);
   if (context.surface.surfaceRole === 'record') {
+    const document = documentPresentation(context);
     return slotPanel(
       context,
       record
-        ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><h2>${escapeHtml(entityLabel(context.surface))} information</h2></div></div><details class="record-section-group" open><summary>${escapeHtml(entityLabel(context.surface))} fields</summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${renderValue(record.values[fieldId])}</dd></div>`).join('')}</dl></details></section>`
+        ? `${document ? renderPurchaseOrderSections(document) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}${renderRecordFields(context, record, document !== undefined)}`
         : dataDiagnostic('QUERY_NOT_FOUND'),
       'sections-slot',
     );
@@ -805,6 +853,36 @@ function renderSections(context: SurfaceComponentContext): string {
     `${compatibilityFeedback}<section class="panel data-panel" data-data-state="${record ? 'exact' : 'empty'}"><div class="panel__heading"><div><h2>${record ? 'Update the record' : 'Create a record'}</h2></div></div>${relationContent.freeze}<form id="surface-record-form" method="post" action="${escapeHtml(surfaceHref(context.surface, undefined, false, context))}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(recordId)}">${record ? `<input type="hidden" name="expectedRevision" value="${record.revision}">` : ''}<div class="form-fields">${relationContent.controls}${renderFormFields(context, operation, record)}</div></form></section>`,
     'sections-slot',
   );
+}
+
+/**
+ * Every field of the record, exactly as stored.
+ *
+ * On a generic Record page this IS the content, so it renders open under its
+ * own heading. Where a module document presentation already shows the same
+ * facts in a designed form, it becomes supplementary detail: still present,
+ * still one click away and announced with its field count, but collapsed
+ * (the ux-grammar `progressive` tier).
+ */
+function renderRecordFields(
+  context: SurfaceComponentContext,
+  record: SemanticRecordDto,
+  supplementary: boolean,
+): string {
+  const label = entityLabel(context.surface);
+  const fields = `<dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${renderValue(record.values[fieldId])}</dd></div>`).join('')}</dl>`;
+  return supplementary
+    ? pageSection({
+        attributes: { 'data-data-state': 'exact' },
+        bodyHtml: disclosure({
+          attributes: { 'data-record-fields': 'supplementary' },
+          bodyHtml: fields,
+          hint: `${String(context.surface.fieldIds.length)} fields, as stored`,
+          summary: `${label} record`,
+        }),
+        density: 'flush',
+      })
+    : `<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><h2>${escapeHtml(label)} information</h2></div></div><details class="record-section-group" open><summary>${escapeHtml(label)} fields</summary>${fields}</details></section>`;
 }
 
 function renderSalesOrderSection(section: SalesOrderSection): string {
@@ -1119,6 +1197,62 @@ function previousPageHref(
   coverage: NonNullable<SemanticQueryResultEnvelope['listCoverage']>,
   linkContext?: Pick<SurfaceComponentContext, 'legalEntitySelection' | 'view'>,
 ): string {
+  const location = previousPageLocation(surface, coverage, linkContext);
+  return location
+    ? `<a class="list-page-link" href="${escapeHtml(location)}">Previous page</a>`
+    : '';
+}
+
+/**
+ * The shared List mechanics a module presentation needs but must not
+ * reimplement: where search submits, where paging goes and what coverage the
+ * result reported. Computed from the same helpers as the generic grid, so a
+ * module's list pages, searches and scopes exactly like every other list.
+ */
+function listFrame(
+  context: SurfaceComponentContext,
+  result: SemanticQueryResultEnvelope,
+): ListFrame {
+  const coverage = sharedListView(result).listCoverage;
+  const preserved = listParameters(
+    context.surface,
+    coverage.search,
+    coverage.includeArchived,
+    context,
+  );
+  preserved.delete('q');
+  const first = coverage.returnedCount === 0 ? 0 : coverage.pageOffset + 1;
+  const last = coverage.pageOffset + coverage.returnedCount;
+  const form = relatedSurface(context, 'form');
+  const previous = previousPageLocation(context.surface, coverage, context);
+  return {
+    ...(coverage.search.length > 0
+      ? { clearSearchHref: `/?${preserved.toString()}` }
+      : {}),
+    coverageLabel: `${String(first)}–${String(last)} of ${String(coverage.totalCount)}`,
+    ...(form ? { newHref: surfaceHref(form, undefined, false, context) } : {}),
+    ...(coverage.nextCursor
+      ? {
+          nextHref: nextPageHref(
+            context.surface,
+            coverage.nextCursor,
+            coverage.search,
+            coverage.includeArchived,
+            context,
+          ),
+        }
+      : {}),
+    ...(previous ? { previousHref: previous } : {}),
+    search: coverage.search,
+    searchPreserved: [...preserved.entries()],
+  };
+}
+
+function previousPageLocation(
+  surface: CompiledSurfaceDefinition,
+  coverage: NonNullable<SemanticQueryResultEnvelope['listCoverage']>,
+  linkContext?: Pick<SurfaceComponentContext, 'legalEntitySelection' | 'view'>,
+): string {
   if (coverage.pageOffset === 0 || !linkContext) return '';
   const previousOffset = Math.max(
     0,
@@ -1155,7 +1289,7 @@ function previousPageHref(
       ),
     );
   }
-  return `<a class="list-page-link" href="/?${escapeHtml(parameters.toString())}">Previous page</a>`;
+  return `/?${parameters.toString()}`;
 }
 
 function listParameters(
@@ -1286,6 +1420,23 @@ function feedbackHtml(
 
 function emptyDataPanel(): string {
   return `<section class="panel data-empty" data-data-state="empty"><h2>No records yet</h2><p class="lede">This view has no visible records for the current tenant, environment, and principal.</p></section>`;
+}
+
+/**
+ * The module document presentation for a Record page, when one was attached
+ * AND the surface carries the slots it is designed across. A surface missing
+ * `titleStatus` or `commandBar` keeps the generic rendering, whose
+ * compatibility paths put status and lifecycle actions in `keyFacts` instead.
+ */
+function documentPresentation(
+  context: SurfaceComponentContext,
+): PurchaseOrderDocument | undefined {
+  return context.surface.surfaceRole === 'record' &&
+    context.data?.status === 'READY' &&
+    hasSurfaceSlot(context, 'titleStatus') &&
+    hasSurfaceSlot(context, 'commandBar')
+    ? context.data.purchaseOrder
+    : undefined;
 }
 
 function recordFrom(

@@ -26,6 +26,7 @@ import {
   type SurfaceRelationPickerState,
 } from './component-registry.js';
 import { DESIGN_TOKENS } from './design-tokens.js';
+import { PRIMITIVE_STYLES } from './ui/primitives-styles.js';
 import { escapeHtml, shortIdentity } from './html.js';
 import {
   operationMessageRef,
@@ -67,6 +68,21 @@ type ReadySurfaceData = Extract<SurfaceDataRenderState, { status: 'READY' }>;
 
 export interface SurfaceRuntimeApplicationExtension {
   augmentRecordData(context: {
+    readonly binding: CompiledSurfaceDataBinding;
+    readonly data: ReadySurfaceData;
+    readonly legalEntitySelection: readonly string[];
+    readonly queryGateway: SemanticQueryGateway;
+    readonly surface: CompiledSurfaceDefinition;
+    readonly surfaces: readonly CompiledSurfaceDefinition[];
+    readonly view: RuntimeViewContract.RequestRuntimeView;
+  }): Promise<ReadySurfaceData>;
+  /**
+   * The List counterpart of `augmentRecordData`: an explicitly composed
+   * application contribution may attach a module's own presentation of the
+   * page of records the shared list query already returned. Optional, so a
+   * contribution with nothing to say about lists declares nothing.
+   */
+  augmentListData?(context: {
     readonly binding: CompiledSurfaceDataBinding;
     readonly data: ReadySurfaceData;
     readonly legalEntitySelection: readonly string[];
@@ -246,6 +262,21 @@ export async function renderSurfaceRuntimeWithData(
         gateways.applicationExtension
       ) {
         data = await gateways.applicationExtension.augmentRecordData({
+          binding,
+          data,
+          legalEntitySelection,
+          queryGateway: gateways.queryGateway,
+          surface: selection.selected,
+          surfaces: selection.surfaces,
+          view,
+        });
+      }
+      if (
+        data.status === 'READY' &&
+        selection.selected.surfaceRole === 'list' &&
+        gateways.applicationExtension?.augmentListData
+      ) {
+        data = await gateways.applicationExtension.augmentListData({
           binding,
           data,
           legalEntitySelection,
@@ -1626,12 +1657,13 @@ body:has(.record-selector__input:checked) .bulk-ready{display:inline-grid}
 .skeleton::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent 0%,var(--skeleton-sheen) 50%,transparent 100%);transform:translateX(-100%);animation:skeleton-sweep var(--shimmer-duration) linear infinite}
 @keyframes skeleton-sweep{to{transform:translateX(100%)}}
 @media (prefers-reduced-motion:reduce){.skeleton::after{animation:none;display:none}}
+${PRIMITIVE_STYLES}
 @media (prefers-reduced-motion:no-preference){.sidebar a,.navigation-group>summary,.primary-action,.secondary-action,.list-page-link,.record-link,.data-table-wrap tbody tr,button{transition:background-color var(--motion-duration) var(--motion-easing),border-color var(--motion-duration) var(--motion-easing),color var(--motion-duration) var(--motion-easing),opacity var(--motion-duration) var(--motion-easing)}}
 @media print{body *{visibility:hidden}.packing-document,.packing-document *{visibility:visible}.packing-document{position:absolute;inset:0;width:100%;border:0;box-shadow:none}.print-guidance{display:none}}
 @media(max-width:800px){
 body{padding-bottom:72px}
 .app-shell{display:block}
-.sidebar{position:fixed;z-index:4;right:0;bottom:0;left:0;width:100%;height:auto;padding:var(--space-1);border-top:1px solid var(--line-on-rail);background:var(--surface-rail)}
+.sidebar{position:fixed;z-index:4;top:auto;right:0;bottom:0;left:0;width:100%;height:auto;padding:var(--space-1);border-top:1px solid var(--line-on-rail);background:var(--surface-rail)}
 .brand,.release-card,.nav-label{display:none}
 .sidebar .navigation-tree{display:grid;grid-template-columns:repeat(var(--compact-nav-count,4),minmax(0,1fr));gap:var(--space-1);margin:0;overflow:visible}
 .navigation-tree>li{min-width:0}

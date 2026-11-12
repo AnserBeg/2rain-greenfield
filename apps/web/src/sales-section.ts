@@ -524,6 +524,8 @@ export const COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION = Object.freeze({
       ),
     };
   },
+  // Lists: only purchasing contributes one today, so it passes straight through.
+  augmentListData: RECEIVING_SURFACE_RUNTIME_EXTENSION.augmentListData,
   refreshAfterOperation(
     context: Parameters<
       typeof RECEIVING_SURFACE_RUNTIME_EXTENSION.refreshAfterOperation

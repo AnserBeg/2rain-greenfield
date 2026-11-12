@@ -156,7 +156,7 @@ async function journey(
   await page.getByRole('button', { name: 'Release', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Release complete');
   const progress = page.locator(`[data-order-line="${orderLineId}"]`);
-  await expect(progress.locator('td')).toHaveText([itemId, '5', '0', '5']);
+  await expect(progress.locator('[data-quantity]')).toHaveText(['5', '0', '5']);
   await page
     .getByRole('link', { name: 'Create goods receipt', exact: true })
     .click();
@@ -237,7 +237,11 @@ async function journey(
     ).toHaveCount(1);
     expect(await deniedPosts()).toBe(deniedBefore + 1);
     await page.goto(orderUrl);
-    await expect(progress.locator('td')).toHaveText([itemId, '5', '0', '5']);
+    await expect(progress.locator('[data-quantity]')).toHaveText([
+      '5',
+      '0',
+      '5',
+    ]);
   } finally {
     await pool.query(
       `UPDATE platform.current_policy_permission_grants SET revoked_at=NULL WHERE ${grantWhere}`,
@@ -258,7 +262,7 @@ async function journey(
       exact: true,
     })
     .click();
-  await expect(progress.locator('td')).toHaveText([itemId, '5', '3', '2']);
+  await expect(progress.locator('[data-quantity]')).toHaveText(['5', '3', '2']);
   console.log(
     `RECEIVING_AUTHORIZED_WALKTHROUGH ${JSON.stringify({ orderUrl, receiptUrl: url('goods_receipt', 'detail', receiptId), ordered: '5', received: '3', remaining: '2', revokedPostDenied: true })}`,
   );
@@ -282,7 +286,7 @@ async function journey(
   await command('Amend');
   await expect(page.getByRole('status')).toContainText('Amend complete');
   await page.goto(orderUrl);
-  await expect(progress.locator('td')).toHaveText([itemId, '3', '3', '0']);
+  await expect(progress.locator('[data-quantity]')).toHaveText(['3', '3', '0']);
 
   const originalMovements = await movementsFor(receiptId);
   expect(originalMovements).toHaveLength(1);
@@ -314,7 +318,7 @@ async function journey(
   await command('Post');
   await expect(page.getByRole('status')).toContainText('Post complete');
   await page.goto(orderUrl);
-  await expect(progress.locator('td')).toHaveText([itemId, '3', '2', '1']);
+  await expect(progress.locator('[data-quantity]')).toHaveText(['3', '2', '1']);
   expect(await movementsFor(receiptId)).toEqual(originalMovements);
 
   const reversalId = await compensatingReceipt(
@@ -378,7 +382,7 @@ async function journey(
     );
   }
   await page.goto(orderUrl);
-  await expect(progress.locator('td')).toHaveText([itemId, '3', '0', '3']);
+  await expect(progress.locator('[data-quantity]')).toHaveText(['3', '0', '3']);
   expect(await movementsFor(receiptId)).toEqual(originalMovements);
   console.log(
     `RECEIVING_LIFECYCLE_WALKTHROUGH ${JSON.stringify({ orderUrl, correctionUrl: url('goods_receipt', 'detail', correctionId), reversalUrl: url('goods_receipt', 'detail', reversalId), ordered: '3', received: '0', remaining: '3', committedReadBackWithheld: true })}`,

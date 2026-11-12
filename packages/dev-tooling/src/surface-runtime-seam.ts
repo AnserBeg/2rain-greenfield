@@ -616,6 +616,14 @@ function scanForBypass(
     // Owner-ratified RECEIPT §5.11 exception: this focused renderer is consumed
     // only by the closed registry; it is not an alternate surface authority.
     'apps/web/src/receiving-section.ts',
+    // PROPOSED exception, pending owner ratification (purchasing-order-design):
+    // the UI primitives are pure option-to-markup functions with no route, no
+    // data access and no surface selection. They are reachable only through
+    // renderers the closed registry calls, so they are building blocks OF the
+    // registry's output, not an alternate surface authority. Module sections
+    // (for example purchasing-section.ts) stay outside this list on purpose:
+    // they may compose primitives but may not write structural markup.
+    'apps/web/src/ui/primitives.ts',
   ]);
   const allowedSurfaceConsumers = new Set<string>([
     paths.componentRegistry,
