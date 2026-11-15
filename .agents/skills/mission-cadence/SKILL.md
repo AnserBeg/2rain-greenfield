@@ -11,15 +11,15 @@ description: How a vertical is chartered, worked continuously, checkpointed for
 A **vertical** is one user-visible capability end to end — the goods receipt
 from document to posted movement to visible received quantity, or the sale from
 order to shipment. It is chartered once, worked by one writer lane
-continuously, checkpointed per slice, reviewed once at the end (`review-tiers`),
-integrated once.
+continuously, checkpointed per slice, merged once on CI green. The trunk is read
+afterwards (`review-tiers`).
 
 ## The charter (the orchestrator writes it, ≤ 60 lines)
 
 1. Outcome in the user's words, and the slices in order (each user-observable).
 2. Lease: the paths the writer owns. Bridges the writer will foreseeably need
-   are granted in advance. `ls` every path; check `lanes.md` for the other lane.
-3. Which paths are in the Critical set (`AGENTS.md` §4) and therefore reviewed.
+   are granted in advance. `ls` every path.
+3. Which paths are in the Critical set (`AGENTS.md` §4): its merge is logged `unread`.
 4. Decisions already made (with the ADR or plan section) and decisions the
    writer may take alone. Anything on the STOP list is named here.
 5. Gates: CI on push; `scripts/check-records.sh` before freeze.
@@ -52,12 +52,11 @@ diff. The user tests when they choose; the writer does not wait.
    commit, which carries a `Packet:` trailer), `changedPaths`, `symbols`.
    `scripts/check-records.sh` must be green. A narrative-only packet declares
    nothing and owes no block.
-3. If the Critical set was touched: the review prompt (≤ 40 lines, per
-   `review-tiers`) at the bottom of the record. Otherwise write
-   `Review: not owed — outside the Critical set`.
-4. **No arm owed → integrate yourself** (`git-workflow`, Integration) and report: merge SHA, CI run, the record, the test-it-yourself list. **Arm owed → stop** with the same report plus the prompt; the orchestrator integrates after the arm.
+3. **Integrate yourself** (`git-workflow`, Integration); the review-log row says
+   `merged — no Critical path` or `merged — unread`.
+4. Report: merge SHA, CI run, the record, the test-it-yourself list, and whether the unread range now owes a read (`review-tiers`).
 
-## The packet record — at most 150 lines
+## The packet record — at most 80 lines
 
 ```
 # <packet> — <outcome in one sentence>
@@ -65,28 +64,26 @@ Status / tier / Critical paths touched / stops taken
 ## Claims        (numbered; one line each; the review tests these)
 ## Decisions     (one line each: what, why, where it is written down)
 ## Slices        (one line each with its test-it-yourself anchor)
-## Controls      (Critical set only: manifest entry -> claim it kills)
+## Controls      (silent-harm claims only: manifest entry -> claim it kills)
 ## Gates         (CI run URL/SHA; check-records; anything red, stated)
 ## Test it yourself
 ## Filed         (non-blocking findings, one line each -> archive table)
-## Review prompt (if owed)
 record-claim block
 ```
 
-Ledger row, lane row and review-log row: **one line each**. No prose history in
+Ledger row and review-log row: **one line each**. No prose history in
 rows; history is `git log`.
 
 ## Roles and who integrates (corrected 2026-09-05)
 
-- **BUILD agent** — owns the vertical end to end. Outside the Critical set it
-  **integrates itself**: `--no-ff` merge into `main` on CI green, one ledger
-  row, one lane row, one `no arm owed` review-log row, push. Nobody else is in
-  the loop.
-- **Orchestrator** — a session opened to charter the next vertical, to
-  adjudicate the one Critical arm and integrate that vertical, and for
-  stage-boundary reviews. Not a standing relay.
-- **User** — tests at checkpoints; pastes one Critical review prompt and its
-  verdict when owed.
+- **BUILD agent** — owns the vertical end to end and **integrates itself**:
+  `--no-ff` merge into `main` on CI green, one ledger row, one review-log row,
+  push. Nobody else is in the loop.
+- **Orchestrator** — a session opened to charter the next vertical, to write
+  and adjudicate the read of the trunk when one is owed, and for stage-boundary
+  reviews. Not a standing relay.
+- **User** — tests at checkpoints; pastes one read prompt and its verdict when
+  a read is owed.
 - **Parallelism is by dependency.** Two verticals sharing the mount chain or the
   posting kernel are serial; otherwise parallel, no lease. Each vertical runs in
   its own worktree.
