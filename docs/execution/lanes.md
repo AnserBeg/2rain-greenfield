@@ -1,5 +1,7 @@
 # Parallel lanes — coordination protocol
 
+> **RETIRED 2026-11-15** (`AGENTS.md` §6): one trunk, branches merge within two days, and `gh pr list` shows what is open. No new rows; everything below is history.
+
 > **2026-09-04 — TWO LANES, NOT FOUR.** `AGENTS.md` §3: BUILD holds the critical path
 > (one vertical at a time, worked continuously); SUPPORT holds rulings, reviews,
 > docs and small correctives on paths BUILD does not own. No third lane is started.

@@ -5,7 +5,7 @@
 - **R1, "Yes, write week 1":** `packet/INTEGRATION` becomes `main`'s trunk, superseding PR #29's "do not merge". ADR-0066's re-baseline (ruling I1) now stands on `main`; pre-tenant mode holds; a dev database built from an older lineage runs `dev:reset`. Record and Critical arm: [INTEGRATION](packets/INTEGRATION.md).
 - **R2, feature freeze until the week-6 decision:** no new distributor features, no nav relabeling, and the parked set is not folded in: UNITS, SPECIAL-ORDER + DROP-SHIP, STOCK-COUNTS, RETURNS, RETURNABLE-ASSETS, LOCATIONS-2, PRs #32-#34, the item page (I-V1).
 - **The six-week test.** Week 1: the trunk. Weeks 1-2, the agent: the five tools over existing operations; ten real-model tasks; record the success rate and the cost per completed task. Weeks 2-5, customization: a new record type, field, choice or layout is AI-drafted, compiled, shown to the owner as a plain diff, approved, activated, and one click rolls it back. **Week 6, decide:** a non-developer gets a new record type live in under ten minutes, rollback works, nothing else breaks, and the agent completes at least 8 of 10 tasks.
-- **Speed rules.** One trunk. A branch merges within two days or is dropped. CI green is the gate. Heavy evidence (expected-red controls, the arm) only for the Critical set.
+- **Speed rules.** One trunk. A branch merges within two days or is dropped. CI green is the gate; review reads the trunk after the merge (`AGENTS.md` §4, amended 2026-11-15). Heavy evidence (expected-red controls) only for silent-harm claims.
 - **Stage state, stated plainly.** G3 is at 14 of 17 gate criteria (`rulings/g3-completion.md`); the trunk packet claims no stage gate. The agent packet is not chartered here.
 
 ---
@@ -20,8 +20,8 @@
    Verticals are never split for review size; parallelism is by dependency, not
    by file lease.
 2. **CI green at the pushed SHA is the acceptance matrix.** No local matrix, no lock.
-3. **One review arm, only when the Critical set is touched, production defects
-   only.** Everything else ships on tests and the user's click-through.
+3. **Nothing waits for a review** (amended 2026-11-15): a vertical merges on CI
+   green; one read of the trunk's Critical diff is owed by trigger (`AGENTS.md` §4).
 4. **Pre-tenant mode** (ADR-0066): a refused storage transition is a re-baseline,
    not an enabler packet.
 5. **Records are one page; rows are one line; the doctrine is frozen until
