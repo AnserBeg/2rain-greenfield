@@ -57,7 +57,7 @@ Authored file 1,563,797 B (normalized 1,627,095 = 38.8% of 4 MiB); compiled 6,68
 
 - Local at `e7d48106`: format, typecheck, lint, `check:app-release`, `check:demo-release`, `check:language-coverage` (2,867 obligations PASS), `check:schema` (28 applied, 28 verified), `check:expected-red` (169), unit 255, compiler 176, integration 259, agent 3, contracts 46, architecture 200 (Docker-backed files included). The same set is re-run after `e0de6c87`; the report states the result.
 - CI at `e7d48106` ([run 43684418232](https://github.com/AnserBeg/2rain-greenfield/actions/runs/43684418232), 2026-11-15): 13 of 14 jobs green; Dependency and secret scans red on the zod advisory only (gitleaks clean). Totals: unit 255, compiler 176, integration 259, agent 3, architecture 200, contracts 46; PostgreSQL schema 163 + locale 1, inventory 83, commercial 14, sales 10, composed 24; browser 87, operations 12, inventory 11, composed 23; observability 11; performance 6.
-- CI at the frozen SHA and the final tip: in the report. Nothing here is evidence for them.
+- CI at the frozen SHA `781cd809` ([run 43687745926](https://github.com/AnserBeg/2rain-greenfield/actions/runs/43687745926), attempt 2): all 14 jobs green. Attempt 1 failed only the exclusive performance job, `COMPILE_BUDGET_INDETERMINATE` (CPU idle 72.5% below the 90% floor), which skipped reachability; the whole workflow was re-run, no bound relaxed. The final tip is docs-only (report).
 
 ## Test it yourself (observed 2026-11-15 on fixture `dev-trunk-check`; about ten minutes by hand)
 
@@ -71,4 +71,31 @@ Authored file 1,563,797 B (normalized 1,627,095 = 38.8% of 4 MiB); compiled 6,68
 
 ## Review prompt
 
-Written after the freeze, below.
+Frozen SHA `781cd80910e6a0d82b4e5301a5f65d219bb6ecf6`; user-run, online, one fresh arm (`review-tiers`).
+
+```text
+You are a fresh reviewer. Repository `AnserBeg/2rain-greenfield` (https://github.com/AnserBeg/2rain-greenfield), branch `packet/INTEGRATION`, frozen SHA `781cd80910e6a0d82b4e5301a5f65d219bb6ecf6`.
+`git ls-remote origin packet/INTEGRATION` printed `781cd80910e6a0d82b4e5301a5f65d219bb6ecf6	refs/heads/packet/INTEGRATION` when this was written. Review that SHA (a later docs-only tip may exist; the Critical files are identical there). Base `fe97b63b` (`origin/main` `02217a67` carries no Critical change since).
+
+**Question (the only one):** is there a production defect in these paths under the claims below? Evidence depth, wording and records are not asked.
+
+**Critical paths and exact ranges** (all under `packages/postgres-provider/src/`):
+1. `inventory-posting-service.ts`: `git diff fe97b63b 781cd809 -- <file>` (+43 -15, POSTING-FORWARD-DATE). Writer states it equals `aeef2b65` (`git diff aeef2b65 781cd809 -- <file>` is empty). Adjacent, not Critical by name: `inventory-posting-error.ts` is +22 lines since `aeef2b65`, error-code union members only (CREDIT_*, PAYABLES_*, RECEIVABLES_*).
+2. `module-storage-materializer.ts`: `git diff fe97b63b 781cd809 -- <file>` (+45 -2). Two parts: grant hunks `fe97b63b..974ae755` (+28 -2); the relation-column hunk in `locateColumn` `974ae755..781cd809` (+17).
+3. `release-verification-service.ts`: `git diff fe97b63b 781cd809 -- <file>` (+459 -54); the file equals `packet/SALES-PARITY` `9967abe5`. Subrange `7d254902..781cd809` (+79 -54: `fe864f66` and `43b0b473`).
+No file under `db/**`, `platform-runtime/src/trust/`, `stock-serializer.ts` or `release-activation.ts` differs from base (writer's claim; check it).
+
+**Claims (the writer's, to test):**
+1. No posting family commits an effective business day after the tenant's recorded one (`enforceForwardDate`); stored and natural replays return first; backdating stays bounded by the window.
+2. `locateColumn` resolves a relation-owned column element (origin not `field`) uniquely by relation id and physical name and installs it nullable, no default.
+3. A column added later to a company-scoped table (not fact, not period-lock) gets the creation-time column UPDATE grant when entity-owned mutable; replaying a table's creation by another tenant revokes UPDATE only when a table-level grant exists.
+4. Verification sentinel numbers never read as or collide with a business number; verification reads only through gets and searches its gateway executes and leaves no probe record live; an assigned number counts as written by the create (SALES-PARITY claims 9, 20, 21).
+
+**Prior verdicts, stated as the writer's claims, not as facts:** claim 1: owner-run round 1 on `aeef2b65`, no production defect. Claim 3: round 1 of SALES-PARITY (`974ae755`) found none. Claim 2: no verdict exists. Claim 4: SALES-PARITY rounds 1-8 are recorded only in `docs/execution/packets/SALES-PARITY.md` (no `review-log.md` row); round 8 (`7d254902`) found two production defects, fixed in `fe864f66`; `43b0b473` landed after it; round 9 (confirm) has no recorded verdict.
+
+**Read:** `docs/architecture/posting-kernel-guarantees.md`, then the diffs above. Not the packet records.
+
+**Not verified by the writer:** no Postgres suite was run locally for the final tip (CI ran them); no expected-red control was executed in this lane (only the text check); whether the prior rounds' verdicts are as recorded; the semantics of claim 4 beyond what the tests assert; non-Critical code in the range (`inventory-posting-capability-executor.ts`, the `contracts.ts` family table, the zod 4.1.12 -> 4.6.6 bump `e0de6c87`); anything in the browser beyond one scripted buy-to-pay walk-through.
+
+**This framing is a claim under test and bounds nothing.** Read whatever you need, say plainly if this prompt steers you, and report any production defect (a wrong behaviour in `packages/**`, `apps/**` or `db/**`) with the input that exposes it; file anything else as one line.
+```
