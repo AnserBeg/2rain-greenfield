@@ -142,15 +142,15 @@ test('v3 and v4 select their profiles, reject mixed nodes, and leave adoption ex
   // absorbed deliberately rather than discovered. UPDATE it to the true new
   // values; never relax it to a relation between the two constants, because
   // "LATEST is at or after ADOPTED" holds in both states and observes neither.
-  assert.equal(LATEST_LANGUAGE_VERSION, LANGUAGE_VERSIONS.v5);
+  assert.equal(LATEST_LANGUAGE_VERSION, LANGUAGE_VERSIONS.v6);
   assert.equal(
     LATEST_NORMALIZATION_PROFILE_VERSION,
-    NORMALIZATION_PROFILE_VERSIONS.v5,
+    NORMALIZATION_PROFILE_VERSIONS.v6,
   );
-  assert.equal(ADOPTED_LANGUAGE_VERSION, LANGUAGE_VERSIONS.v5);
+  assert.equal(ADOPTED_LANGUAGE_VERSION, LANGUAGE_VERSIONS.v6);
   assert.equal(
     ADOPTED_NORMALIZATION_PROFILE_VERSION,
-    NORMALIZATION_PROFILE_VERSIONS.v5,
+    NORMALIZATION_PROFILE_VERSIONS.v6,
   );
   assert.deepEqual(SUPPORTED_LANGUAGE_VERSIONS, [
     LANGUAGE_VERSIONS.experimentalV0,
@@ -159,6 +159,7 @@ test('v3 and v4 select their profiles, reject mixed nodes, and leave adoption ex
     LANGUAGE_VERSIONS.v3,
     LANGUAGE_VERSIONS.v4,
     LANGUAGE_VERSIONS.v5,
+    LANGUAGE_VERSIONS.v6,
   ]);
   assert.deepEqual(SUPPORTED_NORMALIZATION_PROFILE_VERSIONS, [
     NORMALIZATION_PROFILE_VERSIONS.experimentalV0,
@@ -167,6 +168,7 @@ test('v3 and v4 select their profiles, reject mixed nodes, and leave adoption ex
     NORMALIZATION_PROFILE_VERSIONS.v3,
     NORMALIZATION_PROFILE_VERSIONS.v4,
     NORMALIZATION_PROFILE_VERSIONS.v5,
+    NORMALIZATION_PROFILE_VERSIONS.v6,
   ]);
   // Feature levels are cumulative in both directions that matter: a later
   // version answers yes to every earlier question, and the version below the
@@ -336,6 +338,7 @@ test('v3 and v4 select their profiles, reject mixed nodes, and leave adoption ex
     v3: 'v3',
     v4: 'v4',
     v5: 'v5',
+    v6: 'v6',
   });
   assert.deepEqual(NORMALIZATION_PROFILE_VERSIONS, {
     experimentalV0: 'northstar.normalization/v0-experimental',
@@ -344,6 +347,7 @@ test('v3 and v4 select their profiles, reject mixed nodes, and leave adoption ex
     v3: 'northstar.normalization/v3',
     v4: 'northstar.normalization/v4',
     v5: 'northstar.normalization/v5',
+    v6: 'northstar.normalization/v6',
   });
 });
 

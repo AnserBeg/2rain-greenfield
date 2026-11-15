@@ -10,6 +10,9 @@ import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '@north-star/postgres-provider
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/inventory-posting-capability-executor';
 import { FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/fulfillment-capability-executor';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/receiving-capability-executor';
+import { RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/receivables-capability-executor';
+import { PAYABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/payables-capability-executor';
+import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '@north-star/postgres-provider/purchase-order-approval-executor';
 import { createSurfaceRuntimeServer } from '@north-star/web/app-server';
 import { COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/sales-section';
 
@@ -19,6 +22,11 @@ import {
 } from '../../../packages/domain/src/app/seed.js';
 
 export interface ComposedApplicationServerOptions {
+  /**
+   * A compiled release envelope to serve instead of the checked-in one. Tests
+   * use it to serve a metadata-only variation through the unchanged runtime.
+   */
+  readonly compiledApplication?: unknown;
   readonly databaseUrl: string;
   readonly host?: string;
   readonly port?: number;
@@ -31,6 +39,8 @@ export interface ComposedApplicationServerOptions {
    */
   readonly seedProfile?: ComposedApplicationSeedProfile;
   readonly tenantSlug?: string;
+  /** The approval demo fixture opts in; tenant absence/default remains off. */
+  readonly purchaseOrdersRequireApproval?: true;
 }
 
 export interface RunningComposedApplication {
@@ -52,6 +62,12 @@ export interface ComposedApplicationSeedReceipt {
   };
 }
 
+/**
+ * The office's inventory policy (POSTING-FORWARD-DATE owner rulings,
+ * 2026-09-30): the business day is Calgary's, and a posting may be dated up to
+ * seven business days back. Provisioning asserts these against the stored
+ * values, so a changed value needs a fresh database (pre-tenant, ADR-0066).
+ */
 export const COMPOSED_APPLICATION_INVENTORY_SCOPE = Object.freeze({
   adjustmentApprovalThreshold: null,
   adjustmentReasonRequirement: 'codeAndNarrative',
@@ -64,11 +80,11 @@ export const COMPOSED_APPLICATION_INVENTORY_SCOPE = Object.freeze({
   entityCode: 'DEFAULT',
   entityName: 'Default legal entity',
   legalEntityId: '74000000-0000-4000-8000-000000000001',
-  maximumBackdateDays: 0,
+  maximumBackdateDays: 7,
   negativeStock: 'reject',
   rebaselineApprovalThreshold: null,
   rebaselineReasonRequirement: 'codeAndNarrative',
-  timeZone: 'UTC',
+  timeZone: 'America/Edmonton',
   transferApprovalThreshold: null,
   transferReasonRequirement: 'codeOnly',
 } as const satisfies InventoryScopeProvisioning);
@@ -81,17 +97,22 @@ export async function startComposedApplication(
   if (!['127.0.0.1', '::1', 'localhost'].includes(host)) {
     throw new Error('the composed demo identity may bind only to loopback');
   }
-  const compiledApplication = JSON.parse(
-    await readFile(
-      new URL('../../web/release/app.compiled.json', import.meta.url),
-      'utf8',
-    ),
-  ) as unknown;
+  const compiledApplication =
+    options.compiledApplication ??
+    (JSON.parse(
+      await readFile(
+        new URL('../../web/release/app.compiled.json', import.meta.url),
+        'utf8',
+      ),
+    ) as unknown);
   const runtime = await createComposedApplicationRuntime({
     capabilityOperationExecutorFactories: [
       INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
       RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
       FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY,
+      RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY,
+      PAYABLES_CAPABILITY_EXECUTOR_FACTORY,
+      PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY,
     ],
     compiledApplication,
     databaseUrl: options.databaseUrl,
@@ -121,12 +142,41 @@ export async function startComposedApplication(
       runtime,
       options.seedProfile ?? 'demo',
     );
-    server = createSurfaceRuntimeServer(runtime.entry, {
-      applicationExtension: COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION,
-      operationGateway: runtime.operationGateway,
-      operationMediation: runtime.operationMediation,
-      queryGateway: runtime.queryGateway,
-    });
+    if (options.purchaseOrdersRequireApproval) {
+      await runtime.entry.run(
+        { headers: { cookie: 'northstar-demo-actor=manager' } },
+        async (view) => {
+          await runtime.operationGateway.invoke(
+            view,
+            {
+              schemaVersion: 'northstar.semantic-operation-request/v1',
+              operationId: 'northstar.app:operation.purchasing_settings_create',
+              idempotencyKey: '74000000-0000-4000-8000-000000000098',
+              confirmationGrant: null,
+              input: {
+                recordId: '74000000-0000-4000-8000-000000000099',
+                values: {
+                  'northstar.app:field.purchasing_settings_key':
+                    'purchase-orders',
+                  'northstar.app:field.purchasing_settings_require_approval': true,
+                },
+              },
+            },
+            runtime.operationMediation.issueInvocation(view, 'UI'),
+          );
+        },
+      );
+    }
+    server = createSurfaceRuntimeServer(
+      runtime.entry,
+      {
+        applicationExtension: COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION,
+        operationGateway: runtime.operationGateway,
+        operationMediation: runtime.operationMediation,
+        queryGateway: runtime.queryGateway,
+      },
+      runtime.identityMode === 'LOCAL_DEMO' ? runtime.localDemoActors : null,
+    );
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
       server.listen(options.port ?? 4174, host, () => {
@@ -179,7 +229,11 @@ async function seedComposedApplication(
           {
             confirmationGrant: null,
             idempotencyKey: seed.idempotencyKey,
-            input: { recordId: seed.recordId, values: seed.values },
+            input: {
+              recordId: seed.recordId,
+              values: seed.values,
+              ...(seed.relations ? { relations: seed.relations } : {}),
+            },
             operationId: seed.operationId,
             schemaVersion: 'northstar.semantic-operation-request/v1',
           },

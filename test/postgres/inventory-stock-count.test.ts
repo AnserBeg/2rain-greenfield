@@ -60,6 +60,7 @@ import {
   type AuthenticatedIdentity,
   type TrustedRequestContext,
 } from '../../packages/runtime/src/request-context.js';
+import { assertComposedInventoryCollection } from '../helpers/assert-composed-inventory.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
 
 const migrations = resolve('db/migrations');
@@ -2410,9 +2411,20 @@ async function loadInventoryDefinition(): Promise<Record<string, unknown>> {
   const definition = (
     applicationBuilder.composedApplicationDefinition as () => unknown
   )();
+  // As the product mounts it: with stock documents (INVENTORY-PARITY)
+  // and a company's reorder rule (CATALOG-EXTRAS).
   const inventory = (
-    loaded.inventoryModuleDefinition as (namespace: string) => unknown
-  )(String(applicationBuilder.APPLICATION_NAMESPACE));
+    loaded.inventoryModuleDefinition as (
+      namespace: string,
+      options: {
+        readonly companyReorderRule: boolean;
+        readonly documentEntry: boolean;
+      },
+    ) => unknown
+  )(String(applicationBuilder.APPLICATION_NAMESPACE), {
+    companyReorderRule: true,
+    documentEntry: true,
+  });
   assert.ok(isRecord(definition));
   assert.ok(isRecord(inventory));
   for (const collection of [
@@ -2433,16 +2445,12 @@ async function loadInventoryDefinition(): Promise<Record<string, unknown>> {
     const inventoryEntries: readonly unknown[] = inventory[
       collection
     ] as readonly unknown[];
-    for (const inventoryEntry of inventoryEntries) {
-      assert.equal(
-        composedEntries.filter(
-          (candidate) =>
-            JSON.stringify(candidate) === JSON.stringify(inventoryEntry),
-        ).length,
-        1,
-        `composed application must contain each inventory ${collection} entry exactly once`,
-      );
-    }
+    assertComposedInventoryCollection(
+      collection,
+      composedEntries,
+      inventoryEntries,
+      String(applicationBuilder.APPLICATION_NAMESPACE),
+    );
   }
   assert.ok(Array.isArray(definition.modules));
   assert.ok(Array.isArray(inventory.modules));

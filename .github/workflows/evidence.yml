@@ -1,0 +1,179 @@
+name: Evidence on demand
+
+# Two heavy local steps, run on GitHub's runners only when a pull request asks
+# for them by label; without a label every job is skipped. The token is
+# read-only, so committing anything stays with the pull request's author.
+#
+#   run-controls    reproduce expected-red controls, one control per job
+#   regen-snapshot  regenerate the fresh-tenant full-replay schema snapshot
+#
+# A `labeled` event runs only the job for the label just added. A push, an open
+# or a reopen runs the jobs for every label the pull request carries. How to ask
+# for a run and cite it: docs/execution/evidence-on-demand.md.
+on:
+  pull_request:
+    types: [labeled, synchronize, opened, reopened]
+
+permissions:
+  contents: read
+
+# One run per pull request and trigger: a push cancels the previous push's run,
+# re-adding a label cancels that label's previous run, and an unrelated label
+# cancels nothing.
+concurrency:
+  group: evidence-${{ github.event.pull_request.number }}-${{ github.event.action == 'labeled' && github.event.label.name || 'head' }}
+  cancel-in-progress: true
+
+env:
+  CI: '1'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  select-controls:
+    name: Select expected-red controls
+    if: >-
+      (github.event.action == 'labeled' && github.event.label.name == 'run-controls') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-controls'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      names: ${{ steps.select.outputs.names }}
+      count: ${{ steps.select.outputs.count }}
+    steps:
+      - name: Check out the pull request head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+      # A `controls: a b` line in the body names exactly the controls to run;
+      # otherwise every manifest entry the head adds or changes runs.
+      - name: Select the controls this pull request adds, changes or names
+        id: select
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          node scripts/expected-red-on-demand.mjs select \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --output "$GITHUB_OUTPUT" \
+            --summary "$GITHUB_STEP_SUMMARY"
+
+  control:
+    name: expected-red ${{ matrix.control }}
+    needs: select-controls
+    if: needs.select-controls.outputs.count != '0'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        control: ${{ fromJSON(needs.select-controls.outputs.names) }}
+    steps:
+      - name: Check out the pull request head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install frozen dependencies
+        run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      # The runner's own rules apply unchanged: mutation first, the declared
+      # kills with their declared reasons, then the restored suite wholly green.
+      # The step bound leaves the job's last minutes for the report below.
+      - name: Reproduce the declared red, then the restored green
+        timeout-minutes: 40
+        env:
+          CONTROL: ${{ matrix.control }}
+        run: |
+          set +e
+          bash scripts/check-expected-red.sh --run "$CONTROL" 2>&1 |
+            tee "$RUNNER_TEMP/expected-red.log"
+          status="${PIPESTATUS[0]}"
+          echo "$status" >"$RUNNER_TEMP/expected-red.status"
+          exit "$status"
+      - name: Report the outcome
+        if: success() || failure()
+        env:
+          CONTROL: ${{ matrix.control }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          status="$(cat "$RUNNER_TEMP/expected-red.status" 2>/dev/null || echo none)"
+          node scripts/expected-red-on-demand.mjs outcome \
+            --name "$CONTROL" \
+            --status "$status" \
+            --log "$RUNNER_TEMP/expected-red.log" \
+            --sha "$HEAD_SHA" \
+            --summary "$GITHUB_STEP_SUMMARY"
+
+  regen-snapshot:
+    name: Regenerate the full-replay schema snapshot
+    if: >-
+      (github.event.action == 'labeled' && github.event.label.name == 'regen-snapshot') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'regen-snapshot'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the pull request head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install frozen dependencies
+        run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - name: Regenerate the snapshot against PostgreSQL
+        run: node --import tsx test/helpers/generate-fresh-tenant-full-replay-schema.ts
+      - name: Say whether it differs from the committed snapshot
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SNAPSHOT: test/postgres/fresh-tenant-full-replay-schema.snapshot.json
+        run: |
+          short="${HEAD_SHA:0:12}"
+          if ! git cat-file -e "HEAD:$SNAPSHOT" 2>/dev/null; then
+            line="NEW: no snapshot is committed at $short; download the artifact and commit it."
+            echo "::warning title=full-replay schema snapshot::$line"
+          elif git diff --quiet -- "$SNAPSHOT"; then
+            line="IDENTICAL to the snapshot committed at $short; nothing to commit."
+            echo "::notice title=full-replay schema snapshot::$line"
+          else
+            counts="$(git diff --numstat -- "$SNAPSHOT" | awk '{ print "+" $1 " -" $2 " lines" }')"
+            line="DIFFERS from the snapshot committed at $short ($counts); download the artifact and commit it."
+            echo "::warning title=full-replay schema snapshot::$line"
+            git --no-pager diff -- "$SNAPSHOT" | sed -n '1,200p'
+          fi
+          echo "$line"
+          {
+            echo '### Full-replay schema snapshot'
+            echo
+            echo "$line"
+            echo
+            echo "Artifact: \`full-replay-schema-snapshot-$HEAD_SHA\`"
+          } >>"$GITHUB_STEP_SUMMARY"
+      - name: Retain the regenerated snapshot
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: full-replay-schema-snapshot-${{ github.event.pull_request.head.sha }}
+          path: test/postgres/fresh-tenant-full-replay-schema.snapshot.json
+          if-no-files-found: error
+          retention-days: 7

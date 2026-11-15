@@ -3,19 +3,37 @@ import { dirname, resolve } from 'node:path';
 
 import type { FullConfig, Reporter } from '@playwright/test/reporter';
 
-import { getReachabilityProducer } from './reachability-producers.js';
+import {
+  getPlaywrightReachabilityProducer,
+  type PlaywrightReachabilityProducer,
+  type ReachabilityProducer,
+} from './reachability-producers.js';
 import { resolveReachabilityRunId } from './reachability-run.mjs';
 
-const producer = getReachabilityProducer('browser');
+/**
+ * Each Playwright config names the producer it runs as (`{ producer: id }`),
+ * so two browser jobs record their invocations side by side. A config that
+ * names none, or names anything but a Playwright producer, fails its run
+ * rather than writing another producer's evidence.
+ */
+export interface PlaywrightUnfilteredReporterOptions {
+  readonly producer?: unknown;
+}
 
 export default class PlaywrightUnfilteredReporter implements Reporter {
+  private readonly producerId: unknown;
   private violation: string | undefined;
+
+  constructor(options: PlaywrightUnfilteredReporterOptions = {}) {
+    this.producerId = options.producer;
+  }
 
   onBegin(config: FullConfig): void {
     try {
+      const producer = getPlaywrightReachabilityProducer(this.producerId);
       const argv = process.argv.slice(2);
-      assertUnfilteredPlaywrightRun(argv, config);
-      writeObservedInvocation(argv);
+      assertUnfilteredPlaywrightRun(producer, argv, config);
+      writeObservedInvocation(producer, argv);
     } catch (error) {
       this.violation = error instanceof Error ? error.message : String(error);
       process.stderr.write(`${this.violation}\n`);
@@ -32,6 +50,7 @@ export default class PlaywrightUnfilteredReporter implements Reporter {
 }
 
 export function assertUnfilteredPlaywrightRun(
+  producer: Pick<ReachabilityProducer, 'argv'>,
   arguments_: readonly string[],
   config: Pick<FullConfig, 'grep' | 'grepInvert' | 'projects' | 'shard'>,
 ): void {
@@ -61,10 +80,10 @@ export function assertUnfilteredPlaywrightRun(
   }
 }
 
-function writeObservedInvocation(argv: readonly string[]): void {
-  if (!producer.invocationEvidencePath) {
-    throw new Error('Browser producer is missing its invocation evidence path');
-  }
+function writeObservedInvocation(
+  producer: PlaywrightReachabilityProducer,
+  argv: readonly string[],
+): void {
   const repositoryRoot = resolve('.');
   const path = resolve(repositoryRoot, producer.invocationEvidencePath);
   const runId = resolveReachabilityRunId({ repositoryRoot });

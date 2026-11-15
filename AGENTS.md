@@ -2,8 +2,8 @@
 
 Single operating doctrine for every agent in this repository. CLAUDE.md points
 here. **Rewritten 2026-09-04 by user ruling** to remove the overhead the first six
-weeks accumulated; the previous doctrine is preserved verbatim under
-`.agents/skills/*/ARCHIVE.md` and in git history. If anything here conflicts
+weeks accumulated; **§3-§6 amended 2026-11-15** (one trunk; review after the
+merge). Earlier doctrine is verbatim under `.agents/skills/*/ARCHIVE.md`. If anything here conflicts
 with the plan or an accepted ADR, say so and stop — do not improvise.
 
 ## 1. What this repository is
@@ -12,8 +12,7 @@ with the plan or an accepted ADR, say so and stop — do not improvise.
   `docs/greenfield-north-star-erp-platform-plan.md`. Authority order:
   plan > accepted ADRs (`docs/decisions/`) > skills (`.agents/skills/`) > this file.
 - Execution state: `docs/execution/ledger.md` (what landed),
-  `docs/execution/current-plan.md` (what is next; read its top section first),
-  `docs/execution/lanes.md` (who holds which paths right now).
+  `docs/execution/current-plan.md` (what is next; read its top section first).
 - The prior repository `/home/rvham/2rain_erp` is a read-only quarry
   (`salvage-admission` skill).
 
@@ -34,31 +33,29 @@ transition. The kernel's immutability mechanics stay in code and in tests.
 
 **The unit is a vertical**: everything an office worker needs for one
 user-visible capability (the goods receipt end to end, then the sale). It is
-chartered once, worked continuously, reviewed once at the end on its Critical
-paths (§4). **A vertical is never split by review size or lease convenience.** It
+chartered once, worked continuously and merged on CI green. **A vertical is never split by review size or lease convenience.** It
 splits only at a user-observable boundary, and only by the orchestrator.
 
 **Partition by dependency, not by file.** The serialization in this codebase is
 the mount chain — `builder.ts`, the release lineage, the migration number — plus
 the posting kernel and the three record files. Two verticals that both mount a
 module or both enter the posting kernel run **one after the other**; leases
-between them are pointless. Two verticals that share none of that run in
-parallel with no lease at all. Today: RECEIPT then SALE are serial; AUTH runs
-beside either.
+between them are pointless; two that share none of that run in parallel with no
+lease. **One trunk:** a branch is cut from `main`, never stacked on another, and
+merges within two days or is dropped.
 
 **Topology — the human is not the message bus.**
 
 - **The BUILD agent owns the vertical end to end**: reads the charter, builds
-  every slice, pushes, and **integrates its own vertical on CI green when no
-  review arm is owed** (`git-workflow`, Integration). It writes the record and
-  the three one-line rows itself.
+  every slice, pushes, and **integrates its own vertical on CI green**
+  (`git-workflow`, Integration). It writes the record and its two rows itself.
 - **The orchestrator is a session opened for three jobs only**: charter the next
-  vertical (≤ 60 lines); adjudicate the one Critical arm by reading the code and
-  integrate that vertical; keep the plan honest at stage boundaries. It is not a
-  relay and it does not stand between the writer and `main`.
+  vertical (≤ 60 lines); write and adjudicate the read of the trunk when one is
+  owed (§4); keep the plan honest at stage boundaries. It is not a relay and it
+  does not stand between the writer and `main`.
 - **The user does two things**: tests the product at each slice's "Test it
-  yourself", and pastes exactly one Critical review prompt and its verdict when
-  a vertical touches the Critical set. Nothing else passes through the user.
+  yourself", and pastes one read prompt and its verdict when a read is owed —
+  per trigger, never per vertical. Nothing else passes through the user.
 - **Reviewers and writers read the kernel note, not the records.**
   `docs/architecture/posting-kernel-guarantees.md` states what the posting
   kernel guarantees, at which symbol, and why, in under sixty lines. The
@@ -73,34 +70,35 @@ the slice; (d) a design fork with product-visible consequences the plan does
 not settle. Everything else the writer decides, notes in one line, and
 continues. Mechanics: `mission-cadence`.
 
-## 4. Review — one arm, on the Critical set only
+## 4. Review — one read of the trunk, after the merge
 
-- **Critical set:** `packages/postgres-provider/src/inventory-posting-service.ts`,
+- **Nothing waits for a review.** While pre-tenant (no `rulings/first-tenant.md`,
+  ADR-0066's switch) a vertical merges on CI green; review reads `main` afterwards.
+- **Critical set** (by path; nobody classifies their own diff out of it):
+  `packages/postgres-provider/src/inventory-posting-service.ts`,
   `stock-serializer.ts`, the posting trigger and rebuild in
   `module-storage-materializer.ts`, `release-activation.ts`,
   `release-verification-service.ts`, the trust substrate under
   `platform-runtime/src/trust/`, `db/migrations/**`, and RLS/grant SQL.
-- A vertical that touches the Critical set gets **one fresh-naive arm**, user-run,
-  on the diff to those paths and the claims the writer lists. **Production
-  defects are fixed; everything else — evidence, controls, records, wording — is
-  filed as one line and never earns a round.** A second arm is owed only when
-  the first found a production defect.
-- Everything outside the Critical set ships on typecheck, tests, CI and the
-  user clicking through it. No arm.
-- Mechanics: `review-tiers` skill (≤ 100 lines).
+- **A read is owed** — one fresh-naive arm, user-run, online, over the Critical
+  diff on `main` since the last read — when that diff passes 400 changed lines,
+  and before a stage gate, the week-6 decision or the first tenant.
+- **It asks whether the diff can do silent harm**: a wrong quantity or amount, a
+  lost or repeated posting, a crossed tenant or company boundary, a wider grant,
+  a missing audit row, a release passed that should be refused. Silent defects
+  are fixed with a test. A failure that announces itself is filed as one line.
+- **No confirm arms.** A fix merges on CI green and is in the next read's range.
+  Mechanics: `review-tiers`.
 
 ## 5. Gates
 
-- **CI green at the pushed SHA is the acceptance matrix.** `.github/workflows/ci.yml`
-  runs the same suites the local matrix did. `scripts/run-matrix.sh` is a
-  local convenience, not a requirement. No local slot, no lock, no
-  `FULL_MATRIX_PASS_SHA`.
-- Integration is a `--no-ff` merge of the packet into `main`; the reviewed tip is
-  the second parent (`check-review-record.sh` reads it). A merge outside the
-  Critical set records a one-line `no arm owed` row.
-- **Evidence depth is proportionate.** In the Critical set: one discriminating
-  red per claim in the expected-red manifest. Elsewhere: tests. Nothing else is
-  owed.
+- **CI green at the pushed SHA is the acceptance matrix** (`.github/workflows/ci.yml`).
+  `scripts/run-matrix.sh` is a local convenience, not a requirement.
+- Integration is a `--no-ff` merge of the packet into `main`; the packet tip is
+  the second parent (`check-review-record.sh` reads it). Every merge records one
+  review-log row: `merged — no Critical path` or `merged — unread`.
+- **Evidence depth is proportionate.** One discriminating red per claim that a
+  silent harm cannot happen. Elsewhere: tests. Nothing else is owed.
 - Docs-only commits re-run `scripts/check-records.sh` only; CI covers the rest
   on push.
 - Standing rules that do not relax: no hard-delete paths for business data;
@@ -109,14 +107,15 @@ continues. Mechanics: `mission-cadence`.
 
 ## 6. Records — one page, and the doctrine is frozen
 
-- **A packet record is at most 150 lines**, in the template in
-  `mission-cadence`: claims, gates, controls (Critical only), test-it-yourself,
-  the `record-claim` block, decisions taken in one line each.
-- A ledger row, a lane row and a review-log row are **one line each**.
+- **A packet record is at most 80 lines**, in the template in
+  `mission-cadence`: claims, gates, controls (silent-harm claims only),
+  test-it-yourself, the `record-claim` block, decisions in one line each.
+- A ledger row and a review-log row are **one line each**. `lanes.md` is retired:
+  with one trunk, `gh pr list` shows what is open.
 - **No new queue row without the step it blocks.** Non-blocking findings are one
   line in `current-plan-archive.md`, table *Filed during the freeze*.
-- **Doctrine freeze until 2026-10-04.** No new rule in this file or any skill.
-  After that, a rule is added only by deleting one of equal or greater length.
+- **Doctrine is delete-to-add.** A rule is added to this file or a skill only by
+  deleting one of equal or greater length.
   Skill sizes are capped: `mission-cadence` 120, `review-tiers` 100,
   `git-workflow` 150 lines; `program-review`, `ux-grammar`, `salvage-admission`
   and `capture-learnings` unchanged.
@@ -140,16 +139,17 @@ edit of a few lines.
 
 ## 9. Skills
 
-`mission-cadence` (the vertical and its checkpoints) · `review-tiers` (the one
-arm) · `git-workflow` (branches, freeze, merge, push, worktrees) ·
+`mission-cadence` (the vertical and its checkpoints) · `review-tiers` (the read
+of the trunk) · `git-workflow` (branches, freeze, merge, push, worktrees) ·
 `program-review` (stage-boundary whole-app review, unchanged) ·
 `salvage-admission` · `ux-grammar` · `capture-learnings`.
 
-## 10. What was retired on 2026-09-04
+## 10. What was retired
 
-One user-selected packet at a time; the tier matrix and the Fable confirm; the
-two-REVISE cap and the convergence questions; Band A negative controls outside
-the Critical set; the local full matrix as the acceptance gate; four parallel
-lanes; the orchestrator-never-edits rule; unbounded packet records. Each is
-preserved verbatim in the skills' `ARCHIVE.md` files with the date it was
-retired, and every incident that earned it is still cited there.
+**2026-11-15:** the arm before a merge; the second arm on a fix; stacked
+branches; lane rows; the 150-line record. **2026-09-04:** one user-selected
+packet at a time; the tier matrix and the Fable confirm; the two-REVISE cap and
+the convergence questions; Band A negative controls outside the Critical set;
+the local full matrix as the acceptance gate; four parallel lanes; the
+orchestrator-never-edits rule; unbounded packet records. Each is preserved
+verbatim in the skills' `ARCHIVE.md` files with its date and its incidents.

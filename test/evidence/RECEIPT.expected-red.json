@@ -248,8 +248,8 @@
       "name": "receipt-amendment-rewrites-progress",
       "claim": "ADR-0065 claim 9: amendment leaves received-row bytes and revision unchanged.",
       "file": "packages/postgres-provider/src/purchasing-order-lifecycle.ts",
-      "original": "  const ordered = receiptQuantity(quantity);",
-      "replacement": "  const ordered = receiptQuantity(quantity);\n  await client.query('SET LOCAL ROLE north_star_receipt_projection_writer');\n  await client.query(`UPDATE ${receiptTable(binding.received)} SET revision=revision+1 WHERE tenant_id=$1 AND environment_id=$2 AND ${q(receiptRelation(binding, binding.received, 'purchase_order_received_order_line'))}=$3`, [context.tenantId, context.environmentId, orderLineId]);\n  await client.query('SET LOCAL ROLE north_star_module_runtime');",
+      "original": "  const ordered =\n    quantity === 'received'\n      ? receiptQuantity(ledger.quantity)\n      : receiptQuantity(quantity);",
+      "replacement": "  const ordered =\n    quantity === 'received'\n      ? receiptQuantity(ledger.quantity)\n      : receiptQuantity(quantity);\n  await client.query('SET LOCAL ROLE north_star_receipt_projection_writer');\n  await client.query(`UPDATE ${receiptTable(binding.received)} SET revision=revision+1 WHERE tenant_id=$1 AND environment_id=$2 AND ${q(receiptRelation(binding, binding.received, 'purchase_order_received_order_line'))}=$3`, [context.tenantId, context.environmentId, orderLineId]);\n  await client.query('SET LOCAL ROLE north_star_module_runtime');",
       "test": {
         "files": ["test/postgres/inventory-posting.test.ts"],
         "namePattern": "RECEIPT posts"

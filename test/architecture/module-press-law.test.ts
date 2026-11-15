@@ -292,6 +292,22 @@ const routedPressLawDebt: readonly RoutedPressLawDebt[] = [
     ruleId: 'PRESS006_MODULE_ID_IN_PRESS',
     sourceLine: "'northstar.inventory:capability.posting' as const;",
   },
+  // PAYABLES: vendor bills, payments and credits post through their own
+  // capability; the settlement executor they share names no module.
+  routedIdentityDebt(
+    'packages/postgres-provider/src/payables-capability-executor.ts',
+    'purchasing',
+    'northstar.purchasing',
+    "'northstar.purchasing:capability.payables' as const;",
+  ),
+  // SALES-PARITY ruling C: invoices, payments and credits post through their
+  // own capability, named as fulfillment's and receiving's are.
+  routedIdentityDebt(
+    'packages/postgres-provider/src/receivables-capability-executor.ts',
+    'sales',
+    'northstar.sales',
+    "'northstar.sales:capability.receivables' as const;",
+  ),
   {
     file: 'packages/postgres-provider/src/saved-filter-executor.ts',
     message:

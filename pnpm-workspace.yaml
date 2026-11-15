@@ -17,3 +17,8 @@ overrides:
   # deliberately: a bare '>=4.3.2' resolves to 5.2.3, and a major bump of
   # eslint's YAML config loader is a wider change than either advisory asks for.
   js-yaml: '>=4.3.2 <5'
+  # GHSA-mrhx-c7xc-m3w5 — memory exhaustion validating oversized constrained
+  # collections; patched in 4.6.6. The pin stays exact, as the declared 4.1.12
+  # was: the first patched release, not the latest. Reach: the canonical model's
+  # input validation (packages/canonical-model).
+  zod: 4.6.6

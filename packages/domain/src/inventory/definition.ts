@@ -4,8 +4,8 @@
 // move with the language.
 import { INVENTORY_CONTRACT_V1 } from './contracts.js';
 
-const version = 'v5' as const;
-const normalizationProfileVersion = 'northstar.normalization/v5' as const;
+const version = 'v6' as const;
+const normalizationProfileVersion = 'northstar.normalization/v6' as const;
 
 export const INVENTORY_NAMESPACE = 'northstar.inventory' as const;
 
@@ -35,6 +35,14 @@ function ids(namespace: string) {
       transactionLine: entity('inventory_transaction_line'),
     },
     fieldIds: {
+      // The company's reorder rule (CATALOG-EXTRAS): an item that follows it
+      // reorders at this percentage of its reorder-up-to level, in this
+      // company. Kept apart from `legalEntity`, whose members every legal
+      // entity query selects in the standalone module too.
+      companyReorderPointPercent: field(
+        'legal_entity',
+        'reorder_point_percent',
+      ),
       legalEntity: {
         code: field('legal_entity', 'code'),
         isDefault: field('legal_entity', 'is_default'),
@@ -172,9 +180,32 @@ const ENTITY_OWNED_QUERY_FAMILIES = new Set([
  */
 export function inventoryModuleDefinition(
   namespace: string = INVENTORY_NAMESPACE,
+  options: {
+    /**
+     * Stock documents recorded like any other document (INVENTORY-PARITY):
+     * a transaction takes a server-assigned `STK-000001` number on its first
+     * save. Its source, recorded time and actor stay required and are never
+     * typed: the editor's first save writes them -- the document as its own
+     * posting source, the save's time and the saving person -- because a
+     * released field's NOT NULL cannot be relaxed by the storage planner
+     * (only a relation's can). The product application mounts Inventory with
+     * this; the standalone kernel harness keeps the module it has always
+     * compiled.
+     */
+    readonly documentEntry?: boolean;
+    /**
+     * A company's reorder rule (CATALOG-EXTRAS): the percentage of an item's
+     * reorder-up-to level at which an item following the rule reorders in
+     * that company, on the legal entity's own record. Only the product
+     * application mounts it.
+     */
+    readonly companyReorderRule?: boolean;
+  } = {},
 ): Record<string, unknown> {
   const definitionIds = ids(namespace);
   const { entityIds, fieldIds, moduleId, packageId } = definitionIds;
+  const documentEntry = options.documentEntry === true;
+  const companyReorderRule = options.companyReorderRule === true;
   const standardEntities = [
     ['legal_entity', 'Legal entity', entityIds.legalEntity],
     ['inventory_transaction', 'Inventory transaction', entityIds.transaction],
@@ -293,6 +324,21 @@ export function inventoryModuleDefinition(
         40,
         boolean(),
       ),
+      // Unset: the company has no rule, and an item that follows it has no
+      // reorder point there.
+      ...(companyReorderRule
+        ? [
+            field(
+              definitionIds,
+              entityIds.legalEntity,
+              fieldIds.companyReorderPointPercent,
+              'Reorder point % of reorder up to',
+              50,
+              decimal(),
+              { optional: true },
+            ),
+          ]
+        : []),
 
       field(
         definitionIds,
@@ -304,6 +350,9 @@ export function inventoryModuleDefinition(
         {
           businessKey: true,
           searchable: true,
+          // The prefix differs from the kernel's companion numbers (GR-, SH-,
+          // SC- followed by a uuid), which the allocator's scan never matches.
+          ...(documentEntry ? { numberedAs: 'STK' } : {}),
         },
       ),
       field(
@@ -847,7 +896,12 @@ export function inventoryModuleDefinition(
     ],
     queries: [
       ...standardEntities.flatMap(([local, , entityId]) => {
-        const entityFields = fieldsForEntity(fieldIds, local);
+        const entityFields = [
+          ...fieldsForEntity(fieldIds, local),
+          ...(companyReorderRule && local === 'legal_entity'
+            ? [fieldIds.companyReorderPointPercent]
+            : []),
+        ];
         return queries(
           definitionIds,
           local,
@@ -1197,11 +1251,27 @@ function field(
     businessKey?: boolean;
     optional?: boolean;
     searchable?: boolean;
+    /** A server-assigned document number: `PREFIX-000001`, one per tenant. */
+    numberedAs?: string;
   } = {},
 ): Record<string, unknown> {
+  const local = entityId.slice(
+    entityId.indexOf(':entity.') + ':entity.'.length,
+  );
   return {
     ...(options.businessKey
       ? { businessKey: 'tenantEnvironmentCaseInsensitiveUnique' }
+      : {}),
+    ...(options.numberedAs
+      ? {
+          numbering: {
+            kind: 'documentSequence',
+            sequenceId: `${ids.namespace}:document_sequence.${local}`,
+            prefix: options.numberedAs,
+            minimumDigits: 6,
+            start: 1,
+          },
+        }
       : {}),
     classification: 'internal',
     collation: 'binary',
@@ -1306,6 +1376,10 @@ function queries(
           }
         : {}),
       maximumResultCount: queryType === 'get' ? 1 : 100,
+      // The declared List exports this whole filtered set in one statement.
+      ...(queryType === 'list' && local === 'posted_stock_balance'
+        ? { exportMaximumResultCount: 5_000 }
+        : {}),
       module: reference('moduleReference', ids.moduleId),
       permission: reference(
         'permissionReference',

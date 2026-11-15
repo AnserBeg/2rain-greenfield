@@ -139,3 +139,32 @@ is built on, which is the part that cannot be changed afterwards.
   a client-supplied field outside the declared `effectiveAt` input.
 - G3 gate: backdated posting, period-lock rejection, and reconstruction of a prior balance
   at a stated `recordedAt` horizon are all proven, with negative controls.
+
+## Amendment 2026-09-30 — no posting is dated after the tenant's today
+
+Recorded by packet POSTING-FORWARD-DATE on the owner's rulings of 2026-09-30.
+
+- **Rule.** No inventory posting family (adjustment, transfer, count and its correction,
+  receipt, shipment) commits a fact whose effective business day is after the business
+  day of its `recordedAt`. There is no slack, and the comparison is by day: a later instant
+  of the recorded day is admitted, the next day is refused. The rule is fixed, not a
+  configuration dial, as RECEIPT's pinned `maximumForwardDateDays = 0` already was.
+- **Whose day.** Both days come from the tenant's declared zone and boundary
+  (`inventory_business_period`), never from the UTC date of either instant. This is "The
+  tenant owns the business day" above, applied to "today".
+- **Where.** Inside the posting transaction, after each family's own source checks and
+  before any master, stock or write check (`enforceForwardDate`). Receipts keep
+  `RECEIPT_FORWARD_DATE_REFUSED` and shipments `FULFILLMENT_SHIPMENT_INVALID`, the codes
+  their own checks used; every other family refuses as `INVENTORY_FORWARD_DATE_REFUSED`
+  with the two periods and `maximumForwardDateDays = '0'`. Stored and natural replays of
+  an already-posted command return before the check.
+- **Why.** Posted stock adds every movement as soon as it is inserted, whatever its date,
+  while the as-of read leaves a future-dated movement out, so one forward-dated posting
+  made the application give two answers to "how many are on hand now". Receipts and
+  shipments already refused it; adjustments (reachable from the transaction form),
+  transfers and counts did not.
+- **The composed tenant** declares `America/Edmonton` (the office is in Calgary) and a
+  seven-day backdate window. Provisioning asserts both against the stored values, so the
+  change needs a fresh database, which pre-tenant mode allows
+  ([ADR-0066](ADR-0066-pre-tenant-development-re-baselines-the-release-lineage.md)).
+- Unchanged: the backdate window's meaning, the period lock, and the rest of this ADR.

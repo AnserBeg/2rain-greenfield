@@ -360,8 +360,12 @@ test('a mixed-version composition is refused by name while the uniform one is ad
       // cuts without being edited.
       assert.deepEqual(
         [...new Set(mixedVersion.map((diagnostic) => diagnostic.path))].sort(),
-        mixedVersion
-          .map((_, index) => `$.entities[${String(index)}].schemaVersion`)
+        mixed.entities
+          .flatMap((entity, index) =>
+            heldBackIds.includes(entity.entityId)
+              ? [`$.entities[${String(index)}].schemaVersion`]
+              : [],
+          )
           .sort(),
       );
       return true;

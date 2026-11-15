@@ -49,10 +49,31 @@ const waitingContainerStates = new Set([
   'running',
 ]);
 
+export interface EphemeralPostgresOptions {
+  /** The data directory's tmpfs size; the default suits every test database. */
+  dataSizeMegabytes?: number;
+}
+
+/**
+ * The one data volume for a database that installs a whole release lineage and
+ * then its successors, reverse edges or a full replay. Every such install keeps
+ * each release's artifacts and their write-ahead log: the full-replay generator
+ * filled the default 256 MB at nineteen entries (SALES-PARITY 28461658), and the
+ * lineage-advancing composed tests did the same at entries 6-8 (sqlstate 53100).
+ * Room, not a bound: no assertion, timeout or readiness wait changes, and every
+ * other test database keeps the 256 MB default. One preset instead of a literal
+ * per test, so the size is stated once (INTEGRATION).
+ */
+export const LINEAGE_INSTALL_VOLUME: Readonly<EphemeralPostgresOptions> =
+  Object.freeze({ dataSizeMegabytes: 1024 });
+
 export async function withEphemeralPostgres<T>(
   label: string,
   run: (database: EphemeralPostgres) => Promise<T>,
+  { dataSizeMegabytes = 256 }: EphemeralPostgresOptions = {},
 ): Promise<T> {
+  if (!Number.isSafeInteger(dataSizeMegabytes) || dataSizeMegabytes < 1)
+    throw new RangeError('dataSizeMegabytes must be a positive integer');
   const safeLabel = label
     .toLowerCase()
     .replaceAll(/[^a-z0-9]+/g, '-')
@@ -82,7 +103,7 @@ export async function withEphemeralPostgres<T>(
       '--publish',
       '127.0.0.1::5432',
       '--tmpfs',
-      '/var/lib/postgresql/data:rw,noexec,nosuid,size=256m',
+      `/var/lib/postgresql/data:rw,noexec,nosuid,size=${String(dataSizeMegabytes)}m`,
       '--env',
       'POSTGRES_HOST_AUTH_METHOD=trust',
       '--env',
@@ -358,12 +379,45 @@ export async function isEphemeralPostgresReadyInsideContainer(
 export async function removeEphemeralPostgresContainer(
   containerName: string,
   runDocker: DockerRunner = docker,
+  pauseMilliseconds = 250,
 ): Promise<void> {
   try {
     await runDocker(['rm', '--force', containerName]);
+    return;
   } catch (error) {
-    if (!isMissingDockerContainerError(error, containerName)) throw error;
+    if (isMissingDockerContainerError(error, containerName)) return;
+    // The container runs with --rm: once a test stops it, the daemon removes
+    // it itself and refuses a forced remove that races that removal. Wait for
+    // the daemon's removal, within a bound, rather than calling it a failure.
+    if (!isRemovalInProgressError(error)) throw error;
   }
+  for (let attempt = 0; attempt < REMOVAL_WAIT_ATTEMPTS; attempt += 1) {
+    const state = await inspectEphemeralPostgresContainer(
+      containerName,
+      runDocker,
+    );
+    if (state === 'removed') return;
+    await new Promise((resolveDelay) =>
+      setTimeout(resolveDelay, pauseMilliseconds),
+    );
+  }
+  throw new Error(
+    `docker did not finish removing ${containerName} after ${String(REMOVAL_WAIT_ATTEMPTS)} checks`,
+  );
+}
+
+const REMOVAL_WAIT_ATTEMPTS = 60;
+
+function isRemovalInProgressError(error: unknown): boolean {
+  const cause = error instanceof Error ? error.cause : undefined;
+  if (typeof cause !== 'object' || cause === null || !('stderr' in cause)) {
+    return false;
+  }
+  const stderr = cause.stderr;
+  return (
+    typeof stderr === 'string' &&
+    /removal of container \S+ is already in progress/iu.test(stderr)
+  );
 }
 
 async function containerLogs(containerName: string): Promise<DockerResult> {

@@ -1,5 +1,15 @@
 # Current plan — active execution state
 
+## TRUNK AND THE SIX-WEEK TEST — 2026-11-14 (owner rulings R1 and R2; read this first)
+
+- **R1, "Yes, write week 1":** `packet/INTEGRATION` becomes `main`'s trunk, superseding PR #29's "do not merge". ADR-0066's re-baseline (ruling I1) now stands on `main`; pre-tenant mode holds; a dev database built from an older lineage runs `dev:reset`. Record: [INTEGRATION](packets/INTEGRATION.md); the first read's prompt: [ruling note](rulings/2026-11-15-review-after-merge.md).
+- **R2, feature freeze until the week-6 decision:** no new distributor features, no nav relabeling, and the parked set is not folded in: UNITS, SPECIAL-ORDER + DROP-SHIP, STOCK-COUNTS, RETURNS, RETURNABLE-ASSETS, LOCATIONS-2, PRs #32-#34, the item page (I-V1).
+- **The six-week test.** Week 1: the trunk. Weeks 1-2, the agent: the five tools over existing operations; ten real-model tasks; record the success rate and the cost per completed task. Weeks 2-5, customization: a new record type, field, choice or layout is AI-drafted, compiled, shown to the owner as a plain diff, approved, activated, and one click rolls it back. **Week 6, decide:** a non-developer gets a new record type live in under ten minutes, rollback works, nothing else breaks, and the agent completes at least 8 of 10 tasks.
+- **Speed rules.** One trunk. A branch merges within two days or is dropped. CI green is the gate; review reads the trunk after the merge (`AGENTS.md` §4, amended 2026-11-15). Heavy evidence (expected-red controls) only for silent-harm claims.
+- **Stage state, stated plainly.** G3 is at 14 of 17 gate criteria (`rulings/g3-completion.md`); the trunk packet claims no stage gate. The agent packet is not chartered here.
+
+---
+
 ## OPERATING MODEL — rewritten 2026-09-04 by user ruling. Read this and stop reading.
 
 `AGENTS.md` is the doctrine and it is now short. The rules that matter for this file:
@@ -10,8 +20,8 @@
    Verticals are never split for review size; parallelism is by dependency, not
    by file lease.
 2. **CI green at the pushed SHA is the acceptance matrix.** No local matrix, no lock.
-3. **One review arm, only when the Critical set is touched, production defects
-   only.** Everything else ships on tests and the user's click-through.
+3. **Nothing waits for a review** (amended 2026-11-15): a vertical merges on CI
+   green; one read of the trunk's Critical diff is owed by trigger (`AGENTS.md` §4).
 4. **Pre-tenant mode** (ADR-0066): a refused storage transition is a re-baseline,
    not an enabler packet.
 5. **Records are one page; rows are one line; the doctrine is frozen until
@@ -24,6 +34,8 @@
 
 The 2026-09-01 QUEUE FREEZE and the previous operating model are in the archive; their
 substance survives in the rules above.
+
+**Selected 2026-09-15: RAIN-ORDER-ENTRY** — workspace interaction completion (owner charter after the product-parity audit) at executable `d9eca60a1d4ddbac6d69aaf323e53fc423b5721a` on `packet/RAIN-ORDER-ENTRY` (PR #6), stacked on PR #5 at `3830f95`, over audited `35e3eaa1`: working Inventory destinations, role-eligible pickers and policy-aware quick create; pickers answer in place (ADR-0036 behaviour 7) without reloading the order; declared choice/derived/decimal controls in Tasks, receiving included; [draft handoff and test-it-yourself](packets/RAIN-ORDER-ENTRY.md). FORM-1..4/PAGING, editor F1/F2/F3 and Task P1/P2 preserved; ONLINE review complete (round 2 closed D1-D5, no new production defect); fresh CI / owner acceptance pending. BUILD stops at draft PR, no integration or deployment. PR #5 and its closed P1/P2 and retained demos remain the dependency.
 
 ## Where we are — 2026-09-04
 

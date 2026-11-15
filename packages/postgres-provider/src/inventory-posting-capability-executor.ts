@@ -28,6 +28,7 @@ import {
   InventoryPostingError,
   PostgresInventoryPostingService,
   type InventoryAdjustmentPostingCommandV1,
+  type InventoryTransferPostingCommandV1,
 } from './inventory-posting-service.js';
 import { withModuleRuntimeRole } from './module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from './request-context.js';
@@ -36,12 +37,27 @@ const identifierPattern = /^[a-z][a-z0-9_]{0,62}$/u;
 const INVENTORY_POSTING_VERIFICATION_REFUSAL = Object.freeze({
   code: 'INVENTORY_POSTING_INPUT_INVALID',
   reason:
-    'INVENTORY_POSTING_INPUT_INVALID: only adjustment drafts are admitted by this route',
+    'INVENTORY_POSTING_INPUT_INVALID: only adjustment and transfer drafts are admitted by this route',
 });
+/**
+ * A stock document posts as its own natural source: the editor stores this
+ * pair at first save and the posting command carries the same, so the
+ * kernel's draft match and its natural idempotency key both name the document.
+ */
+const DOCUMENT_SOURCE_TYPE = 'inventoryTransaction';
+/** Opening stock is an adjustment with this reason (owner ruling R3). */
+const OPENING_REASON = 'OPENING';
 type StorageEntityTarget = StorageTargetPayloadV1['entities'][number];
 type StorageColumnTarget = StorageEntityTarget['columns'][number];
 
 interface InventoryDraftBinding {
+  readonly balance: Readonly<{
+    entity: StorageEntityTarget;
+    itemId: string;
+    legalEntityColumn: string;
+    locationId: string;
+    postedQuantity: string;
+  }>;
   readonly legalEntityColumn: string;
   readonly line: StorageEntityTarget;
   readonly lineFields: Readonly<{
@@ -58,6 +74,8 @@ interface InventoryDraftBinding {
 
 interface HydratedAdjustmentDraft {
   readonly currentRevision: number;
+  /** The stored type: the two this route posts. */
+  readonly kind: 'adjustment' | 'transfer';
   readonly legalEntityId: string;
   readonly lines: readonly Readonly<{
     readonly fromLocationId: string | null;
@@ -115,7 +133,7 @@ class InventoryPostingCapabilityExecutor implements RegisteredCapabilityOperatio
   ): Promise<RegisteredCapabilityOperationAuthorization> {
     assertPostingOperation(request, this.#binding);
     const input = postingInput(request.input);
-    const draft = await hydrateAdjustmentDraft(
+    const draft = await hydrateInventoryDraft(
       this.context,
       this.#binding,
       request.context,
@@ -138,6 +156,20 @@ class InventoryPostingCapabilityExecutor implements RegisteredCapabilityOperatio
         );
       }
     }
+    // What the document asks of the kernel is judged here, so a refusal names
+    // the document's own mistake before policy and trust work begin.
+    assertDocumentSource(draft, input.recordId);
+    assertDocumentLines(draft);
+    // Advisory: another posting may still land between this read and the
+    // kernel's stock lock (owner ruling R3). A replay of a posted opening is
+    // not judged again -- it would see its own stock.
+    if (!replay && isOpening(draft))
+      await assertOpeningIntoEmptyStock(
+        this.context,
+        this.#binding,
+        request.context,
+        draft,
+      );
     const scope = request.readBackDefinition.legalEntityScope;
     if (!scope || scope.cardinality !== 'exactlyOne') {
       throw inputError('the posting read-back lacks exact legal-entity scope');
@@ -182,13 +214,31 @@ class InventoryPostingCapabilityExecutor implements RegisteredCapabilityOperatio
       );
     }
     const { draft, input } = prepared;
-    const command = adjustmentCommand(request, input, draft);
+    // One route, two kernel commands: the stored type decides which (ADR-0027
+    // amendment 2026-09-30). The kernel keeps every transfer rule.
+    const command =
+      draft.kind === 'transfer'
+        ? ({
+            kind: 'transfer',
+            command: transferCommand(request, input, draft),
+          } as const)
+        : ({
+            kind: 'adjustment',
+            command: adjustmentCommand(request, input, draft),
+          } as const);
     const actor = await this.context.actorIssuer.issue(request.context);
-    const posted = await this.#posting.postAdjustment(
-      request.context,
-      actor,
-      command,
-    );
+    const posted =
+      command.kind === 'transfer'
+        ? await this.#posting.postTransfer(
+            request.context,
+            actor,
+            command.command,
+          )
+        : await this.#posting.postAdjustment(
+            request.context,
+            actor,
+            command.command,
+          );
     let readBack;
     try {
       readBack = await this.context.queryGateway.invoke(request.view, {
@@ -214,9 +264,9 @@ class InventoryPostingCapabilityExecutor implements RegisteredCapabilityOperatio
 
 function postingResult(
   request: RegisteredCapabilityOperationExecutionRequest,
-  posted: Awaited<
-    ReturnType<PostgresInventoryPostingService['postAdjustment']>
-  >,
+  posted:
+    | Awaited<ReturnType<PostgresInventoryPostingService['postAdjustment']>>
+    | Awaited<ReturnType<PostgresInventoryPostingService['postTransfer']>>,
   readBack: SemanticOperationResultEnvelope['readBack'],
 ): SemanticOperationResultEnvelope {
   return Object.freeze({
@@ -266,12 +316,18 @@ function assertPostingOperation(
   }
 }
 
-function adjustmentCommand(
+/**
+ * What an adjustment and a transfer command share: the admitted decision, the
+ * stored effective time and reason, and the document itself as the posting
+ * source -- the pair the editor stored at first save and the source check
+ * compared -- so a replay derives the identical command.
+ */
+function commandEnvelope(
   request: RegisteredCapabilityOperationExecutionRequest,
   input: { readonly expectedRevision: number; readonly recordId: string },
   draft: HydratedAdjustmentDraft,
-): InventoryAdjustmentPostingCommandV1 {
-  return Object.freeze({
+) {
+  return {
     authorization: Object.freeze({
       decision: 'ALLOW' as const,
       evaluatorVersion: request.policyEvaluatorVersion,
@@ -284,6 +340,29 @@ function adjustmentCommand(
     ),
     idempotencyKey: request.idempotencyKey,
     legalEntityId: draft.legalEntityId,
+    reason: Object.freeze({
+      code: reasonCode(draft) ?? '',
+      narrative: nullableText(
+        draft.values[
+          fieldId(draft.values, 'inventory_transaction_reason_narrative')
+        ],
+      ),
+    }),
+    sourceId: input.recordId,
+    sourceRevision: input.expectedRevision,
+    sourceType: DOCUMENT_SOURCE_TYPE,
+    stockDimensionSetVersion: 'v1' as const,
+    transactionId: input.recordId,
+  };
+}
+
+function adjustmentCommand(
+  request: RegisteredCapabilityOperationExecutionRequest,
+  input: { readonly expectedRevision: number; readonly recordId: string },
+  draft: HydratedAdjustmentDraft,
+): InventoryAdjustmentPostingCommandV1 {
+  return Object.freeze({
+    ...commandEnvelope(request, input, draft),
     lines: Object.freeze(
       draft.lines.map((line) => {
         const negative = line.quantity.startsWith('-');
@@ -303,34 +382,162 @@ function adjustmentCommand(
         });
       }),
     ),
-    reason: Object.freeze({
-      code:
-        nullableText(
-          draft.values[
-            fieldId(draft.values, 'inventory_transaction_reason_code')
-          ],
-        ) ?? '',
-      narrative: nullableText(
-        draft.values[
-          fieldId(draft.values, 'inventory_transaction_reason_narrative')
-        ],
-      ),
-    }),
-    sourceId: requiredText(
-      draft.values[fieldId(draft.values, 'inventory_transaction_source_id')],
-      'sourceId',
-    ),
-    sourceRevision: input.expectedRevision,
-    sourceType: requiredText(
-      draft.values[fieldId(draft.values, 'inventory_transaction_source_type')],
-      'sourceType',
-    ),
-    stockDimensionSetVersion: 'v1',
-    transactionId: input.recordId,
   });
 }
 
-async function hydrateAdjustmentDraft(
+/** Each line moves its quantity out of From and into To, in one posting. */
+function transferCommand(
+  request: RegisteredCapabilityOperationExecutionRequest,
+  input: { readonly expectedRevision: number; readonly recordId: string },
+  draft: HydratedAdjustmentDraft,
+): InventoryTransferPostingCommandV1 {
+  return Object.freeze({
+    ...commandEnvelope(request, input, draft),
+    lines: Object.freeze(
+      draft.lines.map((line) => {
+        if (!line.fromLocationId || !line.toLocationId) {
+          throw inputError('a transfer line does not name both locations');
+        }
+        return Object.freeze({
+          fromLocationId: line.fromLocationId,
+          itemId: line.itemId,
+          quantity: line.quantity,
+          sourceLine: line.lineNumber,
+          toLocationId: line.toLocationId,
+          transactionLineId: line.transactionLineId,
+          unitId: line.unitId,
+        });
+      }),
+    ),
+  });
+}
+
+function reasonCode(draft: HydratedAdjustmentDraft): string | null {
+  return nullableText(
+    draft.values[fieldId(draft.values, 'inventory_transaction_reason_code')],
+  );
+}
+
+function isOpening(draft: HydratedAdjustmentDraft): boolean {
+  return reasonCode(draft) === OPENING_REASON;
+}
+
+/**
+ * A stock document posts only as itself. The kernel matches the stored source
+ * pair to the command's, so a draft naming another source could never post;
+ * it is refused here by name instead of as a state conflict.
+ */
+function assertDocumentSource(
+  draft: HydratedAdjustmentDraft,
+  recordId: string,
+): void {
+  const type =
+    draft.values[fieldId(draft.values, 'inventory_transaction_source_type')];
+  const id =
+    draft.values[fieldId(draft.values, 'inventory_transaction_source_id')];
+  if (
+    type !== DOCUMENT_SOURCE_TYPE ||
+    typeof id !== 'string' ||
+    id.toLowerCase() !== recordId
+  ) {
+    throw inputError('the draft does not name itself as its posting source');
+  }
+}
+
+/**
+ * The kernel pins each line's columns to what it does, so a wrong column is
+ * named here: a negative adjustment takes stock from its From location, a
+ * positive one adds it at its To location, and a transfer names two distinct
+ * locations and moves a quantity above zero. Opening stock (ruling R3) is an
+ * adjustment that only adds.
+ */
+function assertDocumentLines(draft: HydratedAdjustmentDraft): void {
+  const opening = isOpening(draft);
+  if (opening && draft.kind !== 'adjustment') {
+    throw inputError('opening stock is recorded as an adjustment');
+  }
+  for (const line of draft.lines) {
+    const label = `line ${line.lineNumber}`;
+    const negative = line.quantity.startsWith('-');
+    const positive = !negative && line.quantity !== '0';
+    if (draft.kind === 'transfer') {
+      if (
+        !line.fromLocationId ||
+        !line.toLocationId ||
+        line.fromLocationId === line.toLocationId
+      ) {
+        throw inputError(
+          `${label}: a transfer takes stock from its From location to a different To location`,
+        );
+      }
+      if (!positive) {
+        throw inputError(`${label}: a transfer moves a quantity above zero`);
+      }
+      continue;
+    }
+    if (opening && !positive) {
+      throw inputError(`${label}: opening stock only adds stock`);
+    }
+    if (negative && (!line.fromLocationId || line.toLocationId)) {
+      throw inputError(
+        `${label}: a negative adjustment takes stock from its From location and names no To location`,
+      );
+    }
+    if (!negative && (!line.toLocationId || line.fromLocationId)) {
+      throw inputError(
+        `${label}: a positive adjustment adds stock at its To location and names no From location`,
+      );
+    }
+  }
+}
+
+/**
+ * Opening stock goes only where the item has none yet at that location in
+ * this company. Read before the kernel's stock lock, so it is advisory: a
+ * posting landing in between is not seen (the guarantee is a later Critical
+ * packet's). Reserved stock needs on-hand, so an empty balance is unreserved.
+ */
+async function assertOpeningIntoEmptyStock(
+  context: PostgresCapabilityOperationExecutorContext,
+  binding: InventoryDraftBinding,
+  requestContext: RegisteredCapabilityOperationExecutionRequest['context'],
+  draft: HydratedAdjustmentDraft,
+): Promise<void> {
+  const balance = binding.balance;
+  await withTrustedRequestTransaction(context.pool, requestContext, (client) =>
+    withModuleRuntimeRole(client, async () => {
+      for (const line of draft.lines) {
+        const stored = await client.query<{ quantity: unknown }>(
+          `SELECT ${quoted(balance.postedQuantity)}::text AS quantity
+             FROM ${table(balance.entity)}
+            WHERE tenant_id = $1 AND environment_id = $2
+              AND ${quoted(balance.legalEntityColumn)} = $3
+              AND ${quoted(balance.itemId)}::text = $4
+              AND ${quoted(balance.locationId)}::text = $5
+              AND ${quoted(balance.entity.archive.archivedAtColumn)} IS NULL`,
+          [
+            requestContext.tenantId,
+            requestContext.environmentId,
+            draft.legalEntityId,
+            line.itemId,
+            line.toLocationId,
+          ],
+        );
+        if (
+          stored.rows.some(
+            (row) => canonicalDecimal(row.quantity, 'posted quantity') !== '0',
+          )
+        ) {
+          throw inputError(
+            `line ${line.lineNumber}: opening stock goes only where the item has none yet`,
+          );
+        }
+      }
+    }),
+  );
+}
+
+async function hydrateInventoryDraft(
   context: PostgresCapabilityOperationExecutorContext,
   binding: InventoryDraftBinding,
   requestContext: RegisteredCapabilityOperationExecutionRequest['context'],
@@ -364,11 +571,20 @@ async function hydrateAdjustmentDraft(
       });
       const typeValue =
         values[canonicalFieldId(fields, 'inventory_transaction_type')];
-      if (
-        typeof typeValue !== 'string' ||
-        !typeValue.endsWith(':option.inventory_transaction_type_adjustment')
-      ) {
-        throw inputError('only adjustment drafts are admitted by this route');
+      const kind =
+        typeof typeValue !== 'string'
+          ? null
+          : typeValue.endsWith(':option.inventory_transaction_type_adjustment')
+            ? ('adjustment' as const)
+            : typeValue.endsWith(':option.inventory_transaction_type_transfer')
+              ? ('transfer' as const)
+              : null;
+      // The first refusal release verification's probe meets, byte for byte
+      // the factory's declaration (its probe draft is a goods receipt).
+      if (!kind) {
+        throw inputError(
+          'only adjustment and transfer drafts are admitted by this route',
+        );
       }
       const lineResult = await client.query<Record<string, unknown>>(
         `SELECT ${quoted(binding.line.recordIdentity.column)}::text AS "recordId",
@@ -400,6 +616,7 @@ async function hydrateAdjustmentDraft(
       }
       return Object.freeze({
         currentRevision: revision,
+        kind,
         legalEntityId: requiredUuid(row.legalEntityId, 'legalEntityId'),
         lines: Object.freeze(
           lineResult.rows.map((line) =>
@@ -442,6 +659,10 @@ function inventoryDraftBinding(
   if (relation.length !== 1) {
     throw inputError('inventory transaction lines lack one parent relation');
   }
+  const balance = requiredEntity(storage, 'posted_stock_balance');
+  if (!balance.legalEntity) {
+    throw inputError('posted stock storage lacks legal-entity ownership');
+  }
   for (const suffix of [
     'inventory_transaction_effective_at',
     'inventory_transaction_reason_code',
@@ -454,6 +675,16 @@ function inventoryDraftBinding(
     physicalField(transaction, suffix);
   }
   return Object.freeze({
+    balance: Object.freeze({
+      entity: balance,
+      itemId: physicalField(balance, 'posted_stock_balance_item_id'),
+      legalEntityColumn: safeIdentifier(balance.legalEntity.column),
+      locationId: physicalField(balance, 'posted_stock_balance_location_id'),
+      postedQuantity: physicalField(
+        balance,
+        'posted_stock_balance_posted_quantity',
+      ),
+    }),
     legalEntityColumn: safeIdentifier(transaction.legalEntity.column),
     line,
     lineFields: Object.freeze({

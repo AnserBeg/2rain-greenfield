@@ -12,7 +12,10 @@ const seamPaths = [
   '.agents/skills/ux-grammar/SKILL.md',
   'apps/web/src/app-server.ts',
   'apps/web/src/component-registry.ts',
+  'apps/web/src/document-editor.ts',
+  'apps/web/src/editor-controls.ts',
   'apps/web/src/surface-runtime.ts',
+  'apps/web/src/workspace-entry.ts',
 ] as const;
 
 test('G1 browser surfaces have one compiled issued-view SurfaceRuntime seam', () => {
@@ -139,8 +142,75 @@ test('application-domain selection in generic SurfaceRuntime fails with SURF001'
   }
 });
 
+test('the generic document editor may consume SurfaceRuntime types only', () => {
+  const files = seamFixture();
+  const editorPath = 'apps/web/src/document-editor.ts';
+  const editor = files[editorPath];
+  assert.ok(editor);
+  files[editorPath] = editor.replace(
+    'import type {\n  SurfaceRuntimeGateways,',
+    'import {\n  SurfaceRuntimeGateways,',
+  );
+  assert.notEqual(files[editorPath], editor);
+  const root = createArchitectureFixture(files);
+
+  try {
+    assert.ok(
+      checkSurfaceRuntimeSeam(root).violations.some(
+        (violation) =>
+          violation.file === editorPath &&
+          violation.ruleId === 'SURF001_RUNTIME_BYPASS' &&
+          violation.message.includes('issued-view app server'),
+      ),
+    );
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
+test('editor controls are reachable only through the generic document editor', () => {
+  const files = seamFixture();
+  const appServerPath = 'apps/web/src/app-server.ts';
+  files[appServerPath] =
+    "import { renderReferenceControl } from './editor-controls.js';\n" +
+    files[appServerPath]!;
+  const root = createArchitectureFixture(files);
+
+  try {
+    assert.ok(
+      checkSurfaceRuntimeSeam(root).violations.some(
+        (violation) =>
+          violation.file === appServerPath &&
+          violation.ruleId === 'SURF001_RUNTIME_BYPASS' &&
+          violation.message.includes('generic document editor'),
+      ),
+    );
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});
+
 function seamFixture(): Record<string, string> {
   return Object.fromEntries(
     seamPaths.map((path) => [path, readFileSync(path, 'utf8')]),
   );
 }
+
+test('the composition interpreter cannot be called directly by the app server', () => {
+  const files = seamFixture();
+  files['apps/web/src/app-server.ts'] =
+    "import {submitCompositionAction} from './surface-composition.js';\n" +
+    files['apps/web/src/app-server.ts'];
+  const root = createArchitectureFixture(files);
+  try {
+    assert.ok(
+      checkSurfaceRuntimeSeam(root).violations.some(
+        (violation) =>
+          violation.ruleId === 'SURF001_RUNTIME_BYPASS' &&
+          violation.message.includes('delegate'),
+      ),
+    );
+  } finally {
+    removeArchitectureFixture(root);
+  }
+});

@@ -1359,6 +1359,23 @@ async function applyDdlElement(
         `ALTER TABLE north_star_module.${quoted(entity.physicalTableName)}
            ADD COLUMN IF NOT EXISTS ${quoted(column.physicalName)} ${safeType(column.postgresqlType)}${defaultSql(column.defaultSemantics, column.defaultValue, column.postgresqlType)}`,
       );
+      // A company-scoped table grants UPDATE per column at creation, so a
+      // column added later carries the same grant or the runtime cannot write
+      // it and the catalog drifts from the expected column grants.
+      if (
+        entity.legalEntity &&
+        !entity.factStorage &&
+        !entity.periodLock &&
+        entityOwnedMutableColumnNames(target, entity).includes(
+          column.physicalName,
+        )
+      ) {
+        await client.query(
+          `GRANT UPDATE (${quoted(column.physicalName)})
+             ON north_star_module.${quoted(entity.physicalTableName)}
+             TO north_star_module_runtime`,
+        );
+      }
       return;
     }
     case 'createIndex': {
@@ -1660,9 +1677,18 @@ async function createManagedTable(
     await client.query(
       `GRANT SELECT, INSERT ON north_star_module.${quoted(entity.physicalTableName)} TO north_star_module_runtime`,
     );
-    await client.query(
-      `REVOKE UPDATE ON north_star_module.${quoted(entity.physicalTableName)} FROM north_star_module_runtime`,
+    // Revoking UPDATE on a table also revokes it from every column. Tables are
+    // shared by tenants, and another tenant may already serve a later release
+    // whose added columns hold their own UPDATE grants, so the revoke runs only
+    // when there is a table-level grant to remove.
+    const tableLevel = await client.query<{ granted: boolean }>(
+      `SELECT has_table_privilege('north_star_module_runtime', $1, 'UPDATE') AS granted`,
+      [`north_star_module.${quoted(entity.physicalTableName)}`],
     );
+    if (tableLevel.rows[0]?.granted === true)
+      await client.query(
+        `REVOKE UPDATE ON north_star_module.${quoted(entity.physicalTableName)} FROM north_star_module_runtime`,
+      );
     const mutableColumns = entityOwnedMutableColumnNames(target, entity);
     if (mutableColumns.length > 0) {
       await client.query(
@@ -6040,6 +6066,23 @@ function locateColumn(
       (candidate) => candidate.physicalName === element.physicalObjectName,
     );
     if (column) return { column, entity };
+  }
+  const relations = target.relations.filter(
+    (relation) =>
+      relation.relationColumn.origin !== 'field' &&
+      relation.relationId === element.subjectId &&
+      relation.relationColumn.physicalName === element.physicalObjectName,
+  );
+  if (relations.length === 1) {
+    const relation = relations[0]!;
+    return {
+      column: {
+        ...relation.relationColumn,
+        defaultSemantics: 'nullable' as const,
+        defaultValue: null,
+      },
+      entity: requiredEntity(target, relation.sourceEntityId),
+    };
   }
   throw failure('ELEMENT_TARGET_MISSING', element.elementId);
 }

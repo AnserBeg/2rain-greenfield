@@ -15,10 +15,11 @@ import type { SharedListQueryRequest } from './index.js';
  * CURSOR IDENTITY. A page window only means something against the exact query
  * shape it was minted for, so the binding digest covers every member that can
  * move a row into or out of the set -- archive inclusion, match mode, search,
- * sort, relation labels and the parent scope -- and the cursor carries a
- * checksum over that digest. A cursor minted for one shape, one parent or one
- * relation therefore cannot decode against another; it is refused rather than
- * silently reinterpreted as an offset into a different set.
+ * sort, relation labels, the parent scope, progress, figures and before
+ * filters -- and the cursor carries a checksum over that digest. A cursor
+ * minted for one shape, one parent or one relation therefore cannot decode
+ * against another; it is refused rather than silently reinterpreted as an
+ * offset into a different set.
  */
 const SHARED_LIST_CURSOR_VERSION = 'northstar.shared-list-cursor/v1' as const;
 
@@ -93,8 +94,16 @@ export function sharedListBindingDigest(
     | 'includeArchived'
     | 'matchMode'
     | 'parentScope'
+    | 'referenceScope'
+    | 'fieldFilters'
+    | 'relatedFilter'
+    | 'progress'
+    | 'figures'
+    | 'beforeFilters'
     | 'relationLabels'
+    | 'referenceLabels'
     | 'search'
+    | 'searchChildren'
     | 'sort'
   >,
 ): string {
@@ -105,9 +114,25 @@ export function sharedListBindingDigest(
     // meaningless against parent B or against a different relation, so a cursor
     // minted under one parent scope must not decode under another.
     parentScope: query.parentScope,
+    ...(query.referenceScope ? { referenceScope: query.referenceScope } : {}),
+    ...(query.fieldFilters ? { fieldFilters: query.fieldFilters } : {}),
+    // Likewise a window over customers is not a window over suppliers.
+    ...(query.relatedFilter ? { relatedFilter: query.relatedFilter } : {}),
+    // A window over orders with something open is not a window over all of
+    // them, and yesterday's "before today" is not today's.
+    ...(query.progress ? { progress: query.progress } : {}),
+    // A window over items short of stock is not a window over all of them.
+    ...(query.figures ? { figures: query.figures } : {}),
+    ...(query.beforeFilters ? { beforeFilters: query.beforeFilters } : {}),
     queryId,
     relationLabels: query.relationLabels,
+    // A window sorted or searched by customer name is not a window over ids.
+    ...(query.referenceLabels
+      ? { referenceLabels: query.referenceLabels }
+      : {}),
     search: query.search,
+    // A window of items found by their aliases is not one found without them.
+    ...(query.searchChildren ? { searchChildren: query.searchChildren } : {}),
     sort: query.sort,
   });
 }

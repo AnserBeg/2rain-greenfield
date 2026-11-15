@@ -9,7 +9,7 @@ description: Branches, commits, the frozen SHA, integration, pushing, worktrees
 ## Branches
 
 - `main` holds accepted work only and always matches `origin/main`.
-- A vertical lives on `packet/<id>` cut from current `main`, in its own
+- A vertical lives on `packet/<id>` cut from current `main` (never stacked), in its own
   `git worktree add ../<repo>-<id> packet/<id>`; remove the worktree on
   integration. Two lanes at most (`AGENTS.md` §3).
 - Direct commits to `main` are for doctrine and record housekeeping only, and
@@ -35,9 +35,8 @@ description: Branches, commits, the frozen SHA, integration, pushing, worktrees
 
 ## Integration
 
-**Who:** the BUILD agent, for a vertical that owes no review arm; the
-orthestrator, after adjudicating the arm, for one that does. Either way the
-steps are the same.
+**Who:** the BUILD agent, on CI green. Nothing waits for a review
+(`review-tiers`).
 
 1. `git fetch`; if `main` moved, merge `main` into the packet branch (or rebase
    if unreviewed), push, let CI run.
@@ -46,8 +45,8 @@ steps are the same.
    through it. Never fast-forward, never squash, never reset `main`.
 3. **CI green at the merged SHA is the acceptance gate.** Push `main`; the
    `post-merge` hook checks origin sync and the review record.
-4. Record: one ledger row, one lane row, one review-log row (a verdict, or
-   `no arm owed — outside the Critical set`).
+4. Record: one ledger row and one review-log row (`merged — no Critical path`
+   or `merged — unread`).
 5. A conflict in a **derived artifact** (compiled release, coverage decisions,
    lockfile, schema snapshot) is re-derived from the merged inputs, never picked.
 

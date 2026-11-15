@@ -84,6 +84,27 @@ Record rendering.
 | Task | one decision per screen; scan-first input; large targets; sticky bottom primary action |
 | Builder | operate/customize mode switch; edit-in-place selection; right properties drawer; draft banner; publish diff |
 
+**Task presentation, amended 2026-09-15 (ADR-0036 §2.5).** A compiled Record
+composition may select `{ mode: nativeDialog, fallback: page }` for its existing
+Task/action flow. This preserves the originating document during input, review,
+explicit confirmation and result; it adds no archetype or slot. One SSR Task
+container is promoted with native `showModal()` by the single CSP-hash-pinned
+owned script. With JS disabled or unavailable it stays a usable full-page Task.
+Close/Escape dispatch nothing; reopening retains the same preparation/outcome.
+After submission, closing never implies rollback. Fresh governed Record data is
+served with every Task response; denied reads must never reveal cached context.
+Visible close, sensible initial focus, native focus containment, focus return
+to the Record's continuation control, and scrollable compact controls are required.
+`modal` MESSAGE placement remains refused under ADR-0048.
+
+**Reference controls, amended 2026-09-26 (ADR-0036 §2.7).** A draft-editor
+reference is one metadata-declared combobox: server-side search and paging over the
+declared list query and eligibility, selection only from the newest offered results
+re-read through the declared exact get, and "+ New" (only when it may start) as the
+popup's last row, returning to the same field. The owned script answers it in place
+with server-rendered fragments; ordinary submits remain the no-JavaScript path.
+Typed text, focus and the rendered popup are never permission authority.
+
 Rules that follow:
 
 1. Every screen renders through SurfaceRuntime from a compiled
@@ -111,16 +132,15 @@ Rules that follow:
 
   It is **shell furniture, not a fourth part** — same class as the command
   palette and the New button. It is platform-owned, never an archetype slot and
-  never tenant-customizable. It **holds no state**: every selection is written to
-  the URL and read back from it, per ADR-0015:38's ban on ambient session state.
-  It **never selects for the user**. *Narrowed 2026-08-08.* For **legal entity**
-  that is absolute, including when exactly one option exists, because ADR-0031 §3
-  makes omission a typed refusal rather than a narrower scope — the reason is a
-  property of that dimension, not of the bar. The form that carries to a future
-  dimension is weaker and still binding: **no implicit default.** A default may
-  arrive only through the declared-default mechanism ADR-0015:38 admits and
-  ADR-0037 §4 records as absent; whether omission is *also* a refusal is answered
-  by each new dimension's own justification.
+  never tenant-customizable. **Amended by the owner 2026-09-15:** declared browser
+  entry resolves current authorized active companies. One enters automatically;
+  several reuse a currently authorized advisory preference scoped to the trusted
+  principal/tenant/environment, or ask once; none show access/setup guidance.
+  Entry writes explicit scope into the URL. Preference never grants permission or
+  supplies an operation operand. Invalid explicit scope refuses, and open documents,
+  draft buffers and prepared tasks retain their original scope across tabs/switches.
+  Raw APIs/background callers retain explicit pinned context. Without a declaration,
+  no implicit default is available. See amended ADR-0037 and ADR-0015.
 
   **A workspace scope is not a field pre-fill.** The bar selects the slice of the
   business being looked at; a form pre-filling a legal-entity field from a
@@ -253,7 +273,7 @@ page itself is unserviceable.
 
 **No client capability is implied.** These are server-rendered states.
 [ADR-0036](../../../docs/decisions/ADR-0036-minimum-client-capability.md)
-authorizes exactly one script with four closed behaviours, and none of them is
+authorizes exactly one script with five closed behaviours, and none of them is
 this.
 
 ## Disclosure tiers
@@ -278,7 +298,7 @@ ever hidden; `progressive` and `onDemand` defer, and both remain discoverable.
 2026-08-08.** It is spelled here because the vocabulary is closed and an unspelled
 tier cannot be refused *by name*; it is not a working tier. Nothing honours it:
 native `<details>` expansion reveals content already in the document and cannot
-fetch, ADR-0036 §2's four behaviours contain no fetch-on-expand, and §7 forbids
+fetch, ADR-0036 §2's behaviours contain no fetch-on-expand, and §7 forbids
 client rendering of business data. Admitting it as workable would be precisely the
 accepted-and-ignored state this skill refuses `toast` and `modal` for
 (ADR-0041 §3, a refusal to ship a spelling ahead of its meaning). `U5b` — in
@@ -377,7 +397,7 @@ gains a field or control anchor; placement and anchor become separate axes; or
 validation messages are ruled a grammar of their own, with the reason recorded.
 
 **`toast` and `modal` are refused by name, with a diagnostic.** Neither is among
-the four client behaviours [ADR-0036](../../../docs/decisions/ADR-0036-minimum-client-capability.md)
+the six client behaviours [ADR-0036](../../../docs/decisions/ADR-0036-minimum-client-capability.md)
 authorises; a toast additionally needs a durable record substrate that does not
 exist, and a modal needs a rectifying-action capability that does not exist.
 Registering a spelling nothing can honour is ADR-0041's accepted-and-ignored

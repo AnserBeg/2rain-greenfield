@@ -1,5 +1,13 @@
 # ADR-0015: Legal entity as a compiled business scoping dimension
 
+**Owner-approved clarification, 2026-09-15 — RAIN-ORDER-ENTRY.** Declared browser
+entry may resolve an authorized single company or validated advisory preference,
+then materialize explicit operation/query context. This is the approved declared
+default seam; it does not make remembered state an operation default or permission.
+Trusted tenant/environment, current policy, immutable document ownership and audit
+attribution remain authoritative. Invalid explicit scope never falls back; raw
+APIs and background callers retain their explicit pinned context contracts.
+
 Date: 2026-07-26
 Status: accepted (orchestrator ruling, user-authorized 2026-07-26; the implementing packet is
 the G3 stage cut, which must land the dimension before the first posted movement exists)

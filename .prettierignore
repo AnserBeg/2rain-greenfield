@@ -10,3 +10,6 @@ coverage/
 playwright-report/
 test-results/
 pnpm-lock.yaml
+# Compact JSON: the authored package limit counts its bytes
+# (apps/web/scripts/generate-app-authored.ts).
+apps/web/release/app.authored.json

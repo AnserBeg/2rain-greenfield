@@ -236,3 +236,43 @@ function dto(recordId: string, name: string): SemanticRecordDto {
     values: { [PARTY_IDS.fieldIds.name]: name },
   };
 }
+
+test('SALES-EXTRAS: the product Party carries an optional credit limit and hold; the standalone Party does not', () => {
+  type Definition = {
+    fields: Array<{
+      fieldId: string;
+      fieldType: { kind: string };
+      presence: string;
+    }>;
+    queries: Array<{
+      queryId: string;
+      selections: Array<{ field: { targetId: string } }>;
+    }>;
+  };
+  const product = partyModuleDefinition(PARTY_IDS.namespace, {
+    salesMasterData: true,
+  }) as unknown as Definition;
+  const standalone = partyModuleDefinition() as unknown as Definition;
+  const credit = [
+    [PARTY_IDS.fieldIds.creditLimit, 'exactDecimalFieldType'],
+    [PARTY_IDS.fieldIds.creditHold, 'booleanFieldType'],
+  ] as const;
+  for (const [fieldId, kind] of credit) {
+    const field = product.fields.find((value) => value.fieldId === fieldId);
+    assert.equal(field?.fieldType.kind, kind, fieldId);
+    assert.equal(field?.presence, 'optional', fieldId);
+    assert.ok(
+      product.queries
+        .find(
+          (query) => query.queryId === `${PARTY_IDS.namespace}:query.party_get`,
+        )
+        ?.selections.some((selection) => selection.field.targetId === fieldId),
+      `party_get selects ${fieldId}`,
+    );
+    assert.equal(
+      standalone.fields.some((value) => value.fieldId === fieldId),
+      false,
+      `the standalone Party has no ${fieldId}`,
+    );
+  }
+});

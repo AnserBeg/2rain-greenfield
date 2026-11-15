@@ -1680,6 +1680,12 @@ including ones that do not exist yet.
 | List | title, saved-view tabs, spreadsheet-grade grid (sort, filter, all-visible-value search, paging), bulk bar |
 | Record | breadcrumb; title + status chip; command bar (primary action first, destructive behind overflow); key facts; sections and child tables; activity rail |
 | Task | one decision per screen, scan-first input, large touch targets; receiving, picking, shipping, counting |
+
+Task presentation may retain its originating Record context using the bounded
+native-dialog policy of ADR-0036 §2.5 (owner-approved 2026-09-15). The existing
+compiled Task/action flow declares both native dialog and full-page fallback;
+it adds no archetype, slot, application model, client business state or MESSAGE
+modality. Preparation, confirmation and execution remain server-authoritative.
 | Builder | operate/customize mode switch, edit-in-place selection, right properties drawer, visible draft banner, publish diff |
 
 Shell contract:
@@ -1690,12 +1696,19 @@ Shell contract:
 - within the workspace, above the canvas, a platform-owned **context bar**
   carrying explicit business-dimension selection and nothing else — see
   [ADR-0037](decisions/ADR-0037-workspace-context-bar.md). It is shell furniture,
-  not a fourth part; it holds no state, writes every selection to the URL, and
-  never selects on the user's behalf even when one option exists;
+  not a fourth part; owner-approved RAIN-ORDER-ENTRY amendment (2026-09-15):
+  declared workspace entry resolves current authorized active companies, enters
+  the sole company, or validates a principal/tenant/environment advisory
+  preference among several and otherwise asks once. Every resulting selection
+  is materialized as explicit URL/form/task scope; explicit invalid scope refuses.
+  Preference is never permission; documents, drafts and prepared retries remain
+  pinned when another tab switches company (amended ADR-0037/0015);
 - navigation is role-shaped, task-named, and budgeted to seven **top-level**
   entries on desktop and five in compact — a budget on entries *after* module
   grouping, never on total leaf count; saved views are page tabs, never
-  navigation nodes; everything else is reached through search;
+  navigation nodes; canonical workspace membership defines operational/setup
+  destinations, with child/derived surfaces reached in owning document/task
+  context or by preserved deep links (amended ADR-0030, 2026-09-15);
 - one global command palette combines navigate, create, and ask;
 - records open as full pages (deep-linkable units of work); quick create and
   peek use drawers; master data allows inline grid editing, posted documents
@@ -1704,7 +1717,9 @@ Shell contract:
   happened" is answerable on every record without a report;
 - one global status-color grammar (success, attention, blocked, in progress);
   modules may add states but never recolor meanings;
-- weight matches consequence: drafts autosave and edit inline; postings and
+- weight matches consequence: declared document drafts buffer inline edits and
+  explicitly save through the declared persistence boundary (including honest
+  sequential saves under RAIN-ORDER-ENTRY); postings and
   other consequential effects always preview predicted effects and confirm;
 - object identifiers are visible, stable, and copyable on every record;
 - empty states teach the next action; the first-run home is a setup checklist

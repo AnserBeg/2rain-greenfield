@@ -48,7 +48,15 @@ export function receivingNavigation(
             'goods_receipt_line_list',
             'View receipt lines',
           ],
-          ['purchase_order_list', 'purchase_order_list', 'View order progress'],
+          // Where the product composes it, the Purchase orders List reads its
+          // orders with their totals (ORDER-PARITY), under that query's own
+          // company parameter; otherwise it reads its plain query.
+          [
+            'purchase_order_list',
+            'commercial_purchase_order_list',
+            'View order progress',
+            'purchase_order_list',
+          ],
         ],
         guidance:
           'Add lines linked to this receipt and the matching purchase order lines, then post this receipt. Enter actual received unit cost and currency, or explicitly choose absent. To correct, create a new correction or reversal receipt linked to the posted original and identify the compensated movement on each line. Reopen a closed order first.',
@@ -69,11 +77,20 @@ export function receivingNavigation(
   if (!spec) return undefined;
   return {
     guidance: spec.guidance,
-    links: spec.links.map(([surface, query, label]) => {
-      const definition = registeredSemanticQueryFromPinnedView(
-        view,
-        `${namespace}:query.${query}`,
-      );
+    // A link carries the company under the parameter of the query its surface
+    // reads: the first one named that the release registers.
+    links: spec.links.map(([surface, query, label, otherwise]) => {
+      const definition =
+        registeredSemanticQueryFromPinnedView(
+          view,
+          `${namespace}:query.${query}`,
+        ) ??
+        (otherwise
+          ? registeredSemanticQueryFromPinnedView(
+              view,
+              `${namespace}:query.${otherwise}`,
+            )
+          : null);
       if (!definition?.legalEntityScope)
         throw new Error('Receiving link lacks registered scope');
       return {

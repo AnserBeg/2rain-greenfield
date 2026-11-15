@@ -78,6 +78,110 @@ const authenticationInput = Object.freeze({
   headers: Object.freeze({ authorization: 'Bearer semantic-gateway-fixture' }),
 });
 
+test('APPROVAL-PO: Task permission previews remain advisory and preserve required confirmation', async () => {
+  const scopedEntity = 'aa000000-0000-4000-8000-000000000099';
+  for (const outcome of ['ALLOW', 'DENY', 'MALFORMED'] as const) {
+    const fixture = createFixture({
+      operationPayload: capabilityOperationCatalogWith(
+        operationId,
+        'northstar.test:capability.approval',
+        queryId,
+      ),
+      policyOutcome: outcome,
+    });
+    const view = await fixture.requestEntry.run(authenticationInput, (value) =>
+      Promise.resolve(value),
+    );
+    const gateway = new SemanticOperationGateway(
+      fixture.policy,
+      undefined,
+      fixture.operationMediation,
+    );
+    assert.equal(
+      await gateway.previewEligibility(view, [operationId], scopedEntity),
+      'ineligible',
+    );
+    assert.equal(
+      await gateway.previewTaskEligibility(view, [], scopedEntity),
+      'ineligible',
+    );
+    assert.equal(
+      await gateway.previewTaskEligibility(
+        view,
+        ['northstar.test:operation.absent'],
+        scopedEntity,
+      ),
+      'ineligible',
+    );
+    if (outcome === 'MALFORMED') {
+      await assert.rejects(
+        gateway.previewTaskEligibility(view, [operationId], scopedEntity),
+        RequestRuntimeViewIntegrityError,
+      );
+    } else {
+      assert.equal(
+        await gateway.previewTaskEligibility(view, [operationId], scopedEntity),
+        outcome === 'ALLOW' ? 'eligible' : 'ineligible',
+      );
+    }
+    if (outcome === 'ALLOW') {
+      assert.deepEqual(
+        fixture.policy.authorizationCalls.map((call) => call.permissionId),
+        [
+          'northstar.runtime:permission.semantic-operation-boundary',
+          'northstar.bootstrap:permission.post',
+        ],
+      );
+      assert.deepEqual(
+        fixture.policy.authorizationCalls.at(-1)!.decisionInput,
+        {
+          input: { legalEntityId: scopedEntity },
+          kind: 'semanticOperationEligibilityPolicyInput',
+          operationId,
+          requestId: view.requestId,
+          schemaVersion: 'northstar.semantic-operation-policy-input/v1',
+        },
+      );
+      await assert.rejects(
+        gateway.invoke(
+          view,
+          {
+            confirmationGrant: null,
+            idempotencyKey: 'aa000000-0000-4000-8000-000000000098',
+            input: { expectedRevision: 1, recordId: scopedEntity },
+            operationId,
+            schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+          },
+          fixture.operationMediation.issueInvocation(view, 'UI'),
+        ),
+        SemanticOperationConfirmationRequiredError,
+      );
+    }
+  }
+  const payload = capabilityOperationCatalogWith(
+    operationId,
+    'northstar.test:capability.approval',
+    queryId,
+  ) as {
+    operations: { lifecycle: string }[];
+  };
+  payload.operations[0]!.lifecycle = 'retired';
+  const retired = createFixture({
+    operationPayload: payload as unknown as ImmutableJsonValue,
+  });
+  const view = await retired.requestEntry.run(authenticationInput, (value) =>
+    Promise.resolve(value),
+  );
+  assert.equal(
+    await new SemanticOperationGateway(retired.policy).previewTaskEligibility(
+      view,
+      [operationId],
+      null,
+    ),
+    'ineligible',
+  );
+});
+
 test('policy narrowing may reference only a parameter and type declared by the selected query', async () => {
   const declaredParameterId =
     'northstar.bootstrap:parameter.item_list_policy_scope';

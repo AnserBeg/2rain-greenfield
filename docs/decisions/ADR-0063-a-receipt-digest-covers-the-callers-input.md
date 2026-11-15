@@ -159,6 +159,13 @@ and what was queried is named so it can be attacked.
    read-back's `sourceEntityId` to be the TRANSACTION entity; and the factory
    declares `verificationRefusal` = *"only adjustment drafts are admitted by this
    route"*.
+
+   > **Note 2026-09-30 (INVENTORY-PARITY, owner ruling R4).** The executor now
+   > also dispatches `transfer` drafts, to `postTransfer`, and declares
+   > `verificationRefusal` = *"only adjustment and transfer drafts are admitted
+   > by this route"* (ADR-0027, *Amendment 2026-09-30*). Items 4-5 are
+   > unchanged -- no route reaches `postStockCount` -- so every verdict below
+   > still stands.
 4. `grep -rn postStockCount` over the repository returns three files: its own
    definition, `test/postgres/inventory-stock-count.test.ts` and
    `test/postgres/inventory-backup-restore.test.ts`. **There is no production

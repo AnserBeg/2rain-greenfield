@@ -513,6 +513,8 @@ class Seeder {
   ): Promise<string> {
     const shipment = this.binding.shipment;
     const recordId = randomUUID();
+    // An initial shipment carries a complete ship-to (SALES-PARITY ruling E);
+    // its line's archive guard, lifted from `shipment_update`, requires it.
     await this.pool.query(
       `INSERT INTO ${fulfillmentTable(shipment)}
          (tenant_id,environment_id,${q(shipment.legalEntity!.column)},record_id,revision,archived_at,
@@ -522,8 +524,13 @@ class Seeder {
           ${q(fulfillmentColumn(shipment, 'shipment_effective_at'))},
           ${q(fulfillmentColumn(shipment, 'shipment_location_id'))},
           ${q(fulfillmentColumn(shipment, 'shipment_reason_code'))},
+          ${q(fulfillmentColumn(shipment, 'shipment_ship_to_street'))},
+          ${q(fulfillmentColumn(shipment, 'shipment_ship_to_city'))},
+          ${q(fulfillmentColumn(shipment, 'shipment_ship_to_postal_code'))},
+          ${q(fulfillmentColumn(shipment, 'shipment_ship_to_country'))},
           ${q(fulfillmentRelation(this.binding, shipment, 'shipment_order'))})
-       VALUES ($1,$2,$3,$4,1,NULL,$5,$6,$7,$8,$9,'packing-retrieval',$10)`,
+       VALUES ($1,$2,$3,$4,1,NULL,$5,$6,$7,$8,$9,'packing-retrieval',
+               '100 Packing Way','Calgary','T2P 1J9','Canada',$10)`,
       [
         ...this.scope,
         recordId,

@@ -10,11 +10,14 @@ import {
   FieldTypeSchema,
   LATEST_LANGUAGE_VERSION,
   QUERY_AGGREGATE_PROFILE_VERSION,
+  STRUCTURAL_LIMITS_V0,
   canonicalAuthoredProjection,
+  canonicalize,
   evaluateQueryAggregateSemantics,
   inspectPredicateForExecution,
   normalizeApplicationPackage,
   parseAuthoredApplicationPackageJson,
+  parseNormalizedApplicationPackageJson,
   type VersionedAuthoredApplicationPackage,
 } from '../../../packages/canonical-model/src/index.js';
 import { lowerStorageTargetV1 } from '../../../packages/compiler/src/index.js';
@@ -23,6 +26,12 @@ import {
   V3_AGGREGATE_IDS,
   v3AggregateModule,
 } from '../../compiler/v3-definition.js';
+import {
+  PACKAGE_BYTE_MAXIMUM_V0,
+  authoredCanonicalBytes,
+  normalizedCanonicalBytes,
+  packageAtByteBoundary,
+} from '../../helpers/package-byte-boundary.js';
 import {
   Q1_AGGREGATE_PARITY_CASES,
   evaluatePredicateCase,
@@ -1398,12 +1407,134 @@ test('family, collection, and authored-byte bounds fail with stable codes', () =
     'test/fixtures/canonical-model/representative.authored.json',
     'utf8',
   );
-  const padded = `${' '.repeat(2_097_153)}${authoredText}`;
+  // Was a literal 2_097_153 (the 2 MiB maximum + 1); derived from the limit
+  // since STRUCTURAL-LIMITS-RAISE so this stays a refusal at any maximum. The
+  // exact boundary is pinned by the test below.
+  const padded = `${' '.repeat(STRUCTURAL_LIMITS_V0.maximumAuthoredBytes + 1)}${authoredText}`;
   expectDiagnostic(
     () => parseAuthoredApplicationPackageJson(padded),
     'CANON_LIMIT_PACKAGE_BYTES',
   );
 });
+
+/**
+ * STRUCTURAL-LIMITS-RAISE (ADR-0070, owner ruling 2026-10-05): the 4 MiB maximum
+ * admits exactly its value and refuses one byte more, with one deterministic
+ * diagnostic, at each of the four places the package bytes are measured. The
+ * maximum is the pinned literal, not the constant, so a silent move reds here.
+ */
+test('the 4 MiB package-byte maximum admits exactly its value and refuses one byte more on every path', () => {
+  assert.equal(
+    STRUCTURAL_LIMITS_V0.maximumAuthoredBytes,
+    PACKAGE_BYTE_MAXIMUM_V0,
+  );
+  assert.equal(
+    STRUCTURAL_LIMITS_V0.maximumNormalizedBytes,
+    PACKAGE_BYTE_MAXIMUM_V0,
+  );
+  const encoder = new TextEncoder();
+  const packageId = fixture().package.packageId;
+  const authoredRefusal = {
+    acceptedAlternative:
+      'split non-language evidence from the package or reduce authored content',
+    code: 'CANON_LIMIT_PACKAGE_BYTES',
+    occurrenceIndex: 0,
+    path: '$',
+    phase: 'canonicalModel',
+    rule: 'authored package bytes must not exceed 4194304',
+  };
+  const normalizedRefusal = {
+    acceptedAlternative: 'split the package or reduce canonical definitions',
+    code: 'CANON_LIMIT_NORMALIZED_BYTES',
+    occurrenceIndex: 0,
+    path: '$',
+    phase: 'canonicalModel',
+    rule: 'normalized package bytes must not exceed 4194304',
+  };
+  const refusedTwiceAlike = (action: () => unknown, expected: object) => {
+    const first = refusal(action);
+    assert.deepEqual(first, [expected]);
+    assert.deepEqual(refusal(action), first, 'refusal must be deterministic');
+  };
+
+  // 1. Authored canonical bytes: the first measurement inside normalization.
+  const authored = packageAtByteBoundary(fixture(), authoredCanonicalBytes);
+  const authoredText = canonicalize(authored.atTarget);
+  const overText = canonicalize(authored.oneByteOver);
+  assert.equal(
+    encoder.encode(authoredText).byteLength,
+    PACKAGE_BYTE_MAXIMUM_V0,
+  );
+  assert.equal(
+    encoder.encode(overText).byteLength,
+    PACKAGE_BYTE_MAXIMUM_V0 + 1,
+  );
+  // At exactly the maximum the authored check passes; normalization then adds
+  // defaults, so the package is refused by the NEXT check, never by this one.
+  assert.deepEqual(
+    refusal(() => normalizeApplicationPackage(authored.atTarget)).map(
+      (entry) => entry.code,
+    ),
+    ['CANON_LIMIT_NORMALIZED_BYTES'],
+  );
+  refusedTwiceAlike(() => normalizeApplicationPackage(authored.oneByteOver), {
+    ...authoredRefusal,
+    objectId: packageId,
+  });
+
+  // 2. Authored file bytes: the check `compile-app-release.ts` runs on the
+  // checked-in `app.authored.json` before anything else.
+  assert.deepEqual(
+    parseAuthoredApplicationPackageJson(authoredText),
+    parseAuthoredApplicationPackageJson(JSON.stringify(authored.atTarget)),
+  );
+  refusedTwiceAlike(() => parseAuthoredApplicationPackageJson(overText), {
+    ...authoredRefusal,
+    objectId: null,
+  });
+
+  // 3. Normalized canonical bytes: the last measurement inside normalization.
+  const normalized = packageAtByteBoundary(fixture(), normalizedCanonicalBytes);
+  const atMaximum = normalizeApplicationPackage(normalized.atTarget);
+  const atMaximumBytes = encoder.encode(canonicalize(atMaximum));
+  assert.equal(atMaximumBytes.byteLength, PACKAGE_BYTE_MAXIMUM_V0);
+  refusedTwiceAlike(() => normalizeApplicationPackage(normalized.oneByteOver), {
+    ...normalizedRefusal,
+    objectId: packageId,
+  });
+
+  // 4. Decode: stored and recorded normalized bytes are read back through
+  // here (compiler decode, release repository, historical reproduction).
+  assert.deepEqual(
+    parseNormalizedApplicationPackageJson(atMaximumBytes),
+    atMaximum,
+  );
+  const overNormalized = structuredClone(atMaximum) as unknown as {
+    fields: Array<{ defaultValue?: { value?: unknown } }>;
+  };
+  const shortDefault = overNormalized.fields.find(
+    (field) =>
+      typeof field.defaultValue?.value === 'string' &&
+      field.defaultValue.value.length < 4_000,
+  )!.defaultValue!;
+  shortDefault.value = `${String(shortDefault.value)}x`;
+  const overBytes = encoder.encode(canonicalize(overNormalized as never));
+  assert.equal(overBytes.byteLength, PACKAGE_BYTE_MAXIMUM_V0 + 1);
+  refusedTwiceAlike(() => parseNormalizedApplicationPackageJson(overBytes), {
+    ...normalizedRefusal,
+    objectId: null,
+  });
+});
+
+function refusal(action: () => unknown): CanonicalModelError['diagnostics'] {
+  try {
+    action();
+  } catch (error) {
+    assert.ok(error instanceof CanonicalModelError, String(error));
+    return error.diagnostics;
+  }
+  assert.fail('expected a CanonicalModelError refusal');
+}
 
 test('model-authored predicate scenarios are judged by the deterministic kernel', () => {
   const corpus = loadPredicateParityCorpus();
