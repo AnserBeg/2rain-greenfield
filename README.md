@@ -25,15 +25,15 @@ That design is aimed at the two capabilities the product is built toward:
 
 ## At a glance
 
-|                     |                                                                                                                                                                 |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Stage**           | Pre-launch. The purchase → receive → stock → sell → reserve → ship loop runs end to end on PostgreSQL. There is no production tenant yet                        |
-| **Built on `main`** | 6 modules, 25 entities, 135 fields, 99 queries, 93 operations, 70 screens, 116 permissions, 4 registered domain capabilities                                    |
-| **Code**            | ≈92,000 lines of production TypeScript · ≈131,000 lines of tests · 6,781 lines of SQL in 28 append-only migrations                                              |
-| **Verification**    | 1,077 automated tests in 11 suites, all green in CI on `main`'s tree (2026-10-22) · 139 mutation controls · 2,050 language-coverage obligations                 |
-| **Decisions**       | 66 accepted Architecture Decision Records in [`docs/decisions/`](docs/decisions)                                                                                |
-| **Stack**           | TypeScript 5.9 on Node 22.22.2 · PostgreSQL 16.14 (image pinned by digest) · Zod 4.1.12 · pnpm 11.9 monorepo · Playwright · no UI framework                     |
-| **Not built yet**   | The AI agent runtime, the tenant customization engine, production sign-in, and the background worker. Their contracts are designed and partly projected already |
+|                     |                                                                                                                                                                               |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Stage**           | Pre-launch. The purchase → receive → stock → sell → reserve → ship loop runs end to end on PostgreSQL. There is no production tenant yet                                      |
+| **Built on `main`** | 6 modules, 41 entities, 308 fields, 186 queries, 165 operations, 123 screens, 201 permissions, 9 registered domain capabilities (measured 2026-11-15)                         |
+| **Code**            | ≈134,000 lines of production TypeScript · ≈182,000 lines of tests · 6,781 lines of SQL in 28 append-only migrations                                                           |
+| **Verification**    | 1,384 automated tests in 10 suites, every test suite green in CI on the merge tip (run 43684418232, 2026-11-15) · 169 mutation controls · 2,867 language-coverage obligations |
+| **Decisions**       | 69 accepted Architecture Decision Records in [`docs/decisions/`](docs/decisions)                                                                                              |
+| **Stack**           | TypeScript 5.9 on Node 22.22.2 · PostgreSQL 16.14 (image pinned by digest) · Zod 4.6.6 · pnpm 11.9 monorepo · Playwright · no UI framework                                    |
+| **Not built yet**   | The AI agent runtime, the tenant customization engine, production sign-in, and the background worker. Their contracts are designed and partly projected already               |
 
 ---
 
@@ -159,7 +159,7 @@ measured reason ([ADR-0002](docs/decisions/ADR-0002-modular-monolith-and-depende
 
 ## 3. The application language
 
-`@north-star/canonical-model` defines the language, currently **v5**. A package is a
+`@north-star/canonical-model` defines the language, currently **v6**. A package is a
 closed set of typed families: modules, entities, fields, relations, state machines,
 queries, operations, permissions, surfaces (screens), storage mappings, capability
 requirements and assertions. Every node carries a closed `kind` and a `schemaVersion`.
@@ -492,26 +492,27 @@ stage G6.
 
 ## 13. Engineering assurance
 
-**Test inventory.** These are from CI on `main`'s tree, 2026-10-22. Every suite was
-green.
+**Test inventory.** These are from CI run 43684418232 on the merge tip `e7d48106`,
+2026-11-15. Every test suite was green; that run's dependency audit failed on a newly
+published zod advisory, fixed at `e0de6c87` by pinning zod 4.6.6.
 
-| Suite                           |     Tests | What it covers                                                                                  |
-| ------------------------------- | --------: | ----------------------------------------------------------------------------------------------- |
-| Unit                            |       163 | Language normalization, admission rules, module definitions                                     |
-| Compiler                        |       175 | Golden byte vectors, determinism, projections, predicate lowering                               |
-| Integration                     |       150 | Gateways, module runtime, storage transitions, trust substrate, surfaces                        |
-| Architecture and hygiene        |       191 | Dependency boundaries, compiler hermeticity, tenant completeness, UX grammar, test reachability |
-| PostgreSQL schema and isolation |       249 | RLS, migrations, posting kernel, concurrency, reconciliation, locale ordering                   |
-| Browser (Playwright)            |       101 | End-to-end flows against the composed application                                               |
-| Web surface contracts           |        29 | The UI runtime's contract with compiled surfaces                                                |
-| Observability                   |        11 | Health and readiness, deterministic redacted logs, bounded metrics                              |
-| Compiler performance            |         5 | The ≤ 5 s cold-compile budget on a CPU-exclusive runner                                         |
-| Agent discovery                 |         3 | The agent projection is compiler data over the same query and operation contracts               |
-| **Total**                       | **1,077** |                                                                                                 |
+| Suite                                                                                                   |     Tests | What it covers                                                                                                                |
+| ------------------------------------------------------------------------------------------------------- | --------: | ----------------------------------------------------------------------------------------------------------------------------- |
+| Unit                                                                                                    |       255 | Language normalization, admission rules, module definitions                                                                   |
+| Compiler                                                                                                |       176 | Golden byte vectors, determinism, projections, predicate lowering                                                             |
+| Integration                                                                                             |       259 | Gateways, module runtime, storage transitions, trust substrate, surfaces                                                      |
+| Architecture and hygiene                                                                                |       200 | Dependency boundaries, compiler hermeticity, tenant completeness, UX grammar, test reachability                               |
+| PostgreSQL (schema and isolation 163 plus locale 1, inventory 83, commercial 14, sales 10, composed 24) |       295 | RLS, migrations, posting kernel, concurrency, reconciliation, locale ordering, commercial workflows, the composed application |
+| Browser (Playwright; browser 87, operations 12, inventory 11, composed 23)                              |       133 | End-to-end flows against the composed application                                                                             |
+| Web surface contracts                                                                                   |        46 | The UI runtime's contract with compiled surfaces                                                                              |
+| Observability                                                                                           |        11 | Health and readiness, deterministic redacted logs, bounded metrics                                                            |
+| Compiler performance                                                                                    |         6 | The ≤ 5 s cold-compile budget on a CPU-exclusive runner                                                                       |
+| Agent discovery                                                                                         |         3 | The agent projection is compiler data over the same query and operation contracts                                             |
+| **Total**                                                                                               | **1,384** |                                                                                                                               |
 
 **Gates that prove the tests themselves:**
 
-- **Mutation controls.** 139 recorded mutations in
+- **Mutation controls.** 169 recorded mutations in
   [`test/evidence/`](test/evidence) each deliberately break production code, and the
   named test must fail ("go red"). A gate that has never been seen failing is not
   accepted as evidence
@@ -519,7 +520,7 @@ green.
 - **Executed-file reachability.** Every `*.test.ts` and `*.spec.ts` file must be proven
   to have executed in a successful CI suite. A test file that silently never runs fails
   the build.
-- **Language coverage.** 2,050 obligations derived from the language definition are
+- **Language coverage.** 2,867 obligations derived from the language definition are
   tracked against reviewed decisions and observed first-party use.
 - **Observation over proxies.** Gates read execution counters, produced artifacts or
   persisted effects, not parsed output or declarations. The posting kernel's writer
@@ -530,55 +531,50 @@ green.
   a gitleaks secret scan with a planted synthetic secret that must be caught. Overrides
   pin vulnerable transitive dependencies with the advisory recorded inline.
 
-**CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs seven jobs: quality
-and build, the exclusive compiler performance budget, PostgreSQL schema and isolation,
-browser, dependency and secret scans, observability evidence, and executed-file
-reachability.
+**CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs fourteen jobs: quality
+and build, the exclusive compiler performance budget, five PostgreSQL jobs (schema and
+isolation, inventory, commercial workflows, sales workflows, the composed application),
+four browser jobs (browser, operations, inventory, composed application), dependency and
+secret scans, observability evidence, and executed-file reachability.
 
 ---
 
 ## 14. Current state
 
-_As of 2026-10-22._
+_As of 2026-11-15._
 
 ### On `main`
 
-| Module     | What works                                                                                                                         |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Party      | Suppliers and customers with roles, plus legal entities                                                                            |
-| Catalog    | Items with an immutable base unit                                                                                                  |
-| Location   | Stock locations                                                                                                                    |
-| Inventory  | Adjustments, transfers, stock counts with correction, period locks, posted movements and balances                                  |
-| Purchasing | Purchase orders with a lifecycle state machine, amendments, goods receipts (partial, corrected, reversed), close and reopen        |
-| Sales      | Sales orders with a lifecycle state machine, reservations, partial shipments, correction, reversal, cancellation, closure, packing |
+`main`'s trunk is the combined parity branch, by the owner's ruling of 2026-11-14.
+It compiles from one application package into one release: 123 screens and 671
+verification scenarios, in one release-lineage entry (the pre-tenant re-baseline,
+[ADR-0066](docs/decisions/ADR-0066-pre-tenant-development-re-baselines-the-release-lineage.md)).
+A development database built from an older lineage needs `dev:reset`.
 
+| Module     | What works                                                                                                                                                                                                                  |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Party      | Suppliers and customers with roles, addresses, plus legal entities                                                                                                                                                          |
+| Catalog    | Items with an immutable base unit, aliases found by search, stocked and non-stocked items, merging duplicates, company reorder rules                                                                                        |
+| Location   | Stock locations with a status (usable, quarantine, damaged, in transit, return pending) and types                                                                                                                           |
+| Inventory  | Adjustments, transfers, opening stock, stock counts with correction, stock on the item page, period locks, a floor-staff warehouse view, posted movements and balances, a posting-date guard against the business's "today" |
+| Purchasing | Priced purchase orders with approval, a lifecycle state machine, amendments, goods receipts (partial, corrected, reversed), vendor bills, payments and credits with a three-way match                                       |
+| Sales      | Sales orders with reservations, partial shipments, correction, reversal, closure and packing; invoices, payments and credits; credit limits and holds; price lists; counter sales                                           |
+
+Worklists include expected receipts and a buying worklist with reorder points and
+shortage warnings, and the inventory value list shows a derived moving-average cost
+([ADR-0067](docs/decisions/ADR-0067-inventory-value-is-a-derived-moving-average.md)).
 Authorization is current and scoped on every gateway call. It runs against local
 development identities; production sign-in is not built.
 
-### In development
+### Parked until the week-6 decision
 
-The next feature set is being built on separate branches, each with its own CI, and combined
-on one integration branch,
-[`packet/INTEGRATION`](https://github.com/AnserBeg/2rain-greenfield/pull/29), before
-anything is merged to `main`:
-
-| Area                    | Capability                                                                                                                                                                                                                   |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Order entry             | Sales and purchase workspaces composed entirely from metadata; priced purchase orders; order lists with progress and totals                                                                                                  |
-| Payables                | Vendor bills, payments and credits                                                                                                                                                                                           |
-| Receivables and reports | Receivables aging, customer statements, open orders by customer, a home dashboard                                                                                                                                            |
-| Valuation               | Derived moving-average inventory value, shipment cost, landed cost ([ADR-0067](https://github.com/AnserBeg/2rain-greenfield/blob/packet/INTEGRATION/docs/decisions/ADR-0067-inventory-value-is-a-derived-moving-average.md)) |
-| Approvals               | Purchase-order approval, placing orders, staged amendments                                                                                                                                                                   |
-| Inventory               | Stock on the item page, stock documents, opening stock, a posting-date guard against the business's "today"                                                                                                                  |
-| Locations and warehouse | Location status and types, usable stock, warehouses, a floor-staff warehouse view, period-lock screens                                                                                                                       |
-| Replenishment           | Reorder points, stock by item, a buying worklist, shortage and blocked-by-supply warnings                                                                                                                                    |
-| Catalog                 | Item aliases, stocked and non-stocked items, merging duplicates, company reorder rules                                                                                                                                       |
-| Sales                   | Credit limits and holds, customer price lists, counter sales                                                                                                                                                                 |
-| In review               | Customer and vendor returns, stock counts by location, units of measure, special orders and drop ship, returnable containers with deposits                                                                                   |
-
-At its latest combined point, the integration branch's whole feature set still compiles
-from one application package into one release: 123 screens and 671 verification
-scenarios, with all 14 CI jobs green.
+A feature freeze holds until the decision at week 6 of the test in
+[`docs/execution/current-plan.md`](docs/execution/current-plan.md). These stay on their own
+branches and are not on `main`: units of measure, special orders and drop ship, stock counts
+by location, customer and vendor returns, returnable containers with deposits, a second
+locations increment, the combined item page, and three open pull requests (company-bound
+generic writes #32, receiving extras #33, and receivables aging, customer statements and a
+Today home view #34).
 
 ### Not built yet
 
@@ -602,6 +598,11 @@ identity and sign-in, the background worker, and multi-tenant production deploym
 | G8    | Production launch                                                                                                                             | ⬜                                             |
 | N1–N7 | Generated modules, workflows and documents, commercial depth, CRM and work orders, connectors, more ERP domains, a controlled extension point | after launch                                   |
 
+The six-week test that began on 2026-11-14 puts the trunk first, then the agent, then
+customization, and decides at week 6 (see
+[`docs/execution/current-plan.md`](docs/execution/current-plan.md)). G3 stays at 14 of 17
+criteria; merging the trunk claims no stage gate.
+
 The full program, including every stage gate, is in
 [`docs/greenfield-north-star-erp-platform-plan.md`](docs/greenfield-north-star-erp-platform-plan.md).
 
@@ -611,23 +612,23 @@ The full program, including every stage gate, is in
 
 ```text
 packages/
-  canonical-model/     6.2k  the application language: schemas, normalization, canonical bytes,
+  canonical-model/    10.9k  the application language: schemas, normalization, canonical bytes,
                              predicate / aggregate / legal-entity-scope kernels, limits
-  compiler/           13.8k  the pure compiler, projections, storage planning, verification plans,
+  compiler/           14.8k  the pure compiler, projections, storage planning, verification plans,
                              hashing, diffs, conformance
-  runtime/             6.3k  request runtime view, Semantic Query / Operation gateways, list behavior
+  runtime/             8.6k  request runtime view, Semantic Query / Operation gateways, list behavior
   platform-runtime/    1.7k  release records and activation, storage transitions, trust contracts
-  postgres-provider/  43.2k  migrations, release persistence / approval / verification / activation,
+  postgres-provider/  52.0k  migrations, release persistence / approval / verification / activation,
                              the inventory posting kernel, receiving, fulfillment, reconciliation,
                              current policy, the generated-module runtime and materializer
-  domain/              7.6k  first-party modules as data: party, catalog, location, inventory,
+  domain/             20.9k  first-party modules as data: party, catalog, location, inventory,
                              purchasing, sales, and the application builder
   observability/       0.5k  structured logs, metrics, request context, feedback-ladder bands
-  dev-tooling/         4.0k  architecture boundaries, UX-grammar conformance, tenant completeness
+  dev-tooling/         4.1k  architecture boundaries, UX-grammar conformance, tenant completeness
 apps/
-  web/                 8.3k  server-rendered UI runtime, component registry, design tokens,
+  web/                19.3k  server-rendered UI runtime, component registry, design tokens,
                              message catalog; release/ holds the authored and compiled releases
-  api/                 0.6k  composition root and dev entry point
+  api/                 0.7k  composition root and dev entry point
   worker/                    reserved
 db/migrations/               28 ordered, append-only SQL migrations
 test/                        unit, compiler, integration, architecture, agent and postgres suites,
