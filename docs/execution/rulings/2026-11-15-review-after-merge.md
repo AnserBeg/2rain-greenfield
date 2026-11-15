@@ -1,6 +1,6 @@
 # Review after the merge — why the doctrine changed on 2026-11-15
 
-Status: **proposed by the BUILD lane at the owner's request ("decide the best approach… create a better doctrine"); adopted when this branch merges.** It amends `AGENTS.md` §3-§6 and the `review-tiers`, `mission-cadence` and `git-workflow` skills, inside their size caps (155 -> 155, 62 -> 60, 102 -> 99, 86 -> 85 lines).
+Status: **adopted by the owner on 2026-11-15 ("Adopt it", PR #39).** Proposed by the BUILD lane at the owner's request ("decide the best approach… create a better doctrine"). It amends `AGENTS.md` §3-§6 and the `review-tiers`, `mission-cadence` and `git-workflow` skills, inside their size caps (155 -> 155, 62 -> 60, 102 -> 99, 86 -> 85 lines).
 
 ## What the reviews since 2026-09-04 found
 
@@ -39,7 +39,7 @@ Reading: one arm on the posting path found silent defects in one pass. Eight arm
 Of INTEGRATION's Critical diff, the posting hunk and the grant hunks were read before with nothing found, and the verifier was read through `7d254902`. Two sub-ranges were never read. It does not block the trunk merge; it is owed before the week-6 decision, and it is small enough to run now.
 
 ```text
-You are a fresh reviewer. Repository https://github.com/AnserBeg/2rain-greenfield, branch `packet/INTEGRATION`, SHA `781cd80910e6a0d82b4e5301a5f65d219bb6ecf6` (an ancestor of the branch tip; `git ls-remote origin packet/INTEGRATION` printed `c332398828b07934c1179604f4f495f195ff8846	refs/heads/packet/INTEGRATION`, a docs-only tip with identical code).
+You are a fresh reviewer. Repository https://github.com/AnserBeg/2rain-greenfield, branch `packet/INTEGRATION`, SHA `781cd80910e6a0d82b4e5301a5f65d219bb6ecf6` (an ancestor of the branch tip, and of `main` once the trunk is merged; every later commit is docs-only: `git diff 781cd809 origin/packet/INTEGRATION -- packages apps db test` prints nothing).
 
 Read `docs/architecture/posting-kernel-guarantees.md`, then exactly these two diffs under `packages/postgres-provider/src/`, and whatever code you need around them. Do not read the packet records.
 1. `git diff 974ae755 781cd809 -- packages/postgres-provider/src/module-storage-materializer.ts` (+17): `locateColumn` now resolves a column element that belongs to a relation.
