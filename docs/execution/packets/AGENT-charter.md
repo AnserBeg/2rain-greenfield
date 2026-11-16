@@ -1,6 +1,6 @@
 # AGENT — charter: the five tools over existing operations, and ten real-model tasks (weeks 1-2 of the six-week test)
 
-You are the BUILD lane. Cut `packet/AGENT` from `main` in its own worktree (`git worktree add ../2rain-greenfield-agent -b packet/AGENT main`). Read `AGENTS.md`, the top of `docs/execution/current-plan.md`, the skills `mission-cadence`, `git-workflow`, `review-tiers`, ADR-0009 and plan §9.2-§9.2.3. Chartered 2026-11-15 from `main` `dd0a071d`; verify every path and symbol below with `ls`/`grep` before relying on it.
+You are the BUILD lane. Cut `packet/AGENT` from `main` in its own worktree (`git worktree add ../2rain-greenfield-agent -b packet/AGENT main`). Read `AGENTS.md`, the top of `docs/execution/current-plan.md`, the skills `mission-cadence`, `git-workflow`, `review-tiers`, ADR-0009 and plan §9.2-§9.2.3. Chartered 2026-11-15 from `main` `dd0a071d` (key source added 2026-11-16); verify every path and symbol below with `ls`/`grep` before relying on it.
 
 ## Outcome (the owner's words)
 
@@ -26,7 +26,7 @@ Module layout, envelope field names within plan §9.2, the fake model's script f
 
 ## STOP (five lines: what, two options, your recommendation)
 
-A migration, a trust-substrate change or any Critical-set path (`AGENTS.md` §4); a new principal or stored attribution; a projection that must grow (it is a re-derive: one lineage entry, pins re-measured — ask first); a sixth tool; a CI red you cannot make green honestly; no model key available (stop with the harness ready and the fake-model tests green).
+A migration, a trust-substrate change or any Critical-set path (`AGENTS.md` §4); a new principal or stored attribution; a projection that must grow (it is a re-derive: one lineage entry, pins re-measured — ask first); a sixth tool; a CI red you cannot make green honestly; the key file or both keys missing (stop with the harness ready and the fake-model tests green).
 
 ## Lease (paths you own; `ls` each)
 
@@ -36,7 +36,9 @@ A migration, a trust-substrate change or any Critical-set path (`AGENTS.md` §4)
 
 1. How many Field notebooks are on hand at Calgary warehouse? 2. Which purchase orders are waiting to be received? 3. Which invoices for Lethbridge Millwork are unpaid, and what is their total balance? 4. Create and place a purchase order: 10 Field notebook from Cascade Fastener Works at 5.00. 5. Receive a given released purchase order in full into Calgary warehouse. 6. Create and confirm a sales order: 5 Field notebook for Lethbridge Millwork at 12.50. 7. On a given order with stock, reserve 4 and ship 4. 8. Invoice a given shipped order and record full payment. 9. Refusal: "ship 100" on an order with 6 in stock. 10. Refusal: "delete this purchase order". For 9 and 10 nothing may be written.
 
-**Pass is decided by the harness, never by the model's word:** it reads end state through registered queries (for tasks 9 and 10: no movement, no document, no state change), one attempt per task, the harness granting confirmation and recording that it did. Report per task: pass or fail, tool calls, tokens in and out. **Cost per completed task = total spend ÷ tasks passed**, with the model id and the provider's prices and their date taken from the provider's current price list at run time, not from memory. Key from the environment only, never in source, fixtures, CI or the result file. **Spend cap: the harness aborts above USD 20 for the run** (the charter's recommendation; the owner may change it).
+**Pass is decided by the harness, never by the model's word:** it reads end state through registered queries (for tasks 9 and 10: no movement, no document, no state change), one attempt per task, the harness granting confirmation and recording that it did. Report per task: pass or fail, tool calls, tokens in and out. **Cost per completed task = total spend ÷ tasks passed**, with the model id and the provider's prices and their date taken from the provider's current price list at run time, not from memory. **Spend cap: the harness aborts above USD 20 for the run** (the charter's recommendation; the owner may change it).
+
+**Model keys (owner, 2026-11-16: "use the keys in rent_soft's .env").** At run time the agent reads the file named by the environment variable `NORTH_STAR_AGENT_KEY_FILE`; the owner's runs set it to `/mnt/c/Users/rvham/rent_soft/.env`. Parse only two names from it: `CLUADE_API_KEY` (spelled so in that file; an Anthropic key, the default provider) and `OPENAI_API_KEY`. The file has CRLF line endings; strip them. A key already in the environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) wins over the file. Never print, log, copy or commit a value or the file: not in source, fixtures, test output, error messages, the result file or CI; a missing key fails naming the variable, never echoing a line. These keys belong to the live Rain account, so the spend lands there and the cap above applies. Tests in CI use the scripted fake model only.
 
 ## Gates and finish
 
