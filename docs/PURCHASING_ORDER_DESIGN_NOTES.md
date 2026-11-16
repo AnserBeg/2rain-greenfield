@@ -26,6 +26,48 @@ primitives:
 | **Purchase order list**  | One row per order: number, supplier name, lifecycle status, receiving status with `received of ordered`, order date, expected date (with "N days overdue"), line count, order total, and one contextual action (_Receive_ or _Open_). Search by number, supplier or currency. A count of orders by status. An overdue banner. |
 | **Purchase order record** | Title block with order and receiving status; lifecycle stepper; headline figures (total, ordered, received, open); supplier and dates; order lines with per-line receiving progress, unit price and line total; received / open / total value; collapsible notes, receiving guidance and stored fields.                       |
 
+### Workflow tabs on the list
+
+The list opens with a row of tabs, each showing how many orders it holds:
+
+| Tab                | Holds                                                    | The question it answers           |
+| ------------------ | -------------------------------------------------------- | --------------------------------- |
+| **All**            | Every order                                              | "Find me an order"                |
+| **Draft**          | Not yet released                                         | "What still has to go out?"       |
+| **To receive**     | Released, with goods outstanding                         | "What am I waiting on?"           |
+| **Overdue**        | Released, outstanding, past the expected date            | "Who do I need to chase?"         |
+| **Ready to close** | Released, everything received                            | "What can I finish off?"          |
+| **Closed**         | Closed                                                   | "What is done?"                   |
+| **Cancelled**      | Cancelled                                                | "What was abandoned?"             |
+
+They follow the order work moves through purchasing, the same idea as the sales
+order tabs (To ship, Reserved, To invoice …) but with purchasing's own steps.
+There is deliberately no "To invoice" or "To pay" tab: Rain's purchasing module
+has no supplier bills, so those tabs would always be empty.
+
+Two things are worth understanding:
+
+- **A tab is a question, not a column.** "To receive" and "Ready to close" are
+  both the stored state `released`; what separates them is a _derived_ fact —
+  whether anything is still outstanding. That is why the tabs cannot be a simple
+  database filter and are computed in `loadPurchaseOrderWorklist`.
+- **Counts and rows come from one pass.** The loader reads every order matching
+  the search once, derives each order's summary, and from that single list
+  produces both the number on every tab and the rows of the open tab. They can
+  never disagree. Adding a tab is one entry in the `PURCHASE_ORDER_VIEWS` array.
+
+The chosen tab is a URL parameter (`view=toReceive`), so it can be bookmarked
+and survives search and paging.
+
+### Compact controls
+
+Buttons and inputs now look 32 px tall instead of 44 px. The 44 px size was not
+arbitrary — it is the minimum click/touch target Rain's grammar and tests
+require for accessibility — so the _clickable_ area is still 44 px. The control
+has a 6 px transparent border and its background is clipped inside it
+(`background-clip: padding-box`), so only the inner 32 px is painted. Smaller to
+look at, just as easy to hit. This applies to every screen, not only purchasing.
+
 **Design direction.** Plain and dense, like real ERP software: one-pixel rules
 instead of shadows, one flat panel instead of nested cards, hierarchy from type
 size and weight, status always as colour + dot + word. No gradients, no
@@ -54,6 +96,7 @@ framework, no script. Section 3 explains how interactivity works without it.
 | `apps/web/test/purchasing-fixture.ts`       | An in-memory version of the composed application for tests and local preview (real release + real renderer, fake storage).           |
 | `apps/web/test/purchasing-workspace.test.ts` | Nine tests covering arithmetic, escaping, both screens, search, empty states and a real state transition.                            |
 | `apps/web/test/purchasing-preview.ts` | A local preview server over that in-memory fixture (see section 8). |
+| `apps/web/test/purchasing-workflow.test.ts` | Walks the whole order workflow over HTTP, page by page, as a browser would. |
 | `docs/PURCHASING_ORDER_DESIGN_NOTES.md`     | This document.                                                                                                                       |
 
 ### Files modified
@@ -417,7 +460,8 @@ started here. Verification therefore used an in-memory harness that runs the
 | `tsc -p tsconfig.build.json --noEmit` (build configuration)                                   | Pass                                                      |
 | `eslint apps/web`                                                                             | Pass                                                      |
 | `prettier --check apps/web docs`                                                              | Pass                                                      |
-| `apps/web/test/purchasing-workspace.test.ts` (9 tests)                                        | 9 / 9 pass                                                |
+| `apps/web/test/purchasing-workspace.test.ts` (10 tests, including the tabs)                   | 10 / 10 pass                                              |
+| `apps/web/test/purchasing-workflow.test.ts` (2 tests, see "Workflow walk-through")            | 2 / 2 pass                                                |
 | `test/unit/web-surface-hex-literal-ratchet.test.ts` (no colour literals outside tokens)       | 6 / 6 pass                                                |
 | `test/architecture/surface-runtime-seam.test.ts`                                              | 5 / 5 pass (with the proposed allow-list entry; 4 / 5 without) |
 | `test/architecture/surface-grammar-conformance.test.ts`                                       | 25 / 25 pass                                              |
@@ -432,6 +476,70 @@ started here. Verification therefore used an in-memory harness that runs the
 | Browser console                                                                               | No errors or warnings                                     |
 | Desktop (1360 px) and mobile (375–500 px) layouts, no horizontal page scroll                  | Verified by screenshot                                    |
 | A non-purchasing list (Party) still renders the generic grid                                  | Verified (test 9)                                         |
+
+### Performance
+
+Pages were taking 4–8 seconds to render — including pages this work never
+touched (the party list took about 4 s). A CPU profile showed where the time
+went: to answer "which query feeds this surface?", Rain validates the **whole**
+compiled query catalog (99 queries), and one page asks that question hundreds of
+times — once for every navigation link, every slot and every related-surface
+lookup.
+
+The fix is in `apps/web/src/surface-contract.ts`: the answer for a given surface
+is now remembered for the rest of that request (`readCompiledSurfaceDataBinding`
+keeps a `WeakMap` keyed by the request's view). This is called _memoization_ —
+caching the result of a pure function so it is computed once. It is safe here
+because the view is a deeply frozen copy made for one request, so the same
+question cannot have a different answer, and the cache is dropped when the
+request ends.
+
+| Page                  | Before  | After   |
+| --------------------- | ------- | ------- |
+| Party list            | ~4.0 s  | ~1.1 s  |
+| Purchase order list   | ~5.0 s  | ~1.1 s  |
+| Purchase order record | ~7.0 s  | ~1.2 s  |
+
+Measured in the local preview on this machine; absolute numbers will differ
+elsewhere, the ratio is what matters.
+
+**What is left, and who should decide.** The remaining ~1 s is the same catalog
+validation, now running once per database query instead of hundreds of times. It
+lives in `packages/runtime/src/semantic-query-gateway.ts`
+(`registeredSemanticQueryFromPinnedView`), which is shared platform code beside
+the trust boundary. Remembering the parsed catalog there, once per view, should
+remove most of what remains — but that is a change for the platform's owners to
+approve, not one to slip into a purchasing branch. Two smaller costs: the
+purchasing screens read all order lines, parties and items on each request, and
+the preview compiles TypeScript on start-up.
+
+### Workflow walk-through
+
+`purchasing-workflow.test.ts` starts the real server and walks the workflow over
+HTTP: it fetches each page, reads the form from the HTML it was served, fills it
+and posts it back — the same requests a browser makes. Each step asserts what
+the user would see.
+
+| Step                              | What is checked                                                                                       |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| 1. Create an order                | Saves; page shows Draft and the "no lines" notice; list shows it under **Draft**                      |
+| 2. Add a line                     | The line form offers the new order in its picker; order shows 10 / 0 / 10 and a total of 25.00        |
+| 3. Release                        | Status Released; _Add line_ and _Edit_ disappear; _Create goods receipt_ appears; moves to **To receive** |
+| 4. Receive 4 of 10                | Receipt and receipt line save; _Post_ asks for confirmation; order shows 10 / 4 / 6, Partially received |
+| — Try to close early              | Refused with a message; the order is unchanged                                                        |
+| 5. Receive the remaining 6        | 10 / 10 / 0, Fully received; _Create goods receipt_ disappears; moves to **Ready to close**           |
+| 6. Close                          | Confirmation, then Closed; moves to **Closed**                                                        |
+| 7. Reopen                         | Returns to Released                                                                                   |
+| Separately: cancel a draft        | Confirmation, then Cancelled; no further actions offered; appears under **Cancelled**                 |
+
+**What this does and does not prove.** The pages, forms, pickers, confirmation
+steps, tabs and the Release/Cancel transitions are the real production code. But
+posting a receipt, Close and Reopen normally run inside PostgreSQL through the
+"posting kernel". In this harness they are **simulated** (`SimulatedReceiving`
+in `purchasing-fixture.ts`): it imitates their visible result and a few of their
+refusals, and records no stock movement. So the walk-through shows the _screens_
+carry the workflow correctly end to end; it does not re-prove the database
+logic, which the existing PostgreSQL browser test covers in CI.
 
 **Not verified — be upfront about these**
 
@@ -493,8 +601,10 @@ Things to know about the preview:
   the links also change on every start — always use the freshly printed links.
 - **It does not restart itself when you edit code.** Stop it with Ctrl+C and run
   the command again (or add `--watch` after `node` to restart automatically).
-- **Receipts cannot be posted** in the preview, so _Post_, _Close_ and _Reopen_
-  show a refusal. _Release_, _Cancel_, create and edit all work.
+- **Receiving is simulated** in the preview. You can create a goods receipt,
+  add a receipt line, _Post_ it, then _Close_ and _Reopen_ the order, and the
+  screens update — but no real stock movement is recorded. Quantity amendments
+  are not simulated.
 - If port 4190 is busy, pick another. In PowerShell (VS Code's default):
   `$env:PORT = 4191; node --import tsx apps/web/test/purchasing-preview.ts`
 
@@ -524,8 +634,9 @@ deliberately does not fake them.
 - **Supplier and item are text fields, not relations.** The screens look the
   stored text up against parties and items and show a name when it matches;
   otherwise they show the stored text. The form still asks for typed text.
-- **No status filter and no sorting.** The list query supports text search only.
-  The status counts describe the current page.
+- **No sorting.** The list request carries no sort. Views are the workflow tabs.
+- **The list reads every matching order to build its tabs.** Simple and always
+  consistent, but it would need a server-side summary for very large order books.
 - **"Add line" cannot pre-select the order.** Rain's grammar reserves field
   pre-fill for a mechanism that does not exist yet, so the line form asks you to
   choose the order.

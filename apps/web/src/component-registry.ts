@@ -1214,35 +1214,20 @@ function listFrame(
   result: SemanticQueryResultEnvelope,
 ): ListFrame {
   const coverage = sharedListView(result).listCoverage;
-  const preserved = listParameters(
-    context.surface,
-    coverage.search,
-    coverage.includeArchived,
-    context,
-  );
-  preserved.delete('q');
-  const first = coverage.returnedCount === 0 ? 0 : coverage.pageOffset + 1;
-  const last = coverage.pageOffset + coverage.returnedCount;
+  const base = (search: string): URLSearchParams =>
+    listParameters(context.surface, search, coverage.includeArchived, context);
+  const preserved = base('');
   const form = relatedSurface(context, 'form');
-  const previous = previousPageLocation(context.surface, coverage, context);
   return {
-    ...(coverage.search.length > 0
-      ? { clearSearchHref: `/?${preserved.toString()}` }
-      : {}),
-    coverageLabel: `${String(first)}–${String(last)} of ${String(coverage.totalCount)}`,
+    href({ page, search, view }) {
+      const parameters = base(search);
+      if (view) parameters.set('view', view);
+      if (page !== undefined && page > 1) {
+        parameters.set('page', String(page));
+      }
+      return `/?${parameters.toString()}`;
+    },
     ...(form ? { newHref: surfaceHref(form, undefined, false, context) } : {}),
-    ...(coverage.nextCursor
-      ? {
-          nextHref: nextPageHref(
-            context.surface,
-            coverage.nextCursor,
-            coverage.search,
-            coverage.includeArchived,
-            context,
-          ),
-        }
-      : {}),
-    ...(previous ? { previousHref: previous } : {}),
     search: coverage.search,
     searchPreserved: [...preserved.entries()],
   };

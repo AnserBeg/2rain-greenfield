@@ -168,6 +168,56 @@ test('worklist: search narrows the list and an empty result says why', async () 
   assert.doesNotMatch(none, /<table/u);
 });
 
+test('worklist: saved-view tabs count every order and filter the rows', async () => {
+  const { fixture, ids } = seeded();
+  const list = fixture.url('purchase_order_list');
+  const all = await get(fixture, list);
+  const counts = Object.fromEntries(
+    [
+      ...all.matchAll(
+        /data-view="([A-Za-z]+)"[^>]*><span>[^<]*<\/span><span class="ui-tabs__count">(\d+)/gu,
+      ),
+    ].map((match) => [match[1], Number(match[2])]),
+  );
+  assert.deepEqual(counts, {
+    all: 6,
+    cancelled: 1,
+    closed: 1,
+    draft: 2,
+    overdue: 1,
+    toClose: 0,
+    toReceive: 2,
+  });
+  assert.match(all, /data-view="all" aria-current="page"/u);
+
+  const toReceive = await get(fixture, `${list}&view=toReceive`);
+  assert.match(toReceive, /data-purchase-order-view="toReceive"/u);
+  assert.match(toReceive, /data-view="toReceive" aria-current="page"/u);
+  assert.match(toReceive, /data-purchase-order-worklist="2"/u);
+  row(toReceive, 'data-record-id', ids.releasedOrderId);
+  row(toReceive, 'data-record-id', ids.overdueOrderId);
+  assert.doesNotMatch(toReceive, new RegExp(ids.draftOrderId, 'u'));
+  // Searching stays inside the chosen view.
+  assert.match(
+    toReceive,
+    /<input type="hidden" name="view" value="toReceive">/u,
+  );
+
+  // A view with nothing in it says so, without offering a misleading action.
+  const toClose = await get(fixture, `${list}&view=toClose`);
+  assert.match(toClose, /Nothing in “Ready to close”/u);
+  assert.doesNotMatch(toClose, /<table/u);
+
+  // Counts follow the search; an unknown view falls back to All.
+  const searched = await get(fixture, `${list}&view=draft&q=PO-2041`);
+  assert.match(
+    searched,
+    /data-view="draft"[^>]*><span>Draft<\/span><span class="ui-tabs__count">1</u,
+  );
+  const unknown = await get(fixture, `${list}&view=nonsense`);
+  assert.match(unknown, /data-purchase-order-view="all"/u);
+});
+
 test('worklist: with no orders at all, the empty state offers the first one', async () => {
   const fixture = createPurchasingFixture();
   const html = await get(fixture, fixture.url('purchase_order_list'));

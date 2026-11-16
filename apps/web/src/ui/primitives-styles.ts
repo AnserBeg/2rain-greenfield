@@ -19,12 +19,33 @@ export const PRIMITIVE_STYLES = `
 .capability-command>button{order:1}
 .capability-command>span{order:2;max-width:28ch;color:var(--ink-muted);font-size:var(--text-micro);line-height:1.35}
 .action-overflow summary{white-space:nowrap}
+/* Compact controls.
+ * Every control keeps the 44 px box the ux-grammar's target-size floor
+ * requires, so it is as easy to hit as before. What changes is how much of
+ * that box is PAINTED: a 6 px transparent border with the background clipped
+ * to the padding box draws a 32 px control inside a 44 px target. An outline
+ * can no longer be a border (the border is the invisible margin), so outlined
+ * controls draw theirs as an inset shadow, which is clipped to the same box.
+ * The negative margin gives the invisible ring back to the layout, so rows and
+ * toolbars are spaced by what the eye sees. */
+.primary-action,.secondary-action,.list-page-link,button,.action-overflow summary,.ui-menu>summary{box-sizing:border-box;min-height:44px;margin:-6px -4px;padding:0 var(--space-3);border:6px solid transparent;border-radius:calc(var(--radius-control) + 6px);background-clip:padding-box!important;font-size:var(--text-body);line-height:1.2;white-space:nowrap}
+.secondary-action,.action-overflow summary,.ui-menu>summary{box-shadow:inset 0 0 0 1px var(--line-strong)}
+.workspace-context-bar__options .secondary-action{margin:0;padding:0 var(--space-3)}
+.workspace-context-bar__options .secondary-action[aria-current=true]{border-color:transparent;box-shadow:inset 0 0 0 1px var(--accent-edge)}
+.primary-action:focus-visible,.secondary-action:focus-visible,.list-page-link:focus-visible,button:focus-visible,.action-overflow summary:focus-visible,.ui-menu>summary:focus-visible{outline:3px solid var(--focus-ring-surface);outline-offset:-4px}
+.form-fields input:not([type=checkbox]),.form-fields select,.ui-search input{box-sizing:border-box;width:calc(100% + 12px);min-height:44px;margin:-6px;padding:0 var(--space-2);border:6px solid transparent;border-radius:calc(var(--radius-control) + 6px);background:var(--surface-panel);background-clip:padding-box!important;box-shadow:inset 0 0 0 1px var(--line-strong);color:var(--ink);font:inherit;font-size:var(--text-body)}
+.form-fields input:not([type=checkbox]):focus-visible,.form-fields select:focus-visible,.ui-search input:focus-visible{outline:3px solid var(--focus-ring-surface);outline-offset:-4px}
+.form-fields{gap:var(--space-3) var(--space-5)}
+.command-bar{gap:var(--space-4);min-height:0;padding:var(--space-3) var(--space-4)}
+.action-overflow[open]{padding:0;border:0;background:none}
+.action-overflow .lifecycle-action{margin:var(--space-2) 0 0}
+.list-pagination{gap:var(--space-3)}
+.surface-heading__actions{gap:var(--space-3)}
 .ui-section{padding:0}
 .ui-section__header{display:flex;align-items:center;justify-content:space-between;gap:var(--space-4);min-height:48px;padding:var(--space-2) var(--space-4);border-bottom:1px solid var(--line)}
 .ui-section__header h2{margin:0;font-size:var(--text-base);line-height:1.3}
 .ui-section__description{margin:2px 0 0;color:var(--ink-muted);font-size:var(--text-body)}
 .ui-section__actions{display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center;justify-content:flex-end}
-.ui-section__actions .primary-action,.ui-section__actions .secondary-action{min-height:36px;padding:var(--space-1) var(--space-3)}
 .ui-section__body{padding:var(--space-4)}
 .ui-section[data-density=flush]>.ui-section__body{padding:0}
 .ui-section[data-density=flush] .data-table-wrap{margin-top:0}
@@ -97,14 +118,13 @@ export const PRIMITIVE_STYLES = `
 .ui-prose{white-space:pre-wrap;overflow-wrap:anywhere}
 
 .ui-menu{position:relative}
-.ui-menu>summary{display:inline-grid;place-items:center;min-height:36px;padding:var(--space-1) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--accent-ink);font-size:var(--text-body);font-weight:var(--weight-emphasis);cursor:pointer;list-style:none}
+.ui-menu>summary{display:inline-grid;place-items:center;background:var(--surface-panel);color:var(--accent-ink);font-size:var(--text-body);font-weight:var(--weight-emphasis);cursor:pointer;list-style:none}
 .ui-menu>summary::-webkit-details-marker{display:none}
 .ui-menu>summary::after{content:"▾";margin-left:var(--space-2);font-size:var(--text-micro)}
 .ui-menu>summary{grid-auto-flow:column}
 .ui-menu>summary:hover,.ui-menu[open]>summary{background:var(--accent-soft)}
-.ui-menu>summary:focus-visible{outline:3px solid var(--focus-ring-surface);outline-offset:2px}
 .ui-menu__list{position:absolute;z-index:2;top:calc(100% + var(--space-1));right:0;min-width:220px;margin:0;padding:var(--space-1);border:1px solid var(--line);border-radius:var(--radius-container);background:var(--surface-panel);box-shadow:var(--elevation-overlay);list-style:none}
-.ui-menu__list a{display:flex;align-items:center;min-height:36px;padding:0 var(--space-3);border-radius:var(--radius-control);color:var(--ink);font-size:var(--text-body);text-decoration:none;white-space:nowrap}
+.ui-menu__list a{display:flex;align-items:center;min-height:44px;padding:0 var(--space-3);border-radius:var(--radius-control);color:var(--ink);font-size:var(--text-body);text-decoration:none;white-space:nowrap}
 .ui-menu__list a:hover{background:var(--accent-soft)}
 .ui-menu__list a:focus-visible{outline:3px solid var(--focus-ring-surface);outline-offset:-3px}
 
@@ -122,10 +142,16 @@ export const PRIMITIVE_STYLES = `
 .ui-search{display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--space-2);padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--line)}
 .ui-search__field{display:grid;flex:1 1 280px;gap:var(--space-1);max-width:440px}
 .ui-search__field span{color:var(--ink-muted);font-size:var(--text-micro);font-weight:var(--weight-emphasis);letter-spacing:.07em;text-transform:uppercase}
-.ui-search input{width:100%;min-height:44px;padding:var(--space-2) var(--space-3);border:1px solid var(--line-strong);border-radius:var(--radius-control);background:var(--surface-panel);color:var(--ink);font:inherit}
-.ui-search input:focus-visible{outline:3px solid var(--focus-ring-surface);outline-offset:2px}
+.ui-search input{background:var(--surface-panel);color:var(--ink);font:inherit}
 .ui-search__trailing{display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center;min-height:44px;margin-left:auto;color:var(--ink-muted);font-size:var(--text-body)}
 
+.ui-tabs{display:flex;gap:var(--space-1);padding:0 var(--space-3);overflow-x:auto;overflow-y:hidden;border-bottom:1px solid var(--line)}
+.ui-tabs a{display:flex;flex:0 0 auto;align-items:center;gap:var(--space-2);min-height:44px;padding:0 var(--space-3);border-bottom:2px solid transparent;color:var(--ink-muted);font-size:var(--text-body);font-weight:var(--weight-emphasis);text-decoration:none;white-space:nowrap}
+.ui-tabs a:hover{color:var(--ink)}
+.ui-tabs a[aria-current=page]{border-bottom-color:var(--accent);color:var(--ink-strong)}
+.ui-tabs a:focus-visible{outline:3px solid var(--focus-ring-surface);outline-offset:-3px}
+.ui-tabs__count{min-width:20px;padding:0 var(--space-2);border-radius:999px;background:var(--surface-sunken);color:var(--ink-muted);font-size:var(--text-micro);font-variant-numeric:tabular-nums;line-height:18px;text-align:center}
+.ui-tabs a[aria-current=page] .ui-tabs__count{background:var(--accent-selected);color:var(--accent-ink)}
 .ui-pagination{gap:var(--space-2);margin:0;padding:var(--space-3) var(--space-4);border-top:1px solid var(--line)}
 
 .ui-notice{margin:0;padding:var(--space-2) var(--space-4);border-bottom:1px solid var(--line);font-size:var(--text-body)}
@@ -137,7 +163,6 @@ export const PRIMITIVE_STYLES = `
 @media(max-width:800px){
 .ui-section__header{align-items:flex-start;flex-direction:column;gap:var(--space-2)}
 .ui-section__actions{justify-content:flex-start}
-.ui-section__actions .primary-action,.ui-section__actions .secondary-action,.ui-menu>summary,.ui-menu__list a{min-height:44px}
 .ui-record-heading__status{justify-content:flex-start}
 .ui-facts{grid-template-columns:repeat(2,minmax(0,1fr))}
 .ui-metrics{grid-auto-flow:row;grid-template-columns:repeat(2,minmax(0,1fr))}

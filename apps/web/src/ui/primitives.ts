@@ -428,6 +428,30 @@ export function searchBar({
   return `<form class="ui-search" data-list-search method="get" action="/" role="search">${hidden}<label class="ui-search__field"><span>${escapeHtml(label)}</span><input type="search" name="q" value="${escapeHtml(value)}" maxlength="240" autocomplete="off" placeholder="${escapeHtml(placeholder)}"></label><button type="submit">Search</button>${clearHref ? `<a class="secondary-action" href="${escapeHtml(clearHref)}">Clear</a>` : ''}${trailingHtml ? `<div class="ui-search__trailing">${trailingHtml}</div>` : ''}</form>`;
 }
 
+export interface ViewTab {
+  readonly count: number;
+  readonly current: boolean;
+  readonly href: string;
+  /** Stable identity, for tests and for a reader locating this tab. */
+  readonly id: string;
+  readonly label: string;
+}
+
+/**
+ * Saved views of one list as a row of tabs, each with the number of records
+ * it holds. A tab is a link, so the chosen view lives in the URL like every
+ * other list state; the ux-grammar's rule that saved views are page tabs,
+ * never navigation entries.
+ */
+export function viewTabs(label: string, tabs: readonly ViewTab[]): Html {
+  return `<nav class="ui-tabs" aria-label="${escapeHtml(label)}">${tabs
+    .map(
+      (tab) =>
+        `<a href="${escapeHtml(tab.href)}" data-view="${escapeHtml(tab.id)}"${tab.current ? ' aria-current="page"' : ''}><span>${escapeHtml(tab.label)}</span><span class="ui-tabs__count">${String(tab.count)}</span></a>`,
+    )
+    .join('')}</nav>`;
+}
+
 export interface PaginationOptions {
   readonly previousHref?: string;
   readonly nextHref?: string;

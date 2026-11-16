@@ -9,10 +9,17 @@
  * What is a DOUBLE: storage. `InMemoryExecutor` stands where the PostgreSQL
  * provider stands. It keeps records in a map, answers `get` and shared `list`
  * queries (search, paging, relation labels) and applies create, update,
- * archive, restore and state transitions. It does not post receipts: the
- * receiving capability is not registered, so nothing here can be mistaken for
- * evidence about the posting kernel. Received quantities are seeded directly
- * as `purchase_order_received` rows, which is the read model the screens use.
+ * archive, restore and state transitions.
+ *
+ * RECEIVING IS SIMULATED, and the word is chosen carefully. In production,
+ * posting a receipt, closing and reopening an order run through the receiving
+ * capability and the posting kernel in PostgreSQL. `SimulatedReceiving` below
+ * imitates only their visible outcome: a posted receipt adds to the
+ * `purchase_order_received` read model; close and reopen move the order state,
+ * with a few of the same refusals. It appends no stock movement and proves
+ * nothing about the kernel. It exists so the SCREENS can be walked end to end;
+ * `browser/receiving.composed-application.spec.ts` is the evidence for the
+ * real thing.
  *
  * It exists so the purchasing screens can be rendered and exercised without a
  * database — in a unit test, and in a local preview server.
@@ -42,6 +49,9 @@ import {
   SEMANTIC_OPERATION_RESULT_VERSION,
   SemanticOperationGateway,
   SemanticOperationMediationAuthority,
+  type RegisteredCapabilityOperationAuthorizationRequest,
+  type RegisteredCapabilityOperationExecutionRequest,
+  type RegisteredCapabilityOperationExecutor,
   type SemanticOperationExecutionRequest,
   type SemanticOperationExecutor,
   type SemanticOperationResultEnvelope,
@@ -121,6 +131,110 @@ export class InMemoryExecutor
 
   read(recordId: string): SemanticRecordDto | null {
     return this.#records.get(recordId)?.dto ?? null;
+  }
+
+  /** Applies one simulated receiving operation and returns the new image. */
+  receive(operationLocal: string, recordId: string): SemanticRecordDto {
+    const id = (kind: string, local: string): string =>
+      `${FIXTURE_NAMESPACE}:${kind}.${local}`;
+    const target = this.#records.get(recordId);
+    if (!target) throw new Error('record not found');
+    const save = (
+      record: StoredRecord,
+      values: Record<string, ImmutableJsonValue>,
+    ): SemanticRecordDto => {
+      const dto: SemanticRecordDto = Object.freeze({
+        ...record.dto,
+        revision: record.dto.revision + 1,
+        values: Object.freeze({ ...record.dto.values, ...values }),
+      });
+      this.#records.set(dto.recordId, { dto, relations: record.relations });
+      return dto;
+    };
+    const state = (record: StoredRecord): string =>
+      String(record.dto.values[STATE_FIELD_ID]).split('purchase_order_')[1]!;
+    const children = (relationLocal: string, parentId: string) =>
+      [...this.#records.values()].filter(
+        (record) =>
+          record.relations[id('relation', relationLocal)] === parentId &&
+          !record.dto.archived,
+      );
+    const receivedRow = (lineId: string) =>
+      children('purchase_order_received_order_line', lineId)[0];
+    const quantity = (record: StoredRecord | undefined, field: string) =>
+      Number(record?.dto.values[id('field', field)] ?? 0);
+
+    switch (operationLocal) {
+      case 'goods_receipt_post': {
+        const posted = id('option', 'goods_receipt_state_posted');
+        if (target.dto.values[id('field', 'goods_receipt_state')] === posted)
+          throw new Error('receipt is already posted');
+        const order = this.#records.get(
+          target.relations[id('relation', 'goods_receipt_order')] ?? '',
+        );
+        if (!order || state(order) !== 'released')
+          throw new Error('RECEIPT_ORDER_NOT_RELEASED');
+        const lines = children('goods_receipt_line_receipt', recordId);
+        if (lines.length === 0) throw new Error('receipt has no lines');
+        for (const line of lines) {
+          const orderLine = this.#records.get(
+            line.relations[id('relation', 'goods_receipt_line_order_line')] ??
+              '',
+          );
+          if (!orderLine) throw new Error('receipt line has no order line');
+          const existing = receivedRow(orderLine.dto.recordId);
+          const next =
+            quantity(existing, 'purchase_order_received_received_quantity') +
+            quantity(line, 'goods_receipt_line_quantity');
+          if (
+            next < 0 ||
+            next > quantity(orderLine, 'purchase_order_line_ordered_quantity')
+          )
+            throw new Error('receipt would over- or under-receive the line');
+          if (existing) {
+            save(existing, {
+              [id('field', 'purchase_order_received_received_quantity')]:
+                String(next),
+            });
+          } else {
+            this.seed(
+              'purchase_order_received',
+              { received_quantity: String(next), unit_id: 'each' },
+              {
+                relations: {
+                  purchase_order_received_order_line: orderLine.dto.recordId,
+                },
+              },
+            );
+          }
+        }
+        return save(target, { [id('field', 'goods_receipt_state')]: posted });
+      }
+      case 'purchase_order_close': {
+        if (state(target) !== 'released')
+          throw new Error('only a released order can be closed');
+        const open = children('purchase_order_line_order', recordId).some(
+          (line) =>
+            quantity(line, 'purchase_order_line_ordered_quantity') >
+            quantity(
+              receivedRow(line.dto.recordId),
+              'purchase_order_received_received_quantity',
+            ),
+        );
+        if (open) throw new Error('order still has quantity to receive');
+        return save(target, {
+          [STATE_FIELD_ID]: id('state', 'purchase_order_closed'),
+        });
+      }
+      case 'purchase_order_reopen':
+        if (state(target) !== 'closed')
+          throw new Error('only a closed order can be reopened');
+        return save(target, {
+          [STATE_FIELD_ID]: id('state', 'purchase_order_released'),
+        });
+      default:
+        throw new Error(`${operationLocal} is not simulated`);
+    }
   }
 
   async recordNonAccepted(): Promise<void> {
@@ -299,6 +413,47 @@ export class InMemoryExecutor
   }
 }
 
+/** See the file header: an imitation of the visible outcome of receiving. */
+export class SimulatedReceiving implements RegisteredCapabilityOperationExecutor {
+  readonly capabilityId = 'northstar.purchasing:capability.receiving';
+
+  constructor(private readonly records: InMemoryExecutor) {}
+
+  prepareAuthorization(
+    request: RegisteredCapabilityOperationAuthorizationRequest,
+  ) {
+    return Promise.resolve({
+      decisionInput: request.input,
+      legalEntityReadScopeIds: [],
+      readBackArguments: request.input,
+    });
+  }
+
+  async execute(
+    request: RegisteredCapabilityOperationExecutionRequest,
+  ): Promise<SemanticOperationResultEnvelope> {
+    const { operationId } = request.definition;
+    const readBack = this.records.receive(
+      operationId.slice(operationId.lastIndexOf('.') + 1),
+      String((request.input as { recordId?: unknown }).recordId),
+    );
+    return {
+      kind: 'semanticOperationResult',
+      operationId,
+      outcome: 'succeeded',
+      readBack,
+      schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
+      trust: {
+        changeDocumentId: randomUUID(),
+        domainEventId: randomUUID(),
+        invocationId: randomUUID(),
+        outboxId: randomUUID(),
+      },
+      unsupportedReason: null,
+    };
+  }
+}
+
 function display(value: ImmutableJsonValue | undefined): string | null {
   if (value === null || value === undefined) return null;
   return typeof value === 'string' ? value : JSON.stringify(value);
@@ -435,6 +590,8 @@ export function createPurchasingFixture(): PurchasingFixture {
         policy,
         executor,
         operationMediation,
+        undefined,
+        [new SimulatedReceiving(executor)],
       ),
       operationMediation,
       queryGateway: new SemanticQueryGateway(policy, executor),

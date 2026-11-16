@@ -414,6 +414,43 @@ export function readCompiledSurfaceDataBinding(
   view: RuntimeViewContract.RequestRuntimeView,
   surface: CompiledSurfaceDefinition,
 ): CompiledSurfaceDataBinding {
+  let bindings = bindingsByView.get(view);
+  if (!bindings) {
+    bindings = new WeakMap();
+    bindingsByView.set(view, bindings);
+  }
+  const known = bindings.get(surface);
+  if (known) return known;
+  const binding = deriveCompiledSurfaceDataBinding(view, surface);
+  bindings.set(surface, binding);
+  return binding;
+}
+
+/**
+ * One derivation per (issued view, surface), remembered for the life of that
+ * view.
+ *
+ * Deriving a binding validates the ENTIRE pinned query catalog once per query
+ * it names, and one page asks for the same bindings many times over: every
+ * navigation link, every slot, every related-surface lookup. Measured on the
+ * composed application, that repetition was most of a multi-second render.
+ *
+ * Remembering the answer is exact rather than approximate because both keys
+ * are immutable: an issued view is a deeply frozen clone made for one request
+ * (`request-runtime-view.ts`), and a surface definition comes from that view's
+ * own manifest. The same pair therefore cannot derive a different binding.
+ * Both maps are weak, so nothing outlives its request, and a refusal is never
+ * remembered: a derivation that throws is derived (and refused) again.
+ */
+const bindingsByView = new WeakMap<
+  RuntimeViewContract.RequestRuntimeView,
+  WeakMap<CompiledSurfaceDefinition, CompiledSurfaceDataBinding>
+>();
+
+function deriveCompiledSurfaceDataBinding(
+  view: RuntimeViewContract.RequestRuntimeView,
+  surface: CompiledSurfaceDefinition,
+): CompiledSurfaceDataBinding {
   assertRequestRuntimeView(view);
   const query = registeredSemanticQueryFromPinnedView(
     view,

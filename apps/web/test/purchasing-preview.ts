@@ -4,7 +4,8 @@
  * Serves the real SurfaceRuntime and the real compiled release over the
  * in-memory fixture in `purchasing-fixture.ts`, seeded with a small book of
  * orders. Data lives in memory: anything you create or release is gone when
- * the process stops, and receipts cannot be posted (see the fixture's header).
+ * the process stops. Posting a receipt, Close and Reopen are SIMULATED (see the
+ * fixture's header) so the whole flow can be walked through on screen.
  *
  *   node --import tsx apps/web/test/purchasing-preview.ts
  *

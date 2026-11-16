@@ -89,6 +89,12 @@ export interface SurfaceRuntimeApplicationExtension {
     readonly queryGateway: SemanticQueryGateway;
     readonly surface: CompiledSurfaceDefinition;
     readonly surfaces: readonly CompiledSurfaceDefinition[];
+    /**
+     * Reads one parameter of the request URL. List state a contribution owns
+     * (which saved view, which page of it) lives in the URL like the shared
+     * list's own search and paging, never in a session.
+     */
+    readonly urlParameter: (name: string) => string | null;
     readonly view: RuntimeViewContract.RequestRuntimeView;
   }): Promise<ReadySurfaceData>;
   refreshAfterOperation(context: {
@@ -283,6 +289,7 @@ export async function renderSurfaceRuntimeWithData(
           queryGateway: gateways.queryGateway,
           surface: selection.selected,
           surfaces: selection.surfaces,
+          urlParameter: (name) => url.searchParams.get(name),
           view,
         });
       }

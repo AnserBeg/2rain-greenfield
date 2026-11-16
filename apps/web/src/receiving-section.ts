@@ -315,6 +315,7 @@ export const RECEIVING_SURFACE_RUNTIME_EXTENSION = Object.freeze({
     legalEntitySelection,
     queryGateway,
     surface,
+    urlParameter,
     view,
   }) {
     if (
@@ -329,9 +330,16 @@ export const RECEIVING_SURFACE_RUNTIME_EXTENSION = Object.freeze({
         purchaseOrderList: await loadPurchaseOrderWorklist(
           view,
           queryGateway,
-          data.records,
+          binding.query.sourceEntityId.split(':')[0]!,
           legalEntitySelection[0]!,
           new Date(),
+          {
+            includeArchived:
+              data.result?.listCoverage?.includeArchived ?? false,
+            page: urlParameter('page'),
+            search: data.result?.listCoverage?.search ?? '',
+            view: urlParameter('view'),
+          },
         ),
       };
     } catch {

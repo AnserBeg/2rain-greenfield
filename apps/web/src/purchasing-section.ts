@@ -70,6 +70,7 @@ import {
   statusBadge,
   stepper,
   totalsList,
+  viewTabs,
   type ActionMenuItem,
   type Html,
   type StatusRole,
@@ -154,25 +155,71 @@ export interface PurchaseOrderWorklistRow {
   readonly summary: PurchaseOrderSummary;
 }
 
-/** The purchase order List page: one row per order on the current page. */
+/**
+ * The saved views of the purchase order list, in the order work flows through
+ * purchasing: raise it, receive against it, chase it, close it.
+ *
+ * Each view is a QUESTION a purchasing employee asks ("what do I still have to
+ * receive?"), not a column value, which is why two of them cut across the
+ * stored lifecycle state: `toReceive` and `toClose` are both `released`, told
+ * apart by whether anything is still outstanding.
+ */
+export type PurchaseOrderViewId =
+  | 'all'
+  | 'cancelled'
+  | 'closed'
+  | 'draft'
+  | 'overdue'
+  | 'toClose'
+  | 'toReceive';
+
+export interface PurchaseOrderViewCount {
+  readonly count: number;
+  readonly id: PurchaseOrderViewId;
+  readonly label: string;
+}
+
+/** The purchase order List page: saved views, and one page of the active one. */
 export interface PurchaseOrderWorklist {
+  readonly activeView: PurchaseOrderViewId;
+  /** Orders in the active view that are past their expected date. */
+  readonly overdueInView: number;
+  /** 1-based page of the active view, and how many pages it has. */
+  readonly page: number;
+  readonly pageCount: number;
+  /** 1-based position of the first row shown, 0 when the view is empty. */
+  readonly firstRow: number;
   readonly rows: readonly PurchaseOrderWorklistRow[];
+  /** Orders in the active view across all its pages. */
+  readonly totalInView: number;
+  readonly views: readonly PurchaseOrderViewCount[];
+}
+
+/** What the request asked of the list: its search and its place in it. */
+export interface PurchaseOrderWorklistRequest {
+  readonly includeArchived: boolean;
+  readonly page: string | null;
+  readonly search: string;
+  readonly view: string | null;
 }
 
 /**
  * The parts of a list that belong to the shared List runtime rather than to
- * purchasing: paging, search and coverage. `component-registry.ts` computes
- * them exactly as it does for every other list and hands them over, so this
- * module decides the COLUMNS and the platform keeps deciding the MECHANICS.
+ * purchasing: how a URL for this list is built (surface, legal-entity scope,
+ * archive toggle, search). `component-registry.ts` supplies them from the same
+ * helpers every other list uses, so this module decides the COLUMNS and VIEWS
+ * and the platform keeps deciding how a list is addressed.
  */
 export interface ListFrame {
-  readonly clearSearchHref?: string;
-  /** `1–25 of 112`. */
-  readonly coverageLabel: string;
+  /** A URL for this list with the given search, saved view and page. */
+  readonly href: (target: {
+    readonly page?: number;
+    readonly search: string;
+    readonly view?: string;
+  }) => string;
   readonly newHref?: string;
-  readonly nextHref?: string;
-  readonly previousHref?: string;
   readonly search: string;
+  /** Parameters a search form must carry so it stays on this list. */
   readonly searchPreserved: readonly (readonly [string, string])[];
 }
 
@@ -241,6 +288,10 @@ async function listEveryRecord(
   queryId: string,
   legalEntityId: string | null,
   relationLabels: readonly RelationLabelRequest[] = [],
+  filter: { readonly includeArchived: boolean; readonly search: string } = {
+    includeArchived: false,
+    search: '',
+  },
 ): Promise<SemanticRecordDto[]> {
   const query = registeredSemanticQueryFromPinnedView(view, queryId);
   if (!query || query.queryType !== 'list')
@@ -256,7 +307,7 @@ async function listEveryRecord(
           schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
           queryId,
           arguments: {
-            includeArchived: false,
+            includeArchived: filter.includeArchived,
             ...(legalEntityId !== null && query.legalEntityScope
               ? { [query.legalEntityScope.operand.parameterId]: legalEntityId }
               : {}),
@@ -265,7 +316,7 @@ async function listEveryRecord(
               cursor,
               matchMode: 'substring',
               pageSize: query.maximumResultCount,
-              search: '',
+              search: filter.search,
               sort: [],
               relationLabels: [...relationLabels],
             },
@@ -611,16 +662,81 @@ export async function loadPurchaseOrderDocument(
   };
 }
 
-/** Loads the purchase order List page for the orders on the current page. */
+/**
+ * Which orders each saved view holds. One predicate per view, in tab order,
+ * so adding a view is one entry here and nothing else.
+ */
+const PURCHASE_ORDER_VIEWS: readonly {
+  readonly id: PurchaseOrderViewId;
+  readonly label: string;
+  readonly holds: (summary: PurchaseOrderSummary) => boolean;
+}[] = Object.freeze([
+  { holds: () => true, id: 'all', label: 'All' },
+  {
+    holds: (summary) => summary.lifecycle === 'draft',
+    id: 'draft',
+    label: 'Draft',
+  },
+  {
+    // Released with goods still outstanding: the receiving worklist.
+    holds: (summary) =>
+      summary.lifecycle === 'released' && summary.remainingQuantity > ZERO,
+    id: 'toReceive',
+    label: 'To receive',
+  },
+  {
+    holds: (summary) => summary.overdueDays !== null,
+    id: 'overdue',
+    label: 'Overdue',
+  },
+  {
+    // Released with nothing left to receive: only the close remains.
+    holds: (summary) =>
+      summary.lifecycle === 'released' && summary.remainingQuantity === ZERO,
+    id: 'toClose',
+    label: 'Ready to close',
+  },
+  {
+    holds: (summary) => summary.lifecycle === 'closed',
+    id: 'closed',
+    label: 'Closed',
+  },
+  {
+    holds: (summary) => summary.lifecycle === 'cancelled',
+    id: 'cancelled',
+    label: 'Cancelled',
+  },
+]);
+
+/** Rows per page of a saved view. */
+const WORKLIST_PAGE_SIZE = 50;
+
+/**
+ * Loads the purchase order List page.
+ *
+ * A saved view such as "To receive" depends on DERIVED facts (received
+ * quantity, the clock), so it cannot be a filter on the stored list query.
+ * The loader therefore reads every order matching the request's search for
+ * this legal entity, derives each order's summary once, and from that one
+ * pass produces both the count on every tab and the rows of the active view.
+ * Counts and rows can never disagree, because they are the same data.
+ */
 export async function loadPurchaseOrderWorklist(
   view: RequestRuntimeView,
   gateway: SemanticQueryGateway,
-  orders: readonly SemanticRecordDto[],
+  namespace: string,
   legalEntityId: string,
   now: Date,
+  request: PurchaseOrderWorklistRequest,
 ): Promise<PurchaseOrderWorklist> {
-  const namespace = orders[0]?.entityId.split(':')[0];
-  if (!namespace) return { rows: [] };
+  const orders = await listEveryRecord(
+    view,
+    gateway,
+    `${namespace}:query.purchase_order_list`,
+    legalEntityId,
+    [],
+    { includeArchived: request.includeArchived, search: request.search },
+  );
   const facts = await loadOrderLineFacts(
     view,
     gateway,
@@ -629,22 +745,46 @@ export async function loadPurchaseOrderWorklist(
   );
   const names = await loadReferenceNames(view, gateway, namespace);
   const link = surfaceLinker(view, namespace, legalEntityId);
-  return {
-    rows: orders.map((order) => ({
-      detailHref: `${link('purchase_order_detail', 'purchase_order_get', order.recordId)}${order.archived ? '&archived=yes' : ''}`,
-      receiveHref: link('goods_receipt_form', 'goods_receipt_get'),
-      summary: summarize(
+  const all: PurchaseOrderWorklistRow[] = orders.map((order) => ({
+    detailHref: `${link('purchase_order_detail', 'purchase_order_get', order.recordId)}${order.archived ? '&archived=yes' : ''}`,
+    receiveHref: link('goods_receipt_form', 'goods_receipt_get'),
+    summary: summarize(
+      namespace,
+      order,
+      lineViews(
         namespace,
-        order,
-        lineViews(
-          namespace,
-          facts.linesByOrder.get(order.recordId) ?? [],
-          facts,
-          names,
-        ),
+        facts.linesByOrder.get(order.recordId) ?? [],
+        facts,
         names,
-        now,
       ),
+      names,
+      now,
+    ),
+  }));
+  // An unknown view id falls back to All rather than to an empty list.
+  const active =
+    PURCHASE_ORDER_VIEWS.find((candidate) => candidate.id === request.view) ??
+    PURCHASE_ORDER_VIEWS[0]!;
+  const inView = all.filter((row) => active.holds(row.summary));
+  const pageCount = Math.max(1, Math.ceil(inView.length / WORKLIST_PAGE_SIZE));
+  const requestedPage = Number.parseInt(request.page ?? '1', 10);
+  const page = Number.isInteger(requestedPage)
+    ? Math.min(Math.max(requestedPage, 1), pageCount)
+    : 1;
+  const start = (page - 1) * WORKLIST_PAGE_SIZE;
+  return {
+    activeView: active.id,
+    firstRow: inView.length === 0 ? 0 : start + 1,
+    overdueInView: inView.filter((row) => row.summary.overdueDays !== null)
+      .length,
+    page,
+    pageCount,
+    rows: inView.slice(start, start + WORKLIST_PAGE_SIZE),
+    totalInView: inView.length,
+    views: PURCHASE_ORDER_VIEWS.map(({ holds, id, label }) => ({
+      count: all.filter((row) => holds(row.summary)).length,
+      id,
+      label,
     })),
   };
 }
@@ -1118,84 +1258,136 @@ function worklistColumns(): readonly TableColumn<PurchaseOrderWorklistRow>[] {
   ];
 }
 
-/** Counts of the visible orders by state, as a row of badges. */
-function lifecycleBreakdown(worklist: PurchaseOrderWorklist): Html {
-  return LIFECYCLE_STATES.map((state) => {
-    const count = worklist.rows.filter(
-      (row) => row.summary.lifecycle === state,
-    ).length;
-    return count === 0
-      ? ''
-      : statusBadge({
-          kind: 'lifecycle-count',
-          label: `${LIFECYCLE_PRESENTATION[state].label} ${String(count)}`,
-          role: LIFECYCLE_PRESENTATION[state].role,
-        });
-  }).join('');
-}
+/** What an empty view says, so "nothing here" always reads as good news or a next step. */
+const EMPTY_VIEW_DESCRIPTION: Readonly<Record<PurchaseOrderViewId, string>> =
+  Object.freeze({
+    all: 'Orders raised for this legal entity appear here with their status, receiving progress and value.',
+    cancelled: 'No orders have been cancelled.',
+    closed: 'Orders appear here once they are received in full and closed.',
+    draft: 'No orders are waiting to be released.',
+    overdue: 'No released order is past its expected delivery date.',
+    toClose:
+      'Orders appear here when everything on them has been received and only the close remains.',
+    toReceive: 'No released order has goods outstanding.',
+  });
 
 /** `list:dataGrid` — the purchase order worklist. */
 export function renderPurchaseOrderWorklist(
   worklist: PurchaseOrderWorklist,
   frame: ListFrame,
 ): Html {
-  const overdue = worklist.rows.filter(
-    (row) => row.summary.overdueDays !== null,
-  ).length;
+  const { activeView } = worklist;
+  // `all` is the default, so it stays out of the URL.
+  const viewParameter = activeView === 'all' ? undefined : activeView;
+  const href = (target: { page?: number; search?: string; view?: string }) =>
+    frame.href({
+      search: target.search ?? frame.search,
+      ...(target.page === undefined ? {} : { page: target.page }),
+      ...(target.view === undefined ? {} : { view: target.view }),
+    });
+  const lastRow = worklist.firstRow + worklist.rows.length - 1;
+  const coverage =
+    worklist.totalInView === 0
+      ? '0 orders'
+      : `${String(worklist.firstRow)}–${String(lastRow)} of ${String(worklist.totalInView)}`;
+  const activeLabel =
+    worklist.views.find((candidate) => candidate.id === activeView)?.label ??
+    'All';
+  const empty =
+    frame.search !== ''
+      ? emptyState({
+          attributes: { 'data-list-zero-input': 'true' },
+          description: `Nothing ${activeView === 'all' ? '' : `in “${activeLabel}” `}matches “${frame.search}”. Search looks at the order number, supplier and currency.`,
+          title: 'No matching purchase orders',
+        })
+      : emptyState({
+          actionHtml:
+            activeView === 'all' && frame.newHref
+              ? linkAction({
+                  href: frame.newHref,
+                  label: 'New purchase order',
+                  variant: 'primary',
+                })
+              : '',
+          attributes: { 'data-list-zero-input': 'true' },
+          description: EMPTY_VIEW_DESCRIPTION[activeView],
+          title:
+            activeView === 'all'
+              ? 'No purchase orders yet'
+              : `Nothing in “${activeLabel}”`,
+        });
   return pageSection({
     attributes: {
       'data-data-state': 'exact',
+      'data-purchase-order-view': activeView,
       'data-purchase-order-worklist': String(worklist.rows.length),
     },
     bodyHtml: [
+      viewTabs(
+        'Purchase order views',
+        worklist.views.map((candidate) => ({
+          count: candidate.count,
+          current: candidate.id === activeView,
+          // Changing view starts again at its first page.
+          href: href(candidate.id === 'all' ? {} : { view: candidate.id }),
+          id: candidate.id,
+          label: candidate.label,
+        })),
+      ),
       searchBar({
-        ...(frame.clearSearchHref ? { clearHref: frame.clearSearchHref } : {}),
+        ...(frame.search === ''
+          ? {}
+          : {
+              clearHref: href({
+                search: '',
+                ...(viewParameter ? { view: viewParameter } : {}),
+              }),
+            }),
         label: 'Search purchase orders',
         placeholder: 'Order number, supplier or currency',
-        preserved: frame.searchPreserved,
-        trailingHtml: `<span data-list-coverage="${escapeHtml(frame.coverageLabel)}">${escapeHtml(frame.coverageLabel)}</span>${lifecycleBreakdown(worklist)}`,
+        preserved: [
+          ...frame.searchPreserved,
+          ...(viewParameter ? ([['view', viewParameter]] as const) : []),
+        ],
+        trailingHtml: `<span data-list-coverage="${escapeHtml(coverage)}">${escapeHtml(coverage)}</span>`,
         value: frame.search,
       }),
-      overdue > 0
+      // On the Overdue view every row is overdue; the banner would repeat it.
+      worklist.overdueInView > 0 && activeView !== 'overdue'
         ? notice({
             attributes: { 'data-purchase-order-notice': 'overdue' },
             detail:
               'Their expected delivery date has passed and goods are still outstanding.',
             role: 'blocked',
-            title: `${plural(overdue, 'order')} on this page ${overdue === 1 ? 'is' : 'are'} overdue.`,
+            title: `${plural(worklist.overdueInView, 'order')} in this view ${worklist.overdueInView === 1 ? 'is' : 'are'} overdue.`,
           })
         : '',
       dataTable({
-        caption: 'Purchase orders',
+        caption: `Purchase orders — ${activeLabel}`,
         columns: worklistColumns(),
-        emptyHtml:
-          frame.search === ''
-            ? emptyState({
-                actionHtml: frame.newHref
-                  ? linkAction({
-                      href: frame.newHref,
-                      label: 'New purchase order',
-                      variant: 'primary',
-                    })
-                  : '',
-                attributes: { 'data-list-zero-input': 'true' },
-                description:
-                  'Orders raised for this legal entity appear here with their status, receiving progress and value.',
-                title: 'No purchase orders yet',
-              })
-            : emptyState({
-                attributes: { 'data-list-zero-input': 'true' },
-                description: `Nothing matches “${frame.search}”. Search looks at the order number, supplier and currency.`,
-                title: 'No matching purchase orders',
-              }),
+        emptyHtml: empty,
         rowAttributes: ({ summary }) => ({
           'data-record-id': summary.recordId,
         }),
         rows: worklist.rows,
       }),
       pagination({
-        ...(frame.nextHref ? { nextHref: frame.nextHref } : {}),
-        ...(frame.previousHref ? { previousHref: frame.previousHref } : {}),
+        ...(worklist.page < worklist.pageCount
+          ? {
+              nextHref: href({
+                page: worklist.page + 1,
+                ...(viewParameter ? { view: viewParameter } : {}),
+              }),
+            }
+          : {}),
+        ...(worklist.page > 1
+          ? {
+              previousHref: href({
+                page: worklist.page - 1,
+                ...(viewParameter ? { view: viewParameter } : {}),
+              }),
+            }
+          : {}),
       }),
     ].join(''),
     density: 'flush',

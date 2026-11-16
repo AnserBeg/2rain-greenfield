@@ -14,7 +14,7 @@
     "check:demo-release": "node --import tsx scripts/compile-demo-release.ts --check",
     "preview:purchasing": "node --import tsx test/purchasing-preview.ts",
     "serve:shell-fixture": "node --import tsx src/demo-server.ts",
-    "test:contracts": "node ../../scripts/run-with-test-lock.mjs shared -- bash ../../scripts/run-suite.sh contracts -- env REACHABILITY_SUITE_ID=contracts node --import tsx --test --test-reporter=../../test/helpers/node-test-evidence-reporter.mjs --test-reporter-destination=../../test-results/reachability/contracts.json --test-reporter=tap --test-reporter-destination=stdout test/surface-runtime-contract.test.ts test/purchasing-workspace.test.ts"
+    "test:contracts": "node ../../scripts/run-with-test-lock.mjs shared -- bash ../../scripts/run-suite.sh contracts -- env REACHABILITY_SUITE_ID=contracts node --import tsx --test --test-reporter=../../test/helpers/node-test-evidence-reporter.mjs --test-reporter-destination=../../test-results/reachability/contracts.json --test-reporter=tap --test-reporter-destination=stdout test/surface-runtime-contract.test.ts test/purchasing-workspace.test.ts test/purchasing-workflow.test.ts"
   },
   "dependencies": {
     "@north-star/observability": "workspace:*",
