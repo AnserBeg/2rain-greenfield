@@ -37,7 +37,9 @@ In the current renderer. The seven DEFINITION and three RENDERER rows of the evi
 - no raw codes or developer sentences; an error summary that links to the field; one next-action button; no clipped tables.
 
 Scorecard target: the loop completes end to end, invoice and payment included; zero raw codes; zero invented values ("N/A");
-create-and-place a PO in ≤ 8 clicks (today ~14); the sales side in ≤ 16 (today ~30).
+create-and-place a PO in ≤ 8 clicks (today 11); the sales side, create to shipped, in ≤ 11 clicks (today 18 on a priced order).
+Restated 2026-11-17 from the measured [LOOP-1 baseline](evidence/2026-11-17-loop-scorecard.md): the audit's ~14 and ~30 were
+hand counts on an unpriced order; the scorecard's are a priced order's, counted by the journey.
 
 ### Phase 2 — the look (owner's choice; mockups start now, in parallel)
 Two visual directions for five screens on seed data: the home page, a purchase order, the receive dialog, stock by item, and a sales
