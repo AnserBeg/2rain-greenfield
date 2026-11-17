@@ -449,6 +449,15 @@ test(
           managerLoads.contracts.map((entry) => entry.operationId),
           onlyManager,
         );
+        // AGENT-3 slice 1: the business map is filtered the same way, per
+        // person, through the routed gateways' eligibility previews.
+        const buyerMap = await buyer.businessMap();
+        const managerMap = await manager.businessMap();
+        for (const id of onlyManager) {
+          const local = id.slice(id.lastIndexOf('.') + 1);
+          assert.doesNotMatch(buyerMap, new RegExp(`\\b${local}\\b`, 'u'));
+          assert.match(managerMap, new RegExp(`\\b${local}\\b`, 'u'));
+        }
 
         // The terminal refuses a foreign release and never activates one: it
         // reads the pointer, compares, and leaves the pointer where it was.

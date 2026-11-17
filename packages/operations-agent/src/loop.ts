@@ -5,7 +5,7 @@
  * spend has reached the cap.
  */
 import type { ConversationEntry, ModelAdapter, ModelUsage } from './model.js';
-import type { OperationsAgentSession } from './session.js';
+import type { AgentScreen, OperationsAgentSession } from './session.js';
 import {
   OPERATIONS_AGENT_SYSTEM_PROMPT,
   OPERATIONS_AGENT_TOOLS,
@@ -56,6 +56,8 @@ export interface AgentRunResult {
   readonly usage: ModelUsage;
   readonly usd: number;
   readonly conversation: readonly ConversationEntry[];
+  /** Wall time of the run on a monotonic clock, in seconds. */
+  readonly seconds: number;
   readonly error?: string;
 }
 
@@ -66,7 +68,45 @@ export interface AgentRunOptions {
   readonly meter: SpendMeter;
   readonly maximumTurns?: number;
   readonly onEvent?: (event: AgentEvent) => void;
+  /**
+   * The session's preamble (`agentPreamble`): the business map, appended to
+   * the system prompt and cached with it, and this turn's context, sent with
+   * the request. Without it the model starts from the bare prompt.
+   */
+  readonly preamble?: AgentPreamble;
+  /** Earlier turns of the same conversation, replayed unchanged. */
+  readonly history?: readonly ConversationEntry[];
 }
+
+export interface AgentPreamble {
+  readonly businessMap: string;
+  readonly turnContext: string;
+}
+
+/**
+ * The business map and the turn's context for one acting person, read
+ * through their session (so filtered by their eligibility now).
+ */
+export async function agentPreamble(
+  session: OperationsAgentSession,
+  screen?: AgentScreen | null,
+): Promise<AgentPreamble> {
+  const [businessMap, turnContext] = await Promise.all([
+    session.businessMap(),
+    session.turnContext(screen),
+  ]);
+  return { businessMap, turnContext };
+}
+
+/** The system prompt the model is given, with the map when there is one. */
+export function systemPrompt(preamble?: AgentPreamble): string {
+  return preamble?.businessMap
+    ? `${OPERATIONS_AGENT_SYSTEM_PROMPT}\n\n# Business map (what you may read and do; ! = the person must confirm)\n${BUSINESS_MAP_LEGEND}\n${preamble.businessMap}`
+    : OPERATIONS_AGENT_SYSTEM_PROMPT;
+}
+
+const BUSINESS_MAP_LEGEND =
+  'Each "## name" is a record type with its states. "read:" lists queries as id[type] (by = what resolve matches on; views = preset list views by id). Each "- id: does" is an operation; values/patch list writable fields (* required, (a|b) options, :kind otherwise text). A field, option, relation or view is written here without its record type\'s prefix; use it as written or as its full id. "screen" lines are the steps a screen button runs, with where each input comes from.';
 
 export type AgentEvent =
   | {
@@ -89,8 +129,16 @@ export async function runOperationsAgent(
   options: AgentRunOptions,
 ): Promise<AgentRunResult> {
   const conversation: ConversationEntry[] = [
-    { role: 'user', text: options.request },
+    ...(options.history ?? []),
+    {
+      role: 'user',
+      text: options.preamble?.turnContext
+        ? `${options.request}\n\n${options.preamble.turnContext}`
+        : options.request,
+    },
   ];
+  const system = systemPrompt(options.preamble);
+  const started = performance.now();
   const usage = {
     inputTokens: 0,
     outputTokens: 0,
@@ -112,6 +160,7 @@ export async function runOperationsAgent(
     usage: { ...usage },
     usd: options.meter.usd - startUsd,
     conversation,
+    seconds: (performance.now() - started) / 1000,
     ...(error ? { error } : {}),
   });
   const maximumTurns = options.maximumTurns ?? 40;
@@ -122,7 +171,7 @@ export async function runOperationsAgent(
     let turn;
     try {
       turn = await options.model.next({
-        system: OPERATIONS_AGENT_SYSTEM_PROMPT,
+        system,
         tools: OPERATIONS_AGENT_TOOLS,
         conversation,
       });

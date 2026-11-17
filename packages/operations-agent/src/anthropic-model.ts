@@ -41,7 +41,16 @@ export function anthropicModel(options: AnthropicModelOptions): ModelAdapter {
           max_tokens: options.maxTokens ?? 16_000,
           cache_control: { type: 'ephemeral' },
           output_config: { effort: options.effort ?? 'high' },
-          system,
+          // An explicit breakpoint on the system prompt (with the business
+          // map) gives every conversation of the same person and release a
+          // read point; the top-level one caches the growing conversation.
+          system: [
+            {
+              type: 'text',
+              text: system,
+              cache_control: { type: 'ephemeral' },
+            },
+          ],
           tools: tools.map((tool) => ({
             name: tool.name,
             description: tool.description,
