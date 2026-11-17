@@ -1,0 +1,13 @@
+{
+  "name": "@north-star/operations-agent",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
+    "@north-star/compiler": "workspace:*",
+    "@north-star/postgres-provider": "workspace:*",
+    "@north-star/runtime": "workspace:*"
+  }
+}

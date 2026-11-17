@@ -76,6 +76,7 @@ export const reachabilityProducers = [
   nodeProducer('agent', 'quality', 'test:agent', [
     'test/agent/catalog-discovery.test.ts',
     'test/agent/location-discovery.test.ts',
+    'test/agent/operations-agent.test.ts',
     'test/agent/party-discovery.test.ts',
   ]),
   nodeProducer('architecture', 'quality', 'test:architecture', [

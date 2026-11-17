@@ -97,40 +97,7 @@ export async function startComposedApplication(
   if (!['127.0.0.1', '::1', 'localhost'].includes(host)) {
     throw new Error('the composed demo identity may bind only to loopback');
   }
-  const compiledApplication =
-    options.compiledApplication ??
-    (JSON.parse(
-      await readFile(
-        new URL('../../web/release/app.compiled.json', import.meta.url),
-        'utf8',
-      ),
-    ) as unknown);
-  const runtime = await createComposedApplicationRuntime({
-    capabilityOperationExecutorFactories: [
-      INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
-      RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
-      FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY,
-      RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY,
-      PAYABLES_CAPABILITY_EXECUTOR_FACTORY,
-      PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY,
-    ],
-    compiledApplication,
-    databaseUrl: options.databaseUrl,
-    inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
-    localDemoIdentity: true,
-    migrationsDirectory: new URL('../../../db/migrations/', import.meta.url)
-      .pathname,
-    providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
-    ...(options.rollbackReleaseRoot !== undefined
-      ? {
-          releaseSelection: {
-            kind: 'rollback' as const,
-            targetReleaseRoot: options.rollbackReleaseRoot,
-          },
-        }
-      : {}),
-    tenantSlug: options.tenantSlug ?? 'local-composed-application',
-  });
+  const runtime = await openComposedApplicationRuntime(options);
   // Everything after the runtime exists must hand it back closed on failure.
   // Seeding is 176 operations and `listen` can fail with EADDRINUSE; either
   // one previously threw past an open runtime, leaving the caller with no
@@ -212,6 +179,54 @@ export async function startComposedApplication(
     runtime,
     seededRecords,
     server,
+  });
+}
+
+/**
+ * The composed runtime alone: no seed, no listener. `startComposedApplication`
+ * serves it; the operations-agent terminal opens one against the database a
+ * running `pnpm dev` already installed and seeded, because a confirmation grant
+ * is signed by the mediation authority of the process that issues it.
+ */
+export async function openComposedApplicationRuntime(
+  options: Pick<
+    ComposedApplicationServerOptions,
+    'compiledApplication' | 'databaseUrl' | 'rollbackReleaseRoot' | 'tenantSlug'
+  >,
+): Promise<ComposedApplicationRuntime> {
+  const compiledApplication =
+    options.compiledApplication ??
+    (JSON.parse(
+      await readFile(
+        new URL('../../web/release/app.compiled.json', import.meta.url),
+        'utf8',
+      ),
+    ) as unknown);
+  return createComposedApplicationRuntime({
+    capabilityOperationExecutorFactories: [
+      INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+      RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+      FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY,
+      RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY,
+      PAYABLES_CAPABILITY_EXECUTOR_FACTORY,
+      PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY,
+    ],
+    compiledApplication,
+    databaseUrl: options.databaseUrl,
+    inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
+    localDemoIdentity: true,
+    migrationsDirectory: new URL('../../../db/migrations/', import.meta.url)
+      .pathname,
+    providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+    ...(options.rollbackReleaseRoot !== undefined
+      ? {
+          releaseSelection: {
+            kind: 'rollback' as const,
+            targetReleaseRoot: options.rollbackReleaseRoot,
+          },
+        }
+      : {}),
+    tenantSlug: options.tenantSlug ?? 'local-composed-application',
   });
 }
 
