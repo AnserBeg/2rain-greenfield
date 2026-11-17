@@ -263,11 +263,11 @@ async function openInventory(page: Page, destination: string) {
     .getByRole('navigation', { name: 'Release navigation' })
     .locator('.navigation-tree > li')
     .getByRole('group')
-    .filter({ hasText: 'Inventory' });
+    .filter({ hasText: 'Stock' });
   const link = inventory.getByRole('link', { name: destination, exact: true });
   // A group already open on this page stays open; clicking it would close it.
   if (!(await link.isVisible()))
-    await inventory.getByText('Inventory', { exact: true }).click();
+    await inventory.getByText('Stock', { exact: true }).click();
   await link.click();
 }
 

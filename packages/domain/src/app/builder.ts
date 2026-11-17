@@ -40,6 +40,7 @@ import { itemStockWorkspace } from '../inventory/item-stock-workspace.js';
 import { locationWorkspace } from '../location/workspace.js';
 import { periodLockWorkspace } from '../inventory/period-lock-workspace.js';
 import { warehouseSurface } from '../inventory/warehouse-workspace.js';
+import { todaySurface } from './today.js';
 
 const version = 'v6' as const;
 const normalizationProfileVersion = 'northstar.normalization/v6' as const;
@@ -123,6 +124,16 @@ const MODULE_REGISTRY = Object.freeze([
     moduleName: 'location',
   }),
 ] as const);
+
+/**
+ * The menu group names an office person reads (LOOP-1), where a module's own
+ * name is a developer's: the composed application's alone, so each module and
+ * its standalone release keep theirs.
+ */
+const COMPOSED_MODULE_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  inventory: 'Stock',
+  party: 'Customers and suppliers',
+});
 
 /** Record surfaces presented as documents with their own lines and actions. */
 const RECORD_COMPOSITIONS: Readonly<
@@ -218,6 +229,10 @@ export function composedApplicationDefinition(): Record<string, unknown> {
     }
     return {
       ...module,
+      // The menu's plain names (LOOP-1): a group says what is in it.
+      ...(COMPOSED_MODULE_LABELS[moduleName]
+        ? { label: COMPOSED_MODULE_LABELS[moduleName] }
+        : {}),
       orderKey: (index + 1) * 10,
       ownerPackageId: packageId,
     };
@@ -392,6 +407,8 @@ export function composedApplicationDefinition(): Record<string, unknown> {
     surfaces: [
       ...application.surfaces,
       warehouseSurface(APPLICATION_NAMESPACE),
+      // The landing page (LOOP-1): the day's work in the loop.
+      todaySurface(APPLICATION_NAMESPACE),
     ],
   });
 }

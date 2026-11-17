@@ -637,7 +637,7 @@ export async function findStock(card: LoopScorecard): Promise<void> {
   const { page } = card;
   const f = LOOP_FIXTURE;
   card.begin(LOOP_STEPS.findStock);
-  await openFromMenu(card, 'Inventory', 'Stock by item');
+  await openFromMenu(card, 'Stock', 'Stock by item');
   await card.fill(page.getByRole('searchbox').first(), f.item[0]);
   await card.click(page.getByRole('button', { name: 'Apply', exact: true }));
   await expect(
