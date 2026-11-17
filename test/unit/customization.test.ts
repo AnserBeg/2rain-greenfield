@@ -15,7 +15,13 @@ import {
   serializeRelease,
   type CustomizationPatch,
 } from '../../packages/customization/src/index.js';
-import { parseCompiledApplication } from '../../packages/postgres-provider/src/composed-application-runtime.js';
+import {
+  parseCompiledApplication,
+  ReleaseRoutingOperationGateway,
+  ReleaseRoutingQueryGateway,
+} from '../../packages/postgres-provider/src/composed-application-runtime.js';
+import { SemanticOperationGateway } from '../../packages/runtime/src/semantic-operation-gateway.js';
+import { SemanticQueryGateway } from '../../packages/runtime/src/semantic-query-gateway.js';
 
 const authoredPath = resolve('apps/web/release/app.authored.json');
 const authored = JSON.parse(readFileSync(authoredPath, 'utf8')) as Record<
@@ -251,3 +257,22 @@ function patch(input: unknown): CustomizationPatch {
   }
   return parsed.patch;
 }
+
+test('every public method of both gateways is routed by the release a view names', () => {
+  const publicMethods = (prototype: object) =>
+    Object.getOwnPropertyNames(prototype)
+      .filter((name) => name !== 'constructor')
+      .sort();
+  for (const [base, routing] of [
+    [SemanticQueryGateway, ReleaseRoutingQueryGateway],
+    [SemanticOperationGateway, ReleaseRoutingOperationGateway],
+  ] as const) {
+    const methods = publicMethods(base.prototype);
+    assert.ok(methods.length > 0);
+    assert.deepEqual(
+      methods.filter((name) => !Object.hasOwn(routing.prototype, name)),
+      [],
+      `${routing.name} must override every public method of ${base.name}`,
+    );
+  }
+});
