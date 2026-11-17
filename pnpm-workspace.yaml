@@ -22,3 +22,14 @@ overrides:
   # was: the first patched release, not the latest. Reach: the canonical model's
   # input validation (packages/canonical-model).
   zod: 4.6.6
+
+auditConfig:
+  ignoreGhsas:
+    # GHSA-fc5q-39xc-vjpf (picomatch ReDoS through single-branch repeated
+    # extglobs), flagged High on 2026-11-17 for every release <=4.0.7. No
+    # patched release exists: 4.0.8 is unpublished and 4.0.7 is latest.
+    # Reach is dev-only and lint-time: typescript-eslint -> typescript-estree
+    # -> tinyglobby/fdir -> picomatch, matching this repository's own globs,
+    # never input from a user or tenant. Owner-approved 2026-11-17. Remove this
+    # entry and pin picomatch >=4.0.8 the day it is published.
+    - GHSA-fc5q-39xc-vjpf
