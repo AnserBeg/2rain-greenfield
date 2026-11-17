@@ -13,8 +13,10 @@
  * check, never the model's word. The run aborts before any model call once
  * total spend reaches the cap (USD 20 unless --cap says otherwise).
  *
- * Writes `docs/execution/evidence/<date>-agent-eval.md` and, per task, an
- * append-only JSONL run record (one line per model call or tool call).
+ * Writes `docs/execution/evidence/<run timestamp>-agent-eval.md` (created
+ * exclusively: a rerun, even of one task, never overwrites an earlier result)
+ * and, per task, an append-only JSONL run record (one line per model call or
+ * tool call, appended in call order).
  */
 import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -30,7 +32,7 @@ import {
   type AgentRunResult,
 } from '../../packages/operations-agent/src/index.js';
 
-import { COMPANY, withAgentWorlds } from './agent-world.js';
+import { BUSINESS_CALENDAR, COMPANY, withAgentWorlds } from './agent-world.js';
 import { snapshot } from './arrange.js';
 import { TASKS } from './tasks.js';
 
@@ -112,11 +114,14 @@ async function main(): Promise<void> {
         runDirectory,
         `task-${String(task.id).padStart(2, '0')}.jsonl`,
       );
-      const append = (entry: Record<string, unknown>) =>
-        appendFile(
-          record,
-          `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`,
-        );
+      // Appends are queued so lines land in call order; `at` is read when the
+      // event happens, not when its write runs.
+      let queue: Promise<void> = Promise.resolve();
+      const append = (entry: Record<string, unknown>): Promise<void> => {
+        const line = `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`;
+        queue = queue.then(() => appendFile(record, line));
+        return queue;
+      };
       if (meter.exhausted()) {
         rows.push({
           task: task.id,
@@ -149,11 +154,11 @@ async function main(): Promise<void> {
           database: world.databaseName,
           model: model.modelId,
         });
-        const pending: Promise<void>[] = [];
         const session = new OperationsAgentSession({
           runtime: world.runtime,
           personHeaders: { cookie: 'northstar-demo-actor=buyer' },
           companyId: COMPANY,
+          businessCalendar: BUSINESS_CALENDAR,
           approve: async (plan) => {
             await append({
               kind: 'approval',
@@ -172,38 +177,32 @@ async function main(): Promise<void> {
           meter,
           onEvent: (event) => {
             if (event.kind === 'model')
-              pending.push(
-                append({
-                  kind: 'model',
-                  messages: event.messages,
-                  stop: event.stop,
-                  tokensIn: event.usage.inputTokens,
-                  cacheRead: event.usage.cacheReadTokens,
-                  cacheWrite: event.usage.cacheWriteTokens,
-                  tokensOut: event.usage.outputTokens,
-                  usd: event.usd,
-                }),
-              );
+              void append({
+                kind: 'model',
+                messages: event.messages,
+                stop: event.stop,
+                tokensIn: event.usage.inputTokens,
+                cacheRead: event.usage.cacheReadTokens,
+                cacheWrite: event.usage.cacheWriteTokens,
+                tokensOut: event.usage.outputTokens,
+                usd: event.usd,
+              });
             if (event.kind === 'tool')
-              pending.push(
-                append({
-                  kind: 'tool',
-                  tool: event.name,
-                  arguments: event.input,
-                }),
-              );
+              void append({
+                kind: 'tool',
+                tool: event.name,
+                arguments: loggedArguments(event.input),
+              });
             if (event.kind === 'result')
-              pending.push(
-                append({
-                  kind: 'tool-result',
-                  tool: event.name,
-                  status: event.isError ? 'refused' : 'ok',
-                  result: event.content,
-                }),
-              );
+              void append({
+                kind: 'tool-result',
+                tool: event.name,
+                status: event.isError ? 'refused' : 'ok',
+                result: event.content,
+              });
           },
         });
-        await Promise.all(pending);
+        await queue;
         const verdict = await task.check(world, context, before, run);
         await append({
           kind: 'verdict',
@@ -291,8 +290,8 @@ async function main(): Promise<void> {
     ),
     '',
   ].join('\n');
-  const reportPath = join(outDirectory, `${date}-agent-eval.md`);
-  await writeFile(reportPath, report);
+  const reportPath = join(outDirectory, `${stamp}-agent-eval.md`);
+  await writeFile(reportPath, report, { flag: 'wx' });
   log(
     `\n${String(passed)}/${String(rows.length)} passed · USD ${total.toFixed(4)} · ${reportPath}`,
   );
@@ -304,3 +303,19 @@ main().catch((error: unknown) => {
   );
   process.exitCode = 1;
 });
+
+/**
+ * Tool arguments as the run record keeps them. The model's own
+ * `executionIdempotencyKey` is a label, not a credential, but a secret
+ * scanner reads any `...Key` with an opaque value as one; the record keeps
+ * that a key was given, not its text.
+ */
+function loggedArguments(input: unknown): unknown {
+  if (typeof input !== 'object' || input === null || Array.isArray(input))
+    return input;
+  return Object.fromEntries(
+    Object.entries(input).map(([name, value]) =>
+      /key$/iu.test(name) ? [name, '[given]'] : [name, value],
+    ),
+  );
+}

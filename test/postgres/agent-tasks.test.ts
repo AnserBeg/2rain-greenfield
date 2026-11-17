@@ -9,12 +9,20 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  lastToolResult,
   OperationsAgentSession,
   runOperationsAgent,
   scriptedModel,
   SpendMeter,
 } from '../../packages/operations-agent/src/index.js';
 import {
+  checkTerminalRelease,
+  compiledReleaseRoot,
+} from '../../apps/api/src/agent-release-guard.js';
+import { readCompiledApplication } from '../../apps/api/src/composition-root.js';
+import { readActiveReleaseRoot } from '../../packages/postgres-provider/src/active-release-root.js';
+import {
+  BUSINESS_CALENDAR,
   COMPANY,
   withAgentWorlds,
   type AgentWorld,
@@ -28,6 +36,7 @@ const session = (world: AgentWorld, approve: boolean) =>
     runtime: world.runtime,
     personHeaders: { cookie: 'northstar-demo-actor=buyer' },
     companyId: COMPANY,
+    businessCalendar: BUSINESS_CALENDAR,
     approve: () => Promise.resolve(approve),
   });
 
@@ -156,6 +165,211 @@ test(
         assert.equal(
           (verified.content as { verified: boolean }).verified,
           true,
+        );
+
+        // Context, no guessing: the business date and default currency come
+        // from erp_discover; a currency the request and context never gave is
+        // never written.
+        const planPurchaseOrder = async (withCurrency: boolean) => {
+          const agent = new OperationsAgentSession({
+            runtime: world.runtime,
+            personHeaders: { cookie: 'northstar-demo-actor=buyer' },
+            companyId: COMPANY,
+            businessCalendar: BUSINESS_CALENDAR,
+            clock: () => new Date('2026-11-17T05:30:00Z'),
+            approve: () => Promise.resolve(true),
+          });
+          let context: Record<string, any> = {}; // eslint-disable-line @typescript-eslint/no-explicit-any
+          const model = scriptedModel([
+            () => ({
+              toolCalls: [{ name: 'erp_discover', input: { mode: 'context' } }],
+            }),
+            (conversation) => {
+              context = lastToolResult(conversation);
+              return {
+                toolCalls: [
+                  {
+                    name: 'erp_plan',
+                    input: {
+                      intents: [
+                        {
+                          operationId: op('purchase_order_create'),
+                          values: {
+                            [f('purchase_order_supplier_party_id')]: cascade,
+                            [f('purchase_order_order_date')]:
+                              context.today.asDateTime,
+                            ...(withCurrency
+                              ? {
+                                  [f('purchase_order_currency')]:
+                                    context.currency.default,
+                                }
+                              : {}),
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              };
+            },
+            (conversation) => {
+              const planId = lastToolResult(conversation).planId;
+              return planId
+                ? {
+                    toolCalls: [
+                      {
+                        name: 'erp_execute',
+                        input: {
+                          planId,
+                          executionIdempotencyKey: `ctx-${String(withCurrency)}`,
+                        },
+                      },
+                    ],
+                  }
+                : { text: 'no plan to run' };
+            },
+            () => ({ text: 'done' }),
+          ]);
+          const run = await runOperationsAgent({
+            model,
+            session: agent,
+            request: 'Create a purchase order',
+            meter: new SpendMeter(null, 1),
+          });
+          assert.equal(run.stop, 'answered');
+          const executed = agent.executedPlans()[0];
+          if (!executed) return { context, record: null, run };
+          const recordId = executed.results[0]!.recordId!;
+          return {
+            context,
+            record: await world.read('purchase_order', recordId),
+            run,
+          };
+        };
+        const withContext = await planPurchaseOrder(true);
+        assert.equal(withContext.context.today.date, '2026-11-16');
+        assert.equal(withContext.context.currency.default, 'CAD');
+        assert.equal(
+          withContext.record!.values[f('purchase_order_currency')],
+          'CAD',
+        );
+        assert.equal(
+          withContext.record!.values[f('purchase_order_order_date')],
+          '2026-11-16T00:00:00.000Z',
+        );
+        // The currency is required and nobody gave one: the plan is refused,
+        // nothing is created, and the session supplied none of its own.
+        const beforeWithout = await snapshot(world);
+        const without = await planPurchaseOrder(false);
+        assert.equal(
+          without.record,
+          null,
+          'a purchase order without a currency was created',
+        );
+        assert.doesNotMatch(
+          JSON.stringify(without.run.conversation.at(-2)),
+          /approved by the person/u,
+        );
+        assert.deepEqual(await snapshot(world), beforeWithout);
+
+        // Permission-filtered discovery (plan section 9.2.1): the buyer is
+        // not granted purchase approval, the manager is, so their catalogs
+        // differ, and an operation the buyer may not use loads as denied.
+        const as = (actor: 'buyer' | 'manager') =>
+          new OperationsAgentSession({
+            runtime: world.runtime,
+            personHeaders: { cookie: `northstar-demo-actor=${actor}` },
+            companyId: COMPANY,
+            businessCalendar: BUSINESS_CALENDAR,
+            approve: () => Promise.resolve(false),
+          });
+        const buyer = as('buyer');
+        const manager = as('manager');
+        const counts = async (agent: OperationsAgentSession) =>
+          (
+            (await agent.call('erp_discover', { mode: 'context' })).content as {
+              operations: number;
+              queries: number;
+            }
+          ).operations;
+        assert.ok(
+          (await counts(buyer)) < (await counts(manager)),
+          'the buyer sees every operation the manager sees',
+        );
+        const found = async (agent: OperationsAgentSession) =>
+          (
+            (
+              await agent.call('erp_discover', {
+                mode: 'search',
+                search: 'purchase order approval approve reject',
+                limit: 30,
+              })
+            ).content as { results?: { id: string }[] }
+          ).results?.map((entry) => entry.id) ?? [];
+        const buyerIds = await found(buyer);
+        const onlyManager = (await found(manager))
+          .filter((id) => !buyerIds.includes(id))
+          .slice(0, 5);
+        assert.ok(onlyManager.length > 0, 'no operation is manager-only');
+        const buyerLoads = (
+          await buyer.call('erp_discover', {
+            mode: 'contracts',
+            canonicalIds: onlyManager,
+          })
+        ).content as { contracts: { id?: string; outcome?: string }[] };
+        assert.deepEqual(
+          buyerLoads.contracts.map((entry) => entry.outcome),
+          onlyManager.map(() => 'denied'),
+        );
+        const managerLoads = (
+          await manager.call('erp_discover', {
+            mode: 'contracts',
+            canonicalIds: onlyManager,
+          })
+        ).content as { contracts: { operationId?: string }[] };
+        assert.deepEqual(
+          managerLoads.contracts.map((entry) => entry.operationId),
+          onlyManager,
+        );
+
+        // The terminal refuses a foreign release and never activates one: it
+        // reads the pointer, compares, and leaves the pointer where it was.
+        const compiledRoot = compiledReleaseRoot(
+          await readCompiledApplication(),
+        );
+        const target = {
+          databaseUrl: world.databaseUrl,
+          tenantSlug: world.tenantSlug,
+        };
+        const served = await readActiveReleaseRoot(target);
+        assert.equal(served, compiledRoot);
+        assert.deepEqual(
+          await checkTerminalRelease({ ...target, compiledRoot }),
+          { kind: 'match' },
+        );
+        const foreign = 'ab'.repeat(32);
+        const refusedRelease = await checkTerminalRelease({
+          ...target,
+          compiledRoot: foreign,
+        });
+        assert.equal(refusedRelease.kind, 'differs');
+        assert.match(
+          JSON.stringify(refusedRelease),
+          new RegExp(
+            `${compiledRoot.slice(0, 12)}.*${foreign.slice(0, 12)}`,
+            'u',
+          ),
+        );
+        assert.equal(await readActiveReleaseRoot(target), served);
+        assert.equal(
+          (
+            await checkTerminalRelease({
+              ...target,
+              tenantSlug: 'no-such-tenant',
+              compiledRoot,
+            })
+          ).kind,
+          'not-installed',
         );
       } finally {
         await world.close();

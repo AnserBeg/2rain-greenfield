@@ -14,7 +14,9 @@ import {
   serializeRelease,
   storageElements,
   customizationTargets,
+  draftPatchFromRequest,
   type AcknowledgementInput,
+  type DraftingModel,
   type CustomizationTargets,
   type CustomizationPatch,
   type SandboxRunnerOptions,
@@ -27,6 +29,7 @@ import pg from 'pg';
 import type { PostgresCapabilityOperationExecutorFactory } from './capability-operation-executor-factory.js';
 import {
   activateWithExactSwapTrigger,
+  advanceInventoryContractRoot,
   approveModuleRelease,
   approveReleaseWithoutStorageTransition,
   assertExactSwapTriggerEnabled,
@@ -106,6 +109,11 @@ export interface CustomizationServiceOptions {
    * permissions at activation, exactly as boot grants first-party ones.
    */
   readonly localDemoIdentity?: true;
+  /**
+   * The model a plain-English request is drafted with (slice 4); opened on
+   * first use, so a missing key fails only that request.
+   */
+  readonly draftingModel?: () => Promise<DraftingModel>;
 }
 
 export interface CustomizationConnection {
@@ -238,6 +246,52 @@ export class PostgresCustomizationService {
           Object.freeze({ ...record, state: state(record) }),
         ),
       ),
+    });
+  }
+
+  /**
+   * Plain English to one typed patch through the drafting model, then the
+   * same draft as every other channel. The model never sees records, only the
+   * live release's customizable targets; it cannot record or activate.
+   */
+  async draftFromRequest(request: string): Promise<DraftOutcome> {
+    if (!this.options.draftingModel) {
+      return Object.freeze({
+        code: 'CUSTOMIZE_AI_NOT_CONFIGURED',
+        message:
+          'Drafting from plain English needs a model key; describe the change with the forms instead.',
+        status: 'refused' as const,
+      });
+    }
+    let model: DraftingModel;
+    try {
+      model = await this.options.draftingModel();
+    } catch (error) {
+      return Object.freeze({
+        code: 'CUSTOMIZE_AI_NOT_CONFIGURED',
+        message: error instanceof Error ? error.message : String(error),
+        status: 'refused' as const,
+      });
+    }
+    const drafted = await draftPatchFromRequest(
+      model,
+      request,
+      await this.targets(),
+    );
+    if (drafted.status === 'parsed') {
+      return this.draft(drafted.patch, 'conversationalAi');
+    }
+    if (drafted.status === 'unsupported') {
+      return Object.freeze({
+        message: drafted.message,
+        missingCapability: drafted.missingCapability,
+        status: 'unsupported' as const,
+      });
+    }
+    return Object.freeze({
+      issues: drafted.issues,
+      message: 'the model did not produce a well-formed change',
+      status: 'invalid' as const,
     });
   }
 
@@ -396,19 +450,21 @@ export class PostgresCustomizationService {
       record,
     ]);
     const identity = await this.#identity(context, record.resultingReleaseId);
-    await ensureReleaseAdmitted(
-      this.connection.runtimePool,
-      context,
-      identity,
-      candidate,
-      this.options.providerErrorMappings ?? [],
-      this.options.capabilityOperationExecutorFactories ?? [],
-    );
+    const admit = () =>
+      ensureReleaseAdmitted(
+        this.connection.runtimePool,
+        context,
+        identity,
+        candidate,
+        this.options.providerErrorMappings ?? [],
+        this.options.capabilityOperationExecutorFactories ?? [],
+      );
     const binding = releaseDiffBinding(parent, candidate);
     const approver = await trustedContext(this.connection.identities.approver);
     await assertExactSwapTriggerEnabled(this.connection.adminPool);
     let activationAttemptId: MintedUuid;
     if (storageElements(candidate.compiled).length === 0) {
+      await admit();
       activationAttemptId = await approveReleaseWithoutStorageTransition(
         this.connection.runtimePool,
         context,
@@ -420,6 +476,8 @@ export class PostgresCustomizationService {
         binding,
       );
     } else {
+      // As at boot: the inert part of the plan (a new table) is prepared
+      // first, so the candidate's verification scenarios run against it.
       const preparationId = randomUUID() as MintedUuid;
       const prepared = await this.#materializer().prepare({
         context,
@@ -430,6 +488,7 @@ export class PostgresCustomizationService {
         preparationId,
         targetReleaseId: identity.releaseId,
       });
+      await admit();
       activationAttemptId = await approveModuleRelease(
         this.connection.runtimePool,
         context,
@@ -657,11 +716,15 @@ export class PostgresCustomizationService {
         'activation selected another release',
       );
     }
-    return Object.freeze({
-      releaseId: expectedReleaseId,
-      releaseRoot: await this.#root(context, expectedReleaseId),
-      status,
-    });
+    const releaseRoot = await this.#root(context, expectedReleaseId);
+    // Until this lands, a posting refuses loudly (release mismatch); it is
+    // never written under the wrong release.
+    await advanceInventoryContractRoot(
+      this.connection.adminPool,
+      this.connection.identities.runtime,
+      releaseRoot,
+    );
+    return Object.freeze({ releaseId: expectedReleaseId, releaseRoot, status });
   }
 
   /**

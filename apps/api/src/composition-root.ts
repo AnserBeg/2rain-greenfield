@@ -13,7 +13,16 @@ import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-prov
 import { RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/receivables-capability-executor';
 import { PAYABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/payables-capability-executor';
 import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '@north-star/postgres-provider/purchase-order-approval-executor';
-import { openCustomizationService } from '@north-star/postgres-provider/customization-service';
+import {
+  anthropicModel,
+  DEFAULT_ANTHROPIC_MODEL,
+  loadModelKey,
+  type ModelAdapter,
+} from '@north-star/operations-agent';
+import {
+  openCustomizationService,
+  type CustomizationServiceOptions,
+} from '@north-star/postgres-provider/customization-service';
 import { createSurfaceRuntimeServer } from '@north-star/web/app-server';
 import { COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/sales-section';
 
@@ -209,6 +218,16 @@ export async function startComposedApplication(
   });
 }
 
+/** The release this checkout compiled, as `pnpm dev` would install it. */
+export async function readCompiledApplication(): Promise<unknown> {
+  return JSON.parse(
+    await readFile(
+      new URL('../../web/release/app.compiled.json', import.meta.url),
+      'utf8',
+    ),
+  ) as unknown;
+}
+
 /**
  * The composed runtime alone: no seed, no listener. `startComposedApplication`
  * serves it; the operations-agent terminal opens one against the database a
@@ -222,13 +241,7 @@ export async function openComposedApplicationRuntime(
   >,
 ): Promise<ComposedApplicationRuntime> {
   const compiledApplication =
-    options.compiledApplication ??
-    (JSON.parse(
-      await readFile(
-        new URL('../../web/release/app.compiled.json', import.meta.url),
-        'utf8',
-      ),
-    ) as unknown);
+    options.compiledApplication ?? (await readCompiledApplication());
   return createComposedApplicationRuntime({
     capabilityOperationExecutorFactories: CAPABILITY_EXECUTOR_FACTORIES,
     compiledApplication,
@@ -279,6 +292,16 @@ export async function openCustomizeService(
         ),
       ) as unknown),
     databaseUrl: options.databaseUrl,
+    draftingModel: async () =>
+      draftingModelFrom(
+        anthropicModel({
+          effort: 'medium',
+          key: await loadModelKey('anthropic'),
+          maxTokens: 8_000,
+          modelId:
+            process.env.NORTH_STAR_CUSTOMIZE_MODEL ?? DEFAULT_ANTHROPIC_MODEL,
+        }),
+      ),
     firstPartyAuthored,
     localDemoIdentity: true,
     migrationsDirectory: new URL('../../../db/migrations/', import.meta.url)
@@ -286,6 +309,23 @@ export async function openCustomizeService(
     providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
     tenantSlug: options.tenantSlug ?? 'local-composed-application',
   });
+}
+
+/**
+ * The operations agent's provider adapter drafts customizations too (slice 4).
+ * It passes tool definitions to the provider unchanged; only its tool-name
+ * type is narrowed to the agent's five, so the drafting tool is handed through.
+ */
+function draftingModelFrom(
+  adapter: ModelAdapter,
+): NonNullable<
+  Awaited<ReturnType<NonNullable<CustomizationServiceOptions['draftingModel']>>>
+> {
+  return {
+    modelId: adapter.modelId,
+    next: (request) =>
+      adapter.next(request as unknown as Parameters<ModelAdapter['next']>[0]),
+  };
 }
 
 async function seedComposedApplication(

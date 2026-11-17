@@ -50,6 +50,10 @@ carries the detail. No packet is chartered from this table without a user ruling
 | `INTEGRATION` | 2026-11-15 | The first read: the search witness proves one search-and-field pair per entity, and fallback can pass over a search that omitted the record; it does not certify every search or searchable field (evidence depth). | [ruling note](rulings/2026-11-15-review-after-merge.md), the read of 2026-11-15 |
 | `INTEGRATION` | 2026-11-15 | The first read: the witness's recorded positive `fieldId` names the supplied search value, not the column that matched, since the provider searches every eligible selected column (naming). | [ruling note](rulings/2026-11-15-review-after-merge.md), the read of 2026-11-15 |
 | `INTEGRATION` | 2026-11-15 | No script computes the unread Critical range or refuses a stage-gate record while it is non-empty; about twenty lines beside `check-review-record.sh`. | [ruling note](rulings/2026-11-15-review-after-merge.md), the read of 2026-11-15 |
+| `AGENT` | 2026-11-17 | `erp_discover` is not filtered by the person's permissions before use (plan §9.2.1); the gateway refuses on use. | [AGENT](packets/AGENT.md) |
+| `AGENT` | 2026-11-17 | The agent is not given today's date or the company's default currency, so it guessed USD and yesterday's date for a PO in the terminal check. | [AGENT](packets/AGENT.md) |
+| `AGENT` | 2026-11-17 | Eval harness: a same-day rerun overwrites the dated result file, JSONL lines can land out of call order, and task 3's rule fails a correct answer naming the paid invoice as paid. | [AGENT](packets/AGENT.md) |
+| `AGENT` | 2026-11-17 | `corepack pnpm agent` from a checkout with a different compiled release installs and activates that release on the dev database instead of refusing. | [AGENT](packets/AGENT.md) |
 
 ## TRIAGE — 2026-08-13. Read this before the queue.
 

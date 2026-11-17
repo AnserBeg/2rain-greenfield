@@ -677,6 +677,15 @@ export async function createComposedApplicationRuntime(
         applicationIdentity.releaseId,
         applicationRelease,
       );
+    if (tenantServing) {
+      // Provisioning above recorded the lineage tip; the posting kernel posts
+      // only for the release the scope names, so it names the one served.
+      await advanceInventoryContractRoot(
+        adminPool,
+        identities.runtime,
+        tenantServing.releaseRoot,
+      );
+    }
     if (options.localDemoIdentity) {
       await provisionLocalDemoReleaseAuthorization(
         adminPool,
@@ -716,8 +725,8 @@ export async function createComposedApplicationRuntime(
     // view was issued against. An activation by another process (the
     // customize command, the Customize screen) is served by the next request
     // without a restart (CUSTOMIZE).
-    const buildServing = (release: ServingRelease): ReleaseServing => {
-      const policy = new PostgresCurrentPolicyGateway(
+    const policyFor = (release: ServingRelease) =>
+      new PostgresCurrentPolicyGateway(
         runtimePool!,
         currentPolicyBindingsFromPermissions(
           parseNormalizedApplicationPackageJson(
@@ -725,6 +734,14 @@ export async function createComposedApplicationRuntime(
           ).permissions,
         ),
       );
+    const bootPolicy = policyFor(serving);
+    // The runtime's one read ingress: a capability executor's read-back goes
+    // through it like every other read, routed by its view's release.
+    const routed: { queryGateway?: SemanticQueryGateway } = {};
+    const buildServing = (
+      release: ServingRelease,
+      policy: PostgresCurrentPolicyGateway = policyFor(release),
+    ): ReleaseServing => {
       const queryGateway = new SemanticQueryGateway(
         policy,
         interpreter,
@@ -744,7 +761,7 @@ export async function createComposedApplicationRuntime(
           currentInstant: () => new Date().toISOString(),
           pool: runtimePool!,
           projection: release.projection,
-          queryGateway,
+          queryGateway: routed.queryGateway ?? queryGateway,
           releaseContentHash: release.releaseRoot,
           releaseId: release.releaseId,
         }),
@@ -761,10 +778,7 @@ export async function createComposedApplicationRuntime(
         queryGateway,
       });
     };
-    const bootServing = buildServing(serving);
-    const servings = new Map<string, Promise<ReleaseServing>>([
-      [serving.releaseId, Promise.resolve(bootServing)],
-    ]);
+    const servings = new Map<string, Promise<ReleaseServing>>();
     const servingFor = (releaseId: string): Promise<ReleaseServing> => {
       const known = servings.get(releaseId);
       if (known) return known;
@@ -772,13 +786,18 @@ export async function createComposedApplicationRuntime(
         runtimePool!,
         runtimeContext,
         releaseId as MintedUuid,
-      ).then(buildServing);
+      ).then((release) => buildServing(release));
       servings.set(releaseId, loading);
       loading.catch(() => servings.delete(releaseId));
       return loading;
     };
-    const policy = bootServing.policy;
+    const policy = bootPolicy;
     const queryGateway = new ReleaseRoutingQueryGateway(servingFor, policy);
+    routed.queryGateway = queryGateway;
+    servings.set(
+      serving.releaseId,
+      Promise.resolve(buildServing(serving, bootPolicy)),
+    );
     const operationGateway = new ReleaseRoutingOperationGateway(
       servingFor,
       policy,
@@ -1465,6 +1484,46 @@ export async function provisionLocalDemoAuthorization(
   } finally {
     client.release();
   }
+}
+
+/**
+ * Moves every inventory scope of one tenant environment to the release now
+ * active (CUSTOMIZE: a tenant release, or the release a rollback returns to).
+ * `contract_release_root` is provenance the posting kernel requires to equal
+ * the active release (`INVENTORY_POSTING_RELEASE_MISMATCH`). This re-runs the
+ * provisioning function with each scope's own stored policy, so policy stays
+ * assert-identical and only the root advances (migration 0019); the entity
+ * code and name it validates as non-blank are not stored by it.
+ */
+export async function advanceInventoryContractRoot(
+  adminPool: pg.Pool,
+  identity: AuthenticatedIdentity,
+  releaseRoot: string,
+): Promise<void> {
+  await adminPool.query(
+    `SELECT platform.provision_inventory_scope(
+       configuration.tenant_id, configuration.environment_id,
+       configuration.legal_entity_id, 'scope', 'scope',
+       calendar.time_zone, calendar.business_day_boundary, $3,
+       configuration.configuration_version, configuration.negative_stock,
+       configuration.maximum_backdate_days,
+       configuration.adjustment_reason_requirement,
+       configuration.transfer_reason_requirement,
+       configuration.count_reason_requirement,
+       configuration.correction_reason_requirement,
+       configuration.rebaseline_reason_requirement,
+       configuration.adjustment_approval_threshold,
+       configuration.transfer_approval_threshold,
+       configuration.count_approval_threshold,
+       configuration.correction_approval_threshold,
+       configuration.rebaseline_approval_threshold)
+       FROM platform.inventory_posting_configurations AS configuration
+       JOIN platform.inventory_tenant_calendars AS calendar
+         ON calendar.tenant_id = configuration.tenant_id
+      WHERE configuration.tenant_id = $1
+        AND configuration.environment_id = $2`,
+    [identity.tenantId, identity.environmentId, releaseRoot],
+  );
 }
 
 async function provisionInventoryScope(

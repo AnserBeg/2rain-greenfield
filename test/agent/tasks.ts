@@ -12,8 +12,12 @@
  *      and inventory transaction); read and refusal tasks change none;
  * - 1: the answer states Calgary's on-hand figure (6);
  * - 2: the answer names both placed purchase orders and not the draft;
- * - 3: the answer names both unpaid Lethbridge invoices, not the paid one,
- *      and states their total balance (52.5);
+ * - 3: the answer names both unpaid Lethbridge invoices and states their
+ *      total balance (52.5). Rule v1 (the 2026-11-17 run; its result stands
+ *      as registered) also failed any answer naming the paid invoice. Rule v2
+ *      (registered 2026-11-17, applies to runs from the next one): the paid
+ *      invoice may be named when the answer says it is paid, and fails only
+ *      where it is given as unpaid (`task3AnswerFailures`);
  * - 4/6: exactly one new order, placed/confirmed, with the one requested line;
  * - 5: Calgary on hand rises by the ordered 8 through one posted receipt;
  * - 7: Calgary on hand falls by 4 through one posted shipment of that order;
@@ -23,6 +27,7 @@
 import type { AgentRunResult } from '../../packages/operations-agent/src/index.js';
 
 import type { AgentWorld } from './agent-world.js';
+import { numbersIn, task3AnswerFailures } from './answer-rules.js';
 import {
   f,
   ids,
@@ -79,13 +84,6 @@ async function unexpectedChanges(
       (list) =>
         `${list} changed by ${String((after[list] ?? 0) - (before[list] ?? 0))} (expected ${String(expected[list] ?? 0)})`,
     );
-}
-
-/** Every number written in the answer, commas and currency signs ignored. */
-export function numbersIn(answer: string): number[] {
-  return [...answer.replaceAll(',', '').matchAll(/-?\d+(?:\.\d+)?/gu)].map(
-    (match) => Number(match[0]),
-  );
 }
 
 const states = async (world: AgentWorld, local: string, id: string) =>
@@ -188,17 +186,7 @@ export const TASKS: readonly AgentTask[] = [
       run,
     ) {
       const failures = await unexpectedChanges(world, before);
-      for (const number of context.unpaid)
-        if (!run.answer.includes(number))
-          failures.push(`the answer omits ${number}`);
-      if (run.answer.includes(context.paid))
-        failures.push(`the answer lists the paid ${context.paid}`);
-      if (
-        !numbersIn(run.answer).some(
-          (n) => Math.abs(n - context.balance) < 0.005,
-        )
-      )
-        failures.push(`the answer does not state ${String(context.balance)}`);
+      failures.push(...task3AnswerFailures(run.answer, context));
       return verdict(failures);
     },
   },
