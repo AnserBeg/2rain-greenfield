@@ -57,6 +57,14 @@ renderer over the same compiled surfaces (the audit's option b) is taken only if
 
 Scorecard target: every posting in ≤ 2 page loads and ≤ 4 clicks; receive in full in 2 clicks.
 
+### Speed (owner, 2026-11-17: "super super fast")
+Measured: a purchase order page took 5.3 s, 4.85 s of it Node CPU, with 1,204 statements in 148 transactions. Two critical reviews
+(Fable 5.2 with a profile; Codex gpt-6.2-astra) agree: no Rust, no edge hosting of pages; the time is repeated work. LOOP-1's "memo"
+slice removes the catalog re-parse (~3-4 s); [SPEED-1](packets/SPEED-1-charter.md) brings a page to ≤ 3 transactions and ≤ 40
+statements under a CI budget, without changing a security guarantee. The look ([LOOK-1](packets/LOOK-1-charter.md), owner's choice:
+Ledger plus the next-step card, work queues and progress bars; [spec](../design/ledger-spec.md), [mockup](../design/ledger-final.html))
+follows LOOP-1 and uses SPEED-1's batched loader for every count.
+
 ### Then, in this order (the audit's architecture findings)
 1. **Customized upgrade, narrowed.** A field and a layout patch survive a first-party base change without `dev:reset`. Every
    definition edit in phases 1-3 moves the base, so this is the first thing a real tenant would hit (`CUSTOMIZE_BASE_STALE`).
