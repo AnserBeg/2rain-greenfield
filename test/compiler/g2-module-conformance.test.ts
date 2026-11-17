@@ -626,10 +626,11 @@ test('sales compiler scenarios execute input refinements and operation/storage e
         38,
         18,
       ),
+      // LOOP-1: a line is never saved without its price.
       salesInputField(
         'unit_price',
         'exactDecimalFieldType',
-        false,
+        true,
         null,
         38,
         18,

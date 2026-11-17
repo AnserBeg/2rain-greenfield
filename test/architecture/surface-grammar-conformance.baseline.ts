@@ -103,7 +103,10 @@ export const PRODUCT_SURFACE_GRAMMAR_BASELINE = Object.freeze([
     // known slot gaps: invoice detail (SG003 + SG009, 2) and form (4), and the
     // three contextual documents' list (2), detail (4) and form (4) each. The
     // invoice List declares saved views, so it adds none: 59 + 36 = 95. No new
-    // violation kind.
-    violationCount: 95,
+    // violation kind. LOOP-1 (orchestrator ruling 2026-11-17): the invoice
+    // form keeps no sections slot, so the Invoices List offers no raw "New"
+    // and an invoice no "Edit" -- an invoice is made by invoicing its order;
+    // the form's missing sections slot adds 2: 95 + 2 = 97.
+    violationCount: 97,
   }),
 ] as const satisfies readonly ProductSurfaceGrammarBaselineEntry[]);

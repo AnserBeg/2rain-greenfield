@@ -342,7 +342,12 @@ test('compiled navigation stays flat within budget and groups mounted modules be
             };
           }>
         >;
-        composition?: { actions: Array<{ actionId: string }> };
+        composition?: {
+          actions: Array<{ actionId: string }>;
+          presentation?: {
+            progression?: { next: Array<{ action?: string }> };
+          };
+        };
       }>;
     };
     for (const surface of source.surfaces) {
@@ -362,10 +367,20 @@ test('compiled navigation stays flat within budget and groups mounted modules be
             delete field.presentation?.tiers;
           }
         }
-      if (counterSales && surface.composition)
+      // LOOP-1's order payment pays each open invoice in per-row steps that
+      // read their own row's read-backs, as a counter sale does.
+      if (counterSales && surface.composition) {
         surface.composition.actions = surface.composition.actions.filter(
-          (action) => !action.actionId.includes(':action.counter_sale_'),
+          (action) =>
+            !action.actionId.includes(':action.counter_sale_') &&
+            !action.actionId.endsWith(':action.order_record_payment'),
         );
+        const progression = surface.composition.presentation?.progression;
+        if (progression)
+          progression.next = progression.next.filter(
+            (entry) => !entry.action?.endsWith(':action.order_record_payment'),
+          );
+      }
     }
     return compiledSurfaceManifest(compileDefinition(source))
       .requiredRuntimeCapability.minimumVersion;

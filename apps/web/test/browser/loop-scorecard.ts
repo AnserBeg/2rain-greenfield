@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { performance } from 'node:perf_hooks';
 import { dirname } from 'node:path';
 
 import {
@@ -31,7 +32,7 @@ export class LoopScorecard {
   private current: ScorecardStep | undefined;
   /** The step is still on the page the step before ended on. */
   private carried = false;
-  private readonly started = new Map<Request, DatabaseCount>();
+  private readonly started = new Map<Request, RequestStart>();
 
   constructor(
     readonly page: Page,
@@ -47,18 +48,26 @@ export class LoopScorecard {
     const meter = database?.meter;
     if (!meter) return;
     page.on('request', (request) => {
-      if (measured(request)) this.started.set(request, meter.count());
+      if (measured(request))
+        this.started.set(request, {
+          count: meter.count(),
+          cpu: process.cpuUsage(),
+          at: performance.now(),
+        });
     });
     const finish = (request: Request) => {
       const before = this.started.get(request);
       if (!before) return;
       this.started.delete(request);
       const after = meter.count();
+      const cpu = process.cpuUsage(before.cpu);
       const tally: RequestTally = {
         step: this.current?.name ?? '(start)',
         page: requestLabel(request),
-        transactions: after.transactions - before.transactions,
-        statements: after.statements - before.statements,
+        transactions: after.transactions - before.count.transactions,
+        statements: after.statements - before.count.statements,
+        wallMs: Math.round(performance.now() - before.at),
+        cpuMs: Math.round((cpu.user + cpu.system) / 1000),
       };
       this.requests.push(tally);
       if (this.current) {
@@ -231,14 +240,27 @@ export class LoopScorecard {
       '',
       '## Database work per request',
       '',
-      row(['step', 'request', 'db transactions', 'db statements']),
-      row(['---', '---', '---', '---']),
+      'Wall and CPU are milliseconds from the browser sending the request to',
+      "its last byte arriving; CPU is this process's (the application and the",
+      'test client share it). Seconds vary between runners: compare counts.',
+      '',
+      row([
+        'step',
+        'request',
+        'db transactions',
+        'db statements',
+        'wall ms',
+        'cpu ms',
+      ]),
+      row(['---', '---', '---', '---', '---', '---']),
       ...this.requests.map((request) =>
         row([
           request.step,
           request.page,
           request.transactions,
           request.statements,
+          request.wallMs,
+          request.cpuMs,
         ]),
       ),
       '',
@@ -311,6 +333,14 @@ export interface RequestTally {
   readonly page: string;
   readonly transactions: number;
   readonly statements: number;
+  readonly wallMs: number;
+  readonly cpuMs: number;
+}
+
+interface RequestStart {
+  readonly count: DatabaseCount;
+  readonly cpu: NodeJS.CpuUsage;
+  readonly at: number;
 }
 
 export interface DatabaseCount {

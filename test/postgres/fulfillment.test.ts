@@ -198,7 +198,7 @@ test(
               line_number: '1',
               ordered_quantity: '10',
               unit_id: 'EA',
-              unit_price: null,
+              unit_price: '12.5',
             },
             { order: order.recordId },
           );
@@ -626,7 +626,7 @@ test(
               line_number: '1',
               ordered_quantity: '5',
               unit_id: 'EA',
-              unit_price: null,
+              unit_price: '12.5',
             },
             { order: correctionOrder.recordId },
           );
