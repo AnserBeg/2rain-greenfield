@@ -120,6 +120,9 @@ importers:
       '@north-star/compiler':
         specifier: workspace:*
         version: link:../compiler
+      '@north-star/customization':
+        specifier: workspace:*
+        version: link:../customization
       '@north-star/observability':
         specifier: workspace:*
         version: link:../observability

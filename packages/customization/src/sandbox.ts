@@ -95,11 +95,7 @@ export async function compileInSandbox(
   const wallClock =
     options.wallClockLimitMilliseconds ??
     SANDBOX_DEFAULT_LIMITS.wallClockLimitMilliseconds;
-  const execArgv = [
-    `--max-old-space-size=${String(heap)}`,
-    '--import',
-    import.meta.resolve('tsx'),
-  ];
+  const execArgv = [`--max-old-space-size=${String(heap)}`, '--import', 'tsx'];
   const environment = {
     ...process.env,
     NORTH_STAR_SANDBOX_WALL_CLOCK_MS: String(wallClock),

@@ -6,6 +6,7 @@
   "exports": {
     "./composed-application-runtime": "./src/composed-application-runtime.ts",
     "./current-policy": "./src/current-policy.ts",
+    "./customization-service": "./src/customization-service.ts",
     "./inventory-posting-capability-executor": "./src/inventory-posting-capability-executor.ts",
     "./fulfillment-capability-executor": "./src/fulfillment-capability-executor.ts",
     "./fulfillment-projections": "./src/fulfillment-projections.ts",
@@ -24,6 +25,7 @@
   "dependencies": {
     "@north-star/canonical-model": "workspace:*",
     "@north-star/compiler": "workspace:*",
+    "@north-star/customization": "workspace:*",
     "@north-star/observability": "workspace:*",
     "@north-star/platform-runtime": "workspace:*",
     "@north-star/runtime": "workspace:*",
