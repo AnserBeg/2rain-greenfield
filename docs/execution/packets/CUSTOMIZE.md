@@ -54,7 +54,7 @@ What: the ux-grammar skill ("Every screen renders through SurfaceRuntime… Neve
 - F5's deeper case: after base→A→B and a rollback to A, rolling A back to base is refused (`CUSTOMIZE_ROLLBACK_NOT_REVERSIBLE`): the reverse-transition policy reverses only the activation that made the current release live (here B's rollback). Needs a policy change (orchestrator's call).
 - F4 (TRUNCATE bypasses the append-only rules, repo-wide) and F6 (terminal guard) are the orchestrator's and AGENT-2's.
 - AGENT harness: under the scope mismatch above, the receive task's scripted run answered with no refused tool call while posting nothing; only its end-state check caught it (for AGENT-2).
-- No operator path finishes an unverified activation: after a cut between swap and verification, draft, approve, activate and rollback refuse `CUSTOMIZE_ACTIVATION_UNVERIFIED` and posting is refused (the scopes still name the last proven release) until the kernel's `verifyActivation` (or `reconcileActivation`) is run for that attempt; a `customize verify` command is not built.
+- No recovery command for an interrupted activation (fail-closed, judged acceptable by the fix-2 read): after a cut between swap and verification, `status()` stays readable and draft, approve, activate and rollback refuse `CUSTOMIZE_ACTIVATION_UNVERIFIED`; posting is refused (the scopes still name the last verified release). Remedy: the local demo uses `dev:reset`; production needs a `customize recover` that runs the kernel's `verifyActivation` for the attempt matching the pointer and fence.
 
 ## Review fix 2 (read of `884ee0ba..08434a73`, R1-R4)
 
@@ -66,6 +66,7 @@ What: the ux-grammar skill ("Every screen renders through SurfaceRuntime… Neve
 - `approve` holds the lock too (it records an approval bound to the pointer and fence, a state change): about 40 s for a storage change, during which a second click or a boot waits.
 - `status` stays lock-free (the screen reads it on every page load; it changes nothing).
 
-## Review fix 3 (read of `01646f74..4920492f`, B1)
+## Review fixes 3 and 4 (reads of `01646f74..4920492f` and fix 3: B1, B1b)
 
 - B1: boot's early `provisionInventoryScope` set every scope to the lineage tip before the proof ran, so after a cut-off A -> first-party rollback a restart left the scopes matching the unverified pointer. Early provisioning now creates a fresh scope with the tip's root but keeps an existing scope's root (policy still asserted); roots move only in the final locked reconcile, to a verified pointer. Test: that cut, then a restart: the scopes keep A's root and a posting is refused until the kernel verifies; then the next customization call reconciles and posting works.
+- B1b (fix 4): that read and the write it feeds now run inside `withReleaseScopeLock` on its held admin client, so no reconcile or swap lands between them and a stale root is never written back; no pool use inside the lock. Shown by a unit assertion (`test/unit/customization.test.ts`, a fake pool that throws if used): lock, read, provision, unlock all on the held client, and an existing root is passed through. No pause seam was added (it would need new production plumbing).

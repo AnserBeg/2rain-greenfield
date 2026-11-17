@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
+import type pg from 'pg';
+
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import {
   applyCustomizationPatches,
@@ -17,6 +19,7 @@ import {
 } from '../../packages/customization/src/index.js';
 import {
   parseCompiledApplication,
+  provisionInventoryScope,
   ReleaseRoutingOperationGateway,
   ReleaseRoutingQueryGateway,
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
@@ -275,4 +278,57 @@ test('every public method of both gateways is routed by the release a view names
       `${routing.name} must override every public method of ${base.name}`,
     );
   }
+});
+
+test('boot scope provisioning reads and writes only on the release-scope lock client (review B1b)', async () => {
+  const existingRoot = 'cd'.repeat(32);
+  const statements: { readonly sql: string; readonly values: unknown[] }[] = [];
+  const client = {
+    query: (sql: string, values: unknown[] = []) => {
+      statements.push({ sql: sql.replace(/\s+/gu, ' ').trim(), values });
+      return Promise.resolve({
+        rows: sql.includes('contract_release_root')
+          ? [{ contract_release_root: existingRoot }]
+          : [],
+      });
+    },
+    release: () => undefined,
+  };
+  const adminPool = {
+    connect: () => Promise.resolve(client),
+    query: () => {
+      throw new Error('the admin pool was used outside the held client');
+    },
+  } as unknown as pg.Pool;
+  const provisioning = {
+    legalEntityId: 'legal-entity',
+  } as unknown as Parameters<typeof provisionInventoryScope>[3];
+  await provisionInventoryScope(
+    adminPool,
+    {
+      environmentId: 'environment',
+      principalId: 'principal',
+      tenantId: 'tenant',
+    } as unknown as Parameters<typeof provisionInventoryScope>[1],
+    'ab'.repeat(32),
+    provisioning,
+  );
+  assert.deepEqual(
+    statements.map(
+      (statement) =>
+        /^SELECT (\S+?)\(/u.exec(statement.sql)?.[1] ??
+        statement.sql.slice(0, 40),
+    ),
+    [
+      'pg_advisory_lock',
+      'SELECT contract_release_root FROM platfo',
+      'platform.provision_inventory_scope',
+      'pg_advisory_unlock',
+    ],
+  );
+  assert.equal(
+    statements[2]!.values[7],
+    existingRoot,
+    'an existing scope keeps its root',
+  );
 });
