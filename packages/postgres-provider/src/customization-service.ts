@@ -25,6 +25,7 @@ import pg from 'pg';
 import type { PostgresCapabilityOperationExecutorFactory } from './capability-operation-executor-factory.js';
 import {
   activateWithExactSwapTrigger,
+  advanceInventoryContractRoot,
   approveModuleRelease,
   approveReleaseWithoutStorageTransition,
   assertExactSwapTriggerEnabled,
@@ -611,11 +612,15 @@ export class PostgresCustomizationService {
         'activation selected another release',
       );
     }
-    return Object.freeze({
-      releaseId: expectedReleaseId,
-      releaseRoot: await this.#root(context, expectedReleaseId),
-      status,
-    });
+    const releaseRoot = await this.#root(context, expectedReleaseId);
+    // Until this lands, a posting refuses loudly (release mismatch); it is
+    // never written under the wrong release.
+    await advanceInventoryContractRoot(
+      this.connection.adminPool,
+      this.connection.identities.runtime,
+      releaseRoot,
+    );
+    return Object.freeze({ releaseId: expectedReleaseId, releaseRoot, status });
   }
 
   /**
