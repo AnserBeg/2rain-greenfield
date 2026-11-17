@@ -21,11 +21,12 @@ import { expect, type Locator, type Page } from '@playwright/test';
 export class LoopScorecard {
   readonly steps: ScorecardStep[] = [];
   private current: ScorecardStep | undefined;
-  /** The page a step starts on was read at the end of the step before. */
+  /** The step is still on the page the step before ended on. */
   private carried = false;
 
   constructor(readonly page: Page) {
     page.on('load', () => {
+      this.carried = false;
       if (this.current) this.current.loads += 1;
     });
   }
@@ -86,10 +87,9 @@ export class LoopScorecard {
   /** Read the page as the person sees it now. */
   async scan(): Promise<void> {
     const step = this.step();
-    if (this.carried) {
-      this.carried = false;
-      return;
-    }
+    // Until the step's first load, the page is the one the step before
+    // ended on, already read there.
+    if (this.carried) return;
     const text = await this.page
       .evaluate(() => document.body.innerText)
       .catch(() => '');
@@ -437,11 +437,11 @@ export async function invoiceAndPay(card: LoopScorecard): Promise<boolean> {
     .trim()
     .replaceAll(',', '');
   expect(Number(balance)).toBeGreaterThan(0);
+  const next = page.locator('.composition-progression-next');
   const fromOrder =
-    (await page
-      .locator('.composition-progression-next')
-      .getAttribute('data-next-action')
-      .catch(() => null)) === 'northstar.app:action.order_record_payment';
+    (await next.count()) > 0 &&
+    (await next.getAttribute('data-next-action')) ===
+      'northstar.app:action.order_record_payment';
   if (fromOrder) {
     await runTask(card, nextAction(page), 'Record payment');
     await expect(cell(page, 'order_invoices', 'Balance')).toHaveText('0.00');
