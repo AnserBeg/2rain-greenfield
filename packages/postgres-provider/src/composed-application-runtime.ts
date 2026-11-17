@@ -716,8 +716,8 @@ export async function createComposedApplicationRuntime(
     // view was issued against. An activation by another process (the
     // customize command, the Customize screen) is served by the next request
     // without a restart (CUSTOMIZE).
-    const buildServing = (release: ServingRelease): ReleaseServing => {
-      const policy = new PostgresCurrentPolicyGateway(
+    const policyFor = (release: ServingRelease) =>
+      new PostgresCurrentPolicyGateway(
         runtimePool!,
         currentPolicyBindingsFromPermissions(
           parseNormalizedApplicationPackageJson(
@@ -725,6 +725,14 @@ export async function createComposedApplicationRuntime(
           ).permissions,
         ),
       );
+    const bootPolicy = policyFor(serving);
+    // The runtime's one read ingress: a capability executor's read-back goes
+    // through it like every other read, routed by its view's release.
+    let routedQueryGateway: SemanticQueryGateway | undefined;
+    const buildServing = (
+      release: ServingRelease,
+      policy: PostgresCurrentPolicyGateway = policyFor(release),
+    ): ReleaseServing => {
       const queryGateway = new SemanticQueryGateway(
         policy,
         interpreter,
@@ -744,7 +752,7 @@ export async function createComposedApplicationRuntime(
           currentInstant: () => new Date().toISOString(),
           pool: runtimePool!,
           projection: release.projection,
-          queryGateway,
+          queryGateway: routedQueryGateway ?? queryGateway,
           releaseContentHash: release.releaseRoot,
           releaseId: release.releaseId,
         }),
@@ -761,10 +769,7 @@ export async function createComposedApplicationRuntime(
         queryGateway,
       });
     };
-    const bootServing = buildServing(serving);
-    const servings = new Map<string, Promise<ReleaseServing>>([
-      [serving.releaseId, Promise.resolve(bootServing)],
-    ]);
+    const servings = new Map<string, Promise<ReleaseServing>>();
     const servingFor = (releaseId: string): Promise<ReleaseServing> => {
       const known = servings.get(releaseId);
       if (known) return known;
@@ -772,13 +777,18 @@ export async function createComposedApplicationRuntime(
         runtimePool!,
         runtimeContext,
         releaseId as MintedUuid,
-      ).then(buildServing);
+      ).then((release) => buildServing(release));
       servings.set(releaseId, loading);
       loading.catch(() => servings.delete(releaseId));
       return loading;
     };
-    const policy = bootServing.policy;
+    const policy = bootPolicy;
     const queryGateway = new ReleaseRoutingQueryGateway(servingFor, policy);
+    routedQueryGateway = queryGateway;
+    servings.set(
+      serving.releaseId,
+      Promise.resolve(buildServing(serving, bootPolicy)),
+    );
     const operationGateway = new ReleaseRoutingOperationGateway(
       servingFor,
       policy,
