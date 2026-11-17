@@ -1,47 +1,50 @@
 # CUSTOMIZE — a non-developer adds a record type, field, choice or layout, reads a plain diff, approves, activates, rolls back
 
-Status: slice 1 (draft and diff) integrating; slices 2-4 built on `packet/CUSTOMIZE-s2..s4`, slice 5 owed. Charter: [CUSTOMIZE-charter](CUSTOMIZE-charter.md).
-Tier: Critical-touching — `db/migrations/0029_customization_patch_lineage.sql` (RLS/grant SQL). Merges are logged `merged — unread`. Stops taken: none.
-Base: `main` `a7a4cba1`.
+Status: slices 1, 2, 4, 5 built; slice 3 (the Customize screen) STOPPED for a ruling (below). Charter: [CUSTOMIZE-charter](CUSTOMIZE-charter.md).
+Tier: Critical-touching — `db/migrations/0029_customization_patch_lineage.sql` (RLS/grant SQL). Merges are logged `merged — unread`.
+Base: `main` `a7a4cba1`. Stops: slice 3 (ux-grammar seam); main's secret scan red on an AGENT eval record (not this packet's).
 
 ## Claims
 
 1. A change is one of four typed patches (`addRecordType`, `addField`, `addChoice`, `arrangeLayout`), Zod-validated (`packages/customization/src/patch.ts`); any other kind is `unsupported`, naming it; nothing is recorded for a refused, unsupported, invalid or compiler-rejected change.
 2. `platform.customization_patches` (0029) is append-only (update/delete rules refuse), RLS-scoped to the trusted tenant and environment, insert bound to the authoring principal, and the database checks `payload_digest = sha256(payload)`. It binds payload, channel (§5.6's five), actor, base package id/version/revision/release root, parent and resulting revision and release, language and normalization profile versions and trusted time. No release manifest, projection or pointer reads it (ADR-0013 §2).
-3. The child revision is `normalize(apply(first-party authored, ordered patch chain))`, `provenance = tenantAuthored`, parent = the active revision. Every draft re-applies the recorded chain and refuses unless each link reproduces its recorded release root (ADR-0013's determinism gate); a base the checked-in authored file no longer normalizes to is refused.
-4. The untrusted-definition release gate (doctrine-coverage, Freeze B): the compiler still refuses non-first-party input unless a typed `untrustedDefinitionSandbox` attestation within fixed caps (2 GiB heap, 120 s) is supplied; only `sandbox-worker.ts` declares it, observing its own IPC parent, explicit heap flag and wall clock; the runner kills it at its wall clock. First-party compiles are unchanged (`check:app-release`, `check:demo-release` unmoved).
-5. §10.6 boundary (v1): `addField` and `arrangeLayout` target tenant entities or the masters/headers item, location, party, purchase order and sales order (the published posting set names only single fields of them); everything else is refused `CUSTOMIZE_TARGET_IN_TIER_B_DEPENDENCY_SET`. `addChoice` widens only tenant-authored choice fields (`CUSTOMIZE_CHOICE_PLATFORM_OWNED`); a first-party field added by a patch is optional.
-6. `customize draft` prints the plain-language diff rendered from `diffCompiledReleases` and both normalized definitions, never from the patch; drafting moves no pointer.
+3. The child revision is `normalize(apply(first-party authored, ordered patch chain))`, `provenance = tenantAuthored`, parent = the active revision. Every draft, approval and rollback re-applies the recorded chain and refuses unless each link reproduces its recorded release root (ADR-0013's determinism gate).
+4. Untrusted-definition release gate (doctrine-coverage, Freeze B): the compiler refuses non-first-party input unless a typed `untrustedDefinitionSandbox` attestation within fixed caps (2 GiB heap, 120 s) is supplied; only `sandbox-worker.ts` declares it, from its own IPC parent, heap flag and wall clock; the runner kills it at its wall clock. First-party output is unchanged (`check:app-release`, `check:demo-release`).
+5. §10.6 (v1): `addField`/`arrangeLayout` target tenant entities or item, location, party, purchase order, sales order (the posting set names only single fields of them); else `CUSTOMIZE_TARGET_IN_TIER_B_DEPENDENCY_SET`. `addChoice` widens only tenant-authored choice fields (`CUSTOMIZE_CHOICE_PLATFORM_OWNED`).
+6. Every release-diff preparation (boot and customize) binds `diffCompiledReleases`' canonical digest and the digest of the plain-language text the approver is shown, replacing the placeholders; a module preparation is refused unless the diff's transition plan digest equals the materializer's. A rollback binds the forward diff it undoes, read backwards.
+7. Activation runs the existing CAS/fence/verification kernel unchanged; the running runtime builds policy bindings and capability executors per release (`composed-application-runtime.ts`, `ReleaseRouting*Gateway`) and serves the next request from the release its view names — no restart.
+8. Rollback goes through `authorizeReverseTransitionIfApplicable` (createTable included); storage is additive, rows are kept and return on re-activation. Boot serves a pointer naming a tenant descendant of the lineage tip and fails loudly (pre-tenant remedy `dev:reset`) when the first-party base moved.
+9. AI drafting: the model answers only through one tool whose input is read by the same Zod schema; text is never a change; a malformed patch gets one repair turn; anything else is `unsupported`, naming it.
 
 ## Decisions (one line each)
 
-- New permissions are bound at compile by evaluator bindings synthesized for the tenant permissions; the acknowledgement file is never written.
-- The tenant module id is `northstar.app:module.custom_<label>`; every tenant id's local part starts `custom_`.
-- Patches apply to the AUTHORED form: normalized bytes do not re-normalize (measured), so the authored first-party base is the only honest base.
-- The CLI is `corepack pnpm customize` (`apps/api/scripts/customize-cli.ts`), channel `declarativeEditor`; it acts as the local-demo identities (maker: the local human; approver: the local approver), like boot.
-- Re-drafting the same patch on the same parent returns the existing record (unique on parent and payload digest).
-- A tenant revision is reused only under the same parent (`ensurePersistedRelease`), because the rollback policy reads that edge.
+- Permissions: evaluator bindings for tenant permissions are synthesized at compile; the acknowledgement file is never written. Grants go to the local demo's two full-release roles at activation, exactly as boot grants first-party ones.
+- Tenant ids: module `northstar.app:module.custom_<label>`; every tenant id's local part starts `custom_`.
+- Patches apply to the AUTHORED form: normalized bytes do not re-normalize (measured).
+- CLI `corepack pnpm customize draft|ask|approve|activate|rollback|status`; identities are the local demo's (maker: local human; approver: local approver), like boot. Re-activation after a rollback needs a fresh approval.
+- A re-draft of the same patch on the same parent returns the existing record; a tenant revision is reused only under the same parent.
+- The materializer preparation expires in 23 h, inside the approval's 24 h default.
+- AI drafting reuses `@north-star/operations-agent`'s adapter and key loading, `claude-opus-5-5` at medium effort, wrapped in the composition (its tool-name type is narrowed to the agent's five). Local real-model check 2026-11-17, three requests: Equipment → `addRecordType` (2.4 s), "customers need a tax exempt number" → `addField` on Party (1.5 s), two-approval workflow → `unsupported` "Approval workflow" (1.1 s).
+- The denial-recorder expected-red control is re-pointed at the per-release gateway wiring (`auth.expected-red.json`).
 
 ## Slices
 
-1. Draft and diff — `customize draft <patch.json>`; [Test it yourself](#test-it-yourself).
+1. Draft and diff — `customize draft`. 2. Approve, live activation, rollback — `customize approve|activate|rollback`, `test/postgres/customization*.test.ts`. 3. Customize screen — STOPPED, built on `packet/CUSTOMIZE-s3`. 4. AI drafting — `customize ask`. 5. Rehearsal — [evidence](../evidence/) (written from CI).
 
 ## Gates
 
-- Local: format, typecheck, lint, `check:boundaries`, `check:app-release`, `check:demo-release`; unit `customization` 7/7 (two reds: in-process tenant compile refused; worker without heap flag refused); architecture `customization-sandbox-boundary` 1/1. The PostgreSQL test runs in CI only (local container runs are reserved for reproducing a CI red).
+- Local: format, typecheck, lint, `check:boundaries`, `check:app-release`, `check:demo-release`, `check:expected-red`; unit `customization` 7/7 (reds: in-process tenant compile refused; worker without heap flag refused), `customization-ai-draft` 4/4; Docker-free architecture 28/28. PostgreSQL and browser suites run in CI only.
 
 ## Test it yourself
 
-With `corepack pnpm dev` running (or started once on this database):
+With `corepack pnpm dev` running: `corepack pnpm customize draft apps/api/scripts/examples/equipment.json` prints "New record type "Equipment" with 4 fields" and "Nothing is live yet"; `customize status` lists it; `customize approve <id>` then `customize activate <id>`; reload the app: Equipment is in the menu, no restart. `customize rollback`: Equipment is gone; records entered under it return after approve and activate again. With `NORTH_STAR_AGENT_KEY_FILE` set, `corepack pnpm customize ask "customers need a tax exempt number"` drafts a field on Party.
 
-```
-corepack pnpm customize draft apps/api/scripts/examples/equipment.json
-corepack pnpm customize status
-```
+## STOP — slice 3, the Customize screen
 
-Expected: "New record type "Equipment" with 4 fields" with Name, Serial number, Purchase date and Status (one of "In service", "Under repair", "Retired"), "Stored data: a new table, a new index", and "Nothing is live yet"; `status` lists one `addRecordType` change. The running app does not show Equipment. Running `draft` again prints "(already drafted; nothing new recorded)".
+What: the ux-grammar skill ("Every screen renders through SurfaceRuntime… Never build a bespoke screen outside SurfaceRuntime… a separate builder application") and SURF001 forbid the minimal screen the charter asks for "in the web app"; the only application screen outside the seam is owner-ratified (RECEIPT §5.11). Options: (1) ratify a one-line seam exception for a local-demo-only Customize screen (`apps/web/src/customize-screen.ts`, built and tested on `packet/CUSTOMIZE-s3`: four forms, plain diff, Approve, Activate, Roll back; any demo persona can approve and the approval names the fixture approver); (2) build Customize through SurfaceRuntime as compiled surfaces with registered capability operations — the §8.5 builder the charter filed. Recommendation: (1).
 
 ## Filed
 
-- Re-applying tenant patches to a moved first-party base (ADR-0013 upgrade) fails loudly with the pre-tenant remedy `dev:reset`; the rebase itself is not built.
+- Re-applying tenant patches to a moved first-party base (ADR-0013 upgrade) fails loudly with `dev:reset`; the rebase is not built.
 - The full §8.5 builder archetype (charter: filed, not built).
+- main's "Dependency and secret scans" is red since `86d318fa`: gitleaks `generic-api-key` on a model-chosen `executionIdempotencyKey` in an AGENT eval run record (`task-06.jsonl:69`); a ratified `.gitleaksignore` fingerprint would clear it.
