@@ -291,30 +291,30 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
 export const ASSISTANT_PANEL_CSP_HASH = `sha256-${createHash('sha256').update(ASSISTANT_PANEL_SCRIPT).digest('base64')}`;
 
 const PANEL_STYLES = `
-.assistant-toggle{position:fixed;right:16px;bottom:16px;z-index:40;min-height:44px;padding:0 16px;border-radius:999px;border:1px solid var(--line-strong,#999);background:var(--accent,#2f5fb3);color:var(--ink-on-accent,#fff);font:inherit;cursor:pointer}
-.assistant-panel{position:fixed;top:0;right:0;bottom:0;z-index:50;width:min(420px,100vw);display:flex;flex-direction:column;background:var(--surface-panel,#fff);color:var(--ink,#111);border-left:1px solid var(--line,#ddd);box-shadow:var(--elevation-overlay,0 0 24px rgba(0,0,0,.15))}
+.assistant-toggle{position:fixed;right:16px;bottom:16px;z-index:40;min-height:44px;padding:0 16px;border-radius:999px;border:1px solid var(--line-strong);background:var(--accent);color:var(--ink-on-accent);font:inherit;cursor:pointer}
+.assistant-panel{position:fixed;top:0;right:0;bottom:0;z-index:50;width:min(420px,100vw);display:flex;flex-direction:column;background:var(--surface-panel);color:var(--ink);border-left:1px solid var(--line);box-shadow:var(--elevation-overlay)}
 .assistant-panel[hidden]{display:none}
-.assistant-panel header{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line,#ddd)}
+.assistant-panel header{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line)}
 .assistant-panel header h2{margin:0;font-size:1rem;flex:1}
 .assistant-panel header button{min-height:36px}
 .assistant-log{flex:1;overflow:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px}
-.assistant-me{align-self:flex-end;max-width:85%;padding:8px 12px;border-radius:12px;background:var(--accent-soft,#e8eefb);white-space:pre-wrap}
+.assistant-me{align-self:flex-end;max-width:85%;padding:8px 12px;border-radius:12px;background:var(--accent-soft);white-space:pre-wrap}
 .assistant-reply{max-width:100%}
 .assistant-reply p{margin:0 0 6px}
 .assistant-reply table{border-collapse:collapse;margin:6px 0;font-size:.9em}
-.assistant-reply th,.assistant-reply td{border:1px solid var(--line,#ddd);padding:3px 6px;text-align:left}
+.assistant-reply th,.assistant-reply td{border:1px solid var(--line);padding:3px 6px;text-align:left}
 .assistant-heading{font-weight:600}
-.assistant-muted{color:var(--ink-muted,#666);font-size:.85em}
-.assistant-error{color:var(--status-blocked-ink,#a00)}
+.assistant-muted{color:var(--ink-muted);font-size:.85em}
+.assistant-error{color:var(--status-blocked-ink)}
 .assistant-links{display:flex;flex-wrap:wrap;gap:8px}
 .assistant-diff{white-space:pre-wrap;font:inherit;font-size:.9em;margin:0 0 6px}
-.assistant-did{padding:6px 8px;border-radius:var(--radius-control,6px);background:var(--status-success-ground,#e7f6ea);color:var(--status-success-ink,#185c2a)}
+.assistant-did{padding:6px 8px;border-radius:var(--radius-control);background:var(--status-success-ground);color:var(--status-success-ink)}
 .assistant-did button{min-height:36px;margin-left:6px}
-.assistant-plan{border:1px solid var(--line-strong,#999);border-radius:var(--radius-container,8px);padding:10px 12px;background:var(--status-attention-ground,#fff7e0)}
+.assistant-plan{border:1px solid var(--line-strong);border-radius:var(--radius-container);padding:10px 12px;background:var(--status-attention-ground)}
 .assistant-plan button{min-height:44px;margin-right:8px}
-.assistant-status{display:flex;align-items:center;gap:8px;padding:6px 16px;border-top:1px solid var(--line,#ddd);color:var(--status-inprogress-ink,#3b3bb3);background:var(--status-inprogress-ground,#eef)}
+.assistant-status{display:flex;align-items:center;gap:8px;padding:6px 16px;border-top:1px solid var(--line);color:var(--status-inprogress-ink);background:var(--status-inprogress-ground)}
 .assistant-status[hidden]{display:none}
-.assistant-panel form{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--line,#ddd)}
+.assistant-panel form{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
 .assistant-panel textarea{flex:1;min-height:44px;font:inherit;resize:vertical}
 .assistant-panel form button{min-height:44px}
 @media (max-width:720px){.assistant-panel{width:100vw;border-left:0}}
