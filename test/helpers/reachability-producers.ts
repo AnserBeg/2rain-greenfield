@@ -51,6 +51,7 @@ export const reachabilityProducers = [
     'test/unit/observability.test.ts',
     'test/unit/party-definition.test.ts',
     'test/unit/purchasing-definition.test.ts',
+    'test/unit/request-work-meter.test.ts',
     'test/unit/sales-definition.test.ts',
     'test/unit/web-surface-hex-literal-ratchet.test.ts',
     'test/unit/workspace-contract.test.ts',
@@ -116,6 +117,8 @@ export const reachabilityProducers = [
       'test/postgres/purchase-approvals.test.ts',
       'test/postgres/purchase-order-ending.test.ts',
       'test/postgres/receiving-authorization.test.ts',
+      // SPEED-1: the page budget serves the composed application too.
+      'test/performance/page-budget.test.ts',
     ],
   ),
   // The sales-side workflows run in a job of their own as well (INTEGRATION:

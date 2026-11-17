@@ -44,7 +44,10 @@ export class RequestWorkMeter {
       this.#transactions += 1;
       return;
     }
-    if (/^(?:COMMIT|END|ABORT)\b/u.test(head) || /^ROLLBACK\b(?!\s+TO\b)/u.test(head)) {
+    if (
+      /^(?:COMMIT|END|ABORT)\b/u.test(head) ||
+      /^ROLLBACK\b(?!\s+TO\b)/u.test(head)
+    ) {
       this.#open.delete(client);
       return;
     }
