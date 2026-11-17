@@ -471,8 +471,9 @@ class Seeder {
           ${q(fulfillmentColumn(line, 'sales_order_line_item_id'))},
           ${q(fulfillmentColumn(line, 'sales_order_line_unit_id'))},
           ${q(fulfillmentColumn(line, 'sales_order_line_ordered_quantity'))},
+          ${q(fulfillmentColumn(line, 'sales_order_line_unit_price'))},
           ${q(fulfillmentRelation(this.binding, line, 'sales_order_line_order'))})
-       VALUES ($1,$2,$3,$4,1,NULL,1,$5,$6,'1000',$7)`,
+       VALUES ($1,$2,$3,$4,1,NULL,1,$5,$6,'1000','12.5',$7)`,
       [...this.scope, recordId, itemId, unitId, orderId],
     );
     return recordId;

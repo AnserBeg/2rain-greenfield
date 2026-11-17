@@ -487,7 +487,8 @@ export function salesModuleDefinition(
         'Unit price',
         50,
         decimal(),
-        { optional: true },
+        // Required (LOOP-1): an order is never saved, confirmed, shipped or
+        // invoiced without a price on every line.
       ),
       // The item's price in the order currency when the product was chosen,
       // kept so a changed unit price reads as a manual override (ruling B).
@@ -1724,31 +1725,40 @@ function surfaces(
       'form',
     ],
   ];
-  return descriptors.map(([suffix, archetype, slots, surfaceRole]) => ({
-    archetype,
-    dataSource: reference(
-      'queryReference',
-      `${ids.namespace}:query.${local}_${surfaceRole === 'list' ? 'list' : 'get'}`,
-    ),
-    kind: 'surfaceDefinition',
-    label: `${label} ${suffix}`,
-    module: reference('moduleReference', ids.moduleId),
-    schemaVersion: version,
-    slots: slots.map((slot, index) => ({
-      content: reference(
-        'opaqueSurfaceContentReference',
-        ids.contentCapabilityId,
+  return descriptors.map(([suffix, archetype, declared, surfaceRole]) => {
+    // An invoice is made by invoicing its order (LOOP-1), never typed in: its
+    // form keeps no sections, so the Invoices list offers no "New" and an
+    // invoice no "Edit".
+    const slots =
+      local === 'customer_invoice' && surfaceRole === 'form'
+        ? declared.filter((slot) => slot !== 'sections')
+        : declared;
+    return {
+      archetype,
+      dataSource: reference(
+        'queryReference',
+        `${ids.namespace}:query.${local}_${surfaceRole === 'list' ? 'list' : 'get'}`,
       ),
-      kind: 'surfaceSlot',
-      orderKey: (index + 1) * 10,
+      kind: 'surfaceDefinition',
+      label: `${label} ${suffix}`,
+      module: reference('moduleReference', ids.moduleId),
       schemaVersion: version,
-      slot,
-      slotId: `${ids.namespace}:slot.${local}_${suffix}_${slot.replace(/[A-Z]/g, (character) => `_${character.toLowerCase()}`)}`,
-    })),
-    statusRoles: [],
-    surfaceId: `${ids.namespace}:surface.${local}_${suffix}`,
-    surfaceRole,
-  }));
+      slots: slots.map((slot, index) => ({
+        content: reference(
+          'opaqueSurfaceContentReference',
+          ids.contentCapabilityId,
+        ),
+        kind: 'surfaceSlot',
+        orderKey: (index + 1) * 10,
+        schemaVersion: version,
+        slot,
+        slotId: `${ids.namespace}:slot.${local}_${suffix}_${slot.replace(/[A-Z]/g, (character) => `_${character.toLowerCase()}`)}`,
+      })),
+      statusRoles: [],
+      surfaceId: `${ids.namespace}:surface.${local}_${suffix}`,
+      surfaceRole,
+    };
+  });
 }
 
 function storageMapping(

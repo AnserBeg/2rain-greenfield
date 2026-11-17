@@ -77,6 +77,7 @@ import {
   formFieldIds,
   readCompiledSurfaceManifest,
   readCompiledSurfaceDataBinding,
+  surfaceSourceEntityId,
   SurfaceProjectionError,
   type CompiledNavigationEntry,
   type CompiledNavigationTree,
@@ -2384,34 +2385,20 @@ function sharesSurfaceEntity(
   surfaces: readonly CompiledSurfaceDefinition[],
 ): boolean {
   if (navigation.surfaceRole !== 'list') return false;
-  try {
-    const entityId = readCompiledSurfaceDataBinding(view, selected).query
-      .sourceEntityId;
-    if (
-      readCompiledSurfaceDataBinding(view, navigation).query.sourceEntityId !==
-      entityId
-    )
-      return false;
-    if (selected.surfaceRole === 'list')
-      return navigation.surfaceId === selected.surfaceId;
-    const lists = surfaces.filter((candidate) => {
-      if (candidate.surfaceRole !== 'list') return false;
-      try {
-        return (
-          readCompiledSurfaceDataBinding(view, candidate).query
-            .sourceEntityId === entityId
-        );
-      } catch {
-        return false;
-      }
-    });
-    return (
-      lists.length <= 1 ||
-      recordWorkspaceOwners(view, surfaces, entityId).has(navigation.surfaceId)
-    );
-  } catch {
+  const entityId = surfaceSourceEntityId(view, selected);
+  if (entityId === null || surfaceSourceEntityId(view, navigation) !== entityId)
     return false;
-  }
+  if (selected.surfaceRole === 'list')
+    return navigation.surfaceId === selected.surfaceId;
+  const lists = surfaces.filter(
+    (candidate) =>
+      candidate.surfaceRole === 'list' &&
+      surfaceSourceEntityId(view, candidate) === entityId,
+  );
+  return (
+    lists.length <= 1 ||
+    recordWorkspaceOwners(view, surfaces, entityId).has(navigation.surfaceId)
+  );
 }
 
 const styles = `${DESIGN_TOKENS}

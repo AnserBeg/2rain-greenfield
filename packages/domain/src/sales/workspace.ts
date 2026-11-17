@@ -579,6 +579,8 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
             ),
           },
           { action: id('action', 'invoice_shipped') },
+          // LOOP-1: once invoiced, the payment is the order's next step.
+          { action: id('action', 'order_record_payment') },
         ],
       },
     },
@@ -1203,6 +1205,86 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
             { order: record('recordId') },
           ),
           command('invoice_commit', 'customer_invoice_post', 'invoice_draft'),
+        ],
+      },
+      {
+        // LOOP-1: the payment from the order, as its next action once it is
+        // invoiced: each of its open invoices is paid its whole balance, through
+        // the invoice's own payment operations. A part payment is recorded on
+        // the invoice's page.
+        actionId: id('action', 'order_record_payment'),
+        label: 'Record payment',
+        description:
+          'Records the payment of the whole balance of each open invoice on this order. For a part payment, open the invoice.',
+        orderKey: 36,
+        conditions: [],
+        rows: {
+          datasetId: invoices,
+          conditions: [
+            {
+              value: selected(field('customer_invoice_balance')),
+              operator: 'positive',
+              compare: null,
+            },
+          ],
+        },
+        inputs: [
+          {
+            inputId: id('input', 'order_payment_method'),
+            label: 'Paid by',
+            orderKey: 10,
+            type: 'text',
+            required: true,
+            presentation: {
+              kind: 'choice',
+              options: (
+                [
+                  ['cash', 'Cash'],
+                  ['cheque', 'Cheque'],
+                  ['eft', 'EFT'],
+                  ['card', 'Card'],
+                  ['other', 'Other'],
+                ] as const
+              ).map(([value, label]) => ({
+                value: id('option', `customer_payment_method_${value}`),
+                label,
+              })),
+              defaultValue: id('option', 'customer_payment_method_eft'),
+            },
+          },
+          {
+            inputId: id('input', 'order_payment_reference'),
+            label: 'Reference (cheque or transaction number)',
+            orderKey: 20,
+            type: 'text',
+            required: false,
+          },
+        ],
+        steps: [
+          {
+            ...create(
+              'order_payment',
+              'customer_payment',
+              {
+                // The payment number is assigned on create (PAY-000001).
+                state: literal(id('option', 'customer_payment_state_draft')),
+                payment_date: generated('instant'),
+                amount: selected(field('customer_invoice_balance')),
+                method: input('order_payment_method'),
+                reference: input('order_payment_reference'),
+              },
+              { invoice: selected('recordId') },
+            ),
+            each: true as const,
+          },
+          {
+            ...command(
+              'order_payment_post',
+              'customer_payment_post',
+              'order_payment',
+            ),
+            each: true as const,
+          },
         ],
       },
       {
@@ -1916,7 +1998,8 @@ export function invoiceWorkspace(namespace: string): Record<string, unknown> {
             label: 'Reference (cheque or transaction number)',
             orderKey: 30,
             type: 'text',
-            required: true,
+            // Optional (LOOP-1): cash and EFT have no number to give.
+            required: false,
           },
         ],
         steps: settle('payment', {

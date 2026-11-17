@@ -34,22 +34,25 @@ export const PAGE_BUDGET_NAMES = [
 
 export type PageBudgetName = (typeof PAGE_BUDGET_NAMES)[number];
 
-const unpinned: PageBudget = Object.freeze({
-  authorization: null,
-  repeats: null,
-  statements: null,
-  transactions: null,
-});
-
+/** Measured 2026-11-17 on CI at 801584cd/cc08817a (slice 1, before any change). */
 export const PAGE_BUDGETS: Readonly<Record<PageBudgetName, PageBudget>> =
   Object.freeze({
-    home: unpinned,
-    'purchase order list': unpinned,
-    'purchase order detail': unpinned,
-    'new purchase order': unpinned,
-    'stock by item': unpinned,
-    'sales order detail': unpinned,
-    'task: open': unpinned,
-    'task: review': unpinned,
-    'task: confirm': unpinned,
+    home: budget(51, 410, 41, 32),
+    'purchase order list': budget(107, 896, 84, 108),
+    'purchase order detail': budget(169, 1384, 135, 153),
+    'new purchase order': budget(29, 242, 22, 23),
+    'stock by item': budget(76, 586, 67, 62),
+    'sales order detail': budget(255, 2111, 203, 232),
+    'task: open': budget(393, 3237, 311, 417),
+    'task: review': budget(205, 1692, 161, 190),
+    'task: confirm': budget(217, 1879, 169, 204),
   });
+
+function budget(
+  transactions: number,
+  statements: number,
+  authorization: number,
+  repeats: number,
+): PageBudget {
+  return Object.freeze({ authorization, repeats, statements, transactions });
+}
