@@ -1,8 +1,8 @@
 # CUSTOMIZE — a non-developer adds a record type, field, choice or layout, reads a plain diff, approves, activates, rolls back
 
-Status: slices 1, 2, 4, 5 built; slice 3 (the Customize screen) STOPPED for a ruling (below). Charter: [CUSTOMIZE-charter](CUSTOMIZE-charter.md).
+Status: slice 1 integrated (merge `41697099`, main CI run 44054563509 green; rows `e0363eec`); slices 2, 4, 5 built; slice 3 (the Customize screen) STOPPED for a ruling (below). Charter: [CUSTOMIZE-charter](CUSTOMIZE-charter.md).
 Tier: Critical-touching — `db/migrations/0029_customization_patch_lineage.sql` (RLS/grant SQL). Merges are logged `merged — unread`.
-Base: `main` `a7a4cba1`. Stops: slice 3 (ux-grammar seam); main's secret scan red on an AGENT eval record (not this packet's).
+Base: `main` `a7a4cba1`. Stops: slice 3 (ux-grammar seam).
 
 ## Claims
 
@@ -47,4 +47,3 @@ What: the ux-grammar skill ("Every screen renders through SurfaceRuntime… Neve
 
 - Re-applying tenant patches to a moved first-party base (ADR-0013 upgrade) fails loudly with `dev:reset`; the rebase is not built.
 - The full §8.5 builder archetype (charter: filed, not built).
-- main's "Dependency and secret scans" is red since `86d318fa`: gitleaks `generic-api-key` on a model-chosen `executionIdempotencyKey` in an AGENT eval run record (`task-06.jsonl:69`); a ratified `.gitleaksignore` fingerprint would clear it.
