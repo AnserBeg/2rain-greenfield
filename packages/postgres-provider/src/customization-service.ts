@@ -184,11 +184,12 @@ export class PostgresCustomizationService {
     }
     const context = await this.#context();
     const active = await this.#active(context);
-    const steps = await this.#compile([
+    const compiled = await this.#compile([
       ...active.chain.map((record) => record.patch),
       parsed.patch,
     ]);
-    if (!Array.isArray(steps)) return steps;
+    if (compiled.status !== 'compiled') return compiled;
+    const { steps } = compiled;
     this.#assertReproduced(active.chain, steps);
     const step = steps.at(-1)!;
     const candidate = parseSerializedRelease(step.release);
@@ -278,7 +279,8 @@ export class PostgresCustomizationService {
   async #compile(
     chain: readonly CustomizationPatch[],
   ): Promise<
-    readonly SandboxStep[] | Exclude<DraftOutcome, { status: 'drafted' }>
+    | { readonly status: 'compiled'; readonly steps: readonly SandboxStep[] }
+    | Exclude<DraftOutcome, { status: 'drafted' }>
   > {
     const response = await compileInSandbox(
       {
@@ -289,7 +291,7 @@ export class PostgresCustomizationService {
       },
       this.options.sandbox,
     );
-    if (response.status === 'compiled') return response.steps;
+    if (response.status === 'compiled') return response;
     return Object.freeze({
       ...(response.code ? { code: response.code } : {}),
       ...(response.missingCapability
