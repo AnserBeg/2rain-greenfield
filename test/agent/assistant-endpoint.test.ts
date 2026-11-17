@@ -206,6 +206,16 @@ test("a conversation is its starter's; a cross-site or unmarked request is refus
 test('a plan waits for a yes bound to exactly that plan; a wrong digest decides nothing', async () => {
   let planResult: Record<string, unknown> = {};
   const model = scriptedModel([
+    // The record is looked up first: a plan may name only ids the host
+    // returned in this conversation (slice 4).
+    () => ({
+      toolCalls: [
+        {
+          name: 'erp_query',
+          input: { queryId: 'party_get', arguments: { recordId: RECORD } },
+        },
+      ],
+    }),
     () => ({
       toolCalls: [
         {

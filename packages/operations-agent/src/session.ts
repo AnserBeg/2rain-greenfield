@@ -213,6 +213,10 @@ export class OperationsAgentSession {
   readonly approvals: ApprovalRecord[] = [];
   readonly #touched = new Map<string, TouchedRecord>();
   readonly #undoPlans = new Set<string>();
+  /** Record ids the host returned to the model in this session. */
+  readonly #seenIds = new Set<string>();
+  /** Currency codes of records the host returned, and ones the person named. */
+  readonly #seenCurrencies = new Set<string>();
   readonly #undone = new Set<string>();
 
   constructor(options: OperationsAgentSessionOptions) {
@@ -239,6 +243,10 @@ export class OperationsAgentSession {
       if (!isRecord(input)) throw new ToolInputError('input must be an object');
       const content = await this.#dispatch(tool, input);
       outcome = { content: this.#bounded(content), isError: false };
+      // What the host showed the model is what a plan may name (slice 4):
+      // record ids and currencies from lookups, reads, writes and checks,
+      // never from a plan's echo of the model's own input.
+      if (tool !== 'erp_plan') this.#remember(outcome.content);
     } catch (error) {
       outcome = {
         content: {
@@ -421,6 +429,7 @@ export class OperationsAgentSession {
         ).catch(() => null);
         if (record) {
           this.#touch(named.entityId, record, false);
+          this.#remember(compactRecord(record));
           lines.push(
             `That record, read just now through ${localName(named.getQueryId)}: ${JSON.stringify(
               this.#bounded(compactRecord(record), 4_000),
@@ -433,6 +442,80 @@ export class OperationsAgentSession {
       }
       return lines.join('\n');
     });
+  }
+
+  /**
+   * The person's words for this turn. Only the currency codes named in them
+   * are kept: a plan may use a currency the person named.
+   */
+  noteRequest(text: string): void {
+    for (const code of text.match(/\b[A-Z]{3}\b/gu) ?? [])
+      this.#seenCurrencies.add(code);
+    for (const [words, code] of CURRENCY_WORDS)
+      if (words.test(text)) this.#seenCurrencies.add(code);
+  }
+
+  #remember(content: ImmutableJsonValue, fieldId = ''): void {
+    if (typeof content === 'string') {
+      if (uuidPattern.test(content)) this.#seenIds.add(content.toLowerCase());
+      if (/_currency$/u.test(fieldId)) {
+        const code = currencyCode(content);
+        if (code) this.#seenCurrencies.add(code);
+      }
+      return;
+    }
+    if (Array.isArray(content)) {
+      for (const entry of content) this.#remember(entry, fieldId);
+      return;
+    }
+    if (isRecord(content))
+      for (const [key, value] of Object.entries(content))
+        this.#remember(value, key.includes(':') ? localName(key) : fieldId);
+  }
+
+  /**
+   * The two values the host refuses to take on the model's word (slice 4):
+   * a record reference no lookup in this session returned, and a currency
+   * that is neither the company default, a resolved record's, nor named by
+   * the person. It names the value; it says what to do instead.
+   */
+  #unsupportedValue(
+    view: RequestRuntimeView,
+    steps: readonly PlanStep[],
+  ): string | null {
+    const defaultCurrency = declaredCurrencyDefault(view).code;
+    for (const step of steps) {
+      const where = `step ${String(step.step)} (${localName(step.operation.operationId)})`;
+      const references: [string, ImmutableJsonValue][] = [
+        [
+          'target',
+          typeof step.recordId === 'string' && step.pinnedRevision !== null
+            ? step.recordId
+            : null,
+        ],
+        ...Object.entries(step.relations ?? {}),
+        ...Object.entries({ ...step.values, ...step.patch }),
+      ];
+      for (const [name, value] of references) {
+        if (typeof value !== 'string' || !uuidPattern.test(value)) continue;
+        if (!this.#seenIds.has(value.toLowerCase()))
+          return `${where}: ${name === 'target' ? 'the target record' : localName(name)} ${value} did not come from a lookup in this conversation. Find the record with erp_discover resolve or a query, then plan with the id it returns.`;
+      }
+      for (const [fieldId, value] of Object.entries({
+        ...step.values,
+        ...step.patch,
+      })) {
+        if (
+          !/_currency$/u.test(localName(fieldId)) ||
+          typeof value !== 'string'
+        )
+          continue;
+        const code = currencyCode(value);
+        if (code && code !== defaultCurrency && !this.#seenCurrencies.has(code))
+          return `${where}: currency ${code} is not the company default${defaultCurrency ? ` (${defaultCurrency})` : ''}, the currency of a record you read, or one the person named. Use one of those, or ask the person.`;
+      }
+    }
+    return null;
   }
 
   /** The latest change the agent made at once in this session, if any. */
@@ -1013,6 +1096,15 @@ export class OperationsAgentSession {
             note: 'nothing was written; the plan was not created',
           };
       }
+      const unsupported = personsUndo
+        ? null
+        : this.#unsupportedValue(view, steps);
+      if (unsupported)
+        return {
+          outcome: 'refused',
+          reason: unsupported,
+          note: 'nothing was written; the plan was not created',
+        };
       const planId = this.#mint();
       const digest = planDigest(steps);
       // A plan is reversible only when every step is, and an undo of a step
@@ -1597,6 +1689,22 @@ function settingState(
   if (!field || !(field.fieldId in written)) return false;
   const value = written[field.fieldId];
   return value !== null && value !== field.enumOptionIds[0];
+}
+
+const ISO_CURRENCY = /^[A-Z]{3}$/u;
+
+/** Currencies a person names in words rather than by code. */
+const CURRENCY_WORDS: readonly (readonly [RegExp, string])[] = [
+  [/\b(?:us|american) dollars?\b|\$us\b|\bus\$/iu, 'USD'],
+  [/\bcanadian dollars?\b|\bc\$/iu, 'CAD'],
+  [/\beuros?\b|€/iu, 'EUR'],
+];
+
+/** `CAD`, or an option id ending `_cad`, as a currency code. */
+function currencyCode(value: string): string | null {
+  if (ISO_CURRENCY.test(value)) return value;
+  const match = /_([a-z]{3})$/u.exec(localName(value));
+  return value.includes(':') && match ? match[1]!.toUpperCase() : null;
 }
 
 /** What an executed plan did, in short words, for "Did: ..." and Undo. */

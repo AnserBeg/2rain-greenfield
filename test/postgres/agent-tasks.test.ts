@@ -31,6 +31,24 @@ import { f, ids, NAMES, op, q, rel, snapshot } from '../agent/arrange.js';
 import { referenceScript } from '../agent/reference-scripts.js';
 import { TASKS } from '../agent/tasks.js';
 
+/**
+ * Look the seeded supplier and item up, as a model must before naming them
+ * in a plan (AGENT-3 slice 4: record ids come from lookups in the session).
+ */
+async function lookUp(agent: OperationsAgentSession): Promise<void> {
+  for (const [entity, name] of [
+    ['party', NAMES.cascade],
+    ['item', NAMES.notebook],
+  ] as const) {
+    const found = await agent.call('erp_discover', {
+      mode: 'resolve',
+      canonicalIds: [entity],
+      search: name,
+    });
+    assert.equal(found.isError, false, JSON.stringify(found.content));
+  }
+}
+
 const session = (world: AgentWorld, approve: boolean) =>
   new OperationsAgentSession({
     runtime: world.runtime,
@@ -112,6 +130,50 @@ test(
 
         // Planning writes nothing, and a declined plan cannot be executed.
         const declined = session(world, false);
+        // Slice 4: an id no lookup returned is refused, naming it; so is a
+        // currency nobody named. Nothing is planned, nothing written.
+        const guessed = await declined.call('erp_plan', { intents });
+        assert.match(
+          JSON.stringify(guessed.content),
+          new RegExp(
+            `supplier_party_id ${cascade} did not come from a lookup`,
+            'u',
+          ),
+        );
+        await lookUp(declined);
+        const usd = await declined.call('erp_plan', {
+          intents: [
+            {
+              ...intents[0],
+              values: {
+                ...intents[0]!.values,
+                [f('purchase_order_currency')]: 'USD',
+              },
+            },
+          ],
+        });
+        assert.match(
+          JSON.stringify(usd.content),
+          /currency USD is not the company default \(CAD\)/u,
+        );
+        declined.noteRequest('Order it in USD');
+        const named = await declined.call('erp_plan', {
+          intents: [
+            {
+              ...intents[0],
+              values: {
+                ...intents[0]!.values,
+                [f('purchase_order_currency')]: 'USD',
+              },
+            },
+          ],
+        });
+        assert.equal(
+          typeof (named.content as { planId?: unknown }).planId,
+          'string',
+          JSON.stringify(named.content),
+        );
+        assert.deepEqual(await snapshot(world), before);
         const plan = await declined.call('erp_plan', { intents: needsYes });
         assert.equal(plan.isError, false);
         const planId = (plan.content as { planId: string }).planId;
@@ -139,6 +201,7 @@ test(
 
         // An approved plan runs once per key; a replay returns the same result.
         const approved = session(world, true);
+        await lookUp(approved);
         const approvedPlan = await approved.call('erp_plan', { intents });
         const id = (approvedPlan.content as { planId: string }).planId;
         const first = await approved.call('erp_execute', {
@@ -194,6 +257,7 @@ test(
             return Promise.resolve(false);
           },
         });
+        await lookUp(careful);
         await careful.call('erp_plan', { intents: needsYes });
         assert.deepEqual(
           careful.approvals.map((entry) => [entry.by, entry.riskClass]),
@@ -237,6 +301,7 @@ test(
             businessCalendar: BUSINESS_CALENDAR,
             approve: () => Promise.resolve(false),
           });
+          await lookUp(agent);
           const change = async (name: string) => {
             const planned = await agent.call('erp_plan', {
               intents: [
@@ -247,8 +312,8 @@ test(
                 },
               ],
             });
-            assert.equal(planned.isError, false, JSON.stringify(planned));
             const planId = (planned.content as { planId: string }).planId;
+            assert.equal(typeof planId, 'string', JSON.stringify(planned));
             await agent.call('erp_execute', {
               planId,
               executionIdempotencyKey: name,
@@ -303,6 +368,7 @@ test(
             clock: () => new Date('2026-11-17T05:30:00Z'),
             approve: () => Promise.resolve(true),
           });
+          await lookUp(agent);
           let context: Record<string, any> = {}; // eslint-disable-line @typescript-eslint/no-explicit-any
           const model = scriptedModel([
             () => ({

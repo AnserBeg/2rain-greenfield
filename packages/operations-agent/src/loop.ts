@@ -147,6 +147,9 @@ export async function runOperationsAgent(
     },
   ];
   const system = systemPrompt(options.preamble);
+  // The person's own words: currencies they name are theirs to use.
+  if (typeof options.session.noteRequest === 'function')
+    options.session.noteRequest(options.request);
   const started = performance.now();
   const usage = {
     inputTokens: 0,
