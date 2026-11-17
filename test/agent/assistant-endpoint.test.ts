@@ -350,3 +350,55 @@ test('the panel is added to a full page only, with its script pinned by hash', (
   // Model text never becomes markup: the script writes text nodes only.
   assert.doesNotMatch(ASSISTANT_PANEL_SCRIPT, /innerHTML|insertAdjacentHTML/u);
 });
+
+test('Stop ends the run before the next model call; the reply says what happened', async () => {
+  let started!: () => void;
+  const running = new Promise<void>((done) => (started = done));
+  const model: ModelAdapter = {
+    modelId: 'slow',
+    next: ({ signal }) =>
+      new Promise((_resolve, reject) => {
+        started();
+        signal?.addEventListener('abort', () => reject(new Error('aborted')));
+      }),
+  };
+  const { url, server } = await serve(model, []);
+  try {
+    const pending = fetch(`${url}/?assistant=ask`, {
+      method: 'POST',
+      headers: headers('buyer', url),
+      body: JSON.stringify({ text: 'take your time' }),
+    });
+    const response = await pending;
+    const reader = response.body!.getReader();
+    const first = JSON.parse(
+      new TextDecoder().decode((await reader.read()).value).split('\n')[0]!,
+    ) as { id: string };
+    await running;
+    assert.equal(
+      (
+        await fetch(`${url}/?assistant=stop`, {
+          method: 'POST',
+          headers: headers('buyer', url),
+          body: JSON.stringify({ conversation: first.id }),
+        })
+      ).status,
+      204,
+    );
+    let rest = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      rest += new TextDecoder().decode(value);
+    }
+    const answer = rest
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .find((event) => event.type === 'answer')!;
+    assert.equal(answer.stop, 'stopped');
+    assert.match(String(answer.text), /^Stopped\./u);
+  } finally {
+    server.close();
+  }
+});
