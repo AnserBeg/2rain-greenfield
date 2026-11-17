@@ -6,6 +6,8 @@
  * and the model cannot supply what the host owns.
  */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -19,7 +21,11 @@ import {
   checkTerminalRelease,
   compiledReleaseRoot,
 } from '../../apps/api/src/agent-release-guard.js';
-import { readCompiledApplication } from '../../apps/api/src/composition-root.js';
+import {
+  openCustomizeService,
+  readCompiledApplication,
+} from '../../apps/api/src/composition-root.js';
+import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { readActiveRelease } from '../../packages/postgres-provider/src/active-release-root.js';
 import {
   BUSINESS_CALENDAR,
@@ -500,6 +506,141 @@ test(
           'not-installed',
         );
       } finally {
+        await world.close();
+      }
+    });
+  },
+);
+
+/**
+ * Audit A1 (plan §9.4): a plan approved on one release never runs on
+ * another. A customization activated after approval refuses the plan with a
+ * replan result and writes nothing; a rollback between two steps stops the
+ * plan before the second, and the result names what committed.
+ */
+test(
+  'a plan never runs on a release it was not planned on',
+  { timeout: 1_800_000 },
+  async () => {
+    await withAgentWorlds('agent-release-pin', async (worlds) => {
+      const world = await worlds.fresh('release-pin');
+      const opened = await openCustomizeService({
+        databaseUrl: world.databaseUrl,
+        tenantSlug: world.tenantSlug,
+      });
+      try {
+        const { cascade } = ids();
+        const contact = async () =>
+          world.runtime.entry.run(
+            { headers: { cookie: 'northstar-demo-actor=manager' } },
+            async (view) =>
+              (
+                await world.runtime.queryGateway.invoke(view, {
+                  schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+                  queryId: q('party_get'),
+                  arguments: { recordId: cascade },
+                })
+              ).records[0]!.values,
+          );
+        let rollBackAfterFirst = false;
+        const real = world.runtime.operationGateway;
+        const agent = new OperationsAgentSession({
+          runtime: {
+            entry: world.runtime.entry,
+            operationMediation: world.runtime.operationMediation,
+            queryGateway: world.runtime.queryGateway,
+            operationGateway: {
+              previewTaskEligibility: (...args: unknown[]) =>
+                (real.previewTaskEligibility as (...a: unknown[]) => unknown)(
+                  ...args,
+                ),
+              invoke: async (...args: unknown[]) => {
+                const result = await (
+                  real.invoke as (...a: unknown[]) => Promise<unknown>
+                )(...args);
+                if (rollBackAfterFirst) {
+                  rollBackAfterFirst = false;
+                  await opened.service.rollback();
+                }
+                return result;
+              },
+            },
+          } as never,
+          personHeaders: { cookie: 'northstar-demo-actor=manager' },
+          companyId: COMPANY,
+          businessCalendar: BUSINESS_CALENDAR,
+          approve: () => Promise.resolve(true),
+        });
+        await agent.call('erp_discover', {
+          mode: 'resolve',
+          canonicalIds: ['party'],
+          search: NAMES.cascade,
+        });
+        const plan = async (patches: Record<string, string>[]) => {
+          const planned = await agent.call('erp_plan', {
+            intents: patches.map((patch) => ({
+              operationId: 'party_update',
+              target: cascade,
+              patch,
+            })),
+          });
+          const planId = (planned.content as { planId?: string }).planId;
+          assert.equal(typeof planId, 'string', JSON.stringify(planned));
+          return planId!;
+        };
+
+        // Approved, then a customization goes live: nothing runs.
+        const before = await contact();
+        const first = await plan([{ contact_summary: 'Planned before' }]);
+        const equipment = JSON.parse(
+          readFileSync(
+            resolve('apps/api/scripts/examples/equipment.json'),
+            'utf8',
+          ),
+        ) as never;
+        const drafted = await opened.service.draft(
+          equipment,
+          'declarativeEditor',
+        );
+        assert.equal(drafted.status, 'drafted');
+        if (drafted.status !== 'drafted') return;
+        await opened.service.approve(drafted.patchId);
+        await opened.service.activate(drafted.patchId);
+        const refused = (
+          await agent.call('erp_execute', {
+            planId: first,
+            executionIdempotencyKey: 'after-activation',
+          })
+        ).content as { outcome: string; committed: unknown[] };
+        assert.equal(refused.outcome, 'replan');
+        assert.deepEqual(refused.committed, []);
+        assert.deepEqual(await contact(), before);
+
+        // Planned on the customized release; rolled back between steps.
+        const second = await plan([
+          { contact_summary: 'Step one' },
+          { payment_terms: 'net_45' },
+        ]);
+        rollBackAfterFirst = true;
+        const stopped = (
+          await agent.call('erp_execute', {
+            planId: second,
+            executionIdempotencyKey: 'rolled-back-between',
+          })
+        ).content as { outcome: string; committed: { step: number }[] };
+        assert.equal(stopped.outcome, 'replan');
+        assert.deepEqual(
+          stopped.committed.map((entry) => entry.step),
+          [1],
+        );
+        const after = await contact();
+        assert.equal(after[f('party_contact_summary')], 'Step one');
+        assert.equal(
+          after[f('party_payment_terms')],
+          before[f('party_payment_terms')],
+        );
+      } finally {
+        await opened.close();
         await world.close();
       }
     });
