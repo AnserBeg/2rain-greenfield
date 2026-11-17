@@ -49,13 +49,13 @@ merges within two days or is dropped.
 - **The BUILD agent owns the vertical end to end**: reads the charter, builds
   every slice, pushes, and **integrates its own vertical on CI green**
   (`git-workflow`, Integration). It writes the record and its two rows itself.
-- **The orchestrator is a session opened for three jobs only**: charter the next
-  vertical (≤ 60 lines); write and adjudicate the read of the trunk when one is
-  owed (§4); keep the plan honest at stage boundaries. It is not a relay and it
-  does not stand between the writer and `main`.
-- **The user does two things**: tests the product at each slice's "Test it
-  yourself", and pastes one read prompt and its verdict when a read is owed —
-  per trigger, never per vertical. Nothing else passes through the user.
+- **The orchestrator drives the program** (owner, 2026-11-17): it charters the
+  next vertical (≤ 60 lines), launches BUILD lanes itself as Claude subagents
+  (Opus for Critical or design-heavy work, Sonnet for mechanical work), launches
+  and adjudicates the read of the trunk itself (§4), and keeps the plan honest.
+  It does not stand between a writer and `main`.
+- **The user tests when they choose** at a slice's "Test it yourself" and owns
+  one-way doors and the week-6 decision. No review passes through the user.
 - **Reviewers and writers read the kernel note, not the records.**
   `docs/architecture/posting-kernel-guarantees.md` states what the posting
   kernel guarantees, at which symbol, and why, in under sixty lines. The
@@ -80,9 +80,9 @@ continues. Mechanics: `mission-cadence`.
   `module-storage-materializer.ts`, `release-activation.ts`,
   `release-verification-service.ts`, the trust substrate under
   `platform-runtime/src/trust/`, `db/migrations/**`, and RLS/grant SQL.
-- **A read is owed** — one fresh-naive arm, user-run, online, over the Critical
-  diff on `main` since the last read — when that diff passes 400 changed lines,
-  and before a stage gate, the week-6 decision or the first tenant.
+- **A read is owed** — one fresh-naive Codex arm the orchestrator launches over
+  the Critical diff on `main` since the last read — when that diff passes 400
+  changed lines, and before a stage gate, the week-6 decision or the first tenant.
 - **It asks whether the diff can do silent harm**: a wrong quantity or amount, a
   lost or repeated posting, a crossed tenant or company boundary, a wider grant,
   a missing audit row, a release passed that should be refused. Silent defects
@@ -93,7 +93,9 @@ continues. Mechanics: `mission-cadence`.
 ## 5. Gates
 
 - **CI green at the pushed SHA is the acceptance matrix** (`.github/workflows/ci.yml`).
-  `scripts/run-matrix.sh` is a local convenience, not a requirement.
+  Locally run focused tests only; a heavy suite (PostgreSQL, browser, the
+  matrix) runs locally only when CI cannot answer the question, batched (owner,
+  2026-11-17: full local runs stall the machine).
 - Integration is a `--no-ff` merge of the packet into `main`; the packet tip is
   the second parent (`check-review-record.sh` reads it). Every merge records one
   review-log row: `merged — no Critical path` or `merged — unread`.
