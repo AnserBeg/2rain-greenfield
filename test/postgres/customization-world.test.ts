@@ -108,8 +108,10 @@ test(
 
           const rolledBack = await opened.service.rollback();
           assert.equal(rolledBack.releaseRoot, firstParty);
+          // Each reference script replays its own fixed idempotency key, so
+          // the tasks after the rollback are ones not yet run here.
           await runTask(world, 6);
-          await runTask(world, 5);
+          await runTask(world, 8);
         } finally {
           await opened.close();
           await runtime.close();
