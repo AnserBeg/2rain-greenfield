@@ -40,7 +40,7 @@ by the orchestrator's two critical reviews). Base: `main` `74b3367f`. Stops: non
 | purchase order detail | 169 | 1384 | 135 | 153 |
 | new purchase order | 29 | 242 | 22 | 23 |
 | stock by item | 76 | 586 | 67 | 62 |
-| sales order detail | 255 | 2111 | 203 | 232 |
+| sales order detail | 259 | 2139 | 207 | 236 |
 | task: open / review / confirm | 393 / 205 / 217 | 3237 / 1692 / 1879 | 311 / 161 / 169 | 417 / 190 / 204 |
 
 ## Gates

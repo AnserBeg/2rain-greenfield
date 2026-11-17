@@ -34,7 +34,11 @@ export const PAGE_BUDGET_NAMES = [
 
 export type PageBudgetName = (typeof PAGE_BUDGET_NAMES)[number];
 
-/** Measured 2026-11-17 on CI at 801584cd/cc08817a (slice 1, before any change). */
+/**
+ * Measured 2026-11-17 on CI at 801584cd/cc08817a (slice 1, before any change);
+ * the sales order detail re-measured at d097ca9d after LOOP-1 slice 2 added
+ * its record-payment action (+4 transactions), before the gate reached main.
+ */
 export const PAGE_BUDGETS: Readonly<Record<PageBudgetName, PageBudget>> =
   Object.freeze({
     home: budget(51, 410, 41, 32),
@@ -42,7 +46,7 @@ export const PAGE_BUDGETS: Readonly<Record<PageBudgetName, PageBudget>> =
     'purchase order detail': budget(169, 1384, 135, 153),
     'new purchase order': budget(29, 242, 22, 23),
     'stock by item': budget(76, 586, 67, 62),
-    'sales order detail': budget(255, 2111, 203, 232),
+    'sales order detail': budget(259, 2139, 207, 236),
     'task: open': budget(393, 3237, 311, 417),
     'task: review': budget(205, 1692, 161, 190),
     'task: confirm': budget(217, 1879, 169, 204),
