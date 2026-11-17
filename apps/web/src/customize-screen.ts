@@ -7,11 +7,13 @@ import type {
 } from '@north-star/postgres-provider/customization-service';
 
 import { escapeHtml } from './html.js';
-import { surfaceRuntimeStyles } from './surface-runtime.js';
-import type {
-  SurfaceRuntimeResponse,
-  SurfaceRuntimeSubmission,
-} from './surface-runtime.js';
+
+/** The page shape the app server writes; the stylesheet is the runtime's own. */
+export interface CustomizeScreenResponse {
+  readonly html: string;
+  readonly statusCode: number;
+}
+type CustomizeScreenSubmission = Readonly<Record<string, string>>;
 
 /**
  * The Customize screen (CUSTOMIZE slice 3): the same loop as the command line
@@ -38,6 +40,7 @@ export interface CustomizeScreenService {
 }
 
 const FIELD_ROWS = 6;
+let stylesheet = '';
 const FIELD_TYPES = [
   ['text', 'Text'],
   ['number', 'Whole number'],
@@ -49,8 +52,11 @@ const FIELD_TYPES = [
 export async function renderCustomizeScreen(
   service: CustomizeScreenService,
   requestUrl: string,
-  submission: SurfaceRuntimeSubmission | null,
-): Promise<SurfaceRuntimeResponse> {
+  submission: CustomizeScreenSubmission | null,
+  /** The runtime's stylesheet, handed in by the app server (always the same). */
+  styles = '',
+): Promise<CustomizeScreenResponse> {
+  stylesheet = styles;
   const url = new URL(requestUrl, 'http://surface-runtime.local');
   try {
     if (!submission) {
@@ -214,7 +220,7 @@ async function arrangeForm(
 }
 
 /** The typed patch a form describes; the service validates it. */
-export function patchFromForm(form: SurfaceRuntimeSubmission): unknown {
+export function patchFromForm(form: CustomizeScreenSubmission): unknown {
   const field = (n: number) => {
     const label = String(form[`field_${String(n)}_label`] ?? '').trim();
     if (!label) return null;
@@ -284,7 +290,7 @@ export function patchFromForm(form: SurfaceRuntimeSubmission): unknown {
   }
 }
 
-function drafted(outcome: DraftOutcome): SurfaceRuntimeResponse {
+function drafted(outcome: DraftOutcome): CustomizeScreenResponse {
   if (outcome.status !== 'drafted') {
     return page(
       'Not drafted',
@@ -380,7 +386,7 @@ function backLink(): string {
 function failure(
   message: string,
   code: string | null = null,
-): SurfaceRuntimeResponse {
+): CustomizeScreenResponse {
   return page(
     'Customize',
     `<p class="eyebrow">Customize</p><h1>That did not work</h1><p data-customize-refusal="${escapeHtml(code ?? 'ERROR')}">${escapeHtml(message)}</p>${backLink()}`,
@@ -394,9 +400,9 @@ function page(
   body: string,
   attributes = '',
   statusCode = 200,
-): SurfaceRuntimeResponse {
+): CustomizeScreenResponse {
   return Object.freeze({
-    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · 2rain</title><style>${surfaceRuntimeStyles()}</style></head><body class="standalone"><main class="standalone__card" data-customize-screen ${attributes}>${body}</main></body></html>`,
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · 2rain</title><style>${stylesheet}</style></head><body class="standalone"><main class="standalone__card" data-customize-screen ${attributes}>${body}</main></body></html>`,
     statusCode,
   });
 }

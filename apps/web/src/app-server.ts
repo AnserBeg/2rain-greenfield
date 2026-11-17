@@ -23,6 +23,7 @@ import {
   renderSurfaceRuntimeWithData,
   submitSurfaceRuntimeFragment,
   submitSurfaceRuntimeIntent,
+  surfaceRuntimeStyles,
   type SurfaceRuntimeGateways,
   type SurfaceRuntimeResponse,
 } from './surface-runtime.js';
@@ -144,7 +145,12 @@ async function handleRequest(
         return;
       }
       const result = await entry.run({ headers: request.headers }, async () =>
-        renderCustomizeScreen(await customize(), url.href, submission),
+        renderCustomizeScreen(
+          await customize(),
+          url.href,
+          submission,
+          surfaceRuntimeStyles(),
+        ),
       );
       writeHtml(
         response,
