@@ -40,6 +40,11 @@ import {
   type PinnedCatalog,
   type QueryCatalogEntry,
 } from './catalog.js';
+import {
+  businessDayAt,
+  declaredCurrencyDefault,
+  type BusinessCalendar,
+} from './business-context.js';
 import type { OperationsAgentToolId } from './tools.js';
 
 export type AgentRuntime = Pick<
@@ -69,6 +74,10 @@ export interface OperationsAgentSessionOptions {
   readonly personHeaders: Readonly<Record<string, string>>;
   /** The company the person works in; injected wherever a contract asks. */
   readonly companyId: string;
+  /** The company's declared time zone and business-day boundary (ADR-0018). */
+  readonly businessCalendar: BusinessCalendar;
+  /** The instant "now" is read at; a test fixes it. */
+  readonly clock?: () => Date;
   readonly approve: PlanApprover;
   readonly mintId?: () => string;
   /** Upper bound on one tool result's serialized size, in characters. */
@@ -153,6 +162,8 @@ export class OperationsAgentSession {
   readonly #options: OperationsAgentSessionOptions;
   readonly #plans = new Map<string, StoredPlan>();
   readonly #mint: () => string;
+  /** Eligibility decisions by principal, policy version and release. */
+  readonly #usable = new Map<string, Map<string, boolean>>();
   readonly toolCalls: ToolCallRecord[] = [];
   readonly approvals: ApprovalRecord[] = [];
 
@@ -222,6 +233,71 @@ export class OperationsAgentSession {
     );
   }
 
+  /**
+   * Whether the acting person may use an operation or query under current
+   * authorization (plan §9.2.1), asked of the gateways' own eligibility
+   * previews. Decisions are kept for one policy version, so a revoked grant is
+   * asked again on the next call. A preview that fails withholds the id.
+   */
+  async #usableIds(
+    view: RequestRuntimeView,
+    catalog: PinnedCatalog,
+  ): Promise<{ operations: Set<string>; queries: Set<string> }> {
+    const key = `${view.principalId}|${view.entryPolicyVersion}|${view.release.releaseId}`;
+    let known = this.#usable.get(key);
+    if (!known) {
+      known = new Map();
+      this.#usable.set(key, known);
+    }
+    const company = this.#options.companyId;
+    const { operationGateway, queryGateway } = this.#options.runtime;
+    const pending: (() => Promise<void>)[] = [];
+    for (const operation of catalog.operations) {
+      const id = `operation|${operation.operationId}`;
+      if (!known.has(id))
+        pending.push(async () => {
+          known.set(
+            id,
+            await operationGateway
+              .previewTaskEligibility(
+                view as never,
+                [operation.operationId],
+                company,
+              )
+              .then((answer) => answer === 'eligible')
+              .catch(() => false),
+          );
+        });
+    }
+    for (const query of catalog.queries) {
+      const id = `query|${query.queryId}`;
+      if (!known.has(id))
+        pending.push(async () => {
+          known.set(
+            id,
+            await queryGateway
+              .previewEligibility(view as never, query.queryId, company)
+              .then((answer) => answer === 'eligible')
+              .catch(() => false),
+          );
+        });
+    }
+    for (let at = 0; at < pending.length; at += 8)
+      await Promise.all(pending.slice(at, at + 8).map((check) => check()));
+    return {
+      operations: new Set(
+        catalog.operations
+          .filter((op) => known.get(`operation|${op.operationId}`))
+          .map((op) => op.operationId),
+      ),
+      queries: new Set(
+        catalog.queries
+          .filter((query) => known.get(`query|${query.queryId}`))
+          .map((query) => query.queryId),
+      ),
+    };
+  }
+
   // ---------------------------------------------------------------- discover
 
   #discover(
@@ -229,25 +305,51 @@ export class OperationsAgentSession {
   ): Promise<ImmutableJsonValue> {
     return this.#run(async (view) => {
       const catalog = pinnedCatalog(view);
+      const usable = await this.#usableIds(view, catalog);
+      const operations = catalog.operations.filter((op) =>
+        usable.operations.has(op.operationId),
+      );
+      const queries = catalog.queries.filter((query) =>
+        usable.queries.has(query.queryId),
+      );
       const mode = input.mode;
       const limit = boundedInteger(input.limit, 15, 30);
       const offset = cursorOffset(input.cursor);
       if (mode === 'context') {
         const entities = [
-          ...new Set(
-            catalog.operations.map((op) => catalog.operationEntity(op)),
-          ),
+          ...new Set(operations.map((op) => catalog.operationEntity(op))),
         ]
           .filter(Boolean)
           .map(localName)
           .sort();
+        const today = businessDayAt(
+          (this.#options.clock ?? (() => new Date()))(),
+          this.#options.businessCalendar,
+        );
+        const currency = declaredCurrencyDefault(view);
         return {
           mode,
+          today: {
+            date: today.date,
+            asDateTime: today.asDateTime,
+            timeZone: this.#options.businessCalendar.timeZone,
+            businessDayBoundary:
+              this.#options.businessCalendar.businessDayBoundary,
+            use: 'This is the company\'s business date. "Today" means this date and "yesterday" the day before; write a date field as the midnight-UTC instant asDateTime shows for that date.',
+          },
+          currency: {
+            default: currency.code,
+            offered: [...currency.offered],
+            use:
+              currency.code === null
+                ? 'No company default currency is declared. Use a currency the person names or the customer or supplier record carries; if there is none, do not invent one.'
+                : 'A customer or supplier record carrying its own default currency takes precedence over default, which applies when it has none or the person names none. Use only a code the person named or one of these.',
+          },
           actingAs:
             'the signed-in person, with their current permissions, on channel AGENT',
           company: 'one company, supplied by the host',
-          operations: catalog.operations.length,
-          queries: catalog.queries.length,
+          operations: operations.length,
+          queries: queries.length,
           entities,
           howTo:
             'search finds operation and query ids; contracts loads up to 5 full contracts; resolve turns a name or number into a record id. Writes go through a plan the person approves.',
@@ -260,7 +362,7 @@ export class OperationsAgentSession {
           .split(/[^a-z0-9]+/u)
           .filter((term) => term.length > 1);
         const scored = [
-          ...catalog.operations.map((op) => ({
+          ...operations.map((op) => ({
             id: op.operationId,
             kind: 'operation' as const,
             text: searchableText(op.operationId, op.label),
@@ -271,7 +373,7 @@ export class OperationsAgentSession {
               effect: effectKind(op).replace(/Effect$/u, ''),
             },
           })),
-          ...catalog.queries.map((query) => ({
+          ...queries.map((query) => ({
             id: query.queryId,
             kind: 'query' as const,
             text: searchableText(query.queryId),
@@ -310,7 +412,7 @@ export class OperationsAgentSession {
           ...(scored.length === 0
             ? {
                 reason:
-                  'no registered operation or query matches; the capability may not exist in this release',
+                  'no registered operation or query you may use matches; the capability may not exist in this release, or you may lack permission for it',
               }
             : {}),
         };
@@ -321,9 +423,15 @@ export class OperationsAgentSession {
           mode,
           contracts: ids.map((id) => {
             const operation = catalog.operation(id);
-            if (operation) return operationContract(catalog, operation);
+            if (operation)
+              return usable.operations.has(id)
+                ? operationContract(catalog, operation)
+                : { id, outcome: 'denied' };
             const query = catalog.query(id);
-            if (query) return queryContract(catalog, query);
+            if (query)
+              return usable.queries.has(id)
+                ? queryContract(catalog, query)
+                : { id, outcome: 'denied' };
             return { id, outcome: 'not-found' };
           }),
         };
@@ -340,13 +448,16 @@ export class OperationsAgentSession {
           '',
         );
         const query =
-          catalog.query(`northstar.app:query.${entity}_resolve`) ??
-          catalog.queries.find(
+          queries.find(
+            (candidate) =>
+              candidate.queryId === `northstar.app:query.${entity}_resolve`,
+          ) ??
+          queries.find(
             (candidate) =>
               localName(candidate.sourceEntityId) === entity &&
               candidate.queryType === 'resolve',
           );
-        const list = catalog.queries.find(
+        const list = queries.find(
           (candidate) =>
             localName(candidate.sourceEntityId) === entity &&
             candidate.queryType === 'list' &&
@@ -356,7 +467,7 @@ export class OperationsAgentSession {
           return {
             mode,
             outcome: 'unsupported',
-            reason: `no resolver for ${entity}`,
+            reason: `no resolver for ${entity} that you may use`,
           };
         if (query) {
           const result = await this.#options.runtime.queryGateway.invoke(view, {

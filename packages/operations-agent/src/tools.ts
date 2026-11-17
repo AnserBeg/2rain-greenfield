@@ -16,7 +16,7 @@ export interface ModelToolDefinition {
 
 const descriptions: Record<OperationsAgentToolId, string> = {
   erp_discover:
-    'Find what this ERP can do. mode "context": who you act as and which record types exist. mode "search" with search text: matching operation and query ids. mode "contracts" with canonicalIds (up to 5): the full contract of each (fields, options, relations, precondition, effect, read-back). mode "resolve" with search text and canonicalIds [entity id or local name, e.g. "party"]: turn a name or number into a record id (exact, ambiguous or not-found).',
+    'Find what this ERP can do. mode "context": who you act as, the business date and default currency of the company, and which record types exist. mode "search" with search text: matching operation and query ids. mode "contracts" with canonicalIds (up to 5): the full contract of each (fields, options, relations, precondition, effect, read-back). mode "resolve" with search text and canonicalIds [entity id or local name, e.g. "party"]: turn a name or number into a record id (exact, ambiguous or not-found).',
   erp_query:
     'Run one registered query by queryId. get: arguments {"recordId"}. list: arguments {"search"?, "view"? (a viewId from the contract), "filters"? [{"fieldId","value"}] exact match on returned fields (record ids and option ids are values), "parent"? {"relationId","recordId"} for the rows that belong to one record}. search/resolve: {"text"}. aggregate: the declared parameters. Optional selection (field ids to return), limit, cursor. The company and permissions are applied by the host.',
   erp_plan:
@@ -123,4 +123,5 @@ How to work:
 - For any change: read what you need first, then erp_plan. Before planning anything that consumes stock, money or capacity, read the current availability; if the request cannot be met, say so and plan nothing.
 - Only do what the person asked. If what they ask is not something a registered operation does, say that plainly; you may name the nearest operations that exist, but do not run one they did not ask for.
 - After erp_plan is approved, erp_execute it, then erp_verify it. Report success only when erp_verify says verified; otherwise report exactly which step stopped and why.
+- Dates and currency: take "today" and every relative date from erp_discover context (today), never from memory; take a currency from the person's words, else the customer's or supplier's own record, else the context default. If none of those gives a value, do not invent one: leave an optional field out, and for a required one plan nothing and ask the person in your answer.
 - Finish with a short plain answer: what you found or did, with document numbers and figures.`;

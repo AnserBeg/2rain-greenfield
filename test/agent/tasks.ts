@@ -12,8 +12,12 @@
  *      and inventory transaction); read and refusal tasks change none;
  * - 1: the answer states Calgary's on-hand figure (6);
  * - 2: the answer names both placed purchase orders and not the draft;
- * - 3: the answer names both unpaid Lethbridge invoices, not the paid one,
- *      and states their total balance (52.5);
+ * - 3: the answer names both unpaid Lethbridge invoices and states their
+ *      total balance (52.5). Rule v1 (the 2026-11-17 run; its result stands
+ *      as registered) also failed any answer naming the paid invoice. Rule v2
+ *      (registered 2026-11-17, applies to runs from the next one): the paid
+ *      invoice may be named when the answer says it is paid, and fails only
+ *      where it is given as unpaid (`task3AnswerFailures`);
  * - 4/6: exactly one new order, placed/confirmed, with the one requested line;
  * - 5: Calgary on hand rises by the ordered 8 through one posted receipt;
  * - 7: Calgary on hand falls by 4 through one posted shipment of that order;
@@ -188,17 +192,7 @@ export const TASKS: readonly AgentTask[] = [
       run,
     ) {
       const failures = await unexpectedChanges(world, before);
-      for (const number of context.unpaid)
-        if (!run.answer.includes(number))
-          failures.push(`the answer omits ${number}`);
-      if (run.answer.includes(context.paid))
-        failures.push(`the answer lists the paid ${context.paid}`);
-      if (
-        !numbersIn(run.answer).some(
-          (n) => Math.abs(n - context.balance) < 0.005,
-        )
-      )
-        failures.push(`the answer does not state ${String(context.balance)}`);
+      failures.push(...task3AnswerFailures(run.answer, context));
       return verdict(failures);
     },
   },
@@ -465,3 +459,28 @@ export const TASKS: readonly AgentTask[] = [
     },
   },
 ];
+
+/**
+ * Task 3's answer rule v2 (registered 2026-11-17): both unpaid invoices named,
+ * the total balance stated, and the paid invoice either absent or named in a
+ * clause that says it is paid and does not call it unpaid or outstanding. A
+ * clause is a line or a sentence (a period between digits does not end one).
+ */
+export function task3AnswerFailures(
+  answer: string,
+  context: { paid: string; unpaid: readonly string[]; balance: number },
+): string[] {
+  const failures: string[] = [];
+  for (const number of context.unpaid)
+    if (!answer.includes(number)) failures.push(`the answer omits ${number}`);
+  for (const clause of answer.split(/\n|;|(?<!\d)\.|\.(?!\d)/u))
+    if (
+      clause.includes(context.paid) &&
+      (!/\b(?:paid|settled)\b/iu.test(clause) ||
+        /\b(?:unpaid|not paid)\b/iu.test(clause))
+    )
+      failures.push(`the answer lists the paid ${context.paid} as unpaid`);
+  if (!numbersIn(answer).some((n) => Math.abs(n - context.balance) < 0.005))
+    failures.push(`the answer does not state ${String(context.balance)}`);
+  return failures;
+}

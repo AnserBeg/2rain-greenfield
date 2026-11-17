@@ -14,6 +14,7 @@
     "./payables-capability-executor": "./src/payables-capability-executor.ts",
     "./purchase-order-approval-executor": "./src/purchase-order-approval-executor.ts",
     "./inventory-provider-error-mappings": "./src/inventory-provider-error-mappings.ts",
+    "./active-release-root": "./src/active-release-root.ts",
     "./readiness": "./src/readiness.ts",
     "./release-activation-service": "./src/release-activation-service.ts",
     "./release-approval-service": "./src/release-approval-service.ts",
