@@ -50,6 +50,11 @@ Charter: [AGENT-3-charter.md](AGENT-3-charter.md) from `main` `f1abcb3a`. Branch
 | baseline 2026-11-17 16:52 (AGENT-2, no map) | 9/10 | 7.5 | 34.8 (JSONL stamps) | 13.5 | 1.5282 | 0.1698 |
 | slice 1 17:54 at `7c604fda` ([result](../evidence/2026-11-17T17-54-02-978Z-agent-eval.md)) | 10/10 | 2 | 18.6 | 7 | 0.8869 | 0.0887 |
 | slice 3 18:25 at `47bc6c82` ([result](../evidence/2026-11-17T18-25-11-573Z-agent-eval.md)) | 10/10 | 2 | 18.3 | 6.5 | 0.8482 | 0.0848 |
+| slice 4 18:35 at `ae5c4443` ([result](../evidence/2026-11-17T18-35-50-111Z-agent-eval.md)) | 10/10 | 2 | 20.9 | 7 | 0.9030 | 0.0903 |
+
+Slice 4's run found an over-refusal (task 7: a reservation number the model minted as a uuid, as the screen recipe does, was refused
+as an unlooked-up reference; it recovered) and a 0-based `fromStep` twice; both fixed after the run (`_id` fields only; "steps count
+from 1"). Tasks 7-8 ran 104 s and 93 s while this laptop also typechecked (a 14 s resolve is the host, not the model).
 
 ## Slices
 
