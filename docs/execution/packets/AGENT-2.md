@@ -1,6 +1,6 @@
 # AGENT-2 — the agent stops guessing (date, currency, permissions) and the terminal stops switching releases
 
-Status: slices 1-3 integrated (merge `18ec624a`, CI run 44087242803, PR #47); slice 4 harness code integrated; real-model eval run 2026-11-17: 7 of 10 (bar 8) · Tier: Mechanical (no Critical path) · Stops taken: none
+Status: slices 1-3 integrated (merge `18ec624a`, CI run 44087242803, PR #47); slice 4 harness code integrated; real-model eval 2026-11-17: 7 of 10 at 15:33, re-measured 9 of 10 at 16:52 (bar 8) · Tier: Mechanical (no Critical path) · Stops taken: none
 Charter: [AGENT-2-charter.md](AGENT-2-charter.md) from `main` `e244abbd`. Branch `packet/AGENT-2`, base `08224859`.
 
 ## Claims
@@ -32,6 +32,10 @@ Charter: [AGENT-2-charter.md](AGENT-2-charter.md) from `main` `e244abbd`. Branch
 ## Re-measure after the prompt fix (2026-11-17)
 
 Tasks 6 and 8 had passed at 06:22 and failed at 15:33, so the "do not invent" prompt over-refused: a value held by a resolved record (the customer's default ship-to address) or a declared screen default must be used, and only a value that exists nowhere is asked for. Evidence that a default payment method exists: `invoice_method` is pre-selected to EFT in `packages/domain/src/sales/workspace.ts` (checked `sales/definition.ts`, `sales/workspace.ts`, `party/definition.ts`, `app/seed.ts`; no per-customer or per-invoice default exists). So task 8's request is unchanged (a "v3" naming the method was drafted and reverted); context now carries `formDefaults` (read from the surface projection) and the prompt points at them and at resolved records. Test: scripted plan fills ship-to from the customer's address record (`agent-tasks.test.ts`). The 06:22 (9/10) and 15:33 (7/10) results stand as run.
+
+### Re-measure (run 2026-11-17 16:52, [result file](../evidence/2026-11-17T16-52-54-374Z-agent-eval.md), after merge `386731d3`)
+
+Same model, prices and cap. **9 of 10 passed; USD 1.5282 total; USD 0.1698 per completed task.** Tool calls per task 6 / 7 / 6 / 12 / 21 / 15 / 26 / 28 / 17 / 2. Tasks 7 and 8 now pass (shipment at `now`; payment method from the declared EFT default). Task 6 failed: the model read availability, found no stock for the notebook and stopped without creating the order (the existing availability rule, not a missing address: it quoted the customer's ship-to). That rule predates this packet, and task 6 passed under it at 06:22 and failed at 15:33 for the ship-to reason, so task 6 is flaky across runs on a single attempt; not changed. All three results (9, 7, 9) stand as run.
 
 ## Gates
 
