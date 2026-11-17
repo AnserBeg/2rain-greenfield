@@ -26,11 +26,11 @@ Every task: the watched document lists (orders, lines, receipts, reservations, s
 - Exact decimals are written canonically (`12.50` -> `12.5`): the gateway refuses trailing zeros, and reads return 18-place strings.
 - The terminal opens its own runtime on the `pnpm dev` database (`openComposedApplicationRuntime`, split out of `startComposedApplication`): a grant is signed by the process that issues it.
 - The harness installs the release once into a base database and gives each task a `CREATE DATABASE ... TEMPLATE` copy (about 4 s, against about 3 min per install).
-- OpenAI: the key name is parsed but no adapter is built. Slices 1 and 2 merged together (the write tools were done before slice 1's CI ran). Turn limit 40; no sleeps and no retries beyond the SDK's two; the spend cap is checked before every model call.
+- OpenAI: the key name is parsed but no adapter is built. Slices 1 and 2 merged together (the write tools were done before slice 1's CI ran). Turn limit 40; no sleeps and no retries beyond the SDK's two; the harness checks its USD cap before every model call; the terminal has only the turn limit.
 
 ## Result (slice 3, run 2026-11-17; [result file](../evidence/2026-11-17-agent-eval.md), JSONL per task beside it)
 
-`claude-opus-5-5`, effort high; prices from platform.claude.com/docs/en/about-claude/pricing read 2026-11-17 (USD/MTok: input 4, output 20, cache write 5, cache read 0.20). **9 of 10 passed; total USD 1.6310; cost per completed task USD 0.1812.** Tool calls per task 6 / 8 / 6 / 17 / 25 / 28 / 26 / 31 / 16 / 2. Task 3 failed its pre-registered rule: the answer named both unpaid invoices and the 52.50 total correctly, and also mentioned the paid INV-000001 as "fully paid"; the rule ("does not name the paid invoice") is stricter than the question. The result stands as registered; a reworded rule applies only to a later, separately dated run.
+`claude-opus-5-5`, effort high; prices from platform.claude.com/docs/en/about-claude/pricing read 2026-11-17 (USD/MTok: input 4, output 20, cache write 5, cache read 0.20). **9 of 10 passed; total USD 1.6310; cost per completed task USD 0.1812.** Tool calls per task 6 / 8 / 6 / 17 / 25 / 28 / 26 / 31 / 16 / 2. Task 3 failed its pre-registered rule: the answer named both unpaid invoices and the 52.50 total correctly, and also mentioned the paid INV-000001 as "fully paid"; the rule ("does not name the paid invoice") is stricter than the question. The result stands as registered; a reworded rule applies only to a later, separately dated run. The eval ran at `f0eb507f`. The system prompt's availability and only-what-was-asked rules and the delete note in discovery were written knowing the ten tasks; no real-model run preceded this one. The three terminal checks below were further real-model runs (about 300k tokens in, mostly cached, 8.6k out; at most about USD 0.4) outside this total and its cap.
 
 ## Slices
 
@@ -49,10 +49,10 @@ Start `corepack pnpm dev` and wait for the URL. In a second terminal: `NORTH_STA
 
 ## Filed
 
-- Discovery results are not filtered by the person's permissions before use (plan §9.2.1); the gateway refuses on use.
-- A plan whose last step fails leaves its earlier creates committed as drafts (no compensation; no hard delete exists).
-- The agent is not told today's date or the company's default currency; in the terminal check it guessed USD and yesterday's date for a PO. `erp_discover` context could carry both.
-- Task 3's pass rule fails a correct answer that names the paid invoice as paid; reword before the next dated run.
+- Discovery results are not filtered by the person's permissions before use (plan §9.2.1); the gateway refuses on use. A plan whose last step fails leaves its earlier creates committed as drafts (no compensation; no hard delete exists).
+- The agent is not told today's date or the company's default currency; in the terminal check it guessed USD and yesterday's date for a PO. `erp_discover` context could carry both. Task 3's pass rule fails a correct answer that names the paid invoice as paid; reword before the next dated run.
+- Harness: a same-day rerun (even `--tasks 3`) overwrites `<date>-agent-eval.md` (name it by run timestamp); JSONL appends are not awaited in order, so some lines are out of call order (sort by `at`; queue them).
+- The terminal opened from a checkout whose compiled release differs from the dev database's installs and activates that release there, as `pnpm dev` from that checkout would; compare release roots and refuse.
 
 ```record-claim
 {
