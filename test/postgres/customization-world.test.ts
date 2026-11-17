@@ -7,7 +7,9 @@
  * the rollback.
  */
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { performance } from 'node:perf_hooks';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
@@ -16,6 +18,10 @@ import {
   startComposedApplication,
 } from '../../apps/api/src/composition-root.js';
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
+import {
+  DRAFT_CUSTOMIZATION_TOOL,
+  type DraftingModel,
+} from '../../packages/customization/src/index.js';
 import { openCustomizationService } from '../../packages/postgres-provider/src/customization-service.js';
 import { FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/fulfillment-capability-executor.js';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
@@ -41,9 +47,27 @@ const equipment = JSON.parse(
 ) as unknown;
 const tenantSlug = 'customize-world';
 const authoredPath = resolve('apps/web/release/app.authored.json');
+const request =
+  'Add an Equipment record with a name, serial number, purchase date and a status of in service, under repair or retired';
+
+/**
+ * CI holds no model key, so the week-6 rehearsal drafts through a scripted
+ * model that proposes the patch a real model proposed for the same request
+ * (the local real-model check is in the packet record).
+ */
+const scriptedDrafter: DraftingModel = {
+  modelId: 'scripted',
+  next: () =>
+    Promise.resolve({
+      text: '',
+      toolCalls: [
+        { id: 'draft-1', input: equipment, name: DRAFT_CUSTOMIZATION_TOOL },
+      ],
+    }),
+};
 
 test(
-  'first-party postings pass their checks under a live customization and after its rollback',
+  'a request becomes a live record type in under ten minutes, first-party postings pass under it, and it rolls back',
   { timeout: 1_800_000 },
   async () => {
     await withEphemeralPostgres(
@@ -81,6 +105,7 @@ test(
           firstPartyAuthored: JSON.parse(
             readFileSync(authoredPath, 'utf8'),
           ) as Record<string, unknown>,
+          draftingModel: () => Promise.resolve(scriptedDrafter),
           localDemoIdentity: true,
           migrationsDirectory: resolve('db/migrations'),
           providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
@@ -89,25 +114,53 @@ test(
         try {
           const world = worldOver(runtime, String(connection.database));
           const firstParty = runtime.releaseRoot;
-          const drafted = await opened.service.draft(
-            equipment,
-            'declarativeEditor',
-          );
+          // The week-6 rehearsal (slice 5): a request in plain English to a
+          // record entered on the live record type, then a rollback.
+          const started = performance.now();
+          const drafted = await opened.service.draftFromRequest(request);
           assert.equal(drafted.status, 'drafted');
           if (drafted.status !== 'drafted') return;
+          const draftedAt = performance.now();
           await opened.service.approve(drafted.patchId);
+          const approvedAt = performance.now();
           await opened.service.activate(drafted.patchId);
+          const activatedAt = performance.now();
           assert.equal(
             (await opened.service.status()).activeReleaseRoot,
             drafted.releaseRoot,
           );
+          const equipmentId = randomUUID();
+          const created = await world.invoke('custom_equipment_create', {
+            recordId: equipmentId,
+            values: {
+              'northstar.app:field.custom_equipment_name': 'Forklift 3',
+              'northstar.app:field.custom_equipment_serial_number': 'FL-0003',
+            },
+          });
+          assert.equal(created.outcome, 'succeeded');
+          const liveAt = performance.now();
 
           // Receiving and shipping post through executors pinned per release.
           await runTask(world, 5);
           await runTask(world, 7);
 
+          const rollbackStarted = performance.now();
           const rolledBack = await opened.service.rollback();
+          const rolledBackAt = performance.now();
           assert.equal(rolledBack.releaseRoot, firstParty);
+          const timings = {
+            approveMs: Math.round(approvedAt - draftedAt),
+            activateMs: Math.round(activatedAt - approvedAt),
+            draftMs: Math.round(draftedAt - started),
+            firstRecordMs: Math.round(liveAt - activatedAt),
+            requestToLiveMs: Math.round(liveAt - started),
+            rollbackMs: Math.round(rolledBackAt - rollbackStarted),
+          };
+          console.log(`CUSTOMIZE_REHEARSAL ${JSON.stringify(timings)}`);
+          assert.ok(
+            timings.requestToLiveMs < 600_000,
+            'a new record type is live within ten minutes of the request',
+          );
           await runTask(world, 6);
           await runTask(world, 5);
         } finally {
