@@ -7,7 +7,9 @@
  * the rollback.
  */
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { performance } from 'node:perf_hooks';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
@@ -17,6 +19,10 @@ import {
   startComposedApplication,
 } from '../../apps/api/src/composition-root.js';
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
+import {
+  DRAFT_CUSTOMIZATION_TOOL,
+  type DraftingModel,
+} from '../../packages/customization/src/index.js';
 import {
   ensureScope,
   rolePool,
@@ -42,6 +48,7 @@ import { ids, openingStock, snapshot } from '../agent/arrange.js';
 import { referenceScript } from '../agent/reference-scripts.js';
 import { TASKS } from '../agent/tasks.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
+import type { MintedUuid } from '../../packages/platform-runtime/src/index.js';
 import type pg from 'pg';
 
 const equipment = JSON.parse(
@@ -49,9 +56,27 @@ const equipment = JSON.parse(
 ) as unknown;
 const tenantSlug = 'customize-world';
 const authoredPath = resolve('apps/web/release/app.authored.json');
+const request =
+  'Add an Equipment record with a name, serial number, purchase date and a status of in service, under repair or retired';
+
+/**
+ * CI holds no model key, so the week-6 rehearsal drafts through a scripted
+ * model that proposes the patch a real model proposed for the same request
+ * (the local real-model check is in the packet record).
+ */
+const scriptedDrafter: DraftingModel = {
+  modelId: 'scripted',
+  next: () =>
+    Promise.resolve({
+      text: '',
+      toolCalls: [
+        { id: 'draft-1', input: equipment, name: DRAFT_CUSTOMIZATION_TOOL },
+      ],
+    }),
+};
 
 test(
-  'first-party postings pass their checks under a live customization and after its rollback',
+  'a request becomes a live record type in under ten minutes, first-party postings pass under it, and it rolls back',
   { timeout: 1_800_000 },
   async () => {
     await withEphemeralPostgres(
@@ -89,6 +114,7 @@ test(
           firstPartyAuthored: JSON.parse(
             readFileSync(authoredPath, 'utf8'),
           ) as Record<string, unknown>,
+          draftingModel: () => Promise.resolve(scriptedDrafter),
           localDemoIdentity: true as const,
           migrationsDirectory: resolve('db/migrations'),
           providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
@@ -98,18 +124,31 @@ test(
         try {
           const world = worldOver(runtime, String(connection.database));
           const firstParty = runtime.releaseRoot;
-          const drafted = await opened.service.draft(
-            equipment,
-            'declarativeEditor',
-          );
+          // The week-6 rehearsal (slice 5): a request in plain English to a
+          // record entered on the live record type, then a rollback.
+          const started = performance.now();
+          const drafted = await opened.service.draftFromRequest(request);
           assert.equal(drafted.status, 'drafted');
           if (drafted.status !== 'drafted') return;
+          const draftedAt = performance.now();
           await opened.service.approve(drafted.patchId);
+          const approvedAt = performance.now();
           await opened.service.activate(drafted.patchId);
+          const activatedAt = performance.now();
           assert.equal(
             (await opened.service.status()).activeReleaseRoot,
             drafted.releaseRoot,
           );
+          const equipmentId = randomUUID();
+          const created = await world.invoke('custom_equipment_create', {
+            recordId: equipmentId,
+            values: {
+              'northstar.app:field.custom_equipment_name': 'Forklift 3',
+              'northstar.app:field.custom_equipment_serial_number': 'FL-0003',
+            },
+          });
+          assert.equal(created.outcome, 'succeeded');
+          const liveAt = performance.now();
           // Review F3: discovery on the never-restarted runtime sees the new
           // record type's queries under the live release's policy.
           assert.equal(
@@ -150,8 +189,23 @@ test(
           await runTask(world, 7);
           await runTask(world, 5);
 
+          const rollbackStarted = performance.now();
           const rolledBack = await opened.service.rollback();
+          const rolledBackAt = performance.now();
           assert.equal(rolledBack.releaseRoot, firstParty);
+          const timings = {
+            approveMs: Math.round(approvedAt - draftedAt),
+            activateMs: Math.round(activatedAt - approvedAt),
+            draftMs: Math.round(draftedAt - started),
+            firstRecordMs: Math.round(liveAt - activatedAt),
+            requestToLiveMs: Math.round(liveAt - started),
+            rollbackMs: Math.round(rolledBackAt - rollbackStarted),
+          };
+          console.log(`CUSTOMIZE_REHEARSAL ${JSON.stringify(timings)}`);
+          assert.ok(
+            timings.requestToLiveMs < 600_000,
+            'a new record type is live within ten minutes of the request',
+          );
           assert.deepEqual(
             await checkTerminalRelease({
               ...guarded,
@@ -241,6 +295,58 @@ test(
           );
           await assertScopesNamePointer(pool, runtime);
 
+          // Review B1: A -> first-party rollback cut after its swap commits,
+          // before it verifies; then a restart. Boot's early scope
+          // provisioning must not write the first-party root over A's: the
+          // scopes keep A's root and posting refuses until a verified
+          // reconcile.
+          await opened.service.approve(drafted.patchId);
+          await opened.service.activate(drafted.patchId);
+          await assertScopesNamePointer(pool, runtime);
+          const cutRollbackVerification = await openCustomizationService({
+            ...serviceOptions,
+            activationKernel: (runtimePool) =>
+              new CutBeforeVerification(runtimePool),
+          });
+          let cutRollbackAttempt: string | undefined;
+          try {
+            await assert.rejects(
+              cutRollbackVerification.service.rollback(),
+              /cut between the swap and its verification/u,
+            );
+            cutRollbackAttempt = await latestActivationAttempt(pool, runtime);
+          } finally {
+            await cutRollbackVerification.close();
+          }
+          await openComposedApplicationRuntime({
+            databaseUrl,
+            tenantSlug,
+          }).then(
+            (restarted) => restarted.close(),
+            () => undefined,
+          );
+          assert.deepEqual(
+            await scopeRoots(pool, runtime),
+            [drafted.releaseRoot],
+            'a restart left the scopes on the last verified release',
+          );
+          await assert.rejects(openingStock(world, notebook, calgary, '6'));
+          await verifyThroughKernel(
+            pool,
+            databaseUrl,
+            tenantSlug,
+            cutRollbackAttempt!,
+          );
+          await assert.rejects(
+            opened.service.rollback(),
+            (error: unknown) =>
+              refusalCode({ reason: error, status: 'rejected' }) ===
+              'CUSTOMIZE_NOTHING_TO_ROLL_BACK',
+          );
+          await assertScopesNamePointer(pool, runtime);
+          assert.deepEqual(await scopeRoots(pool, runtime), [firstParty]);
+          await openingStock(world, notebook, calgary, '6');
+
           // Review R3: base -> A -> B, then a B -> A rollback whose scope
           // reconcile fails. The retry sets the scopes to A before it decides,
           // so posting works even though the retry itself is refused.
@@ -325,18 +431,12 @@ test(
             (await scopeMismatches(pool, runtime)) > 0,
             'a restart did not set the scopes to an unverified release',
           );
-          const identities = await ensureScope(pool, tenantSlug, 'production');
-          const kernelPool = rolePool(databaseUrl, 'north_star_runtime', 2);
-          try {
-            const verified = await new PostgresReleaseActivationService(
-              kernelPool,
-            ).verifyActivation(await trustedContext(identities.system), {
-              activationAttemptId: approvedVehicle.activationAttemptId,
-            });
-            assert.equal(verified.status, 'SWAPPED_VERIFIED');
-          } finally {
-            await kernelPool.end();
-          }
+          await verifyThroughKernel(
+            pool,
+            databaseUrl,
+            tenantSlug,
+            approvedVehicle.activationAttemptId,
+          );
           const finished = await opened.service.activate(vehicle.patchId);
           assert.equal(finished.status, 'activated');
           assert.equal(finished.releaseRoot, vehicle.releaseRoot);
@@ -351,6 +451,55 @@ test(
     );
   },
 );
+
+/** The kernel's own verification of one activation attempt. */
+async function verifyThroughKernel(
+  pool: pg.Pool,
+  databaseUrl: string,
+  slug: string,
+  activationAttemptId: string,
+): Promise<void> {
+  const identities = await ensureScope(pool, slug, 'production');
+  const kernelPool = rolePool(databaseUrl, 'north_star_runtime', 2);
+  try {
+    const verified = await new PostgresReleaseActivationService(
+      kernelPool,
+    ).verifyActivation(await trustedContext(identities.system), {
+      activationAttemptId: activationAttemptId as MintedUuid,
+    });
+    assert.equal(verified.status, 'SWAPPED_VERIFIED');
+  } finally {
+    await kernelPool.end();
+  }
+}
+
+/** The newest activation attempt that swapped the pointer. */
+async function latestActivationAttempt(
+  pool: pg.Pool,
+  runtime: { readonly identity: { readonly tenantId: string } },
+): Promise<string> {
+  const result = await pool.query<{ activation_attempt_id: string }>(
+    `SELECT activation_attempt_id
+       FROM platform.release_activation_swap_receipts
+      WHERE tenant_id = $1
+      ORDER BY fence DESC LIMIT 1`,
+    [runtime.identity.tenantId],
+  );
+  return result.rows[0]!.activation_attempt_id;
+}
+
+async function scopeRoots(
+  pool: pg.Pool,
+  runtime: { readonly identity: { readonly tenantId: string } },
+): Promise<string[]> {
+  const result = await pool.query<{ contract_release_root: string }>(
+    `SELECT DISTINCT contract_release_root
+       FROM platform.inventory_posting_configurations
+      WHERE tenant_id = $1`,
+    [runtime.identity.tenantId],
+  );
+  return result.rows.map((row) => row.contract_release_root);
+}
 
 /** A kernel cut after the pointer swap commits, before it verifies. */
 class CutBeforeVerification extends PostgresReleaseActivationService {
