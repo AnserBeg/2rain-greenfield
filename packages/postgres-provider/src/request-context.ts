@@ -91,13 +91,14 @@ async function runTrustedTransaction<T>(
  * A read that joins the request's read snapshot when one is held for `pool`;
  * otherwise an ordinary trusted transaction of its own. Only reads use this
  * entry point, and the snapshot is `READ ONLY`, so a write sent through it
- * fails at the database. `snapshotPolicyVersion` is the live-policy epoch the
+ * fails at the database. `snapshot` is the open snapshot's handle (its policy
+ * epoch and a memo that lives as long as it), null outside a snapshot; the
  * snapshot sees (null outside a snapshot).
  */
 export async function withTrustedRequestRead<T>(
   pool: Pool,
   context: TrustedRequestContext,
-  run: (client: PoolClient, snapshotPolicyVersion: string | null) => Promise<T>,
+  run: (client: PoolClient, snapshot: ReadSnapshotHandle | null) => Promise<T>,
 ): Promise<T> {
   assertTrustedRequestContext(context);
   const snapshot = currentReadSnapshot(pool);
@@ -138,6 +139,31 @@ export async function withReadSnapshot<T>(
   }
 }
 
+/**
+ * What a joined read sees of the open snapshot: the live-policy epoch it was
+ * taken at, and a memo that lives exactly as long as it. A memoised read is
+ * reused only within this one snapshot of this one request.
+ */
+export interface ReadSnapshotHandle {
+  readonly policyVersion: string;
+  memo<T>(key: string, load: () => Promise<T>): Promise<T>;
+}
+
+function snapshotHandle(policyVersion: string): ReadSnapshotHandle {
+  const memo = new Map<string, Promise<unknown>>();
+  return Object.freeze({
+    policyVersion,
+    memo<T>(key: string, load: () => Promise<T>): Promise<T> {
+      let value = memo.get(key) as Promise<T> | undefined;
+      if (!value) {
+        value = load();
+        memo.set(key, value);
+      }
+      return value;
+    },
+  });
+}
+
 const heldSnapshots = new AsyncLocalStorage<ReadSnapshot>();
 /** Set while a joined read runs, so a nested read reuses its turn. */
 const joinedReads = new AsyncLocalStorage<ReadSnapshot>();
@@ -166,7 +192,7 @@ class ReadSnapshot {
   #identity: TrustedRequestContext | null = null;
   /** The epoch the request's first snapshot saw; every later one must agree. */
   #policyVersion: string | null = null;
-  #snapshotPolicyVersion: string | null = null;
+  #held: ReadSnapshotHandle | null = null;
   #finished = false;
   #turn: Promise<unknown> = Promise.resolve();
 
@@ -174,7 +200,10 @@ class ReadSnapshot {
 
   async join<T>(
     context: TrustedRequestContext,
-    run: (client: PoolClient, policyVersion: string | null) => Promise<T>,
+    run: (
+      client: PoolClient,
+      snapshot: ReadSnapshotHandle | null,
+    ) => Promise<T>,
   ): Promise<T> {
     if (joinedReads.getStore() === this) {
       // A read nested inside a joined read: same turn, same client.
@@ -182,7 +211,7 @@ class ReadSnapshot {
         throw new ReadSnapshotIntegrityError(
           'a nested read must use the open snapshot and its identity',
         );
-      return run(this.#client, this.#snapshotPolicyVersion);
+      return run(this.#client, this.#held);
     }
     return this.#exclusive(async () => {
       if (this.#finished)
@@ -194,9 +223,7 @@ class ReadSnapshot {
       if (!this.#client) await this.#open(context);
       const client = this.#client!;
       try {
-        return await joinedReads.run(this, () =>
-          run(client, this.#snapshotPolicyVersion),
-        );
+        return await joinedReads.run(this, () => run(client, this.#held));
       } catch (error) {
         // A failed read leaves the shared transaction unusable, and may have
         // left the module role assumed: end it; a later read opens anew.
@@ -250,7 +277,7 @@ class ReadSnapshot {
         [context.tenantId, context.environmentId],
       );
       const version = result.rows[0]?.policy_version ?? '0';
-      this.#snapshotPolicyVersion = version;
+      this.#held = snapshotHandle(version);
       if (this.#policyVersion === null) this.#policyVersion = version;
       else if (this.#policyVersion !== version)
         throw new ReadSnapshotPolicyChangedError(
@@ -267,7 +294,7 @@ class ReadSnapshot {
     const client = this.#client;
     if (!client) return;
     this.#client = null;
-    this.#snapshotPolicyVersion = null;
+    this.#held = null;
     let commitError: unknown;
     try {
       await client.query('COMMIT');
@@ -284,7 +311,7 @@ class ReadSnapshot {
     const client = this.#client;
     if (!client) return;
     this.#client = null;
-    this.#snapshotPolicyVersion = null;
+    this.#held = null;
     let rollbackError: unknown;
     try {
       await client.query('ROLLBACK');

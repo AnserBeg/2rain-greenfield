@@ -13,14 +13,17 @@ import {
   QUERY_BOUNDARY_PERMISSION_ID,
   type SemanticQueryDenialRecorder,
 } from '../../runtime/src/semantic-query-gateway.js';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { randomUUID } from 'node:crypto';
 
 import {
   POLICY_DECISION_EVIDENCE_VERSION,
   type EvidenceMetadataInput,
 } from '../../platform-runtime/src/trust/contracts.js';
-import { withTrustedRequestRead } from './request-context.js';
+import {
+  withTrustedRequestRead,
+  withTrustedRequestTransaction,
+} from './request-context.js';
 import { PostgresTrustService } from './trust/postgres-trust-service.js';
 import type { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
 
@@ -119,7 +122,9 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
     return withTrustedRequestRead(this.pool, context, async (client, held) => {
       // Inside a page's read snapshot the epoch is the snapshot's own.
       if (held !== null)
-        return Object.freeze({ policyVersion: policyVersion(held) });
+        return Object.freeze({
+          policyVersion: policyVersion(held.policyVersion),
+        });
       const result = await client.query<{ policy_version: string }>(
         `SELECT COALESCE(
            (SELECT policy_version::text
@@ -147,13 +152,39 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
       });
     }
 
-    return withTrustedRequestRead(this.pool, context, async (client) => {
-      const result = await client.query<{
-        grant_role_id: string | null;
-        legal_entity_id: string | null;
-        policy_version: string;
-      }>(
-        `WITH policy_version AS (
+    // SPEED-1 (ADR-0070): a read decision inside a page's read snapshot is
+    // computed from the principal's grants, read once per snapshot; any other
+    // decision -- an invocation, a capability's, one outside a page -- reads
+    // the live grants in a transaction of its own, which never joins.
+    const reusable = reusableReadDecision(request.decisionInput);
+    const transaction = reusable
+      ? withTrustedRequestRead
+      : <T>(
+          pool: Pool,
+          trusted: typeof context,
+          run: (client: PoolClient, held: null) => Promise<T>,
+        ) =>
+          withTrustedRequestTransaction(pool, trusted, (client) =>
+            run(client, null),
+          );
+    return transaction(this.pool, context, async (client, held) => {
+      const result = held
+        ? {
+            rows: snapshotGrantRows(
+              await held.memo(
+                `current-policy-grants:${context.tenantId}:${context.environmentId}:${context.principalId}`,
+                () => readPrincipalGrants(client, context),
+              ),
+              binding,
+              held.policyVersion,
+            ),
+          }
+        : await client.query<{
+            grant_role_id: string | null;
+            legal_entity_id: string | null;
+            policy_version: string;
+          }>(
+            `WITH policy_version AS (
            SELECT COALESCE(
              (SELECT policy_version
                 FROM platform.current_policy_epochs
@@ -182,14 +213,14 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
             AND permission_grant.permission_id = $4
             AND permission_grant.resource_id = $5
             AND permission_grant.revoked_at IS NULL`,
-        [
-          context.tenantId,
-          context.environmentId,
-          context.principalId,
-          binding.permissionId,
-          binding.resourceId,
-        ],
-      );
+            [
+              context.tenantId,
+              context.environmentId,
+              context.principalId,
+              binding.permissionId,
+              binding.resourceId,
+            ],
+          );
       const version = policyVersion(result.rows[0]?.policy_version);
       const memberships = result.rows
         .filter((row) => row.grant_role_id !== null)
@@ -214,7 +245,7 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
     context: ReturnType<typeof trustedContextForCurrentPolicyDecision>,
   ): Promise<string> {
     return withTrustedRequestRead(this.pool, context, async (client, held) => {
-      if (held !== null) return policyVersion(held);
+      if (held !== null) return policyVersion(held.policyVersion);
       const result = await client.query<{ policy_version: string }>(
         `SELECT COALESCE(
            (SELECT policy_version::text
@@ -295,6 +326,119 @@ export function currentPolicyBindingsFromPermissions(
       }),
     ),
   );
+}
+
+/**
+ * The decision inputs a page's reads make (query, list, legal-entity scope and
+ * the advisory eligibility preview). Only these may be decided from the
+ * snapshot's grants; an operation's or a capability's decision never is.
+ */
+const REUSABLE_READ_DECISION_KINDS: ReadonlySet<string> = new Set([
+  'legalEntityReadScopePolicyInput',
+  'registeredSemanticListFiguresPolicyInput',
+  'registeredSemanticListProgressPolicyInput',
+  'registeredSemanticListReferencePolicyInput',
+  'registeredSemanticListRelatedFilterPolicyInput',
+  'registeredSemanticListRelationPolicyInput',
+  'registeredSemanticListSearchChildPolicyInput',
+  'registeredSemanticListSupplyPolicyInput',
+  'registeredSemanticQueryPolicyInput',
+  'semanticOperationEligibilityPolicyInput',
+  'semanticQueryPolicyInput',
+]);
+
+function reusableReadDecision(input: ImmutableJsonValue): boolean {
+  return (
+    isRecord(input) &&
+    typeof input.kind === 'string' &&
+    REUSABLE_READ_DECISION_KINDS.has(input.kind)
+  );
+}
+
+interface PrincipalGrant {
+  readonly legalEntityId: string | null;
+  readonly permissionId: string;
+  readonly resourceId: string;
+  readonly roleId: string;
+}
+
+/**
+ * Every live grant the principal holds, through a live membership of a live
+ * role: the same three revocation checks as the per-decision statement.
+ */
+async function readPrincipalGrants(
+  client: PoolClient,
+  context: ReturnType<typeof trustedContextForCurrentPolicyDecision>,
+): Promise<readonly PrincipalGrant[]> {
+  const result = await client.query<{
+    grant_role_id: string;
+    legal_entity_id: string | null;
+    permission_id: string;
+    resource_id: string;
+  }>(
+    `SELECT permission_grant.role_id AS grant_role_id,
+            permission_grant.permission_id,
+            permission_grant.resource_id,
+            membership.legal_entity_id
+       FROM platform.current_policy_memberships AS membership
+       JOIN platform.current_policy_roles AS role
+         ON role.tenant_id = membership.tenant_id
+        AND role.environment_id = membership.environment_id
+        AND role.role_id = membership.role_id
+        AND role.revoked_at IS NULL
+       JOIN platform.current_policy_permission_grants AS permission_grant
+         ON permission_grant.tenant_id = role.tenant_id
+        AND permission_grant.environment_id = role.environment_id
+        AND permission_grant.role_id = role.role_id
+        AND permission_grant.revoked_at IS NULL
+      WHERE membership.tenant_id = $1
+        AND membership.environment_id = $2
+        AND membership.principal_id = $3
+        AND membership.revoked_at IS NULL`,
+    [context.tenantId, context.environmentId, context.principalId],
+  );
+  return Object.freeze(
+    result.rows.map((row) =>
+      Object.freeze({
+        legalEntityId: row.legal_entity_id,
+        permissionId: row.permission_id,
+        resourceId: row.resource_id,
+        roleId: row.grant_role_id,
+      }),
+    ),
+  );
+}
+
+/** The per-decision statement's rows, computed from the snapshot's grants. */
+function snapshotGrantRows(
+  grants: readonly PrincipalGrant[],
+  binding: CurrentPolicyPermissionBinding,
+  snapshotPolicyVersion: string,
+): {
+  grant_role_id: string | null;
+  legal_entity_id: string | null;
+  policy_version: string;
+}[] {
+  const rows = grants
+    .filter(
+      (grant) =>
+        grant.permissionId === binding.permissionId &&
+        grant.resourceId === binding.resourceId,
+    )
+    .map((grant) => ({
+      grant_role_id: grant.roleId,
+      legal_entity_id: grant.legalEntityId,
+      policy_version: snapshotPolicyVersion,
+    }));
+  return rows.length > 0
+    ? rows
+    : [
+        {
+          grant_role_id: null,
+          legal_entity_id: null,
+          policy_version: snapshotPolicyVersion,
+        },
+      ];
 }
 
 function receiptBinding(
