@@ -26,6 +26,9 @@ Base: `main` `a7a4cba1`. Stops: slice 3 (ux-grammar seam).
 - The materializer preparation expires in 23 h, inside the approval's 24 h default.
 - AI drafting reuses `@north-star/operations-agent`'s adapter and key loading, `claude-opus-5-5` at medium effort, wrapped in the composition (its tool-name type is narrowed to the agent's five). Local real-model check 2026-11-17, three requests: Equipment → `addRecordType` (2.4 s), "customers need a tax exempt number" → `addField` on Party (1.5 s), two-approval workflow → `unsupported` "Approval workflow" (1.1 s).
 - The denial-recorder expected-red control is re-pointed at the per-release gateway wiring (`auth.expected-red.json`).
+- Approval prepares the inert storage plan (a new table) before verifying the candidate, the order boot uses; capability read-backs go through the runtime's one routed read ingress.
+- Activation, rollback and a boot serving a tenant release re-run `platform.provision_inventory_scope` with each scope's stored policy and the active root: the posting kernel posts only for the release a scope names. Between the swap and that call a posting refuses loudly (`INVENTORY_POSTING_RELEASE_MISMATCH`).
+- Agent terminal and web server agree: every runtime routes each request by the pointer; opening a runtime on a database whose pointer names a tenant descendant of its tip serves it and moves nothing (tested); a moved base fails loudly. AGENT-2's "terminal refuses a foreign release" must accept a tenant descendant of its tip.
 
 ## Slices
 
@@ -47,3 +50,4 @@ What: the ux-grammar skill ("Every screen renders through SurfaceRuntime… Neve
 
 - Re-applying tenant patches to a moved first-party base (ADR-0013 upgrade) fails loudly with `dev:reset`; the rebase is not built.
 - The full §8.5 builder archetype (charter: filed, not built).
+- AGENT harness: under the scope mismatch above, the receive task's scripted run answered with no refused tool call while posting nothing; only its end-state check caught it (for AGENT-2).
