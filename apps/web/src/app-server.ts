@@ -48,6 +48,7 @@ export interface SurfaceRuntimeServerOptions {
    */
   readonly readSnapshot?: <T>(
     work: (finishReads: () => Promise<void>) => Promise<T>,
+    options?: { readonly retry?: boolean },
   ) => Promise<T>;
   readonly requestWork?: RequestWorkProbe;
 }
@@ -236,9 +237,24 @@ async function handleRequest(
     }
     const result = gateways
       ? submission
-        ? await entry.run({ headers: request.headers }, (view) =>
-            submitSurfaceRuntimeIntent(view, url.href, submission, gateways),
-          )
+        ? readSnapshot && readOnlyTaskStep(submission)
+          ? // A task's open and Review read in one snapshot too; a policy
+            // change refuses the step rather than repeating it.
+            await readSnapshot(
+              () =>
+                entry.run({ headers: request.headers }, (view) =>
+                  submitSurfaceRuntimeIntent(
+                    view,
+                    url.href,
+                    submission,
+                    gateways,
+                  ),
+                ),
+              { retry: false },
+            )
+          : await entry.run({ headers: request.headers }, (view) =>
+              submitSurfaceRuntimeIntent(view, url.href, submission, gateways),
+            )
         : readSnapshot
           ? await readSnapshot((finishReads) =>
               entry.run({ headers: request.headers }, (view) =>
@@ -301,6 +317,21 @@ export function runtimeViewRefusalMessage(
     code: 'REQUEST_RUNTIME_VIEW_REFUSED' as const,
     subject: error.code,
   };
+}
+
+/**
+ * A composition task's open (no stage) or Review (`prepare`): it reads and
+ * prepares, and writes nothing. Confirm, retry and every other POST keep a
+ * transaction per read.
+ */
+function readOnlyTaskStep(
+  submission: Readonly<Record<string, string>>,
+): boolean {
+  return (
+    typeof submission.compositionAction === 'string' &&
+    submission.compositionAction !== '' &&
+    (submission.taskStage === undefined || submission.taskStage === 'prepare')
+  );
 }
 
 function sameOriginRequest(request: IncomingMessage): boolean {

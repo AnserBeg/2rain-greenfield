@@ -196,6 +196,7 @@ export interface ComposedApplicationRuntime {
    */
   readSnapshot<T>(
     work: (finishReads: () => Promise<void>) => Promise<T>,
+    options?: { readonly retry?: boolean },
   ): Promise<T>;
   close(): Promise<void>;
 }
@@ -859,7 +860,8 @@ export async function createComposedApplicationRuntime(
       queryGateway,
       readSnapshot: <T>(
         work: (finishReads: () => Promise<void>) => Promise<T>,
-      ) => withReadSnapshot(runtimePool!, work),
+        snapshotOptions?: { readonly retry?: boolean },
+      ) => withReadSnapshot(runtimePool!, work, snapshotOptions),
       releaseRoot: serving.releaseRoot,
       triggerEnabledDuringActivation: true as const,
     });

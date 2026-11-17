@@ -127,7 +127,13 @@ export async function withTrustedRequestRead<T>(
 export async function withReadSnapshot<T>(
   pool: Pool,
   work: (finishReads: () => Promise<void>) => Promise<T>,
+  /**
+   * `false` for work that is not safe to run twice (a task step's POST):
+   * a policy change then refuses the request at once.
+   */
+  options: { readonly retry?: boolean } = {},
 ): Promise<T> {
+  const attempts = options.retry === false ? 1 : 2;
   for (let attempt = 1; ; attempt += 1) {
     const snapshot = new ReadSnapshot(pool);
     try {
@@ -138,7 +144,7 @@ export async function withReadSnapshot<T>(
       return result;
     } catch (error) {
       await snapshot.abandon();
-      if (error instanceof ReadSnapshotPolicyChangedError && attempt === 1)
+      if (error instanceof ReadSnapshotPolicyChangedError && attempt < attempts)
         continue;
       throw error;
     }
