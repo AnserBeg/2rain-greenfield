@@ -23,6 +23,7 @@ import {
   openCustomizationService,
   type CustomizationServiceOptions,
 } from '@north-star/postgres-provider/customization-service';
+import { createRequestWorkProbe } from '@north-star/postgres-provider/request-work-meter';
 import { createSurfaceRuntimeServer } from '@north-star/web/app-server';
 import { COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/sales-section';
 
@@ -177,6 +178,9 @@ export async function startComposedApplication(
       },
       runtime.identityMode === 'LOCAL_DEMO' ? runtime.localDemoActors : null,
       runtime.identityMode === 'LOCAL_DEMO' ? customize : undefined,
+      // Loopback-only dev and test server: each response reports its
+      // database work as `Server-Timing` (SPEED-1).
+      { requestWork: createRequestWorkProbe() },
     );
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);

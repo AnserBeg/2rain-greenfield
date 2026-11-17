@@ -53,6 +53,7 @@ import {
 } from '@north-star/runtime';
 import { AuthenticatedRequestRuntimeEntryAdapter } from '@north-star/runtime/request-runtime-view';
 import pg from 'pg';
+import { meterPoolStatements } from './request-work-meter.js';
 
 import {
   SemanticOperationGateway,
@@ -2835,7 +2836,8 @@ export function rolePool(
   connection.password = '';
   const pool = new pg.Pool({ connectionString: connection.href, max });
   pool.on('error', () => undefined);
-  return pool;
+  // Counting only: a request's statements reach its work meter (SPEED-1).
+  return meterPoolStatements(pool);
 }
 
 function humanActorIssuer(): TrustedActorEnvelopeIssuer {
