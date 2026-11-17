@@ -129,8 +129,8 @@ export async function withAgentWorlds<T>(
 export function worldOver(
   runtime: ComposedApplicationRuntime,
   databaseName: string,
-  databaseUrl: string,
-  tenantSlug: string,
+  databaseUrl = '',
+  tenantSlug = TENANT_SLUG,
 ): AgentWorld {
   const headers = (actor: DemoActor) => ({
     headers: { cookie: `northstar-demo-actor=${actor}` },

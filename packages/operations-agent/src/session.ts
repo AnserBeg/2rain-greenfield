@@ -75,7 +75,7 @@ export interface OperationsAgentSessionOptions {
   /** The company the person works in; injected wherever a contract asks. */
   readonly companyId: string;
   /** The company's declared time zone and business-day boundary (ADR-0018). */
-  readonly businessCalendar: BusinessCalendar;
+  readonly businessCalendar?: BusinessCalendar;
   /** The instant "now" is read at; a test fixes it. */
   readonly clock?: () => Date;
   readonly approve: PlanApprover;
@@ -322,21 +322,29 @@ export class OperationsAgentSession {
           .filter(Boolean)
           .map(localName)
           .sort();
-        const today = businessDayAt(
-          (this.#options.clock ?? (() => new Date()))(),
-          this.#options.businessCalendar,
-        );
+        const calendar = this.#options.businessCalendar;
+        const today = calendar
+          ? businessDayAt(
+              (this.#options.clock ?? (() => new Date()))(),
+              calendar,
+            )
+          : null;
         const currency = declaredCurrencyDefault(view);
         return {
           mode,
-          today: {
-            date: today.date,
-            asDateTime: today.asDateTime,
-            timeZone: this.#options.businessCalendar.timeZone,
-            businessDayBoundary:
-              this.#options.businessCalendar.businessDayBoundary,
-            use: 'This is the company\'s business date. "Today" means this date and "yesterday" the day before; write a date field as the midnight-UTC instant asDateTime shows for that date.',
-          },
+          today:
+            today && calendar
+              ? {
+                  date: today.date,
+                  asDateTime: today.asDateTime,
+                  timeZone: calendar.timeZone,
+                  businessDayBoundary: calendar.businessDayBoundary,
+                  use: 'This is the company\'s business date. "Today" means this date and "yesterday" the day before; write a date field as the midnight-UTC instant asDateTime shows for that date.',
+                }
+              : {
+                  date: null,
+                  use: "The company's business date is not available to you. Do not guess today's date: use a date the person gives, and otherwise leave an optional date out or ask.",
+                },
           currency: {
             default: currency.code,
             offered: [...currency.offered],
