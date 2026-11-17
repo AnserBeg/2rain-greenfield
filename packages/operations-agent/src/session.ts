@@ -42,6 +42,7 @@ import {
 } from './catalog.js';
 import {
   businessDayAt,
+  declaredChoiceDefaults,
   declaredCurrencyDefault,
   type BusinessCalendar,
 } from './business-context.js';
@@ -353,8 +354,12 @@ export class OperationsAgentSession {
             offered: [...currency.offered],
             use:
               currency.code === null
-                ? 'No company default currency is declared. Use a currency the person names or the customer or supplier record carries; if there is none, do not invent one.'
+                ? 'No company default currency is declared. Use a currency the person names or the customer or supplier record you resolved carries; if there is none anywhere, do not invent one.'
                 : 'A customer or supplier record carrying its own default currency takes precedence over default, which applies when it has none or the person names none. Use only a code the person named or one of these.',
+          },
+          formDefaults: {
+            values: { ...declaredChoiceDefaults(view) },
+            use: 'What the screens pre-select when nobody chooses, by form field or input name (for example invoice_method, the payment method). When the person did not give such a value and no record you resolved holds one, use this default instead of asking.',
           },
           actingAs:
             'the signed-in person, with their current permissions, on channel AGENT',
