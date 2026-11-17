@@ -173,6 +173,25 @@ test(
           'string',
           JSON.stringify(named.content),
         );
+        // A fresh uuid in a free text field (a supplier reference, as a
+        // reservation number in the 18:35 run) is not a record reference.
+        const freeText = await declined.call('erp_plan', {
+          intents: [
+            {
+              ...intents[0],
+              values: {
+                ...intents[0]!.values,
+                [f('purchase_order_supplier_reference')]:
+                  '5f3c2a1e-8b7d-4c6e-9a2f-1d0e3b4c5a61',
+              },
+            },
+          ],
+        });
+        assert.equal(
+          typeof (freeText.content as { planId?: unknown }).planId,
+          'string',
+          JSON.stringify(freeText.content),
+        );
         assert.deepEqual(await snapshot(world), before);
         const plan = await declined.call('erp_plan', { intents: needsYes });
         assert.equal(plan.isError, false);

@@ -498,6 +498,15 @@ export class OperationsAgentSession {
       ];
       for (const [name, value] of references) {
         if (typeof value !== 'string' || !uuidPattern.test(value)) continue;
+        // A reference is the target, a relation, or a field named `..._id`
+        // (`item_id`, `customer_party_id`): a free text field such as a
+        // reservation number may hold a fresh uuid the screens also mint.
+        if (
+          name !== 'target' &&
+          !(step.relations && name in step.relations) &&
+          !localName(name).endsWith('_id')
+        )
+          continue;
         if (!this.#seenIds.has(value.toLowerCase()))
           return `${where}: ${name === 'target' ? 'the target record' : localName(name)} ${value} did not come from a lookup in this conversation. Find the record with erp_discover resolve or a query, then plan with the id it returns.`;
       }
@@ -1907,7 +1916,9 @@ function refValue(
       raw.fromStep < 1 ||
       raw.fromStep >= step
     )
-      throw new ToolInputError(`${where}: fromStep must name an earlier step`);
+      throw new ToolInputError(
+        `${where}: fromStep must name an earlier step (steps count from 1)`,
+      );
     return { fromStep: raw.fromStep };
   }
   throw new ToolInputError(`${where}: expected a record id or {"fromStep": n}`);
