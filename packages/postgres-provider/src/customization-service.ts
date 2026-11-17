@@ -14,7 +14,9 @@ import {
   serializeRelease,
   storageElements,
   customizationTargets,
+  draftPatchFromRequest,
   type AcknowledgementInput,
+  type DraftingModel,
   type CustomizationTargets,
   type CustomizationPatch,
   type SandboxRunnerOptions,
@@ -106,6 +108,11 @@ export interface CustomizationServiceOptions {
    * permissions at activation, exactly as boot grants first-party ones.
    */
   readonly localDemoIdentity?: true;
+  /**
+   * The model a plain-English request is drafted with (slice 4); opened on
+   * first use, so a missing key fails only that request.
+   */
+  readonly draftingModel?: () => Promise<DraftingModel>;
 }
 
 export interface CustomizationConnection {
@@ -238,6 +245,52 @@ export class PostgresCustomizationService {
           Object.freeze({ ...record, state: state(record) }),
         ),
       ),
+    });
+  }
+
+  /**
+   * Plain English to one typed patch through the drafting model, then the
+   * same draft as every other channel. The model never sees records, only the
+   * live release's customizable targets; it cannot record or activate.
+   */
+  async draftFromRequest(request: string): Promise<DraftOutcome> {
+    if (!this.options.draftingModel) {
+      return Object.freeze({
+        code: 'CUSTOMIZE_AI_NOT_CONFIGURED',
+        message:
+          'Drafting from plain English needs a model key; describe the change with the forms instead.',
+        status: 'refused' as const,
+      });
+    }
+    let model: DraftingModel;
+    try {
+      model = await this.options.draftingModel();
+    } catch (error) {
+      return Object.freeze({
+        code: 'CUSTOMIZE_AI_NOT_CONFIGURED',
+        message: error instanceof Error ? error.message : String(error),
+        status: 'refused' as const,
+      });
+    }
+    const drafted = await draftPatchFromRequest(
+      model,
+      request,
+      await this.targets(),
+    );
+    if (drafted.status === 'parsed') {
+      return this.draft(drafted.patch, 'conversationalAi');
+    }
+    if (drafted.status === 'unsupported') {
+      return Object.freeze({
+        message: drafted.message,
+        missingCapability: drafted.missingCapability,
+        status: 'unsupported' as const,
+      });
+    }
+    return Object.freeze({
+      issues: drafted.issues,
+      message: 'the model did not produce a well-formed change',
+      status: 'invalid' as const,
     });
   }
 
