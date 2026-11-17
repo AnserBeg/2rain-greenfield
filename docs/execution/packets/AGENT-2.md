@@ -1,6 +1,6 @@
 # AGENT-2 — the agent stops guessing (date, currency, permissions) and the terminal stops switching releases
 
-Status: slices 1-4 built (eval result below) · Tier: Mechanical (no Critical path) · Stops taken: none
+Status: slices 1-3 integrated (merge `18ec624a`, CI run 44087242803, PR #47); slice 4 harness code integrated, real-model eval NOT yet run (Docker engine hung) · Tier: Mechanical (no Critical path) · Stops taken: none
 Charter: [AGENT-2-charter.md](AGENT-2-charter.md) from `main` `e244abbd`. Branch `packet/AGENT-2`, base `08224859`.
 
 ## Claims
@@ -27,7 +27,7 @@ Charter: [AGENT-2-charter.md](AGENT-2-charter.md) from `main` `e244abbd`. Branch
 
 ## Gates
 
-CI: see the ledger row. Local: prettier, typecheck, eslint on changed files, `test/agent/operations-agent.test.ts` 9/9.
+CI: run 44087242803 green (14/14); earlier reds were fixed in-slice (a unit test importing the container-bearing task file; a required-currency assumption; `release root` parse of the lineage envelope; main's `customization-world.test.ts` constructing the session and `worldOver`, so `businessCalendar` is optional and says the date is unknown without it). Local: prettier, typecheck, eslint on changed files, `test/agent/operations-agent.test.ts` 9/9.
 
 ## Test it yourself
 
