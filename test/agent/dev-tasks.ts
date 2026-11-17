@@ -481,9 +481,10 @@ const NEW_TASKS: readonly DevTask[] = [
         'MED-ST',
       );
       if (!location) failures.push('no location MED-ST');
-      else if (
-        location.values[f('location_type')] !== option('location_type_store')
-      )
+      // Rule v2 (2026-11-17, after the first dev run): the release's option
+      // id is `option.store`; v1 expected `option.location_type_store` and
+      // failed a correct store. The v1 results stand as registered.
+      else if (location.values[f('location_type')] !== option('store'))
         failures.push('MED-ST is not a store');
       return verdict(failures);
     },
