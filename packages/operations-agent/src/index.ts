@@ -1,6 +1,7 @@
 export {
   OperationsAgentSession,
   type AgentRuntime,
+  type AgentScreen,
   type ApprovalRecord,
   type OperationsAgentSessionOptions,
   type PlanApprover,
@@ -25,8 +26,11 @@ export {
   type ToolCall,
 } from './model.js';
 export {
+  agentPreamble,
   runOperationsAgent,
   SpendMeter,
+  systemPrompt,
+  type AgentPreamble,
   type AgentEvent,
   type AgentRunOptions,
   type AgentRunResult,
@@ -52,3 +56,8 @@ export {
   type BusinessDay,
   type CurrencyDefault,
 } from './business-context.js';
+export {
+  businessMapStructure,
+  renderBusinessMap,
+  type BusinessMapStructure,
+} from './business-map.js';

@@ -33,6 +33,7 @@ import {
   effectKind,
   isRecord,
   localName,
+  matchId,
   operationContract,
   pinnedCatalog,
   queryContract,
@@ -46,6 +47,7 @@ import {
   declaredCurrencyDefault,
   type BusinessCalendar,
 } from './business-context.js';
+import { businessMapStructure, renderBusinessMap } from './business-map.js';
 import type { OperationsAgentToolId } from './tools.js';
 
 export type AgentRuntime = Pick<
@@ -83,6 +85,12 @@ export interface OperationsAgentSessionOptions {
   readonly mintId?: () => string;
   /** Upper bound on one tool result's serialized size, in characters. */
   readonly maximumResultCharacters?: number;
+}
+
+/** The page the person is on, as the browser reports it: a claim, not a fact. */
+export interface AgentScreen {
+  readonly surfaceId: string;
+  readonly recordId?: string | null;
 }
 
 export interface ToolOutcome {
@@ -126,9 +134,16 @@ interface StepResult {
   readonly error?: string;
 }
 
+/** The release a plan was made on: approval binds it, execution checks it. */
+interface PlanRelease {
+  readonly releaseId: string;
+  readonly contentHash: string;
+}
+
 interface StoredPlan {
   readonly planId: string;
   readonly steps: readonly PlanStep[];
+  readonly release: PlanRelease;
   readonly digest: string;
   status: 'approved' | 'declined' | 'executed' | 'failed';
   execution?: {
@@ -244,7 +259,7 @@ export class OperationsAgentSession {
     view: RequestRuntimeView,
     catalog: PinnedCatalog,
   ): Promise<{ operations: Set<string>; queries: Set<string> }> {
-    const key = `${view.principalId}|${view.entryPolicyVersion}|${view.release.releaseId}`;
+    const key = `${view.principalId}|${view.entryPolicyVersion}|${view.release.releaseId}|${view.release.contentHash}`;
     let known = this.#usable.get(key);
     if (!known) {
       known = new Map();
@@ -299,6 +314,72 @@ export class OperationsAgentSession {
     };
   }
 
+  /** Business date, currency and screen defaults, as context reports them. */
+  #facts(view: RequestRuntimeView): Record<string, ImmutableJsonValue> {
+    const calendar = this.#options.businessCalendar;
+    const now = (this.#options.clock ?? (() => new Date()))();
+    const today = calendar ? businessDayAt(now, calendar) : null;
+    const currency = declaredCurrencyDefault(view);
+    return {
+      today:
+        today && calendar
+          ? {
+              date: today.date,
+              asDateTime: today.asDateTime,
+              now: now.toISOString(),
+              timeZone: calendar.timeZone,
+              businessDayBoundary: calendar.businessDayBoundary,
+              use: 'This is the company\'s business date. "Today" means this date and "yesterday" the day before; write a calendar-date field as the midnight-UTC instant asDateTime shows for that date, but a field for the moment something is posted or happens (an effective or posting time, a shipment, a receipt) as now: a posting dated midnight can fall before stock that arrived today.',
+            }
+          : {
+              date: null,
+              use: "The company's business date is not available to you. Do not guess today's date: use a date the person gives, and otherwise leave an optional date out or ask.",
+            },
+      currency: {
+        default: currency.code,
+        offered: [...currency.offered],
+        use:
+          currency.code === null
+            ? 'No company default currency is declared. Use a currency the person names or the customer or supplier record you resolved carries; if there is none anywhere, do not invent one.'
+            : 'A customer or supplier record carrying its own default currency takes precedence over default, which applies when it has none or the person names none. Use only a code the person named or one of these.',
+      },
+      formDefaults: {
+        values: { ...declaredChoiceDefaults(view) },
+        use: 'What the screens pre-select when nobody chooses, by form field or input name (for example invoice_method, the payment method). When the person did not give such a value and no record you resolved holds one, use this default instead of asking.',
+      },
+    };
+  }
+
+  /**
+   * The business map for the acting person: the release's record types,
+   * states, operations, queries and screen recipes, filtered to what the
+   * person may use now. The unfiltered structure is cached by release root;
+   * the filtered text is built per call and never shared.
+   */
+  businessMap(): Promise<string> {
+    return this.#run(async (view) => {
+      const catalog = pinnedCatalog(view);
+      const usable = await this.#usableIds(view, catalog);
+      return renderBusinessMap(businessMapStructure(view), usable);
+    });
+  }
+
+  /**
+   * What changes between sessions and turns, kept out of the cached prompt:
+   * the business date and now, the default currency, the screens' defaults,
+   * and the screen the person is on. A screen is named only when the release
+   * declares it; its record id is the page's claim until read.
+   */
+  turnContext(screen?: AgentScreen | null): Promise<string> {
+    return this.#run((view) => {
+      const facts = this.#facts(view);
+      const lines = [`Context (JSON): ${JSON.stringify(facts)}`];
+      const named = screen ? screenFacts(view, screen) : null;
+      if (named) lines.push(named);
+      return Promise.resolve(lines.join('\n'));
+    });
+  }
+
   // ---------------------------------------------------------------- discover
 
   #discover(
@@ -323,44 +404,9 @@ export class OperationsAgentSession {
           .filter(Boolean)
           .map(localName)
           .sort();
-        const calendar = this.#options.businessCalendar;
-        const today = calendar
-          ? businessDayAt(
-              (this.#options.clock ?? (() => new Date()))(),
-              calendar,
-            )
-          : null;
-        const currency = declaredCurrencyDefault(view);
         return {
           mode,
-          today:
-            today && calendar
-              ? {
-                  date: today.date,
-                  asDateTime: today.asDateTime,
-                  now: (
-                    this.#options.clock ?? (() => new Date())
-                  )().toISOString(),
-                  timeZone: calendar.timeZone,
-                  businessDayBoundary: calendar.businessDayBoundary,
-                  use: 'This is the company\'s business date. "Today" means this date and "yesterday" the day before; write a calendar-date field as the midnight-UTC instant asDateTime shows for that date, but a field for the moment something is posted or happens (an effective or posting time, a shipment, a receipt) as now: a posting dated midnight can fall before stock that arrived today.',
-                }
-              : {
-                  date: null,
-                  use: "The company's business date is not available to you. Do not guess today's date: use a date the person gives, and otherwise leave an optional date out or ask.",
-                },
-          currency: {
-            default: currency.code,
-            offered: [...currency.offered],
-            use:
-              currency.code === null
-                ? 'No company default currency is declared. Use a currency the person names or the customer or supplier record you resolved carries; if there is none anywhere, do not invent one.'
-                : 'A customer or supplier record carrying its own default currency takes precedence over default, which applies when it has none or the person names none. Use only a code the person named or one of these.',
-          },
-          formDefaults: {
-            values: { ...declaredChoiceDefaults(view) },
-            use: 'What the screens pre-select when nobody chooses, by form field or input name (for example invoice_method, the payment method). When the person did not give such a value and no record you resolved holds one, use this default instead of asking.',
-          },
+          ...this.#facts(view),
           actingAs:
             'the signed-in person, with their current permissions, on channel AGENT',
           company: 'one company, supplied by the host',
@@ -527,14 +573,15 @@ export class OperationsAgentSession {
   ): Promise<ImmutableJsonValue> {
     return this.#run(async (view) => {
       const catalog = pinnedCatalog(view);
-      const queryId = requiredText(input.queryId, 'queryId');
-      const query = catalog.query(queryId);
+      const asked = requiredText(input.queryId, 'queryId');
+      const query = catalog.query(asked);
       if (!query)
         return {
-          queryId,
+          queryId: asked,
           outcome: 'unsupported',
           reason: 'no registered query has this id in the pinned release',
         };
+      const queryId = query.queryId;
       const args = isRecord(input.arguments) ? input.arguments : {};
       for (const key of Object.keys(args))
         if (hostOwnedKeys.has(key))
@@ -629,9 +676,17 @@ export class OperationsAgentSession {
     nextCursor: string | null;
   }> {
     const presetView = request.view
-      ? catalog
-          .preset(query.queryId)
-          ?.views?.find((candidate) => candidate.viewId === request.view)
+      ? catalog.preset(query.queryId)?.views?.find(
+          (candidate) =>
+            candidate.viewId ===
+            matchId(
+              request.view!,
+              (catalog.preset(query.queryId)?.views ?? []).map(
+                (view) => view.viewId,
+              ),
+              localName(query.queryId),
+            ),
+        )
       : undefined;
     if (request.view && !presetView)
       throw new ToolInputError(`no view ${request.view} on ${query.queryId}`);
@@ -644,16 +699,28 @@ export class OperationsAgentSession {
           (typeof filter.value !== 'string' && typeof filter.value !== 'number')
         )
           throw new ToolInputError('a filter is {"fieldId", "value"}');
-        return { fieldId: filter.fieldId, value: String(filter.value) };
+        return {
+          fieldId:
+            matchId(
+              filter.fieldId,
+              query.selections.map((selection) => selection.fieldId),
+              localName(query.sourceEntityId),
+            ) ?? filter.fieldId,
+          value: String(filter.value),
+        };
       }),
     ];
     if (filters.length > 4)
       throw new ToolInputError('at most four exact filters');
     const parent = request.parent
       ? {
-          relationId: requiredText(
-            request.parent.relationId,
-            'parent.relationId',
+          relationId: ((asked: string) =>
+            matchId(
+              asked,
+              relationIds(catalog),
+              localName(query.sourceEntityId),
+            ) ?? asked)(
+            requiredText(request.parent.relationId, 'parent.relationId'),
           ),
           recordId: requiredText(request.parent.recordId, 'parent.recordId'),
         }
@@ -743,7 +810,8 @@ export class OperationsAgentSession {
           };
       }
       const planId = this.#mint();
-      const digest = planDigest(steps);
+      const release = releaseOf(view);
+      const digest = planDigest(steps, release);
       const presentation: PlanForApproval = {
         planId,
         summary: `${String(steps.length)} step(s)`,
@@ -768,6 +836,7 @@ export class OperationsAgentSession {
       this.#plans.set(planId, {
         planId,
         steps,
+        release,
         digest,
         status: approved ? 'approved' : 'declined',
       });
@@ -809,6 +878,7 @@ export class OperationsAgentSession {
     const fields = new Map(
       (contract?.fields ?? []).map((field) => [field.fieldId, field]),
     );
+    const prefix = localName(catalog.operationEntity(operation));
     const assigned = new Set(
       contract?.assignedFields?.map((field) => field.fieldId) ?? [],
     );
@@ -820,14 +890,17 @@ export class OperationsAgentSession {
       if (!isRecord(bag))
         throw new ToolInputError(`${where}: ${name} must be an object`);
       const out: Record<string, ImmutableJsonValue> = {};
-      for (const [fieldId, raw] of Object.entries(bag)) {
+      for (const [asked, raw] of Object.entries(bag)) {
+        const fieldId = matchId(asked, fields.keys(), prefix) ?? asked;
         const field = fields.get(fieldId);
         if (!field || assigned.has(fieldId))
           throw new ToolInputError(
-            `${where}: ${fieldId} is not a writable field of this operation`,
+            `${where}: ${asked} is not a writable field of this operation`,
           );
         out[fieldId] = normalizeValue(
-          raw,
+          typeof raw === 'string' && field.enumOptionIds.length > 0
+            ? (matchId(raw, field.enumOptionIds, localName(fieldId)) ?? raw)
+            : raw,
           field.fieldKind,
           field.enumOptionIds,
           step,
@@ -863,10 +936,11 @@ export class OperationsAgentSession {
       );
       const given = isRecord(intent.relations) ? intent.relations : {};
       relations = {};
-      for (const [relationId, raw] of Object.entries(given)) {
+      for (const [asked, raw] of Object.entries(given)) {
+        const relationId = matchId(asked, declared.keys(), prefix) ?? asked;
         if (!declared.has(relationId))
           throw new ToolInputError(
-            `${where}: ${relationId} is not a relation of this operation`,
+            `${where}: ${asked} is not a relation of this operation`,
           );
         relations[relationId] = refValue(raw, step, `${where} ${relationId}`);
       }
@@ -960,13 +1034,17 @@ export class OperationsAgentSession {
       throw new ToolInputError(
         'the person did not approve this plan; it cannot run',
       );
-    if (planDigest(plan.steps) !== plan.digest)
+    if (planDigest(plan.steps, plan.release) !== plan.digest)
       throw new ToolInputError(
         'the plan changed after approval; it cannot run',
       );
+    // Plan §9.4: a release change before execution forces a replan.
+    const now = await this.#run((view) => Promise.resolve(releaseOf(view)));
+    if (!sameRelease(now, plan.release)) return replanResult(plan, now, []);
     const results: StepResult[] = [];
     const latestRevision = new Map<string, number>();
     let stopped = false;
+    let releaseChanged: PlanRelease | null = null;
     for (const step of plan.steps) {
       if (stopped) {
         results.push({
@@ -1003,8 +1081,15 @@ export class OperationsAgentSession {
             ? { arguments: step.arguments }
             : {}),
         };
-        const result = await this.#run((view) =>
-          this.#options.runtime.operationGateway.invoke(
+        // Checked in the same view the step runs in: a release that changed
+        // between two steps stops the plan before the next one runs.
+        let changedTo: PlanRelease | null = null;
+        const result = await this.#run((view) => {
+          if (!sameRelease(releaseOf(view), plan.release)) {
+            changedTo = releaseOf(view);
+            return Promise.resolve(null);
+          }
+          return this.#options.runtime.operationGateway.invoke(
             view,
             {
               schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
@@ -1024,8 +1109,22 @@ export class OperationsAgentSession {
               view,
               'AGENT',
             ),
-          ),
-        );
+          );
+        });
+        if (changedTo || !result) {
+          stopped = true;
+          releaseChanged = changedTo;
+          results.push({
+            step: step.step,
+            operationId: step.operation.operationId,
+            outcome: 'not-run',
+            recordId: null,
+            revision: null,
+            error:
+              'the active release changed before this step; it did not run',
+          });
+          continue;
+        }
         if (result.outcome !== 'succeeded') {
           stopped = true;
           results.push({
@@ -1070,6 +1169,7 @@ export class OperationsAgentSession {
     }
     plan.execution = { key, results };
     plan.status = stopped ? 'failed' : 'executed';
+    if (releaseChanged) return replanResult(plan, releaseChanged, results);
     return executionReport(plan);
   }
 
@@ -1126,23 +1226,43 @@ export class OperationsAgentSession {
             mismatches.push(
               `state is not ${localName(String(effect.toStateId))}`,
             );
-          // A later step of this plan that acted on the same record (a post
-          // after a create) legitimately changed it; its own read-back is
-          // checked in its own row.
-          const changedLater = execution.results.some(
-            (later) =>
-              later.step > step.step && later.recordId === result.recordId,
+          // A field a later step of this plan wrote legitimately changed;
+          // its own read-back is checked in its own row. A later registered
+          // capability or state transition on the same record may change any
+          // field (a post after a create), so it covers them all.
+          const later = plan.steps.filter((other) => {
+            const otherResult = execution.results.find(
+              (entry) => entry.step === other.step,
+            );
+            return (
+              other.step > step.step &&
+              otherResult?.recordId === result.recordId
+            );
+          });
+          const opaqueLater = later.some((other) =>
+            ['registeredCapabilityEffect', 'transitionStateEffect'].includes(
+              effectKind(other.operation),
+            ),
           );
-          for (const [fieldId, expected] of changedLater
+          const writtenLater = new Set(
+            later.flatMap((other) => [
+              ...Object.keys(other.values ?? {}),
+              ...Object.keys(other.patch ?? {}),
+            ]),
+          );
+          for (const [fieldId, expected] of opaqueLater
             ? []
-            : Object.entries(step.values ?? {})) {
+            : Object.entries({ ...step.values, ...step.patch })) {
+            if (writtenLater.has(fieldId)) continue;
             const resolved = resolveRefs({ v: expected }, execution.results).v;
-            if (
-              resolved !== null &&
-              resolved !== undefined &&
-              fieldId in record.values &&
-              !sameValue(record.values[fieldId], resolved)
-            )
+            if (resolved === undefined) continue;
+            const stored = record.values[fieldId];
+            if (resolved === null) {
+              if (stored !== null && stored !== undefined)
+                mismatches.push(`${fieldId} reads back differently`);
+              continue;
+            }
+            if (fieldId in record.values && !sameValue(stored, resolved))
               mismatches.push(`${fieldId} reads back differently`);
           }
         }
@@ -1187,6 +1307,57 @@ export class OperationsAgentSession {
 }
 
 // ------------------------------------------------------------------ helpers
+
+/** The screen in words, only when the pinned release declares that surface. */
+function screenFacts(
+  view: RequestRuntimeView,
+  screen: AgentScreen,
+): string | null {
+  const surfaces =
+    (
+      view.projections.surface.payload as unknown as {
+        surfaces?: readonly {
+          surfaceId: string;
+          label?: string;
+          archetype?: string;
+          dataSourceQueryId?: string;
+        }[];
+      }
+    ).surfaces ?? [];
+  const surface = surfaces.find(
+    (candidate) => candidate.surfaceId === screen.surfaceId,
+  );
+  if (!surface) return null;
+  const catalog = pinnedCatalog(view);
+  const entity = surface.dataSourceQueryId
+    ? catalog.query(surface.dataSourceQueryId)?.sourceEntityId
+    : undefined;
+  const record =
+    typeof screen.recordId === 'string' && uuidPattern.test(screen.recordId)
+      ? screen.recordId
+      : null;
+  return `Screen: the person is on "${surface.label ?? localName(surface.surfaceId)}" (${surface.archetype ?? 'page'}${entity ? `, ${localName(entity)}` : ''})${record ? `, showing record ${record}; "this", "it" and "here" mean that record` : ''}.`;
+}
+
+const relationIdSets = new WeakMap<PinnedCatalog, readonly string[]>();
+
+/** Every relation id an operation of the release declares. */
+function relationIds(catalog: PinnedCatalog): readonly string[] {
+  let ids = relationIdSets.get(catalog);
+  if (!ids) {
+    ids = [
+      ...new Set(
+        catalog.operations.flatMap((operation) =>
+          (operation.inputContract?.relationInputs ?? []).map(
+            (relation) => relation.relationId,
+          ),
+        ),
+      ),
+    ];
+    relationIdSets.set(catalog, ids);
+  }
+  return ids;
+}
 
 function executionReport(plan: StoredPlan): ImmutableJsonValue {
   const results = plan.execution!.results;
@@ -1381,11 +1552,49 @@ function sameValue(
   return JSON.stringify(stored) === JSON.stringify(expected);
 }
 
-function planDigest(steps: readonly PlanStep[]): string {
+function releaseOf(view: RequestRuntimeView): PlanRelease {
+  return {
+    releaseId: view.release.releaseId,
+    contentHash: view.release.contentHash,
+  };
+}
+
+function sameRelease(a: PlanRelease, b: PlanRelease): boolean {
+  return a.releaseId === b.releaseId && a.contentHash === b.contentHash;
+}
+
+/**
+ * The typed, recoverable answer when the active release changed after the
+ * plan was made: nothing more runs; what already committed is listed.
+ */
+function replanResult(
+  plan: StoredPlan,
+  now: PlanRelease,
+  results: readonly StepResult[],
+): ImmutableJsonValue {
+  const committed = results.filter((result) => result.outcome === 'succeeded');
+  return {
+    operationSessionId: plan.planId,
+    outcome: 'replan',
+    reason: `the active release changed after this plan was made (${plan.release.contentHash.slice(0, 12)} is now ${now.contentHash.slice(0, 12)})`,
+    committed: committed.map((result) => ({
+      step: result.step,
+      operationId: result.operationId,
+      ...(result.recordId ? { recordId: result.recordId } : {}),
+    })),
+    next:
+      committed.length > 0
+        ? 'the listed steps stay committed; plan the rest again on the current release with erp_plan, then ask the person if it needs a yes'
+        : 'nothing was written; plan again with erp_plan on the current release',
+  };
+}
+
+function planDigest(steps: readonly PlanStep[], release: PlanRelease): string {
   return createHash('sha256')
     .update(
-      JSON.stringify(
-        steps.map((step) => ({
+      JSON.stringify({
+        release,
+        steps: steps.map((step) => ({
           step: step.step,
           operationId: step.operation.operationId,
           recordId: step.recordId,
@@ -1395,7 +1604,7 @@ function planDigest(steps: readonly PlanStep[]): string {
           patch: step.patch ?? null,
           arguments: step.arguments ?? null,
         })),
-      ),
+      }),
     )
     .digest('hex');
 }

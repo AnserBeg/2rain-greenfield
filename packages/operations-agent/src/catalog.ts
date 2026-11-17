@@ -111,8 +111,11 @@ export function pinnedCatalog(view: RequestRuntimeView): PinnedCatalog {
     operations,
     queries,
     presets: agent.listPresets ?? [],
-    operation: (id) => operationById.get(id),
-    query: (id) => queryById.get(id),
+    operation: (id) =>
+      operationById.get(id) ??
+      operationById.get(matchId(id, operationById.keys()) ?? ''),
+    query: (id) =>
+      queryById.get(id) ?? queryById.get(matchId(id, queryById.keys()) ?? ''),
     preset: (id) => presetById.get(id),
     operationEntity: (operation) =>
       'entity' in operation.effect
@@ -339,4 +342,27 @@ export function isRecord(
   value: unknown,
 ): value is Record<string, ImmutableJsonValue> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The full id a model-written name stands for, among `candidates`: the id
+ * itself, else the one candidate whose local name is the text, else the one
+ * whose local name is `<prefix>_<text>` (the business map writes field ids
+ * without their record type's prefix). Anything else is undefined: a name
+ * that is not exactly one candidate is never guessed.
+ */
+export function matchId(
+  text: string,
+  candidates: Iterable<string>,
+  prefix?: string,
+): string | undefined {
+  const all = [...candidates];
+  if (all.includes(text)) return text;
+  if (text.includes(':')) return undefined;
+  for (const wanted of prefix ? [text, `${prefix}_${text}`] : [text]) {
+    const found = all.filter((id) => localName(id) === wanted);
+    if (found.length === 1) return found[0];
+    if (found.length > 1) return undefined;
+  }
+  return undefined;
 }

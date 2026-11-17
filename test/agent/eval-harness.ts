@@ -23,6 +23,7 @@ import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
 import {
+  agentPreamble,
   anthropicModel,
   DEFAULT_ANTHROPIC_MODEL,
   loadModelKey,
@@ -52,6 +53,8 @@ async function main(): Promise<void> {
       cap: { type: 'string', default: '20' },
       tasks: { type: 'string', default: '1,2,3,4,5,6,7,8,9,10' },
       out: { type: 'string', default: 'docs/execution/evidence' },
+      // `off` runs without the business map (the pre-AGENT-3 start).
+      preamble: { type: 'string', default: 'on' },
     },
   });
 
@@ -100,6 +103,8 @@ async function main(): Promise<void> {
     cacheWrite: number;
     tokensOut: number;
     usd: number;
+    seconds: number;
+    calls: Record<string, number>;
     answer: string;
     record: string;
   }
@@ -136,6 +141,8 @@ async function main(): Promise<void> {
           cacheWrite: 0,
           tokensOut: 0,
           usd: 0,
+          seconds: 0,
+          calls: {},
           answer: '',
           record,
         });
@@ -170,11 +177,15 @@ async function main(): Promise<void> {
             return true;
           },
         });
+        const calls: Record<string, number> = {};
         const run = await runOperationsAgent({
           model,
           session,
           request,
           meter,
+          ...(args.preamble === 'off'
+            ? {}
+            : { preamble: await agentPreamble(session) }),
           onEvent: (event) => {
             if (event.kind === 'model')
               void append({
@@ -187,6 +198,10 @@ async function main(): Promise<void> {
                 tokensOut: event.usage.outputTokens,
                 usd: event.usd,
               });
+            if (event.kind === 'tool') {
+              const name = callName(event.name, event.input);
+              calls[name] = (calls[name] ?? 0) + 1;
+            }
             if (event.kind === 'tool')
               void append({
                 kind: 'tool',
@@ -225,11 +240,13 @@ async function main(): Promise<void> {
           cacheWrite: run.usage.cacheWriteTokens,
           tokensOut: run.usage.outputTokens,
           usd: run.usd,
+          seconds: run.seconds,
+          calls,
           answer: run.answer,
           record,
         });
         log(
-          `  ${verdict.pass ? 'PASS' : 'FAIL'} ${verdict.reason} · ${String(run.toolCalls)} tool calls · $${run.usd.toFixed(4)} (total $${meter.usd.toFixed(4)})`,
+          `  ${verdict.pass ? 'PASS' : 'FAIL'} ${verdict.reason} · ${String(run.toolCalls)} tool calls (${String(discoveryCalls(calls))} discovery) · ${run.seconds.toFixed(1)} s · $${run.usd.toFixed(4)} (total $${meter.usd.toFixed(4)})`,
         );
       } catch (error) {
         const message =
@@ -250,6 +267,8 @@ async function main(): Promise<void> {
           cacheWrite: 0,
           tokensOut: 0,
           usd: 0,
+          seconds: 0,
+          calls: {},
           answer: '',
           record,
         });
@@ -265,10 +284,11 @@ async function main(): Promise<void> {
   const relative = (path: string) => path.slice(outDirectory.length + 1);
   const cell = (text: string) =>
     text.replaceAll('|', '\\|').replaceAll('\n', ' ');
+  const ran = rows.filter((row) => row.stop !== 'not-run');
   const report = [
     `# Agent eval — ${date}`,
     '',
-    `Model \`${model.modelId}\` (effort ${String(args.effort)}), acting as the demo buyer on channel AGENT. One attempt per task, each on a fresh database; the harness granted every confirmation it was asked for and recorded it.`,
+    `Model \`${model.modelId}\` (effort ${String(args.effort)}), acting as the demo buyer on channel AGENT, business map ${args.preamble === 'off' ? 'off' : 'on'}. One attempt per task, each on a fresh database; the harness granted every confirmation it was asked for and recorded it. Seconds are the agent run on a monotonic clock (arrangement excluded).`,
     `Prices (USD per million tokens) from ${String(args['price-source'])}, read ${String(args['price-date'])}: input ${String(prices.input)}, output ${String(prices.output)}, cache read ${String(prices.cacheRead)}, cache write ${String(prices.cacheWrite)}. Spend cap USD ${String(cap)}.`,
     '',
     '| task | result | stop | tool calls | approvals | tokens in (uncached / cache read / cache write) | tokens out | USD | reason |',
@@ -279,8 +299,23 @@ async function main(): Promise<void> {
     ),
     '',
     `**Success rate:** ${String(passed)} of ${String(rows.length)}.`,
+    `**Median discovery calls per task** (every erp_discover call): ${String(median(ran.map((row) => discoveryCalls(row.calls))))}. **Median seconds per task:** ${median(ran.map((row) => row.seconds)).toFixed(1)}. **Median tool calls per task:** ${String(median(ran.map((row) => row.toolCalls)))}.`,
     `**Total spend:** USD ${total.toFixed(4)}.`,
     `**Cost per completed task:** ${passed > 0 ? `USD ${(total / passed).toFixed(4)}` : 'undefined (no task passed)'}.`,
+    '',
+    '## Tool calls by tool and mode',
+    '',
+    '| task | seconds | calls by tool and mode |',
+    '|---|---|---|',
+    ...rows.map(
+      (row) =>
+        `| ${String(row.task)} | ${row.seconds.toFixed(1)} | ${Object.entries(
+          row.calls,
+        )
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([name, count]) => `${name} ${String(count)}`)
+          .join(', ')} |`,
+    ),
     '',
     '## Final answers',
     '',
@@ -318,4 +353,31 @@ function loggedArguments(input: unknown): unknown {
       /key$/iu.test(name) ? [name, '[given]'] : [name, value],
     ),
   );
+}
+
+/** `erp_discover:search`, `erp_query`, ...: a call named by tool and mode. */
+export function callName(tool: string, input: unknown): string {
+  const mode =
+    tool === 'erp_discover' &&
+    typeof input === 'object' &&
+    input !== null &&
+    typeof (input as { mode?: unknown }).mode === 'string'
+      ? (input as { mode: string }).mode
+      : null;
+  return mode ? `${tool}:${mode}` : tool;
+}
+
+function discoveryCalls(calls: Record<string, number>): number {
+  return Object.entries(calls)
+    .filter(([name]) => name.startsWith('erp_discover'))
+    .reduce((sum, [, count]) => sum + count, 0);
+}
+
+function median(values: readonly number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1
+    ? sorted[middle]!
+    : (sorted[middle - 1]! + sorted[middle]!) / 2;
 }
