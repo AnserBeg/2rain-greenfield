@@ -18,7 +18,7 @@ Charter: [AGENT-2-charter.md](AGENT-2-charter.md) from `main` `e244abbd`. Branch
 - Default currency: the domain holds no company-level setting. It is read from the pinned surface projection's declared editor default for `*_currency` fields (CAD today); a customer's or supplier's own default currency takes precedence and is read from its record. More than one distinct default, or none, reports `null`.
 - When neither the request, context nor a record gives a currency or date, the system prompt tells the model to leave an optional field out and, for a required one, plan nothing and ask in its answer.
 - Eligibility: the operation gateway's existing `previewTaskEligibility` (plans are confirmed) and a new `SemanticQueryGateway.previewEligibility` (a disclosed small bridge in `packages/runtime`; no read, no denial row), cached per principal, policy version and release; a failed preview withholds the id.
-- Release guard: new read-only `readActiveReleaseRoot` in `packages/postgres-provider` (a disclosed bridge; apps/api has no `pg`), plain refusal text; slices 1-3 merged together because their edits share files.
+- Release guard: a tenantAuthored descendant of this checkout's release matches (same parent-chain walk as `tenantDescendantOfLineageTip`); a descendant of another base says a customization of a different application version is active. New read-only `readActiveRelease` in `packages/postgres-provider` (a disclosed bridge; apps/api has no `pg`), plain refusal text; slices 1-3 merged together because their edits share files.
 - Task 3 rule v2 (`task3AnswerFailures`, registered 2026-11-17, applies from the next run): the paid invoice may be named when called paid. The 2026-11-17 result stands as registered.
 
 ## Slices
@@ -35,4 +35,5 @@ Start `corepack pnpm dev`. Then `NORTH_STAR_AGENT_KEY_FILE=/mnt/c/Users/rvham/re
 
 ## Filed
 
+- CUSTOMIZE (harness): under a scope mismatch the receive task's scripted run answered with no refused tool call while posting nothing; only its end-state check caught it.
 - A plan whose last step fails still leaves earlier creates as drafts (no compensation; out of scope).

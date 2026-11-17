@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
+import { checkTerminalRelease } from '../../apps/api/src/agent-release-guard.js';
 import {
   openComposedApplicationRuntime,
   startComposedApplication,
@@ -102,6 +103,26 @@ test(
             drafted.releaseRoot,
           );
 
+          // The terminal's release guard (AGENT-2): a customization built on
+          // this checkout's release matches; one built on another does not.
+          const guarded = { databaseUrl, tenantSlug };
+          assert.deepEqual(
+            await checkTerminalRelease({
+              ...guarded,
+              compiledRoot: firstParty,
+            }),
+            { kind: 'match' },
+          );
+          const foreignBase = await checkTerminalRelease({
+            ...guarded,
+            compiledRoot: 'cd'.repeat(32),
+          });
+          assert.equal(foreignBase.kind, 'differs');
+          assert.match(
+            JSON.stringify(foreignBase),
+            /customization of a different application version/u,
+          );
+
           // Receiving and shipping post through executors pinned per release.
           // Task 7 asserts an absolute on-hand figure, so it runs first.
           await runTask(world, 7);
@@ -109,6 +130,13 @@ test(
 
           const rolledBack = await opened.service.rollback();
           assert.equal(rolledBack.releaseRoot, firstParty);
+          assert.deepEqual(
+            await checkTerminalRelease({
+              ...guarded,
+              compiledRoot: firstParty,
+            }),
+            { kind: 'match' },
+          );
           // Each reference script replays its own fixed idempotency key, so
           // the tasks after the rollback are ones not yet run here.
           await runTask(world, 6);
