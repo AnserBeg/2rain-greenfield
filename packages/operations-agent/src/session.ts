@@ -337,9 +337,12 @@ export class OperationsAgentSession {
               ? {
                   date: today.date,
                   asDateTime: today.asDateTime,
+                  now: (
+                    this.#options.clock ?? (() => new Date())
+                  )().toISOString(),
                   timeZone: calendar.timeZone,
                   businessDayBoundary: calendar.businessDayBoundary,
-                  use: 'This is the company\'s business date. "Today" means this date and "yesterday" the day before; write a date field as the midnight-UTC instant asDateTime shows for that date.',
+                  use: 'This is the company\'s business date. "Today" means this date and "yesterday" the day before; write a calendar-date field as the midnight-UTC instant asDateTime shows for that date, but a field for the moment something is posted or happens (an effective or posting time, a shipment, a receipt) as now: a posting dated midnight can fall before stock that arrived today.',
                 }
               : {
                   date: null,

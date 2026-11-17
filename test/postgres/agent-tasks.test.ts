@@ -20,7 +20,7 @@ import {
   compiledReleaseRoot,
 } from '../../apps/api/src/agent-release-guard.js';
 import { readCompiledApplication } from '../../apps/api/src/composition-root.js';
-import { readActiveReleaseRoot } from '../../packages/postgres-provider/src/active-release-root.js';
+import { readActiveRelease } from '../../packages/postgres-provider/src/active-release-root.js';
 import {
   BUSINESS_CALENDAR,
   COMPANY,
@@ -341,8 +341,9 @@ test(
           databaseUrl: world.databaseUrl,
           tenantSlug: world.tenantSlug,
         };
-        const served = await readActiveReleaseRoot(target);
-        assert.equal(served, compiledRoot);
+        const served = await readActiveRelease(target);
+        assert.equal(served?.releaseRoot, compiledRoot);
+        assert.equal(served?.customized, false);
         assert.deepEqual(
           await checkTerminalRelease({ ...target, compiledRoot }),
           { kind: 'match' },
@@ -360,7 +361,7 @@ test(
             'u',
           ),
         );
-        assert.equal(await readActiveReleaseRoot(target), served);
+        assert.deepEqual(await readActiveRelease(target), served);
         assert.equal(
           (
             await checkTerminalRelease({
