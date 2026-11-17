@@ -1,0 +1,70 @@
+import { expect, test } from '@playwright/test';
+
+import { startComposedApplication } from '../../../api/src/composition-root.js';
+import { withEphemeralPostgres } from '../../../../test/helpers/postgres.js';
+
+import {
+  DatabaseMeter,
+  DatabaseStatistics,
+  invoiceAndPay,
+  LoopScorecard,
+  walkToShipped,
+  writeScorecard,
+} from './loop-scorecard.js';
+
+test.use({ viewport: { width: 1440, height: 900 } });
+
+/**
+ * LOOP-1's scorecard: an office person walks the purchase order -> inventory
+ * -> sales order loop in the composed application on a fresh distributor
+ * seed, and every click, page load, typed field and raw code is counted per
+ * step. The table is printed (LOOP_SCORECARD ...) and, when
+ * LOOP_SCORECARD_OUT names a path, written there.
+ */
+test('LOOP-1 scorecard: purchase order to stock to a shipped, invoiced and paid sales order', async ({
+  page,
+}) => {
+  test.setTimeout(1_200_000);
+  await withEphemeralPostgres(
+    'loop-scorecard-browser',
+    async ({ connection, pool }) => {
+      const application = await startComposedApplication({
+        databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+        port: 0,
+        seedProfile: 'distributor',
+        tenantSlug: 'loop-scorecard-browser',
+      });
+      // The database work of every request, counted at the application's
+      // PostgreSQL client, and the database's own count per step.
+      const meter = new DatabaseMeter();
+      const statisticsClient = await pool.connect();
+      meter.ignored.add(statisticsClient);
+      meter.install();
+      const card = new LoopScorecard(page, {
+        meter,
+        statistics: new DatabaseStatistics(statisticsClient),
+      });
+      try {
+        await walkToShipped(card, application.baseUrl);
+        const fromOrder = await invoiceAndPay(card);
+        // Slice 2 flips this: once invoiced, the order offers the payment as
+        // its next action. Until then it is recorded on the invoice's page.
+        expect(
+          fromOrder,
+          "payment recorded as the order's next action (expected false until LOOP-1 slice 2)",
+        ).toBe(false);
+      } finally {
+        card.abandon('not reached');
+        const table = writeScorecard(
+          card,
+          process.env.LOOP_SCORECARD_OUT,
+          `Loop scorecard — ${new Date().toISOString().slice(0, 10)}`,
+        );
+        console.log(`LOOP_SCORECARD\n${table}`);
+        meter.uninstall();
+        statisticsClient.release();
+        await application.close();
+      }
+    },
+  );
+});
