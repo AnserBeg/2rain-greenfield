@@ -52,11 +52,11 @@ test('LOOP-1 scorecard: purchase order to stock to a shipped, invoiced and paid 
           await invoiceAndPay(card),
           "payment recorded as the order's next action",
         ).toBe(true);
-        // The memo slice: once the first page has read the release, no
-        // request parses the operation catalog or surface manifest again.
+        // The memo slice: once the home page has read the release, no request
+        // of the loop parses the operation catalog or surface manifest again.
         expect(
           card.requests
-            .slice(1)
+            .filter((request) => request.step !== '(start)')
             .filter(
               (request) =>
                 request.parses.operationCatalog +
