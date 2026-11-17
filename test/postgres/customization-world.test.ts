@@ -42,6 +42,7 @@ import { ids, openingStock, snapshot } from '../agent/arrange.js';
 import { referenceScript } from '../agent/reference-scripts.js';
 import { TASKS } from '../agent/tasks.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
+import type { MintedUuid } from '../../packages/platform-runtime/src/index.js';
 import type pg from 'pg';
 
 const equipment = JSON.parse(
@@ -241,6 +242,58 @@ test(
           );
           await assertScopesNamePointer(pool, runtime);
 
+          // Review B1: A -> first-party rollback cut after its swap commits,
+          // before it verifies; then a restart. Boot's early scope
+          // provisioning must not write the first-party root over A's: the
+          // scopes keep A's root and posting refuses until a verified
+          // reconcile.
+          await opened.service.approve(drafted.patchId);
+          await opened.service.activate(drafted.patchId);
+          await assertScopesNamePointer(pool, runtime);
+          const cutRollbackVerification = await openCustomizationService({
+            ...serviceOptions,
+            activationKernel: (runtimePool) =>
+              new CutBeforeVerification(runtimePool),
+          });
+          let cutRollbackAttempt: string | undefined;
+          try {
+            await assert.rejects(
+              cutRollbackVerification.service.rollback(),
+              /cut between the swap and its verification/u,
+            );
+            cutRollbackAttempt = await latestActivationAttempt(pool, runtime);
+          } finally {
+            await cutRollbackVerification.close();
+          }
+          await openComposedApplicationRuntime({
+            databaseUrl,
+            tenantSlug,
+          }).then(
+            (restarted) => restarted.close(),
+            () => undefined,
+          );
+          assert.deepEqual(
+            await scopeRoots(pool, runtime),
+            [drafted.releaseRoot],
+            'a restart left the scopes on the last verified release',
+          );
+          await assert.rejects(openingStock(world, notebook, calgary, '6'));
+          await verifyThroughKernel(
+            pool,
+            databaseUrl,
+            tenantSlug,
+            cutRollbackAttempt!,
+          );
+          await assert.rejects(
+            opened.service.rollback(),
+            (error: unknown) =>
+              refusalCode({ reason: error, status: 'rejected' }) ===
+              'CUSTOMIZE_NOTHING_TO_ROLL_BACK',
+          );
+          await assertScopesNamePointer(pool, runtime);
+          assert.deepEqual(await scopeRoots(pool, runtime), [firstParty]);
+          await openingStock(world, notebook, calgary, '6');
+
           // Review R3: base -> A -> B, then a B -> A rollback whose scope
           // reconcile fails. The retry sets the scopes to A before it decides,
           // so posting works even though the retry itself is refused.
@@ -325,18 +378,12 @@ test(
             (await scopeMismatches(pool, runtime)) > 0,
             'a restart did not set the scopes to an unverified release',
           );
-          const identities = await ensureScope(pool, tenantSlug, 'production');
-          const kernelPool = rolePool(databaseUrl, 'north_star_runtime', 2);
-          try {
-            const verified = await new PostgresReleaseActivationService(
-              kernelPool,
-            ).verifyActivation(await trustedContext(identities.system), {
-              activationAttemptId: approvedVehicle.activationAttemptId,
-            });
-            assert.equal(verified.status, 'SWAPPED_VERIFIED');
-          } finally {
-            await kernelPool.end();
-          }
+          await verifyThroughKernel(
+            pool,
+            databaseUrl,
+            tenantSlug,
+            approvedVehicle.activationAttemptId,
+          );
           const finished = await opened.service.activate(vehicle.patchId);
           assert.equal(finished.status, 'activated');
           assert.equal(finished.releaseRoot, vehicle.releaseRoot);
@@ -351,6 +398,55 @@ test(
     );
   },
 );
+
+/** The kernel's own verification of one activation attempt. */
+async function verifyThroughKernel(
+  pool: pg.Pool,
+  databaseUrl: string,
+  slug: string,
+  activationAttemptId: string,
+): Promise<void> {
+  const identities = await ensureScope(pool, slug, 'production');
+  const kernelPool = rolePool(databaseUrl, 'north_star_runtime', 2);
+  try {
+    const verified = await new PostgresReleaseActivationService(
+      kernelPool,
+    ).verifyActivation(await trustedContext(identities.system), {
+      activationAttemptId: activationAttemptId as MintedUuid,
+    });
+    assert.equal(verified.status, 'SWAPPED_VERIFIED');
+  } finally {
+    await kernelPool.end();
+  }
+}
+
+/** The newest activation attempt that swapped the pointer. */
+async function latestActivationAttempt(
+  pool: pg.Pool,
+  runtime: { readonly identity: { readonly tenantId: string } },
+): Promise<string> {
+  const result = await pool.query<{ activation_attempt_id: string }>(
+    `SELECT activation_attempt_id
+       FROM platform.release_activation_swap_receipts
+      WHERE tenant_id = $1
+      ORDER BY fence DESC LIMIT 1`,
+    [runtime.identity.tenantId],
+  );
+  return result.rows[0]!.activation_attempt_id;
+}
+
+async function scopeRoots(
+  pool: pg.Pool,
+  runtime: { readonly identity: { readonly tenantId: string } },
+): Promise<string[]> {
+  const result = await pool.query<{ contract_release_root: string }>(
+    `SELECT DISTINCT contract_release_root
+       FROM platform.inventory_posting_configurations
+      WHERE tenant_id = $1`,
+    [runtime.identity.tenantId],
+  );
+  return result.rows.map((row) => row.contract_release_root);
+}
 
 /** A kernel cut after the pointer swap commits, before it verifies. */
 class CutBeforeVerification extends PostgresReleaseActivationService {
