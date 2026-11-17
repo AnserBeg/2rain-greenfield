@@ -35,6 +35,8 @@ import { withEphemeralPostgres } from '../helpers/postgres.js';
 export const NS = 'northstar.app';
 export const COMPANY = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
 
+export const BUSINESS_CALENDAR = COMPOSED_APPLICATION_INVENTORY_SCOPE;
+
 export type DemoActor = 'buyer' | 'manager';
 
 /** A seeded master's record id, by the name it is seeded with. */
@@ -49,6 +51,8 @@ export function seededId(name: string): string {
 export interface AgentWorld {
   readonly runtime: ComposedApplicationRuntime;
   readonly databaseName: string;
+  readonly databaseUrl: string;
+  readonly tenantSlug: string;
   invoke(
     local: string,
     input: ImmutableJsonValue,
@@ -111,9 +115,10 @@ export async function withAgentWorlds<T>(
             databaseUrl: url(databaseName),
             tenantSlug: TENANT_SLUG,
           });
-          return Object.assign(worldOver(runtime, databaseName), {
-            close: () => runtime.close(),
-          });
+          return Object.assign(
+            worldOver(runtime, databaseName, url(databaseName), TENANT_SLUG),
+            { close: () => runtime.close() },
+          );
         },
       });
     },
@@ -124,6 +129,8 @@ export async function withAgentWorlds<T>(
 export function worldOver(
   runtime: ComposedApplicationRuntime,
   databaseName: string,
+  databaseUrl = '',
+  tenantSlug = TENANT_SLUG,
 ): AgentWorld {
   const headers = (actor: DemoActor) => ({
     headers: { cookie: `northstar-demo-actor=${actor}` },
@@ -232,5 +239,14 @@ export function worldOver(
       } while (cursor);
       return rows;
     });
-  return { runtime, databaseName, invoke, create, read, list };
+  return {
+    runtime,
+    databaseName,
+    databaseUrl,
+    tenantSlug,
+    invoke,
+    create,
+    read,
+    list,
+  };
 }

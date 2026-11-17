@@ -202,6 +202,16 @@ export async function startComposedApplication(
   });
 }
 
+/** The release this checkout compiled, as `pnpm dev` would install it. */
+export async function readCompiledApplication(): Promise<unknown> {
+  return JSON.parse(
+    await readFile(
+      new URL('../../web/release/app.compiled.json', import.meta.url),
+      'utf8',
+    ),
+  ) as unknown;
+}
+
 /**
  * The composed runtime alone: no seed, no listener. `startComposedApplication`
  * serves it; the operations-agent terminal opens one against the database a
@@ -215,13 +225,7 @@ export async function openComposedApplicationRuntime(
   >,
 ): Promise<ComposedApplicationRuntime> {
   const compiledApplication =
-    options.compiledApplication ??
-    (JSON.parse(
-      await readFile(
-        new URL('../../web/release/app.compiled.json', import.meta.url),
-        'utf8',
-      ),
-    ) as unknown);
+    options.compiledApplication ?? (await readCompiledApplication());
   return createComposedApplicationRuntime({
     capabilityOperationExecutorFactories: CAPABILITY_EXECUTOR_FACTORIES,
     compiledApplication,

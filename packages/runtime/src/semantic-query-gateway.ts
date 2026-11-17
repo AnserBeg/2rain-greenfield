@@ -365,6 +365,46 @@ export class SemanticQueryGateway {
     > = {},
   ) {}
 
+  /**
+   * Whether current policy would let this principal run the named query, asked
+   * without running it: nothing is read, no denial is recorded and no scope is
+   * issued. The boundary and per-query permissions `invoke` checks are
+   * evaluated against an eligibility-only decision input that carries the
+   * company scope, if any. `eligible` is not authority -- `invoke` decides
+   * again against the submitted arguments. An unregistered query is
+   * `ineligible`; a policy failure throws and the caller withholds the claim.
+   */
+  async previewEligibility(
+    view: IssuedRequestRuntimeView,
+    queryId: string,
+    legalEntityId: string | null,
+  ): Promise<'eligible' | 'ineligible'> {
+    assertRequestRuntimeView(view);
+    const definition = registeredSemanticQueryFromPinnedView(view, queryId);
+    if (!definition || definition.lifecycle !== 'active') return 'ineligible';
+    for (const [permissionId, kind] of [
+      [QUERY_BOUNDARY_PERMISSION_ID, 'semanticQueryPolicyInput'],
+      [definition.permissionId, 'registeredSemanticQueryPolicyInput'],
+    ] as const) {
+      const decision = await authorizeCurrentPolicy(
+        this.currentPolicy,
+        view,
+        permissionId,
+        Object.freeze({
+          arguments: Object.freeze(
+            legalEntityId === null ? {} : { legalEntityId },
+          ),
+          kind,
+          queryId,
+          requestId: view.requestId,
+          schemaVersion: QUERY_POLICY_INPUT_VERSION,
+        }),
+      );
+      if (decision.decision !== 'ALLOW') return 'ineligible';
+    }
+    return 'eligible';
+  }
+
   async invoke(
     view: IssuedRequestRuntimeView,
     requestInput: unknown,

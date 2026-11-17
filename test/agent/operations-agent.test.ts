@@ -6,14 +6,17 @@ import { inspect } from 'node:util';
 import test from 'node:test';
 
 import { OPERATIONS_AGENT_TOOL_IDS } from '../../packages/compiler/src/index.js';
+import { task3AnswerFailures } from './answer-rules.js';
+import { OPERATION_CATALOG_PAYLOAD_VERSION } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import {
+  businessDayAt,
   keyFromFile,
+  OperationsAgentSession,
   loadModelKey,
   OPERATIONS_AGENT_TOOLS,
   runOperationsAgent,
   SpendMeter,
   type ModelAdapter,
-  type OperationsAgentSession,
 } from '../../packages/operations-agent/src/index.js';
 
 const PLANTED = 'sk-planted-test-value-0123456789';
@@ -183,4 +186,137 @@ test('a provider error that echoes the key never carries it outward', async () =
   } finally {
     await new Promise<void>((done) => server.close(() => done()));
   }
+});
+
+const EDMONTON = {
+  timeZone: 'America/Edmonton',
+  businessDayBoundary: '00:00:00',
+};
+
+test('the business date is the day in the tenant time zone, not UTC', () => {
+  // 05:30Z is 22:30 the evening before in Edmonton (UTC-7 in November).
+  assert.equal(
+    businessDayAt(new Date('2026-11-17T05:30:00Z'), EDMONTON).date,
+    '2026-11-16',
+  );
+  assert.equal(
+    businessDayAt(new Date('2026-11-17T07:00:00Z'), EDMONTON).asDateTime,
+    '2026-11-17T00:00:00.000Z',
+  );
+  // A 06:00 boundary: 03:00 local still belongs to the previous business day.
+  assert.equal(
+    businessDayAt(new Date('2026-11-17T10:00:00Z'), {
+      ...EDMONTON,
+      businessDayBoundary: '06:00:00',
+    }).date,
+    '2026-11-16',
+  );
+  // Daylight saving: July is UTC-6, so 05:30Z is still the evening before.
+  assert.equal(
+    businessDayAt(new Date('2026-07-01T05:30:00Z'), EDMONTON).date,
+    '2026-06-30',
+  );
+  assert.equal(
+    businessDayAt(new Date('2026-07-01T06:30:00Z'), EDMONTON).date,
+    '2026-07-01',
+  );
+});
+
+/** A session over a hand-made pinned view: no database, no operations. */
+function contextSession(surfaces: unknown[]) {
+  const view = {
+    principalId: 'p',
+    entryPolicyVersion: '1',
+    release: { releaseId: 'r' },
+    projections: {
+      agent: { payload: { operations: [], queries: [], toolIds: [] } },
+      operation: {
+        payload: {
+          kind: 'operationCatalogPayload',
+          schemaVersion: OPERATION_CATALOG_PAYLOAD_VERSION,
+          operations: [],
+        },
+      },
+      query: { payload: { queries: [] } },
+      surface: { payload: { surfaces } },
+    },
+  };
+  return new OperationsAgentSession({
+    runtime: {
+      entry: {
+        run: (_request: unknown, work: (v: unknown) => unknown) => work(view),
+      },
+    } as never,
+    personHeaders: {},
+    companyId: 'c',
+    businessCalendar: EDMONTON,
+    clock: () => new Date('2026-11-17T05:30:00Z'),
+    approve: () => Promise.resolve(false),
+  });
+}
+
+test('context carries the business date and the declared default currency', async () => {
+  const declared = await contextSession([
+    {
+      documentEditor: {
+        headerFields: [
+          {
+            fieldId: 'northstar.app:field.purchase_order_currency',
+            presentation: {
+              kind: 'choice',
+              defaultValue: 'CAD',
+              options: [
+                { value: 'CAD', label: 'CAD' },
+                { value: 'USD', label: 'USD' },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  ]).call('erp_discover', { mode: 'context' });
+  const context = declared.content as {
+    today: { date: string; asDateTime: string; timeZone: string };
+    currency: { default: string | null; offered: string[] };
+  };
+  assert.equal(context.today.date, '2026-11-16');
+  assert.equal(context.today.asDateTime, '2026-11-16T00:00:00.000Z');
+  assert.equal(context.today.timeZone, 'America/Edmonton');
+  assert.equal(context.currency.default, 'CAD');
+  assert.deepEqual(context.currency.offered, ['CAD', 'USD']);
+});
+
+test('a release that declares no currency gives the agent none to use', async () => {
+  const absent = await contextSession([]).call('erp_discover', {
+    mode: 'context',
+  });
+  const context = absent.content as { currency: { default: string | null } };
+  assert.equal(context.currency.default, null);
+  assert.match(JSON.stringify(absent.content), /do not invent one/u);
+  assert.doesNotMatch(JSON.stringify(context.currency), /CAD|USD|EUR/u);
+});
+
+test('task 3 rule v2: a paid invoice may be named as paid, never as unpaid', () => {
+  const context = {
+    paid: 'INV-000001',
+    unpaid: ['INV-000002', 'INV-000003'],
+    balance: 52.5,
+  };
+  const good = [
+    'Unpaid: INV-000002 and INV-000003. Total balance 52.50. INV-000001 is fully paid.',
+    '- INV-000002\n- INV-000003\n- INV-000001: paid in full, not included\nTotal 52.5',
+  ];
+  for (const answer of good)
+    assert.deepEqual(task3AnswerFailures(answer, context), [], answer);
+  assert.ok(
+    task3AnswerFailures(
+      'Unpaid: INV-000001, INV-000002, INV-000003. Total 52.50.',
+      context,
+    ).length > 0,
+  );
+  assert.ok(
+    task3AnswerFailures('INV-000002 and INV-000003 are unpaid.', context).some(
+      (failure) => /52.5/u.test(failure),
+    ),
+  );
 });

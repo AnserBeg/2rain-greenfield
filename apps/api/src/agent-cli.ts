@@ -20,8 +20,13 @@ import {
 } from '@north-star/operations-agent';
 
 import {
+  checkTerminalRelease,
+  compiledReleaseRoot,
+} from './agent-release-guard.js';
+import {
   COMPOSED_APPLICATION_INVENTORY_SCOPE,
   openComposedApplicationRuntime,
+  readCompiledApplication,
 } from './composition-root.js';
 
 const request = process.argv.slice(2).join(' ').trim();
@@ -64,17 +69,30 @@ async function approveAtTerminal(plan: PlanForApproval): Promise<boolean> {
   }
 }
 
+const tenantSlug =
+  process.env.NORTH_STAR_TENANT_SLUG ?? 'local-composed-application';
+const compiledApplication = await readCompiledApplication();
+const release = await checkTerminalRelease({
+  databaseUrl,
+  tenantSlug,
+  compiledRoot: compiledReleaseRoot(compiledApplication),
+});
+if (release.kind !== 'match') {
+  process.stderr.write(`${release.message}\n`);
+  process.exit(1);
+}
 const key = await loadModelKey('anthropic');
 const runtime = await openComposedApplicationRuntime({
+  compiledApplication,
   databaseUrl,
-  tenantSlug:
-    process.env.NORTH_STAR_TENANT_SLUG ?? 'local-composed-application',
+  tenantSlug,
 });
 try {
   const session = new OperationsAgentSession({
     runtime,
     personHeaders: { cookie: `northstar-demo-actor=${actor}` },
     companyId: COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId,
+    businessCalendar: COMPOSED_APPLICATION_INVENTORY_SCOPE,
     approve: approveAtTerminal,
   });
   const model = anthropicModel({
