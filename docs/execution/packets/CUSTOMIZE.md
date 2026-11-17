@@ -28,6 +28,7 @@ Base: `main` `a7a4cba1`. Stops: slice 3 (ux-grammar seam).
 - The denial-recorder expected-red control is re-pointed at the per-release gateway wiring (`auth.expected-red.json`).
 - Approval prepares the inert storage plan (a new table) before verifying the candidate, the order boot uses; capability read-backs go through the runtime's one routed read ingress.
 - Activation, rollback and a boot serving a tenant release re-run `platform.provision_inventory_scope` with each scope's stored policy and the active root: the posting kernel posts only for the release a scope names. Between the swap and that call a posting refuses loudly (`INVENTORY_POSTING_RELEASE_MISMATCH`).
+- Review fix (Sol read at `4d2b5672`, merge `6d06f76c`): swap, pointer re-read and scope reconcile hold one tenant-environment advisory lock, and `activate` on a live change or `rollback` with nothing live reconcile (F1); a reused staged release returns its own revision, a conflicting tenant one is refused `CUSTOMIZE_RELEASE_REVISION_CONFLICT` (F2); `previewEligibility` is routed and a test proves every gateway method is (F3); rollback targets the live change's parent (F5).
 - Agent terminal and web server agree: every runtime routes each request by the pointer; opening a runtime on a database whose pointer names a tenant descendant of its tip serves it and moves nothing (tested); a moved base fails loudly. AGENT-2's "terminal refuses a foreign release" must accept a tenant descendant of its tip.
 
 ## Slices
@@ -50,4 +51,6 @@ What: the ux-grammar skill ("Every screen renders through SurfaceRuntime… Neve
 
 - Re-applying tenant patches to a moved first-party base (ADR-0013 upgrade) fails loudly with `dev:reset`; the rebase is not built.
 - The full §8.5 builder archetype (charter: filed, not built).
+- F5's deeper case: after base→A→B and a rollback to A, rolling A back to base is refused (`CUSTOMIZE_ROLLBACK_NOT_REVERSIBLE`): the reverse-transition policy reverses only the activation that made the current release live (here B's rollback). Needs a policy change (orchestrator's call).
+- F4 (TRUNCATE bypasses the append-only rules, repo-wide) and F6 (terminal guard) are the orchestrator's and AGENT-2's.
 - AGENT harness: under the scope mismatch above, the receive task's scripted run answered with no refused tool call while posting nothing; only its end-state check caught it (for AGENT-2).
