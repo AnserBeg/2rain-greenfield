@@ -34,6 +34,7 @@ const suiteDefinitions = [
       'test/unit/catalog-definition.test.ts',
       'test/unit/catalog-extras.test.ts',
       'test/unit/commercial-amounts.test.ts',
+      'test/unit/customization.test.ts',
       'test/unit/dev-environment.test.ts',
       'test/unit/inventory-definition.test.ts',
       'test/unit/inventory-valuation.test.ts',
@@ -100,6 +101,7 @@ const suiteDefinitions = [
     expectedFiles: [
       'test/architecture/canonical-contracts-purity.test.ts',
       'test/architecture/compiler-hermeticity.test.ts',
+      'test/architecture/customization-sandbox-boundary.test.ts',
       'test/architecture/dependency-boundaries.test.ts',
       'test/architecture/evidence-on-demand.test.ts',
       'test/architecture/module-conformance-runtime.test.ts',
@@ -169,6 +171,7 @@ const suiteDefinitions = [
       'test/postgres/catalog-extras.test.ts',
       'test/postgres/catalog-runtime.test.ts',
       'test/postgres/current-policy.test.ts',
+      'test/postgres/customization.test.ts',
       'test/postgres/declared-list.test.ts',
       'test/postgres/document-numbering.test.ts',
       'test/postgres/location-runtime.test.ts',

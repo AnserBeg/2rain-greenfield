@@ -305,7 +305,24 @@ export class PostgresCustomizationService {
       this.connection.runtimePool,
       context,
       async (client) => {
-        const inserted = await client.query<{ patch_id: MintedUuid }>(
+        // The table's append-only rules rule out ON CONFLICT, so a re-draft
+        // is found first; two identical drafts racing meet the unique key.
+        const existing = await client.query<{ patch_id: MintedUuid }>(
+          `SELECT patch_id FROM platform.customization_patches
+            WHERE tenant_id = $1 AND environment_id = $2
+              AND parent_revision_id = $3 AND payload_digest = $4`,
+          [
+            context.tenantId,
+            context.environmentId,
+            active.revisionId,
+            payloadDigest,
+          ],
+        );
+        if (existing.rows[0]) {
+          return { patchId: existing.rows[0].patch_id, reused: true };
+        }
+        const patchId = randomUUID() as MintedUuid;
+        await client.query(
           `INSERT INTO platform.customization_patches (
              tenant_id, environment_id, patch_id, patch_version, patch_kind,
              payload, payload_digest, channel, authored_by, base_package_id,
@@ -313,15 +330,12 @@ export class PostgresCustomizationService {
              parent_revision_id, resulting_revision_id, resulting_release_id,
              language_version, normalization_profile_version
            ) VALUES (
-             $1,$2,gen_random_uuid(),$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
-             $15,$16,$17
-           )
-           ON CONFLICT (tenant_id, environment_id, parent_revision_id,
-                        payload_digest) DO NOTHING
-           RETURNING patch_id`,
+             $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18
+           )`,
           [
             context.tenantId,
             context.environmentId,
+            patchId,
             CUSTOMIZATION_PATCH_VERSION,
             parsed.patch.kind,
             Buffer.from(payload),
@@ -339,21 +353,7 @@ export class PostgresCustomizationService {
             normalized.normalizationProfileVersion,
           ],
         );
-        if (inserted.rows[0]) {
-          return { patchId: inserted.rows[0].patch_id, reused: false };
-        }
-        const existing = await client.query<{ patch_id: MintedUuid }>(
-          `SELECT patch_id FROM platform.customization_patches
-            WHERE tenant_id = $1 AND environment_id = $2
-              AND parent_revision_id = $3 AND payload_digest = $4`,
-          [
-            context.tenantId,
-            context.environmentId,
-            active.revisionId,
-            payloadDigest,
-          ],
-        );
-        return { patchId: existing.rows[0]!.patch_id, reused: true };
+        return { patchId, reused: false };
       },
     );
     return Object.freeze({
