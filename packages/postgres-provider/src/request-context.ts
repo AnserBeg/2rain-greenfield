@@ -296,9 +296,51 @@ class ReadSnapshot {
     await this.#exclusive(async () => {
       if (this.#finished) return;
       this.#finished = true;
-      await this.#end();
-      await this.#checkLivePolicy();
+      if (this.#client) await this.#endWithLivePolicy();
+      else await this.#checkLivePolicy();
     });
+  }
+
+  /**
+   * Commit the open snapshot, then read the live epoch in a transaction of
+   * its own on the same connection (its identity set again; the login role
+   * was verified when the connection opened the snapshot) before releasing it.
+   */
+  async #endWithLivePolicy(): Promise<void> {
+    const client = this.#client!;
+    const identity = this.#identity!;
+    this.#client = null;
+    this.#held = null;
+    this.#role = null;
+    let live: string | undefined;
+    let failure: unknown;
+    let open = true;
+    try {
+      await client.query('COMMIT');
+      open = false;
+      await client.query('BEGIN READ ONLY');
+      open = true;
+      await setTrustedIdentity(client, identity);
+      live =
+        (
+          await client.query<{ live_policy_version: string }>(
+            LIVE_POLICY_VERSION_SQL,
+            [identity.tenantId, identity.environmentId],
+          )
+        ).rows[0]?.live_policy_version ?? '0';
+      await client.query('COMMIT');
+      open = false;
+    } catch (error) {
+      failure = error;
+      if (open) await client.query('ROLLBACK').catch(() => undefined);
+    }
+    const cleanupError = await releaseConnection(client, failure);
+    if (failure !== undefined) throw failure;
+    if (cleanupError) throw cleanupError;
+    if (live !== this.#policyVersion)
+      throw new ReadSnapshotPolicyChangedError(
+        'the live policy changed while the page was read',
+      );
   }
 
   /** On failure: end without the policy check, keeping the original error. */
