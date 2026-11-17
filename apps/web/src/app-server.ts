@@ -66,7 +66,15 @@ export function createSurfaceRuntimeServer(
 ): Server {
   return createServer((request, response) => {
     const handle = () =>
-      handleRequest(entry, gateways, request, response, demoActors, customize);
+      handleRequest(
+        entry,
+        gateways,
+        request,
+        response,
+        demoActors,
+        customize,
+        options.readSnapshot,
+      );
     const probe = options.requestWork;
     void (probe
       ? probe.measure((serverTiming) => {
