@@ -65,7 +65,12 @@ test('Buyer submits, Manager rejects and approves, then Buyer places and stages 
       .click();
     const orderUrl = page.url();
     const act = async (label: string) => {
-      await page.getByRole('button', { name: label, exact: true }).click();
+      // The record's next step is one button, named "Next action: …" (LOOP-1).
+      await page
+        .getByRole('button', {
+          name: new RegExp(`^(?:Next action: )?${label}$`, 'u'),
+        })
+        .click();
       const dialog = page.getByRole('dialog');
       await dialog
         .getByRole('button', { name: `Review ${label}`, exact: true })

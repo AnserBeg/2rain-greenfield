@@ -1671,8 +1671,9 @@ async function assertRealProductDefinition(
     // launcher; VALUATION the Inventory value List; APPROVALS five
     // (approval requests and settings); SALES-EXTRAS the price list, its
     // prices and its customers (list, detail, form each), and its Counter
-    // sales worklist (INTEGRATION, decision I-M8(a)).
-    assert.equal(surfaces.length, 123);
+    // sales worklist (INTEGRATION, decision I-M8(a)); LOOP-1 the Today
+    // launcher.
+    assert.equal(surfaces.length, 124);
     assert.ok(surfaces.includes('northstar.app:surface.counter_sale_list'));
     assert.ok(surfaces.includes('northstar.app:surface.item_alias_list'));
     assert.ok(surfaces.includes('northstar.app:surface.inventory_warehouse'));

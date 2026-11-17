@@ -14445,7 +14445,7 @@ test('WAREHOUSE-MODE: the warehouse opens each List view with its count in the c
   assert.match(
     unchosen.html,
     new RegExp(
-      `<a href="/\\?surface=${encodeURIComponent(warehouse).replace(/%/gu, '%')}[^"]*"[^>]*><span class="nav-icon" aria-hidden="true">W</span><span>Warehouse</span>`,
+      `<a href="/\\?surface=${encodeURIComponent(warehouse).replace(/%/gu, '%')}[^"]*"[^>]*><span class="nav-icon" aria-hidden="true"><svg[^<]*>(?:<[^>]+>)*</svg></span><span>Warehouse</span>`,
       'u',
     ),
   );

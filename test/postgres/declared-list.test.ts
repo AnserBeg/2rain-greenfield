@@ -381,16 +381,20 @@ test(
     // view this variant drops, and the compiler refuses a tile whose view its
     // List no longer declares; the variation stays metadata-only by pointing
     // that tile at a view the List keeps.
-    const warehouse = authored.surfaces.find(
-      (surface) => surface.surfaceId === `${ns}:surface.inventory_warehouse`,
-    )!;
-    for (const tile of (
-      warehouse.launcher as {
-        tiles: Array<{ surface: string; view?: string }>;
-      }
-    ).tiles)
-      if (tile.surface === `${ns}:surface.sales_order_list`)
-        tile.view = salesView('released');
+    // LOOP-1's Today launcher has a To ship tile too.
+    for (const launcher of authored.surfaces.filter((surface) =>
+      [
+        `${ns}:surface.inventory_warehouse`,
+        `${ns}:surface.inventory_today`,
+      ].includes(surface.surfaceId),
+    ))
+      for (const tile of (
+        launcher.launcher as {
+          tiles: Array<{ surface: string; view?: string }>;
+        }
+      ).tiles)
+        if (tile.surface === `${ns}:surface.sales_order_list`)
+          tile.view = salesView('released');
     authored.queries.find(
       (query) => query.queryId === `${ns}:query.sales_order_list`,
     )!.exportMaximumResultCount = 5;
