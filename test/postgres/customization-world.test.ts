@@ -103,8 +103,9 @@ test(
           );
 
           // Receiving and shipping post through executors pinned per release.
-          await runTask(world, 5);
+          // Task 7 asserts an absolute on-hand figure, so it runs first.
           await runTask(world, 7);
+          await runTask(world, 5);
 
           const rolledBack = await opened.service.rollback();
           assert.equal(rolledBack.releaseRoot, firstParty);
