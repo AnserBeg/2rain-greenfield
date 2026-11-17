@@ -26,8 +26,11 @@ interface Scenario {
   readonly location: string;
 }
 interface Served {
-  readonly counts: RequestWorkCounts & { readonly milliseconds: number };
+  readonly counts: { -readonly [K in keyof RequestWorkCounts]: number } & {
+    milliseconds: number;
+  };
   readonly html: string;
+  readonly location: string | null;
   readonly status: number;
 }
 
@@ -63,15 +66,18 @@ async function serve(target: string, form?: Record<string, string>) {
   const html = await response.text();
   const counts = parseServerTiming(response.headers.get('server-timing'));
   assert.ok(counts, `${target} carried no Server-Timing work counts`);
-  return { counts, html, status: response.status } satisfies Served;
+  return {
+    counts,
+    html,
+    location: response.headers.get('location'),
+    status: response.status,
+  } satisfies Served;
 }
 
-function hidden(html: string, name: string): string {
-  const value = new RegExp(`name="${name}" value="([^"]+)"`, 'u').exec(
-    html,
-  )?.[1];
-  assert.ok(value, `no ${name}`);
-  return value;
+function hiddenValue(html: string, name: string): string | null {
+  return (
+    new RegExp(`name="${name}" value="([^"]+)"`, 'u').exec(html)?.[1] ?? null
+  );
 }
 
 test(
@@ -82,148 +88,211 @@ test(
       const scenario = (await fixture.measure(
         'order_pages',
       )) as unknown as Scenario;
-      const measured = new Map<PageBudgetName, Served['counts']>();
+      const measured = new Map<PageBudgetName, Counts>();
+      /** Load 2 of each page, beside the measured load 3: warm stability. */
+      const second = new Map<PageBudgetName, Counts>();
+      // Every problem is collected, so one CI run reports the whole table.
+      const problems: string[] = [];
 
       /** Three loads; the third, warm, is the measured one. */
       const page = async (
         name: PageBudgetName,
         target: string,
-        rendered: (html: string) => void,
-      ) => {
-        let last: Served | undefined;
-        for (let load = 0; load < 3; load += 1) {
-          last = await serve(target);
-          assert.equal(last.status, 200, `${name}: ${last.html.slice(0, 600)}`);
-          rendered(last.html);
+        markers: readonly (string | RegExp)[],
+      ): Promise<string | null> => {
+        let html: string | null = null;
+        for (let load = 1; load <= 3; load += 1) {
+          const served = await serveFollowing(target);
+          if (served.status !== 200) {
+            problems.push(
+              `${name}: status ${String(served.status)} ${served.html.slice(0, 300)}`,
+            );
+            return null;
+          }
+          const missing = markers.filter((marker) =>
+            typeof marker === 'string'
+              ? !served.html.includes(marker)
+              : !marker.test(served.html),
+          );
+          if (missing.length) {
+            problems.push(`${name}: did not render ${missing.join(', ')}`);
+            return null;
+          }
+          if (load === 2) second.set(name, served.counts);
+          if (load === 3) measured.set(name, served.counts);
+          html = served.html;
         }
-        measured.set(name, last!.counts);
-        return last!;
+        return html;
       };
-      const contains =
-        (...texts: string[]) =>
-        (html: string) => {
-          for (const text of texts) assert.ok(html.includes(text), text);
-        };
 
-      await page(
-        'home',
-        `${fixture.app.baseUrl}/`,
-        contains('Purchase orders'),
-      );
-      const list = await page(
-        'purchase order list',
-        pageUrl(
-          fixture,
-          'purchase_order_list',
-          'commercial_purchase_order_list',
-        ),
-        contains(scenario.truck.number, scenario.delivered.number),
-      );
-      await page(
-        'purchase order detail',
-        pageUrl(
-          fixture,
-          'purchase_order_detail',
-          'commercial_purchase_order_get',
-          { record: scenario.delivered.recordId },
-        ),
-        contains(scenario.delivered.number, ...scenario.delivered.lines),
-      );
-      const newHref = /<a class="primary-action" href="([^"]+)">New<\/a>/u.exec(
-        list.html,
-      )?.[1];
-      assert.ok(newHref, 'the purchase order list offers New');
-      await page(
-        'new purchase order',
-        new URL(newHref.replaceAll('&amp;', '&'), fixture.app.baseUrl).href,
-        contains('<form'),
-      );
-      await page(
-        'stock by item',
-        pageUrl(fixture, 'item_stock_list', 'item_stock_list'),
-        contains('Field notebook', 'data-list-total='),
-      );
-      await page(
-        'sales order detail',
-        pageUrl(fixture, 'sales_order_detail', 'commercial_order_get', {
-          record: scenario.short.recordId,
-        }),
-        contains(scenario.short.number, ...scenario.short.lines),
-      );
+      try {
+        await page('home', `${fixture.app.baseUrl}/`, [
+          /<nav[\s>]/u,
+          'Purchase orders',
+        ]);
+        const list = await page(
+          'purchase order list',
+          pageUrl(
+            fixture,
+            'purchase_order_list',
+            'commercial_purchase_order_list',
+          ),
+          [scenario.truck.number, scenario.delivered.number],
+        );
+        await page(
+          'purchase order detail',
+          pageUrl(
+            fixture,
+            'purchase_order_detail',
+            'commercial_purchase_order_get',
+            { record: scenario.delivered.recordId },
+          ),
+          [scenario.delivered.number, ...scenario.delivered.lines],
+        );
+        const newHref =
+          list &&
+          /<a class="(?:primary|secondary)-action" href="([^"]+)">New<\/a>/u.exec(
+            list,
+          )?.[1];
+        if (newHref)
+          await page(
+            'new purchase order',
+            new URL(newHref.replaceAll('&amp;', '&'), fixture.app.baseUrl).href,
+            [/<h1>New /u],
+          );
+        else problems.push('new purchase order: the list offers no New');
+        await page(
+          'stock by item',
+          pageUrl(fixture, 'item_stock_list', 'item_stock_list'),
+          ['Field notebook', 'data-list-total='],
+        );
+        await page(
+          'sales order detail',
+          pageUrl(fixture, 'sales_order_detail', 'commercial_order_get', {
+            record: scenario.short.recordId,
+          }),
+          [scenario.short.number, ...scenario.short.lines],
+        );
+        await taskStep(fixture, scenario, measured, problems);
+      } finally {
+        console.log(
+          `PAGE_BUDGET (measured / ceiling; load 2 in brackets)\n${table(measured, second)}`,
+        );
+      }
 
-      // One task step on a warm detail page: open, Review, Confirm.
-      const truckPage = pageUrl(
-        fixture,
-        'purchase_order_detail',
-        'commercial_purchase_order_get',
-        { record: scenario.truck.recordId },
-      );
-      await serve(truckPage);
-      const action = `${ns}:action.receive_lines_known`;
-      const input = (local: string) => `${ns}:input.${local}`;
-      const [first] = scenario.truck.lines as [string];
-      const opened = await serve(truckPage, { compositionAction: action });
-      assert.equal(opened.status, 200, opened.html.slice(0, 2000));
-      measured.set('task: open', opened.counts);
-      const token = hidden(opened.html, 'taskToken');
-      const review = await serve(truckPage, {
-        taskToken: token,
-        compositionAction: action,
-        taskStage: 'prepare',
-        [input('receive_lines_location')]: scenario.location,
-        [input('receive_lines_currency')]: 'CAD',
-        [input('receive_lines_packing_slip')]: 'PS-BUDGET',
-        [input('receive_lines_notes')]: '',
-        [`${input('receive_lines_quantity')}@${first}`]: '5',
-        [`${input('receive_lines_cost')}@${first}`]: '2.40',
-      });
-      assert.match(review.html, /name="preparedId"/u, review.html.slice(-4000));
-      measured.set('task: review', review.counts);
-      const done = await serve(truckPage, {
-        taskToken: token,
-        compositionAction: action,
-        taskStage: 'confirm',
-        preparedId: hidden(review.html, 'preparedId'),
-      });
-      assert.match(done.html, /Receive lines with actual cost: done/u);
-      measured.set('task: confirm', done.counts);
-
-      const keys = [
-        'transactions',
-        'statements',
-        'authorization',
-        'repeats',
-      ] as const;
-      const table = [
-        `| page | ${keys.join(' | ')} | ms |`,
-        `| --- | ${keys.map(() => '---').join(' | ')} | --- |`,
-        ...PAGE_BUDGET_NAMES.map((name) => {
-          const counts = measured.get(name)!;
-          return `| ${name} | ${keys
-            .map((key) => {
-              const ceiling = PAGE_BUDGETS[name][key];
-              return `${String(counts[key])} / ${ceiling === null ? '—' : String(ceiling)}`;
-            })
-            .join(' | ')} | ${counts.milliseconds.toFixed(0)} |`;
-        }),
-      ].join('\n');
-      console.log(`PAGE_BUDGET (measured / ceiling)\n${table}`);
-
-      const over: string[] = [];
       for (const name of PAGE_BUDGET_NAMES) {
         const counts = measured.get(name);
-        assert.ok(counts, `${name} was not measured`);
-        for (const key of keys) {
+        if (!counts) {
+          problems.push(`${name}: not measured`);
+          continue;
+        }
+        for (const key of KEYS) {
           const ceiling = PAGE_BUDGETS[name][key];
           if (ceiling === null)
-            over.push(`${name}: ${key} ${String(counts[key])} is not pinned`);
+            problems.push(
+              `${name}: ${key} ${String(counts[key])} is not pinned`,
+            );
           else if (counts[key] > ceiling)
-            over.push(
+            problems.push(
               `${name}: ${key} ${String(counts[key])} exceeds ${String(ceiling)}`,
             );
         }
       }
-      assert.deepEqual(over, [], over.join('\n'));
+      assert.deepEqual(problems, [], problems.join('\n'));
     });
   },
 );
+
+const KEYS = [
+  'transactions',
+  'statements',
+  'authorization',
+  'repeats',
+] as const;
+type Counts = Served['counts'];
+
+/** A page as a person reaches it: a workspace entry's redirect is part of it. */
+async function serveFollowing(target: string): Promise<Served> {
+  const first = await serve(target);
+  if (first.status !== 303 || !first.location) return first;
+  const landed = await serve(new URL(first.location, target).href);
+  const counts = { ...landed.counts };
+  for (const key of KEYS) counts[key] += first.counts[key];
+  counts.milliseconds += first.counts.milliseconds;
+  return { ...landed, counts };
+}
+
+/** One task step on a warm detail page: open, Review, Confirm. */
+async function taskStep(
+  fixture: Fixture,
+  scenario: Scenario,
+  measured: Map<PageBudgetName, Counts>,
+  problems: string[],
+): Promise<void> {
+  const truckPage = pageUrl(
+    fixture,
+    'purchase_order_detail',
+    'commercial_purchase_order_get',
+    { record: scenario.truck.recordId },
+  );
+  await serve(truckPage);
+  const action = `${ns}:action.receive_lines_known`;
+  const input = (local: string) => `${ns}:input.${local}`;
+  const [first] = scenario.truck.lines as [string];
+  const opened = await serve(truckPage, { compositionAction: action });
+  const token = hiddenValue(opened.html, 'taskToken');
+  if (opened.status !== 200 || !token) {
+    problems.push(`task: open: status ${String(opened.status)}, no task token`);
+    return;
+  }
+  measured.set('task: open', opened.counts);
+  const review = await serve(truckPage, {
+    taskToken: token,
+    compositionAction: action,
+    taskStage: 'prepare',
+    [input('receive_lines_location')]: scenario.location,
+    [input('receive_lines_currency')]: 'CAD',
+    [input('receive_lines_packing_slip')]: 'PS-BUDGET',
+    [input('receive_lines_notes')]: '',
+    [`${input('receive_lines_quantity')}@${first}`]: '5',
+    [`${input('receive_lines_cost')}@${first}`]: '2.40',
+  });
+  const prepared = hiddenValue(review.html, 'preparedId');
+  if (!prepared) {
+    problems.push(`task: review: no prepared id ${review.html.slice(-600)}`);
+    return;
+  }
+  measured.set('task: review', review.counts);
+  const done = await serve(truckPage, {
+    taskToken: token,
+    compositionAction: action,
+    taskStage: 'confirm',
+    preparedId: prepared,
+  });
+  if (!/Receive lines with actual cost: done/u.test(done.html)) {
+    problems.push(`task: confirm: not done ${done.html.slice(-600)}`);
+    return;
+  }
+  measured.set('task: confirm', done.counts);
+}
+
+function table(
+  measured: ReadonlyMap<PageBudgetName, Counts>,
+  second: ReadonlyMap<PageBudgetName, Counts>,
+): string {
+  return [
+    `| page | ${KEYS.join(' | ')} | ms |`,
+    `| --- | ${KEYS.map(() => '---').join(' | ')} | --- |`,
+    ...PAGE_BUDGET_NAMES.map((name) => {
+      const counts = measured.get(name);
+      if (!counts)
+        return `| ${name} | ${KEYS.map(() => '—').join(' | ')} | — |`;
+      const before = second.get(name);
+      return `| ${name} | ${KEYS.map((key) => {
+        const ceiling = PAGE_BUDGETS[name][key];
+        const warm = before ? ` [${String(before[key])}]` : '';
+        return `${String(counts[key])}${warm} / ${ceiling === null ? '—' : String(ceiling)}`;
+      }).join(' | ')} | ${counts.milliseconds.toFixed(0)} |`;
+    }),
+  ].join('\n');
+}
