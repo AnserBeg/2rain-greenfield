@@ -1,0 +1,12 @@
+{
+  "name": "@north-star/customization",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@north-star/canonical-model": "workspace:*",
+    "@north-star/compiler": "workspace:*",
+    "zod": "4.6.6"
+  }
+}

@@ -74,6 +74,7 @@ export {
   SUPPORTED_STORAGE_TARGET_PAYLOAD_VERSIONS,
   STORAGE_TRANSITION_ENVELOPE_VERSION,
   TIGHTENING_DEBT_VERSION,
+  UNTRUSTED_DEFINITION_SANDBOX_CAPS,
   VERIFICATION_PLAN_PAYLOAD_VERSION,
   VERIFICATION_RESULT_VERSION,
   VERIFICATION_SCENARIO_VERSION,
@@ -109,6 +110,7 @@ export {
   type StorageTransitionElementKind,
   type StorageTransitionEnvelope,
   type TighteningDebt,
+  type UntrustedDefinitionSandboxAttestation,
 } from './protocol.js';
 export {
   MODULE_RLS_GRANT_TEMPLATE,
