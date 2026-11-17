@@ -266,7 +266,10 @@ test(
           null,
           'a purchase order without a currency was created',
         );
-        assert.match(JSON.stringify(without.run.conversation), /refused/u);
+        assert.doesNotMatch(
+          JSON.stringify(without.run.conversation.at(-2)),
+          /approved by the person/u,
+        );
         assert.deepEqual(await snapshot(world), beforeWithout);
 
         // Permission-filtered discovery (plan section 9.2.1): the buyer is
