@@ -152,7 +152,7 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
       });
     }
 
-    // SPEED-1 (ADR-0070): a read decision inside a page's read snapshot is
+    // SPEED-1 (ADR-0071): a read decision inside a page's read snapshot is
     // computed from the principal's grants, read once per snapshot; any other
     // decision -- an invocation, a capability's, one outside a page -- reads
     // the live grants in a transaction of its own, which never joins.

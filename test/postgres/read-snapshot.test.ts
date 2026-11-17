@@ -52,6 +52,9 @@ const principalId = 'b3000000-0000-4000-8000-000000000003';
 const otherPrincipalId = 'b3000000-0000-4000-8000-000000000004';
 const roleId = 'b4000000-0000-4000-8000-000000000004';
 const membershipId = 'b5000000-0000-4000-8000-000000000005';
+const scopedMembershipId = 'b5000000-0000-4000-8000-000000000006';
+const legalEntityId = 'b6000000-0000-4000-8000-000000000006';
+const foreignLegalEntityId = 'b6000000-0000-4000-8000-000000000007';
 const binding = RECEIPT_AUTHORIZATION_DEPENDENCY_BINDINGS.find(
   (candidate) =>
     candidate.permissionId === 'northstar.app:permission.goods_receipt_create',
@@ -93,7 +96,24 @@ test('SPEED-1 read snapshot: one transaction per page, writes apart, policy chan
         RECEIPT_AUTHORIZATION_DEPENDENCY_BINDINGS,
       );
       const entry = requestEntry(identity, policy);
+      /** A page's read decision: reusable within the page's snapshot. */
       const allows = async (
+        view: Parameters<typeof authorizeCurrentPolicy>[1],
+        legalEntityId?: string,
+      ) =>
+        (
+          await authorizeCurrentPolicy(
+            policy,
+            view,
+            binding.permissionId,
+            Object.freeze({
+              kind: 'semanticQueryPolicyInput',
+              ...(legalEntityId ? { input: { legalEntityId } } : {}),
+            }),
+          )
+        ).decision;
+      /** An invocation's decision: live per call, never from the snapshot. */
+      const invokes = async (
         view: Parameters<typeof authorizeCurrentPolicy>[1],
       ) =>
         (
@@ -101,7 +121,7 @@ test('SPEED-1 read snapshot: one transaction per page, writes apart, policy chan
             policy,
             view,
             binding.permissionId,
-            Object.freeze({}),
+            Object.freeze({ kind: 'semanticOperationPolicyInput' }),
           )
         ).decision;
       const page = <T>(work: (finish: () => Promise<void>) => Promise<T>) =>
@@ -120,7 +140,11 @@ test('SPEED-1 read snapshot: one transaction per page, writes apart, policy chan
           ),
         );
         assert.deepEqual(decisions, ['ALLOW', 'ALLOW', 'ALLOW']);
-        assert.equal(meter.counts().transactions, 2);
+        // The snapshot's epoch, its one grants read, the live epoch after.
+        assert.deepEqual(
+          [meter.counts().transactions, meter.counts().authorization],
+          [2, 3],
+        );
 
         // The snapshot is read-only REPEATABLE READ under the trusted
         // identity; a transaction of its own is neither.
@@ -243,6 +267,78 @@ test('SPEED-1 read snapshot: one transaction per page, writes apart, policy chan
         );
         assert.equal(flips, 2);
         await revoke(false);
+
+        // An invocation's decision inside a page is live: a revocation is seen
+        // at once, while the page's read decisions keep the snapshot's (and
+        // the page itself is then discarded).
+        const invoked: string[] = [];
+        await assert.rejects(
+          page(() =>
+            entry.run({}, async (view) => {
+              const read = await allows(view);
+              await admin.query(
+                `UPDATE platform.current_policy_roles
+                    SET revoked_at = clock_timestamp()
+                  WHERE tenant_id = $1 AND environment_id = $2 AND role_id = $3`,
+                [tenantId, environmentId, roleId],
+              );
+              invoked.push(`${read}/${await invokes(view)}`);
+            }),
+          ),
+          ReadSnapshotPolicyChangedError,
+        );
+        assert.equal(invoked[0], 'ALLOW/DENY');
+
+        // Revoked role, revoked membership: a fresh page's snapshot denies.
+        assert.equal(
+          await page(() => entry.run({}, (view) => allows(view))),
+          'DENY',
+        );
+        await admin.query(
+          `UPDATE platform.current_policy_roles SET revoked_at = NULL
+            WHERE tenant_id = $1 AND environment_id = $2 AND role_id = $3`,
+          [tenantId, environmentId, roleId],
+        );
+        await admin.query(
+          `UPDATE platform.current_policy_memberships SET revoked_at = clock_timestamp()
+            WHERE tenant_id = $1 AND environment_id = $2 AND membership_id = $3`,
+          [tenantId, environmentId, membershipId],
+        );
+        assert.equal(
+          await page(() => entry.run({}, (view) => allows(view))),
+          'DENY',
+        );
+
+        // A membership scoped to one company admits that company only.
+        await admin.query(
+          `INSERT INTO platform.current_policy_memberships (
+             tenant_id, environment_id, membership_id, principal_id, role_id,
+             legal_entity_id
+           ) VALUES ($1,$2,$3,$4,$5,$6)`,
+          [
+            tenantId,
+            environmentId,
+            scopedMembershipId,
+            principalId,
+            roleId,
+            legalEntityId,
+          ],
+        );
+        assert.deepEqual(
+          await page(() =>
+            entry.run({}, async (view) => [
+              await allows(view, legalEntityId),
+              await allows(view, foreignLegalEntityId),
+              await allows(view),
+            ]),
+          ),
+          ['ALLOW', 'DENY', 'DENY'],
+        );
+        await admin.query(
+          `UPDATE platform.current_policy_memberships SET revoked_at = NULL
+            WHERE tenant_id = $1 AND environment_id = $2 AND membership_id = $3`,
+          [tenantId, environmentId, membershipId],
+        );
 
         // Outside a page every read is live, as before.
         await entry.run({}, async (view) => {

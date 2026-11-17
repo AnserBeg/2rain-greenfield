@@ -77,10 +77,7 @@ import {
 } from '../../runtime/src/list-behavior/index.js';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 
-import {
-  withTrustedRequestRead,
-  withTrustedRequestTransaction,
-} from './request-context.js';
+import { withTrustedRequestRead } from './request-context.js';
 import { PostgresTrustService } from './trust/postgres-trust-service.js';
 import type { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
 
