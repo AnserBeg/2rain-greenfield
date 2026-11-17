@@ -99,10 +99,16 @@ export async function withTrustedRequestRead<T>(
   pool: Pool,
   context: TrustedRequestContext,
   run: (client: PoolClient, snapshot: ReadSnapshotHandle | null) => Promise<T>,
+  /**
+   * The role the read runs as inside a snapshot (the snapshot assumes it, and
+   * verifies the switch once per snapshot); absent, the trusted runtime login
+   * role. Outside a snapshot `run` receives `null` and switches itself.
+   */
+  role: SnapshotRoleSwitch | null = null,
 ): Promise<T> {
   assertTrustedRequestContext(context);
   const snapshot = currentReadSnapshot(pool);
-  if (snapshot) return snapshot.join(context, run);
+  if (snapshot) return snapshot.join(context, run, role);
   return withTrustedRequestTransaction(pool, context, (client) =>
     run(client, null),
   );
@@ -137,6 +143,18 @@ export async function withReadSnapshot<T>(
       throw error;
     }
   }
+}
+
+/**
+ * A role a snapshot's reads may assume (SPEED-1 slice 4: the module role).
+ * `assume` sets it; `restore` returns to the trusted runtime login role. Each
+ * verifies the resulting role facts when `verify` is set, which the snapshot
+ * asks for the first time each direction is taken in that snapshot; the
+ * login role itself is verified when the snapshot opens.
+ */
+export interface SnapshotRoleSwitch {
+  assume(client: PoolClient, verify: boolean): Promise<void>;
+  restore(client: PoolClient, verify: boolean): Promise<void>;
 }
 
 /**
@@ -193,6 +211,11 @@ class ReadSnapshot {
   /** The epoch the request's first snapshot saw; every later one must agree. */
   #policyVersion: string | null = null;
   #held: ReadSnapshotHandle | null = null;
+  /** The role the open snapshot runs as (null: the runtime login role). */
+  #role: SnapshotRoleSwitch | null = null;
+  /** Role switches already verified in the open snapshot, per direction. */
+  #assumed = new Set<SnapshotRoleSwitch>();
+  #restored = new Set<SnapshotRoleSwitch>();
   #finished = false;
   #turn: Promise<unknown> = Promise.resolve();
 
@@ -204,12 +227,17 @@ class ReadSnapshot {
       client: PoolClient,
       snapshot: ReadSnapshotHandle | null,
     ) => Promise<T>,
+    role: SnapshotRoleSwitch | null,
   ): Promise<T> {
     if (joinedReads.getStore() === this) {
-      // A read nested inside a joined read: same turn, same client.
-      if (!this.#client || !sameIdentity(this.#identity, context))
+      // A read nested inside a joined read: same turn, client and role.
+      if (
+        !this.#client ||
+        !sameIdentity(this.#identity, context) ||
+        this.#role !== role
+      )
         throw new ReadSnapshotIntegrityError(
-          'a nested read must use the open snapshot and its identity',
+          'a nested read must use the open snapshot, its identity and its role',
         );
       return run(this.#client, this.#held);
     }
@@ -223,6 +251,7 @@ class ReadSnapshot {
       if (!this.#client) await this.#open(context);
       const client = this.#client!;
       try {
+        await this.#switchRole(client, role);
         return await joinedReads.run(this, () => run(client, this.#held));
       } catch (error) {
         // A failed read leaves the shared transaction unusable, and may have
@@ -231,6 +260,26 @@ class ReadSnapshot {
         throw error;
       }
     });
+  }
+
+  /** Assume `role` (null: the runtime login role) on the open snapshot. */
+  async #switchRole(
+    client: PoolClient,
+    role: SnapshotRoleSwitch | null,
+  ): Promise<void> {
+    if (this.#role === role) return;
+    if (this.#role) {
+      const verify = !this.#restored.has(this.#role);
+      await this.#role.restore(client, verify);
+      this.#restored.add(this.#role);
+      this.#role = null;
+    }
+    if (role) {
+      const verify = !this.#assumed.has(role);
+      await role.assume(client, verify);
+      this.#assumed.add(role);
+      this.#role = role;
+    }
   }
 
   /** End the open snapshot before a transaction of its own on this pool. */
@@ -295,6 +344,9 @@ class ReadSnapshot {
     if (!client) return;
     this.#client = null;
     this.#held = null;
+    this.#role = null;
+    this.#assumed = new Set();
+    this.#restored = new Set();
     let commitError: unknown;
     try {
       await client.query('COMMIT');
@@ -312,6 +364,9 @@ class ReadSnapshot {
     if (!client) return;
     this.#client = null;
     this.#held = null;
+    this.#role = null;
+    this.#assumed = new Set();
+    this.#restored = new Set();
     let rollbackError: unknown;
     try {
       await client.query('ROLLBACK');

@@ -77,7 +77,11 @@ import {
 } from '../../runtime/src/list-behavior/index.js';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 
-import { withTrustedRequestRead } from './request-context.js';
+import {
+  withTrustedRequestRead,
+  type ReadSnapshotHandle,
+  type SnapshotRoleSwitch,
+} from './request-context.js';
 import { PostgresTrustService } from './trust/postgres-trust-service.js';
 import type { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
 
@@ -301,17 +305,25 @@ export class PostgresModuleRuntimeInterpreter
       return await withTrustedRequestRead(
         this.pool,
         request.context,
-        async (client) => {
+        async (client, snapshot) => {
           const storage = await this.#loadPinnedStorageTarget(client, request);
-          return withModuleRuntimeRole(client, () =>
+          const execute = () =>
             executeQueryOnClient(
               client,
               storage,
               request,
               this.observeAggregateCache,
-            ),
-          );
+              snapshot,
+            );
+          if (!snapshot) return withModuleRuntimeRole(client, execute);
+          // In a page's read snapshot the snapshot holds the module role,
+          // verified once per snapshot, and an identical read -- the same
+          // query, arguments, plans and company scope on the same release --
+          // runs once: the snapshot cannot change between the two.
+          const key = identicalReadKey(request);
+          return key === null ? execute() : snapshot.memo(key, execute);
         },
+        MODULE_RUNTIME_READ_ROLE,
       );
     } catch (error) {
       throw providerBoundaryFailure(
@@ -1318,6 +1330,30 @@ async function assertRestorableRelations(
   }
 }
 
+/**
+ * Everything an executed read depends on besides the snapshot itself, or null
+ * when some part does not serialize (then the read is never shared).
+ */
+function identicalReadKey(
+  request:
+    SemanticAggregateQueryExecutionRequest | SemanticQueryExecutionRequest,
+): string | null {
+  try {
+    return `module-read:${JSON.stringify([
+      request.view.release.releaseId,
+      request.view.release.contentHash,
+      request.definition.queryId,
+      request.arguments,
+      request.parameterValues,
+      request.filterPlans,
+      request.list,
+      request.legalEntityReadScope?.legalEntityIds ?? null,
+    ])}`;
+  } catch {
+    return null;
+  }
+}
+
 async function executeQueryOnClient(
   client: PoolClient,
   storage: StorageTargetPayloadV1,
@@ -1325,6 +1361,7 @@ async function executeQueryOnClient(
     SemanticAggregateQueryExecutionRequest | SemanticQueryExecutionRequest,
   observeAggregateCache:
     ((observation: AggregateCacheObservation) => void) | undefined,
+  snapshot: ReadSnapshotHandle | null = null,
 ): Promise<SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope> {
   const { arguments: argumentValue, definition, filterPlans, list } = request;
   const entity = requiredEntity(storage, definition.sourceEntityId);
@@ -1358,6 +1395,7 @@ async function executeQueryOnClient(
       : null;
   const readScope = await verifyLegalEntityReadScope(
     client,
+    snapshot,
     storage,
     request.legalEntityReadScope,
     [
@@ -5340,6 +5378,45 @@ function decodeCanonical(bytes: Uint8Array): Record<string, unknown> {
   }
 }
 
+/**
+ * The module role as a page's read snapshot assumes it (SPEED-1): the same
+ * statements and the same role-fact checks as `withModuleRuntimeRole`, the
+ * checks run the first time each direction is taken in a snapshot. The
+ * snapshot's opening envelope has already verified the runtime login role.
+ */
+export const MODULE_RUNTIME_READ_ROLE: SnapshotRoleSwitch = Object.freeze({
+  async assume(client: PoolClient, verify: boolean) {
+    await client.query('SET LOCAL ROLE north_star_module_runtime');
+    if (!verify) return;
+    const assumed = await roleFacts(client);
+    if (
+      assumed.currentRole !== 'north_star_module_runtime' ||
+      assumed.sessionRole !== 'north_star_runtime' ||
+      assumed.superuser ||
+      assumed.bypassRls
+    ) {
+      throw failure(
+        'MODULE_ROLE_ASSUMPTION_INVALID',
+        'module DML role assumption violated least privilege',
+      );
+    }
+  },
+  async restore(client: PoolClient, verify: boolean) {
+    await client.query('RESET ROLE');
+    if (!verify) return;
+    const reset = await roleFacts(client);
+    if (
+      reset.currentRole !== 'north_star_runtime' ||
+      reset.sessionRole !== 'north_star_runtime'
+    ) {
+      throw failure(
+        'MODULE_ROLE_RESET_FAILED',
+        'trusted runtime role was not restored before evidence writes',
+      );
+    }
+  },
+});
+
 export async function withModuleRuntimeRole<T>(
   client: PoolClient,
   run: () => Promise<T>,
@@ -5882,6 +5959,7 @@ export function legalEntityReadScopeRequirement(
 
 async function verifyLegalEntityReadScope(
   client: PoolClient,
+  snapshot: ReadSnapshotHandle | null,
   storage: StorageTargetPayloadV1,
   value: LegalEntityReadScope | null,
   readEntities: readonly StorageEntity[],
@@ -5919,12 +5997,21 @@ async function verifyLegalEntityReadScope(
   safeIdentifier(master.physicalTableName);
   safeIdentifier(master.recordIdentity.column);
 
-  const result = await client.query<{ legal_entity_id: string }>(
-    `SELECT ${quoted(master.recordIdentity.column)}::text AS legal_entity_id
+  const readMaster = () =>
+    client.query<{ legal_entity_id: string }>(
+      `SELECT ${quoted(master.recordIdentity.column)}::text AS legal_entity_id
        FROM north_star_module.${quoted(master.physicalTableName)}
       WHERE ${quoted(master.recordIdentity.column)} = ANY($1::uuid[])`,
-    [[...legalEntityIds]],
-  );
+      [[...legalEntityIds]],
+    );
+  // Within one read snapshot the companies' existence cannot change: one
+  // check serves every read of the page (SPEED-1).
+  const result = snapshot
+    ? await snapshot.memo(
+        `legal-entity-master:${master.physicalTableName}:${legalEntityIds.join(',')}`,
+        readMaster,
+      )
+    : await readMaster();
   const existingIds = new Set(
     result.rows.map((row) =>
       requiredUuid(row.legal_entity_id, 'legalEntityId'),
