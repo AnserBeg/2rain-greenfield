@@ -632,6 +632,10 @@ function scanForBypass(
     // Owner-ratified RECEIPT §5.11 exception: this focused renderer is consumed
     // only by the closed registry; it is not an alternate surface authority.
     'apps/web/src/receiving-section.ts',
+    // Owner ruling 2026-11-17 (AGENT-3 charter, "chat panel seam
+    // exception"): the assistant panel, local demo only, one panel on every
+    // app page. It renders no surface and reads no business data itself.
+    'apps/web/src/assistant-panel.ts',
   ]);
   const allowedSurfaceConsumers = new Set<string>([
     paths.controlSemantics,

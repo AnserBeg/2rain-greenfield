@@ -87,6 +87,14 @@ export interface OperationsAgentSessionOptions {
   readonly maximumResultCharacters?: number;
 }
 
+/** A record the session read or wrote, for links in the panel. */
+export interface TouchedRecord {
+  readonly recordId: string;
+  readonly entityId: string;
+  readonly label: string | null;
+  readonly wrote: boolean;
+}
+
 /** The page the person is on, as the browser reports it: a claim, not a fact. */
 export interface AgentScreen {
   readonly surfaceId: string;
@@ -175,6 +183,7 @@ export class OperationsAgentSession {
   readonly #usable = new Map<string, Map<string, boolean>>();
   readonly toolCalls: ToolCallRecord[] = [];
   readonly approvals: ApprovalRecord[] = [];
+  readonly #touched = new Map<string, TouchedRecord>();
 
   constructor(options: OperationsAgentSessionOptions) {
     this.#options = options;
@@ -364,13 +373,54 @@ export class OperationsAgentSession {
    * declares it; its record id is the page's claim until read.
    */
   turnContext(screen?: AgentScreen | null): Promise<string> {
-    return this.#run((view) => {
+    return this.#run(async (view) => {
       const facts = this.#facts(view);
       const lines = [`Context (JSON): ${JSON.stringify(facts)}`];
       const named = screen ? screenFacts(view, screen) : null;
-      if (named) lines.push(named);
-      return Promise.resolve(lines.join('\n'));
+      if (named) lines.push(named.text);
+      if (named?.recordId && named.getQueryId) {
+        // Read fresh, as the person, through the same gateway the page uses:
+        // the browser's record id is a claim, the read is the fact.
+        const record = await readRecord(
+          this.#options.runtime,
+          view,
+          pinnedCatalog(view),
+          named.getQueryId,
+          named.recordId,
+          this.#options.companyId,
+        ).catch(() => null);
+        if (record) {
+          this.#touch(named.entityId, record, false);
+          lines.push(
+            `That record, read just now through ${localName(named.getQueryId)}: ${JSON.stringify(
+              this.#bounded(compactRecord(record), 4_000),
+            )}`,
+          );
+        } else
+          lines.push(
+            'That record could not be read for the person (not found, archived or not permitted); do not rely on it.',
+          );
+      }
+      return lines.join('\n');
     });
+  }
+
+  /** Records this session read or wrote, newest last; written ones marked. */
+  touchedRecords(): readonly TouchedRecord[] {
+    return [...this.#touched.values()];
+  }
+
+  #touch(entityId: string, record: SemanticRecordDto, wrote: boolean): void {
+    const existing = this.#touched.get(record.recordId);
+    this.#touched.delete(record.recordId);
+    this.#touched.set(record.recordId, {
+      recordId: record.recordId,
+      entityId,
+      label: recordLabel(record) ?? existing?.label ?? null,
+      wrote: wrote || (existing?.wrote ?? false),
+    });
+    while (this.#touched.size > 50)
+      this.#touched.delete(this.#touched.keys().next().value!);
   }
 
   // ---------------------------------------------------------------- discover
@@ -618,6 +668,8 @@ export class OperationsAgentSession {
           limit,
           catalog,
         );
+        for (const record of listed.records.slice(0, 10))
+          this.#touch(query.sourceEntityId, record, false);
         return {
           queryId,
           outcome: listed.records.length === 0 ? 'not-found' : 'exact',
@@ -638,6 +690,8 @@ export class OperationsAgentSession {
         queryId,
         arguments: withScope(query, argumentsForType, this.#options.companyId),
       });
+      for (const record of result.records.slice(0, 10))
+        this.#touch(query.sourceEntityId, record, false);
       return {
         queryId,
         outcome: result.outcome,
@@ -1103,11 +1157,13 @@ export class OperationsAgentSession {
           });
           continue;
         }
-        if (result.readBack)
+        if (result.readBack) {
           latestRevision.set(
             result.readBack.recordId,
             result.readBack.revision,
           );
+          this.#touch(step.entity, result.readBack, true);
+        }
         results.push({
           step: step.step,
           operationId: step.operation.operationId,
@@ -1230,8 +1286,10 @@ export class OperationsAgentSession {
     });
   }
 
-  #bounded(content: ImmutableJsonValue): ImmutableJsonValue {
-    const limit = this.#options.maximumResultCharacters ?? 16_000;
+  #bounded(
+    content: ImmutableJsonValue,
+    limit = this.#options.maximumResultCharacters ?? 16_000,
+  ): ImmutableJsonValue {
     const text = JSON.stringify(content);
     if (text.length <= limit) return content;
     if (isRecord(content) && Array.isArray(content.records)) {
@@ -1257,7 +1315,12 @@ export class OperationsAgentSession {
 function screenFacts(
   view: RequestRuntimeView,
   screen: AgentScreen,
-): string | null {
+): {
+  text: string;
+  recordId: string | null;
+  entityId: string;
+  getQueryId: string | null;
+} | null {
   const surfaces =
     (
       view.projections.surface.payload as unknown as {
@@ -1281,7 +1344,40 @@ function screenFacts(
     typeof screen.recordId === 'string' && uuidPattern.test(screen.recordId)
       ? screen.recordId
       : null;
-  return `Screen: the person is on "${surface.label ?? localName(surface.surfaceId)}" (${surface.archetype ?? 'page'}${entity ? `, ${localName(entity)}` : ''})${record ? `, showing record ${record}; "this", "it" and "here" mean that record` : ''}.`;
+  const getQuery =
+    entity && record
+      ? (catalog.queries.find(
+          (query) =>
+            query.queryId === surface.dataSourceQueryId &&
+            query.queryType === 'get',
+        ) ??
+        catalog.queries.find(
+          (query) =>
+            query.sourceEntityId === entity &&
+            query.queryType === 'get' &&
+            localName(query.queryId) === `${localName(entity)}_get`,
+        ))
+      : undefined;
+  return {
+    text: `Screen: the person is on "${surface.label ?? localName(surface.surfaceId)}" (${surface.archetype ?? 'page'}${entity ? `, ${localName(entity)}` : ''})${record ? `, showing record ${record}; "this", "it" and "here" mean that record` : ''}.`,
+    recordId: record,
+    entityId: entity ?? '',
+    getQueryId: getQuery?.queryId ?? null,
+  };
+}
+
+/** A record's human name: its number, name, SKU or code, when it has one. */
+function recordLabel(record: SemanticRecordDto): string | null {
+  for (const suffix of ['_number', '_name', '_sku', '_code']) {
+    const entry = Object.entries(record.values).find(
+      ([fieldId, value]) =>
+        localName(fieldId).endsWith(suffix) &&
+        typeof value === 'string' &&
+        value !== '',
+    );
+    if (entry) return String(entry[1]);
+  }
+  return null;
 }
 
 const relationIdSets = new WeakMap<PinnedCatalog, readonly string[]>();

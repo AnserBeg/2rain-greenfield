@@ -125,6 +125,7 @@ const suiteDefinitions = [
   {
     discoveryPattern: 'test/agent/**/*.test.ts',
     expectedFiles: [
+      'test/agent/assistant-endpoint.test.ts',
       'test/agent/business-map.test.ts',
       'test/agent/catalog-discovery.test.ts',
       'test/agent/location-discovery.test.ts',

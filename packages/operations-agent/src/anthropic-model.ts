@@ -33,31 +33,42 @@ export function anthropicModel(options: AnthropicModelOptions): ModelAdapter {
   const modelId = options.modelId ?? DEFAULT_ANTHROPIC_MODEL;
   return {
     modelId,
-    async next({ system, tools, conversation }): Promise<ModelTurn> {
+    async next({
+      system,
+      tools,
+      conversation,
+      signal,
+      onText,
+    }): Promise<ModelTurn> {
       let response: Anthropic.Message;
       try {
-        response = await client.messages.create({
-          model: modelId,
-          max_tokens: options.maxTokens ?? 16_000,
-          cache_control: { type: 'ephemeral' },
-          output_config: { effort: options.effort ?? 'high' },
-          // An explicit breakpoint on the system prompt (with the business
-          // map) gives every conversation of the same person and release a
-          // read point; the top-level one caches the growing conversation.
-          system: [
-            {
-              type: 'text',
-              text: system,
-              cache_control: { type: 'ephemeral' },
-            },
-          ],
-          tools: tools.map((tool) => ({
-            name: tool.name,
-            description: tool.description,
-            input_schema: tool.inputSchema as Anthropic.Tool.InputSchema,
-          })),
-          messages: toMessages(conversation),
-        });
+        const stream = client.messages.stream(
+          {
+            model: modelId,
+            max_tokens: options.maxTokens ?? 16_000,
+            cache_control: { type: 'ephemeral' },
+            output_config: { effort: options.effort ?? 'high' },
+            // An explicit breakpoint on the system prompt (with the business
+            // map) gives every conversation of the same person and release a
+            // read point; the top-level one caches the growing conversation.
+            system: [
+              {
+                type: 'text',
+                text: system,
+                cache_control: { type: 'ephemeral' },
+              },
+            ],
+            tools: tools.map((tool) => ({
+              name: tool.name,
+              description: tool.description,
+              input_schema: tool.inputSchema as Anthropic.Tool.InputSchema,
+            })),
+            messages: toMessages(conversation),
+          },
+          signal ? { signal } : {},
+        );
+        if (onText) stream.on('text', (delta) => onText(delta));
+        response = await stream.finalMessage();
       } catch (error) {
         // Never let a provider error carry the key outward.
         const message = error instanceof Error ? error.message : String(error);

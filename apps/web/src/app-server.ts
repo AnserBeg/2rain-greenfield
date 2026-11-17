@@ -8,6 +8,11 @@ import {
 import { RequestRuntimeViewRefusalError } from '@north-star/runtime/request-runtime-view';
 import type { AuthenticatedRequestRuntimeEntryAdapter } from '@north-star/runtime/request-runtime-view';
 import { SURFACE_CLIENT_CSP_HASH } from './surface-client.js';
+import {
+  ASSISTANT_PANEL_CSP_HASH,
+  withAssistantPanel,
+  type AssistantMount,
+} from './assistant-panel.js';
 import { localDemoActor } from '../../../packages/runtime/src/local-demo-actor.js';
 
 import {
@@ -29,9 +34,18 @@ export function createSurfaceRuntimeServer(
   entry: AuthenticatedRequestRuntimeEntryAdapter,
   gateways?: SurfaceRuntimeGateways,
   demoActors?: readonly { key: 'buyer' | 'manager'; label: string }[] | null,
+  /** The assistant panel (AGENT-3, local demo only); absent, no panel. */
+  assistant?: AssistantMount,
 ): Server {
   return createServer((request, response) => {
-    void handleRequest(entry, gateways, request, response, demoActors);
+    void handleRequest(
+      entry,
+      gateways,
+      request,
+      response,
+      demoActors,
+      gateways ? assistant : undefined,
+    );
   });
 }
 
@@ -41,13 +55,14 @@ async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
   demoActors?: readonly { key: 'buyer' | 'manager'; label: string }[] | null,
+  assistant?: AssistantMount,
 ): Promise<void> {
   response.setHeader('cache-control', 'no-store');
   response.setHeader(
     'content-security-policy',
     // `connect-src 'self'` admits only the owned script's same-origin fragment
     // POSTs (ADR-0036 behaviour 7); script, style and form rules are unchanged.
-    `default-src 'none'; script-src '${SURFACE_CLIENT_CSP_HASH}'; style-src 'unsafe-inline'; img-src data:; connect-src ${gateways ? "'self'" : "'none'"}; base-uri 'none'; form-action ${gateways ? "'self'" : "'none'"}; frame-ancestors 'none'`,
+    `default-src 'none'; script-src '${SURFACE_CLIENT_CSP_HASH}'${assistant ? ` '${ASSISTANT_PANEL_CSP_HASH}'` : ''}; style-src 'unsafe-inline'; img-src data:; connect-src ${gateways ? "'self'" : "'none'"}; base-uri 'none'; form-action ${gateways ? "'self'" : "'none'"}; frame-ancestors 'none'`,
   );
   response.setHeader('x-content-type-options', 'nosniff');
 
@@ -66,6 +81,17 @@ async function handleRequest(
   }
 
   const url = new URL(request.url ?? '/', 'http://surface-runtime.local');
+  if (
+    assistant &&
+    url.pathname === '/' &&
+    url.searchParams.has('assistant') &&
+    (await assistant.handle(request, response, url).catch(() => {
+      if (!response.headersSent) response.statusCode = 500;
+      response.end();
+      return true;
+    }))
+  )
+    return;
   if (url.pathname !== '/') {
     writeHtml(
       response,
@@ -163,14 +189,12 @@ async function handleRequest(
       : await entry.run({ headers: request.headers }, (view) =>
           renderSurfaceRuntime(view, url.href),
         );
-    writeHtml(
-      response,
-      withLocalDemoIdentity(
-        result,
-        demoActors,
-        localDemoActor(request.headers.cookie),
-      ),
+    const page = withLocalDemoIdentity(
+      result,
+      demoActors,
+      localDemoActor(request.headers.cookie),
     );
+    writeHtml(response, assistant ? withAssistantPanel(page) : page);
   } catch (error) {
     if (error instanceof AuthenticationRequiredError) {
       writeHtml(
