@@ -13,6 +13,7 @@ import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-prov
 import { RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/receivables-capability-executor';
 import { PAYABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/payables-capability-executor';
 import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '@north-star/postgres-provider/purchase-order-approval-executor';
+import { openCustomizationService } from '@north-star/postgres-provider/customization-service';
 import { createSurfaceRuntimeServer } from '@north-star/web/app-server';
 import { COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/sales-section';
 
@@ -20,6 +21,7 @@ import {
   composedApplicationSeed,
   type ComposedApplicationSeedProfile,
 } from '../../../packages/domain/src/app/seed.js';
+import { readUnboundPermissionAcknowledgementFor } from '../../web/scripts/unbound-permission-acknowledgement.js';
 
 export interface ComposedApplicationServerOptions {
   /**
@@ -89,6 +91,15 @@ export const COMPOSED_APPLICATION_INVENTORY_SCOPE = Object.freeze({
   transferReasonRequirement: 'codeOnly',
 } as const satisfies InventoryScopeProvisioning);
 
+const CAPABILITY_EXECUTOR_FACTORIES = Object.freeze([
+  INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+  RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+  FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY,
+  RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY,
+  PAYABLES_CAPABILITY_EXECUTOR_FACTORY,
+  PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY,
+]);
+
 /** Thin transport root: provider assembly owns persistence and runtime wiring. */
 export async function startComposedApplication(
   options: ComposedApplicationServerOptions,
@@ -98,6 +109,19 @@ export async function startComposedApplication(
     throw new Error('the composed demo identity may bind only to loopback');
   }
   const runtime = await openComposedApplicationRuntime(options);
+  // The Customize screen's service opens on first use (CUSTOMIZE), so a
+  // server nobody customizes holds no extra connections.
+  let customization: ReturnType<typeof openCustomizeService> | undefined;
+  const customize = async () => {
+    customization ??= openCustomizeService(options).catch((error: unknown) => {
+      customization = undefined;
+      throw error;
+    });
+    return (await customization).service;
+  };
+  const closeCustomization = async () => {
+    await (await customization?.catch(() => undefined))?.close();
+  };
   // Everything after the runtime exists must hand it back closed on failure.
   // Seeding is 176 operations and `listen` can fail with EADDRINUSE; either
   // one previously threw past an open runtime, leaving the caller with no
@@ -143,6 +167,7 @@ export async function startComposedApplication(
         queryGateway: runtime.queryGateway,
       },
       runtime.identityMode === 'LOCAL_DEMO' ? runtime.localDemoActors : null,
+      runtime.identityMode === 'LOCAL_DEMO' ? customize : undefined,
     );
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
@@ -152,6 +177,7 @@ export async function startComposedApplication(
       });
     });
   } catch (error) {
+    await closeCustomization();
     await runtime.close();
     throw error;
   }
@@ -174,6 +200,7 @@ export async function startComposedApplication(
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
       });
+      await closeCustomization();
       await runtime.close();
     },
     runtime,
@@ -203,14 +230,7 @@ export async function openComposedApplicationRuntime(
       ),
     ) as unknown);
   return createComposedApplicationRuntime({
-    capabilityOperationExecutorFactories: [
-      INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
-      RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
-      FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY,
-      RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY,
-      PAYABLES_CAPABILITY_EXECUTOR_FACTORY,
-      PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY,
-    ],
+    capabilityOperationExecutorFactories: CAPABILITY_EXECUTOR_FACTORIES,
     compiledApplication,
     databaseUrl: options.databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
@@ -226,6 +246,44 @@ export async function openComposedApplicationRuntime(
           },
         }
       : {}),
+    tenantSlug: options.tenantSlug ?? 'local-composed-application',
+  });
+}
+
+/** Tenant customization over the database the composed runtime serves. */
+export async function openCustomizeService(
+  options: Pick<
+    ComposedApplicationServerOptions,
+    'compiledApplication' | 'databaseUrl' | 'tenantSlug'
+  >,
+) {
+  const authoredPath = new URL(
+    '../../web/release/app.authored.json',
+    import.meta.url,
+  ).pathname;
+  const firstPartyAuthored = JSON.parse(
+    await readFile(authoredPath, 'utf8'),
+  ) as Record<string, unknown>;
+  return openCustomizationService({
+    acknowledgement: readUnboundPermissionAcknowledgementFor(
+      authoredPath,
+      String((firstPartyAuthored.package as Record<string, unknown>).packageId),
+    ),
+    capabilityOperationExecutorFactories: CAPABILITY_EXECUTOR_FACTORIES,
+    compiledApplication:
+      options.compiledApplication ??
+      (JSON.parse(
+        await readFile(
+          new URL('../../web/release/app.compiled.json', import.meta.url),
+          'utf8',
+        ),
+      ) as unknown),
+    databaseUrl: options.databaseUrl,
+    firstPartyAuthored,
+    localDemoIdentity: true,
+    migrationsDirectory: new URL('../../../db/migrations/', import.meta.url)
+      .pathname,
+    providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
     tenantSlug: options.tenantSlug ?? 'local-composed-application',
   });
 }

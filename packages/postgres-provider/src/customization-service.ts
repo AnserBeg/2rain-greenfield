@@ -13,7 +13,9 @@ import {
   parseSerializedRelease,
   serializeRelease,
   storageElements,
+  customizationTargets,
   type AcknowledgementInput,
+  type CustomizationTargets,
   type CustomizationPatch,
   type SandboxRunnerOptions,
   type SandboxStep,
@@ -55,6 +57,8 @@ import { withTrustedRequestTransaction } from './request-context.js';
  * worker, and a plain-language diff. Nothing here activates anything: drafting
  * changes no pointer and no serving state.
  */
+export type { CustomizationTargets } from '@north-star/customization';
+
 export const AUTHORING_CHANNELS = [
   'firstPartyAuthoring',
   'visualBuilder',
@@ -156,12 +160,14 @@ export interface PatchRecord {
   readonly resultingRevisionId: MintedUuid;
 }
 
+export type PatchState = 'live' | 'approved' | 'drafted' | 'stale';
+
 export interface CustomizationStatus {
   readonly activeReleaseId: MintedUuid;
   readonly activeReleaseRoot: string;
   /** Applied patches of the active release, oldest first. */
   readonly activeChain: readonly PatchRecord[];
-  readonly patches: readonly PatchRecord[];
+  readonly patches: readonly (PatchRecord & { readonly state: PatchState })[];
 }
 
 interface ActiveState {
@@ -192,12 +198,57 @@ export class PostgresCustomizationService {
   async status(): Promise<CustomizationStatus> {
     const context = await this.#context();
     const active = await this.#active(context);
+    const approvedReleases = await withTrustedRequestTransaction(
+      this.connection.runtimePool,
+      context,
+      async (client) => {
+        const result = await client.query<{ target_release_id: string }>(
+          `SELECT DISTINCT target_release_id
+             FROM platform.release_approvals
+            WHERE tenant_id = $1 AND environment_id = $2
+              AND expected_pointer_id = $3
+              AND expected_release_id IS NOT DISTINCT FROM $4
+              AND expected_fence = $5
+              AND expires_at > clock_timestamp()`,
+          [
+            context.tenantId,
+            context.environmentId,
+            active.pointer.pointerId,
+            active.pointer.releaseId,
+            active.pointer.fence,
+          ],
+        );
+        return new Set(result.rows.map((row) => row.target_release_id));
+      },
+    );
+    const state = (record: PatchRecord): PatchState =>
+      active.chain.some((applied) => applied.patchId === record.patchId)
+        ? 'live'
+        : record.parentRevisionId !== active.revisionId
+          ? 'stale'
+          : approvedReleases.has(record.resultingReleaseId)
+            ? 'approved'
+            : 'drafted';
     return Object.freeze({
       activeChain: active.chain,
       activeReleaseId: active.releaseId,
       activeReleaseRoot: active.releaseRoot,
-      patches: await this.#patches(context),
+      patches: Object.freeze(
+        (await this.#patches(context)).map((record) =>
+          Object.freeze({ ...record, state: state(record) }),
+        ),
+      ),
     });
+  }
+
+  /** What a change may target on the live release (plan §10.6 rules). */
+  async targets(): Promise<CustomizationTargets> {
+    const context = await this.#context();
+    const active = await this.#active(context);
+    const definition = parseNormalizedApplicationPackageJson(
+      await this.#desiredState(context, active.revisionId),
+    ) as unknown as Parameters<typeof customizationTargets>[0];
+    return customizationTargets(definition);
   }
 
   /**
