@@ -15,22 +15,29 @@ import { readUnboundPermissionAcknowledgementFor } from '../../web/scripts/unbou
  * database a running or previously started `corepack pnpm dev` uses.
  *
  *   customize draft <patch.json>   store the change and print its plain diff
+ *   customize approve <change-id>  approve a drafted change (shows the diff again)
+ *   customize activate <change-id> make an approved change live; no restart
+ *   customize rollback             hide the live change again; its records stay
  *   customize status               the active release and every drafted change
  */
 const root = resolve(import.meta.dirname, '../../..');
 const authoredPath = resolve(root, 'apps/web/release/app.authored.json');
 const usage = [
   'usage: corepack pnpm customize <command>',
-  '  draft <patch.json>   record a change and print what it would do',
-  '  status               show the active release and every recorded change',
+  '  draft <patch.json>     record a change and print what it would do',
+  '  approve <change-id>    approve a drafted change',
+  '  activate <change-id>   make an approved change live (no restart)',
+  '  rollback               hide the live change; its records are kept',
+  '  status                 show the active release and every recorded change',
 ].join('\n');
 
+const commands = ['draft', 'approve', 'activate', 'rollback', 'status'];
 const [command, argument] = process.argv.slice(2);
-if (command !== 'draft' && command !== 'status') {
-  process.stderr.write(`${usage}\n`);
-  process.exit(2);
-}
-if (command === 'draft' && !argument) {
+if (
+  !command ||
+  !commands.includes(command) ||
+  (['draft', 'approve', 'activate'].includes(command) && !argument)
+) {
   process.stderr.write(`${usage}\n`);
   process.exit(2);
 }
@@ -52,6 +59,7 @@ const opened = await openCustomizationService({
   databaseUrl,
   firstPartyAuthored,
   migrationsDirectory: resolve(root, 'db/migrations'),
+  localDemoIdentity: true,
   tenantSlug:
     process.env.NORTH_STAR_TENANT_SLUG ?? 'local-composed-application',
 });
@@ -66,6 +74,28 @@ try {
       ),
     ) as unknown;
     exitCode = report(await opened.service.draft(patch, 'declarativeEditor'));
+  } else if (command === 'approve') {
+    const approved = await opened.service.approve(argument!);
+    process.stdout.write(
+      [
+        `Approved change ${argument!}:`,
+        '',
+        approved.renderedDiff,
+        '',
+        `Make it live with: corepack pnpm customize activate ${argument!}`,
+        '',
+      ].join('\n'),
+    );
+  } else if (command === 'activate') {
+    const activated = await opened.service.activate(argument!);
+    process.stdout.write(
+      `Live: release ${activated.releaseRoot.slice(0, 12)}. A running corepack pnpm dev shows it on the next page load.\n`,
+    );
+  } else if (command === 'rollback') {
+    const rolledBack = await opened.service.rollback();
+    process.stdout.write(
+      `Rolled back to release ${rolledBack.releaseRoot.slice(0, 12)}. The change is hidden; every record entered under it is kept.\n`,
+    );
   } else {
     const status = await opened.service.status();
     const lines = [
