@@ -48,6 +48,7 @@ import {
   type BusinessCalendar,
 } from './business-context.js';
 import { businessMapStructure, renderBusinessMap } from './business-map.js';
+import { operationRisk, type OperationRisk, type RiskClass } from './risk.js';
 import type { OperationsAgentToolId } from './tools.js';
 
 export type AgentRuntime = Pick<
@@ -58,6 +59,8 @@ export type AgentRuntime = Pick<
 export interface PlanForApproval {
   readonly planId: string;
   readonly summary: string;
+  /** Why this plan needs the person's yes, one reason per kind of step. */
+  readonly reasons?: readonly string[];
   readonly steps: readonly {
     readonly step: number;
     readonly operationId: string;
@@ -115,7 +118,28 @@ export interface ApprovalRecord {
   readonly planId: string;
   readonly approved: boolean;
   readonly steps: number;
+  /**
+   * Who approved: the person (their yes, or their Undo click), or the plan's
+   * risk class (a reversible in-app change runs at once). Never both.
+   */
+  readonly by: 'person' | 'riskClass';
+  readonly riskClass: RiskClass;
 }
+
+/** A change the agent made at once, and how Undo takes it back. */
+export interface AgentChange {
+  readonly changeId: string;
+  readonly summary: string;
+  readonly undone: boolean;
+}
+
+export type UndoOutcome =
+  | {
+      readonly outcome: 'undone';
+      readonly summary: string;
+      readonly verified: boolean;
+    }
+  | { readonly outcome: 'refused'; readonly reason: string };
 
 type StepRef = string | { readonly fromStep: number };
 
@@ -130,6 +154,9 @@ interface PlanStep {
   readonly relations?: Readonly<Record<string, ImmutableJsonValue>>;
   readonly patch?: Readonly<Record<string, ImmutableJsonValue>>;
   readonly arguments?: ImmutableJsonValue;
+  /** For an update of an existing record: the patched fields' values before. */
+  readonly prior?: Readonly<Record<string, ImmutableJsonValue>>;
+  readonly risk: OperationRisk;
 }
 
 interface StepResult {
@@ -146,6 +173,7 @@ interface StoredPlan {
   readonly planId: string;
   readonly steps: readonly PlanStep[];
   readonly digest: string;
+  readonly riskClass: RiskClass;
   status: 'approved' | 'declined' | 'executed' | 'failed';
   execution?: {
     readonly key: string;
@@ -184,6 +212,8 @@ export class OperationsAgentSession {
   readonly toolCalls: ToolCallRecord[] = [];
   readonly approvals: ApprovalRecord[] = [];
   readonly #touched = new Map<string, TouchedRecord>();
+  readonly #undoPlans = new Set<string>();
+  readonly #undone = new Set<string>();
 
   constructor(options: OperationsAgentSessionOptions) {
     this.#options = options;
@@ -403,6 +433,131 @@ export class OperationsAgentSession {
       }
       return lines.join('\n');
     });
+  }
+
+  /** The latest change the agent made at once in this session, if any. */
+  latestChange(): AgentChange | null {
+    const plan = [...this.#plans.values()]
+      .filter(
+        (candidate) =>
+          candidate.riskClass === 'reversible' &&
+          candidate.execution &&
+          !this.#undoPlans.has(candidate.planId),
+      )
+      .at(-1);
+    if (!plan?.execution) return null;
+    return {
+      changeId: plan.planId,
+      summary: changeSummary(plan),
+      undone: this.#undone.has(plan.planId),
+    };
+  }
+
+  /**
+   * Undo the latest change, named by its id (the person's Undo click): a
+   * planned, executed and verified operation of its own. It refuses, saying
+   * why, when a record changed after the agent's write or the change is not
+   * the latest one.
+   */
+  async undo(changeId: string): Promise<UndoOutcome> {
+    const latest = this.latestChange();
+    if (!latest || latest.changeId !== changeId)
+      return {
+        outcome: 'refused',
+        reason: 'Only the latest change of this conversation can be undone.',
+      };
+    if (latest.undone)
+      return { outcome: 'refused', reason: 'That change was already undone.' };
+    const plan = this.#plans.get(changeId)!;
+    const results = plan.execution!.results;
+    // The revision each record had right after the agent's last write to it.
+    const written = new Map<string, { revision: number; step: PlanStep }>();
+    for (const step of plan.steps) {
+      const result = results.find((entry) => entry.step === step.step);
+      if (result?.outcome === 'succeeded' && result.recordId)
+        written.set(result.recordId, {
+          revision: result.revision ?? 0,
+          step: written.get(result.recordId)?.step ?? step,
+        });
+    }
+    if (written.size === 0)
+      return { outcome: 'refused', reason: 'That change wrote nothing.' };
+    const changed = await this.#run(async (view) => {
+      const catalog = pinnedCatalog(view);
+      for (const [recordId, { revision, step }] of written) {
+        const record = await readRecord(
+          this.#options.runtime,
+          view,
+          catalog,
+          step.operation.readBackQueryId,
+          recordId,
+          this.#options.companyId,
+        );
+        if (!record)
+          return `${localName(step.entity).replaceAll('_', ' ')} ${recordId} can no longer be read.`;
+        if (record.revision !== revision)
+          return `${recordLabel(record) ?? localName(step.entity).replaceAll('_', ' ')} changed after the assistant's change (revision ${String(revision)} is now ${String(record.revision)}); undoing would overwrite that later change.`;
+      }
+      return null;
+    });
+    if (changed) return { outcome: 'refused', reason: changed };
+    // Reverse order: archive what was made, put back what was changed. A
+    // record made in this change is archived, not restored field by field.
+    const intents: ImmutableJsonValue[] = [];
+    const created = new Set(
+      plan.steps
+        .filter((step) => step.risk.inverse?.kind === 'archive')
+        .map((step) => results.find((r) => r.step === step.step)?.recordId),
+    );
+    for (const step of [...plan.steps].reverse()) {
+      const result = results.find((entry) => entry.step === step.step);
+      if (result?.outcome !== 'succeeded' || !result.recordId) continue;
+      const inverse = step.risk.inverse;
+      if (inverse?.kind === 'archive')
+        intents.push({
+          operationId: inverse.operationId,
+          target: result.recordId,
+        });
+      else if (
+        inverse?.kind === 'restorePriorValues' &&
+        step.prior &&
+        !created.has(result.recordId)
+      )
+        intents.push({
+          operationId: inverse.operationId,
+          target: result.recordId,
+          patch: step.prior,
+        });
+    }
+    const planned = (await this.#plan({ intents }, true)) as Record<
+      string,
+      ImmutableJsonValue
+    >;
+    if (typeof planned.planId !== 'string')
+      return {
+        outcome: 'refused',
+        reason: `Undo could not be planned: ${String(planned.reason ?? planned.error ?? 'refused')}`,
+      };
+    this.#undoPlans.add(planned.planId);
+    this.toolCalls.push({ tool: 'undo:plan', isError: false });
+    const executed = (await this.#execute({
+      planId: planned.planId,
+      executionIdempotencyKey: `undo-${changeId}`,
+    })) as Record<string, ImmutableJsonValue>;
+    if (executed.outcome !== 'executed')
+      return {
+        outcome: 'refused',
+        reason: `Undo stopped: ${JSON.stringify(executed.steps)}`,
+      };
+    this.#undone.add(changeId);
+    const verified = (await this.#verify({
+      operationSessionId: planned.planId,
+    })) as Record<string, ImmutableJsonValue>;
+    return {
+      outcome: 'undone',
+      summary: `Undid: ${latest.summary}`,
+      verified: verified.verified === true,
+    };
   }
 
   /** Records this session read or wrote, newest last; written ones marked. */
@@ -804,6 +959,8 @@ export class OperationsAgentSession {
 
   #plan(
     input: Record<string, ImmutableJsonValue>,
+    /** Undo passes the person's click; the model's plans never do. */
+    personsUndo = false,
   ): Promise<ImmutableJsonValue> {
     if (
       input.requestedBulkMode !== undefined &&
@@ -858,9 +1015,30 @@ export class OperationsAgentSession {
       }
       const planId = this.#mint();
       const digest = planDigest(steps);
+      // A plan is reversible only when every step is, and an undo of a step
+      // made earlier in the same plan is covered by archiving what it made.
+      const riskClass: RiskClass = steps.every(
+        (step) =>
+          step.risk.riskClass === 'reversible' &&
+          (step.risk.inverse?.kind !== 'restorePriorValues' ||
+            step.prior !== undefined ||
+            (typeof step.recordId !== 'string' &&
+              steps[step.recordId.fromStep - 1]?.risk.inverse?.kind ===
+                'archive')),
+      )
+        ? 'reversible'
+        : 'needsYes';
+      const reasons = [
+        ...new Set(
+          steps
+            .filter((step) => step.risk.riskClass !== 'reversible')
+            .map((step) => step.risk.reason),
+        ),
+      ];
       const presentation: PlanForApproval = {
         planId,
         summary: `${String(steps.length)} step(s)`,
+        ...(reasons.length > 0 ? { reasons } : {}),
         steps: steps.map((step) => ({
           step: step.step,
           operationId: step.operation.operationId,
@@ -877,19 +1055,32 @@ export class OperationsAgentSession {
           },
         })),
       };
-      const approved = await this.#options.approve(presentation);
-      this.approvals.push({ planId, approved, steps: steps.length });
+      const automatic = riskClass === 'reversible' && !personsUndo;
+      const approved =
+        automatic || personsUndo
+          ? true
+          : await this.#options.approve(presentation);
+      this.approvals.push({
+        planId,
+        approved,
+        steps: steps.length,
+        by: automatic ? 'riskClass' : 'person',
+        riskClass,
+      });
       this.#plans.set(planId, {
         planId,
         steps,
         digest,
+        riskClass,
         status: approved ? 'approved' : 'declined',
       });
       return {
         planId,
-        approval: approved
-          ? 'approved by the person'
-          : 'declined by the person',
+        approval: automatic
+          ? 'runs at once: a reversible in-app change (risk class reversible); the person can Undo it'
+          : approved
+            ? 'approved by the person'
+            : 'declined by the person',
         steps: presentation.steps.map((step, index) => ({
           ...step,
           precondition: checks[index] ?? null,
@@ -1005,6 +1196,13 @@ export class OperationsAgentSession {
       step,
       operation,
       entity,
+      risk: settingState(operation, prefix, { ...values, ...patch })
+        ? ({
+            riskClass: 'needsYes',
+            reason:
+              "it sets a document's state past its first one (only its posting operation should)",
+          } satisfies OperationRisk)
+        : operationRisk(catalog, operation),
       ...(values ? { values } : {}),
       ...(relations ? { relations } : {}),
       ...(patch ? { patch } : {}),
@@ -1046,7 +1244,21 @@ export class OperationsAgentSession {
     );
     const check = `${describePredicate(operation.precondition)}: ${evaluation.outcome}`;
     return {
-      step: { ...base, recordId: target, pinnedRevision: record.revision },
+      step: {
+        ...base,
+        recordId: target,
+        pinnedRevision: record.revision,
+        ...(patch
+          ? {
+              prior: Object.fromEntries(
+                Object.keys(patch).map((fieldId) => [
+                  fieldId,
+                  record.values[fieldId] ?? null,
+                ]),
+              ),
+            }
+          : {}),
+      },
       check,
       ...(evaluation.outcome === 'refused'
         ? {
@@ -1240,6 +1452,8 @@ export class OperationsAgentSession {
               effect: Record<string, unknown>;
             }
           ).effect;
+          if (effect.kind === 'archiveRecordEffect' && !record.archived)
+            mismatches.push('the record is not archived');
           if (
             effect.kind === 'transitionStateEffect' &&
             record.values[String(effect.stateFieldId)] !== effect.toStateId
@@ -1364,6 +1578,48 @@ function screenFacts(
     entityId: entity ?? '',
     getQueryId: getQuery?.queryId ?? null,
   };
+}
+
+/**
+ * Whether a write sets the record type's own state field (`<type>_state`, a
+ * choice) to anything but its first option, the state a record starts in.
+ */
+function settingState(
+  operation: RegisteredOperationDefinition,
+  prefix: string,
+  written: Readonly<Record<string, ImmutableJsonValue>>,
+): boolean {
+  const field = (operation.inputContract?.fields ?? []).find(
+    (candidate) =>
+      localName(candidate.fieldId) === `${prefix}_state` &&
+      candidate.enumOptionIds.length > 0,
+  );
+  if (!field || !(field.fieldId in written)) return false;
+  const value = written[field.fieldId];
+  return value !== null && value !== field.enumOptionIds[0];
+}
+
+/** What an executed plan did, in short words, for "Did: ..." and Undo. */
+function changeSummary(plan: StoredPlan): string {
+  return plan.steps
+    .map((step) => {
+      const result = plan.execution?.results.find(
+        (entry) => entry.step === step.step,
+      );
+      const values = result?.values ?? {};
+      const label =
+        Object.entries(values).find(([fieldId, value]) =>
+          ['_number', '_name', '_sku', '_code'].some(
+            (suffix) =>
+              localName(fieldId).endsWith(suffix) && typeof value === 'string',
+          ),
+        )?.[1] ?? null;
+      const what = localName(step.entity).replaceAll('_', ' ');
+      const verb =
+        step.risk.inverse?.kind === 'archive' ? 'created' : 'changed';
+      return `${verb} ${what}${label ? ` ${String(label)}` : ''}`;
+    })
+    .join(', ');
 }
 
 /** A record's human name: its number, name, SKU or code, when it has one. */

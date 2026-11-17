@@ -4,33 +4,50 @@ import { startComposedApplication } from '../../../api/src/composition-root.js';
 import {
   lastToolResult,
   scriptedModel,
+  type ConversationEntry,
 } from '../../../../packages/operations-agent/src/index.js';
 import { withEphemeralPostgres } from '../../../../test/helpers/postgres.js';
 
+/** The first record id an `erp_query` returned earlier in the conversation. */
+function firstQueriedRecord(
+  conversation: readonly ConversationEntry[],
+): string {
+  for (const entry of conversation)
+    if (entry.role === 'tool')
+      for (const result of entry.results) {
+        const content = JSON.parse(result.content) as {
+          records?: { recordId: string }[];
+        };
+        if (content.records?.[0]) return content.records[0].recordId;
+      }
+  throw new Error('no record was queried');
+}
+
 /**
- * The assistant panel (AGENT-3 slice 2) with the scripted model only: no key
- * and no provider in CI. A read answers with a plain table; a write shows its
- * plan, runs only after "Yes, do it", and links the record it made, which
- * opens on its own page.
+ * The assistant panel (AGENT-3 slices 2 and 3) with the scripted model only:
+ * no key and no provider in CI. A read answers with a plain table. A
+ * reversible in-app write runs at once and shows "Did: ..." with Undo and a
+ * link to the record. A write that needs a yes shows its plan and runs only
+ * after "Yes, do it". Undo takes the latest change back, verified.
  */
-test('the assistant panel answers, asks before a write, and links what it changed', async ({
+test('the assistant panel answers, acts then offers Undo, and asks before a consequential write', async ({
   page,
 }) => {
   test.setTimeout(300_000);
   const model = scriptedModel([
-    // 1: a read.
+    // Turn 1: a read.
     () => ({
       toolCalls: [
         {
           name: 'erp_query',
-          input: { queryId: 'party_list', arguments: { search: 'Lethbridge' } },
+          input: { queryId: 'party_list', arguments: {} },
         },
       ],
     }),
     () => ({
       text: 'Here is what I found:\n\n| Customer | Number |\n|---|---|\n| Lethbridge Millwork | P-2016 |',
     }),
-    // 2: a write, planned, approved in the panel, executed and verified.
+    // Turn 2: a reversible create runs at once (no yes asked).
     () => ({
       toolCalls: [
         {
@@ -70,6 +87,34 @@ test('the assistant panel answers, asks before a write, and links what it change
       ],
     }),
     () => ({ text: 'Done: I created customer **P-7701**.' }),
+    // Turn 3: archiving needs the person's yes.
+    (conversation) => ({
+      toolCalls: [
+        {
+          name: 'erp_plan',
+          input: {
+            intents: [
+              {
+                operationId: 'party_archive',
+                target: firstQueriedRecord(conversation),
+              },
+            ],
+          },
+        },
+      ],
+    }),
+    (conversation) => ({
+      toolCalls: [
+        {
+          name: 'erp_execute',
+          input: {
+            planId: String(lastToolResult(conversation).planId),
+            executionIdempotencyKey: 'panel-browser-2',
+          },
+        },
+      ],
+    }),
+    () => ({ text: 'Archived.' }),
   ]);
   await withEphemeralPostgres(
     'assistant-panel-browser',
@@ -87,31 +132,49 @@ test('the assistant panel answers, asks before a write, and links what it change
         await expect(panel).toBeHidden();
         await page.locator('[data-assistant-toggle]').click();
         await expect(panel).toBeVisible();
+        const say = async (text: string) => {
+          await panel.locator('textarea').fill(text);
+          await panel.locator('button[type=submit]').click();
+        };
+        const reply = (index: number) =>
+          panel.locator('[data-assistant-reply]').nth(index);
 
-        await panel.locator('textarea').fill('Find Lethbridge Millwork');
-        await panel.locator('button[type=submit]').click();
-        const firstReply = panel.locator('[data-assistant-reply]').first();
-        await expect(firstReply.locator('table td').first()).toHaveText(
+        await say('Find our customers');
+        await expect(reply(0).locator('table td').first()).toHaveText(
           'Lethbridge Millwork',
         );
-        await expect(firstReply).toContainText('USD 0.00 used');
+        await expect(reply(0)).toContainText('USD 0.00 used');
         await expect(panel.locator('[data-assistant-status]')).toBeHidden();
 
-        await panel
-          .locator('textarea')
-          .fill('Add customer P-7701, Panel Test Customer');
-        await panel.locator('button[type=submit]').click();
+        await say('Add customer P-7701, Panel Test Customer');
+        await expect(reply(1)).toContainText('Done: I created customer');
+        await expect(panel.locator('[data-assistant-plan]')).toHaveCount(0);
+        const did = reply(1).locator('[data-assistant-did]');
+        await expect(did).toContainText('Did: created party P-7701');
+        const link = reply(1).locator('a', { hasText: 'Changed: P-7701' });
+        const href = await link.getAttribute('href');
+        expect(href).toContain('record=');
+
+        await say('Archive the first customer');
         const plan = panel.locator('[data-assistant-plan]');
-        await expect(plan).toContainText('creates one party record');
-        // Nothing runs before the yes: the step label waits on the plan.
+        await expect(plan).toContainText('archives one party record');
+        await expect(plan).toContainText('Because it archives a record.');
         await expect(panel.locator('[data-assistant-status]')).toBeVisible();
         await plan.locator('[data-assistant-yes]').click();
-        const secondReply = panel.locator('[data-assistant-reply]').nth(1);
-        await expect(secondReply).toContainText('Done: I created customer');
-        const link = secondReply.locator('a', { hasText: 'Changed: P-7701' });
-        await expect(link).toBeVisible();
-        await link.click();
-        await expect(page.locator('main')).toContainText('Panel Test Customer');
+        await expect(reply(2)).toContainText('Archived.');
+
+        // Undo the create (the latest change made at once), verified.
+        await did.locator('[data-assistant-undo]').click();
+        await expect(did).toContainText(
+          'Undid: created party P-7701 (checked)',
+        );
+
+        // The link opens the record the assistant made, on its own page.
+        const opened = await page.context().newPage();
+        await opened.goto(`${application.baseUrl}${href!}`);
+        await expect(opened.locator('main')).toContainText(
+          'Panel Test Customer',
+        );
       } finally {
         await application.close();
       }

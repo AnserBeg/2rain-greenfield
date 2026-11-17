@@ -212,10 +212,8 @@ test('a plan waits for a yes bound to exactly that plan; a wrong digest decides 
           name: 'erp_plan',
           input: {
             intents: [
-              {
-                operationId: 'party_create',
-                values: { number: 'P-9', name: 'New customer' },
-              },
+              // Archiving needs the person's yes (slice 3's risk class).
+              { operationId: 'party_archive', target: RECORD },
             ],
           },
         },
@@ -235,7 +233,7 @@ test('a plan waits for a yes bound to exactly that plan; a wrong digest decides 
     const response = await fetch(`${url}/?assistant=ask`, {
       method: 'POST',
       headers: headers('buyer', url),
-      body: JSON.stringify({ text: 'add customer P-9' }),
+      body: JSON.stringify({ text: 'archive this customer' }),
     });
     const reader = response.body!.getReader();
     const decoder = new TextDecoder();

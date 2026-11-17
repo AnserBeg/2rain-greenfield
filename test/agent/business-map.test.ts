@@ -211,3 +211,37 @@ test('a short name stands for exactly one id or for none', () => {
     `${NS}:operation.sales_order_create`,
   );
 });
+
+test('the risk class comes from contract facts: O0 creates and updates are reversible, everything else needs a yes', async () => {
+  const { operationRisk } =
+    await import('../../packages/operations-agent/src/risk.js');
+  const catalog = pinnedCatalog(compiledAppView());
+  const risk = (local: string) =>
+    operationRisk(catalog, catalog.operation(local)!);
+  assert.deepEqual(risk('party_create').inverse, {
+    kind: 'archive',
+    operationId: `${NS}:operation.party_archive`,
+  });
+  assert.deepEqual(risk('sales_order_update').inverse, {
+    kind: 'restorePriorValues',
+    operationId: `${NS}:operation.sales_order_update`,
+  });
+  for (const local of [
+    'party_archive',
+    'party_restore',
+    'goods_receipt_post',
+    'shipment_post',
+    'customer_payment_post',
+    'purchase_order_release',
+    'purchase_order_draft_cancel',
+    // Its field is one reopen_period changes only with confirmation.
+    'advance_period_lock',
+  ])
+    assert.equal(risk(local).riskClass, 'needsYes', local);
+  // An unknown family is never reversible.
+  const strange = {
+    ...catalog.operation('party_create')!,
+    tier: 'o9',
+  } as never;
+  assert.equal(operationRisk(catalog, strange).riskClass, 'needsYes');
+});

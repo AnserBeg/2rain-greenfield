@@ -140,6 +140,7 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     const card = element('section', null, 'assistant-plan');
     card.setAttribute('data-assistant-plan', event.planId);
     card.appendChild(element('p', 'This needs your yes before it runs:', 'assistant-heading'));
+    (event.reasons || []).forEach((reason) => card.appendChild(element('p', 'Because ' + reason + '.', 'assistant-muted')));
     const list = card.appendChild(element('ol'));
     event.steps.forEach((step) => {
       const item = list.appendChild(element('li', step.text));
@@ -215,6 +216,20 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
                 anchor.href = link.href;
               });
             }
+            if (event.did) {
+              const did = reply.appendChild(element('p', 'Did: ' + event.did.summary + ' ', 'assistant-did'));
+              did.setAttribute('data-assistant-did', event.did.changeId);
+              const undo = did.appendChild(element('button', 'Undo'));
+              undo.type = 'button';
+              undo.setAttribute('data-assistant-undo', '');
+              undo.addEventListener('click', async () => {
+                undo.disabled = true;
+                const answer = await post('undo', { conversation, changeId: event.did.changeId });
+                const result = await answer.json().catch(() => ({ text: 'Undo failed.' }));
+                did.appendChild(element('span', ' ' + result.text, result.outcome === 'undone' ? 'assistant-muted' : 'assistant-error'));
+                if (result.outcome !== 'undone') undo.disabled = false;
+              });
+            }
             reply.appendChild(element('p', 'USD ' + Number(event.spentUsd).toFixed(2) + ' used in this conversation', 'assistant-muted'));
           } else if (event.type === 'error') {
             reply.appendChild(element('p', event.message, 'assistant-error'));
@@ -285,6 +300,8 @@ const PANEL_STYLES = `
 .assistant-muted{color:var(--ink-muted,#666);font-size:.85em}
 .assistant-error{color:var(--status-blocked-ink,#a00)}
 .assistant-links{display:flex;flex-wrap:wrap;gap:8px}
+.assistant-did{padding:6px 8px;border-radius:var(--radius-control,6px);background:var(--status-success-ground,#e7f6ea);color:var(--status-success-ink,#185c2a)}
+.assistant-did button{min-height:36px;margin-left:6px}
 .assistant-plan{border:1px solid var(--line-strong,#999);border-radius:var(--radius-container,8px);padding:10px 12px;background:var(--status-attention-ground,#fff7e0)}
 .assistant-plan button{min-height:44px;margin-right:8px}
 .assistant-status{display:flex;align-items:center;gap:8px;padding:6px 16px;border-top:1px solid var(--line,#ddd);color:var(--status-inprogress-ink,#3b3bb3);background:var(--status-inprogress-ground,#eef)}

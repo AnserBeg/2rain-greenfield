@@ -103,10 +103,16 @@ test(
           },
         ];
         const before = await snapshot(world);
+        // AGENT-3 slice 3: placing the order (an O1 capability) needs the
+        // person's yes, so this plan is one that can be declined.
+        const needsYes = [
+          ...intents,
+          { operationId: op('purchase_order_submit'), target: { fromStep: 1 } },
+        ];
 
         // Planning writes nothing, and a declined plan cannot be executed.
         const declined = session(world, false);
-        const plan = await declined.call('erp_plan', { intents });
+        const plan = await declined.call('erp_plan', { intents: needsYes });
         assert.equal(plan.isError, false);
         const planId = (plan.content as { planId: string }).planId;
         assert.deepEqual(await snapshot(world), before);
@@ -166,6 +172,124 @@ test(
           (verified.content as { verified: boolean }).verified,
           true,
         );
+        // A reversible in-app change (O0 creates) runs at once even for a
+        // person who would decline: the approval names the risk class, never
+        // the person.
+        assert.deepEqual(
+          approved.approvals.map((entry) => [entry.by, entry.riskClass]),
+          [['riskClass', 'reversible']],
+        );
+        assert.match(
+          JSON.stringify(approvedPlan.content),
+          /risk class reversible/u,
+        );
+        const asked: string[] = [];
+        const careful = new OperationsAgentSession({
+          runtime: world.runtime,
+          personHeaders: { cookie: 'northstar-demo-actor=buyer' },
+          companyId: COMPANY,
+          businessCalendar: BUSINESS_CALENDAR,
+          approve: (presented) => {
+            asked.push(...(presented.reasons ?? []));
+            return Promise.resolve(false);
+          },
+        });
+        await careful.call('erp_plan', { intents: needsYes });
+        assert.deepEqual(
+          careful.approvals.map((entry) => [entry.by, entry.riskClass]),
+          [['person', 'needsYes']],
+        );
+        assert.match(asked.join(' '), /registered business capability/u);
+
+        // Undo: the latest change, planned, executed and verified as the
+        // person's own operation, archives what the change created.
+        const change = approved.latestChange();
+        assert.equal(change?.changeId, id);
+        assert.match(change!.summary, /created purchase order PO-/u);
+        const undone = await approved.undo(id);
+        assert.deepEqual(
+          {
+            outcome: undone.outcome,
+            verified: (undone as { verified?: boolean }).verified,
+          },
+          { outcome: 'undone', verified: true },
+        );
+        const executed = approved.executedPlans()[0]!.results;
+        for (const [local, result] of [
+          ['purchase_order', executed[0]!],
+          ['purchase_order_line', executed[1]!],
+        ] as const)
+          assert.equal(
+            (await world.read(local, result.recordId!)).archived,
+            true,
+            `${local} was not archived by Undo`,
+          );
+        assert.equal(approved.approvals.at(-1)?.by, 'person');
+        assert.equal((await approved.undo(id)).outcome, 'refused');
+
+        // Undo refuses, saying why, when the record changed after the
+        // agent's write; and puts prior values back when it did not.
+        {
+          const agent = new OperationsAgentSession({
+            runtime: world.runtime,
+            personHeaders: { cookie: 'northstar-demo-actor=manager' },
+            companyId: COMPANY,
+            businessCalendar: BUSINESS_CALENDAR,
+            approve: () => Promise.resolve(false),
+          });
+          const change = async (name: string) => {
+            const planned = await agent.call('erp_plan', {
+              intents: [
+                {
+                  operationId: 'party_update',
+                  target: cascade,
+                  patch: { contact_summary: name },
+                },
+              ],
+            });
+            assert.equal(planned.isError, false, JSON.stringify(planned));
+            const planId = (planned.content as { planId: string }).planId;
+            await agent.call('erp_execute', {
+              planId,
+              executionIdempotencyKey: name,
+            });
+            return planId;
+          };
+          const original =
+            (await world.read('party', cascade)).values[
+              f('party_contact_summary')
+            ] ?? null;
+          const first = await change('Changed by the agent');
+          const party = await world.read('party', cascade);
+          const later = await world.invoke('party_update', {
+            recordId: cascade,
+            expectedRevision: party.revision,
+            patch: { [f('party_contact_summary')]: 'Changed by a person' },
+          });
+          assert.equal(later.outcome, 'succeeded');
+          const refusedUndo = await agent.undo(first);
+          assert.equal(refusedUndo.outcome, 'refused');
+          assert.match(
+            (refusedUndo as { reason: string }).reason,
+            /changed after the assistant's change/u,
+          );
+          assert.equal(
+            (await world.read('party', cascade)).values[
+              f('party_contact_summary')
+            ],
+            'Changed by a person',
+          );
+          const second = await change('Changed again by the agent');
+          const putBack = await agent.undo(second);
+          assert.equal(putBack.outcome, 'undone');
+          assert.equal(
+            (await world.read('party', cascade)).values[
+              f('party_contact_summary')
+            ] ?? null,
+            'Changed by a person',
+          );
+          assert.notEqual(original, 'Changed by a person');
+        }
 
         // Context, no guessing: the business date and default currency come
         // from erp_discover; a currency the request and context never gave is

@@ -169,6 +169,34 @@ export function createAssistantEndpoint(
         response.end();
         return true;
       }
+      if (action === 'undo') {
+        // The person's Undo click: the latest change of their conversation,
+        // named by its id, and never while a run is working.
+        response.setHeader('content-type', 'application/json; charset=utf-8');
+        if (!mine || mine.running || typeof body.changeId !== 'string') {
+          response.statusCode = 409;
+          response.end(
+            JSON.stringify({
+              outcome: 'refused',
+              text: 'Nothing to undo now.',
+            }),
+          );
+          return true;
+        }
+        const undone = await mine.session.undo(body.changeId);
+        response.statusCode = 200;
+        response.end(
+          JSON.stringify(
+            undone.outcome === 'undone'
+              ? {
+                  outcome: 'undone',
+                  text: `${undone.summary}${undone.verified ? ' (checked)' : ' (the check did not confirm it; look at the record)'}`,
+                }
+              : { outcome: 'refused', text: `Not undone: ${undone.reason}` },
+          ),
+        );
+        return true;
+      }
       if (action === 'stop') {
         mine?.running?.abort();
         mine?.pending?.decide(false);
@@ -257,6 +285,7 @@ export function createAssistantEndpoint(
       });
       return;
     }
+    const changeBefore = conversation.session.latestChange()?.changeId ?? null;
     emit({ type: 'step', label: 'Reading the screen' });
     const preamble = await agentPreamble(conversation.session, screen);
     const run = await runOperationsAgent({
@@ -285,6 +314,7 @@ export function createAssistantEndpoint(
             : run.answer || '(no answer)',
       stop: run.stop,
       links: await links(conversation, run.answer),
+      ...didThisTurn(conversation.session.latestChange(), changeBefore),
       usd: run.usd,
       spentUsd: conversation.meter.usd,
     });
@@ -320,6 +350,7 @@ export function createAssistantEndpoint(
         type: 'plan',
         planId: plan.planId,
         digest,
+        reasons: plan.reasons ?? [],
         steps: plan.steps.map((step) => ({
           text: `${step.effect}`,
           inputs: plainInputs(step.inputs),
@@ -360,6 +391,16 @@ export function createAssistantEndpoint(
       ];
     });
   }
+}
+
+/** "Did: ..." with Undo, when this turn made a change at once. */
+function didThisTurn(
+  change: { changeId: string; summary: string; undone: boolean } | null,
+  before: string | null,
+): { did?: { changeId: string; summary: string } } {
+  return change && change.changeId !== before && !change.undone
+    ? { did: { changeId: change.changeId, summary: change.summary } }
+    : {};
 }
 
 /** The record page of each record type: its `<type>_detail` surface. */
