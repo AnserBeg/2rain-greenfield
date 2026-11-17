@@ -134,9 +134,16 @@ interface StepResult {
   readonly error?: string;
 }
 
+/** The release a plan was made on: approval binds it, execution checks it. */
+interface PlanRelease {
+  readonly releaseId: string;
+  readonly contentHash: string;
+}
+
 interface StoredPlan {
   readonly planId: string;
   readonly steps: readonly PlanStep[];
+  readonly release: PlanRelease;
   readonly digest: string;
   status: 'approved' | 'declined' | 'executed' | 'failed';
   execution?: {
@@ -803,7 +810,8 @@ export class OperationsAgentSession {
           };
       }
       const planId = this.#mint();
-      const digest = planDigest(steps);
+      const release = releaseOf(view);
+      const digest = planDigest(steps, release);
       const presentation: PlanForApproval = {
         planId,
         summary: `${String(steps.length)} step(s)`,
@@ -828,6 +836,7 @@ export class OperationsAgentSession {
       this.#plans.set(planId, {
         planId,
         steps,
+        release,
         digest,
         status: approved ? 'approved' : 'declined',
       });
@@ -1025,13 +1034,17 @@ export class OperationsAgentSession {
       throw new ToolInputError(
         'the person did not approve this plan; it cannot run',
       );
-    if (planDigest(plan.steps) !== plan.digest)
+    if (planDigest(plan.steps, plan.release) !== plan.digest)
       throw new ToolInputError(
         'the plan changed after approval; it cannot run',
       );
+    // Plan §9.4: a release change before execution forces a replan.
+    const now = await this.#run((view) => Promise.resolve(releaseOf(view)));
+    if (!sameRelease(now, plan.release)) return replanResult(plan, now, []);
     const results: StepResult[] = [];
     const latestRevision = new Map<string, number>();
     let stopped = false;
+    let releaseChanged: PlanRelease | null = null;
     for (const step of plan.steps) {
       if (stopped) {
         results.push({
@@ -1068,8 +1081,15 @@ export class OperationsAgentSession {
             ? { arguments: step.arguments }
             : {}),
         };
-        const result = await this.#run((view) =>
-          this.#options.runtime.operationGateway.invoke(
+        // Checked in the same view the step runs in: a release that changed
+        // between two steps stops the plan before the next one runs.
+        let changedTo: PlanRelease | null = null;
+        const result = await this.#run((view) => {
+          if (!sameRelease(releaseOf(view), plan.release)) {
+            changedTo = releaseOf(view);
+            return Promise.resolve(null);
+          }
+          return this.#options.runtime.operationGateway.invoke(
             view,
             {
               schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
@@ -1089,8 +1109,22 @@ export class OperationsAgentSession {
               view,
               'AGENT',
             ),
-          ),
-        );
+          );
+        });
+        if (changedTo || !result) {
+          stopped = true;
+          releaseChanged = changedTo;
+          results.push({
+            step: step.step,
+            operationId: step.operation.operationId,
+            outcome: 'not-run',
+            recordId: null,
+            revision: null,
+            error:
+              'the active release changed before this step; it did not run',
+          });
+          continue;
+        }
         if (result.outcome !== 'succeeded') {
           stopped = true;
           results.push({
@@ -1135,6 +1169,7 @@ export class OperationsAgentSession {
     }
     plan.execution = { key, results };
     plan.status = stopped ? 'failed' : 'executed';
+    if (releaseChanged) return replanResult(plan, releaseChanged, results);
     return executionReport(plan);
   }
 
@@ -1191,23 +1226,43 @@ export class OperationsAgentSession {
             mismatches.push(
               `state is not ${localName(String(effect.toStateId))}`,
             );
-          // A later step of this plan that acted on the same record (a post
-          // after a create) legitimately changed it; its own read-back is
-          // checked in its own row.
-          const changedLater = execution.results.some(
-            (later) =>
-              later.step > step.step && later.recordId === result.recordId,
+          // A field a later step of this plan wrote legitimately changed;
+          // its own read-back is checked in its own row. A later registered
+          // capability or state transition on the same record may change any
+          // field (a post after a create), so it covers them all.
+          const later = plan.steps.filter((other) => {
+            const otherResult = execution.results.find(
+              (entry) => entry.step === other.step,
+            );
+            return (
+              other.step > step.step &&
+              otherResult?.recordId === result.recordId
+            );
+          });
+          const opaqueLater = later.some((other) =>
+            ['registeredCapabilityEffect', 'transitionStateEffect'].includes(
+              effectKind(other.operation),
+            ),
           );
-          for (const [fieldId, expected] of changedLater
+          const writtenLater = new Set(
+            later.flatMap((other) => [
+              ...Object.keys(other.values ?? {}),
+              ...Object.keys(other.patch ?? {}),
+            ]),
+          );
+          for (const [fieldId, expected] of opaqueLater
             ? []
-            : Object.entries(step.values ?? {})) {
+            : Object.entries({ ...step.values, ...step.patch })) {
+            if (writtenLater.has(fieldId)) continue;
             const resolved = resolveRefs({ v: expected }, execution.results).v;
-            if (
-              resolved !== null &&
-              resolved !== undefined &&
-              fieldId in record.values &&
-              !sameValue(record.values[fieldId], resolved)
-            )
+            if (resolved === undefined) continue;
+            const stored = record.values[fieldId];
+            if (resolved === null) {
+              if (stored !== null && stored !== undefined)
+                mismatches.push(`${fieldId} reads back differently`);
+              continue;
+            }
+            if (fieldId in record.values && !sameValue(stored, resolved))
               mismatches.push(`${fieldId} reads back differently`);
           }
         }
@@ -1497,11 +1552,49 @@ function sameValue(
   return JSON.stringify(stored) === JSON.stringify(expected);
 }
 
-function planDigest(steps: readonly PlanStep[]): string {
+function releaseOf(view: RequestRuntimeView): PlanRelease {
+  return {
+    releaseId: view.release.releaseId,
+    contentHash: view.release.contentHash,
+  };
+}
+
+function sameRelease(a: PlanRelease, b: PlanRelease): boolean {
+  return a.releaseId === b.releaseId && a.contentHash === b.contentHash;
+}
+
+/**
+ * The typed, recoverable answer when the active release changed after the
+ * plan was made: nothing more runs; what already committed is listed.
+ */
+function replanResult(
+  plan: StoredPlan,
+  now: PlanRelease,
+  results: readonly StepResult[],
+): ImmutableJsonValue {
+  const committed = results.filter((result) => result.outcome === 'succeeded');
+  return {
+    operationSessionId: plan.planId,
+    outcome: 'replan',
+    reason: `the active release changed after this plan was made (${plan.release.contentHash.slice(0, 12)} is now ${now.contentHash.slice(0, 12)})`,
+    committed: committed.map((result) => ({
+      step: result.step,
+      operationId: result.operationId,
+      ...(result.recordId ? { recordId: result.recordId } : {}),
+    })),
+    next:
+      committed.length > 0
+        ? 'the listed steps stay committed; plan the rest again on the current release with erp_plan, then ask the person if it needs a yes'
+        : 'nothing was written; plan again with erp_plan on the current release',
+  };
+}
+
+function planDigest(steps: readonly PlanStep[], release: PlanRelease): string {
   return createHash('sha256')
     .update(
-      JSON.stringify(
-        steps.map((step) => ({
+      JSON.stringify({
+        release,
+        steps: steps.map((step) => ({
           step: step.step,
           operationId: step.operation.operationId,
           recordId: step.recordId,
@@ -1511,7 +1604,7 @@ function planDigest(steps: readonly PlanStep[]): string {
           patch: step.patch ?? null,
           arguments: step.arguments ?? null,
         })),
-      ),
+      }),
     )
     .digest('hex');
 }

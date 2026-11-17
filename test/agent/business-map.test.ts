@@ -211,3 +211,150 @@ test('a short name stands for exactly one id or for none', () => {
     `${NS}:operation.sales_order_create`,
   );
 });
+
+// ------------------------------------------------ plan guards (audit A1, A2)
+
+const PARTY = '0d9c6f2e-3a1b-4c5d-8e7f-001122334455';
+
+/** A session over the compiled release whose release and record a test moves. */
+function guardedSession() {
+  const base = compiledAppView('manager');
+  const state = {
+    release: { ...base.release },
+    record: {
+      recordId: PARTY,
+      revision: 1,
+      archived: false,
+      values: {
+        [`${NS}:field.party_number`]: 'P-2016',
+        [`${NS}:field.party_contact_summary`]: 'Old',
+      } as Record<string, string>,
+    },
+    invoked: [] as string[],
+    afterInvoke: () => {},
+  };
+  const session = new OperationsAgentSession({
+    runtime: {
+      entry: {
+        run: (_request: unknown, work: (v: unknown) => unknown) =>
+          Promise.resolve(work({ ...base, release: { ...state.release } })),
+      },
+      operationGateway: {
+        previewTaskEligibility: () => Promise.resolve('eligible'),
+        invoke: (_view: unknown, request: { operationId: string }) => {
+          state.invoked.push(request.operationId);
+          state.record = {
+            ...state.record,
+            revision: state.record.revision + 1,
+          };
+          state.afterInvoke();
+          return Promise.resolve({
+            outcome: 'succeeded',
+            readBack: state.record,
+          });
+        },
+      },
+      operationMediation: {
+        issueInvocation: () => ({}),
+        issueConfirmationGrant: () => ({}),
+      },
+      queryGateway: {
+        previewEligibility: () => Promise.resolve('eligible'),
+        invoke: () =>
+          Promise.resolve({ outcome: 'exact', records: [state.record] }),
+      },
+    } as never,
+    personHeaders: {},
+    companyId: 'c',
+    approve: () => Promise.resolve(true),
+  });
+  return { session, state };
+}
+
+async function plannedUpdate(
+  session: OperationsAgentSession,
+  patches: readonly Record<string, string>[],
+): Promise<string> {
+  await session.call('erp_query', {
+    queryId: 'party_get',
+    arguments: { recordId: PARTY },
+  });
+  const planned = await session.call('erp_plan', {
+    intents: patches.map((patch) => ({
+      operationId: 'party_update',
+      target: PARTY,
+      patch,
+    })),
+  });
+  const planId = (planned.content as { planId?: string }).planId;
+  assert.equal(typeof planId, 'string', JSON.stringify(planned.content));
+  return planId!;
+}
+
+test('A1: a plan made on one release never runs on another; the result asks for a replan', async () => {
+  const { session, state } = guardedSession();
+  const planId = await plannedUpdate(session, [{ contact_summary: 'New' }]);
+  state.release = { ...state.release, contentHash: 'e'.repeat(64) };
+  const executed = await session.call('erp_execute', {
+    planId,
+    executionIdempotencyKey: 'k',
+  });
+  const content = executed.content as {
+    outcome: string;
+    committed: unknown[];
+  };
+  assert.equal(content.outcome, 'replan');
+  assert.deepEqual(content.committed, []);
+  assert.deepEqual(state.invoked, []);
+});
+
+test('A1: a release change between two steps stops the plan before the second; the result says what committed', async () => {
+  const { session, state } = guardedSession();
+  const planId = await plannedUpdate(session, [
+    { contact_summary: 'First' },
+    { name: 'Second' },
+  ]);
+  state.afterInvoke = () => {
+    state.release = { ...state.release, releaseId: 'activated-between' };
+  };
+  const executed = await session.call('erp_execute', {
+    planId,
+    executionIdempotencyKey: 'k',
+  });
+  const content = executed.content as {
+    outcome: string;
+    committed: { step: number }[];
+  };
+  assert.equal(content.outcome, 'replan');
+  assert.deepEqual(
+    content.committed.map((entry) => entry.step),
+    [1],
+  );
+  assert.equal(state.invoked.length, 1);
+});
+
+test('A2: verify compares a patched field; one that did not take is named', async () => {
+  for (const [readBack, verified] of [
+    ['New', true],
+    ['Old', false],
+  ] as const) {
+    const { session, state } = guardedSession();
+    const planId = await plannedUpdate(session, [{ contact_summary: 'New' }]);
+    await session.call('erp_execute', { planId, executionIdempotencyKey: 'k' });
+    state.record = {
+      ...state.record,
+      values: {
+        ...state.record.values,
+        [`${NS}:field.party_contact_summary`]: readBack,
+      },
+    };
+    const checked = (
+      await session.call('erp_verify', { operationSessionId: planId })
+    ).content as { verified: boolean; steps: { mismatches?: string[] }[] };
+    assert.equal(checked.verified, verified, readBack);
+    if (!verified)
+      assert.deepEqual(checked.steps[0]!.mismatches, [
+        `${NS}:field.party_contact_summary reads back differently`,
+      ]);
+  }
+});
