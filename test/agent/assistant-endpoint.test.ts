@@ -353,7 +353,11 @@ test('the panel is added to a full page only, with its script pinned by hash', (
     html: '<html><body><main>x</main></body></html>',
   });
   assert.match(page.html, /data-assistant-panel/u);
-  assert.ok(page.html.includes(`<script>${ASSISTANT_PANEL_SCRIPT}</script>`));
+  assert.ok(
+    page.html.includes(
+      `<script data-assistant-script>${ASSISTANT_PANEL_SCRIPT}</script>`,
+    ),
+  );
   for (const result of [
     { statusCode: 303, html: '' },
     { statusCode: 200, html: '<tr>fragment</tr>' },

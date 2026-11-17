@@ -339,6 +339,6 @@ export function withAssistantPanel<
   const index = result.html.lastIndexOf('</body>');
   return {
     ...result,
-    html: `${result.html.slice(0, index)}<style>${PANEL_STYLES}</style>${PANEL_MARKUP}<script>${ASSISTANT_PANEL_SCRIPT}</script>${result.html.slice(index)}`,
+    html: `${result.html.slice(0, index)}<style>${PANEL_STYLES}</style>${PANEL_MARKUP}<script data-assistant-script>${ASSISTANT_PANEL_SCRIPT}</script>${result.html.slice(index)}`,
   };
 }

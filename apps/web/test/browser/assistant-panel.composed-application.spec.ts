@@ -158,7 +158,9 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
         await say('Archive the first customer');
         const plan = panel.locator('[data-assistant-plan]');
         await expect(plan).toContainText('archives one party record');
-        await expect(plan).toContainText('Because it archives a record.');
+        await expect(plan).toContainText(
+          "Because the operation is declared to need the person's confirmation.",
+        );
         await expect(panel.locator('[data-assistant-status]')).toBeVisible();
         await plan.locator('[data-assistant-yes]').click();
         await expect(reply(2)).toContainText('Archived.');
