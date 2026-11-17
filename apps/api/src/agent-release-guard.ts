@@ -7,7 +7,7 @@
  * differ; the caller then stops before any runtime is opened.
  */
 import { parseCompiledApplication } from '@north-star/postgres-provider/composed-application-runtime';
-import { readActiveReleaseRoot } from '@north-star/postgres-provider/active-release-root';
+import { readActiveRelease } from '@north-star/postgres-provider/active-release-root';
 
 export type TerminalReleaseCheck =
   | { readonly kind: 'match' }
@@ -26,9 +26,9 @@ export async function checkTerminalRelease(options: {
   readonly tenantSlug: string;
   readonly compiledRoot: string;
 }): Promise<TerminalReleaseCheck> {
-  let active: string | null;
+  let active;
   try {
-    active = await readActiveReleaseRoot(options);
+    active = await readActiveRelease(options);
   } catch {
     return {
       kind: 'not-installed',
@@ -42,9 +42,16 @@ export async function checkTerminalRelease(options: {
       message:
         'The dev database has no installed release. Start `corepack pnpm dev` from this checkout first; the agent never installs one.',
     };
-  if (active === options.compiledRoot) return { kind: 'match' };
+  if (active.releaseRoot === options.compiledRoot) return { kind: 'match' };
+  if (active.customized && active.baseReleaseRoot === options.compiledRoot)
+    return { kind: 'match' };
+  if (active.customized)
+    return {
+      kind: 'differs',
+      message: `A customization of a different application version is active in the dev database (it builds on release ${shortRoot(active.baseReleaseRoot ?? 'unknown')}, but this checkout is release ${shortRoot(options.compiledRoot)}). The agent does not switch releases. Run it from the checkout that started \`corepack pnpm dev\`, or restart dev from this one.`,
+    };
   return {
     kind: 'differs',
-    message: `The dev database is serving release ${shortRoot(active)}, but this checkout is release ${shortRoot(options.compiledRoot)}. The agent does not switch releases. Run it from the checkout that started \`corepack pnpm dev\`, or restart dev from this one.`,
+    message: `The dev database is serving release ${shortRoot(active.releaseRoot)}, but this checkout is release ${shortRoot(options.compiledRoot)}. The agent does not switch releases. Run it from the checkout that started \`corepack pnpm dev\`, or restart dev from this one.`,
   };
 }

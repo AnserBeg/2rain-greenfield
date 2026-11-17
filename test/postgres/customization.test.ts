@@ -135,6 +135,42 @@ test(
               're-drafting the same change on the same base reproduces its release',
             );
 
+            // Review F2: a second, older revision with the same content and
+            // parent -- what two identical drafts racing leave behind. The
+            // re-draft must record the revision its release is linked to.
+            await pool.query(
+              `INSERT INTO platform.app_package_revisions (
+                 tenant_id, revision_id, parent_revision_id, schema_version,
+                 language_version, normalization_profile_version,
+                 canonicalization_profile_version, hash_algorithm,
+                 content_hash, desired_state, provenance, created_by,
+                 created_at
+               )
+               SELECT tenant_id, gen_random_uuid(), parent_revision_id,
+                      schema_version, language_version,
+                      normalization_profile_version,
+                      canonicalization_profile_version, hash_algorithm,
+                      content_hash, desired_state, provenance, created_by,
+                      created_at - interval '1 minute'
+                 FROM platform.app_package_revisions
+                WHERE revision_id = $1`,
+              [drafted.revisionId],
+            );
+            const raced = await opened.service.draft(
+              equipment,
+              'declarativeEditor',
+            );
+            assert.equal(
+              raced.status === 'drafted' && raced.revisionId,
+              drafted.revisionId,
+              'a reused release returns the revision it is linked to',
+            );
+            assert.equal(
+              (await opened.service.status()).patches.length,
+              1,
+              'status still reads the one recorded change',
+            );
+
             const unsupported = await opened.service.draft(
               { kind: 'addWorkflow', label: 'Approve equipment purchases' },
               'declarativeEditor',
@@ -188,6 +224,41 @@ test(
               'a payload whose digest does not match is refused by the database',
             );
             assert.equal(await patchCount(pool), 1);
+
+            // Review R4: two identical drafts at once record one change, and
+            // both return exactly the release and revision that change
+            // recorded.
+            const vehicle = {
+              fields: [{ label: 'Name', required: true, type: 'text' }],
+              kind: 'addRecordType',
+              label: 'Vehicle',
+            };
+            const duplicates = await Promise.all([
+              opened.service.draft(vehicle, 'declarativeEditor'),
+              opened.service.draft(vehicle, 'declarativeEditor'),
+            ]);
+            const vehiclePatchId =
+              duplicates[0].status === 'drafted' ? duplicates[0].patchId : '';
+            const vehicleRow = await recordedPatch(pool, vehiclePatchId);
+            for (const outcome of duplicates) {
+              assert.equal(outcome.status, 'drafted');
+              if (outcome.status !== 'drafted') return;
+              assert.equal(outcome.patchId, vehiclePatchId);
+              assert.equal(outcome.releaseId, vehicleRow.resulting_release_id);
+              assert.equal(
+                outcome.revisionId,
+                vehicleRow.resulting_revision_id,
+              );
+            }
+            assert.deepEqual(
+              duplicates
+                .map(
+                  (outcome) => outcome.status === 'drafted' && outcome.reused,
+                )
+                .sort(),
+              [false, true],
+            );
+            assert.equal(await patchCount(pool), 2);
 
             const stranger = await trustedContext({
               environmentId: randomUUID(),
@@ -417,6 +488,36 @@ test(
             ),
             [recordId],
             're-activation shows the rows kept through the rollback',
+          );
+
+          // Review F5: base -> A -> B, then roll back twice. The first goes
+          // to A (the change B was built on, not whatever the last swap came
+          // from). The second is refused by the reverse-transition policy,
+          // which reverses only the activation that made the current release
+          // live -- here B's rollback (filed).
+          const choice = await opened.service.draft(
+            {
+              enumField: EQUIPMENT.status,
+              kind: 'addChoice',
+              option: 'Lost',
+            },
+            'declarativeEditor',
+          );
+          assert.equal(choice.status, 'drafted');
+          if (choice.status !== 'drafted') return;
+          await opened.service.approve(choice.patchId);
+          await opened.service.activate(choice.patchId);
+          const back = await opened.service.rollback();
+          assert.equal(back.releaseId, drafted.releaseId);
+          await assert.rejects(
+            opened.service.rollback(),
+            /CUSTOMIZE_ROLLBACK_NOT_REVERSIBLE|rolling back past it is not supported/u,
+          );
+          assert.deepEqual(
+            (await listEquipment(runtime)).records.map(
+              (record) => record.recordId,
+            ),
+            [recordId],
           );
 
           await runtime.close();

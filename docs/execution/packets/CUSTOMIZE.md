@@ -1,6 +1,6 @@
 # CUSTOMIZE — a non-developer adds a record type, field, choice or layout, reads a plain diff, approves, activates, rolls back
 
-Status: slices 1, 2 and 4 integrated (merges `41697099`, `9bbc6adf`, `273c7129`); slice 5 (rehearsal) and slice 3 (the Customize screen, ruled 2026-11-17) integrating.
+Status: slices 1, 2, 4 and 5 integrated (merges `41697099`, `9bbc6adf`, `273c7129`, `19985460`); review fixes integrated (`6d06f76c`, `1aa1b630`, `b61bdf44`, fix 4 with slice 5); slice 3 (the Customize screen, ruled 2026-11-17, option 1 seam exception) integrating.
 Tier: Critical-touching — `db/migrations/0029_customization_patch_lineage.sql` (RLS/grant SQL). Merges are logged `merged — unread`.
 Base: `main` `a7a4cba1`. Stops: slice 3 (ux-grammar seam), ruled.
 
@@ -28,6 +28,7 @@ Base: `main` `a7a4cba1`. Stops: slice 3 (ux-grammar seam), ruled.
 - The denial-recorder expected-red control is re-pointed at the per-release gateway wiring (`auth.expected-red.json`).
 - Approval prepares the inert storage plan (a new table) before verifying the candidate, the order boot uses; capability read-backs go through the runtime's one routed read ingress.
 - Activation, rollback and a boot serving a tenant release re-run `platform.provision_inventory_scope` with each scope's stored policy and the active root: the posting kernel posts only for the release a scope names. Between the swap and that call a posting refuses loudly (`INVENTORY_POSTING_RELEASE_MISMATCH`).
+- Review fix (Sol read at `4d2b5672`, merge `6d06f76c`): swap, pointer re-read and scope reconcile hold one tenant-environment advisory lock, and `activate` on a live change or `rollback` with nothing live reconcile (F1); a reused staged release returns its own revision, a conflicting tenant one is refused `CUSTOMIZE_RELEASE_REVISION_CONFLICT` (F2); `previewEligibility` is routed and a test proves every gateway method is (F3); rollback targets the live change's parent (F5).
 - Agent terminal and web server agree: every runtime routes each request by the pointer; opening a runtime on a database whose pointer names a tenant descendant of its tip serves it and moves nothing (tested); a moved base fails loudly. AGENT-2's "terminal refuses a foreign release" must accept a tenant descendant of its tip.
 
 ## Slices
@@ -51,4 +52,22 @@ Ruling 2026-11-17 (orchestrator under owner standing rule; owner may veto): opti
 
 - Re-applying tenant patches to a moved first-party base (ADR-0013 upgrade) fails loudly with `dev:reset`; the rebase is not built.
 - The full §8.5 builder archetype (charter: filed, not built).
+- F5's deeper case: after base→A→B and a rollback to A, rolling A back to base is refused (`CUSTOMIZE_ROLLBACK_NOT_REVERSIBLE`): the reverse-transition policy reverses only the activation that made the current release live (here B's rollback). Needs a policy change (orchestrator's call).
+- F4 (TRUNCATE bypasses the append-only rules, repo-wide) and F6 (terminal guard) are the orchestrator's and AGENT-2's.
 - AGENT harness: under the scope mismatch above, the receive task's scripted run answered with no refused tool call while posting nothing; only its end-state check caught it (for AGENT-2).
+- No recovery command for an interrupted activation (fail-closed, judged acceptable by the fix-2 read): after a cut between swap and verification, `status()` stays readable and draft, approve, activate and rollback refuse `CUSTOMIZE_ACTIVATION_UNVERIFIED`; posting is refused (the scopes still name the last verified release). Remedy: the local demo uses `dev:reset`; production needs a `customize recover` that runs the kernel's `verifyActivation` for the attempt matching the pointer and fence.
+
+## Review fix 2 (read of `884ee0ba..08434a73`, R1-R4)
+
+- One shape for every state change (`#locked` in `customization-service.ts`): draft recording, approve, activate and rollback each run on one admin connection holding the release-scope lock, first prove the live pointer's activation verified (its swap receipt at the current pointer and fence has a `SWAPPED_VERIFIED` receipt) and set the inventory scopes to it, then read the live state and decide.
+- R1: inside the lock no admin work touches the pool; `activateWithExactSwapTrigger`, `assertExactSwapTriggerEnabled` and the local-demo grants take the held client. Test: two concurrent rollbacks on one service (admin pool of two) both finish, one refused, under a 300 s bound.
+- R2: an unverified live pointer is refused `CUSTOMIZE_ACTIVATION_UNVERIFIED`, naming the attempt and its state; never `activated`. A restart does not bless it either: boot reconciles scopes only for a proven pointer (`unprovenLivePointer`, shared). The kernel's own `verifyActivation` finishes it, after which the retry activates. Test seam: `activationKernel` (a test subclass cuts `verifyActivation`; production always uses the PostgreSQL kernel).
+- R3: a B -> A rollback whose reconcile failed is repaired by the retry before it is refused; posting works. The reverse-transition policy is unchanged.
+- R4: a reused patch returns the release and revision its row recorded; identical drafts are serialized by the lock, so the second finds the first's patch. The content-hash lookup in `ensurePersistedRelease` is at its head (since fix 1); the dead branch after it is gone.
+- `approve` holds the lock too (it records an approval bound to the pointer and fence, a state change): about 40 s for a storage change, during which a second click or a boot waits.
+- `status` stays lock-free (the screen reads it on every page load; it changes nothing).
+
+## Review fixes 3 and 4 (reads of `01646f74..4920492f` and fix 3: B1, B1b)
+
+- B1: boot's early `provisionInventoryScope` set every scope to the lineage tip before the proof ran, so after a cut-off A -> first-party rollback a restart left the scopes matching the unverified pointer. Early provisioning now creates a fresh scope with the tip's root but keeps an existing scope's root (policy still asserted); roots move only in the final locked reconcile, to a verified pointer. Test: that cut, then a restart: the scopes keep A's root and a posting is refused until the kernel verifies; then the next customization call reconciles and posting works.
+- B1b (fix 4): that read and the write it feeds now run inside `withReleaseScopeLock` on its held admin client, so no reconcile or swap lands between them and a stale root is never written back; no pool use inside the lock. Shown by a unit assertion (`test/unit/customization.test.ts`, a fake pool that throws if used): lock, read, provision, unlock all on the held client, and an existing root is passed through. No pause seam was added (it would need new production plumbing).
