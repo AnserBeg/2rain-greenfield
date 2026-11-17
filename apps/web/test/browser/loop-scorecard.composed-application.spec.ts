@@ -46,13 +46,12 @@ test('LOOP-1 scorecard: purchase order to stock to a shipped, invoiced and paid 
       });
       try {
         await walkToShipped(card, application.baseUrl);
-        const fromOrder = await invoiceAndPay(card);
-        // Slice 2 flips this: once invoiced, the order offers the payment as
-        // its next action. Until then it is recorded on the invoice's page.
+        // Slice 2: once invoiced, the order offers the payment as its next
+        // action (until then it was recorded on the invoice's page).
         expect(
-          fromOrder,
-          "payment recorded as the order's next action (expected false until LOOP-1 slice 2)",
-        ).toBe(false);
+          await invoiceAndPay(card),
+          "payment recorded as the order's next action",
+        ).toBe(true);
       } finally {
         card.abandon('not reached');
         const table = writeScorecard(

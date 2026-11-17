@@ -81,11 +81,13 @@ function creditKit(fixture: Fixture) {
         unit_id: 'EA',
         line_number: '1',
         ordered_quantity: quantity,
-        unit_price: price === '' ? null : price,
-        list_price: price === '' ? null : price,
+        // A price is required (LOOP-1); '' states the total as unknowable by
+        // leaving the line's frozen tax rate unstated instead.
+        unit_price: price === '' ? '10' : price,
+        list_price: price === '' ? '10' : price,
         discount_percent: null,
         tax_code_id: fixture.taxCode,
-        tax_rate_percent: '5',
+        tax_rate_percent: price === '' ? null : '5',
       },
       { order: header.recordId },
     );
