@@ -6,7 +6,7 @@
 - **R2, feature freeze until the week-6 decision:** no new distributor features, no nav relabeling, and the parked set is not folded in: UNITS, SPECIAL-ORDER + DROP-SHIP, STOCK-COUNTS, RETURNS, RETURNABLE-ASSETS, LOCATIONS-2, PRs #32-#34, the item page (I-V1).
 - **The six-week test.** Week 1: the trunk. Weeks 1-2, the agent: the five tools over existing operations; ten real-model tasks; record the success rate and the cost per completed task. Weeks 2-5, customization: a new record type, field, choice or layout is AI-drafted, compiled, shown to the owner as a plain diff, approved, activated, and one click rolls it back. **Week 6, decide:** a non-developer gets a new record type live in under ten minutes, rollback works, nothing else breaks, and the agent completes at least 8 of 10 tasks.
 - **Speed rules.** One trunk. A branch merges within two days or is dropped. CI green is the gate; review reads the trunk after the merge (`AGENTS.md` §4, amended 2026-11-15). Heavy evidence (expected-red controls) only for silent-harm claims.
-- **Stage state, stated plainly.** G3 is at 14 of 17 gate criteria (`rulings/g3-completion.md`); the trunk packet claims no stage gate. The agent packet is chartered: [AGENT](packets/AGENT-charter.md), 2026-11-15.
+- **Stage state, stated plainly.** G3 is at 14 of 17 gate criteria (`rulings/g3-completion.md`); the trunk packet claims no stage gate. The agent packet is chartered: [AGENT](packets/AGENT-charter.md), 2026-11-15. The customization packet is chartered in parallel (no shared mount chain): [CUSTOMIZE](packets/CUSTOMIZE-charter.md), 2026-11-17; slice 4 (AI drafting) follows AGENT's adapter onto `main`.
 
 ---
 
