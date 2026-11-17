@@ -538,7 +538,7 @@
       "ordinal_position": 11,
       "column_name": "nsm_c_4hczojlm6ubmv5rblmbdzg6e6gtc2oarn5glfk73vtlusxelzizq",
       "data_type": "numeric(38,18)",
-      "is_nullable": true,
+      "is_nullable": false,
       "column_default": null,
       "identity_kind": "",
       "generated_kind": "",

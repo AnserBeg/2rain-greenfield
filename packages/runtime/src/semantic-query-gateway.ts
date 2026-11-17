@@ -1,3 +1,4 @@
+import { recordCatalogParse } from './catalog-parse-count.js';
 import {
   QueryReadModelSchema,
   type QueryReadModel,
@@ -1542,6 +1543,7 @@ export function registeredSemanticQueryFromPinnedView(
       'pinned query catalog has an invalid kind, version, or shape',
     );
   }
+  recordCatalogParse('queryCatalog');
   const queryIds = new Set<string>();
   const catalog = new Map<string, RegisteredSemanticQueryDefinition>();
   for (const query of payload.queries) {

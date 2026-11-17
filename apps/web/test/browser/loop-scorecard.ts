@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { performance } from 'node:perf_hooks';
 import { dirname } from 'node:path';
 
 import {
@@ -8,6 +9,11 @@ import {
   type Request,
 } from '@playwright/test';
 import pg from 'pg';
+
+import {
+  catalogParseCount,
+  type CatalogParseCount,
+} from '../../../../packages/runtime/src/catalog-parse-count.js';
 
 /**
  * The loop scorecard (LOOP-1): what an office person does, step by step, to
@@ -31,7 +37,7 @@ export class LoopScorecard {
   private current: ScorecardStep | undefined;
   /** The step is still on the page the step before ended on. */
   private carried = false;
-  private readonly started = new Map<Request, DatabaseCount>();
+  private readonly started = new Map<Request, RequestStart>();
 
   constructor(
     readonly page: Page,
@@ -47,18 +53,28 @@ export class LoopScorecard {
     const meter = database?.meter;
     if (!meter) return;
     page.on('request', (request) => {
-      if (measured(request)) this.started.set(request, meter.count());
+      if (measured(request))
+        this.started.set(request, {
+          count: meter.count(),
+          cpu: process.cpuUsage(),
+          at: performance.now(),
+          parses: catalogParseCount(),
+        });
     });
     const finish = (request: Request) => {
       const before = this.started.get(request);
       if (!before) return;
       this.started.delete(request);
       const after = meter.count();
+      const cpu = process.cpuUsage(before.cpu);
       const tally: RequestTally = {
         step: this.current?.name ?? '(start)',
         page: requestLabel(request),
-        transactions: after.transactions - before.transactions,
-        statements: after.statements - before.statements,
+        transactions: after.transactions - before.count.transactions,
+        statements: after.statements - before.count.statements,
+        wallMs: Math.round(performance.now() - before.at),
+        cpuMs: Math.round((cpu.user + cpu.system) / 1000),
+        parses: parsesSince(before.parses),
       };
       this.requests.push(tally);
       if (this.current) {
@@ -195,9 +211,9 @@ export class LoopScorecard {
         'invented values',
         'raw codes',
         'developer sentences',
-        'db transactions',
+        'db xacts incl. resets',
         'db statements',
-        'pg_stat transactions',
+        'pg_stat xacts incl. resets',
         'result',
       ]),
       row(Array.from({ length: 11 }, () => '---')),
@@ -208,14 +224,17 @@ export class LoopScorecard {
         row([`**${name}**`, ...tally(this.sum(steps)), 'total']),
       ),
       '',
-      'Database work: `db transactions` and `db statements` are counted in the',
-      "test process, at the application's PostgreSQL client, for every page and",
-      'fragment request of the step (a statement outside BEGIN … COMMIT is its',
-      'own transaction; BEGIN, COMMIT and ROLLBACK are not counted as',
-      "statements). `pg_stat transactions` is the database's own count",
-      '(`xact_commit + xact_rollback` in `pg_stat_database`) across the whole',
-      'step, read after its statistics settle, less the reads themselves; it',
-      'also counts work outside a request (background and seed tails).',
+      'Database work: `db xacts incl. resets` and `db statements` are counted in',
+      "the test process at the application's PostgreSQL client for every page",
+      'and fragment request of the step. A statement outside BEGIN … COMMIT',
+      'counts as its own transaction, so the RESET ROLE / RESET ALL after each',
+      'transaction is counted too: this over-counts the BEGIN … COMMIT pairs',
+      '(SPEED-1 measured 148 pairs on a PO detail page this counts as ~405);',
+      "SPEED-1's request meter replaces it once merged. BEGIN, COMMIT and",
+      'ROLLBACK are not counted as statements. `pg_stat xacts incl. resets` is',
+      "the database's own count (`xact_commit + xact_rollback`) across the step,",
+      'read after its statistics settle, less the reads themselves; it counts',
+      'the resets the same way and work outside a request.',
       '',
       '## Raw codes and developer sentences seen',
       '',
@@ -231,14 +250,33 @@ export class LoopScorecard {
       '',
       '## Database work per request',
       '',
-      row(['step', 'request', 'db transactions', 'db statements']),
-      row(['---', '---', '---', '---']),
+      'Wall and CPU are milliseconds from the browser sending the request to',
+      "its last byte arriving; CPU is this process's (the application and the",
+      'test client share it). Seconds vary between runners: compare counts.',
+      'Parses are the full parses the request caused (catalogParseCount in',
+      'packages/runtime): the operation catalog and surface manifest are reused',
+      'by a warm request; a binding is resolved once per surface per request and',
+      'the query catalog once per request.',
+      '',
+      row([
+        'step',
+        'request',
+        'db xacts incl. resets',
+        'db statements',
+        'wall ms',
+        'cpu ms',
+        'parses: operation / manifest / binding / query',
+      ]),
+      row(['---', '---', '---', '---', '---', '---', '---']),
       ...this.requests.map((request) =>
         row([
           request.step,
           request.page,
           request.transactions,
           request.statements,
+          request.wallMs,
+          request.cpuMs,
+          `${String(request.parses.operationCatalog)} / ${String(request.parses.surfaceManifest)} / ${String(request.parses.surfaceBinding)} / ${String(request.parses.queryCatalog)}`,
         ]),
       ),
       '',
@@ -311,6 +349,27 @@ export interface RequestTally {
   readonly page: string;
   readonly transactions: number;
   readonly statements: number;
+  readonly wallMs: number;
+  readonly cpuMs: number;
+  /** Full catalog parses the request caused, by kind. */
+  readonly parses: CatalogParseCount;
+}
+
+interface RequestStart {
+  readonly count: DatabaseCount;
+  readonly cpu: NodeJS.CpuUsage;
+  readonly at: number;
+  readonly parses: CatalogParseCount;
+}
+
+function parsesSince(before: CatalogParseCount): CatalogParseCount {
+  const now = catalogParseCount();
+  return {
+    operationCatalog: now.operationCatalog - before.operationCatalog,
+    surfaceManifest: now.surfaceManifest - before.surfaceManifest,
+    surfaceBinding: now.surfaceBinding - before.surfaceBinding,
+    queryCatalog: now.queryCatalog - before.queryCatalog,
+  };
 }
 
 export interface DatabaseCount {

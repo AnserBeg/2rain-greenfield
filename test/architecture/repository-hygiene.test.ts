@@ -89,6 +89,7 @@ const suiteDefinitions = [
       'test/integration/module-storage-transition.test.ts',
       'test/integration/observability-ci-contract.test.ts',
       'test/integration/party-runtime.test.ts',
+      'test/integration/pinned-catalog-memo.test.ts',
       'test/integration/security-scan-contract.test.ts',
       'test/integration/semantic-gateways.test.ts',
       'test/integration/semantic-query-legal-entity-scope.test.ts',

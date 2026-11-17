@@ -46,13 +46,25 @@ test('LOOP-1 scorecard: purchase order to stock to a shipped, invoiced and paid 
       });
       try {
         await walkToShipped(card, application.baseUrl);
-        const fromOrder = await invoiceAndPay(card);
-        // Slice 2 flips this: once invoiced, the order offers the payment as
-        // its next action. Until then it is recorded on the invoice's page.
+        // Slice 2: once invoiced, the order offers the payment as its next
+        // action (until then it was recorded on the invoice's page).
         expect(
-          fromOrder,
-          "payment recorded as the order's next action (expected false until LOOP-1 slice 2)",
-        ).toBe(false);
+          await invoiceAndPay(card),
+          "payment recorded as the order's next action",
+        ).toBe(true);
+        // The memo slice: once the home page has read the release, no request
+        // of the loop parses the operation catalog or surface manifest again.
+        expect(
+          card.requests
+            .filter((request) => request.step !== '(start)')
+            .filter(
+              (request) =>
+                request.parses.operationCatalog +
+                  request.parses.surfaceManifest >
+                0,
+            )
+            .map((request) => request.page),
+        ).toEqual([]);
       } finally {
         card.abandon('not reached');
         const table = writeScorecard(

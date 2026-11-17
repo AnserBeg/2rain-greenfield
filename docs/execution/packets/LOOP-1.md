@@ -1,6 +1,6 @@
 # LOOP-1 — the purchase order → inventory → sales order loop completes and makes sense
 
-Status: slice 1 (the scorecard) integrated at `02725446`. Tier: Mechanical (no Critical path). Base: `main` `689b0117`. Stops: none.
+Status: slice 1 integrated at `02725446`; slice 2 at `0cad5e5f`; memo at `18155602`. Tier: Mechanical (no Critical path). Base: `main` `689b0117`. Stops: none.
 Charter: [LOOP-1-charter.md](LOOP-1-charter.md). Plan: [loop-ux-plan.md](../loop-ux-plan.md).
 
 ## Claims
@@ -10,7 +10,16 @@ Charter: [LOOP-1-charter.md](LOOP-1-charter.md). Plan: [loop-ux-plan.md](../loop
    order released, 4 reserved, 4 shipped, the invoice's balance 0.00.
 2. Every count in the table is the journey's own (`LoopScorecard`): clicks, full page loads, typed fields, invented values, raw
    codes (the charter's three patterns) and the plan's developer sentences, per step.
-3. Slice 1 asserts the payment is NOT the order's next action (today it is recorded on the invoice page); slice 2 flips it.
+3. Slice 2: a sales line is never saved without a unit price (field presence required; refused at save, any channel); once
+   invoiced, the order's next action pays each open invoice's whole balance through the invoice's own payment operations; the
+   payment reference is optional; the invoice form declares no `sections` slot, so the Invoices List offers no raw "New" and an
+   invoice no "Edit" (ruled). The scorecard asserts the payment is the order's next action.
+
+4. Memo: the pinned operation catalog and surface manifest are parsed once per content (frozen payloads only; published after
+   full validation; a refused one is never cached), a surface binding once per request view, an operation binding once per
+   pinned definition; navigation and related-surface lookups match through `surfaceSourceEntityId`. `catalogParseCount()`
+   (`packages/runtime/src/catalog-parse-count.ts`) counts each parse where it runs; the scorecard asserts a warm request parses
+   no operation catalog or manifest. No authorization, transaction or SQL change.
 
 ## Decisions (one line each)
 
@@ -26,6 +35,14 @@ Charter: [LOOP-1-charter.md](LOOP-1-charter.md). Plan: [loop-ux-plan.md](../loop
   is the CI run's.
 - Developer sentences ("Save commits the header", "Draft staged.", "No child records", "required parent selection") are a
   separate column, so "zero raw codes" means the charter's three patterns.
+- Slice 2 re-baseline (ADR-0066): the required price retypes a column (v1 transitions refuse); one-entry release; `dev:reset`
+  for any dev database (the 4174 demo too). The full-replay snapshot was regenerated on GitHub (evidence run 44182814394).
+- Slice 2 test bridges (ruled): unpriced sales lines priced in `test/postgres/fulfillment.test.ts`, `order-lists.test.ts`,
+  `packing-retrieval.test.ts` and `test/helpers/order-entry-fixture.ts`; `customer-credit.test.ts` keeps its unstated-total case
+  through an unstated tax rate (`CREDIT_EXPOSURE_UNSTATED` unchanged); pins moved: `g2-module-conformance` (price input required),
+  the surface-grammar debt baseline (95 → 97, the invoice form's missing sections slot) and the reader-22 floor test.
+- A draft invoice is corrected on its own page (Record actions → Post or Void, as before); a posted one is voided and re-invoiced
+  from the order. The invoice form never offers a hand-made invoice.
 - Not built: the plan's rule 2 repeat of receive-and-list on a tenant-added record type (charter slice 1 omits it); the
   orchestrator rules.
 
@@ -34,10 +51,15 @@ Charter: [LOOP-1-charter.md](LOOP-1-charter.md). Plan: [loop-ux-plan.md](../loop
 1. The scorecard — baseline [2026-11-17-loop-scorecard.md](../evidence/2026-11-17-loop-scorecard.md) (CI run 44179517091): PO
    create-and-place 11 clicks; sales side create → shipped 18; invoice and payment 9 through the invoice page; PO detail ~405
    database transactions per load. The audit's row 1 and baseline row corrected; the plan's targets restated (≤ 8, ≤ 11).
+3. Memo — [after](../evidence/2026-11-17-loop-scorecard-memo.md) (CI run 44189274091; before = slice 2's run, another GitHub
+   runner, not one machine): PO detail wall ~1.7 s → ~0.59 s, CPU ~1.5 s → ~0.2 s; db counts unchanged; per warm request 0
+   operation / 0 manifest parses, ~94 bindings, 1 query catalog (per view; a cross-request memo of those is filed).
+2. The loop finishes — [after](../evidence/2026-11-17-loop-scorecard-slice-2.md) (CI run 44187720302): invoice and payment 8
+   clicks, 8 loads, 0 typed, 0 invented (was 9, 9, 2, 1), all from the order.
 
 ## Gates
 
-- Slice 1: CI run 44179517091 green at `7cf5f580` (the scorecard 3.7 min in the composed browser job). Local: format,
+- Memo: CI run 44189274091 green at `7401f53e`. Slice 2: CI run 44187720302 green at `da4aefa8`. Slice 1: CI run 44179517091 green at `7cf5f580` (the scorecard 3.7 min in the composed browser job). Local: format,
   typecheck, lint; the journey run against a local dev server (`distributor` seed).
 
 ## Test it yourself
@@ -50,3 +72,10 @@ reservation, Ship reserved stock (you must type a carrier and a tracking number)
 invoice and Record payment (amount and a reference typed). The counts are in the scorecard.
 
 ## Filed
+
+- Confirm refusing a missing total for every customer (the provider's confirm reads the total only under a credit limit): ruled
+  option 2, filed for the provider; the required price closes the observed harm.
+- The scorecard's db columns count the RESET after each transaction (PO detail ~405 here, 148 BEGIN/COMMIT pairs in SPEED-1's
+  statement log); SPEED-1's request meter (Server-Timing) replaces them once merged.
+- Cross-request memo of the query catalog (1 parse per request) and surface bindings (~94 per request): SPEED-1 or a follow-up.
+- Part payment and an amount defaulting to the balance on the order's payment: phase 3 (row-derived defaults).
