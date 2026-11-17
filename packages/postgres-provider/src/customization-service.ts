@@ -13,7 +13,11 @@ import {
   parseSerializedRelease,
   serializeRelease,
   storageElements,
+  customizationTargets,
+  draftPatchFromRequest,
   type AcknowledgementInput,
+  type DraftingModel,
+  type CustomizationTargets,
   type CustomizationPatch,
   type SandboxRunnerOptions,
   type SandboxStep,
@@ -55,6 +59,8 @@ import { withTrustedRequestTransaction } from './request-context.js';
  * worker, and a plain-language diff. Nothing here activates anything: drafting
  * changes no pointer and no serving state.
  */
+export type { CustomizationTargets } from '@north-star/customization';
+
 export const AUTHORING_CHANNELS = [
   'firstPartyAuthoring',
   'visualBuilder',
@@ -102,6 +108,11 @@ export interface CustomizationServiceOptions {
    * permissions at activation, exactly as boot grants first-party ones.
    */
   readonly localDemoIdentity?: true;
+  /**
+   * The model a plain-English request is drafted with (slice 4); opened on
+   * first use, so a missing key fails only that request.
+   */
+  readonly draftingModel?: () => Promise<DraftingModel>;
 }
 
 export interface CustomizationConnection {
@@ -156,12 +167,14 @@ export interface PatchRecord {
   readonly resultingRevisionId: MintedUuid;
 }
 
+export type PatchState = 'live' | 'approved' | 'drafted' | 'stale';
+
 export interface CustomizationStatus {
   readonly activeReleaseId: MintedUuid;
   readonly activeReleaseRoot: string;
   /** Applied patches of the active release, oldest first. */
   readonly activeChain: readonly PatchRecord[];
-  readonly patches: readonly PatchRecord[];
+  readonly patches: readonly (PatchRecord & { readonly state: PatchState })[];
 }
 
 interface ActiveState {
@@ -192,12 +205,103 @@ export class PostgresCustomizationService {
   async status(): Promise<CustomizationStatus> {
     const context = await this.#context();
     const active = await this.#active(context);
+    const approvedReleases = await withTrustedRequestTransaction(
+      this.connection.runtimePool,
+      context,
+      async (client) => {
+        const result = await client.query<{ target_release_id: string }>(
+          `SELECT DISTINCT target_release_id
+             FROM platform.release_approvals
+            WHERE tenant_id = $1 AND environment_id = $2
+              AND expected_pointer_id = $3
+              AND expected_release_id IS NOT DISTINCT FROM $4
+              AND expected_fence = $5
+              AND expires_at > clock_timestamp()`,
+          [
+            context.tenantId,
+            context.environmentId,
+            active.pointer.pointerId,
+            active.pointer.releaseId,
+            active.pointer.fence,
+          ],
+        );
+        return new Set(result.rows.map((row) => row.target_release_id));
+      },
+    );
+    const state = (record: PatchRecord): PatchState =>
+      active.chain.some((applied) => applied.patchId === record.patchId)
+        ? 'live'
+        : record.parentRevisionId !== active.revisionId
+          ? 'stale'
+          : approvedReleases.has(record.resultingReleaseId)
+            ? 'approved'
+            : 'drafted';
     return Object.freeze({
       activeChain: active.chain,
       activeReleaseId: active.releaseId,
       activeReleaseRoot: active.releaseRoot,
-      patches: await this.#patches(context),
+      patches: Object.freeze(
+        (await this.#patches(context)).map((record) =>
+          Object.freeze({ ...record, state: state(record) }),
+        ),
+      ),
     });
+  }
+
+  /**
+   * Plain English to one typed patch through the drafting model, then the
+   * same draft as every other channel. The model never sees records, only the
+   * live release's customizable targets; it cannot record or activate.
+   */
+  async draftFromRequest(request: string): Promise<DraftOutcome> {
+    if (!this.options.draftingModel) {
+      return Object.freeze({
+        code: 'CUSTOMIZE_AI_NOT_CONFIGURED',
+        message:
+          'Drafting from plain English needs a model key; describe the change with the forms instead.',
+        status: 'refused' as const,
+      });
+    }
+    let model: DraftingModel;
+    try {
+      model = await this.options.draftingModel();
+    } catch (error) {
+      return Object.freeze({
+        code: 'CUSTOMIZE_AI_NOT_CONFIGURED',
+        message: error instanceof Error ? error.message : String(error),
+        status: 'refused' as const,
+      });
+    }
+    const drafted = await draftPatchFromRequest(
+      model,
+      request,
+      await this.targets(),
+    );
+    if (drafted.status === 'parsed') {
+      return this.draft(drafted.patch, 'conversationalAi');
+    }
+    if (drafted.status === 'unsupported') {
+      return Object.freeze({
+        message: drafted.message,
+        missingCapability: drafted.missingCapability,
+        status: 'unsupported' as const,
+      });
+    }
+    return Object.freeze({
+      issues: drafted.issues,
+      message: 'the model did not produce a well-formed change',
+      status: 'invalid' as const,
+    });
+  }
+
+  /** What a change may target on the live release (plan §10.6 rules). */
+  async targets(): Promise<CustomizationTargets> {
+    const context = await this.#context();
+    const active = await this.#active(context);
+    const definition = parseNormalizedApplicationPackageJson(
+      await this.#desiredState(context, active.revisionId),
+    ) as unknown as Parameters<typeof customizationTargets>[0];
+    return customizationTargets(definition);
   }
 
   /**
