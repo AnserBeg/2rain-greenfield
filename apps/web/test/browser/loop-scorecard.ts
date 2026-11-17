@@ -10,8 +10,10 @@ import {
 } from '@playwright/test';
 import pg from 'pg';
 
-import { pinnedOperationCatalogParseCount } from '../../../../packages/runtime/src/semantic-operation-gateway.js';
-import { surfaceManifestParseCount } from '../../src/surface-contract.js';
+import {
+  catalogParseCount,
+  type CatalogParseCount,
+} from '../../../../packages/runtime/src/catalog-parse-count.js';
 
 /**
  * The loop scorecard (LOOP-1): what an office person does, step by step, to
@@ -56,7 +58,7 @@ export class LoopScorecard {
           count: meter.count(),
           cpu: process.cpuUsage(),
           at: performance.now(),
-          parses: catalogParses(),
+          parses: catalogParseCount(),
         });
     });
     const finish = (request: Request) => {
@@ -72,7 +74,7 @@ export class LoopScorecard {
         statements: after.statements - before.count.statements,
         wallMs: Math.round(performance.now() - before.at),
         cpuMs: Math.round((cpu.user + cpu.system) / 1000),
-        parses: catalogParses() - before.parses,
+        parses: parsesSince(before.parses),
       };
       this.requests.push(tally);
       if (this.current) {
@@ -209,9 +211,9 @@ export class LoopScorecard {
         'invented values',
         'raw codes',
         'developer sentences',
-        'db transactions',
+        'db xacts incl. resets',
         'db statements',
-        'pg_stat transactions',
+        'pg_stat xacts incl. resets',
         'result',
       ]),
       row(Array.from({ length: 11 }, () => '---')),
@@ -222,14 +224,17 @@ export class LoopScorecard {
         row([`**${name}**`, ...tally(this.sum(steps)), 'total']),
       ),
       '',
-      'Database work: `db transactions` and `db statements` are counted in the',
-      "test process, at the application's PostgreSQL client, for every page and",
-      'fragment request of the step (a statement outside BEGIN … COMMIT is its',
-      'own transaction; BEGIN, COMMIT and ROLLBACK are not counted as',
-      "statements). `pg_stat transactions` is the database's own count",
-      '(`xact_commit + xact_rollback` in `pg_stat_database`) across the whole',
-      'step, read after its statistics settle, less the reads themselves; it',
-      'also counts work outside a request (background and seed tails).',
+      'Database work: `db xacts incl. resets` and `db statements` are counted in',
+      "the test process at the application's PostgreSQL client for every page",
+      'and fragment request of the step. A statement outside BEGIN … COMMIT',
+      'counts as its own transaction, so the RESET ROLE / RESET ALL after each',
+      'transaction is counted too: this over-counts the BEGIN … COMMIT pairs',
+      '(SPEED-1 measured 148 pairs on a PO detail page this counts as ~405);',
+      "SPEED-1's request meter replaces it once merged. BEGIN, COMMIT and",
+      'ROLLBACK are not counted as statements. `pg_stat xacts incl. resets` is',
+      "the database's own count (`xact_commit + xact_rollback`) across the step,",
+      'read after its statistics settle, less the reads themselves; it counts',
+      'the resets the same way and work outside a request.',
       '',
       '## Raw codes and developer sentences seen',
       '',
@@ -248,17 +253,19 @@ export class LoopScorecard {
       'Wall and CPU are milliseconds from the browser sending the request to',
       "its last byte arriving; CPU is this process's (the application and the",
       'test client share it). Seconds vary between runners: compare counts.',
-      'Catalog parses are full parses of the pinned operation catalog and',
-      'surface manifest the request caused; a warm request reuses them.',
+      'Parses are the full parses the request caused (catalogParseCount in',
+      'packages/runtime): the operation catalog and surface manifest are reused',
+      'by a warm request; a binding is resolved once per surface per request and',
+      'the query catalog once per request.',
       '',
       row([
         'step',
         'request',
-        'db transactions',
+        'db xacts incl. resets',
         'db statements',
         'wall ms',
         'cpu ms',
-        'catalog parses',
+        'parses: operation / manifest / binding / query',
       ]),
       row(['---', '---', '---', '---', '---', '---', '---']),
       ...this.requests.map((request) =>
@@ -269,7 +276,7 @@ export class LoopScorecard {
           request.statements,
           request.wallMs,
           request.cpuMs,
-          request.parses,
+          `${String(request.parses.operationCatalog)} / ${String(request.parses.surfaceManifest)} / ${String(request.parses.surfaceBinding)} / ${String(request.parses.queryCatalog)}`,
         ]),
       ),
       '',
@@ -344,20 +351,25 @@ export interface RequestTally {
   readonly statements: number;
   readonly wallMs: number;
   readonly cpuMs: number;
-  /** Operation catalogs and surface manifests parsed in full. */
-  readonly parses: number;
+  /** Full catalog parses the request caused, by kind. */
+  readonly parses: CatalogParseCount;
 }
 
 interface RequestStart {
   readonly count: DatabaseCount;
   readonly cpu: NodeJS.CpuUsage;
   readonly at: number;
-  readonly parses: number;
+  readonly parses: CatalogParseCount;
 }
 
-/** Full parses of a pinned operation catalog or surface manifest, so far. */
-function catalogParses(): number {
-  return pinnedOperationCatalogParseCount() + surfaceManifestParseCount();
+function parsesSince(before: CatalogParseCount): CatalogParseCount {
+  const now = catalogParseCount();
+  return {
+    operationCatalog: now.operationCatalog - before.operationCatalog,
+    surfaceManifest: now.surfaceManifest - before.surfaceManifest,
+    surfaceBinding: now.surfaceBinding - before.surfaceBinding,
+    queryCatalog: now.queryCatalog - before.queryCatalog,
+  };
 }
 
 export interface DatabaseCount {

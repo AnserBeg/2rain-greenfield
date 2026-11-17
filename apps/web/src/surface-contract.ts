@@ -1,3 +1,4 @@
+import { recordCatalogParse } from '../../../packages/runtime/src/catalog-parse-count.js';
 import {
   canonicalize,
   SurfaceCompositionSchema,
@@ -516,6 +517,7 @@ function bindSurfaceData(
   view: RuntimeViewContract.RequestRuntimeView,
   surface: CompiledSurfaceDefinition,
 ): CompiledSurfaceDataBinding {
+  recordCatalogParse('surfaceBinding');
   const query = registeredSemanticQueryFromPinnedView(
     view,
     surface.dataSourceQueryId,
@@ -839,20 +841,16 @@ export function readCompiledSurfaceManifest(
 const PARSED_MANIFEST_LIMIT = 8;
 const parsedManifestsByContent = new Map<string, CompiledSurfaceManifest>();
 const parsedManifestsByPayload = new WeakMap<object, CompiledSurfaceManifest>();
-let surfaceManifestParses = 0;
-
 /**
- * How many surface manifests were parsed in full in this process, so a test
- * can observe that a warm request parses none.
+ * The server's full catalog parses (operation catalog, query catalog,
+ * surface manifest, surface bindings), counted where each parse runs.
  */
-export function surfaceManifestParseCount(): number {
-  return surfaceManifestParses;
-}
+export { catalogParseCount } from '../../../packages/runtime/src/catalog-parse-count.js';
 
 function parseCompiledSurfaceManifest(
   projection: RuntimeViewContract.RequestRuntimeView['projections']['surface'],
 ): CompiledSurfaceManifest {
-  surfaceManifestParses += 1;
+  recordCatalogParse('surfaceManifest');
   if (
     !SUPPORTED_SURFACE_MANIFEST_PAYLOAD_VERSIONS.some(
       (version) => version === projection.payloadSchemaVersion,

@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { catalogParseCount } from '../../packages/runtime/src/catalog-parse-count.js';
 import {
   OPERATION_CATALOG_PAYLOAD_VERSION,
   parsePinnedOperationCatalog,
-  pinnedOperationCatalogParseCount,
 } from '../../packages/runtime/src/semantic-operation-gateway.js';
+
+const pinnedOperationCatalogParseCount = () =>
+  catalogParseCount().operationCatalog;
 
 function frozen<T>(value: T): T {
   if (value && typeof value === 'object') {

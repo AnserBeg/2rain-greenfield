@@ -57,8 +57,13 @@ test('LOOP-1 scorecard: purchase order to stock to a shipped, invoiced and paid 
         expect(
           card.requests
             .slice(1)
-            .filter((request) => request.parses > 0)
-            .map((request) => `${request.page}: ${String(request.parses)}`),
+            .filter(
+              (request) =>
+                request.parses.operationCatalog +
+                  request.parses.surfaceManifest >
+                0,
+            )
+            .map((request) => request.page),
         ).toEqual([]);
       } finally {
         card.abandon('not reached');

@@ -1,3 +1,4 @@
+import { recordCatalogParse } from './catalog-parse-count.js';
 import {
   createHash,
   createHmac,
@@ -1184,16 +1185,6 @@ const parsedCatalogsByPayload = new WeakMap<
   object,
   readonly RegisteredOperationDefinition[]
 >();
-let operationCatalogParses = 0;
-
-/**
- * How many pinned operation catalogs were parsed in full in this process, so
- * a test can observe that a warm request parses none.
- */
-export function pinnedOperationCatalogParseCount(): number {
-  return operationCatalogParses;
-}
-
 function serializedPayload(payload: unknown): string | undefined {
   try {
     return JSON.stringify(payload);
@@ -1205,7 +1196,7 @@ function serializedPayload(payload: unknown): string | undefined {
 function parseOperationCatalogPayload(
   payload: unknown,
 ): readonly RegisteredOperationDefinition[] {
-  operationCatalogParses += 1;
+  recordCatalogParse('operationCatalog');
   if (!isRecord(payload)) {
     throw new MalformedPinnedOperationCatalogError(
       'pinned operation catalog must be an object',
