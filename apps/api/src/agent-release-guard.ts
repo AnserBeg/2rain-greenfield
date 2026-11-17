@@ -6,6 +6,7 @@
  * the pointer first, changes nothing, and says in plain words when the two
  * differ; the caller then stops before any runtime is opened.
  */
+import { parseCompiledApplication } from '@north-star/postgres-provider/composed-application-runtime';
 import { readActiveReleaseRoot } from '@north-star/postgres-provider/active-release-root';
 
 export type TerminalReleaseCheck =
@@ -13,14 +14,9 @@ export type TerminalReleaseCheck =
   | { readonly kind: 'not-installed'; readonly message: string }
   | { readonly kind: 'differs'; readonly message: string };
 
-/** The serving release root of a compiled application envelope. */
+/** The serving release root of a compiled application envelope (either lineage form). */
 export function compiledReleaseRoot(compiled: unknown): string {
-  const applications = (compiled as { applications?: unknown }).applications;
-  const last = Array.isArray(applications) ? applications.at(-1) : undefined;
-  const root = (last as { releaseRoot?: unknown } | undefined)?.releaseRoot;
-  if (typeof root !== 'string')
-    throw new TypeError('the compiled application has no release root');
-  return root;
+  return parseCompiledApplication(compiled).application.compiled.releaseRoot;
 }
 
 const shortRoot = (root: string) => root.slice(0, 12);
