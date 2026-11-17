@@ -212,17 +212,22 @@ test(
                 ],
               };
             },
-            (conversation) => ({
-              toolCalls: [
-                {
-                  name: 'erp_execute',
-                  input: {
-                    planId: lastToolResult(conversation).planId,
-                    executionIdempotencyKey: `ctx-${String(withCurrency)}`,
-                  },
-                },
-              ],
-            }),
+            (conversation) => {
+              const planId = lastToolResult(conversation).planId;
+              return planId
+                ? {
+                    toolCalls: [
+                      {
+                        name: 'erp_execute',
+                        input: {
+                          planId,
+                          executionIdempotencyKey: `ctx-${String(withCurrency)}`,
+                        },
+                      },
+                    ],
+                  }
+                : { text: 'no plan to run' };
+            },
             () => ({ text: 'done' }),
           ]);
           const run = await runOperationsAgent({
@@ -233,32 +238,36 @@ test(
           });
           assert.equal(run.stop, 'answered');
           const executed = agent.executedPlans()[0];
-          assert.ok(
-            executed,
-            `the scripted plan was not executed: ${JSON.stringify(run.conversation.slice(-3))}`,
-          );
+          if (!executed) return { context, record: null, run };
           const recordId = executed.results[0]!.recordId!;
           return {
             context,
             record: await world.read('purchase_order', recordId),
+            run,
           };
         };
         const withContext = await planPurchaseOrder(true);
         assert.equal(withContext.context.today.date, '2026-11-16');
         assert.equal(withContext.context.currency.default, 'CAD');
         assert.equal(
-          withContext.record.values[f('purchase_order_currency')],
+          withContext.record!.values[f('purchase_order_currency')],
           'CAD',
         );
         assert.equal(
-          withContext.record.values[f('purchase_order_order_date')],
+          withContext.record!.values[f('purchase_order_order_date')],
           '2026-11-16T00:00:00.000Z',
         );
+        // The currency is required and nobody gave one: the plan is refused,
+        // nothing is created, and the session supplied none of its own.
+        const beforeWithout = await snapshot(world);
         const without = await planPurchaseOrder(false);
-        assert.ok(
-          !without.record.values[f('purchase_order_currency')],
-          'the session wrote a currency nobody gave it',
+        assert.equal(
+          without.record,
+          null,
+          'a purchase order without a currency was created',
         );
+        assert.match(JSON.stringify(without.run.conversation), /refused/u);
+        assert.deepEqual(await snapshot(world), beforeWithout);
 
         // Permission-filtered discovery (plan section 9.2.1): the buyer is
         // not granted purchase approval, the manager is, so their catalogs
