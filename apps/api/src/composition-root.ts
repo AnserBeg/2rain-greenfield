@@ -13,6 +13,16 @@ import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-prov
 import { RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/receivables-capability-executor';
 import { PAYABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/payables-capability-executor';
 import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '@north-star/postgres-provider/purchase-order-approval-executor';
+import {
+  anthropicModel,
+  DEFAULT_ANTHROPIC_MODEL,
+  loadModelKey,
+  type ModelAdapter,
+} from '@north-star/operations-agent';
+import {
+  openCustomizationService,
+  type CustomizationServiceOptions,
+} from '@north-star/postgres-provider/customization-service';
 import { createSurfaceRuntimeServer } from '@north-star/web/app-server';
 import { COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/sales-section';
 
@@ -20,6 +30,7 @@ import {
   composedApplicationSeed,
   type ComposedApplicationSeedProfile,
 } from '../../../packages/domain/src/app/seed.js';
+import { readUnboundPermissionAcknowledgementFor } from '../../web/scripts/unbound-permission-acknowledgement.js';
 
 export interface ComposedApplicationServerOptions {
   /**
@@ -88,6 +99,15 @@ export const COMPOSED_APPLICATION_INVENTORY_SCOPE = Object.freeze({
   transferApprovalThreshold: null,
   transferReasonRequirement: 'codeOnly',
 } as const satisfies InventoryScopeProvisioning);
+
+const CAPABILITY_EXECUTOR_FACTORIES = Object.freeze([
+  INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+  RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+  FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY,
+  RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY,
+  PAYABLES_CAPABILITY_EXECUTOR_FACTORY,
+  PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY,
+]);
 
 /** Thin transport root: provider assembly owns persistence and runtime wiring. */
 export async function startComposedApplication(
@@ -207,14 +227,7 @@ export async function openComposedApplicationRuntime(
   const compiledApplication =
     options.compiledApplication ?? (await readCompiledApplication());
   return createComposedApplicationRuntime({
-    capabilityOperationExecutorFactories: [
-      INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
-      RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
-      FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY,
-      RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY,
-      PAYABLES_CAPABILITY_EXECUTOR_FACTORY,
-      PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY,
-    ],
+    capabilityOperationExecutorFactories: CAPABILITY_EXECUTOR_FACTORIES,
     compiledApplication,
     databaseUrl: options.databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
@@ -232,6 +245,71 @@ export async function openComposedApplicationRuntime(
       : {}),
     tenantSlug: options.tenantSlug ?? 'local-composed-application',
   });
+}
+
+/** Tenant customization over the database the composed runtime serves. */
+export async function openCustomizeService(
+  options: Pick<
+    ComposedApplicationServerOptions,
+    'compiledApplication' | 'databaseUrl' | 'tenantSlug'
+  >,
+) {
+  const authoredPath = new URL(
+    '../../web/release/app.authored.json',
+    import.meta.url,
+  ).pathname;
+  const firstPartyAuthored = JSON.parse(
+    await readFile(authoredPath, 'utf8'),
+  ) as Record<string, unknown>;
+  return openCustomizationService({
+    acknowledgement: readUnboundPermissionAcknowledgementFor(
+      authoredPath,
+      String((firstPartyAuthored.package as Record<string, unknown>).packageId),
+    ),
+    capabilityOperationExecutorFactories: CAPABILITY_EXECUTOR_FACTORIES,
+    compiledApplication:
+      options.compiledApplication ??
+      (JSON.parse(
+        await readFile(
+          new URL('../../web/release/app.compiled.json', import.meta.url),
+          'utf8',
+        ),
+      ) as unknown),
+    databaseUrl: options.databaseUrl,
+    draftingModel: async () =>
+      draftingModelFrom(
+        anthropicModel({
+          effort: 'medium',
+          key: await loadModelKey('anthropic'),
+          maxTokens: 8_000,
+          modelId:
+            process.env.NORTH_STAR_CUSTOMIZE_MODEL ?? DEFAULT_ANTHROPIC_MODEL,
+        }),
+      ),
+    firstPartyAuthored,
+    localDemoIdentity: true,
+    migrationsDirectory: new URL('../../../db/migrations/', import.meta.url)
+      .pathname,
+    providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+    tenantSlug: options.tenantSlug ?? 'local-composed-application',
+  });
+}
+
+/**
+ * The operations agent's provider adapter drafts customizations too (slice 4).
+ * It passes tool definitions to the provider unchanged; only its tool-name
+ * type is narrowed to the agent's five, so the drafting tool is handed through.
+ */
+function draftingModelFrom(
+  adapter: ModelAdapter,
+): NonNullable<
+  Awaited<ReturnType<NonNullable<CustomizationServiceOptions['draftingModel']>>>
+> {
+  return {
+    modelId: adapter.modelId,
+    next: (request) =>
+      adapter.next(request as unknown as Parameters<ModelAdapter['next']>[0]),
+  };
 }
 
 async function seedComposedApplication(

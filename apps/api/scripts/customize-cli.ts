@@ -3,11 +3,10 @@ import { resolve } from 'node:path';
 
 import {
   CustomizationServiceRefusal,
-  openCustomizationService,
   type DraftOutcome,
 } from '@north-star/postgres-provider/customization-service';
 
-import { readUnboundPermissionAcknowledgementFor } from '../../web/scripts/unbound-permission-acknowledgement.js';
+import { openCustomizeService } from '../src/composition-root.js';
 
 /**
  * `corepack pnpm customize <command>` -- the command-line channel of tenant
@@ -15,28 +14,29 @@ import { readUnboundPermissionAcknowledgementFor } from '../../web/scripts/unbou
  * database a running or previously started `corepack pnpm dev` uses.
  *
  *   customize draft <patch.json>   store the change and print its plain diff
+ *   customize ask "<request>"      draft a change from plain English (model key)
  *   customize approve <change-id>  approve a drafted change (shows the diff again)
  *   customize activate <change-id> make an approved change live; no restart
  *   customize rollback             hide the live change again; its records stay
  *   customize status               the active release and every drafted change
  */
-const root = resolve(import.meta.dirname, '../../..');
-const authoredPath = resolve(root, 'apps/web/release/app.authored.json');
 const usage = [
   'usage: corepack pnpm customize <command>',
   '  draft <patch.json>     record a change and print what it would do',
+  '  ask "<request>"        draft a change from plain English',
   '  approve <change-id>    approve a drafted change',
   '  activate <change-id>   make an approved change live (no restart)',
   '  rollback               hide the live change; its records are kept',
   '  status                 show the active release and every recorded change',
 ].join('\n');
 
-const commands = ['draft', 'approve', 'activate', 'rollback', 'status'];
-const [command, argument] = process.argv.slice(2);
+const commands = ['draft', 'ask', 'approve', 'activate', 'rollback', 'status'];
+const [command, ...rest] = process.argv.slice(2);
+const argument = command === 'ask' ? rest.join(' ').trim() : rest[0];
 if (
   !command ||
   !commands.includes(command) ||
-  (['draft', 'approve', 'activate'].includes(command) && !argument)
+  (['draft', 'ask', 'approve', 'activate'].includes(command) && !argument)
 ) {
   process.stderr.write(`${usage}\n`);
   process.exit(2);
@@ -45,21 +45,8 @@ if (
 const databaseUrl =
   process.env.DATABASE_URL ??
   `postgresql://postgres@127.0.0.1:${process.env.NORTH_STAR_DATABASE_PORT ?? '55432'}/postgres`;
-const firstPartyAuthored = JSON.parse(
-  await readFile(authoredPath, 'utf8'),
-) as Record<string, unknown>;
-const opened = await openCustomizationService({
-  acknowledgement: readUnboundPermissionAcknowledgementFor(
-    authoredPath,
-    String((firstPartyAuthored.package as Record<string, unknown>).packageId),
-  ),
-  compiledApplication: JSON.parse(
-    await readFile(resolve(root, 'apps/web/release/app.compiled.json'), 'utf8'),
-  ) as unknown,
+const opened = await openCustomizeService({
   databaseUrl,
-  firstPartyAuthored,
-  migrationsDirectory: resolve(root, 'db/migrations'),
-  localDemoIdentity: true,
   tenantSlug:
     process.env.NORTH_STAR_TENANT_SLUG ?? 'local-composed-application',
 });
@@ -74,6 +61,8 @@ try {
       ),
     ) as unknown;
     exitCode = report(await opened.service.draft(patch, 'declarativeEditor'));
+  } else if (command === 'ask') {
+    exitCode = report(await opened.service.draftFromRequest(argument!));
   } else if (command === 'approve') {
     const approved = await opened.service.approve(argument!);
     process.stdout.write(
