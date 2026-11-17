@@ -4,6 +4,8 @@ import { startComposedApplication } from '../../../api/src/composition-root.js';
 import { withEphemeralPostgres } from '../../../../test/helpers/postgres.js';
 
 import {
+  DatabaseMeter,
+  DatabaseStatistics,
   invoiceAndPay,
   LoopScorecard,
   walkToShipped,
@@ -22,17 +24,26 @@ test.use({ viewport: { width: 1440, height: 900 } });
 test('LOOP-1 scorecard: purchase order to stock to a shipped, invoiced and paid sales order', async ({
   page,
 }) => {
-  test.setTimeout(900_000);
+  test.setTimeout(1_200_000);
   await withEphemeralPostgres(
     'loop-scorecard-browser',
-    async ({ connection }) => {
+    async ({ connection, pool }) => {
       const application = await startComposedApplication({
         databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
         port: 0,
         seedProfile: 'distributor',
         tenantSlug: 'loop-scorecard-browser',
       });
-      const card = new LoopScorecard(page);
+      // The database work of every request, counted at the application's
+      // PostgreSQL client, and the database's own count per step.
+      const meter = new DatabaseMeter();
+      const statisticsClient = await pool.connect();
+      meter.ignored.add(statisticsClient);
+      meter.install();
+      const card = new LoopScorecard(page, {
+        meter,
+        statistics: new DatabaseStatistics(statisticsClient),
+      });
       try {
         await walkToShipped(card, application.baseUrl);
         const fromOrder = await invoiceAndPay(card);
@@ -50,6 +61,8 @@ test('LOOP-1 scorecard: purchase order to stock to a shipped, invoiced and paid 
           `Loop scorecard — ${new Date().toISOString().slice(0, 10)}`,
         );
         console.log(`LOOP_SCORECARD\n${table}`);
+        meter.uninstall();
+        statisticsClient.release();
         await application.close();
       }
     },

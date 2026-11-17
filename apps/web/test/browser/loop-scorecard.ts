@@ -1,7 +1,13 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-import { expect, type Locator, type Page } from '@playwright/test';
+import {
+  expect,
+  type Locator,
+  type Page,
+  type Request,
+} from '@playwright/test';
+import pg from 'pg';
 
 /**
  * The loop scorecard (LOOP-1): what an office person does, step by step, to
@@ -20,15 +26,48 @@ import { expect, type Locator, type Page } from '@playwright/test';
  */
 export class LoopScorecard {
   readonly steps: ScorecardStep[] = [];
+  /** Every page and fragment request, with the database work it caused. */
+  readonly requests: RequestTally[] = [];
   private current: ScorecardStep | undefined;
   /** The step is still on the page the step before ended on. */
   private carried = false;
+  private readonly started = new Map<Request, DatabaseCount>();
 
-  constructor(readonly page: Page) {
+  constructor(
+    readonly page: Page,
+    private readonly database?: {
+      readonly meter: DatabaseMeter;
+      readonly statistics?: DatabaseStatistics;
+    },
+  ) {
     page.on('load', () => {
       this.carried = false;
       if (this.current) this.current.loads += 1;
     });
+    const meter = database?.meter;
+    if (!meter) return;
+    page.on('request', (request) => {
+      if (measured(request)) this.started.set(request, meter.count());
+    });
+    const finish = (request: Request) => {
+      const before = this.started.get(request);
+      if (!before) return;
+      this.started.delete(request);
+      const after = meter.count();
+      const tally: RequestTally = {
+        step: this.current?.name ?? '(start)',
+        page: requestLabel(request),
+        transactions: after.transactions - before.transactions,
+        statements: after.statements - before.statements,
+      };
+      this.requests.push(tally);
+      if (this.current) {
+        this.current.transactions += tally.transactions;
+        this.current.statements += tally.statements;
+      }
+    };
+    page.on('requestfinished', finish);
+    page.on('requestfailed', finish);
   }
 
   begin(name: string): void {
@@ -41,18 +80,39 @@ export class LoopScorecard {
       invented: 0,
       codes: new Set(),
       sentences: new Set(),
+      transactions: 0,
+      statements: 0,
+      statisticsTransactions: null,
       result: 'not finished',
     };
     this.carried = this.steps.length > 0;
     this.steps.push(this.current);
   }
 
+  /**
+   * Read the database's own transaction count before the first step, so the
+   * first step's `pg_stat_database` delta has a start.
+   */
+  async baseline(): Promise<void> {
+    this.statisticsMark = (await this.database?.statistics?.settled()) ?? null;
+  }
+
   async end(result: string): Promise<void> {
     await this.page.waitForLoadState('load');
     await this.scan();
-    this.step().result = result;
+    const step = this.step();
+    step.result = result;
+    const statistics = this.database?.statistics;
+    if (statistics && this.statisticsMark !== null) {
+      const mark = await statistics.settled();
+      step.statisticsTransactions =
+        mark - this.statisticsMark - statistics.readCost;
+      this.statisticsMark = mark;
+    }
     this.current = undefined;
   }
+
+  private statisticsMark: number | null = null;
 
   /** Close the open step as not possible, recording why. */
   abandon(reason: string): void {
@@ -111,6 +171,9 @@ export class LoopScorecard {
       step.invented,
       step.codes.size,
       step.sentences.size,
+      step.transactions,
+      step.statements,
+      step.statisticsTransactions ?? '—',
     ];
     const lines = [
       `# ${title}`,
@@ -132,15 +195,27 @@ export class LoopScorecard {
         'invented values',
         'raw codes',
         'developer sentences',
+        'db transactions',
+        'db statements',
+        'pg_stat transactions',
         'result',
       ]),
-      row(['---', '---', '---', '---', '---', '---', '---', '---']),
+      row(Array.from({ length: 11 }, () => '---')),
       ...this.steps.map((step) =>
         row([step.name, ...tally(step), step.result]),
       ),
       ...totals.map(([name, steps]) =>
         row([`**${name}**`, ...tally(this.sum(steps)), 'total']),
       ),
+      '',
+      'Database work: `db transactions` and `db statements` are counted in the',
+      "test process, at the application's PostgreSQL client, for every page and",
+      'fragment request of the step (a statement outside BEGIN … COMMIT is its',
+      'own transaction; BEGIN, COMMIT and ROLLBACK are not counted as',
+      "statements). `pg_stat transactions` is the database's own count",
+      '(`xact_commit + xact_rollback` in `pg_stat_database`) across the whole',
+      'step, read after its statistics settle, less the reads themselves; it',
+      'also counts work outside a request (background and seed tails).',
       '',
       '## Raw codes and developer sentences seen',
       '',
@@ -154,6 +229,19 @@ export class LoopScorecard {
           : [],
       ),
       '',
+      '## Database work per request',
+      '',
+      row(['step', 'request', 'db transactions', 'db statements']),
+      row(['---', '---', '---', '---']),
+      ...this.requests.map((request) =>
+        row([
+          request.step,
+          request.page,
+          request.transactions,
+          request.statements,
+        ]),
+      ),
+      '',
     ];
     return lines.join('\n');
   }
@@ -161,13 +249,26 @@ export class LoopScorecard {
   /** The named steps, summed; raw codes and sentences as distinct unions. */
   sum(names: readonly string[]): Tally {
     const chosen = this.steps.filter((step) => names.includes(step.name));
-    const add = (key: 'clicks' | 'loads' | 'typed' | 'invented') =>
-      chosen.reduce((total, step) => total + step[key], 0);
+    const add = (
+      key:
+        | 'clicks'
+        | 'loads'
+        | 'typed'
+        | 'invented'
+        | 'transactions'
+        | 'statements',
+    ) => chosen.reduce((total, step) => total + step[key], 0);
+    const statistics = chosen.map((step) => step.statisticsTransactions);
     return {
       clicks: add('clicks'),
       loads: add('loads'),
       typed: add('typed'),
       invented: add('invented'),
+      transactions: add('transactions'),
+      statements: add('statements'),
+      statisticsTransactions: statistics.every((value) => value !== null)
+        ? statistics.reduce<number>((total, value) => total + value!, 0)
+        : null,
       codes: new Set(chosen.flatMap((step) => [...step.codes])),
       sentences: new Set(chosen.flatMap((step) => [...step.sentences])),
     };
@@ -184,6 +285,9 @@ export interface Tally {
   readonly loads: number;
   readonly typed: number;
   readonly invented: number;
+  readonly transactions: number;
+  readonly statements: number;
+  readonly statisticsTransactions: number | null;
   readonly codes: ReadonlySet<string>;
   readonly sentences: ReadonlySet<string>;
 }
@@ -196,7 +300,140 @@ export interface ScorecardStep {
   invented: number;
   readonly codes: Set<string>;
   readonly sentences: Set<string>;
+  transactions: number;
+  statements: number;
+  statisticsTransactions: number | null;
   result: string;
+}
+
+export interface RequestTally {
+  readonly step: string;
+  readonly page: string;
+  readonly transactions: number;
+  readonly statements: number;
+}
+
+export interface DatabaseCount {
+  readonly transactions: number;
+  readonly statements: number;
+}
+
+/**
+ * Counts what the application sends to PostgreSQL, in this process: every
+ * \`pg\` client query is a statement, and a statement outside an explicit
+ * transaction is a transaction of its own. Installed by the test that starts
+ * the application in-process; clients it ignores (the test's own) are not
+ * counted.
+ */
+export class DatabaseMeter {
+  readonly ignored = new WeakSet<object>();
+  private transactions = 0;
+  private statements = 0;
+  private readonly open = new WeakMap<object, boolean>();
+  private restore: (() => void) | undefined;
+
+  install(): void {
+    if (this.restore) return;
+    const prototype = pg.Client.prototype as unknown as {
+      query: (...parameters: unknown[]) => unknown;
+    };
+    const original = prototype.query;
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const meter = this;
+    prototype.query = function (this: object, ...parameters: unknown[]) {
+      if (!meter.ignored.has(this)) meter.observe(this, parameters[0]);
+      return original.apply(this, parameters);
+    };
+    this.restore = () => {
+      prototype.query = original;
+    };
+  }
+
+  uninstall(): void {
+    this.restore?.();
+    this.restore = undefined;
+  }
+
+  count(): DatabaseCount {
+    return { transactions: this.transactions, statements: this.statements };
+  }
+
+  private observe(client: object, query: unknown): void {
+    const text =
+      typeof query === 'string'
+        ? query
+        : typeof (query as { text?: unknown } | null)?.text === 'string'
+          ? (query as { text: string }).text
+          : '';
+    const head = text.trimStart().slice(0, 24).toUpperCase();
+    if (/^(BEGIN|START TRANSACTION)\b/u.test(head)) {
+      this.open.set(client, true);
+      this.transactions += 1;
+      return;
+    }
+    if (
+      /^(COMMIT|END|ABORT)\b/u.test(head) ||
+      /^ROLLBACK(?!\s+TO)\b/u.test(head)
+    ) {
+      this.open.set(client, false);
+      return;
+    }
+    this.statements += 1;
+    if (!this.open.get(client)) this.transactions += 1;
+  }
+}
+
+/**
+ * The database's own transaction count, \`xact_commit + xact_rollback\` for
+ * the test database, read on a client the meter ignores. A backend flushes
+ * its counts when it goes idle, at most once a second and otherwise after
+ * PostgreSQL's ten-second idle interval, so a read waits that out first.
+ */
+export class DatabaseStatistics {
+  /** Each read is one transaction of its own, counted by the next read. */
+  readonly readCost = 1;
+
+  constructor(
+    private readonly client: pg.ClientBase,
+    private readonly settleMs = 11_000,
+  ) {}
+
+  async settled(): Promise<number> {
+    await new Promise((resolve) => setTimeout(resolve, this.settleMs));
+    const result = await this.client.query<{ count: string }>(
+      `SELECT (xact_commit + xact_rollback)::text AS count
+         FROM pg_stat_database WHERE datname = current_database()`,
+    );
+    return Number(result.rows[0]!.count);
+  }
+}
+
+function measured(request: Request): boolean {
+  return (
+    request.frame() === request.frame().page().mainFrame() &&
+    (request.isNavigationRequest() || request.resourceType() === 'fetch')
+  );
+}
+
+/** A request named by the page it asks for and the stage of a Task it moves. */
+function requestLabel(request: Request): string {
+  const url = new URL(request.url());
+  const surface = (url.searchParams.get('surface') ?? 'home').replace(
+    /^.*:surface\./u,
+    '',
+  );
+  const body = request.method() === 'POST' ? (request.postData() ?? '') : '';
+  const form = new URLSearchParams(body);
+  const stage = form.get('taskStage')
+    ? `task ${form.get('taskStage')!}`
+    : form.get('compositionAction') || url.searchParams.get('compositionAction')
+      ? 'task open'
+      : request.resourceType() === 'fetch'
+        ? 'fragment'
+        : request.method() === 'POST'
+          ? 'submit'
+          : '';
+  return `${request.method()} ${surface}${stage ? ` (${stage})` : ''}`;
 }
 
 const DEVELOPER_SENTENCES = [
@@ -271,6 +508,7 @@ export async function walkToShipped(
 ): Promise<void> {
   card.page.setDefaultTimeout(30_000);
   await card.page.goto(baseUrl);
+  await card.baseline();
   await placePurchaseOrder(card);
   await receiveInFull(card);
   await findStock(card);
