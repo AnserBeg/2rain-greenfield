@@ -783,12 +783,12 @@ export class OperationsAgentSession {
           contracts: ids.map((id) => {
             const operation = catalog.operation(id);
             if (operation)
-              return usable.operations.has(id)
+              return usable.operations.has(operation.operationId)
                 ? operationContract(catalog, operation)
                 : { id, outcome: 'denied' };
             const query = catalog.query(id);
             if (query)
-              return usable.queries.has(id)
+              return usable.queries.has(query.queryId)
                 ? queryContract(catalog, query)
                 : { id, outcome: 'denied' };
             return { id, outcome: 'not-found' };

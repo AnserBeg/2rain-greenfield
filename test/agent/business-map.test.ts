@@ -392,3 +392,21 @@ test('A2: verify compares a patched field; one that did not take is named', asyn
       ]);
   }
 });
+
+test('a contract asked for by its short name loads, as the map writes it', async () => {
+  const { session } = guardedSession();
+  const loaded = (
+    await session.call('erp_discover', {
+      mode: 'contracts',
+      canonicalIds: ['party_update', 'party_get'],
+    })
+  ).content as {
+    contracts: { operationId?: string; queryId?: string; outcome?: string }[];
+  };
+  assert.deepEqual(
+    loaded.contracts.map(
+      (entry) => entry.operationId ?? entry.queryId ?? entry.outcome,
+    ),
+    [`${NS}:operation.party_update`, `${NS}:query.party_get`],
+  );
+});
