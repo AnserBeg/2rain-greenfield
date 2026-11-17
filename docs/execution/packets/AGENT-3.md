@@ -31,6 +31,16 @@ Charter: [AGENT-3-charter.md](AGENT-3-charter.md) from `main` `f1abcb3a`. Branch
   automatic one; today, now, currency, form defaults and the screen travel in the user turn, so the cached prefix stays stable.
 - `#usable` eligibility cache is keyed by principal, policy version, release id and release root.
 
+## Results (each dated result file stands as registered)
+
+| run | pass | median discovery calls | median s | median calls | USD total | USD / completed task |
+|---|---|---|---|---|---|---|
+| baseline 2026-11-17 16:52 (AGENT-2, no map) | 9/10 | 7.5 | 34.8 (JSONL stamps) | 14.0 | 1.5282 | 0.1698 |
+| slice 1 2026-11-17 17:54 at `7c604fda` ([result](../evidence/2026-11-17T17-54-02-978Z-agent-eval.md)) | 10/10 | 2 | 18.6 | 7 | 0.8869 | 0.0887 |
+
+Slice 1 target met: discovery median 7.5 -> 2 (contracts 24 -> 6, search 28 -> 0, context 7 -> 0; resolve 18 -> 14), seconds 34.8 -> 18.6.
+One attempt per task; the baseline's seconds come from JSONL stamps, slice 1's from the monotonic clock (both exclude arrangement).
+
 ## Slices
 
 1. Context instead of discovery — Test it yourself below.
