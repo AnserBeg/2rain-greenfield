@@ -71,6 +71,7 @@ import {
   STORAGE_TARGET_PAYLOAD_V2_VERSION,
   STORAGE_TARGET_PAYLOAD_V3_VERSION,
   STORAGE_TRANSITION_ENVELOPE_VERSION,
+  UNTRUSTED_DEFINITION_SANDBOX_CAPS,
   type CapabilityFact,
   type CompilationNodeContract,
   type CompileFailure,
@@ -1199,6 +1200,25 @@ function typeCheck(
   return diagnostics;
 }
 
+/** Only a declared, bounded process-isolated compile admits untrusted input. */
+function admittedBySandbox(
+  attestation: CompilerExecutionOptions['untrustedDefinitionSandbox'],
+): boolean {
+  return (
+    typeof attestation === 'object' &&
+    attestation !== null &&
+    attestation.kind === 'processIsolatedCompile' &&
+    Number.isSafeInteger(attestation.heapLimitBytes) &&
+    attestation.heapLimitBytes > 0 &&
+    attestation.heapLimitBytes <=
+      UNTRUSTED_DEFINITION_SANDBOX_CAPS.maximumHeapLimitBytes &&
+    Number.isSafeInteger(attestation.wallClockLimitMilliseconds) &&
+    attestation.wallClockLimitMilliseconds > 0 &&
+    attestation.wallClockLimitMilliseconds <=
+      UNTRUSTED_DEFINITION_SANDBOX_CAPS.maximumWallClockLimitMilliseconds
+  );
+}
+
 function validateWholeModel(
   packageRevision: VersionedNormalizedApplicationPackage,
   options: CompilerExecutionOptions,
@@ -1221,7 +1241,10 @@ function validateWholeModel(
       ),
     );
   }
-  if (packageRevision.package.provenance !== 'firstParty') {
+  if (
+    packageRevision.package.provenance !== 'firstParty' &&
+    !admittedBySandbox(options.untrustedDefinitionSandbox)
+  ) {
     diagnostics.push(
       compilerDiagnostic(
         'COMPILER_UNTRUSTED_INPUT_GATE_REQUIRED',

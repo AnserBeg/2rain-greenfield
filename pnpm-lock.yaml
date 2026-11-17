@@ -95,6 +95,18 @@ importers:
         specifier: workspace:*
         version: link:../canonical-model
 
+  packages/customization:
+    dependencies:
+      '@north-star/canonical-model':
+        specifier: workspace:*
+        version: link:../canonical-model
+      '@north-star/compiler':
+        specifier: workspace:*
+        version: link:../compiler
+      zod:
+        specifier: 4.6.6
+        version: 4.6.6
+
   packages/dev-tooling: {}
 
   packages/domain: {}
@@ -126,6 +138,9 @@ importers:
       '@north-star/compiler':
         specifier: workspace:*
         version: link:../compiler
+      '@north-star/customization':
+        specifier: workspace:*
+        version: link:../customization
       '@north-star/observability':
         specifier: workspace:*
         version: link:../observability

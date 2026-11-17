@@ -277,9 +277,30 @@ export interface UnboundPermissionAcknowledgementInput {
   readonly packageId: string;
 }
 
+/**
+ * The untrusted-definition release gate (doctrine-coverage, Freeze B; plan
+ * §7.2): a tenant- or AI-authored definition compiles only inside a separate
+ * process whose heap and wall clock are bounded. The compiler is hermetic and
+ * cannot observe its process, so the isolated worker observes its own limits
+ * and declares them here; the compiler admits non-first-party input only when
+ * the declaration is present and within the fixed caps below. Absent, such
+ * input is refused exactly as before.
+ */
+export interface UntrustedDefinitionSandboxAttestation {
+  readonly heapLimitBytes: number;
+  readonly kind: 'processIsolatedCompile';
+  readonly wallClockLimitMilliseconds: number;
+}
+
+export const UNTRUSTED_DEFINITION_SANDBOX_CAPS = Object.freeze({
+  maximumHeapLimitBytes: 2 * 1024 * 1024 * 1024,
+  maximumWallClockLimitMilliseconds: 120_000,
+});
+
 export interface CompilerExecutionOptions {
   projectionSchedule?: 'canonical' | 'interleaved' | 'reverse';
   unboundPermissionAcknowledgement?: UnboundPermissionAcknowledgementInput;
+  untrustedDefinitionSandbox?: UntrustedDefinitionSandboxAttestation;
 }
 
 export type StorageTransitionElementKind =

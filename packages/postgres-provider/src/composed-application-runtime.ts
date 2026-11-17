@@ -210,18 +210,18 @@ interface ParsedApplicationRelease {
   readonly bootstrap: ParsedRelease;
 }
 
-interface ParsedRelease {
+export interface ParsedRelease {
   readonly compiled: CompileSuccess;
   readonly normalizedDefinitionBytes: Uint8Array;
 }
 
-interface PersistedReleaseIdentity {
+export interface PersistedReleaseIdentity {
   readonly evidenceId: MintedUuid;
   readonly releaseId: MintedUuid;
   readonly revisionId: MintedUuid;
 }
 
-interface ScopeIdentities {
+export interface ScopeIdentities {
   readonly manager: AuthenticatedIdentity;
   readonly approver: AuthenticatedIdentity;
   readonly authorityOperatorId: string;
@@ -229,7 +229,7 @@ interface ScopeIdentities {
   readonly system: AuthenticatedIdentity;
 }
 
-interface PointerState {
+export interface PointerState {
   readonly fence: number;
   readonly pointerId: MintedUuid;
   readonly releaseId: MintedUuid | null;
@@ -889,7 +889,7 @@ function parseRelease(value: unknown, label: string): ParsedRelease {
   return Object.freeze({ compiled, normalizedDefinitionBytes });
 }
 
-function releasesForLineage(
+export function releasesForLineage(
   releases: ParsedApplicationRelease,
 ): readonly ParsedRelease[] {
   return Object.freeze([releases.bootstrap, ...releases.applications]);
@@ -1026,7 +1026,7 @@ function parseArtifact(value: unknown, path: string): ContentAddressedArtifact {
   };
 }
 
-async function migrate(pool: pg.Pool, directory: string): Promise<void> {
+export async function migrate(pool: pg.Pool, directory: string): Promise<void> {
   const client = await pool.connect();
   try {
     const loaded = await loadMigrations(directory);
@@ -1045,7 +1045,7 @@ async function migrate(pool: pg.Pool, directory: string): Promise<void> {
   }
 }
 
-async function ensureScope(
+export async function ensureScope(
   pool: pg.Pool,
   tenantSlug: string,
   environmentSlug: string,
@@ -1273,11 +1273,12 @@ async function ensureAuthority(
   }
 }
 
-async function ensurePersistedRelease(
+export async function ensurePersistedRelease(
   pool: pg.Pool,
   context: TrustedRequestContext,
   release: ParsedRelease,
   parentRevisionId: MintedUuid | null,
+  provenance: 'firstParty' | 'tenantAuthored' = 'firstParty',
 ): Promise<PersistedReleaseIdentity> {
   const normalizedDefinition = parseNormalizedApplicationPackageJson(
     release.normalizedDefinitionBytes,
@@ -1288,11 +1289,15 @@ async function ensurePersistedRelease(
     context,
     async (client) =>
       client.query<{ revision_id: MintedUuid }>(
+        // A tenant-authored revision is reused only under the same parent:
+        // the rollback policy reads that edge (ADR-0013).
         `SELECT revision_id
            FROM platform.app_package_revisions
           WHERE tenant_id = $1 AND content_hash = $2
+            AND ($3::text = 'firstParty'
+                 OR (provenance = $3 AND parent_revision_id = $4))
           ORDER BY created_at LIMIT 1`,
-        [context.tenantId, digest.contentHash],
+        [context.tenantId, digest.contentHash, provenance, parentRevisionId],
       ),
   );
   let revisionId = existingRevision.rows[0]?.revision_id;
@@ -1309,7 +1314,7 @@ async function ensurePersistedRelease(
       normalizationProfileVersion:
         normalizedDefinition.normalizationProfileVersion,
       parentRevisionId,
-      provenance: 'firstParty',
+      provenance,
       revisionId,
       schemaVersion: normalizedDefinition.schemaVersion,
       tenantId: context.tenantId,
@@ -1347,7 +1352,7 @@ async function ensurePersistedRelease(
   return Object.freeze({ evidenceId, releaseId, revisionId });
 }
 
-async function ensureReleaseAdmitted(
+export async function ensureReleaseAdmitted(
   pool: pg.Pool,
   context: TrustedRequestContext,
   identity: PersistedReleaseIdentity,
@@ -2186,7 +2191,7 @@ async function createApproval(
   return created.attempt.activationAttemptId;
 }
 
-async function readPointer(
+export async function readPointer(
   pool: pg.Pool,
   context: TrustedRequestContext,
 ): Promise<PointerState> {
@@ -2238,7 +2243,11 @@ async function assertExactSwapTriggerEnabled(pool: pg.Pool): Promise<void> {
   }
 }
 
-function rolePool(databaseUrl: string, user: string, max: number): pg.Pool {
+export function rolePool(
+  databaseUrl: string,
+  user: string,
+  max: number,
+): pg.Pool {
   const connection = new URL(databaseUrl);
   connection.username = user;
   connection.password = '';
@@ -2264,7 +2273,7 @@ function humanActorIssuer(): TrustedActorEnvelopeIssuer {
   });
 }
 
-async function trustedContext(
+export async function trustedContext(
   identity: AuthenticatedIdentity,
 ): Promise<TrustedRequestContext> {
   return new AuthenticatedRequestEntryAdapter(async () => identity).enter({});

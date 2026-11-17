@@ -1,0 +1,14 @@
+{
+  "kind": "addRecordType",
+  "label": "Equipment",
+  "fields": [
+    { "label": "Name", "type": "text", "required": true },
+    { "label": "Serial number", "type": "text" },
+    { "label": "Purchase date", "type": "date" },
+    {
+      "label": "Status",
+      "type": "choice",
+      "options": ["In service", "Under repair", "Retired"]
+    }
+  ]
+}
