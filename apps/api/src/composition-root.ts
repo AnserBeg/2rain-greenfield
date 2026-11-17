@@ -118,6 +118,19 @@ export async function startComposedApplication(
     throw new Error('the composed demo identity may bind only to loopback');
   }
   const runtime = await openComposedApplicationRuntime(options);
+  // The Customize screen's service opens on first use (CUSTOMIZE), so a
+  // server nobody customizes holds no extra connections.
+  let customization: ReturnType<typeof openCustomizeService> | undefined;
+  const customize = async () => {
+    customization ??= openCustomizeService(options).catch((error: unknown) => {
+      customization = undefined;
+      throw error;
+    });
+    return (await customization).service;
+  };
+  const closeCustomization = async () => {
+    await (await customization?.catch(() => undefined))?.close();
+  };
   // Everything after the runtime exists must hand it back closed on failure.
   // Seeding is 176 operations and `listen` can fail with EADDRINUSE; either
   // one previously threw past an open runtime, leaving the caller with no
@@ -163,6 +176,7 @@ export async function startComposedApplication(
         queryGateway: runtime.queryGateway,
       },
       runtime.identityMode === 'LOCAL_DEMO' ? runtime.localDemoActors : null,
+      runtime.identityMode === 'LOCAL_DEMO' ? customize : undefined,
     );
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
@@ -172,6 +186,7 @@ export async function startComposedApplication(
       });
     });
   } catch (error) {
+    await closeCustomization();
     await runtime.close();
     throw error;
   }
@@ -194,6 +209,7 @@ export async function startComposedApplication(
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
       });
+      await closeCustomization();
       await runtime.close();
     },
     runtime,

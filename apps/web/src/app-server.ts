@@ -11,6 +11,11 @@ import { SURFACE_CLIENT_CSP_HASH } from './surface-client.js';
 import { localDemoActor } from '../../../packages/runtime/src/local-demo-actor.js';
 
 import {
+  renderCustomizeScreen,
+  type CustomizeScreenService,
+} from './customize-screen.js';
+
+import {
   FRAGMENT_REQUEST_HEADER,
   renderApplicationDiagnostic,
   renderSurfaceRuntime,
@@ -18,6 +23,7 @@ import {
   renderSurfaceRuntimeWithData,
   submitSurfaceRuntimeFragment,
   submitSurfaceRuntimeIntent,
+  surfaceRuntimeStyles,
   type SurfaceRuntimeGateways,
   type SurfaceRuntimeResponse,
 } from './surface-runtime.js';
@@ -29,9 +35,18 @@ export function createSurfaceRuntimeServer(
   entry: AuthenticatedRequestRuntimeEntryAdapter,
   gateways?: SurfaceRuntimeGateways,
   demoActors?: readonly { key: 'buyer' | 'manager'; label: string }[] | null,
+  /** The Customize screen at `/?customize`; absent, the page is not served. */
+  customize?: () => Promise<CustomizeScreenService>,
 ): Server {
   return createServer((request, response) => {
-    void handleRequest(entry, gateways, request, response, demoActors);
+    void handleRequest(
+      entry,
+      gateways,
+      request,
+      response,
+      demoActors,
+      customize,
+    );
   });
 }
 
@@ -41,6 +56,7 @@ async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
   demoActors?: readonly { key: 'buyer' | 'manager'; label: string }[] | null,
+  customize?: () => Promise<CustomizeScreenService>,
 ): Promise<void> {
   response.setHeader('cache-control', 'no-store');
   response.setHeader(
@@ -118,6 +134,34 @@ async function handleRequest(
   try {
     const submission =
       request.method === 'POST' ? await readFormSubmission(request) : null;
+    if (
+      customize &&
+      url.searchParams.has('customize') &&
+      !(submission && Object.hasOwn(submission, 'localDemoActAs'))
+    ) {
+      // A cross-site form cannot draft, approve, activate or roll back.
+      if (submission && !sameOriginRequest(request)) {
+        writeHtml(response, { statusCode: 403, html: '' });
+        return;
+      }
+      const result = await entry.run({ headers: request.headers }, async () =>
+        renderCustomizeScreen(
+          await customize(),
+          url.href,
+          submission,
+          surfaceRuntimeStyles(),
+        ),
+      );
+      writeHtml(
+        response,
+        withLocalDemoIdentity(
+          result,
+          demoActors,
+          localDemoActor(request.headers.cookie),
+        ),
+      );
+      return;
+    }
     if (
       demoActors &&
       submission &&
@@ -211,6 +255,18 @@ export function runtimeViewRefusalMessage(
     code: 'REQUEST_RUNTIME_VIEW_REFUSED' as const,
     subject: error.code,
   };
+}
+
+function sameOriginRequest(request: IncomingMessage): boolean {
+  if (request.headers['sec-fetch-site'] === 'same-origin') return true;
+  const origin = request.headers.origin;
+  if (request.headers['sec-fetch-site'] !== undefined) return false;
+  if (typeof origin !== 'string') return false;
+  try {
+    return new URL(origin).host === request.headers.host;
+  } catch {
+    return false;
+  }
 }
 
 async function readFormSubmission(

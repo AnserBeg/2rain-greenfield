@@ -36,6 +36,7 @@ const suiteDefinitions = [
       'test/unit/commercial-amounts.test.ts',
       'test/unit/customization-ai-draft.test.ts',
       'test/unit/customization.test.ts',
+      'test/unit/customize-screen.test.ts',
       'test/unit/dev-environment.test.ts',
       'test/unit/inventory-definition.test.ts',
       'test/unit/inventory-valuation.test.ts',

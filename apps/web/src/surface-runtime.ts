@@ -2861,3 +2861,8 @@ body{padding-bottom:72px}
 .data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td::before{display:none}
 }
 `;
+
+/** The runtime's own stylesheet, for standalone pages served beside it. */
+export function surfaceRuntimeStyles(): string {
+  return styles;
+}
