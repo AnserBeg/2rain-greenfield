@@ -386,7 +386,7 @@ test(
       [
         `${ns}:surface.inventory_warehouse`,
         `${ns}:surface.inventory_today`,
-      ].includes(surface.surfaceId),
+      ].includes(String(surface.surfaceId)),
     ))
       for (const tile of (
         launcher.launcher as {
