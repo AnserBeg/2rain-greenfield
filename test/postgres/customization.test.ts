@@ -364,18 +364,6 @@ test(
           assert.notEqual(preparation.rows[0]!.transition_plan_digest, null);
 
           const activated = await opened.service.activate(drafted.patchId);
-          const debugTables = await pool.query(
-            `SELECT n.nspname, c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname LIKE 'nsm_t_m6rk%'`,
-          );
-          const debugApps = await pool.query(
-            `SELECT e.element_kind, a.* FROM north_star_internal.module_storage_element_applications a LEFT JOIN north_star_internal.module_storage_elements e USING (tenant_id, environment_id, element_id) ORDER BY 1`,
-          ).catch((error: unknown) => ({ rows: [String(error)] }));
-          const debugGens = await pool.query(
-            `SELECT generation_id, state, generation_number FROM north_star_internal.module_storage_generations ORDER BY generation_number`,
-          );
-          console.error('DEBUG_TABLES', JSON.stringify(debugTables.rows));
-          console.error('DEBUG_APPS', JSON.stringify(debugApps.rows).slice(0, 4000));
-          console.error('DEBUG_GENS', JSON.stringify(debugGens.rows));
           assert.equal(activated.status, 'activated');
           assert.equal(activated.releaseId, drafted.releaseId);
 

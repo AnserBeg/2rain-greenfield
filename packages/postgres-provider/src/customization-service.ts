@@ -552,7 +552,6 @@ export class PostgresCustomizationService {
         'this change has no current approval; approve it first',
       );
     }
-    process.stderr.write(`DEBUG_ACTIVATE plan=${String(approved.transition_plan_digest !== null)} prep=${approved.preparation_id}\n`);
     if (approved.transition_plan_digest !== null) {
       const generation = await this.connection.adminPool.query<{
         generation_id: string;
@@ -575,7 +574,6 @@ export class PostgresCustomizationService {
         coordinatorId: randomUUID() as MintedUuid,
         generationId,
       });
-      process.stderr.write(`DEBUG_EXECUTED ${generationId} ${executed.disposition}\n`);
       if (executed.disposition !== 'READY_TO_SWAP') {
         throw new CustomizationServiceRefusal(
           'CUSTOMIZE_ACTIVATION_FAILED',
