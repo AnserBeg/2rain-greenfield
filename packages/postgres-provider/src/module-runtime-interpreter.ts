@@ -6451,6 +6451,7 @@ function unregisteredProviderFailure(
   subjectId: string,
 ): ModuleRuntimeInterpreterError {
   const metadata = providerErrorMetadata(error);
+  process.stderr.write(`DEBUG_PROVIDER_ERROR ${String((error as { message?: unknown }).message)} ${String((error as { where?: unknown }).where)}\n`);
   return failure(
     'MODULE_PROVIDER_FAILURE',
     metadata
