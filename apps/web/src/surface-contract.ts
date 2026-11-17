@@ -466,6 +466,56 @@ export function readCompiledSurfaceDataBinding(
   surface: CompiledSurfaceDefinition,
 ): CompiledSurfaceDataBinding {
   assertRequestRuntimeView(view);
+  // Navigation and related-surface lookups ask for many surfaces' bindings on
+  // one page; each is resolved once per request view, a refusal included.
+  let bindings = bindingsByView.get(view);
+  if (!bindings) {
+    bindings = new Map();
+    bindingsByView.set(view, bindings);
+  }
+  const known = bindings.get(surface);
+  if (known) {
+    if (known.status === 'refused') throw known.error;
+    return known.binding;
+  }
+  try {
+    const binding = bindSurfaceData(view, surface);
+    bindings.set(surface, { binding, status: 'bound' });
+    return binding;
+  } catch (error) {
+    bindings.set(surface, { error, status: 'refused' });
+    throw error;
+  }
+}
+
+const bindingsByView = new WeakMap<
+  RuntimeViewContract.RequestRuntimeView,
+  Map<
+    CompiledSurfaceDefinition,
+    | { readonly binding: CompiledSurfaceDataBinding; readonly status: 'bound' }
+    | { readonly error: unknown; readonly status: 'refused' }
+  >
+>();
+
+/**
+ * The entity a surface's bound query reads, or null where the surface does
+ * not bind: the index navigation and related-surface lookups match on.
+ */
+export function surfaceSourceEntityId(
+  view: RuntimeViewContract.RequestRuntimeView,
+  surface: CompiledSurfaceDefinition,
+): string | null {
+  try {
+    return readCompiledSurfaceDataBinding(view, surface).query.sourceEntityId;
+  } catch {
+    return null;
+  }
+}
+
+function bindSurfaceData(
+  view: RuntimeViewContract.RequestRuntimeView,
+  surface: CompiledSurfaceDefinition,
+): CompiledSurfaceDataBinding {
   const query = registeredSemanticQueryFromPinnedView(
     view,
     surface.dataSourceQueryId,
@@ -525,7 +575,7 @@ export function readCompiledSurfaceDataBinding(
   let relationInputs: readonly CompiledSurfaceRelationInput[] | null = null;
   let authorityUnavailable = false;
   for (const value of operationCatalog) {
-    const operation = parseOperationBinding(value);
+    const operation = operationBinding(value);
     const entityId =
       operation.entityId ??
       registeredSemanticQueryFromPinnedView(view, operation.readBackQueryId)
@@ -751,6 +801,58 @@ export function readCompiledSurfaceManifest(
 ): CompiledSurfaceManifest {
   assertRequestRuntimeView(view);
   const projection = view.projections.surface;
+  // An issued view's payload is a deeply frozen clone of the release's, new
+  // on every request. The parse is reused by content (the payload version and
+  // its exact JSON), and published only once the whole manifest was admitted;
+  // a refused manifest is never cached and refuses again.
+  const payload = projection.payload;
+  if (isRecord(payload) && Object.isFrozen(payload)) {
+    const known = parsedManifestsByPayload.get(payload);
+    if (known) return known;
+    let content: string | undefined;
+    try {
+      content = `${projection.payloadSchemaVersion}\n${JSON.stringify(payload)}`;
+    } catch {
+      content = undefined;
+    }
+    const cached =
+      content === undefined ? undefined : parsedManifestsByContent.get(content);
+    if (cached) {
+      parsedManifestsByPayload.set(payload, cached);
+      return cached;
+    }
+    const parsed = parseCompiledSurfaceManifest(projection);
+    if (content !== undefined) {
+      if (parsedManifestsByContent.size >= PARSED_MANIFEST_LIMIT)
+        parsedManifestsByContent.delete(
+          parsedManifestsByContent.keys().next().value!,
+        );
+      parsedManifestsByContent.set(content, parsed);
+    }
+    parsedManifestsByPayload.set(payload, parsed);
+    return parsed;
+  }
+  return parseCompiledSurfaceManifest(projection);
+}
+
+/** How many releases' parsed manifests are kept; the oldest goes first. */
+const PARSED_MANIFEST_LIMIT = 8;
+const parsedManifestsByContent = new Map<string, CompiledSurfaceManifest>();
+const parsedManifestsByPayload = new WeakMap<object, CompiledSurfaceManifest>();
+let surfaceManifestParses = 0;
+
+/**
+ * How many surface manifests were parsed in full in this process, so a test
+ * can observe that a warm request parses none.
+ */
+export function surfaceManifestParseCount(): number {
+  return surfaceManifestParses;
+}
+
+function parseCompiledSurfaceManifest(
+  projection: RuntimeViewContract.RequestRuntimeView['projections']['surface'],
+): CompiledSurfaceManifest {
+  surfaceManifestParses += 1;
   if (
     !SUPPORTED_SURFACE_MANIFEST_PAYLOAD_VERSIONS.some(
       (version) => version === projection.payloadSchemaVersion,
@@ -1227,6 +1329,21 @@ function parseTemporalField<K extends CompiledTemporalKind>(
     }),
   }) as CompiledTemporalField<K>;
 }
+
+/** An operation's binding, read once per pinned (frozen) definition. */
+function operationBinding(
+  value: RegisteredOperationDefinition,
+): ReturnType<typeof parseOperationBinding> {
+  const known = operationBindings.get(value);
+  if (known) return known;
+  const binding = parseOperationBinding(value);
+  if (Object.isFrozen(value)) operationBindings.set(value, binding);
+  return binding;
+}
+const operationBindings = new WeakMap<
+  RegisteredOperationDefinition,
+  ReturnType<typeof parseOperationBinding>
+>();
 
 function parseOperationBinding(value: RegisteredOperationDefinition): {
   readonly capabilityId: string | null;

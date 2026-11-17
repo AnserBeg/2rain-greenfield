@@ -52,6 +52,14 @@ test('LOOP-1 scorecard: purchase order to stock to a shipped, invoiced and paid 
           await invoiceAndPay(card),
           "payment recorded as the order's next action",
         ).toBe(true);
+        // The memo slice: once the first page has read the release, no
+        // request parses the operation catalog or surface manifest again.
+        expect(
+          card.requests
+            .slice(1)
+            .filter((request) => request.parses > 0)
+            .map((request) => `${request.page}: ${String(request.parses)}`),
+        ).toEqual([]);
       } finally {
         card.abandon('not reached');
         const table = writeScorecard(

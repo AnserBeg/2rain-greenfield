@@ -10,6 +10,9 @@ import {
 } from '@playwright/test';
 import pg from 'pg';
 
+import { pinnedOperationCatalogParseCount } from '../../../../packages/runtime/src/semantic-operation-gateway.js';
+import { surfaceManifestParseCount } from '../../src/surface-contract.js';
+
 /**
  * The loop scorecard (LOOP-1): what an office person does, step by step, to
  * walk the purchase order -> inventory -> sales order loop. Every interaction
@@ -53,6 +56,7 @@ export class LoopScorecard {
           count: meter.count(),
           cpu: process.cpuUsage(),
           at: performance.now(),
+          parses: catalogParses(),
         });
     });
     const finish = (request: Request) => {
@@ -68,6 +72,7 @@ export class LoopScorecard {
         statements: after.statements - before.count.statements,
         wallMs: Math.round(performance.now() - before.at),
         cpuMs: Math.round((cpu.user + cpu.system) / 1000),
+        parses: catalogParses() - before.parses,
       };
       this.requests.push(tally);
       if (this.current) {
@@ -243,6 +248,8 @@ export class LoopScorecard {
       'Wall and CPU are milliseconds from the browser sending the request to',
       "its last byte arriving; CPU is this process's (the application and the",
       'test client share it). Seconds vary between runners: compare counts.',
+      'Catalog parses are full parses of the pinned operation catalog and',
+      'surface manifest the request caused; a warm request reuses them.',
       '',
       row([
         'step',
@@ -251,8 +258,9 @@ export class LoopScorecard {
         'db statements',
         'wall ms',
         'cpu ms',
+        'catalog parses',
       ]),
-      row(['---', '---', '---', '---', '---', '---']),
+      row(['---', '---', '---', '---', '---', '---', '---']),
       ...this.requests.map((request) =>
         row([
           request.step,
@@ -261,6 +269,7 @@ export class LoopScorecard {
           request.statements,
           request.wallMs,
           request.cpuMs,
+          request.parses,
         ]),
       ),
       '',
@@ -335,12 +344,20 @@ export interface RequestTally {
   readonly statements: number;
   readonly wallMs: number;
   readonly cpuMs: number;
+  /** Operation catalogs and surface manifests parsed in full. */
+  readonly parses: number;
 }
 
 interface RequestStart {
   readonly count: DatabaseCount;
   readonly cpu: NodeJS.CpuUsage;
   readonly at: number;
+  readonly parses: number;
+}
+
+/** Full parses of a pinned operation catalog or surface manifest, so far. */
+function catalogParses(): number {
+  return pinnedOperationCatalogParseCount() + surfaceManifestParseCount();
 }
 
 export interface DatabaseCount {

@@ -1144,6 +1144,68 @@ function readPinnedOperationCatalog(
 export function parsePinnedOperationCatalog(
   payload: unknown,
 ): readonly RegisteredOperationDefinition[] {
+  // A request view clones the release's payload deeply frozen, so the object
+  // is new on every request while its content is the release's. A frozen
+  // payload's parse is reused by content: one already seen maps straight to
+  // its parse, any other is serialized and looked up by that exact JSON. A
+  // parse is published only after the complete payload was admitted; a
+  // refused one is never cached and refuses again. An unfrozen payload (a
+  // hand-built fixture) is parsed every time, as before.
+  if (!isRecord(payload) || !Object.isFrozen(payload))
+    return parseOperationCatalogPayload(payload);
+  const known = parsedCatalogsByPayload.get(payload);
+  if (known) return known;
+  const content = serializedPayload(payload);
+  const cached =
+    content === undefined ? undefined : parsedCatalogsByContent.get(content);
+  if (cached) {
+    parsedCatalogsByPayload.set(payload, cached);
+    return cached;
+  }
+  const parsed = parseOperationCatalogPayload(payload);
+  if (content !== undefined) {
+    if (parsedCatalogsByContent.size >= PARSED_CATALOG_LIMIT)
+      parsedCatalogsByContent.delete(
+        parsedCatalogsByContent.keys().next().value!,
+      );
+    parsedCatalogsByContent.set(content, parsed);
+  }
+  parsedCatalogsByPayload.set(payload, parsed);
+  return parsed;
+}
+
+/** How many releases' parsed catalogs are kept; the oldest goes first. */
+const PARSED_CATALOG_LIMIT = 8;
+const parsedCatalogsByContent = new Map<
+  string,
+  readonly RegisteredOperationDefinition[]
+>();
+const parsedCatalogsByPayload = new WeakMap<
+  object,
+  readonly RegisteredOperationDefinition[]
+>();
+let operationCatalogParses = 0;
+
+/**
+ * How many pinned operation catalogs were parsed in full in this process, so
+ * a test can observe that a warm request parses none.
+ */
+export function pinnedOperationCatalogParseCount(): number {
+  return operationCatalogParses;
+}
+
+function serializedPayload(payload: unknown): string | undefined {
+  try {
+    return JSON.stringify(payload);
+  } catch {
+    return undefined;
+  }
+}
+
+function parseOperationCatalogPayload(
+  payload: unknown,
+): readonly RegisteredOperationDefinition[] {
+  operationCatalogParses += 1;
   if (!isRecord(payload)) {
     throw new MalformedPinnedOperationCatalogError(
       'pinned operation catalog must be an object',
