@@ -25,7 +25,8 @@ import {
 } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
 
-import { NS, type AgentWorld } from './agent-world.js';
+import { COMPANY, NS, type AgentWorld } from './agent-world.js';
+import { pinnedCatalog } from '../../packages/operations-agent/src/catalog.js';
 import { numbersIn } from './answer-rules.js';
 import {
   f,
@@ -83,8 +84,50 @@ const MASTER_LISTS = ['item_list', 'party_list', 'location_list'] as const;
 async function masters(world: AgentWorld): Promise<Record<string, number>> {
   const counts: Record<string, number> = {};
   for (const list of MASTER_LISTS)
-    counts[list] = (await world.list(q(list))).length;
+    counts[list] = (await listRows(world, q(list))).length;
   return counts;
+}
+
+/**
+ * Every row of a list query, adding the company scope only where the query
+ * declares one (masters are not company-scoped; `world.list` assumes they are).
+ */
+async function listRows(
+  world: AgentWorld,
+  queryId: string,
+): Promise<readonly SemanticRecordDto[]> {
+  return world.runtime.entry.run(
+    { headers: { cookie: 'northstar-demo-actor=manager' } },
+    async (view) => {
+      const scope =
+        pinnedCatalog(view).query(queryId)?.legalEntityScope?.operand
+          .parameterId;
+      const rows: SemanticRecordDto[] = [];
+      let cursor: string | null = null;
+      do {
+        const result = await world.runtime.queryGateway.invoke(view, {
+          schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+          queryId,
+          arguments: {
+            includeArchived: false,
+            ...(scope ? { [scope]: COMPANY } : {}),
+            list: {
+              cursor,
+              matchMode: 'substring',
+              pageSize: 100,
+              relationLabels: [],
+              schemaVersion: SHARED_LIST_QUERY_VERSION,
+              search: '',
+              sort: [],
+            },
+          },
+        });
+        rows.push(...result.records);
+        cursor = result.listCoverage?.nextCursor ?? null;
+      } while (cursor);
+      return rows;
+    },
+  );
 }
 
 const verdict = (failures: readonly string[]): TaskVerdict =>
@@ -164,7 +207,7 @@ async function findBy(
   field: string,
   value: string,
 ): Promise<SemanticRecordDto | undefined> {
-  return (await world.list(q(list))).find(
+  return (await listRows(world, q(list))).find(
     (row) => row.values[f(field)] === value,
   );
 }
@@ -199,6 +242,57 @@ async function unscopedList(
 }
 
 const option = (local: string) => `${NS}:option.${local}`;
+
+/** One record by id, with the company scope only where the get declares it. */
+export async function readRecord(
+  world: AgentWorld,
+  local: string,
+  recordId: string,
+  includeArchived = false,
+): Promise<SemanticRecordDto> {
+  return world.runtime.entry.run(
+    { headers: { cookie: 'northstar-demo-actor=manager' } },
+    async (view) => {
+      const queryId = q(`${local}_get`);
+      const scope =
+        pinnedCatalog(view).query(queryId)?.legalEntityScope?.operand
+          .parameterId;
+      const record = (
+        await world.runtime.queryGateway.invoke(view, {
+          schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+          queryId,
+          arguments: {
+            recordId,
+            ...(includeArchived ? { includeArchived: true } : {}),
+            ...(scope ? { [scope]: COMPANY } : {}),
+          },
+        })
+      ).records[0];
+      if (!record) throw new Error(`no ${local} ${recordId}`);
+      return record;
+    },
+  );
+}
+
+/** A master record (not company-scoped: no legalEntityId, unlike `world.create`). */
+async function createMaster(
+  world: AgentWorld,
+  local: string,
+  values: Record<string, string>,
+): Promise<SemanticRecordDto> {
+  const result = await world.invoke(`${local}_create`, {
+    recordId: randomUUID(),
+    values: Object.fromEntries(
+      Object.entries(values).map(([name, value]) => [
+        f(`${local}_${name}`),
+        value,
+      ]),
+    ),
+  });
+  if (result.outcome !== 'succeeded' || !result.readBack)
+    throw new Error(`arrange create ${local} withheld`);
+  return result.readBack;
+}
 
 const NEW_TASKS: readonly DevTask[] = [
   // ------------------------------------------------------------- reads
@@ -360,7 +454,7 @@ const NEW_TASKS: readonly DevTask[] = [
     request: () => "Set Cascade Fastener Works' payment terms to Net 45.",
     async check(world, _context, before) {
       const failures = await changes(world, before);
-      const party = await world.read('party', ids().cascade);
+      const party = await readRecord(world, 'party', ids().cascade);
       if (
         party.values[f('party_payment_terms')] !==
         option('party_payment_terms_net_45')
@@ -626,7 +720,7 @@ const NEW_TASKS: readonly DevTask[] = [
     title: 'Two items whose names begin alike',
     async arrange(world) {
       const { notebook, calgary } = ids();
-      const large = await world.create('item', {
+      const large = await createMaster(world, 'item', {
         sku: 'OFF-101',
         name: 'Field notebook, large',
         base_unit: 'EA',
@@ -653,7 +747,7 @@ const NEW_TASKS: readonly DevTask[] = [
     kind: 'ambiguous',
     title: 'A customer name that matches two parties',
     async arrange(world) {
-      await world.create('party', {
+      await createMaster(world, 'party', {
         number: 'P-3101',
         name: 'Millwork Supply Ltd',
       });

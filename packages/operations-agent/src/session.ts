@@ -1542,6 +1542,7 @@ export class OperationsAgentSession {
           step.operation.readBackQueryId,
           result.recordId,
           this.#options.companyId,
+          effectKind(step.operation) === 'archiveRecordEffect',
         );
         const mismatches: string[] = [];
         if (!record) mismatches.push('the declared read-back finds no record');
@@ -1800,13 +1801,19 @@ async function readRecord(
   queryId: string,
   recordId: string,
   companyId: string,
+  /** Archived records too: an archive's read-back finds what it archived. */
+  includeArchived = false,
 ): Promise<SemanticRecordDto | null> {
   const query = catalog.query(queryId);
   if (!query || query.queryType !== 'get') return null;
   const result = await runtime.queryGateway.invoke(view, {
     schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
     queryId,
-    arguments: withScope(query, { recordId }, companyId),
+    arguments: withScope(
+      query,
+      includeArchived ? { includeArchived: true, recordId } : { recordId },
+      companyId,
+    ),
   });
   return result.records[0] ?? null;
 }

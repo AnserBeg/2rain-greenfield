@@ -28,6 +28,7 @@ import {
   type AgentWorld,
 } from '../agent/agent-world.js';
 import { f, ids, NAMES, op, q, rel, snapshot } from '../agent/arrange.js';
+import { readRecord } from '../agent/dev-tasks.js';
 import { referenceScript } from '../agent/reference-scripts.js';
 import { TASKS } from '../agent/tasks.js';
 
@@ -303,7 +304,7 @@ test(
           ['purchase_order_line', executed[1]!],
         ] as const)
           assert.equal(
-            (await world.read(local, result.recordId!)).archived,
+            (await readRecord(world, local, result.recordId!, true)).archived,
             true,
             `${local} was not archived by Undo`,
           );
@@ -340,11 +341,11 @@ test(
             return planId;
           };
           const original =
-            (await world.read('party', cascade)).values[
+            (await readRecord(world, 'party', cascade)).values[
               f('party_contact_summary')
             ] ?? null;
           const first = await change('Changed by the agent');
-          const party = await world.read('party', cascade);
+          const party = await readRecord(world, 'party', cascade);
           const later = await world.invoke('party_update', {
             recordId: cascade,
             expectedRevision: party.revision,
@@ -358,7 +359,7 @@ test(
             /changed after the assistant's change/u,
           );
           assert.equal(
-            (await world.read('party', cascade)).values[
+            (await readRecord(world, 'party', cascade)).values[
               f('party_contact_summary')
             ],
             'Changed by a person',
@@ -367,7 +368,7 @@ test(
           const putBack = await agent.undo(second);
           assert.equal(putBack.outcome, 'undone');
           assert.equal(
-            (await world.read('party', cascade)).values[
+            (await readRecord(world, 'party', cascade)).values[
               f('party_contact_summary')
             ] ?? null,
             'Changed by a person',
