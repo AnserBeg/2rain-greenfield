@@ -18,6 +18,6 @@ for (const [job, { result }] of Object.entries(matrix)) {
     throw new Error(`${job} was ${result}; expected ${expected}`);
   }
 }
-console.log(
-  `All ${Object.keys(matrix).length} matrix jobs reported ${expected}.`,
+process.stdout.write(
+  `All ${Object.keys(matrix).length} matrix jobs reported ${expected}.\n`,
 );
