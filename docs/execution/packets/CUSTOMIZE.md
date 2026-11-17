@@ -1,6 +1,6 @@
 # CUSTOMIZE — a non-developer adds a record type, field, choice or layout, reads a plain diff, approves, activates, rolls back
 
-Status: slice 1 integrated (merge `41697099`, main CI run 44054563509 green; rows `e0363eec`); slices 2, 4, 5 built; slice 3 (the Customize screen) STOPPED for a ruling (below). Charter: [CUSTOMIZE-charter](CUSTOMIZE-charter.md).
+Status: slices 1, 2 and 4 integrated (merges `41697099`, `9bbc6adf`, `273c7129`; main CI green); slice 5 (rehearsal) integrating; slice 3 (the Customize screen) STOPPED for a ruling (below).
 Tier: Critical-touching — `db/migrations/0029_customization_patch_lineage.sql` (RLS/grant SQL). Merges are logged `merged — unread`.
 Base: `main` `a7a4cba1`. Stops: slice 3 (ux-grammar seam).
 
@@ -32,7 +32,7 @@ Base: `main` `a7a4cba1`. Stops: slice 3 (ux-grammar seam).
 
 ## Slices
 
-1. Draft and diff — `customize draft`. 2. Approve, live activation, rollback — `customize approve|activate|rollback`, `test/postgres/customization*.test.ts`. 3. Customize screen — STOPPED, built on `packet/CUSTOMIZE-s3`. 4. AI drafting — `customize ask`. 5. Rehearsal — [evidence](../evidence/) (written from CI).
+1. Draft and diff — `customize draft`. 2. Approve, live activation, rollback — `customize approve|activate|rollback`, `test/postgres/customization*.test.ts`. 3. Customize screen — STOPPED, built on `packet/CUSTOMIZE-s3`. 4. AI drafting — `customize ask`. 5. Rehearsal — [result](../evidence/2026-11-17-customize-week6-rehearsal.md): request to live record 46.6 s, rollback 3.0 s (CI run 44077868142).
 
 ## Gates
 
