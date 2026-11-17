@@ -769,7 +769,8 @@ test('a capability command is artifact-bound, render-minted, and deliberately co
     rendered.html,
     new RegExp(`data-capability-id="${capabilityId}"`),
   );
-  assert.match(rendered.html, /Draft staged\./);
+  // LOOP-1: the command is its button alone, no developer sentence.
+  assert.doesNotMatch(rendered.html, /Draft staged\./);
   const renderedKey = hiddenValue(rendered.html, 'idempotencyKey');
   assert.match(
     renderedKey,
@@ -3151,11 +3152,9 @@ test('the merged command bar renders both halves on the same two transition form
     // revert produces.
     assert.doesNotMatch(form, /name="intent"/);
 
-    // eb02adf's half: a transition stages no draft, so it must not claim to.
-    assert.match(
-      form,
-      /<strong>Ready\.<\/strong> This moves the record to its next state\./,
-    );
+    // eb02adf's half: a transition stages no draft, so it must not claim to;
+    // LOOP-1: no command carries a developer sentence at all.
+    assert.doesNotMatch(form, /This moves the record to its next state/);
     assert.doesNotMatch(form, /Draft staged/);
   }
 
@@ -6801,9 +6800,18 @@ test('Milestone B: reference fields answer in place, bound to their own request 
     // The customer's declared followers (ruling E), in declaration order: a
     // follower that is a picker is replaced whole, any other by its control.
     const customerFollowers = (rowId: string) =>
+      // In the header's order (LOOP-1: the job's fields lead -- currency and
+      // the ship-to, then who sells it, the terms and the charges).
       [
-        ['salesperson_party_id', true],
         ['currency', false],
+        ['ship_to_address_id', true],
+        ['ship_to_name', false],
+        ['ship_to_street', false],
+        ['ship_to_city', false],
+        ['ship_to_region', false],
+        ['ship_to_postal_code', false],
+        ['ship_to_country', false],
+        ['salesperson_party_id', true],
         ['payment_terms', false],
         // Ruling B: the order's tax code, then each charge's code and the
         // rate frozen from it.
@@ -6812,13 +6820,6 @@ test('Milestone B: reference fields answer in place, bound to their own request 
         ['freight_tax_rate_percent', false],
         ['other_fee_tax_code_id', true],
         ['other_fee_tax_rate_percent', false],
-        ['ship_to_address_id', true],
-        ['ship_to_name', false],
-        ['ship_to_street', false],
-        ['ship_to_city', false],
-        ['ship_to_region', false],
-        ['ship_to_postal_code', false],
-        ['ship_to_country', false],
       ].map(
         ([name, picker]) =>
           `${id(rowId, `${f.ns}:field.sales_order_${String(name)}`)}${picker ? '-field' : ''}`,
@@ -12658,7 +12659,7 @@ test('INVENTORY-PARITY: a stock document is entered in the shared editor; its fi
   assert.match(html, /<legend>Stock document<\/legend>/u);
   assert.match(
     html,
-    /A draft does not change stock; Post is a separate, confirmed action\./u,
+    /Saving keeps the document as a draft; stock does not change until you post it\./u,
   );
   // Of the stored types only an adjustment or a transfer is offered, the
   // adjustment first; the reasons include opening stock.

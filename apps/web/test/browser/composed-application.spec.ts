@@ -2480,7 +2480,8 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
       'data-capability-id',
       INVENTORY_POSTING_CAPABILITY_ID,
     );
-    await expect(command).toContainText('Draft staged.');
+    // A posting command is its button alone (LOOP-1: no developer sentence).
+    await expect(command).not.toContainText('Draft staged.');
     const renderedIdempotencyKey = await command
       .locator('input[name="idempotencyKey"]')
       .inputValue();

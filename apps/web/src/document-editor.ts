@@ -2547,9 +2547,16 @@ async function editorResponse(
               if (found.length) {
                 for (const problem of found)
                   buffer.errors.set(problem.control, problem.message);
+                // An error summary that links to each field (LOOP-1); every
+                // entry stays as typed.
                 buffer.notice = `<div role="alert" class="draft-note draft-note--problem" data-editor-problems><p>Nothing was saved. Correct ${found.length === 1 ? 'this field' : `these ${found.length} fields`} first: ${h(
                   found.map((value) => value.label).join(', '),
-                )}.</p></div>`;
+                )}.</p><ul class="draft-problem-links">${found
+                  .map(
+                    (value) =>
+                      `<li><a href="#${h(value.control)}">${h(`${value.label}: ${value.message}`)}</a></li>`,
+                  )
+                  .join('')}</ul></div>`;
                 buffer.focus = found[0]!.control;
                 statusCode = 422;
               } else buffer.pending = plan(view, surfaces, buffer);
@@ -2844,12 +2851,12 @@ async function editorResponse(
           paused
             ? '<p class="draft-paused" role="status">This order is paused while you create a record. Nothing you entered has changed.</p>'
             : ''
-        }${steps}<form id="draft-editor-form" method="post" action="${h(action)}" data-document-editor>
+        }${steps}<form id="draft-editor-form" method="post" action="${h(action)}" data-document-editor novalidate>
       <button class="sr-only" name="draftAction" value="refresh" tabindex="-1" data-draft-default>Update draft</button>
       <input type="hidden" name="draftSession" value="${h(buffer.id)}"><input type="hidden" name="draftVersion" value="${buffer.version}">
       <fieldset><legend>${h(definition.headerLabel ?? 'Document details')}</legend><div class="form-fields draft-header">${header}</div></fieldset></form></section>`,
         sections: `<section class="panel draft-lines-panel" aria-label="${h(definition.linesLabel ?? 'Lines')}"><div class="panel__heading"><h2>${h(definition.linesLabel ?? 'Lines')}</h2>${!frozen ? '<button form="draft-editor-form" class="secondary-action" name="draftAction" value="add" formnovalidate>Add line</button>' : ''}</div>${lines.join('')}</section>`,
-        commandBar: `<section class="panel"><div class="command-bar"><p data-save-boundary>${h(definition.saveDescription ?? 'Save commits this document and each line in sequence.')}</p>${commands}</div></section>`,
+        commandBar: `<section class="panel"><div class="command-bar"><p data-save-boundary>${h(definition.saveDescription ?? 'Saving keeps this document as a draft.')}</p>${commands}</div></section>`,
       },
     };
   } catch (error) {

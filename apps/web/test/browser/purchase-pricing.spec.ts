@@ -142,7 +142,7 @@ test('a partly received order shows what is still open, closes its remainder wit
       await expect(page).toHaveURL(/purchase_order_detail/u);
       const orderUrl = page.url();
       await page
-        .getByRole('button', { name: 'Place order', exact: true })
+        .getByRole('button', { name: /^(?:Next action: )?Place order$/u })
         .click();
       await page
         .getByRole('dialog')

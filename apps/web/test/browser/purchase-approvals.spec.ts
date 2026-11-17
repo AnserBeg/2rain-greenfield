@@ -114,7 +114,7 @@ test('Buyer submits, Manager rejects and approves, then Buyer places and stages 
     };
     await expect(page.getByLabel('Acting as')).toHaveValue('buyer');
     await expect(
-      page.getByRole('button', { name: 'Place order', exact: true }),
+      page.getByRole('button', { name: /^(?:Next action: )?Place order$/u }),
     ).toHaveCount(0);
     await act('Submit for approval');
     await openRequest();
@@ -149,7 +149,7 @@ test('Buyer submits, Manager rejects and approves, then Buyer places and stages 
     await page.goto(orderUrl);
     await switchPerson('buyer');
     await page
-      .getByRole('button', { name: 'Place order', exact: true })
+      .getByRole('button', { name: /^(?:Next action: )?Place order$/u })
       .click();
     await page
       .getByLabel('Supplier reference', { exact: true })

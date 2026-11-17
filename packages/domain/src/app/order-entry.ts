@@ -354,8 +354,8 @@ export function orderEntrySurfaces(
       headerLabel: 'Order details',
       linesLabel: 'Order lines',
       saveDescription: sales
-        ? 'Save commits the header and each line in sequence. Drafts do not change stock. Confirm is a separate action, offered once the order has a complete ship-to address (street, city, postal code and country).'
-        : 'Save commits the header and each line in sequence. Drafts do not change stock. Place order is a separate action.',
+        ? 'Saving keeps the order as a draft; stock does not change. Confirm it when it has a full ship-to address (street, city, postal code and country).'
+        : 'Saving keeps the order as a draft; stock does not change. Place the order when it is ready.',
       saveMode: 'sequential',
       headerFormSurfaceId: id('surface', `${local}_form`),
       recordSurfaceId: id('surface', `${local}_detail`),
@@ -373,8 +373,10 @@ export function orderEntrySurfaces(
               'Customer',
               counterparty('customer'),
             ),
-            // Today, to the second (LOOP-1); the user may change it.
-            field(`${local}_order_date`, 'Order date', { defaultNow: true }),
+            // Today (LOOP-1): a date, read as such; the user may change it.
+            field(`${local}_order_date`, 'Order date', {
+              defaultDaysFromToday: 0,
+            }),
             // A new order asks for delivery three weeks out, as the reference
             // does; the user changes it before saving.
             field(`${local}_requested_date`, 'Requested date', {
@@ -467,8 +469,10 @@ export function orderEntrySurfaces(
               'Vendor',
               counterparty('supplier'),
             ),
-            // Today, to the second (LOOP-1); the user may change it.
-            field(`${local}_order_date`, 'Order date', { defaultNow: true }),
+            // Today (LOOP-1): a date, read as such; the user may change it.
+            field(`${local}_order_date`, 'Order date', {
+              defaultDaysFromToday: 0,
+            }),
             // The fields the job needs lead (LOOP-1): vendor, order date,
             // where the goods arrive; then the dates, terms and charges.
             field(`${local}_receiving_location_id`, 'Receive into', location),
@@ -640,7 +644,7 @@ export function orderEntrySurfaces(
       headerLabel: 'Stock document',
       linesLabel: 'Lines',
       saveDescription:
-        'Save commits the header and each line. A draft does not change stock; Post is a separate, confirmed action.',
+        'Saving keeps the document as a draft; stock does not change until you post it.',
       saveMode: 'sequential',
       headerFormSurfaceId: id('surface', 'inventory_transaction_form'),
       recordSurfaceId: id('surface', 'inventory_transaction_detail'),

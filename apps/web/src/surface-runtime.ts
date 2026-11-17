@@ -2747,6 +2747,7 @@ body{padding-bottom:72px}
 .composition-task-dialog{grid-column:1/-1;position:static;width:100%;max-width:44rem;box-sizing:border-box;margin:0 auto;padding:0;color:var(--ink);border:1px solid var(--line);border-radius:var(--radius-container);background:var(--surface-panel)}
 .composition-task-dialog:modal{position:fixed;margin:auto;max-height:calc(100dvh - 32px);width:calc(100vw - 32px);overflow-y:auto;overscroll-behavior:contain;box-shadow:var(--elevation-overlay)}
 .composition-task-dialog::backdrop{background:rgba(0,0,0,.45)}
+.composition-task-dialog:has(.composition-task-rows,.composition-task-rows-review){max-width:76rem}
 .composition-task-header{position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;gap:var(--space-3);padding:var(--space-4);border-bottom:1px solid var(--line);background:var(--surface-panel)}
 .composition-task-header p{margin:0 0 var(--space-1);font-size:var(--text-micro);color:var(--ink-muted)}
 .composition-task-header h2{margin:0 0 var(--space-1);font-size:var(--text-section)}

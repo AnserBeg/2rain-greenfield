@@ -361,7 +361,7 @@ test('every typed runtime-view refusal crosses the HTTP boundary with its code',
       );
       assert.match(
         html,
-        /<code data-message-code>REQUEST_RUNTIME_VIEW_REFUSED<\/code>/u,
+        /<code data-message-code hidden>REQUEST_RUNTIME_VIEW_REFUSED<\/code>/u,
         code,
       );
       assert.doesNotMatch(html, /REQUEST_RUNTIME_VIEW_UNAVAILABLE/u, code);
@@ -3055,7 +3055,7 @@ function assertRuntimeViewUnavailable(html: string, specimen: string): void {
   );
   assert.match(
     html,
-    /<code data-message-code>REQUEST_RUNTIME_VIEW_UNAVAILABLE<\/code>/u,
+    /<code data-message-code hidden>REQUEST_RUNTIME_VIEW_UNAVAILABLE<\/code>/u,
     specimen,
   );
   assert.doesNotMatch(html, /data-message-subject/u, specimen);

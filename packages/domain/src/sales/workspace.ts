@@ -632,9 +632,10 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
               id('operation', 'sales_order_release'),
             ),
           },
-          // LOOP-1: a confirmed order's next step is to ship its lines.
-          { action: id('action', 'ship_lines') },
+          // Shipped quantity is invoiced first; then (LOOP-1) the lines
+          // still open ship, and an invoiced order takes its payment.
           { action: id('action', 'invoice_shipped') },
+          { action: id('action', 'ship_lines') },
           // LOOP-1: once invoiced, the payment is the order's next step.
           { action: id('action', 'order_record_payment') },
         ],
