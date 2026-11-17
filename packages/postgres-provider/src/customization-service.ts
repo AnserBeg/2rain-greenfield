@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import {
   canonicalize,
@@ -12,6 +12,7 @@ import {
   parseCustomizationPatch,
   parseSerializedRelease,
   serializeRelease,
+  storageElements,
   type AcknowledgementInput,
   type CustomizationPatch,
   type SandboxRunnerOptions,
@@ -21,17 +22,30 @@ import type { MintedUuid } from '@north-star/platform-runtime';
 import type { TrustedRequestContext } from '@north-star/runtime';
 import pg from 'pg';
 
+import type { PostgresCapabilityOperationExecutorFactory } from './capability-operation-executor-factory.js';
 import {
+  activateWithExactSwapTrigger,
+  approveModuleRelease,
+  approveReleaseWithoutStorageTransition,
+  assertExactSwapTriggerEnabled,
   ensurePersistedRelease,
+  ensureReleaseAdmitted,
   ensureScope,
   migrate,
   parseCompiledApplication,
+  provisionLocalDemoReleaseAuthorization,
   readPointer,
+  releaseDiffBinding,
   rolePool,
   trustedContext,
   type ParsedRelease,
+  type PersistedReleaseIdentity,
   type ScopeIdentities,
 } from './composed-application-runtime.js';
+import type { ModuleProviderErrorMapping } from './module-runtime-interpreter.js';
+import { PostgresModuleStorageMaterializer } from './module-storage-materializer.js';
+import { PostgresReleaseActivationService } from './release-activation-service.js';
+import { authorizeReverseTransitionIfApplicable } from './release-reverse-transition-policy.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 
 /**
@@ -55,7 +69,13 @@ export type CustomizationRefusalCode =
   | 'CUSTOMIZE_BASE_STALE'
   | 'CUSTOMIZE_BASE_MOVED'
   | 'CUSTOMIZE_ACTIVE_RELEASE_UNKNOWN'
-  | 'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE';
+  | 'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE'
+  | 'CUSTOMIZE_CHANGE_NOT_FOUND'
+  | 'CUSTOMIZE_DRAFT_STALE'
+  | 'CUSTOMIZE_NOT_APPROVED'
+  | 'CUSTOMIZE_ALREADY_ACTIVE'
+  | 'CUSTOMIZE_NOTHING_TO_ROLL_BACK'
+  | 'CUSTOMIZE_ACTIVATION_FAILED';
 
 export class CustomizationServiceRefusal extends Error {
   override readonly name = 'CustomizationServiceRefusal';
@@ -74,12 +94,34 @@ export interface CustomizationServiceOptions {
   /** The first-party authored package (`app.authored.json`). */
   readonly firstPartyAuthored: Readonly<Record<string, unknown>>;
   readonly sandbox?: SandboxRunnerOptions;
+  /** Verification of a candidate runs the same executors serving does. */
+  readonly capabilityOperationExecutorFactories?: readonly PostgresCapabilityOperationExecutorFactory[];
+  readonly providerErrorMappings?: readonly ModuleProviderErrorMapping[];
+  /**
+   * The local demo's full-release roles receive a tenant release's new
+   * permissions at activation, exactly as boot grants first-party ones.
+   */
+  readonly localDemoIdentity?: true;
 }
 
 export interface CustomizationConnection {
   readonly adminPool: pg.Pool;
   readonly identities: ScopeIdentities;
+  readonly materializerPool: pg.Pool;
+  readonly modulePool: pg.Pool;
   readonly runtimePool: pg.Pool;
+}
+
+export interface ApprovalOutcome {
+  readonly activationAttemptId: MintedUuid;
+  readonly renderedDiff: string;
+  readonly status: 'approved';
+}
+
+export interface ActivationOutcome {
+  readonly releaseId: MintedUuid;
+  readonly releaseRoot: string;
+  readonly status: 'activated' | 'rolledBack';
 }
 
 export type DraftOutcome =
@@ -274,6 +316,418 @@ export class PostgresCustomizationService {
       reused: row.reused,
       status: 'drafted' as const,
     });
+  }
+
+  /**
+   * The human approval of one drafted change on the release it was drafted
+   * on. The approval binds the canonical diff digest and the digest of the
+   * plain-language text returned here (the approver's view); for a storage
+   * change the prepared plan must be the plan that diff names.
+   */
+  async approve(patchId: string): Promise<ApprovalOutcome> {
+    const context = await this.#context();
+    const active = await this.#active(context);
+    const record = await this.#patch(context, patchId);
+    if (active.chain.some((applied) => applied.patchId === record.patchId)) {
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_ALREADY_ACTIVE',
+        'this change is already live',
+      );
+    }
+    if (record.parentRevisionId !== active.revisionId) {
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_DRAFT_STALE',
+        'the live application changed after this change was drafted; draft it again',
+      );
+    }
+    const { parent, candidate } = await this.#reproduce([
+      ...active.chain,
+      record,
+    ]);
+    const identity = await this.#identity(context, record.resultingReleaseId);
+    await ensureReleaseAdmitted(
+      this.connection.runtimePool,
+      context,
+      identity,
+      candidate,
+      this.options.providerErrorMappings ?? [],
+      this.options.capabilityOperationExecutorFactories ?? [],
+    );
+    const binding = releaseDiffBinding(parent, candidate);
+    const approver = await trustedContext(this.connection.identities.approver);
+    await assertExactSwapTriggerEnabled(this.connection.adminPool);
+    let activationAttemptId: MintedUuid;
+    if (storageElements(candidate.compiled).length === 0) {
+      activationAttemptId = await approveReleaseWithoutStorageTransition(
+        this.connection.runtimePool,
+        context,
+        approver,
+        active.pointer,
+        parent,
+        identity,
+        candidate.compiled,
+        binding,
+      );
+    } else {
+      const preparationId = randomUUID() as MintedUuid;
+      const prepared = await this.#materializer().prepare({
+        context,
+        // Inside the approval's own default window (24 hours).
+        expiresAt: new Date(Date.now() + 23 * 60 * 60_000).toISOString(),
+        generationId: randomUUID(),
+        initiatedBy: context.principalId,
+        preparationId,
+        targetReleaseId: identity.releaseId,
+      });
+      activationAttemptId = await approveModuleRelease(
+        this.connection.runtimePool,
+        context,
+        approver,
+        active.pointer,
+        identity,
+        candidate.compiled,
+        prepared,
+        preparationId,
+        binding,
+      );
+    }
+    return Object.freeze({
+      activationAttemptId,
+      renderedDiff: binding.renderedText,
+      status: 'approved' as const,
+    });
+  }
+
+  /**
+   * Activates an approved change through the activation kernel's CAS, fence
+   * and verification. A running server serves it from its next request.
+   */
+  async activate(patchId: string): Promise<ActivationOutcome> {
+    const context = await this.#context();
+    const active = await this.#active(context);
+    const record = await this.#patch(context, patchId);
+    if (active.chain.some((applied) => applied.patchId === record.patchId)) {
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_ALREADY_ACTIVE',
+        'this change is already live',
+      );
+    }
+    const approval = await withTrustedRequestTransaction(
+      this.connection.runtimePool,
+      context,
+      async (client) =>
+        client.query<{
+          activation_attempt_id: MintedUuid;
+          preparation_id: MintedUuid;
+          transition_plan_digest: Uint8Array | null;
+        }>(
+          `SELECT activation_attempt_id, preparation_id, transition_plan_digest
+             FROM platform.release_approvals
+            WHERE tenant_id = $1 AND environment_id = $2
+              AND target_release_id = $3
+              AND expected_pointer_id = $4
+              AND expected_release_id IS NOT DISTINCT FROM $5
+              AND expected_fence = $6
+              AND expires_at > clock_timestamp()
+            ORDER BY decided_at DESC
+            LIMIT 1`,
+          [
+            context.tenantId,
+            context.environmentId,
+            record.resultingReleaseId,
+            active.pointer.pointerId,
+            active.pointer.releaseId,
+            active.pointer.fence,
+          ],
+        ),
+    );
+    const approved = approval.rows[0];
+    if (!approved) {
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_NOT_APPROVED',
+        'this change has no current approval; approve it first',
+      );
+    }
+    if (approved.transition_plan_digest !== null) {
+      const generation = await this.connection.adminPool.query<{
+        generation_id: string;
+      }>(
+        `SELECT generation_id
+           FROM north_star_internal.module_storage_generations
+          WHERE tenant_id = $1 AND environment_id = $2 AND preparation_id = $3`,
+        [context.tenantId, context.environmentId, approved.preparation_id],
+      );
+      const generationId = generation.rows[0]?.generation_id;
+      if (!generationId) {
+        throw new CustomizationServiceRefusal(
+          'CUSTOMIZE_NOT_APPROVED',
+          'the approved storage change has no prepared plan; approve it again',
+        );
+      }
+      const executed = await this.#materializer().executeApprovedAttempt({
+        activationAttemptId: approved.activation_attempt_id,
+        context,
+        coordinatorId: randomUUID() as MintedUuid,
+        generationId,
+      });
+      if (executed.disposition !== 'READY_TO_SWAP') {
+        throw new CustomizationServiceRefusal(
+          'CUSTOMIZE_ACTIVATION_FAILED',
+          `the storage change did not become ready: ${executed.disposition}`,
+        );
+      }
+    }
+    if (this.options.localDemoIdentity) {
+      await provisionLocalDemoReleaseAuthorization(
+        this.connection.adminPool,
+        this.connection.identities,
+        await this.#desiredState(context, record.resultingRevisionId),
+      );
+    }
+    return this.#swap(
+      context,
+      approved.activation_attempt_id,
+      record,
+      'activated',
+    );
+  }
+
+  /**
+   * One click: the active change is reversed to the release its activation
+   * came from, through the reverse-transition policy. Storage stays: the rows
+   * entered under the change are kept and return if it is activated again.
+   */
+  async rollback(): Promise<ActivationOutcome> {
+    const context = await this.#context();
+    const active = await this.#active(context);
+    const record = active.chain.at(-1);
+    if (!record) {
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_NOTHING_TO_ROLL_BACK',
+        'the live application has no customization to roll back',
+      );
+    }
+    const targetReleaseId = await withTrustedRequestTransaction(
+      this.connection.runtimePool,
+      context,
+      async (client) => {
+        const swap = await client.query<{ previous_release_id: MintedUuid }>(
+          `SELECT previous_release_id
+             FROM platform.release_activation_swap_receipts
+            WHERE tenant_id = $1 AND environment_id = $2
+              AND activated_release_id = $3 AND fence = $4`,
+          [
+            context.tenantId,
+            context.environmentId,
+            active.releaseId,
+            active.pointer.fence,
+          ],
+        );
+        return swap.rows[0]?.previous_release_id ?? null;
+      },
+    );
+    if (!targetReleaseId) {
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_NOTHING_TO_ROLL_BACK',
+        'the live customization has no recorded activation to reverse',
+      );
+    }
+    const reverse = await withTrustedRequestTransaction(
+      this.connection.runtimePool,
+      context,
+      async (client) =>
+        authorizeReverseTransitionIfApplicable(client, context, {
+          expectedFence: active.pointer.fence,
+          sourceReleaseId: active.releaseId,
+          targetReleaseId,
+        }),
+    );
+    if (!reverse) {
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_NOTHING_TO_ROLL_BACK',
+        'the previous release is not the exact parent of the live customization',
+      );
+    }
+    const { parent, candidate } = await this.#reproduce(active.chain);
+    const target = await this.#identity(context, targetReleaseId);
+    if (
+      parent.compiled.releaseRoot !==
+      (await this.#root(context, targetReleaseId))
+    ) {
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+        'the release to roll back to is not the parent the customization was built on',
+      );
+    }
+    await assertExactSwapTriggerEnabled(this.connection.adminPool);
+    const attemptId = await approveReleaseWithoutStorageTransition(
+      this.connection.runtimePool,
+      context,
+      await trustedContext(this.connection.identities.approver),
+      active.pointer,
+      candidate,
+      target,
+      parent.compiled,
+      releaseDiffBinding(candidate, parent, 'reverse'),
+      reverse,
+    );
+    return this.#swap(
+      context,
+      attemptId,
+      record,
+      'rolledBack',
+      targetReleaseId,
+    );
+  }
+
+  async #swap(
+    context: TrustedRequestContext,
+    activationAttemptId: MintedUuid,
+    record: PatchRecord,
+    status: ActivationOutcome['status'],
+    expectedReleaseId: MintedUuid = record.resultingReleaseId,
+  ): Promise<ActivationOutcome> {
+    const activated = await activateWithExactSwapTrigger(
+      this.connection.adminPool,
+      new PostgresReleaseActivationService(this.connection.runtimePool),
+      await trustedContext(this.connection.identities.system),
+      activationAttemptId,
+    );
+    if (activated.status !== 'SWAPPED_VERIFIED') {
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_ACTIVATION_FAILED',
+        `activation did not verify: ${activated.status}`,
+      );
+    }
+    const pointer = await readPointer(this.connection.runtimePool, context);
+    if (pointer.releaseId !== expectedReleaseId) {
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_ACTIVATION_FAILED',
+        'activation selected another release',
+      );
+    }
+    return Object.freeze({
+      releaseId: expectedReleaseId,
+      releaseRoot: await this.#root(context, expectedReleaseId),
+      status,
+    });
+  }
+
+  /**
+   * Re-applies a recorded chain in the isolated worker and checks every link
+   * against the release recorded for it; returns the last link and its parent.
+   */
+  async #reproduce(chain: readonly PatchRecord[]): Promise<{
+    readonly candidate: ParsedRelease;
+    readonly parent: ParsedRelease;
+  }> {
+    const compiled = await this.#compile(chain.map((record) => record.patch));
+    if (compiled.status !== 'compiled') {
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+        `a recorded change no longer compiles: ${compiled.message}`,
+      );
+    }
+    this.#assertReproduced(chain, compiled.steps);
+    const releases = compiled.steps.map((step) =>
+      parseSerializedRelease(step.release),
+    );
+    return {
+      candidate: releases.at(-1)!,
+      parent: releases.at(-2) ?? this.#tip,
+    };
+  }
+
+  async #patch(
+    context: TrustedRequestContext,
+    patchId: string,
+  ): Promise<PatchRecord> {
+    const record = (await this.#patches(context)).find(
+      (candidate) => candidate.patchId === patchId,
+    );
+    if (!record) {
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_CHANGE_NOT_FOUND',
+        `no recorded change ${patchId}`,
+      );
+    }
+    return record;
+  }
+
+  async #identity(
+    context: TrustedRequestContext,
+    releaseId: MintedUuid,
+  ): Promise<PersistedReleaseIdentity> {
+    return withTrustedRequestTransaction(
+      this.connection.runtimePool,
+      context,
+      async (client) => {
+        const result = await client.query<{
+          app_package_revision_id: MintedUuid;
+          verification_evidence_id: MintedUuid;
+        }>(
+          `SELECT app_package_revision_id, verification_evidence_id
+             FROM platform.tenant_releases
+            WHERE tenant_id = $1 AND environment_id = $2 AND release_id = $3`,
+          [context.tenantId, context.environmentId, releaseId],
+        );
+        const row = result.rows[0];
+        if (!row) {
+          throw new CustomizationServiceRefusal(
+            'CUSTOMIZE_CHANGE_NOT_FOUND',
+            `release ${releaseId} is not visible`,
+          );
+        }
+        return Object.freeze({
+          evidenceId: row.verification_evidence_id,
+          releaseId,
+          revisionId: row.app_package_revision_id,
+        });
+      },
+    );
+  }
+
+  async #root(
+    context: TrustedRequestContext,
+    releaseId: MintedUuid,
+  ): Promise<string> {
+    return withTrustedRequestTransaction(
+      this.connection.runtimePool,
+      context,
+      async (client) => {
+        const result = await client.query<{ content_hash: string }>(
+          `SELECT content_hash FROM platform.tenant_releases
+            WHERE tenant_id = $1 AND environment_id = $2 AND release_id = $3`,
+          [context.tenantId, context.environmentId, releaseId],
+        );
+        return result.rows[0]?.content_hash ?? '';
+      },
+    );
+  }
+
+  async #desiredState(
+    context: TrustedRequestContext,
+    revisionId: MintedUuid,
+  ): Promise<Uint8Array> {
+    return withTrustedRequestTransaction(
+      this.connection.runtimePool,
+      context,
+      async (client) => {
+        const result = await client.query<{ desired_state: Uint8Array }>(
+          `SELECT desired_state FROM platform.app_package_revisions
+            WHERE tenant_id = $1 AND revision_id = $2`,
+          [context.tenantId, revisionId],
+        );
+        return new Uint8Array(result.rows[0]!.desired_state);
+      },
+    );
+  }
+
+  #materializer(): PostgresModuleStorageMaterializer {
+    return new PostgresModuleStorageMaterializer(
+      this.connection.materializerPool,
+      this.connection.modulePool,
+    );
   }
 
   async #compile(
@@ -476,6 +930,8 @@ export async function openCustomizationService(
   });
   adminPool.on('error', () => undefined);
   let runtimePool: pg.Pool | undefined;
+  let materializerPool: pg.Pool | undefined;
+  let modulePool: pg.Pool | undefined;
   try {
     await migrate(adminPool, options.migrationsDirectory);
     const identities = await ensureScope(
@@ -484,11 +940,17 @@ export async function openCustomizationService(
       options.environmentSlug ?? 'production',
     );
     runtimePool = rolePool(options.databaseUrl, 'north_star_runtime', 4);
+    materializerPool = rolePool(
+      options.databaseUrl,
+      'north_star_module_materializer',
+      2,
+    );
+    modulePool = rolePool(options.databaseUrl, 'north_star_module_runtime', 2);
     const service = new PostgresCustomizationService(
-      { adminPool, identities, runtimePool },
+      { adminPool, identities, materializerPool, modulePool, runtimePool },
       options,
     );
-    const pools = [adminPool, runtimePool];
+    const pools = [adminPool, runtimePool, materializerPool, modulePool];
     return Object.freeze({
       async close() {
         await Promise.all(pools.map((pool) => pool.end()));
@@ -497,7 +959,7 @@ export async function openCustomizationService(
     });
   } catch (error) {
     await Promise.all(
-      [adminPool, runtimePool]
+      [adminPool, runtimePool, materializerPool, modulePool]
         .filter((pool): pool is pg.Pool => pool !== undefined)
         .map((pool) => pool.end().catch(() => undefined)),
     );
