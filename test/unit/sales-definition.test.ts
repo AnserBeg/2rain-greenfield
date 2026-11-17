@@ -636,12 +636,15 @@ test('LOOP-1: a sales line needs a price; a shipped, invoiced order offers the p
       ['northstar.app:input.order_payment_reference', false],
     ],
   );
+  // Shipped quantity is invoiced first, the lines still open then ship
+  // (slice 3), and an invoiced order takes its payment.
   assert.deepEqual(
     order
       .presentation!.progression!.next.map((entry) => entry.action)
-      .slice(-2),
+      .slice(-3),
     [
       'northstar.app:action.invoice_shipped',
+      'northstar.app:action.ship_lines',
       'northstar.app:action.order_record_payment',
     ],
   );

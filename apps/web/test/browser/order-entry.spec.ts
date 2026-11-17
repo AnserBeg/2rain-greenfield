@@ -915,7 +915,12 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
           .click(),
       ),
     ).toBe(409);
-    await expect(page.getByText('DRAFT_EDITOR_CONFLICT')).toBeVisible();
+    // The code stays in the page for support, not in its text (LOOP-1).
+    await expect(
+      page.locator('[data-message-code]', {
+        hasText: 'DRAFT_EDITOR_CONFLICT',
+      }),
+    ).not.toHaveCount(0);
     await kept();
     await expect(product).toHaveAttribute(
       'data-selected-label',
