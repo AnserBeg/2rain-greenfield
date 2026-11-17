@@ -25,7 +25,9 @@ import type {
 import {
   PROJECTION_FAMILY_IDS,
   STORAGE_TRANSITION_ENVELOPE_VERSION,
+  diffCompiledReleases,
 } from '@north-star/compiler';
+import { renderCompiledDiff } from '@north-star/customization';
 import {
   COMPILER_TRANSITION_FACTS_VERSION,
   EXECUTOR_APPLIED_STATE_EVIDENCE_VERSION,
@@ -380,14 +382,34 @@ export async function createComposedApplicationRuntime(
       );
     }
 
-    const activeLineageIndex = lineage.findIndex(
+    const pointerLineageIndex = lineage.findIndex(
       (identity) => identity.releaseId === pointer.releaseId,
     );
-    if (activeLineageIndex < 0) {
+    // A tenant customization activated on the lineage tip is served as it is:
+    // the first-party lineage has nothing to advance (CUSTOMIZE).
+    const tenantServing =
+      pointerLineageIndex < 0 && pointer.releaseId !== null
+        ? await tenantDescendantOfLineageTip(
+            runtimePool,
+            runtimeContext,
+            pointer.releaseId,
+            lineage,
+          )
+        : null;
+    if (pointerLineageIndex < 0 && !tenantServing) {
       throw new Error(
         'the active pointer names a release outside this composed application lineage',
       );
     }
+    if (tenantServing && options.releaseSelection?.kind === 'rollback') {
+      refuseReverseTransition(
+        'ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR',
+        'the active release is a tenant customization; roll it back with corepack pnpm customize rollback',
+      );
+    }
+    const activeLineageIndex = tenantServing
+      ? lineage.length - 1
+      : pointerLineageIndex;
     if (!freshInstall || activeLineageIndex === lineage.length - 1) {
       await ensureReleaseAdmitted(
         runtimePool,
@@ -479,6 +501,7 @@ export async function createComposedApplicationRuntime(
         source,
         targetIdentity,
         target.compiled,
+        releaseDiffBinding(source, target, 'reverse'),
         reverseAuthorization,
       );
       const activated = await activateWithExactSwapTrigger(
@@ -541,6 +564,7 @@ export async function createComposedApplicationRuntime(
             source,
             targetIdentity,
             target.compiled,
+            releaseDiffBinding(source, target),
             undefined,
             freshInstall && !servingTarget
               ? { installId: candidateInstallId, lineageOrdinal: targetIndex }
@@ -584,6 +608,7 @@ export async function createComposedApplicationRuntime(
             target.compiled,
             prepared,
             preparationId,
+            releaseDiffBinding(source, target),
             freshInstall && !servingTarget
               ? { installId: candidateInstallId, lineageOrdinal: targetIndex }
               : undefined,
@@ -646,91 +671,128 @@ export async function createComposedApplicationRuntime(
       : null;
 
     const metrics = options.metrics ?? new ObservabilityMetrics();
-    const normalizedApplication = parseNormalizedApplicationPackageJson(
-      applicationRelease.normalizedDefinitionBytes,
-    );
-    const applicationPolicyBindings = currentPolicyBindingsFromPermissions(
-      normalizedApplication.permissions,
-    );
-    if (options.localDemoIdentity) {
-      await provisionLocalDemoAuthorization(
-        adminPool,
-        identities.runtime,
-        applicationPolicyBindings.filter(
-          (binding) =>
-            !binding.permissionId.endsWith(
-              ':permission.purchase_order_approve',
-            ) &&
-            !/:permission\.purchasing_settings_(?:create|update|archive|restore)$/u.test(
-              binding.permissionId,
-            ),
-        ),
+    const serving =
+      tenantServing ??
+      servingReleaseFromParsed(
+        applicationIdentity.releaseId,
+        applicationRelease,
       );
-      await provisionLocalDemoAuthorization(
+    if (options.localDemoIdentity) {
+      await provisionLocalDemoReleaseAuthorization(
         adminPool,
-        identities.manager,
-        applicationPolicyBindings,
-        'local-demo-manager',
+        identities,
+        serving.normalizedDefinitionBytes,
       );
     }
-    const policy = new PostgresCurrentPolicyGateway(
-      runtimePool,
-      applicationPolicyBindings,
-    );
     const actorIssuer = humanActorIssuer();
     const interpreter = new PostgresModuleRuntimeInterpreter(
       runtimePool,
       actorIssuer,
       options.providerErrorMappings,
     );
+    const operationMediation = new SemanticOperationMediationAuthority();
+    const denialRecorder = new PostgresSemanticQueryDenialRecorder(
+      runtimePool,
+      actorIssuer,
+    );
     // ADR-0032 §2 admits a loading treatment only above a *measured* threshold,
     // so the read ingress is composed with its measurement rather than gaining
     // one later: an uninstrumented composition would make the ladder an
     // assertion again.
-    const queryGateway = new SemanticQueryGateway(
-      policy,
-      interpreter,
-      undefined,
-      undefined,
-      composedRegisteredQueryLatencyInstrumentation(
-        metrics,
-        options.monotonicMilliseconds,
-      ),
-      new PostgresSemanticQueryDenialRecorder(runtimePool, actorIssuer),
-      {
-        [FULFILLMENT_CAPABILITY_ID]: fulfillmentReadModel,
-        [COMMERCIAL_CAPABILITY_ID]: commercialReadModelWithInventoryCost,
-        [VALUATION_CAPABILITY_ID]: inventoryValuationReadModel,
-        // A receipt's lines with what each can still reverse (ORDER-PARITY).
-        [RECEIVING_CAPABILITY_ID]: receivingReadModel,
-      },
+    const latency = composedRegisteredQueryLatencyInstrumentation(
+      metrics,
+      options.monotonicMilliseconds,
     );
-    const capabilityExecutors = createRegisteredCapabilityExecutors(
-      options.capabilityOperationExecutorFactories ?? [],
-      registeredCapabilityIdsFromOperationCatalog(
-        projectionPayload(
-          applicationRelease.compiled,
-          PROJECTION_FAMILY_IDS.operationCatalog,
+    const readModels = {
+      [FULFILLMENT_CAPABILITY_ID]: fulfillmentReadModel,
+      [COMMERCIAL_CAPABILITY_ID]: commercialReadModelWithInventoryCost,
+      [VALUATION_CAPABILITY_ID]: inventoryValuationReadModel,
+      // A receipt's lines with what each can still reverse (ORDER-PARITY).
+      [RECEIVING_CAPABILITY_ID]: receivingReadModel,
+    };
+    // Release-scoped state -- the policy bindings of a release's permissions
+    // and the capability executors pinned to its id, root and projections --
+    // is built per release and chosen per request by the release the request's
+    // view was issued against. An activation by another process (the
+    // customize command, the Customize screen) is served by the next request
+    // without a restart (CUSTOMIZE).
+    const policyFor = (release: ServingRelease) =>
+      new PostgresCurrentPolicyGateway(
+        runtimePool!,
+        currentPolicyBindingsFromPermissions(
+          parseNormalizedApplicationPackageJson(
+            release.normalizedDefinitionBytes,
+          ).permissions,
         ),
-      ),
-      Object.freeze({
-        actorIssuer,
-        currentInstant: () => new Date().toISOString(),
-        pool: runtimePool,
-        projection: (familyId: string) =>
-          projectionBinding(applicationRelease.compiled, familyId),
+      );
+    const bootPolicy = policyFor(serving);
+    // The runtime's one read ingress: a capability executor's read-back goes
+    // through it like every other read, routed by its view's release.
+    let routedQueryGateway: SemanticQueryGateway | undefined;
+    const buildServing = (
+      release: ServingRelease,
+      policy: PostgresCurrentPolicyGateway = policyFor(release),
+    ): ReleaseServing => {
+      const queryGateway = new SemanticQueryGateway(
+        policy,
+        interpreter,
+        undefined,
+        undefined,
+        latency,
+        denialRecorder,
+        readModels,
+      );
+      const capabilityExecutors = createRegisteredCapabilityExecutors(
+        options.capabilityOperationExecutorFactories ?? [],
+        registeredCapabilityIdsFromOperationCatalog(
+          release.projection(PROJECTION_FAMILY_IDS.operationCatalog).payload,
+        ),
+        Object.freeze({
+          actorIssuer,
+          currentInstant: () => new Date().toISOString(),
+          pool: runtimePool!,
+          projection: release.projection,
+          queryGateway: routedQueryGateway ?? queryGateway,
+          releaseContentHash: release.releaseRoot,
+          releaseId: release.releaseId,
+        }),
+      );
+      return Object.freeze({
+        operationGateway: new SemanticOperationGateway(
+          policy,
+          interpreter,
+          operationMediation,
+          undefined,
+          capabilityExecutors,
+        ),
+        policy,
         queryGateway,
-        releaseContentHash: applicationRelease.compiled.releaseRoot,
-        releaseId: applicationIdentity.releaseId,
-      }),
+      });
+    };
+    const servings = new Map<string, Promise<ReleaseServing>>();
+    const servingFor = (releaseId: string): Promise<ReleaseServing> => {
+      const known = servings.get(releaseId);
+      if (known) return known;
+      const loading = loadServingRelease(
+        runtimePool!,
+        runtimeContext,
+        releaseId as MintedUuid,
+      ).then((release) => buildServing(release));
+      servings.set(releaseId, loading);
+      loading.catch(() => servings.delete(releaseId));
+      return loading;
+    };
+    const policy = bootPolicy;
+    const queryGateway = new ReleaseRoutingQueryGateway(servingFor, policy);
+    routedQueryGateway = queryGateway;
+    servings.set(
+      serving.releaseId,
+      Promise.resolve(buildServing(serving, bootPolicy)),
     );
-    const operationMediation = new SemanticOperationMediationAuthority();
-    const operationGateway = new SemanticOperationGateway(
+    const operationGateway = new ReleaseRoutingOperationGateway(
+      servingFor,
       policy,
-      interpreter,
       operationMediation,
-      undefined,
-      capabilityExecutors,
     );
     const entry = new AuthenticatedRequestRuntimeEntryAdapter(
       new AuthenticatedRequestEntryAdapter(
@@ -748,7 +810,7 @@ export async function createComposedApplicationRuntime(
     let closed = false;
 
     return Object.freeze({
-      activeReleaseId: applicationIdentity.releaseId,
+      activeReleaseId: serving.releaseId,
       async close() {
         if (closed) return;
         closed = true;
@@ -772,7 +834,7 @@ export async function createComposedApplicationRuntime(
       operationGateway,
       operationMediation,
       queryGateway,
-      releaseRoot: applicationRelease.compiled.releaseRoot,
+      releaseRoot: serving.releaseRoot,
       triggerEnabledDuringActivation: true as const,
     });
   } catch (error) {
@@ -782,6 +844,260 @@ export async function createComposedApplicationRuntime(
         .map((pool) => pool.end().catch(() => undefined)),
     );
     throw error;
+  }
+}
+
+/** One release as the serving runtime needs it, from the lineage or the database. */
+interface ServingRelease {
+  readonly normalizedDefinitionBytes: Uint8Array;
+  readonly projection: (familyId: string) => PinnedCapabilityProjection;
+  readonly releaseId: MintedUuid;
+  readonly releaseRoot: string;
+}
+
+interface ReleaseServing {
+  readonly operationGateway: SemanticOperationGateway;
+  readonly policy: PostgresCurrentPolicyGateway;
+  readonly queryGateway: SemanticQueryGateway;
+}
+
+function servingReleaseFromParsed(
+  releaseId: MintedUuid,
+  release: ParsedRelease,
+): ServingRelease {
+  return Object.freeze({
+    normalizedDefinitionBytes: release.normalizedDefinitionBytes,
+    projection: (familyId: string) =>
+      projectionBinding(release.compiled, familyId),
+    releaseId,
+    releaseRoot: release.compiled.releaseRoot,
+  });
+}
+
+/** A registered release read back from its immutable rows. */
+async function loadServingRelease(
+  pool: pg.Pool,
+  context: TrustedRequestContext,
+  releaseId: MintedUuid,
+): Promise<ServingRelease> {
+  const repository = new PostgresImmutableReleaseRepository(pool);
+  const persisted = await repository.getTenantRelease(context, releaseId);
+  if (!persisted) {
+    throw new Error(`release ${releaseId} is not registered for serving`);
+  }
+  const revision = await repository.getAppPackageRevision(
+    context,
+    persisted.release.appPackageRevisionId,
+  );
+  if (!revision) {
+    throw new Error(`release ${releaseId} has no visible package revision`);
+  }
+  const manifest = persisted.artifacts.find(
+    (artifact) =>
+      artifact.artifactKind === 'releaseManifest' &&
+      artifact.contentHash === persisted.release.contentHash,
+  );
+  if (!manifest) {
+    throw new Error(`release ${releaseId} has no release manifest artifact`);
+  }
+  const compiled = {
+    bundle: {
+      artifacts: persisted.artifacts.map((artifact) => ({
+        ...artifact,
+        kind: 'contentAddressedArtifact' as const,
+      })),
+      releaseManifest: JSON.parse(
+        new TextDecoder().decode(manifest.canonicalBytes),
+      ) as unknown,
+    },
+    releaseRoot: persisted.release.contentHash,
+  } as unknown as CompileSuccess;
+  return Object.freeze({
+    normalizedDefinitionBytes: revision.desiredState,
+    projection: (familyId: string) => projectionBinding(compiled, familyId),
+    releaseId,
+    releaseRoot: persisted.release.contentHash,
+  });
+}
+
+/**
+ * The active pointer may name a tenant-authored release whose revision chain
+ * leads, through tenant-authored revisions only, to the lineage tip. A chain
+ * that reaches an EARLIER first-party release means the application moved
+ * under the customization: re-applying the patches to the new base is filed,
+ * so this fails loudly with the pre-tenant remedy instead (ADR-0066).
+ */
+async function tenantDescendantOfLineageTip(
+  pool: pg.Pool,
+  context: TrustedRequestContext,
+  releaseId: MintedUuid,
+  lineage: readonly PersistedReleaseIdentity[],
+): Promise<ServingRelease | null> {
+  const base = await withTrustedRequestTransaction(
+    pool,
+    context,
+    async (client) => {
+      const result = await client.query<{
+        base_provenance: string | null;
+        base_revision_id: MintedUuid | null;
+        tenant_authored: boolean;
+      }>(
+        `WITH RECURSIVE chain(revision_id, provenance, parent_revision_id) AS (
+           SELECT revision.revision_id, revision.provenance,
+                  revision.parent_revision_id
+             FROM platform.tenant_releases AS release
+             JOIN platform.app_package_revisions AS revision
+               ON revision.tenant_id = release.tenant_id
+              AND revision.revision_id = release.app_package_revision_id
+            WHERE release.tenant_id = $1 AND release.environment_id = $2
+              AND release.release_id = $3
+           UNION ALL
+           SELECT parent.revision_id, parent.provenance,
+                  parent.parent_revision_id
+             FROM chain
+             JOIN platform.app_package_revisions AS parent
+               ON parent.tenant_id = $1
+              AND parent.revision_id = chain.parent_revision_id
+            WHERE chain.provenance = 'tenantAuthored'
+         )
+         SELECT bool_or(provenance = 'tenantAuthored') AS tenant_authored,
+                (array_agg(revision_id) FILTER (
+                   WHERE provenance <> 'tenantAuthored'))[1]
+                  AS base_revision_id,
+                (array_agg(provenance) FILTER (
+                   WHERE provenance <> 'tenantAuthored'))[1]
+                  AS base_provenance
+           FROM chain`,
+        [context.tenantId, context.environmentId, releaseId],
+      );
+      return result.rows[0];
+    },
+  );
+  if (!base?.tenant_authored) return null;
+  if (base.base_revision_id !== lineage.at(-1)!.revisionId) {
+    throw new Error(
+      'the active release is a tenant customization of an earlier version of this application; ' +
+        're-applying customizations to a new first-party release is not built yet. ' +
+        'Pre-tenant remedy: corepack pnpm --filter @north-star/api dev:reset',
+    );
+  }
+  return loadServingRelease(pool, context, releaseId);
+}
+
+/**
+ * The local demo's grants for one release (CUSTOMIZE: a tenant release's new
+ * permissions bind to the same full-release roles the first-party ones do).
+ */
+export async function provisionLocalDemoReleaseAuthorization(
+  adminPool: pg.Pool,
+  identities: ScopeIdentities,
+  normalizedDefinitionBytes: Uint8Array,
+): Promise<void> {
+  const bindings = currentPolicyBindingsFromPermissions(
+    parseNormalizedApplicationPackageJson(normalizedDefinitionBytes)
+      .permissions,
+  );
+  await provisionLocalDemoAuthorization(
+    adminPool,
+    identities.runtime,
+    bindings.filter(
+      (binding) =>
+        !binding.permissionId.endsWith(':permission.purchase_order_approve') &&
+        !/:permission\.purchasing_settings_(?:create|update|archive|restore)$/u.test(
+          binding.permissionId,
+        ),
+    ),
+  );
+  await provisionLocalDemoAuthorization(
+    adminPool,
+    identities.manager,
+    bindings,
+    'local-demo-manager',
+  );
+}
+
+type RouteServing = (releaseId: string) => Promise<ReleaseServing>;
+
+function viewReleaseId(view: unknown): string | null {
+  const release = isRecord(view) ? view.release : null;
+  return isRecord(release) && typeof release.releaseId === 'string'
+    ? release.releaseId
+    : null;
+}
+
+/**
+ * The read ingress of the composed runtime: each request is answered by the
+ * gateway built for the release its view was issued against.
+ */
+class ReleaseRoutingQueryGateway extends SemanticQueryGateway {
+  readonly #route: RouteServing;
+  readonly #fallback: SemanticQueryGateway;
+
+  constructor(route: RouteServing, policy: PostgresCurrentPolicyGateway) {
+    super(policy);
+    this.#route = route;
+    this.#fallback = new SemanticQueryGateway(policy);
+  }
+
+  override async invoke(
+    ...args: Parameters<SemanticQueryGateway['invoke']>
+  ): ReturnType<SemanticQueryGateway['invoke']> {
+    return (await this.#gateway(args[0])).invoke(...args);
+  }
+
+  override async invokeAggregate(
+    ...args: Parameters<SemanticQueryGateway['invokeAggregate']>
+  ): ReturnType<SemanticQueryGateway['invokeAggregate']> {
+    return (await this.#gateway(args[0])).invokeAggregate(...args);
+  }
+
+  async #gateway(view: unknown): Promise<SemanticQueryGateway> {
+    const releaseId = viewReleaseId(view);
+    // A malformed view is refused by the gateway's own view assertion.
+    return releaseId
+      ? (await this.#route(releaseId)).queryGateway
+      : this.#fallback;
+  }
+}
+
+/** The write ingress, routed the same way. */
+class ReleaseRoutingOperationGateway extends SemanticOperationGateway {
+  readonly #route: RouteServing;
+  readonly #fallback: SemanticOperationGateway;
+
+  constructor(
+    route: RouteServing,
+    policy: PostgresCurrentPolicyGateway,
+    mediation: SemanticOperationMediationAuthority,
+  ) {
+    super(policy, undefined, mediation);
+    this.#route = route;
+    this.#fallback = new SemanticOperationGateway(policy, undefined, mediation);
+  }
+
+  override async previewEligibility(
+    ...args: Parameters<SemanticOperationGateway['previewEligibility']>
+  ): ReturnType<SemanticOperationGateway['previewEligibility']> {
+    return (await this.#gateway(args[0])).previewEligibility(...args);
+  }
+
+  override async previewTaskEligibility(
+    ...args: Parameters<SemanticOperationGateway['previewTaskEligibility']>
+  ): ReturnType<SemanticOperationGateway['previewTaskEligibility']> {
+    return (await this.#gateway(args[0])).previewTaskEligibility(...args);
+  }
+
+  override async invoke(
+    ...args: Parameters<SemanticOperationGateway['invoke']>
+  ): ReturnType<SemanticOperationGateway['invoke']> {
+    return (await this.#gateway(args[0])).invoke(...args);
+  }
+
+  async #gateway(view: unknown): Promise<SemanticOperationGateway> {
+    const releaseId = viewReleaseId(view);
+    return releaseId
+      ? (await this.#route(releaseId)).operationGateway
+      : this.#fallback;
   }
 }
 
@@ -1091,7 +1407,7 @@ export async function ensureScope(
   });
 }
 
-async function provisionLocalDemoAuthorization(
+export async function provisionLocalDemoAuthorization(
   pool: pg.Pool,
   identity: AuthenticatedIdentity,
   applicationBindings: readonly CurrentPolicyPermissionBinding[],
@@ -1776,6 +2092,36 @@ async function persistFreshTenantInstallEvidence(
   });
 }
 
+/**
+ * What the approver of one release edge is shown and what the approval binds:
+ * the compiler's canonical diff digest and the digest of the plain-language
+ * rendering of it (CUSTOMIZE). A reverse edge -- a rollback -- binds the
+ * forward diff it undoes, read backwards.
+ */
+export interface ReleaseDiffBinding {
+  readonly canonicalDiffDigest: string;
+  readonly renderedDigest: string;
+  readonly renderedText: string;
+  readonly transitionPlanDigest: string | null;
+}
+
+export function releaseDiffBinding(
+  source: ParsedRelease,
+  target: ParsedRelease,
+  direction: 'forward' | 'reverse' = 'forward',
+): ReleaseDiffBinding {
+  const [from, to] =
+    direction === 'forward' ? [source, target] : [target, source];
+  const diff = diffCompiledReleases(from.compiled, to.compiled);
+  const rendered = renderCompiledDiff(from, to, diff, direction);
+  return Object.freeze({
+    canonicalDiffDigest: diff.canonicalDiffDigest,
+    renderedDigest: rendered.renderedDigest,
+    renderedText: rendered.text,
+    transitionPlanDigest: diff.transitionPlanDigest,
+  });
+}
+
 async function approveInitialRelease(
   pool: pg.Pool,
   context: TrustedRequestContext,
@@ -1844,7 +2190,7 @@ async function approveInitialRelease(
   );
 }
 
-async function approveModuleRelease(
+export async function approveModuleRelease(
   pool: pg.Pool,
   context: TrustedRequestContext,
   approverContext: TrustedRequestContext,
@@ -1853,8 +2199,20 @@ async function approveModuleRelease(
   compiled: CompileSuccess,
   prepared: Awaited<ReturnType<PostgresModuleStorageMaterializer['prepare']>>,
   preparationId: MintedUuid,
+  diffBinding: ReleaseDiffBinding,
   freshTenantBinding?: FreshTenantPreparationBinding,
 ): Promise<MintedUuid> {
+  // The approver's diff and the plan the executor prepared are one plan.
+  if (
+    diffBinding.transitionPlanDigest === null ||
+    !Buffer.from(diffBinding.transitionPlanDigest, 'hex').equals(
+      Buffer.from(prepared.transitionPlanDigest),
+    )
+  ) {
+    throw new Error(
+      'the release diff and the prepared storage transition name different plans',
+    );
+  }
   const receiptId = minted(randomUUID());
   await withTrustedRequestTransaction(pool, context, async (client) => {
     await client.query(
@@ -1900,6 +2258,7 @@ async function approveModuleRelease(
       bindingVersion: RELEASE_DIFF_BINDING_VERSION,
       compiled,
       context,
+      diffBinding,
       evidenceId: target.evidenceId,
       ...(freshTenantBinding ? { freshTenantBinding } : {}),
       pointer,
@@ -1919,7 +2278,7 @@ async function approveModuleRelease(
   );
 }
 
-async function approveReleaseWithoutStorageTransition(
+export async function approveReleaseWithoutStorageTransition(
   pool: pg.Pool,
   context: TrustedRequestContext,
   approverContext: TrustedRequestContext,
@@ -1927,6 +2286,7 @@ async function approveReleaseWithoutStorageTransition(
   source: ParsedRelease,
   target: PersistedReleaseIdentity,
   compiled: CompileSuccess,
+  diffBinding: ReleaseDiffBinding,
   reverseAuthorization?: ReleaseReverseTransitionAuthorization,
   freshTenantBinding?: FreshTenantPreparationBinding,
 ): Promise<MintedUuid> {
@@ -2003,6 +2363,7 @@ async function approveReleaseWithoutStorageTransition(
       bindingVersion: RELEASE_DIFF_BINDING_VERSION,
       compiled,
       context,
+      diffBinding,
       evidenceId: target.evidenceId,
       ...(freshTenantBinding ? { freshTenantBinding } : {}),
       pointer,
@@ -2029,6 +2390,8 @@ async function insertReleasePreparation(
     readonly bindingVersion: string;
     readonly compiled: CompileSuccess;
     readonly context: TrustedRequestContext;
+    /** Absent only for the initial activation, which has no prior release. */
+    readonly diffBinding?: ReleaseDiffBinding;
     readonly evidenceId: MintedUuid;
     readonly freshTenantBinding?: FreshTenantPreparationBinding;
     readonly pointer: PointerState;
@@ -2039,6 +2402,9 @@ async function insertReleasePreparation(
     readonly transitionPlanDigest: Buffer | null;
   },
 ): Promise<void> {
+  if (input.bindingKind === 'RELEASE_DIFF' && !input.diffBinding) {
+    throw new Error('a release-diff preparation requires the release diff');
+  }
   const targetRoot = Buffer.from(input.compiled.releaseRoot, 'hex');
   const evidence = input.freshTenantBinding
     ? await client.query<{
@@ -2143,11 +2509,13 @@ async function insertReleasePreparation(
       input.bindingKind === 'INITIAL_ACTIVATION'
         ? null
         : 'northstar.release-diff-algorithm/v1',
-      digest(
-        'canonical-diff',
-        input.pointer.pointerId,
-        input.compiled.releaseRoot,
-      ),
+      input.diffBinding
+        ? Buffer.from(input.diffBinding.canonicalDiffDigest, 'hex')
+        : digest(
+            'canonical-diff',
+            input.pointer.pointerId,
+            input.compiled.releaseRoot,
+          ),
       input.transitionPlanDigest,
       Buffer.from(input.compiled.attestation.attestationDigest, 'hex'),
       input.compiled.bundle.releaseManifest.compilerVersion,
@@ -2160,7 +2528,9 @@ async function insertReleasePreparation(
       digest('capability-support', input.compiled.releaseRoot),
       rendererVersion,
       viewSchemaVersion,
-      digest('rendered-diff', input.compiled.releaseRoot),
+      input.diffBinding
+        ? Buffer.from(input.diffBinding.renderedDigest, 'hex')
+        : digest('rendered-diff', input.compiled.releaseRoot),
       input.receiptId,
       input.freshTenantBinding?.installId ?? null,
       input.freshTenantBinding?.lineageOrdinal ?? null,
@@ -2216,7 +2586,7 @@ export async function readPointer(
   });
 }
 
-async function activateWithExactSwapTrigger(
+export async function activateWithExactSwapTrigger(
   adminPool: pg.Pool,
   activation: PostgresReleaseActivationService,
   systemContext: TrustedRequestContext,
@@ -2230,7 +2600,9 @@ async function activateWithExactSwapTrigger(
   }
 }
 
-async function assertExactSwapTriggerEnabled(pool: pg.Pool): Promise<void> {
+export async function assertExactSwapTriggerEnabled(
+  pool: pg.Pool,
+): Promise<void> {
   const result = await pool.query<{ enabled: string }>(
     `SELECT tgenabled AS enabled
        FROM pg_catalog.pg_trigger

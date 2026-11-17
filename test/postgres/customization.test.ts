@@ -13,6 +13,7 @@ import {
   parseCompiledApplication,
   rolePool,
   trustedContext,
+  type ComposedApplicationRuntime,
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { openCustomizationService } from '../../packages/postgres-provider/src/customization-service.js';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
@@ -20,6 +21,13 @@ import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provi
 import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
+import { renderedDiffDigest } from '../../packages/customization/src/index.js';
+import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
+import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../packages/runtime/src/semantic-operation-gateway.js';
+import {
+  NoSuchRegisteredQueryError,
+  SEMANTIC_QUERY_REQUEST_VERSION,
+} from '../../packages/runtime/src/semantic-query-gateway.js';
 import {
   LINEAGE_INSTALL_VOLUME,
   withEphemeralPostgres,
@@ -269,4 +277,240 @@ async function recordedPatch(pool: pg.Pool, patchId: string) {
   );
   assert.equal(result.rows.length, 1);
   return result.rows[0]!;
+}
+
+const EQUIPMENT = Object.freeze({
+  create: 'northstar.app:operation.custom_equipment_create',
+  list: 'northstar.app:query.custom_equipment_list',
+  name: 'northstar.app:field.custom_equipment_name',
+  purchaseDate: 'northstar.app:field.custom_equipment_purchase_date',
+  serial: 'northstar.app:field.custom_equipment_serial_number',
+  status: 'northstar.app:field.custom_equipment_status',
+  inService: 'northstar.app:option.custom_equipment_status_in_service',
+});
+
+test(
+  'an approved change goes live in a running runtime, rolls back keeping its rows, and returns',
+  { timeout: 900_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'customize-live',
+      async ({ connection, pool }) => {
+        const databaseUrl = `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`;
+        const liveTenant = 'customize-live';
+        let runtime = await startRuntime(databaseUrl, liveTenant);
+        const opened = await openCustomizationService({
+          acknowledgement: readUnboundPermissionAcknowledgementFor(
+            authoredPath,
+            'northstar.app:package.application',
+          ),
+          capabilityOperationExecutorFactories: [
+            INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+            RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+            PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY,
+          ],
+          compiledApplication,
+          databaseUrl,
+          firstPartyAuthored,
+          localDemoIdentity: true,
+          migrationsDirectory,
+          providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+          tenantSlug: liveTenant,
+        });
+        try {
+          const firstPartyRelease = runtime.activeReleaseId;
+          const drafted = await opened.service.draft(
+            equipment,
+            'declarativeEditor',
+          );
+          assert.equal(drafted.status, 'drafted');
+          if (drafted.status !== 'drafted') return;
+          await assert.rejects(
+            listEquipment(runtime),
+            NoSuchRegisteredQueryError,
+            'a drafted change is not served',
+          );
+          await assert.rejects(
+            opened.service.activate(drafted.patchId),
+            /CUSTOMIZE_NOT_APPROVED|no current approval/u,
+          );
+
+          const approved = await opened.service.approve(drafted.patchId);
+          assert.equal(approved.renderedDiff, drafted.renderedDiff);
+          const preparation = await pool.query<{
+            canonical_diff_digest: Buffer;
+            rendered_diff_evidence_digest: Buffer;
+            transition_plan_digest: Buffer | null;
+          }>(
+            `SELECT preparation.canonical_diff_digest,
+                    preparation.rendered_diff_evidence_digest,
+                    preparation.transition_plan_digest
+               FROM platform.release_approvals AS approval
+               JOIN platform.release_activation_preparations AS preparation
+                 ON preparation.preparation_id = approval.preparation_id
+              WHERE approval.activation_attempt_id = $1`,
+            [approved.activationAttemptId],
+          );
+          assert.equal(
+            preparation.rows[0]!.canonical_diff_digest.toString('hex'),
+            drafted.canonicalDiffDigest,
+            'the approval binds the canonical diff the approver was shown',
+          );
+          assert.equal(
+            preparation.rows[0]!.rendered_diff_evidence_digest.toString('hex'),
+            renderedDiffDigest(approved.renderedDiff),
+            'the approval binds the plain-language text the approver read',
+          );
+          assert.notEqual(preparation.rows[0]!.transition_plan_digest, null);
+
+          const activated = await opened.service.activate(drafted.patchId);
+          assert.equal(activated.status, 'activated');
+          assert.equal(activated.releaseId, drafted.releaseId);
+
+          // A second process opening the same database -- the agent
+          // terminal -- serves the live customization too and moves nothing.
+          const fenceBefore = await pointerFence(
+            pool,
+            runtime.identity.tenantId,
+          );
+          const terminal = await startRuntime(databaseUrl, liveTenant);
+          try {
+            assert.equal(terminal.releaseRoot, drafted.releaseRoot);
+          } finally {
+            await terminal.close();
+          }
+          assert.equal(
+            await pointerFence(pool, runtime.identity.tenantId),
+            fenceBefore,
+            'opening another runtime does not switch the active release',
+          );
+
+          // The SAME runtime, never restarted, now serves Equipment.
+          const recordId = randomUUID();
+          const created = await createEquipment(runtime, recordId);
+          assert.equal(created.outcome, 'succeeded');
+          assert.deepEqual(
+            (await listEquipment(runtime)).records.map(
+              (record) => record.recordId,
+            ),
+            [recordId],
+          );
+
+          const rolledBack = await opened.service.rollback();
+          assert.equal(rolledBack.status, 'rolledBack');
+          assert.equal(rolledBack.releaseId, firstPartyRelease);
+          await assert.rejects(
+            listEquipment(runtime),
+            NoSuchRegisteredQueryError,
+            'a rolled-back change is hidden',
+          );
+          await assert.rejects(
+            opened.service.rollback(),
+            /nothing|no customization/u,
+          );
+
+          await opened.service.approve(drafted.patchId);
+          await opened.service.activate(drafted.patchId);
+          assert.deepEqual(
+            (await listEquipment(runtime)).records.map(
+              (record) => record.recordId,
+            ),
+            [recordId],
+            're-activation shows the rows kept through the rollback',
+          );
+
+          await runtime.close();
+          runtime = await startRuntime(databaseUrl, liveTenant);
+          assert.equal(
+            runtime.releaseRoot,
+            drafted.releaseRoot,
+            'a restart serves the live customization',
+          );
+          assert.deepEqual(
+            (await listEquipment(runtime)).records.map(
+              (record) => record.recordId,
+            ),
+            [recordId],
+          );
+        } finally {
+          await opened.close();
+          await runtime.close();
+        }
+      },
+      LINEAGE_INSTALL_VOLUME,
+    );
+  },
+);
+
+function startRuntime(databaseUrl: string, slug: string) {
+  return createComposedApplicationRuntime({
+    capabilityOperationExecutorFactories: [
+      INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+      RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+      PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY,
+    ],
+    compiledApplication,
+    databaseUrl,
+    inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
+    localDemoIdentity: true,
+    migrationsDirectory,
+    providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+    tenantSlug: slug,
+  });
+}
+
+function listEquipment(runtime: ComposedApplicationRuntime) {
+  return runtime.entry.run({ headers: { authorization: 'local' } }, (view) =>
+    runtime.queryGateway.invoke(view, {
+      arguments: {
+        includeArchived: false,
+        list: {
+          cursor: null,
+          matchMode: 'substring',
+          pageSize: 100,
+          relationLabels: [],
+          schemaVersion: SHARED_LIST_QUERY_VERSION,
+          search: '',
+          sort: [],
+        },
+      },
+      queryId: EQUIPMENT.list,
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+    }),
+  );
+}
+
+function createEquipment(
+  runtime: ComposedApplicationRuntime,
+  recordId: string,
+) {
+  return runtime.entry.run({ headers: { authorization: 'local' } }, (view) =>
+    runtime.operationGateway.invoke(
+      view,
+      {
+        confirmationGrant: null,
+        idempotencyKey: randomUUID(),
+        input: {
+          recordId,
+          values: {
+            [EQUIPMENT.name]: 'Forklift 3',
+            [EQUIPMENT.serial]: 'FL-0003',
+            [EQUIPMENT.purchaseDate]: '2026-11-01',
+            [EQUIPMENT.status]: EQUIPMENT.inService,
+          },
+        },
+        operationId: EQUIPMENT.create,
+        schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+      },
+      runtime.operationMediation.issueInvocation(view, 'UI'),
+    ),
+  );
+}
+
+async function pointerFence(pool: pg.Pool, tenantId: string): Promise<string> {
+  const result = await pool.query<{ fence: string; release_id: string }>(
+    'SELECT fence::text AS fence, release_id FROM platform.active_release_pointers WHERE tenant_id = $1',
+    [tenantId],
+  );
+  return `${result.rows[0]!.release_id}@${result.rows[0]!.fence}`;
 }
