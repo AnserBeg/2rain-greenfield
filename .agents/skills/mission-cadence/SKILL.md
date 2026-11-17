@@ -79,11 +79,9 @@ rows; history is `git log`.
 - **BUILD agent** — owns the vertical end to end and **integrates itself**:
   `--no-ff` merge into `main` on CI green, one ledger row, one review-log row,
   push. Nobody else is in the loop.
-- **Orchestrator** — a session opened to charter the next vertical, to write
-  and adjudicate the read of the trunk when one is owed, and for stage-boundary
-  reviews. Not a standing relay.
-- **User** — tests at checkpoints; pastes one read prompt and its verdict when
-  a read is owed.
+- **Orchestrator** — charters verticals, launches BUILD lanes as Claude
+  subagents (Opus or Sonnet by difficulty), launches and adjudicates Codex reads.
+- **User** — tests at checkpoints when they choose; nothing waits on them.
 - **Parallelism is by dependency.** Two verticals sharing the mount chain or the
   posting kernel are serial; otherwise parallel, no lease. Each vertical runs in
   its own worktree.

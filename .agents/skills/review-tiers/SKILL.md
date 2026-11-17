@@ -29,8 +29,10 @@ Otherwise none. The orchestrator, or whichever lane is open, writes the prompt.
 
 ## What the read is
 
-- **Fresh naive, user-run, online**, never spawned by a lane or the
-  orchestrator. Codex gpt-5.6-sol xhigh or Fable max.
+- **Fresh naive Codex, launched by the orchestrator** (owner, 2026-11-17), never
+  by the writing lane: `codex exec -s read-only` in a detached worktree at the
+  read-through SHA. `gpt-6.1-sol` xhigh for the Critical read; `gpt-6-astra`
+  for a lighter read the orchestrator wants on a non-Critical diff.
 - It reads the unread diff and `docs/architecture/posting-kernel-guarantees.md`,
   never the records.
 - **One question:** can this diff, silently, store a wrong quantity or amount,
