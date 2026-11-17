@@ -45,6 +45,7 @@ import {
   releaseDiffBinding,
   rolePool,
   trustedContext,
+  unprovenLivePointer,
   type ParsedRelease,
   type PersistedReleaseIdentity,
   type ScopeIdentities,
@@ -812,46 +813,14 @@ export class PostgresCustomizationService {
     admin: pg.PoolClient,
     context: TrustedRequestContext,
   ): Promise<void> {
-    const pointer = await readPointer(this.connection.runtimePool, context);
-    if (pointer.releaseId === null) return;
-    const receipt = await withTrustedRequestTransaction(
+    const unproven = await unprovenLivePointer(
       this.connection.runtimePool,
       context,
-      async (client) =>
-        client.query<{
-          activation_attempt_id: string;
-          status: string | null;
-        }>(
-          `SELECT swap.activation_attempt_id, verification.status
-             FROM platform.release_activation_swap_receipts AS swap
-             LEFT JOIN platform.release_activation_verification_receipts
-                    AS verification
-               ON verification.tenant_id = swap.tenant_id
-              AND verification.environment_id = swap.environment_id
-              AND verification.activation_attempt_id =
-                  swap.activation_attempt_id
-            WHERE swap.tenant_id = $1 AND swap.environment_id = $2
-              AND swap.pointer_id = $3 AND swap.activated_release_id = $4
-              AND swap.fence = $5`,
-          [
-            context.tenantId,
-            context.environmentId,
-            pointer.pointerId,
-            pointer.releaseId,
-            String(pointer.fence),
-          ],
-        ),
     );
-    const row = receipt.rows[0];
-    if (row?.status !== 'SWAPPED_VERIFIED') {
-      const state = !row
-        ? 'no activation receipt names it'
-        : row.status === null
-          ? `activation ${row.activation_attempt_id} swapped the pointer but never verified`
-          : `activation ${row.activation_attempt_id} ended ${row.status}`;
+    if (unproven !== null) {
       throw new CustomizationServiceRefusal(
         'CUSTOMIZE_ACTIVATION_UNVERIFIED',
-        `the live release is not proven: ${state}; nothing was changed`,
+        `the live release is not proven: ${unproven}; nothing was changed`,
       );
     }
     await reconcileInventoryScopeToPointer(

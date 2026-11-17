@@ -45,12 +45,14 @@ Expected: "New record type "Equipment" with 4 fields" with Name, Serial number, 
 
 - Re-applying tenant patches to a moved first-party base (ADR-0013 upgrade) fails loudly with the pre-tenant remedy `dev:reset`; the rebase itself is not built.
 - The full §8.5 builder archetype (charter: filed, not built).
+- No operator path finishes an unverified activation: after a cut between swap and verification, draft, approve, activate and rollback refuse `CUSTOMIZE_ACTIVATION_UNVERIFIED` and posting is refused (the scopes still name the last proven release) until the kernel's `verifyActivation` (or `reconcileActivation`) is run for that attempt; a `customize verify` command is not built.
 
 ## Review fix 2 (read of `884ee0ba..08434a73`, R1-R4)
 
 - One shape for every state change (`#locked` in `customization-service.ts`): draft recording, approve, activate and rollback each run on one admin connection holding the release-scope lock, first prove the live pointer's activation verified (its swap receipt at the current pointer and fence has a `SWAPPED_VERIFIED` receipt) and set the inventory scopes to it, then read the live state and decide.
 - R1: inside the lock no admin work touches the pool; `activateWithExactSwapTrigger`, `assertExactSwapTriggerEnabled` and the local-demo grants take the held client. Test: two concurrent rollbacks on one service (admin pool of two) both finish, one refused, under a 300 s bound.
-- R2: an unverified live pointer is refused `CUSTOMIZE_ACTIVATION_UNVERIFIED`, naming the attempt and its state; never `activated`. The kernel's own `verifyActivation` finishes it, after which the retry activates. Test seam: `activationKernel` (a test subclass cuts `verifyActivation`).
+- R2: an unverified live pointer is refused `CUSTOMIZE_ACTIVATION_UNVERIFIED`, naming the attempt and its state; never `activated`. A restart does not bless it either: boot reconciles scopes only for a proven pointer (`unprovenLivePointer`, shared). The kernel's own `verifyActivation` finishes it, after which the retry activates. Test seam: `activationKernel` (a test subclass cuts `verifyActivation`; production always uses the PostgreSQL kernel).
 - R3: a B -> A rollback whose reconcile failed is repaired by the retry before it is refused; posting works. The reverse-transition policy is unchanged.
-- R4: a reused patch returns the release and revision its row recorded; identical drafts are serialized by the lock, so the second finds the first's patch.
+- R4: a reused patch returns the release and revision its row recorded; identical drafts are serialized by the lock, so the second finds the first's patch. The content-hash lookup in `ensurePersistedRelease` is at its head (since fix 1); the dead branch after it is gone.
+- `approve` holds the lock too (it records an approval bound to the pointer and fence, a state change): about 40 s for a storage change, during which a second click or a boot waits.
 - `status` stays lock-free (the screen reads it on every page load; it changes nothing).

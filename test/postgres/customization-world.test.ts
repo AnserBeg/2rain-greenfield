@@ -312,6 +312,19 @@ test(
                 'CUSTOMIZE_ACTIVATION_UNVERIFIED',
             );
           }
+          // A restart does not bless it either: boot leaves the scopes on
+          // the last proven release (or refuses to start).
+          await openComposedApplicationRuntime({
+            databaseUrl,
+            tenantSlug,
+          }).then(
+            (restarted) => restarted.close(),
+            () => undefined,
+          );
+          assert.ok(
+            (await scopeMismatches(pool, runtime)) > 0,
+            'a restart did not set the scopes to an unverified release',
+          );
           const identities = await ensureScope(pool, tenantSlug, 'production');
           const kernelPool = rolePool(databaseUrl, 'north_star_runtime', 2);
           try {
@@ -376,6 +389,17 @@ async function assertScopesNamePointer(
   pool: pg.Pool,
   runtime: { readonly identity: { readonly tenantId: string } },
 ): Promise<void> {
+  assert.equal(
+    await scopeMismatches(pool, runtime),
+    0,
+    'every inventory scope names the active release',
+  );
+}
+
+async function scopeMismatches(
+  pool: pg.Pool,
+  runtime: { readonly identity: { readonly tenantId: string } },
+): Promise<number> {
   const result = await pool.query<{ mismatched: number; scopes: number }>(
     `SELECT count(*)::integer AS scopes,
             count(*) FILTER (
@@ -391,11 +415,7 @@ async function assertScopesNamePointer(
     [runtime.identity.tenantId],
   );
   assert.ok(result.rows[0]!.scopes > 0);
-  assert.equal(
-    result.rows[0]!.mismatched,
-    0,
-    'every inventory scope names the active release',
-  );
+  return result.rows[0]!.mismatched;
 }
 
 async function waitForAdvisoryLockWaiter(pool: pg.Pool): Promise<void> {

@@ -680,8 +680,14 @@ export async function createComposedApplicationRuntime(
     // Provisioning above recorded the lineage tip; the posting kernel posts
     // only for the release a scope names, so every scope is reconciled to the
     // pointer as re-read under the lock the customize swap also takes.
+    // A live pointer whose activation never verified (a cut between the
+    // kernel's swap and its verification) is not blessed by a restart: its
+    // scopes stay where they are (CUSTOMIZE review R2).
+    const proofPool = runtimePool;
     await withReleaseScopeLock(adminPool, identities.runtime, async (client) =>
-      reconcileInventoryScopeToPointer(client, identities.runtime),
+      (await unprovenLivePointer(proofPool, runtimeContext)) === null
+        ? reconcileInventoryScopeToPointer(client, identities.runtime)
+        : null,
     );
     if (options.localDemoIdentity) {
       await provisionLocalDemoReleaseAuthorization(
@@ -1521,6 +1527,52 @@ export async function withReleaseScopeLock<T>(
 }
 
 /**
+ * Null when the activation that set the live pointer verified, or there is no
+ * live release yet; otherwise what is unproven, in words (CUSTOMIZE review
+ * R2). The kernel commits a pointer swap before it verifies it, so a cut
+ * between the two leaves a live pointer nothing has proven: its swap receipt
+ * at the current pointer and fence has no `SWAPPED_VERIFIED` receipt.
+ */
+export async function unprovenLivePointer(
+  runtimePool: pg.Pool,
+  context: TrustedRequestContext,
+): Promise<string | null> {
+  return withTrustedRequestTransaction(runtimePool, context, async (client) => {
+    const result = await client.query<{
+      activation_attempt_id: string | null;
+      release_id: string | null;
+      status: string | null;
+    }>(
+      `SELECT pointer.release_id, swap.activation_attempt_id,
+                verification.status
+           FROM platform.active_release_pointers AS pointer
+           LEFT JOIN platform.release_activation_swap_receipts AS swap
+             ON swap.tenant_id = pointer.tenant_id
+            AND swap.environment_id = pointer.environment_id
+            AND swap.pointer_id = pointer.pointer_id
+            AND swap.activated_release_id = pointer.release_id
+            AND swap.fence = pointer.fence
+           LEFT JOIN platform.release_activation_verification_receipts
+                  AS verification
+             ON verification.tenant_id = swap.tenant_id
+            AND verification.environment_id = swap.environment_id
+            AND verification.activation_attempt_id = swap.activation_attempt_id
+          WHERE pointer.tenant_id = $1 AND pointer.environment_id = $2`,
+      [context.tenantId, context.environmentId],
+    );
+    const row = result.rows[0];
+    if (!row || row.release_id === null) return null;
+    if (row.status === 'SWAPPED_VERIFIED') return null;
+    if (row.activation_attempt_id === null) {
+      return 'no activation receipt names the live release';
+    }
+    return row.status === null
+      ? `activation ${row.activation_attempt_id} swapped the pointer but never verified`
+      : `activation ${row.activation_attempt_id} ended ${row.status}`;
+  });
+}
+
+/**
  * Sets every inventory scope of one tenant environment to the root of the
  * release the active pointer names, read here -- never a root computed
  * earlier. `contract_release_root` is provenance the posting kernel requires
@@ -1783,21 +1835,23 @@ export async function ensurePersistedRelease(
       tenantId: context.tenantId,
     });
   }
-  let releaseId: MintedUuid | undefined;
-  let evidenceId: MintedUuid | undefined;
-  if (!releaseId || !evidenceId) {
-    releaseId = minted(randomUUID());
-    const staged = await repository.stageTenantReleaseCandidate(context, {
-      appPackageRevisionId: revisionId,
-      compiledRelease: release.compiled,
-      createdBy: context.principalId,
-      environmentId: context.environmentId,
-      releaseId,
-      tenantId: context.tenantId,
-    });
-    evidenceId = staged.verificationEvidenceId;
-  }
-  return Object.freeze({ evidenceId, releaseId, revisionId });
+  // No release is staged for this root (the lookup above): stage one. Two
+  // identical customization drafts are serialized by the release-scope lock,
+  // so the second finds this one (CUSTOMIZE review R4).
+  const releaseId = minted(randomUUID());
+  const staged = await repository.stageTenantReleaseCandidate(context, {
+    appPackageRevisionId: revisionId,
+    compiledRelease: release.compiled,
+    createdBy: context.principalId,
+    environmentId: context.environmentId,
+    releaseId,
+    tenantId: context.tenantId,
+  });
+  return Object.freeze({
+    evidenceId: staged.verificationEvidenceId,
+    releaseId,
+    revisionId,
+  });
 }
 
 export async function ensureReleaseAdmitted(
