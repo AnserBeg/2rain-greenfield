@@ -68,6 +68,7 @@ import {
 import {
   formFieldIds,
   readCompiledSurfaceDataBinding,
+  surfaceSourceEntityId,
 } from './surface-contract.js';
 import type {
   CompiledFieldOption,
@@ -1723,37 +1724,24 @@ function findRelatedSurface(
   surfaces: readonly CompiledSurfaceDefinition[],
   role: CompiledSurfaceDefinition['surfaceRole'],
 ): CompiledSurfaceDefinition | undefined {
-  try {
-    const entityId = readCompiledSurfaceDataBinding(view, surface).query
-      .sourceEntityId;
-    const matches = (candidate: CompiledSurfaceDefinition) => {
-      if (candidate.lifecycle !== 'active' || candidate.surfaceRole !== role) {
-        return false;
-      }
-      try {
-        return (
-          readCompiledSurfaceDataBinding(view, candidate).query
-            .sourceEntityId === entityId
-        );
-      } catch {
-        return false;
-      }
-    };
-    if (role !== 'list') return surfaces.find(matches);
-    // A worklist may list the same records beside the entity's own List; the
-    // way back to "the list" is the one that owns the entity's Record.
-    const candidates = surfaces.filter(matches);
-    if (candidates.length > 1) {
-      const owners = recordWorkspaceOwners(view, surfaces, entityId);
-      return (
-        candidates.find((candidate) => owners.has(candidate.surfaceId)) ??
-        candidates[0]
-      );
-    }
-    return candidates[0];
-  } catch {
-    return undefined;
+  const entityId = surfaceSourceEntityId(view, surface);
+  if (entityId === null) return undefined;
+  const matches = (candidate: CompiledSurfaceDefinition) =>
+    candidate.lifecycle === 'active' &&
+    candidate.surfaceRole === role &&
+    surfaceSourceEntityId(view, candidate) === entityId;
+  if (role !== 'list') return surfaces.find(matches);
+  // A worklist may list the same records beside the entity's own List; the
+  // way back to "the list" is the one that owns the entity's Record.
+  const candidates = surfaces.filter(matches);
+  if (candidates.length > 1) {
+    const owners = recordWorkspaceOwners(view, surfaces, entityId);
+    return (
+      candidates.find((candidate) => owners.has(candidate.surfaceId)) ??
+      candidates[0]
+    );
   }
+  return candidates[0];
 }
 
 /**
@@ -1775,14 +1763,9 @@ export function recordWorkspaceOwners(
         !candidate.workspace?.ownerSurfaceId
       )
         return [];
-      try {
-        return readCompiledSurfaceDataBinding(view, candidate).query
-          .sourceEntityId === entityId
-          ? [candidate.workspace.ownerSurfaceId]
-          : [];
-      } catch {
-        return [];
-      }
+      return surfaceSourceEntityId(view, candidate) === entityId
+        ? [candidate.workspace.ownerSurfaceId]
+        : [];
     }),
   );
 }
