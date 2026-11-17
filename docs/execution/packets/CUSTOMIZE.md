@@ -65,3 +65,7 @@ What: the ux-grammar skill ("Every screen renders through SurfaceRuntime… Neve
 - R4: a reused patch returns the release and revision its row recorded; identical drafts are serialized by the lock, so the second finds the first's patch. The content-hash lookup in `ensurePersistedRelease` is at its head (since fix 1); the dead branch after it is gone.
 - `approve` holds the lock too (it records an approval bound to the pointer and fence, a state change): about 40 s for a storage change, during which a second click or a boot waits.
 - `status` stays lock-free (the screen reads it on every page load; it changes nothing).
+
+## Review fix 3 (read of `01646f74..4920492f`, B1)
+
+- B1: boot's early `provisionInventoryScope` set every scope to the lineage tip before the proof ran, so after a cut-off A -> first-party rollback a restart left the scopes matching the unverified pointer. Early provisioning now creates a fresh scope with the tip's root but keeps an existing scope's root (policy still asserted); roots move only in the final locked reconcile, to a verified pointer. Test: that cut, then a restart: the scopes keep A's root and a posting is refused until the kernel verifies; then the next customization call reconciles and posting works.

@@ -1638,6 +1638,20 @@ async function provisionInventoryScope(
   // stored value stays truthful by advancing (migration 0019) rather than by
   // being read back and echoed. Every policy field is still asserted exactly,
   // so genuine configuration drift still conflicts.
+  //
+  // Only a fresh scope takes the root asked for here. An existing scope keeps
+  // its root (policy is still asserted): roots move only in boot's final
+  // reconcile, under the release-scope lock and only to a verified live
+  // pointer (CUSTOMIZE review B1) -- never to a pointer a cut-off rollback
+  // left unverified.
+  const existing = await pool.query<{ contract_release_root: string }>(
+    `SELECT contract_release_root
+       FROM platform.inventory_posting_configurations
+      WHERE tenant_id = $1 AND environment_id = $2 AND legal_entity_id = $3`,
+    [identity.tenantId, identity.environmentId, provisioning.legalEntityId],
+  );
+  const releaseRoot =
+    existing.rows[0]?.contract_release_root ?? contractReleaseRoot;
   await pool.query(
     `SELECT platform.provision_inventory_scope(
        $1,$2,$3,$4,$5,$6,$7,$8,$9::smallint,$10,$11,
@@ -1651,7 +1665,7 @@ async function provisionInventoryScope(
       provisioning.entityName,
       provisioning.timeZone,
       provisioning.businessDayBoundary,
-      contractReleaseRoot,
+      releaseRoot,
       provisioning.configurationVersion,
       provisioning.negativeStock,
       provisioning.maximumBackdateDays,
