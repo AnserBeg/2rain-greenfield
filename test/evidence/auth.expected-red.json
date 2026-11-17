@@ -137,8 +137,8 @@
       "name": "query-denial-recorder-unwired",
       "claim": "Denied query and relation-option calls must persist redacted trust evidence while denied business writes leave their rows absent.",
       "file": "packages/postgres-provider/src/composed-application-runtime.ts",
-      "original": "      new PostgresSemanticQueryDenialRecorder(runtimePool, actorIssuer),",
-      "replacement": "      undefined,",
+      "original": "        denialRecorder,",
+      "replacement": "        undefined,",
       "test": {
         "files": ["test/postgres/composed-application.test.ts"],
         "namePattern": "composed product activates through the kernel"
