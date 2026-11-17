@@ -22,6 +22,10 @@
  * - 5: Calgary on hand rises by the ordered 8 through one posted receipt;
  * - 7: Calgary on hand falls by 4 through one posted shipment of that order;
  * - 8: one new posted invoice for the order, balance 0, one posted payment;
+ *   (2026-11-17, after the 15:33 run: a default payment method exists -- the
+ *   invoice payment form pre-selects EFT, `invoice_method` in
+ *   packages/domain/src/sales/workspace.ts -- so the request is NOT changed;
+ *   context now lists such form defaults for the agent to use);
  * - 9/10: nothing is written and the named order is unchanged.
  */
 import type { AgentRunResult } from '../../packages/operations-agent/src/index.js';

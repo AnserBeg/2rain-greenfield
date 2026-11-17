@@ -27,7 +27,7 @@ import {
   withAgentWorlds,
   type AgentWorld,
 } from '../agent/agent-world.js';
-import { f, ids, op, rel, snapshot } from '../agent/arrange.js';
+import { f, ids, NAMES, op, q, rel, snapshot } from '../agent/arrange.js';
 import { referenceScript } from '../agent/reference-scripts.js';
 import { TASKS } from '../agent/tasks.js';
 
@@ -271,6 +271,124 @@ test(
           /approved by the person/u,
         );
         assert.deepEqual(await snapshot(world), beforeWithout);
+
+        // A value the request did not give, held by a record the agent
+        // resolved (the customer's address), is read and used, not refused:
+        // the plan fills ship-to from the customer record.
+        {
+          const agent = session(world, true);
+          const addressField = (name: string) => f(`party_address_${name}`);
+          let street = '';
+          const model = scriptedModel([
+            () => ({
+              toolCalls: [
+                {
+                  name: 'erp_discover',
+                  input: {
+                    mode: 'resolve',
+                    canonicalIds: ['party'],
+                    search: NAMES.lethbridge,
+                  },
+                },
+              ],
+            }),
+            (conversation) => ({
+              toolCalls: [
+                {
+                  name: 'erp_query',
+                  input: {
+                    queryId: q('party_address_list'),
+                    arguments: {
+                      parent: {
+                        relationId: rel('party_address_party'),
+                        recordId: (
+                          lastToolResult(conversation) as {
+                            candidates: { recordId: string }[];
+                          }
+                        ).candidates[0]!.recordId,
+                      },
+                    },
+                  },
+                },
+              ],
+            }),
+            (conversation) => {
+              const resolved = conversation
+                .flatMap((entry) =>
+                  entry.role === 'tool' ? entry.results : [],
+                )
+                .map((result) => JSON.parse(result.content))
+                .find((content) => content.candidates)! as {
+                candidates: { recordId: string }[];
+              };
+              const address = (
+                lastToolResult(conversation) as {
+                  records: { values: Record<string, string> }[];
+                }
+              ).records[0]!.values;
+              street = address[addressField('street')]!;
+              return {
+                toolCalls: [
+                  {
+                    name: 'erp_plan',
+                    input: {
+                      intents: [
+                        {
+                          operationId: op('sales_order_create'),
+                          values: {
+                            [f('sales_order_customer_party_id')]:
+                              resolved.candidates[0]!.recordId,
+                            [f('sales_order_order_date')]:
+                              new Date().toISOString(),
+                            [f('sales_order_currency')]: 'CAD',
+                            [f('sales_order_ship_to_name')]:
+                              address[addressField('recipient')],
+                            [f('sales_order_ship_to_street')]: street,
+                            [f('sales_order_ship_to_city')]:
+                              address[addressField('city')],
+                            [f('sales_order_ship_to_region')]:
+                              address[addressField('region')],
+                            [f('sales_order_ship_to_postal_code')]:
+                              address[addressField('postal_code')],
+                            [f('sales_order_ship_to_country')]:
+                              address[addressField('country')],
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              };
+            },
+            (conversation) => ({
+              toolCalls: [
+                {
+                  name: 'erp_execute',
+                  input: {
+                    planId: lastToolResult(conversation).planId,
+                    executionIdempotencyKey: 'ship-to-from-record',
+                  },
+                },
+              ],
+            }),
+            () => ({ text: 'done' }),
+          ]);
+          const run = await runOperationsAgent({
+            model,
+            session: agent,
+            request: 'Create a sales order for Lethbridge Millwork',
+            meter: new SpendMeter(null, 1),
+          });
+          assert.equal(run.stop, 'answered', run.answer);
+          const executed = agent.executedPlans()[0];
+          assert.ok(executed, 'the ship-to plan was not executed');
+          const order = await world.read(
+            'sales_order',
+            executed.results[0]!.recordId!,
+          );
+          assert.ok(street.length > 0, 'the customer record had no street');
+          assert.equal(order.values[f('sales_order_ship_to_street')], street);
+        }
 
         // Permission-filtered discovery (plan section 9.2.1): the buyer is
         // not granted purchase approval, the manager is, so their catalogs
