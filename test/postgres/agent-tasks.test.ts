@@ -232,7 +232,12 @@ test(
             meter: new SpendMeter(null, 1),
           });
           assert.equal(run.stop, 'answered');
-          const recordId = agent.executedPlans()[0]!.results[0]!.recordId!;
+          const executed = agent.executedPlans()[0];
+          assert.ok(
+            executed,
+            `the scripted plan was not executed: ${JSON.stringify(run.conversation.slice(-3))}`,
+          );
+          const recordId = executed.results[0]!.recordId!;
           return {
             context,
             record: await world.read('purchase_order', recordId),

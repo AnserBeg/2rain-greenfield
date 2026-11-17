@@ -27,6 +27,7 @@
 import type { AgentRunResult } from '../../packages/operations-agent/src/index.js';
 
 import type { AgentWorld } from './agent-world.js';
+import { numbersIn, task3AnswerFailures } from './answer-rules.js';
 import {
   f,
   ids,
@@ -83,13 +84,6 @@ async function unexpectedChanges(
       (list) =>
         `${list} changed by ${String((after[list] ?? 0) - (before[list] ?? 0))} (expected ${String(expected[list] ?? 0)})`,
     );
-}
-
-/** Every number written in the answer, commas and currency signs ignored. */
-export function numbersIn(answer: string): number[] {
-  return [...answer.replaceAll(',', '').matchAll(/-?\d+(?:\.\d+)?/gu)].map(
-    (match) => Number(match[0]),
-  );
 }
 
 const states = async (world: AgentWorld, local: string, id: string) =>
@@ -459,28 +453,3 @@ export const TASKS: readonly AgentTask[] = [
     },
   },
 ];
-
-/**
- * Task 3's answer rule v2 (registered 2026-11-17): both unpaid invoices named,
- * the total balance stated, and the paid invoice either absent or named in a
- * clause that says it is paid and does not call it unpaid or outstanding. A
- * clause is a line or a sentence (a period between digits does not end one).
- */
-export function task3AnswerFailures(
-  answer: string,
-  context: { paid: string; unpaid: readonly string[]; balance: number },
-): string[] {
-  const failures: string[] = [];
-  for (const number of context.unpaid)
-    if (!answer.includes(number)) failures.push(`the answer omits ${number}`);
-  for (const clause of answer.split(/\n|;|(?<!\d)\.|\.(?!\d)/u))
-    if (
-      clause.includes(context.paid) &&
-      (!/\b(?:paid|settled)\b/iu.test(clause) ||
-        /\b(?:unpaid|not paid)\b/iu.test(clause))
-    )
-      failures.push(`the answer lists the paid ${context.paid} as unpaid`);
-  if (!numbersIn(answer).some((n) => Math.abs(n - context.balance) < 0.005))
-    failures.push(`the answer does not state ${String(context.balance)}`);
-  return failures;
-}

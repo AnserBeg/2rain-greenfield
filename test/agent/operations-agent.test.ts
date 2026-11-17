@@ -6,7 +6,7 @@ import { inspect } from 'node:util';
 import test from 'node:test';
 
 import { OPERATIONS_AGENT_TOOL_IDS } from '../../packages/compiler/src/index.js';
-import { task3AnswerFailures } from './tasks.js';
+import { task3AnswerFailures } from './answer-rules.js';
 import { OPERATION_CATALOG_PAYLOAD_VERSION } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   businessDayAt,
