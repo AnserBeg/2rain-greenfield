@@ -728,7 +728,7 @@ export async function createComposedApplicationRuntime(
     const bootPolicy = policyFor(serving);
     // The runtime's one read ingress: a capability executor's read-back goes
     // through it like every other read, routed by its view's release.
-    let routedQueryGateway: SemanticQueryGateway | undefined;
+    const routed: { queryGateway?: SemanticQueryGateway } = {};
     const buildServing = (
       release: ServingRelease,
       policy: PostgresCurrentPolicyGateway = policyFor(release),
@@ -752,7 +752,7 @@ export async function createComposedApplicationRuntime(
           currentInstant: () => new Date().toISOString(),
           pool: runtimePool!,
           projection: release.projection,
-          queryGateway: routedQueryGateway ?? queryGateway,
+          queryGateway: routed.queryGateway ?? queryGateway,
           releaseContentHash: release.releaseRoot,
           releaseId: release.releaseId,
         }),
@@ -784,7 +784,7 @@ export async function createComposedApplicationRuntime(
     };
     const policy = bootPolicy;
     const queryGateway = new ReleaseRoutingQueryGateway(servingFor, policy);
-    routedQueryGateway = queryGateway;
+    routed.queryGateway = queryGateway;
     servings.set(
       serving.releaseId,
       Promise.resolve(buildServing(serving, bootPolicy)),

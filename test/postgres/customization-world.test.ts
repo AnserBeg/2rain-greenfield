@@ -161,8 +161,10 @@ test(
             timings.requestToLiveMs < 600_000,
             'a new record type is live within ten minutes of the request',
           );
+          // Each reference script replays its own fixed idempotency key, so
+          // the tasks after the rollback are ones not yet run here.
           await runTask(world, 6);
-          await runTask(world, 5);
+          await runTask(world, 8);
         } finally {
           await opened.close();
           await runtime.close();
