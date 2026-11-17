@@ -225,6 +225,41 @@ test(
             );
             assert.equal(await patchCount(pool), 1);
 
+            // Review R4: two identical drafts at once record one change, and
+            // both return exactly the release and revision that change
+            // recorded.
+            const vehicle = {
+              fields: [{ label: 'Name', required: true, type: 'text' }],
+              kind: 'addRecordType',
+              label: 'Vehicle',
+            };
+            const duplicates = await Promise.all([
+              opened.service.draft(vehicle, 'declarativeEditor'),
+              opened.service.draft(vehicle, 'declarativeEditor'),
+            ]);
+            const vehiclePatchId =
+              duplicates[0].status === 'drafted' ? duplicates[0].patchId : '';
+            const vehicleRow = await recordedPatch(pool, vehiclePatchId);
+            for (const outcome of duplicates) {
+              assert.equal(outcome.status, 'drafted');
+              if (outcome.status !== 'drafted') return;
+              assert.equal(outcome.patchId, vehiclePatchId);
+              assert.equal(outcome.releaseId, vehicleRow.resulting_release_id);
+              assert.equal(
+                outcome.revisionId,
+                vehicleRow.resulting_revision_id,
+              );
+            }
+            assert.deepEqual(
+              duplicates
+                .map(
+                  (outcome) => outcome.status === 'drafted' && outcome.reused,
+                )
+                .sort(),
+              [false, true],
+            );
+            assert.equal(await patchCount(pool), 2);
+
             const stranger = await trustedContext({
               environmentId: randomUUID(),
               principalId: randomUUID(),

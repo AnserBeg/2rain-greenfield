@@ -995,7 +995,7 @@ async function tenantDescendantOfLineageTip(
  * permissions bind to the same full-release roles the first-party ones do).
  */
 export async function provisionLocalDemoReleaseAuthorization(
-  adminPool: pg.Pool,
+  adminPool: AdminQueryable,
   identities: ScopeIdentities,
   normalizedDefinitionBytes: Uint8Array,
 ): Promise<void> {
@@ -1420,7 +1420,7 @@ export async function ensureScope(
 }
 
 export async function provisionLocalDemoAuthorization(
-  pool: pg.Pool,
+  pool: AdminQueryable,
   identity: AuthenticatedIdentity,
   applicationBindings: readonly CurrentPolicyPermissionBinding[],
   roleKey = 'local-demo-full-release',
@@ -1431,7 +1431,9 @@ export async function provisionLocalDemoAuthorization(
   const membershipId = stableUuid(
     `${identity.tenantId}:${identity.environmentId}:${identity.principalId}:local-demo-membership`,
   );
-  const client = await pool.connect();
+  // A held client (the release-scope lock's) is used as is, never released.
+  const held = pool instanceof pg.Pool ? null : pool;
+  const client = held ?? (await (pool as pg.Pool).connect());
   try {
     await client.query('BEGIN');
     await client.query(
@@ -1485,7 +1487,7 @@ export async function provisionLocalDemoAuthorization(
     await client.query('ROLLBACK');
     throw error;
   } finally {
-    client.release();
+    if (!held) client.release();
   }
 }
 
@@ -2716,8 +2718,15 @@ export async function readPointer(
   });
 }
 
+/**
+ * An admin connection or pool. Holding `withReleaseScopeLock`, pass the held
+ * client: a second pool connection can wait forever behind a caller queued on
+ * the same lock (CUSTOMIZE review R1).
+ */
+export type AdminQueryable = pg.Pool | pg.PoolClient;
+
 export async function activateWithExactSwapTrigger(
-  adminPool: pg.Pool,
+  adminPool: AdminQueryable,
   activation: PostgresReleaseActivationService,
   systemContext: TrustedRequestContext,
   activationAttemptId: MintedUuid,
@@ -2731,9 +2740,9 @@ export async function activateWithExactSwapTrigger(
 }
 
 export async function assertExactSwapTriggerEnabled(
-  pool: pg.Pool,
+  pool: AdminQueryable,
 ): Promise<void> {
-  const result = await pool.query<{ enabled: string }>(
+  const result = await (pool as pg.PoolClient).query<{ enabled: string }>(
     `SELECT tgenabled AS enabled
        FROM pg_catalog.pg_trigger
       WHERE tgrelid = 'platform.active_release_pointers'::regclass
