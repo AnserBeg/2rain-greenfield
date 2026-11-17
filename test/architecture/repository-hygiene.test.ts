@@ -124,6 +124,7 @@ const suiteDefinitions = [
     expectedFiles: [
       'test/agent/catalog-discovery.test.ts',
       'test/agent/location-discovery.test.ts',
+      'test/agent/operations-agent.test.ts',
       'test/agent/party-discovery.test.ts',
     ],
     script: 'test:agent',
@@ -164,6 +165,7 @@ const suiteDefinitions = [
       'test/postgres/stock-serializer.test.ts',
     ],
     expectedFiles: [
+      'test/postgres/agent-tasks.test.ts',
       'test/postgres/catalog-extras.test.ts',
       'test/postgres/catalog-runtime.test.ts',
       'test/postgres/current-policy.test.ts',
