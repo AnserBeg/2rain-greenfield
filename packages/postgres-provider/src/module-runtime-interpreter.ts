@@ -77,7 +77,10 @@ import {
 } from '../../runtime/src/list-behavior/index.js';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 
-import { withTrustedRequestTransaction } from './request-context.js';
+import {
+  withTrustedRequestRead,
+  withTrustedRequestTransaction,
+} from './request-context.js';
 import { PostgresTrustService } from './trust/postgres-trust-service.js';
 import type { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
 
@@ -298,7 +301,7 @@ export class PostgresModuleRuntimeInterpreter
       SemanticAggregateQueryExecutionRequest | SemanticQueryExecutionRequest,
   ): Promise<SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope> {
     try {
-      return await withTrustedRequestTransaction(
+      return await withTrustedRequestRead(
         this.pool,
         request.context,
         async (client) => {

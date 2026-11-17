@@ -20,7 +20,7 @@ import {
   POLICY_DECISION_EVIDENCE_VERSION,
   type EvidenceMetadataInput,
 } from '../../platform-runtime/src/trust/contracts.js';
-import { withTrustedRequestTransaction } from './request-context.js';
+import { withTrustedRequestRead } from './request-context.js';
 import { PostgresTrustService } from './trust/postgres-trust-service.js';
 import type { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
 
@@ -116,7 +116,10 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
 
   async readCurrentVersion(subject: CurrentPolicySubject) {
     const context = trustedContextForCurrentPolicySubject(subject);
-    return withTrustedRequestTransaction(this.pool, context, async (client) => {
+    return withTrustedRequestRead(this.pool, context, async (client, held) => {
+      // Inside a page's read snapshot the epoch is the snapshot's own.
+      if (held !== null)
+        return Object.freeze({ policyVersion: policyVersion(held) });
       const result = await client.query<{ policy_version: string }>(
         `SELECT COALESCE(
            (SELECT policy_version::text
@@ -144,7 +147,7 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
       });
     }
 
-    return withTrustedRequestTransaction(this.pool, context, async (client) => {
+    return withTrustedRequestRead(this.pool, context, async (client) => {
       const result = await client.query<{
         grant_role_id: string | null;
         legal_entity_id: string | null;
@@ -210,7 +213,8 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
   async #readVersion(
     context: ReturnType<typeof trustedContextForCurrentPolicyDecision>,
   ): Promise<string> {
-    return withTrustedRequestTransaction(this.pool, context, async (client) => {
+    return withTrustedRequestRead(this.pool, context, async (client, held) => {
+      if (held !== null) return policyVersion(held);
       const result = await client.query<{ policy_version: string }>(
         `SELECT COALESCE(
            (SELECT policy_version::text

@@ -195,8 +195,19 @@ export async function renderSurfaceRuntimeWithData(
   requestUrl: string,
   gateways: SurfaceRuntimeGateways,
   feedback: SurfaceOperationFeedback | null = null,
+  /**
+   * SPEED-1: the page's read snapshot. Its reads are finished before the
+   * page is rendered, so the snapshot is never held across rendering.
+   */
+  reads: { readonly finishReads: () => Promise<void> } | null = null,
 ): Promise<SurfaceRuntimeResponse> {
   assertRequestRuntimeView(view);
+  const rendered = async (
+    render: () => SurfaceRuntimeResponse,
+  ): Promise<SurfaceRuntimeResponse> => {
+    await reads?.finishReads();
+    return render();
+  };
   const selection = selectSurface(view, requestUrl);
   if ('statusCode' in selection) return selection;
   let binding: CompiledSurfaceDataBinding;
@@ -274,23 +285,27 @@ export async function renderSurfaceRuntimeWithData(
         legalEntitySelection[0]!,
         gateways,
       );
-      if (editor)
-        return editor.slots
-          ? renderSelectedSurface(
-              view,
-              selection,
-              {
-                status: 'READY',
-                records: editor.record ? [editor.record] : [],
-                documentEditorSlots: editor.slots,
-              },
-              null,
-              binding.operations,
-              editor.statusCode,
-              legalEntitySelection,
-              workspaceContext,
+      if (editor) {
+        const slots = editor.slots;
+        return slots
+          ? await rendered(() =>
+              renderSelectedSurface(
+                view,
+                selection,
+                {
+                  status: 'READY',
+                  records: editor.record ? [editor.record] : [],
+                  documentEditorSlots: slots,
+                },
+                null,
+                binding.operations,
+                editor.statusCode,
+                legalEntitySelection,
+                workspaceContext,
+              ),
             )
           : editor;
+      }
     } catch (error) {
       return renderApplicationDiagnostic(422, {
         code: queryMessageCode(error),
@@ -320,32 +335,35 @@ export async function renderSurfaceRuntimeWithData(
     }
     const scopeParameterId =
       binding.query.legalEntityScope?.operand.parameterId;
-    return renderSelectedSurface(
+    const tiles = await launcherTiles(
       view,
-      selection,
-      {
-        launcher: {
-          scan,
-          scope:
-            scopeParameterId && company
-              ? { parameterId: scopeParameterId, value: company }
-              : null,
-          tiles: await launcherTiles(
-            view,
-            launcher,
-            selection.surfaces,
-            company,
-            gateways.queryGateway,
-            gateways.clock?.() ?? new Date(),
-          ),
+      launcher,
+      selection.surfaces,
+      company,
+      gateways.queryGateway,
+      gateways.clock?.() ?? new Date(),
+    );
+    return rendered(() =>
+      renderSelectedSurface(
+        view,
+        selection,
+        {
+          launcher: {
+            scan,
+            scope:
+              scopeParameterId && company
+                ? { parameterId: scopeParameterId, value: company }
+                : null,
+            tiles,
+          },
+          status: 'LAUNCHER_READY',
         },
-        status: 'LAUNCHER_READY',
-      },
-      feedback,
-      binding.operations,
-      scan ? 422 : 200,
-      legalEntitySelection,
-      workspaceContext,
+        feedback,
+        binding.operations,
+        scan ? 422 : 200,
+        legalEntitySelection,
+        workspaceContext,
+      ),
     );
   }
   if (binding.query.queryType === 'aggregate') {
@@ -426,19 +444,21 @@ export async function renderSurfaceRuntimeWithData(
       selection.selected.surfaceRole === 'form'
         ? { status: 'EMPTY' }
         : { code: 'QUERY_NOT_FOUND', status: 'DIAGNOSTIC' };
-    return renderSelectedSurface(
-      view,
-      selection,
-      state,
-      feedback,
-      binding.operations,
-      200,
-      legalEntitySelection,
-      workspaceContext,
-      queryParameterValues,
-      binding.relationInputs,
-      relationPickers,
-      formReferences,
+    return rendered(() =>
+      renderSelectedSurface(
+        view,
+        selection,
+        state,
+        feedback,
+        binding.operations,
+        200,
+        legalEntitySelection,
+        workspaceContext,
+        queryParameterValues,
+        binding.relationInputs,
+        relationPickers,
+        formReferences,
+      ),
     );
   }
 
@@ -525,19 +545,21 @@ export async function renderSurfaceRuntimeWithData(
       statusCode = 422;
     }
   }
-  return renderSelectedSurface(
-    view,
-    selection,
-    data,
-    feedback,
-    binding.operations,
-    statusCode,
-    legalEntitySelection,
-    workspaceContext,
-    queryParameterValues,
-    binding.relationInputs,
-    relationPickers,
-    formReferences,
+  return rendered(() =>
+    renderSelectedSurface(
+      view,
+      selection,
+      data,
+      feedback,
+      binding.operations,
+      statusCode,
+      legalEntitySelection,
+      workspaceContext,
+      queryParameterValues,
+      binding.relationInputs,
+      relationPickers,
+      formReferences,
+    ),
   );
 }
 

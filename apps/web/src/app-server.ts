@@ -40,6 +40,15 @@ export interface RequestWorkProbe {
 }
 
 export interface SurfaceRuntimeServerOptions {
+  /**
+   * SPEED-1: a page read (a GET) runs all its reads in one read snapshot,
+   * ended by `finishReads` or when the page is assembled; a policy change
+   * while it was held discards the page. Absent, each read is a transaction
+   * of its own.
+   */
+  readonly readSnapshot?: <T>(
+    work: (finishReads: () => Promise<void>) => Promise<T>,
+  ) => Promise<T>;
   readonly requestWork?: RequestWorkProbe;
 }
 
@@ -75,6 +84,7 @@ async function handleRequest(
   response: ServerResponse,
   demoActors?: readonly { key: 'buyer' | 'manager'; label: string }[] | null,
   customize?: () => Promise<CustomizeScreenService>,
+  readSnapshot?: SurfaceRuntimeServerOptions['readSnapshot'],
 ): Promise<void> {
   response.setHeader('cache-control', 'no-store');
   response.setHeader(
@@ -217,11 +227,21 @@ async function handleRequest(
       return;
     }
     const result = gateways
-      ? await entry.run({ headers: request.headers }, (view) =>
-          submission
-            ? submitSurfaceRuntimeIntent(view, url.href, submission, gateways)
-            : renderSurfaceRuntimeWithData(view, url.href, gateways),
-        )
+      ? submission
+        ? await entry.run({ headers: request.headers }, (view) =>
+            submitSurfaceRuntimeIntent(view, url.href, submission, gateways),
+          )
+        : readSnapshot
+          ? await readSnapshot((finishReads) =>
+              entry.run({ headers: request.headers }, (view) =>
+                renderSurfaceRuntimeWithData(view, url.href, gateways, null, {
+                  finishReads,
+                }),
+              ),
+            )
+          : await entry.run({ headers: request.headers }, (view) =>
+              renderSurfaceRuntimeWithData(view, url.href, gateways),
+            )
       : await entry.run({ headers: request.headers }, (view) =>
           renderSurfaceRuntime(view, url.href),
         );

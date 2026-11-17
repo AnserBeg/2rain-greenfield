@@ -88,7 +88,10 @@ import {
   releaseVerificationBinding,
 } from './release-verification-service.js';
 import { PostgresRequestRuntimeViewService } from './request-runtime-view-service.js';
-import { withTrustedRequestTransaction } from './request-context.js';
+import {
+  withReadSnapshot,
+  withTrustedRequestTransaction,
+} from './request-context.js';
 import {
   CURRENT_POLICY_RUNTIME_BINDINGS,
   PostgresCurrentPolicyGateway,
@@ -187,6 +190,13 @@ export interface ComposedApplicationRuntime {
   readonly queryGateway: SemanticQueryGateway;
   readonly releaseRoot: string;
   readonly triggerEnabledDuringActivation: true;
+  /**
+   * SPEED-1: run one page's reads in one read-only snapshot on the runtime
+   * pool (`withReadSnapshot`); writes never join it.
+   */
+  readSnapshot<T>(
+    work: (finishReads: () => Promise<void>) => Promise<T>,
+  ): Promise<T>;
   close(): Promise<void>;
 }
 
@@ -847,6 +857,9 @@ export async function createComposedApplicationRuntime(
       operationGateway,
       operationMediation,
       queryGateway,
+      readSnapshot: <T>(
+        work: (finishReads: () => Promise<void>) => Promise<T>,
+      ) => withReadSnapshot(runtimePool!, work),
       releaseRoot: serving.releaseRoot,
       triggerEnabledDuringActivation: true as const,
     });
