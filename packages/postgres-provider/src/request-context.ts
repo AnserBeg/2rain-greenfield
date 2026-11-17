@@ -245,7 +245,7 @@ class ReadSnapshot {
         throw new ReadSnapshotIntegrityError(
           'a nested read must use the open snapshot, its identity and its role',
         );
-      return run(this.#client, this.#held);
+      return run(this.#roleBound(this.#client, role), this.#held);
     }
     return this.#exclusive(async () => {
       if (this.#finished)
@@ -257,14 +257,36 @@ class ReadSnapshot {
       if (!this.#client) await this.#open(context);
       const client = this.#client!;
       try {
-        await this.#switchRole(client, role);
-        return await joinedReads.run(this, () => run(client, this.#held));
+        return await joinedReads.run(this, () =>
+          run(this.#roleBound(client, role), this.#held),
+        );
       } catch (error) {
         // A failed read leaves the shared transaction unusable, and may have
         // left the module role assumed: end it; a later read opens anew.
         await this.#discard();
         throw error;
       }
+    });
+  }
+
+  /**
+   * The snapshot's client as a read sees it: its role is switched only when
+   * the read actually sends a statement, so a read answered from the memo
+   * costs nothing.
+   */
+  #roleBound(client: PoolClient, role: SnapshotRoleSwitch | null): PoolClient {
+    if (this.#role === role) return client;
+    const switchRole = () => this.#switchRole(client, role);
+    return new Proxy(client, {
+      get(target, property) {
+        if (property === 'query')
+          return async (...args: Parameters<PoolClient['query']>) => {
+            await switchRole();
+            return (target.query as (...a: unknown[]) => unknown)(...args);
+          };
+        const value: unknown = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
     });
   }
 
