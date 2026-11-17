@@ -4,13 +4,11 @@ Status: slice 1 integrated (`39463ffb`, PR #57, with audit fixes A1/A2); slices 
 Charter: [AGENT-3-charter.md](AGENT-3-charter.md) from `main` `f1abcb3a`. Branch `packet/AGENT-3`, base `5c25acdb`.
 
 ## Pre-registered measures (2026-11-17, before any real-model run of this packet)
-
 Discovery calls = every `erp_discover` call, by tool and mode; baseline (16:52) median **7.5**, slice-1 target ≤ 3.75. Seconds = the
 run on a monotonic clock, arrangement excluded; baseline median **34.8** (from JSONL stamps). Pass rate must not fall below 9 of 10. The
 development set's rules (tasks 11-34) are registered in `test/agent/dev-tasks.ts`; write tasks run 3 attempts.
 
 ## Claims
-
 1. The session starts with a business map generated from the pinned release, cached unfiltered by release root (a customized release
    has its own) and filtered per person through the routed eligibility previews on every call; filtered text is never shared.
 2. A short name resolves to exactly one id of the pinned contract or to none (`matchId`).
@@ -28,13 +26,11 @@ development set's rules (tasks 11-34) are registered in `test/agent/dev-tasks.ts
    `draftFromRequest` and shows the plain diff, with no approve or activate path. Five tools; no migration; no gateway change.
 
 ## Decisions
-
 - Map: local names, fields without their type's prefix, `!` = needs confirmation, bound 60,000 characters (about 33,600); explicit
   cache breakpoint on prompt + map, per-turn context in the user turn. Panel `assistant-panel.ts` (CSP-hash-pinned, text nodes only)
   + `assistant-endpoint.ts` at `/?assistant=ask|decide|stop|undo`; Customize screen's lazily opened service shared for the handoff.
 - Seam exception line in `ux-grammar` and the seam allow-list, as the Customize screen's. Slices 2-6 merge as one: shared files.
 - Pins tripped: `meta-sales.spec.ts` counts the page's own scripts, so the panel's is marked `data-assistant-script` and excluded.
-- Audit A1/A2 (orchestrator, 2026-11-17) went to main with slice 1, before act-then-undo.
 
 ## Results (each dated result file stands as registered)
 
@@ -52,12 +48,10 @@ role and said so; the rule wanted no write). Slice 4's run found an over-refusal
 `fromStep`; both fixed after it. Not in the dev run: A1/A2, the contracts fix.
 
 ## Gates
-
 Slice 1: branch CI 44166005372, main CI 44171233909 green. Local: format, typecheck, lint, unit 192/192, agent 32, and the PG agent
 tests run once locally (they found masters are not company-scoped, an archive's read-back needs archived rows, and a full volume).
 
 ## Test it yourself
-
 1. `node --import tsx --test test/agent/business-map.test.ts test/agent/assistant-endpoint.test.ts` passes.
 2. `NORTH_STAR_AGENT_KEY_FILE=/mnt/c/Users/rvham/rent_soft/.env corepack pnpm dev`, open the URL, click **Assistant**. Ask "How many
    Field notebooks are on hand at Calgary warehouse?": a step label and timer, then the answer with a link.
@@ -65,33 +59,20 @@ tests run once locally (they found masters are not company-scoped, an archive's 
    Ask to ship an order: a plan card waits for **Yes, do it**. "Add a serial number field to items": a plain diff, nothing live.
 
 ## Filed
-
 - Durable conversations and the §9.4 run record (charter: filed). Model routing: measure first; the dev set's numbers are above.
 - The agent asks for `source_id`/`actor_id` on a manual adjustment (task 22): the screens have no adjustment recipe to copy.
 
 ```record-claim
 {
-  "schemaVersion": "northstar.record-claim/v1",
-  "packet": "AGENT-3",
-  "base": "5c25acdb",
-  "head": "89184409",
+  "schemaVersion": "northstar.record-claim/v1", "packet": "AGENT-3",
+  "base": "72e7ac6a10d71b52daa9817929c4bbf13ee80a7e", "head": "8918440985c08fc080c30d3048133e3e29d25579",
   "changedPaths": [
-    ".agents/skills/ux-grammar/SKILL.md", "apps/api/src/agent-cli.ts", "apps/api/src/assistant-endpoint.ts", "apps/api/src/composition-root.ts",
-    "apps/web/src/app-server.ts", "apps/web/src/assistant-panel.ts", "apps/web/test/browser/assistant-panel.composed-application.spec.ts",
-    "apps/web/test/browser/meta-sales.spec.ts", "docs/execution/packets/AGENT-3.md", "package.json", "packages/dev-tooling/src/surface-runtime-seam.ts",
-    "packages/operations-agent/src/anthropic-model.ts", "packages/operations-agent/src/business-map.ts", "packages/operations-agent/src/catalog.ts",
-    "packages/operations-agent/src/index.ts", "packages/operations-agent/src/loop.ts", "packages/operations-agent/src/model.ts",
-    "packages/operations-agent/src/risk.ts", "packages/operations-agent/src/session.ts", "packages/operations-agent/src/tools.ts",
-    "test/agent/agent-world.ts", "test/agent/assistant-endpoint.test.ts", "test/agent/business-map.test.ts", "test/agent/compiled-view.ts",
-    "test/agent/dev-tasks.ts", "test/agent/eval-harness.ts", "test/architecture/repository-hygiene.test.ts", "test/helpers/reachability-producers.ts",
-    "test/postgres/agent-dev-tasks.test.ts", "test/postgres/agent-tasks.test.ts"
+    ".agents/skills/ux-grammar/SKILL.md", "apps/api/src/agent-cli.ts", "apps/api/src/assistant-endpoint.ts", "apps/api/src/composition-root.ts", "apps/web/src/app-server.ts", "apps/web/src/assistant-panel.ts",
+    "apps/web/test/browser/assistant-panel.composed-application.spec.ts", "apps/web/test/browser/meta-sales.spec.ts", "docs/execution/packets/AGENT-3.md", "package.json", "packages/dev-tooling/src/surface-runtime-seam.ts",
+    "packages/operations-agent/src/anthropic-model.ts", "packages/operations-agent/src/index.ts", "packages/operations-agent/src/loop.ts", "packages/operations-agent/src/model.ts", "packages/operations-agent/src/risk.ts",
+    "packages/operations-agent/src/session.ts", "packages/operations-agent/src/tools.ts", "test/agent/agent-world.ts", "test/agent/assistant-endpoint.test.ts", "test/agent/business-map.test.ts", "test/agent/dev-tasks.ts",
+    "test/agent/eval-harness.ts", "test/architecture/repository-hygiene.test.ts", "test/helpers/reachability-producers.ts", "test/postgres/agent-dev-tasks.test.ts", "test/postgres/agent-tasks.test.ts"
   ],
-  "symbols": [
-    {"path": "packages/operations-agent/src/business-map.ts", "name": "businessMapStructure"},
-    {"path": "packages/operations-agent/src/risk.ts", "name": "operationRisk"},
-    {"path": "packages/operations-agent/src/session.ts", "name": "OperationsAgentSession"},
-    {"path": "apps/api/src/assistant-endpoint.ts", "name": "createAssistantEndpoint"},
-    {"path": "apps/web/src/assistant-panel.ts", "name": "withAssistantPanel"}
-  ]
+  "symbols": [{"path": "packages/operations-agent/src/risk.ts", "name": "operationRisk"}, {"path": "packages/operations-agent/src/session.ts", "name": "OperationsAgentSession"}, {"path": "apps/api/src/assistant-endpoint.ts", "name": "createAssistantEndpoint"}, {"path": "apps/web/src/assistant-panel.ts", "name": "withAssistantPanel"}]
 }
 ```
