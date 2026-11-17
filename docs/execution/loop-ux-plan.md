@@ -37,7 +37,9 @@ In the current renderer. The seven DEFINITION and three RENDERER rows of the evi
 - no raw codes or developer sentences; an error summary that links to the field; one next-action button; no clipped tables.
 
 Scorecard target: the loop completes end to end, invoice and payment included; zero raw codes; zero invented values ("N/A");
-create-and-place a PO in ≤ 8 clicks (today ~14); the sales side in ≤ 16 (today ~30).
+create-and-place a PO in ≤ 8 clicks (today 11); the sales side, create to shipped, in ≤ 11 clicks (today 18 on a priced order).
+Restated 2026-11-17 from the measured [LOOP-1 baseline](evidence/2026-11-17-loop-scorecard.md): the audit's ~14 and ~30 were
+hand counts on an unpriced order; the scorecard's are a priced order's, counted by the journey.
 
 ### Phase 2 — the look (owner's choice; mockups start now, in parallel)
 Two visual directions for five screens on seed data: the home page, a purchase order, the receive dialog, stock by item, and a sales
@@ -56,6 +58,14 @@ A two-day spike on PO-plus-receive measures in-place fragments against the score
 renderer over the same compiled surfaces (the audit's option b) is taken only if the spike shows fragments cannot reach the target.
 
 Scorecard target: every posting in ≤ 2 page loads and ≤ 4 clicks; receive in full in 2 clicks.
+
+### Speed (owner, 2026-11-17: "super super fast")
+Measured: a purchase order page took 5.3 s, 4.85 s of it Node CPU, with 1,204 statements in 148 transactions. Two critical reviews
+(Fable 5.2 with a profile; Codex gpt-6.2-astra) agree: no Rust, no edge hosting of pages; the time is repeated work. LOOP-1's "memo"
+slice removes the catalog re-parse (~3-4 s); [SPEED-1](packets/SPEED-1-charter.md) brings a page to ≤ 3 transactions and ≤ 40
+statements under a CI budget, without changing a security guarantee. The look ([LOOK-1](packets/LOOK-1-charter.md), owner's choice:
+Ledger plus the next-step card, work queues and progress bars; [spec](../design/ledger-spec.md), [mockup](../design/ledger-final.html))
+follows LOOP-1 and uses SPEED-1's batched loader for every count.
 
 ### Then, in this order (the audit's architecture findings)
 1. **Customized upgrade, narrowed.** A field and a layout patch survive a first-party base change without `dev:reset`. Every

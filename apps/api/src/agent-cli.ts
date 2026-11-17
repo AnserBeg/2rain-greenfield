@@ -11,6 +11,7 @@ import { createInterface } from 'node:readline/promises';
 
 import {
   anthropicModel,
+  agentPreamble,
   DEFAULT_ANTHROPIC_MODEL,
   loadModelKey,
   OperationsAgentSession,
@@ -104,6 +105,7 @@ try {
     model,
     session,
     request,
+    preamble: await agentPreamble(session),
     meter: new SpendMeter(null, Number.POSITIVE_INFINITY),
     onEvent: (event) => {
       if (event.kind === 'tool') out(`  · ${event.name}`);

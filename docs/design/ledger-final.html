@@ -1,0 +1,1234 @@
+<title>Ledger final</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500&display=swap">
+<style>
+/* Ledger final: slim sidebar with work queues, hairline-ruled sheets on pale paper, one deep teal accent; status colours are their own family */
+:root{
+  --paper:#F5F5F2; --side:#EDEDE9; --sheet:#FFFFFF; --sunk:#F3F3EF; --hover:#E8E8E3;
+  --ink:#17191C; --ink-2:#40454B; --muted:#6B7077; --faint:#A1A5AA;
+  --rule:#E3E3DE; --rule-2:#CDCDC7;
+  --accent:#0E6670; --accent-hover:#0A525A; --on-accent:#FFFFFF; --accent-soft:#E1EEF0; --accent-text:#0C5E67;
+  --success:#2E7A2F; --success-soft:#E4F2E1;
+  --attention:#8A5300; --attention-soft:#F9EED5;
+  --blocked:#A3261B; --blocked-soft:#FAE8E5;
+  --scrim:rgba(23,25,28,.38);
+  --shadow-dlg:0 20px 50px rgba(23,25,28,.22),0 2px 8px rgba(23,25,28,.08);
+  --shadow-bar:0 -6px 18px rgba(23,25,28,.06);
+  --chrome:#1E2023; --chrome-ink:#ECECE8; --chrome-muted:#9EA2A7; --chrome-on:#F5F5F2; --chrome-on-ink:#17191C;
+  --f-ui:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --f-doc:"IBM Plex Serif",Georgia,"Times New Roman",serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  /* density: compact (default) */
+  --row-y:8px; --ctl-h:30px; --nav-h:30px; --gap:18px; --pad-x:14px; --sheet-y:26px; --sheet-x:30px;
+}
+:root[data-density="comfortable"]{
+  --row-y:12px; --ctl-h:36px; --nav-h:34px; --gap:26px; --pad-x:18px; --sheet-y:34px; --sheet-x:40px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#131416; --side:#17181B; --sheet:#1B1D20; --sunk:#202226; --hover:#272A2E;
+    --ink:#E8E8E4; --ink-2:#C3C5C8; --muted:#92969C; --faint:#666A70;
+    --rule:#2B2E32; --rule-2:#3B3F44;
+    --accent:#4FB0BB; --accent-hover:#68C0CA; --on-accent:#071A1D; --accent-soft:#12303A; --accent-text:#80CCD5;
+    --success:#86CF84; --success-soft:#1A3119;
+    --attention:#E2B25E; --attention-soft:#33280F;
+    --blocked:#F1907F; --blocked-soft:#3A1D19;
+    --scrim:rgba(0,0,0,.6);
+    --shadow-dlg:0 20px 50px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.4);
+    --shadow-bar:0 -6px 18px rgba(0,0,0,.35);
+    --chrome:#0B0C0D; --chrome-ink:#ECECE8; --chrome-muted:#8E9298; --chrome-on:#2A2D31; --chrome-on-ink:#F5F5F2;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+    --paper:#131416; --side:#17181B; --sheet:#1B1D20; --sunk:#202226; --hover:#272A2E;
+    --ink:#E8E8E4; --ink-2:#C3C5C8; --muted:#92969C; --faint:#666A70;
+    --rule:#2B2E32; --rule-2:#3B3F44;
+    --accent:#4FB0BB; --accent-hover:#68C0CA; --on-accent:#071A1D; --accent-soft:#12303A; --accent-text:#80CCD5;
+    --success:#86CF84; --success-soft:#1A3119;
+    --attention:#E2B25E; --attention-soft:#33280F;
+    --blocked:#F1907F; --blocked-soft:#3A1D19;
+    --scrim:rgba(0,0,0,.6);
+    --shadow-dlg:0 20px 50px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.4);
+    --shadow-bar:0 -6px 18px rgba(0,0,0,.35);
+    --chrome:#0B0C0D; --chrome-ink:#ECECE8; --chrome-muted:#8E9298; --chrome-on:#2A2D31; --chrome-on-ink:#F5F5F2;
+    color-scheme:dark;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none!important}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font:400 13px/1.45 var(--f-ui);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+body.locked{overflow:hidden}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:70;background:var(--chrome)}
+h1,h2,h3,p,dl,dd,ol,ul{margin:0}
+ol,ul{padding:0;list-style:none}
+table{font:inherit;color:inherit;border-collapse:collapse;width:100%}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:var(--accent-text);text-decoration:none;cursor:pointer}
+a:hover{text-decoration:underline;text-underline-offset:2px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.ic{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.mono{font-family:var(--f-mono);font-size:.92em;letter-spacing:-.01em}
+.muted{color:var(--muted)}
+.num{text-align:right}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* ---------- mockup chrome (not part of the product) ---------- */
+.mock{position:sticky;top:env(safe-area-inset-top,0px);z-index:60;background:var(--chrome);color:var(--chrome-ink)}
+.mock-in{display:flex;align-items:center;gap:14px;height:40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.mock-name{font-size:12px;color:var(--chrome-muted);white-space:nowrap}
+.mock-name b{color:var(--chrome-ink);font-weight:600}
+.mock-tabs{display:flex;gap:2px;min-width:0;flex:1 1 auto;overflow-x:auto;scrollbar-width:none}
+.mock-tabs::-webkit-scrollbar{display:none}
+.mock-tab{flex:none;height:26px;padding:0 10px;border:0;border-radius:4px;background:transparent;color:var(--chrome-muted);font-size:12px;font-weight:500}
+.mock-tab:hover{color:var(--chrome-ink)}
+.mock-tab[aria-selected="true"]{background:var(--chrome-on);color:var(--chrome-on-ink)}
+.mock-tab .s{display:none}
+.mock-tog{flex:none;height:26px;padding:0 10px;border:1px solid var(--chrome-muted);border-radius:4px;background:transparent;color:var(--chrome-ink);font-size:11px}
+
+/* ---------- app shell ---------- */
+.app{display:grid;grid-template-columns:212px minmax(0,1fr);min-height:calc(100vh - 40px)}
+.side{position:sticky;top:calc(40px + env(safe-area-inset-top,0px));height:calc(100vh - 40px - env(safe-area-inset-top,0px));overflow-y:auto;display:flex;flex-direction:column;gap:8px;background:var(--side);border-right:1px solid var(--rule);padding:12px 10px 12px max(10px,env(safe-area-inset-left,0px))}
+.org{display:flex;align-items:center;gap:9px;padding:6px 6px 10px;border-bottom:1px solid var(--rule)}
+.mark{display:grid;place-items:center;width:26px;height:26px;border-radius:5px;background:var(--ink);color:var(--paper);font:600 12px/1 var(--f-ui);letter-spacing:-.02em;flex:none}
+.org-t{display:grid;min-width:0;line-height:1.25}
+.org-t b{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.org-t small{font-size:11px;color:var(--muted)}
+.org .ic{margin-left:auto;color:var(--muted);width:14px;height:14px}
+.nav{display:grid;gap:1px}
+.nav-h{font-size:11px;font-weight:500;color:var(--muted);padding:12px 8px 4px}
+.nav a{display:flex;align-items:center;gap:9px;height:var(--nav-h);padding:0 8px;border-radius:4px;color:var(--ink-2);font-size:13px;text-decoration:none;border:1px solid transparent}
+.nav a .ic{color:var(--muted)}
+.nav a:hover{background:var(--hover)}
+.nav a[aria-current="page"]{background:var(--sheet);border-color:var(--rule);color:var(--ink);font-weight:500}
+.nav a[aria-current="page"] .ic{color:var(--accent)}
+.nav .n{margin-left:auto;font-size:11px;color:var(--muted)}
+.nav .q{margin-left:auto;min-width:22px;height:18px;padding:0 6px;border-radius:9px;background:var(--sheet);border:1px solid var(--rule-2);font-size:11px;font-weight:600;color:var(--ink);display:grid;place-items:center}
+.queues{padding-bottom:6px;border-bottom:1px solid var(--rule);margin-bottom:2px}
+.side-foot{margin-top:auto;border-top:1px solid var(--rule);padding-top:10px;display:flex;align-items:center;gap:9px;padding-left:6px}
+.av{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--accent-soft);color:var(--accent-text);font-size:11px;font-weight:600;flex:none}
+.me{display:grid;line-height:1.25;font-size:12px}
+.me small{color:var(--muted);font-size:11px}
+.side-foot .ib{margin-left:auto}
+
+.main{min-width:0;display:flex;flex-direction:column}
+.top{display:flex;align-items:center;gap:12px;height:48px;padding-left:28px;padding-right:28px;border-bottom:1px solid var(--rule);background:var(--paper)}
+.top .m-only{display:none}
+.gsearch{display:flex;align-items:center;gap:8px;width:340px;max-width:100%;height:var(--ctl-h);padding:0 8px 0 10px;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);color:var(--muted)}
+.gsearch input{border:0;outline:0;background:transparent;min-width:0;flex:1;font-size:13px;color:var(--ink)}
+.gsearch input::placeholder{color:var(--muted)}
+kbd{font:500 11px/1 var(--f-mono);padding:3px 5px;border:1px solid var(--rule-2);border-radius:3px;color:var(--muted);background:var(--sunk)}
+.top-r{margin-left:auto;display:flex;align-items:center;gap:8px}
+.ib{display:inline-grid;place-items:center;width:30px;height:30px;border:1px solid transparent;border-radius:4px;background:transparent;color:var(--ink-2)}
+.ib:hover{background:var(--hover)}
+
+.page{width:100%;max-width:1240px;padding:var(--gap) 28px 56px}
+.crumb{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-bottom:10px}
+.crumb a{color:var(--muted)}
+.crumb .sep{color:var(--faint)}
+.ph{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+.ph h1{font-size:20px;line-height:1.2;font-weight:600;letter-spacing:-.01em;text-wrap:balance}
+.sub{color:var(--muted);font-size:13px;margin-top:3px}
+.acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:var(--ctl-h);padding:0 12px;border-radius:4px;border:1px solid var(--rule-2);background:var(--sheet);color:var(--ink);font-size:13px;font-weight:500;white-space:nowrap}
+.btn:hover{background:var(--sunk)}
+.btn .ic{width:15px;height:15px}
+.btn-p{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn-p:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.btn-sm{height:calc(var(--ctl-h) - 6px);padding:0 9px;font-size:12px}
+.btn-ghost{background:transparent;border-color:transparent}
+.btn-ghost:hover{background:var(--hover)}
+
+/* status badges: one shape per kind, so they read apart without colour */
+.badge{display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:500;line-height:1;white-space:nowrap;border:1px solid transparent}
+.badge::before{content:"";flex:none;width:7px;height:7px}
+.b-neutral{background:transparent;border-color:var(--rule-2);color:var(--muted)}
+.b-neutral::before{border:1.5px solid currentColor;border-radius:50%}
+.b-progress{background:var(--accent-soft);color:var(--accent-text)}
+.b-progress::before{border:1.5px solid currentColor;border-radius:50%;background:linear-gradient(90deg,currentColor 50%,transparent 50%)}
+.b-success{background:var(--success-soft);color:var(--success)}
+.b-success::before{width:4px;height:8px;border:solid currentColor;border-width:0 1.7px 1.7px 0;transform:translate(1px,-1px) rotate(45deg);margin-right:1px}
+.b-attention{background:var(--attention-soft);color:var(--attention)}
+.b-attention::before{border-radius:50%;background:currentColor}
+.b-blocked{background:var(--blocked-soft);color:var(--blocked)}
+.b-blocked::before{border-radius:1.5px;background:currentColor}
+
+/* panels and tables */
+.panel{background:var(--sheet);border:1px solid var(--rule);border-radius:4px;min-width:0}
+.panel-h{display:flex;align-items:baseline;gap:8px;padding:calc(var(--row-y) + 3px) var(--pad-x) calc(var(--row-y) + 2px);border-bottom:1px solid var(--rule)}
+.panel-h h2{font-size:13px;font-weight:600}
+.panel-h .cnt{font-size:12px;color:var(--muted)}
+.panel-h .more{margin-left:auto;font-size:12px}
+.tw{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.t{font-size:12px}
+.t th{font-size:11px;font-weight:500;color:var(--muted);text-align:left;padding:calc(var(--row-y) - 1px) 12px;border-bottom:1px solid var(--rule);background:var(--sunk);white-space:nowrap}
+.t td{padding:var(--row-y) 12px;border-bottom:1px solid var(--rule);white-space:nowrap;vertical-align:middle}
+.t tbody tr:last-child td{border-bottom:0}
+.t th.num,.t td.num{text-align:right}
+.t tbody tr:hover td{background:var(--sunk)}
+.t .item{font-weight:500;color:var(--ink)}
+.t .sku{font-family:var(--f-mono);font-size:11px;color:var(--muted)}
+.t a.mono{font-size:11.5px}
+.t tfoot td{border-top:1px solid var(--rule-2);border-bottom:0;font-weight:600;background:var(--sunk)}
+.zero{color:var(--faint)}
+
+/* ---------- Home ---------- */
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:4px;overflow:hidden;margin-bottom:var(--gap)}
+.tile{display:grid;gap:4px;align-content:start;text-align:left;padding:calc(var(--row-y) + 5px) 16px calc(var(--row-y) + 6px);border:0;background:var(--sheet);color:var(--ink);position:relative}
+button.tile:hover{background:var(--sunk)}
+button.tile:hover .go{opacity:1}
+.tl{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500;color:var(--ink-2)}
+.tl .ic{color:var(--muted);width:15px;height:15px}
+.tile.low .tl .ic{color:var(--attention)}
+.tn{font-size:28px;line-height:1.1;font-weight:500;letter-spacing:-.02em}
+.ts{font-size:12px;color:var(--muted)}
+.go{position:absolute;right:12px;top:13px;opacity:0;color:var(--muted);transition:opacity .12s}
+.go .ic{width:14px;height:14px}
+.cols{display:grid;grid-template-columns:minmax(0,1.75fr) minmax(0,1fr);gap:var(--gap);align-items:start}
+.stack{display:grid;gap:var(--gap);min-width:0}
+.feed{padding:4px 0 8px}
+.feed-h{font-size:11px;font-weight:500;color:var(--muted);padding:10px var(--pad-x) 4px}
+.feed li{display:grid;grid-template-columns:42px minmax(0,1fr);gap:10px;padding:calc(var(--row-y) - 2px) var(--pad-x);font-size:12px;line-height:1.45}
+.feed time{color:var(--muted)}
+.feed .mono{font-size:11.5px}
+.feed .d{color:var(--muted)}
+
+/* ---------- record pages ---------- */
+.doc-h{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.eyebrow{font-size:11px;font-weight:500;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+.title-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:3px}
+.doc-no{font:500 28px/1.1 var(--f-doc);letter-spacing:-.01em}
+.doc-h + .doc-grid,.doc-h + .sheet{margin-top:var(--gap)}
+
+/* next step: stepper + one templated sentence + one primary action */
+.nextstep{background:var(--sheet);border:1px solid var(--rule);border-radius:4px;margin:16px 0 var(--gap)}
+.steps{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:6px;padding:12px 16px 12px;border-bottom:1px solid var(--rule)}
+.steps li{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:8px;align-items:center;border-top:2px solid var(--rule-2);padding-top:9px}
+.steps .dot{grid-row:span 2;display:grid;place-items:center;width:18px;height:18px;border-radius:50%;border:1.5px solid var(--rule-2);background:var(--sheet)}
+.steps .dot .ic{width:11px;height:11px;stroke-width:2.4}
+.steps .sl{font-size:12px;font-weight:500;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.steps .sd{font-size:11px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.steps .done{border-top-color:var(--ink-2)}
+.steps .done .dot{background:var(--ink-2);border-color:var(--ink-2);color:var(--sheet)}
+.steps .done .sl{color:var(--ink-2)}
+.steps .done .sd{color:var(--muted)}
+.steps .cur{border-top-color:var(--accent)}
+.steps .cur .dot{border:5px solid var(--accent);background:var(--sheet)}
+.steps .cur .sl{color:var(--ink);font-weight:600}
+.steps .cur .sd{color:var(--accent-text)}
+.steps-m{display:none}
+.ns-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 16px 13px}
+.ns-text{min-width:0;display:grid;gap:2px}
+.ns-k{font-size:11px;font-weight:600;color:var(--accent-text);letter-spacing:.06em;text-transform:uppercase}
+.ns-s{font-size:14px;font-weight:500;color:var(--ink)}
+.ns-s b{font-weight:600}
+.ns-d{font-size:12px;color:var(--muted)}
+
+.doc-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:var(--gap);align-items:start}
+.sheet{background:var(--sheet);border:1px solid var(--rule);border-radius:4px;padding:var(--sheet-y) var(--sheet-x) calc(var(--sheet-y) + 2px);min-width:0}
+.parties{display:grid;grid-template-columns:1fr 1fr;gap:24px;padding-bottom:18px;border-bottom:1px solid var(--rule)}
+.lbl{font-size:11px;font-weight:500;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:5px}
+.parties address{font-style:normal;line-height:1.55;color:var(--ink-2)}
+.parties address b{color:var(--ink);font-weight:600}
+.facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:calc(var(--row-y) + 6px) 20px;padding:calc(var(--row-y) + 8px) 0 calc(var(--row-y) + 12px)}
+.facts dt{font-size:11px;color:var(--muted);margin-bottom:2px}
+.facts dd{font-size:13px;color:var(--ink);overflow-wrap:anywhere}
+.facts dd .muted{font-size:12px}
+.facts.solo{border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);margin-top:6px}
+.meta{font-size:12px;color:var(--muted);padding-top:12px}
+.lines{border-top:1px solid var(--ink);margin-top:2px}
+.lines th{background:transparent;border-bottom:1px solid var(--rule-2);padding:calc(var(--row-y) - 1px) 10px}
+.lines td{padding:calc(var(--row-y) + 2px) 10px;border-bottom:1px solid var(--rule)}
+.lines th:first-child,.lines td:first-child{padding-left:0;width:26px;color:var(--muted)}
+.lines th:last-child,.lines td:last-child{padding-right:0}
+.lines tbody tr:last-child td{border-bottom:1px solid var(--rule-2)}
+.lines tbody tr:hover td{background:transparent}
+.lines .item{display:block}
+.lines .sku{display:block;margin-top:1px}
+.prog{display:inline-grid;grid-template-columns:44px 62px;align-items:center;gap:10px}
+.pbar{height:3px;border-radius:2px;background:var(--rule);overflow:hidden}
+.pbar i{display:block;height:100%;background:var(--accent)}
+.pbar.full i{background:var(--success)}
+.prog span{text-align:right}
+.prog b{font-weight:500;color:var(--ink)}
+.prog .of{color:var(--muted)}
+.open-n{font-weight:600;color:var(--accent-text)}
+.sum{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;padding-top:12px;flex-wrap:wrap}
+.sum-note{font-size:12px;color:var(--muted);line-height:1.6;padding-top:3px}
+.sum-note b{color:var(--ink-2);font-weight:500}
+.totals{display:grid;grid-template-columns:auto 110px;column-gap:0;row-gap:5px;min-width:260px;font-size:13px}
+.totals dt{padding-right:24px;color:var(--muted)}
+.totals dd{text-align:right}
+.totals .tt{font-weight:600;color:var(--ink);font-size:14px;padding-top:7px;border-top:1px solid var(--rule-2);margin-top:3px}
+.totals dd.tt{border-bottom:3px double var(--ink);padding-bottom:2px}
+.cur-code{font-size:11px;font-weight:500;color:var(--muted);margin-left:4px}
+.note{display:flex;gap:10px;margin-top:22px;padding:10px 12px;border-radius:4px;background:var(--sunk);font-size:12px;color:var(--ink-2)}
+.note .ic{color:var(--muted);margin-top:1px}
+.note b{font-weight:600;color:var(--ink)}
+
+.rail{display:grid;gap:var(--gap);min-width:0}
+.docs li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:start;padding:calc(var(--row-y) + 2px) var(--pad-x);border-bottom:1px solid var(--rule);font-size:12px}
+.docs li:last-child{border-bottom:0}
+.docs .ic{color:var(--muted);margin-top:1px}
+.docs .d{color:var(--muted)}
+.docs .r{display:grid;justify-items:end;gap:4px}
+.docs .amt{font-weight:500}
+.tline{padding:12px var(--pad-x) 6px}
+.tline li{position:relative;display:grid;gap:1px;padding:0 0 calc(var(--row-y) + 6px) 20px;font-size:12px;color:var(--ink-2);line-height:1.45}
+.tline li::before{content:"";position:absolute;left:3px;top:6px;width:7px;height:7px;border-radius:50%;background:var(--sheet);border:1.5px solid var(--rule-2)}
+.tline li::after{content:"";position:absolute;left:6.5px;top:16px;bottom:0;border-left:1px solid var(--rule)}
+.tline li:last-child::after{display:none}
+.tline li.now::before{border-color:var(--accent);background:var(--accent)}
+.tline time{font-size:11px;color:var(--muted)}
+.tline b{font-weight:500;color:var(--ink)}
+.tline .v{color:var(--ink);font-weight:500}
+
+/* availability */
+.av-body{padding:12px var(--pad-x) 14px;display:grid;gap:12px}
+.av-item{display:flex;justify-content:space-between;gap:10px;font-size:12px}
+.av-item b{font-weight:500}
+.av3{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:4px;overflow:hidden}
+.av3 div{background:var(--sheet);padding:8px 10px}
+.av3 dt{font-size:11px;color:var(--muted)}
+.av3 dd{font-size:20px;font-weight:500;line-height:1.2}
+.av3 .hl dd{color:var(--success)}
+.bar{position:relative;height:6px;border-radius:3px;background:var(--rule);overflow:hidden}
+.bar span{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:3px}
+.bar-l{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:5px}
+.av-note{display:flex;gap:8px;font-size:12px;color:var(--ink-2);line-height:1.45}
+.av-note .ic{color:var(--success);margin-top:1px}
+
+/* ---------- Stock ---------- */
+.stat .tile{padding:calc(var(--row-y) + 4px) 16px calc(var(--row-y) + 5px)}
+.stat .tn{font-size:24px}
+.toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.search{display:flex;align-items:center;gap:8px;width:300px;max-width:100%;height:var(--ctl-h);padding:0 10px;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);color:var(--muted)}
+.search:focus-within,.combo:focus-within{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.search input{border:0;outline:0;background:transparent;min-width:0;flex:1;font-size:13px;color:var(--ink)}
+.search input::placeholder{color:var(--muted)}
+.sel{position:relative;display:inline-flex;align-items:center}
+.sel select{appearance:none;-webkit-appearance:none;height:var(--ctl-h);padding:0 30px 0 10px;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);font-size:13px;color:var(--ink)}
+.sel .ic{position:absolute;right:9px;pointer-events:none;color:var(--muted);width:14px;height:14px}
+.seg{display:inline-flex;border:1px solid var(--rule-2);border-radius:4px;overflow:hidden;background:var(--sheet)}
+.seg button{height:calc(var(--ctl-h) - 2px);padding:0 11px;border:0;border-left:1px solid var(--rule-2);background:transparent;font-size:12px;color:var(--ink-2)}
+.seg button:first-child{border-left:0}
+.seg button span{color:var(--muted);margin-left:4px}
+.seg button[aria-pressed="true"]{background:var(--sunk);color:var(--ink);font-weight:500}
+.tb-note{margin-left:auto;font-size:12px;color:var(--muted)}
+.stock td.item-c{white-space:normal;min-width:170px}
+.stock tr.is-low td,.stock tr.is-low:hover td{background:var(--attention-soft)}
+.stock tr.is-low .avail{color:var(--attention);font-weight:600}
+.empty-row td{text-align:center;color:var(--muted);padding:22px}
+
+/* ---------- forms ---------- */
+.form-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1.2fr);gap:14px 18px}
+.f{display:grid;gap:4px;min-width:0;align-content:start}
+.f>span:first-child{font-size:11px;font-weight:500;color:var(--muted)}
+.f small{font-size:11px;color:var(--muted)}
+.f .sel,.f .sel select{width:100%}
+.req{color:var(--blocked);margin-left:2px}
+.inp,.combo{height:var(--ctl-h);padding:0 10px;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);font-size:13px;width:100%;min-width:0}
+textarea.inp{height:auto;min-height:64px;padding:7px 10px;resize:vertical}
+.combo{display:flex;align-items:center;gap:8px;color:var(--muted)}
+.combo input{border:0;outline:0;background:transparent;min-width:0;flex:1;font-size:13px;color:var(--ink);height:100%}
+.combo .sku{font-family:var(--f-mono);font-size:11px;color:var(--muted)}
+.inp:focus,.sel select:focus,.qi:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.inp::placeholder{color:var(--faint)}
+.disclose{margin-top:14px;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule)}
+.disclose summary{display:flex;align-items:center;gap:8px;padding:10px 0;cursor:pointer;list-style:none;font-size:13px;font-weight:500;color:var(--ink)}
+.disclose summary::-webkit-details-marker{display:none}
+.disclose summary .ic{width:14px;height:14px;color:var(--muted);transition:transform .12s}
+.disclose[open] summary .ic{transform:rotate(90deg)}
+.disclose summary .muted{font-weight:400;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.disclose .form-grid{grid-template-columns:repeat(3,minmax(0,1fr));padding:4px 0 16px}
+.disclose .f-wide{grid-column:1 / -1}
+.lines-h{display:flex;align-items:baseline;justify-content:space-between;margin:22px 0 6px}
+.form-lines td{vertical-align:middle}
+.form-lines .combo{height:calc(var(--ctl-h) - 2px)}
+.form-lines .qi{width:96px}
+.form-lines td.amt{width:110px}
+.form-lines td.rm{width:36px;padding-left:6px}
+.add-row td{border-bottom:1px solid var(--rule-2)!important;padding-top:6px;padding-bottom:6px}
+.form-sum{display:flex;justify-content:flex-end;padding-top:12px}
+.form-bar{position:sticky;bottom:0;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-top:var(--gap);padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));background:var(--sheet);border:1px solid var(--rule);border-radius:4px;box-shadow:var(--shadow-bar)}
+.form-bar .run{display:flex;align-items:baseline;gap:8px;font-size:12px;color:var(--muted)}
+.form-bar .run b{font-size:16px;font-weight:600;color:var(--ink)}
+.form-wrap{max-width:960px}
+
+/* ---------- Receive dialog ---------- */
+.scrim{position:fixed;inset:0;background:var(--scrim);z-index:50}
+.dlg{position:fixed;z-index:51;left:50%;top:50%;transform:translate(-50%,-50%);width:min(700px,calc(100vw - 32px));max-height:calc(100vh - 56px);display:flex;flex-direction:column;background:var(--sheet);border:1px solid var(--rule-2);border-radius:6px;box-shadow:var(--shadow-dlg)}
+.dlg-h{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:16px 20px 14px;border-bottom:1px solid var(--rule)}
+.dlg-h h2{font-size:15px;font-weight:600}
+.dlg-h p{font-size:12px;color:var(--muted);margin-top:2px}
+.dlg-b{overflow-y:auto;padding:16px 20px 18px;display:grid;gap:16px}
+.fields{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:12px}
+.rl{border:1px solid var(--rule);border-radius:4px;overflow:hidden}
+.rl-row{display:grid;grid-template-columns:minmax(0,1fr) 56px 92px 92px 80px;gap:12px;align-items:center;padding:var(--row-y) 12px;border-bottom:1px solid var(--rule);font-size:12px}
+.rl-row:last-child{border-bottom:0}
+.rl-head{background:var(--sunk);font-size:11px;font-weight:500;color:var(--muted)}
+.rl-row>.r{text-align:right}
+.rl-row .item{font-weight:500}
+.rl-row .sku{display:block;font-family:var(--f-mono);font-size:11px;color:var(--muted)}
+.qi{width:100%;height:calc(var(--ctl-h) - 2px);padding:0 8px;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);text-align:right;font-size:12px;font-variant-numeric:tabular-nums}
+.unit-in{position:relative;display:block}
+.unit-in .qi{padding-right:28px}
+.unit-in i{position:absolute;right:8px;top:50%;transform:translateY(-50%);font-style:normal;font-size:10px;color:var(--muted)}
+.rl-off{color:var(--muted)}
+.rl-off .item{color:var(--ink-2)}
+.rl-off .done-note{grid-column:3 / -1;display:flex;align-items:center;justify-content:flex-end;gap:6px;color:var(--success)}
+.rl-off .done-note .ic{width:14px;height:14px}
+.impact{display:grid;grid-template-columns:auto 1fr;gap:6px 18px;padding:12px 14px;border-radius:4px;background:var(--accent-soft);font-size:12px;align-items:baseline}
+.impact .k{color:var(--ink-2)}
+.impact .v{text-align:right;color:var(--ink)}
+.impact .big{font-size:15px;font-weight:600}
+.impact .big s{text-decoration:none;color:var(--muted);font-weight:400}
+.impact .arrow{color:var(--accent-text);margin:0 4px}
+.impact .head{grid-column:1 / -1;font-size:11px;font-weight:500;color:var(--accent-text);letter-spacing:.06em;text-transform:uppercase}
+.dlg-f{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 20px;border-top:1px solid var(--rule);background:var(--sunk);border-radius:0 0 6px 6px}
+.dlg-f .muted{font-size:12px}
+
+/* ---------- responsive ---------- */
+@media (max-width:1180px){
+  .doc-grid{grid-template-columns:minmax(0,1fr)}
+  .rail{grid-template-columns:repeat(auto-fit,minmax(280px,1fr));align-items:start}
+}
+@media (max-width:1000px){
+  .cols{grid-template-columns:minmax(0,1fr)}
+  .form-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .form-grid .f-sup{grid-column:1 / -1}
+}
+@media (max-width:900px){
+  .app{grid-template-columns:minmax(0,1fr)}
+  .side{display:none}
+  .top{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+  .top .m-only{display:inline-flex}
+  .top .m-org{display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px}
+  .gsearch{display:none}
+  .page{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+}
+@media (max-width:640px){
+  .mock-name{display:none}
+  .mock-tab .l{display:none}
+  .mock-tab .s{display:inline}
+  .mock-in{gap:8px}
+  .mock-tog{padding:0 7px}
+  .page{padding-top:14px}
+  .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .tile{padding:12px 12px 13px}
+  .tn{font-size:24px}
+  .ph .acts{width:100%}
+  .doc-no{font-size:24px}
+  .steps{gap:4px}
+  .steps li{grid-template-columns:1fr;justify-items:start}
+  .steps .dot{grid-row:auto}
+  .steps .sl,.steps .sd{display:none}
+  .steps-m{display:block;font-size:12px;color:var(--muted);padding:8px 16px 0}
+  .steps-m b{color:var(--ink);font-weight:600}
+  .ns-row{flex-wrap:wrap}
+  .ns-row .btn-p{width:100%;height:36px}
+  .sheet{padding:18px 16px 20px}
+  .parties{grid-template-columns:1fr;gap:14px}
+  .facts{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .rail{grid-template-columns:minmax(0,1fr)}
+  .sum{flex-direction:column-reverse;align-items:stretch}
+  .totals{min-width:0}
+  .search{width:100%}
+  .tb-note{margin-left:0;width:100%}
+  .form-grid,.disclose .form-grid{grid-template-columns:minmax(0,1fr)}
+  .disclose summary .muted{display:none}
+  .form-lines thead{display:none}
+  .form-lines,.form-lines tbody{display:block}
+  .form-lines tr{display:grid;grid-template-columns:24px minmax(0,1fr) minmax(0,1fr) 30px;gap:8px 10px;align-items:center;padding:12px 0;border-bottom:1px solid var(--rule)}
+  .form-lines td{display:block;padding:0!important;border:0!important;white-space:normal}
+  .form-lines td:first-child{grid-column:1;grid-row:1;width:auto}
+  .form-lines td.pr{grid-column:2 / 4;grid-row:1}
+  .form-lines td.q{grid-column:2;grid-row:2}
+  .form-lines td.c{grid-column:3;grid-row:2}
+  .form-lines td.amt{grid-column:2 / 4;grid-row:3;width:auto;display:flex;justify-content:space-between;color:var(--ink)}
+  .form-lines td.amt::before{content:"Amount";color:var(--muted)}
+  .form-lines td.rm{grid-column:4;grid-row:1;width:auto}
+  .form-lines td[data-l]::before{content:attr(data-l);display:block;font-size:10px;color:var(--muted);margin-bottom:2px;text-align:left}
+  .form-lines .qi{width:100%}
+  .form-lines tr.add-row{display:block;padding:8px 0}
+  .form-bar{padding-left:12px;padding-right:12px}
+  .form-bar .acts{width:100%}
+  .form-bar .acts .btn{flex:1;height:36px}
+  .dlg{left:0;right:0;bottom:0;top:auto;transform:none;width:100%;max-height:calc(100vh - 56px);border-radius:10px 10px 0 0;border-left:0;border-right:0;border-bottom:0}
+  .dlg-h,.dlg-b{padding-left:16px;padding-right:16px}
+  .dlg-f{padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));border-radius:0;flex-wrap:wrap}
+  .dlg-f .muted{width:100%}
+  .dlg-f .acts{width:100%}
+  .dlg-f .acts .btn{flex:1;height:36px}
+  .fields{grid-template-columns:1fr 1fr}
+  .fields .f:first-child{grid-column:1 / -1}
+  .rl-head{display:none}
+  .rl-row{grid-template-columns:repeat(3,minmax(0,1fr));row-gap:8px}
+  .rl-row>.it{grid-column:1 / -1}
+  .rl-row>[data-l]::before{content:attr(data-l);display:block;font-size:10px;color:var(--muted);text-align:left;margin-bottom:2px}
+  .rl-row>.r{text-align:left}
+  .rl-row>.val{grid-column:1 / -1;display:flex;justify-content:space-between;border-top:1px dashed var(--rule);padding-top:7px}
+  .rl-row>.val::before{margin:0}
+  .rl-off .done-note{grid-column:1 / -1;justify-content:flex-start}
+  .rl-off>.open-c{display:none}
+}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+  <symbol id="i-truck" viewBox="0 0 24 24"><path d="M2 5h12v11H2z"/><path d="M14 9h4l3 3.5V16h-7"/><circle cx="6" cy="18" r="2"/><circle cx="17.5" cy="18" r="2"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-cart" viewBox="0 0 24 24"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h3l2.7 12.4a2 2 0 0 0 2 1.6h8.6a2 2 0 0 0 2-1.6L22 7H6"/></symbol>
+  <symbol id="i-tag" viewBox="0 0 24 24"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="8" cy="8" r="1.5"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14.5a6.5 6.5 0 0 1 3.5 5.5"/></symbol>
+  <symbol id="i-building" viewBox="0 0 24 24"><path d="M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16M16 9h3a1 1 0 0 1 1 1v11M2 21h20M8 7h4M8 11h4M8 15h4"/></symbol>
+  <symbol id="i-receipt" viewBox="0 0 24 24"><path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/></symbol>
+  <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.3 5.2L3 17.9 6.1 21l6.4-6.4a4 4 0 0 0 5.2-5.3l-2.6 2.6-2.4-.6-.6-2.4z"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-chev-d" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+</svg>
+
+<header class="mock">
+  <div class="mock-in">
+    <span class="mock-name"><b>Ledger final</b> · mockup</span>
+    <nav class="mock-tabs" role="tablist" aria-label="Mockup screens">
+      <button class="mock-tab" role="tab" data-go="home" aria-selected="true">Home</button>
+      <button class="mock-tab" role="tab" data-go="po" aria-selected="false"><span class="l">Purchase order</span><span class="s">PO</span></button>
+      <button class="mock-tab" role="tab" data-go="receive" aria-selected="false"><span class="l">Receive dialog</span><span class="s">Receive</span></button>
+      <button class="mock-tab" role="tab" data-go="stock" aria-selected="false">Stock</button>
+      <button class="mock-tab" role="tab" data-go="so" aria-selected="false"><span class="l">Sales order</span><span class="s">SO</span></button>
+      <button class="mock-tab" role="tab" data-go="record" aria-selected="false"><span class="l">Custom record</span><span class="s">Record</span></button>
+      <button class="mock-tab" role="tab" data-go="new-po" aria-selected="false"><span class="l">New purchase order</span><span class="s">New PO</span></button>
+    </nav>
+    <button class="mock-tog" id="densBtn" type="button" title="Switch density">Compact</button>
+    <button class="mock-tog" id="themeBtn" type="button" title="Switch light / dark">Auto</button>
+  </div>
+</header>
+
+<div class="app">
+  <aside class="side" aria-label="Main navigation">
+    <div class="org">
+      <span class="mark">FI</span>
+      <span class="org-t"><b>Foothills Industrial</b><small>Calgary warehouse</small></span>
+      <svg class="ic"><use href="#i-chev-d"/></svg>
+    </div>
+    <nav class="nav">
+      <div class="queues nav">
+        <a href="#" data-go="home" data-nav="home"><svg class="ic"><use href="#i-home"/></svg>Today</a>
+        <a href="#" data-go="po"><svg class="ic"><use href="#i-inbox"/></svg>To receive<span class="q">3</span></a>
+        <a href="#" data-go="so"><svg class="ic"><use href="#i-truck"/></svg>To ship<span class="q">5</span></a>
+        <a href="#"><svg class="ic"><use href="#i-receipt"/></svg>To invoice<span class="q">2</span></a>
+      </div>
+      <div class="nav-h">Purchasing</div>
+      <a href="#" data-go="po" data-nav="po"><svg class="ic"><use href="#i-cart"/></svg>Purchase orders<span class="n">7</span></a>
+      <a href="#"><svg class="ic"><use href="#i-inbox"/></svg>Receipts</a>
+      <a href="#"><svg class="ic"><use href="#i-file"/></svg>Supplier bills</a>
+      <div class="nav-h">Sales</div>
+      <a href="#" data-go="so" data-nav="so"><svg class="ic"><use href="#i-tag"/></svg>Sales orders<span class="n">9</span></a>
+      <a href="#"><svg class="ic"><use href="#i-truck"/></svg>Shipments</a>
+      <a href="#"><svg class="ic"><use href="#i-receipt"/></svg>Invoices</a>
+      <div class="nav-h">Inventory</div>
+      <a href="#" data-go="stock" data-nav="stock"><svg class="ic"><use href="#i-box"/></svg>Stock</a>
+      <a href="#"><svg class="ic"><use href="#i-list"/></svg>Items</a>
+      <a href="#"><svg class="ic"><use href="#i-swap"/></svg>Transfers</a>
+      <div class="nav-h">Contacts</div>
+      <a href="#"><svg class="ic"><use href="#i-users"/></svg>Customers</a>
+      <a href="#"><svg class="ic"><use href="#i-building"/></svg>Suppliers</a>
+      <div class="nav-h">Custom</div>
+      <a href="#" data-go="record" data-nav="record"><svg class="ic"><use href="#i-wrench"/></svg>Equipment<span class="n">12</span></a>
+    </nav>
+    <div class="side-foot">
+      <span class="av">PN</span>
+      <span class="me">Priya Nair<small>Purchasing</small></span>
+      <button class="ib" type="button" aria-label="Settings"><svg class="ic"><use href="#i-gear"/></svg></button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="top">
+      <button class="ib m-only" type="button" aria-label="Open menu"><svg class="ic"><use href="#i-menu"/></svg></button>
+      <span class="m-only m-org"><span class="mark">FI</span>Foothills Industrial</span>
+      <label class="gsearch"><svg class="ic"><use href="#i-search"/></svg><input id="globalSearch" type="search" placeholder="Search orders, items, contacts" aria-label="Search"><kbd>/</kbd></label>
+      <span class="top-r">
+        <button class="ib m-only" type="button" aria-label="Search"><svg class="ic"><use href="#i-search"/></svg></button>
+        <button class="ib" type="button" aria-label="Notifications"><svg class="ic"><use href="#i-bell"/></svg></button>
+        <span class="av">PN</span>
+      </span>
+    </div>
+
+    <!-- ================= HOME ================= -->
+    <section class="page" data-screen="home">
+      <div class="ph">
+        <div>
+          <h1>Today</h1>
+          <p class="sub">Tuesday, November 17, 2026 · Calgary warehouse</p>
+        </div>
+        <div class="acts">
+          <button class="btn" type="button"><svg class="ic"><use href="#i-plus"/></svg>Sales order</button>
+          <button class="btn" type="button" data-go="new-po"><svg class="ic"><use href="#i-plus"/></svg>Purchase order</button>
+        </div>
+      </div>
+
+      <div class="tiles">
+        <button class="tile" type="button" data-go="po">
+          <span class="tl"><svg class="ic"><use href="#i-inbox"/></svg>To receive</span>
+          <span class="tn">3</span>
+          <span class="ts">1 due today · 530 units on the way</span>
+          <span class="go"><svg class="ic"><use href="#i-chev-r"/></svg></span>
+        </button>
+        <button class="tile" type="button" data-go="so">
+          <span class="tl"><svg class="ic"><use href="#i-truck"/></svg>To ship</span>
+          <span class="tn">5</span>
+          <span class="ts">2 due today · 12 lines</span>
+          <span class="go"><svg class="ic"><use href="#i-chev-r"/></svg></span>
+        </button>
+        <button class="tile" type="button">
+          <span class="tl"><svg class="ic"><use href="#i-receipt"/></svg>To invoice</span>
+          <span class="tn">2</span>
+          <span class="ts">1,284.60 CAD shipped, not billed</span>
+          <span class="go"><svg class="ic"><use href="#i-chev-r"/></svg></span>
+        </button>
+        <button class="tile low" type="button" data-go="stock">
+          <span class="tl"><svg class="ic"><use href="#i-alert"/></svg>Low stock</span>
+          <span class="tn">4</span>
+          <span class="ts">2 at Calgary · 2 at Edmonton</span>
+          <span class="go"><svg class="ic"><use href="#i-chev-r"/></svg></span>
+        </button>
+      </div>
+
+      <div class="cols">
+        <div class="stack">
+          <section class="panel">
+            <header class="panel-h"><h2>Receiving queue</h2><span class="cnt">3 purchase orders</span><a class="more" href="#">All purchase orders</a></header>
+            <div class="tw">
+              <table class="t">
+                <thead><tr><th>Order</th><th>Supplier</th><th>Waiting for</th><th>Expected</th><th></th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td><a class="mono" href="#" data-go="po">PO-000012</a></td>
+                    <td>Cascade Fastener Works</td>
+                    <td>6 × Field notebook</td>
+                    <td><span class="badge b-attention">Today</span></td>
+                    <td class="num"><button class="btn btn-sm" type="button" data-go="receive">Receive</button></td>
+                  </tr>
+                  <tr>
+                    <td><a class="mono" href="#">PO-000013</a></td>
+                    <td>Prairie Hardware Supply</td>
+                    <td>500 × Hex nut M8</td>
+                    <td>Thu, Nov 19</td>
+                    <td class="num"><button class="btn btn-sm" type="button">Receive</button></td>
+                  </tr>
+                  <tr>
+                    <td><a class="mono" href="#">PO-000015</a></td>
+                    <td>Bow River Fasteners</td>
+                    <td>24 × Wood screw #8, box of 100</td>
+                    <td>Mon, Nov 23</td>
+                    <td class="num"><button class="btn btn-sm" type="button">Receive</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel">
+            <header class="panel-h"><h2>Ready to ship</h2><span class="cnt">5 sales orders</span><a class="more" href="#">All shipments</a></header>
+            <div class="tw">
+              <table class="t">
+                <thead><tr><th>Order</th><th>Customer</th><th class="num">Lines</th><th>Ship by</th><th>Stock</th></tr></thead>
+                <tbody>
+                  <tr><td><a class="mono" href="#">SO-000027</a></td><td>Red Deer Cabinet Co.</td><td class="num">3</td><td><span class="badge b-attention">Today</span></td><td><span class="badge b-success">Reserved</span></td></tr>
+                  <tr><td><a class="mono" href="#">SO-000028</a></td><td>Cochrane Renovations</td><td class="num">2</td><td><span class="badge b-attention">Today</span></td><td><span class="badge b-success">Reserved</span></td></tr>
+                  <tr><td><a class="mono" href="#">SO-000029</a></td><td>Banff Lodge Maintenance</td><td class="num">5</td><td>Wed, Nov 18</td><td><span class="badge b-blocked">On credit hold</span></td></tr>
+                  <tr><td><a class="mono" href="#">SO-000030</a></td><td>Medicine Hat Joinery</td><td class="num">1</td><td>Thu, Nov 19</td><td><span class="badge b-progress">Partly reserved</span></td></tr>
+                  <tr><td><a class="mono" href="#" data-go="so">SO-000031</a></td><td>Lethbridge Millwork</td><td class="num">1</td><td>Thu, Nov 19</td><td><span class="badge b-neutral">Not reserved</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <section class="panel">
+          <header class="panel-h"><h2>Recent activity</h2><a class="more" href="#">View all</a></header>
+          <div class="feed">
+            <div class="feed-h">Today</div>
+            <ul>
+              <li><time>09:52</time><span>Jordan Lee confirmed <a class="mono" href="#" data-go="so">SO-000031</a> <span class="d">· Lethbridge Millwork · 52.50 CAD</span></span></li>
+              <li><time>09:14</time><span>Tom Becker shipped <a class="mono" href="#">SO-000026</a> <span class="d">· Airdrie Fixtures · 3 lines</span></span></li>
+              <li><time>08:30</time><span>Priya Nair placed <a class="mono" href="#">PO-000015</a> <span class="d">· Bow River Fasteners · 24 units</span></span></li>
+            </ul>
+            <div class="feed-h">Yesterday</div>
+            <ul>
+              <li><time>15:20</time><span>Tom Becker posted <a class="mono" href="#">RCV-000007</a> <span class="d">· PO-000012 · 204 units into Calgary warehouse</span></span></li>
+              <li><time>14:05</time><span>Jordan Lee created <a class="mono" href="#" data-go="so">SO-000031</a> <span class="d">· Lethbridge Millwork</span></span></li>
+              <li><time>11:10</time><span>Canmore Cabinetry paid <a class="mono" href="#">INV-000040</a> <span class="d">· 1,126.13 CAD</span></span></li>
+              <li><time>09:35</time><span>Priya Nair placed <a class="mono" href="#">PO-000013</a> <span class="d">· Prairie Hardware Supply · 500 units</span></span></li>
+            </ul>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- ================= PURCHASE ORDER ================= -->
+    <section class="page" data-screen="po" hidden>
+      <nav class="crumb" aria-label="Breadcrumb"><a href="#">Purchasing</a><span class="sep">/</span><a href="#">Purchase orders</a><span class="sep">/</span><span>PO-000012</span></nav>
+      <div class="doc-h">
+        <div>
+          <div class="eyebrow">Purchase order</div>
+          <div class="title-row"><h1 class="doc-no">PO-000012</h1><span class="badge b-progress">Receiving</span></div>
+          <p class="sub">Cascade Fastener Works · placed Nov 10, 2026 by Priya Nair</p>
+        </div>
+        <div class="acts">
+          <button class="btn" type="button">Edit</button>
+          <button class="btn" type="button" aria-label="More actions"><svg class="ic"><use href="#i-more"/></svg></button>
+        </div>
+      </div>
+
+      <section class="nextstep" aria-label="Progress and next step">
+        <ol class="steps" style="--n:5" aria-label="Order progress">
+          <li class="done"><span class="dot"><svg class="ic"><use href="#i-check"/></svg></span><span class="sl">Draft</span><span class="sd">Nov 9</span></li>
+          <li class="done"><span class="dot"><svg class="ic"><use href="#i-check"/></svg></span><span class="sl">Placed</span><span class="sd">Nov 10</span></li>
+          <li class="cur" aria-current="step"><span class="dot"></span><span class="sl">Receiving</span><span class="sd">204 of 210 in</span></li>
+          <li><span class="dot"></span><span class="sl">Billed</span><span class="sd">&nbsp;</span></li>
+          <li><span class="dot"></span><span class="sl">Closed</span><span class="sd">&nbsp;</span></li>
+        </ol>
+        <p class="steps-m">Step 3 of 5 · <b>Receiving</b></p>
+        <div class="ns-row">
+          <div class="ns-text">
+            <span class="ns-k">Next step</span>
+            <p class="ns-s"><b>6 of 10</b> Field notebook still to receive.</p>
+            <p class="ns-d">Expected Nov 17, 2026 · into Calgary warehouse</p>
+          </div>
+          <button class="btn btn-p" id="poPrimary" type="button" data-go="receive"><svg class="ic"><use href="#i-inbox"/></svg>Receive 6 remaining</button>
+        </div>
+      </section>
+
+      <div class="doc-grid">
+        <article class="sheet">
+          <div class="parties">
+            <div>
+              <div class="lbl">Supplier</div>
+              <address><b>Cascade Fastener Works</b><br>7720 128 Street<br>Surrey, BC V3W 4E6</address>
+            </div>
+            <div>
+              <div class="lbl">Deliver to</div>
+              <address><b>Foothills Industrial Supply</b><br>Calgary warehouse, 4410 72 Avenue SE<br>Calgary, AB T2C 3J8</address>
+            </div>
+          </div>
+          <dl class="facts">
+            <div><dt>Order date</dt><dd>Nov 10, 2026</dd></div>
+            <div><dt>Expected</dt><dd>Nov 17, 2026 <span class="muted">· today</span></dd></div>
+            <div><dt>Supplier reference</dt><dd class="mono">CFW-88412</dd></div>
+            <div><dt>Payment terms</dt><dd>Net 30</dd></div>
+            <div><dt>Buyer</dt><dd>Priya Nair</dd></div>
+            <div><dt>Receive into</dt><dd>Calgary warehouse</dd></div>
+            <div><dt>Currency</dt><dd>CAD</dd></div>
+            <div><dt>Tax</dt><dd>GST 5%</dd></div>
+          </dl>
+          <div class="tw">
+            <table class="t lines">
+              <thead><tr><th>#</th><th>Item</th><th class="num">Received</th><th class="num">Open</th><th class="num">Unit cost</th><th class="num">Amount</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>1</td>
+                  <td><span class="item">Field notebook</span><span class="sku">OFF-100 · each</span></td>
+                  <td class="num"><span class="prog"><span class="pbar"><i style="width:40%"></i></span><span><b>4</b> <span class="of">of 10</span></span></span></td>
+                  <td class="num"><span class="open-n">6</span></td>
+                  <td class="num">5.00</td>
+                  <td class="num">50.00</td>
+                </tr>
+                <tr>
+                  <td>2</td>
+                  <td><span class="item">Hex bolt M8 × 40</span><span class="sku">FAS-208 · each</span></td>
+                  <td class="num"><span class="prog"><span class="pbar full"><i style="width:100%"></i></span><span><b>200</b> <span class="of">of 200</span></span></span></td>
+                  <td class="num"><span class="zero">0</span></td>
+                  <td class="num">0.12</td>
+                  <td class="num">24.00</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="sum">
+            <div class="sum-note">Received to date <b>44.00</b> · still open <b>30.00</b><br>Amounts in CAD, before tax.</div>
+            <dl class="totals">
+              <dt>Subtotal</dt><dd>74.00</dd>
+              <dt>GST 5%</dt><dd>3.70</dd>
+              <dt class="tt">Total<span class="cur-code">CAD</span></dt><dd class="tt">77.70</dd>
+            </dl>
+          </div>
+          <div class="note"><svg class="ic"><use href="#i-note"/></svg><div><b>Notes</b> · Tom Becker, Nov 16: 6 notebooks back-ordered, shipping Nov 17.</div></div>
+        </article>
+
+        <aside class="rail">
+          <section class="panel">
+            <header class="panel-h"><h2>Linked documents</h2></header>
+            <ul class="docs">
+              <li><svg class="ic"><use href="#i-inbox"/></svg><div><a class="mono" href="#">RCV-000007</a><div class="d">Receipt · Nov 16 · 204 units</div></div><span class="r"><span class="amt">44.00</span><span class="badge b-success">Posted</span></span></li>
+              <li><svg class="ic"><use href="#i-file"/></svg><div>Supplier bill<div class="d">None yet</div></div><span class="r"><span class="badge b-neutral">Not started</span></span></li>
+            </ul>
+          </section>
+          <section class="panel">
+            <header class="panel-h"><h2>Activity</h2></header>
+            <ol class="tline">
+              <li class="now"><b>Waiting for 6 Field notebook</b><time>Expected Nov 17, 2026</time></li>
+              <li><span>Tom Becker added a note</span><time>Nov 16, 15:22</time></li>
+              <li><span>Tom Becker posted <a class="mono" href="#">RCV-000007</a> · 4 Field notebook, 200 Hex bolt M8 × 40</span><time>Nov 16, 15:20</time></li>
+              <li><span>Priya Nair placed PO-000012 · supplier reference CFW-88412</span><time>Nov 10, 08:45</time></li>
+              <li><span>Priya Nair created PO-000012</span><time>Nov 9, 14:12</time></li>
+            </ol>
+          </section>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ================= STOCK ================= -->
+    <section class="page" data-screen="stock" hidden>
+      <nav class="crumb" aria-label="Breadcrumb"><a href="#">Inventory</a><span class="sep">/</span><span>Stock</span></nav>
+      <div class="ph">
+        <div>
+          <h1>Stock</h1>
+          <p class="sub">Calgary warehouse · 10 items · counted to 10:05 today</p>
+        </div>
+        <div class="acts">
+          <button class="btn" type="button">Adjust stock</button>
+          <button class="btn" type="button">Transfer</button>
+        </div>
+      </div>
+
+      <div class="tiles stat">
+        <div class="tile"><span class="tl">On hand</span><span class="tn">3,917</span><span class="ts">units on the shelves</span></div>
+        <div class="tile"><span class="tl">Reserved</span><span class="tn">797</span><span class="ts">held for 4 sales orders</span></div>
+        <div class="tile"><span class="tl">Available</span><span class="tn">3,120</span><span class="ts">on hand minus reserved</span></div>
+        <div class="tile"><span class="tl">Incoming</span><span class="tn">530</span><span class="ts">on 3 purchase orders</span></div>
+      </div>
+
+      <div class="toolbar">
+        <label class="search"><svg class="ic"><use href="#i-search"/></svg><input id="stockSearch" type="search" placeholder="Search by item or SKU" aria-label="Search stock"></label>
+        <span class="sel"><select id="stockLoc" aria-label="Location"><option>Calgary warehouse</option><option>Edmonton warehouse</option><option>All locations</option></select><svg class="ic"><use href="#i-chev-d"/></svg></span>
+        <div class="seg" role="group" aria-label="Filter">
+          <button type="button" data-filter="all" aria-pressed="true">All<span>10</span></button>
+          <button type="button" data-filter="low" aria-pressed="false">Low<span>2</span></button>
+          <button type="button" data-filter="inc" aria-pressed="false">Incoming<span>3</span></button>
+        </div>
+        <span class="tb-note">2 more items are low at Edmonton warehouse</span>
+      </div>
+
+      <section class="panel">
+        <div class="tw">
+          <table class="t stock">
+            <thead><tr><th>SKU</th><th>Item</th><th>Unit</th><th class="num">On hand</th><th class="num">Reserved</th><th class="num">Available</th><th class="num">Incoming</th><th class="num">Reorder at</th><th>Status</th></tr></thead>
+            <tbody id="stockBody">
+              <tr><td class="sku">ADH-410</td><td class="item-c item">Wood glue, 1 L</td><td>Each</td><td class="num">48</td><td class="num">12</td><td class="num avail">36</td><td class="num zero">0</td><td class="num">20</td><td></td></tr>
+              <tr><td class="sku">FAS-204</td><td class="item-c item">Hex bolt M6 × 30</td><td>Each</td><td class="num">820</td><td class="num">150</td><td class="num avail">670</td><td class="num zero">0</td><td class="num">300</td><td></td></tr>
+              <tr><td class="sku">FAS-208</td><td class="item-c item">Hex bolt M8 × 40</td><td>Each</td><td class="num">1,240</td><td class="num">300</td><td class="num avail">940</td><td class="num zero">0</td><td class="num">400</td><td></td></tr>
+              <tr data-inc="1"><td class="sku">FAS-212</td><td class="item-c item">Hex nut M8</td><td>Each</td><td class="num">1,600</td><td class="num">300</td><td class="num avail">1,300</td><td class="num">500</td><td class="num">500</td><td></td></tr>
+              <tr data-inc="1"><td class="sku">FAS-330</td><td class="item-c item">Wood screw #8, box of 100</td><td>Box</td><td class="num">64</td><td class="num">10</td><td class="num avail">54</td><td class="num">24</td><td class="num">20</td><td></td></tr>
+              <tr class="is-low" data-low="1"><td class="sku">HDW-315</td><td class="item-c item">Soft-close hinge, pair</td><td>Pair</td><td class="num">6</td><td class="num zero">0</td><td class="num avail">6</td><td class="num zero">0</td><td class="num">10</td><td><span class="badge b-attention">Low</span></td></tr>
+              <tr><td class="sku">HDW-320</td><td class="item-c item">Drawer slide 18&Prime;, pair</td><td>Pair</td><td class="num">38</td><td class="num">8</td><td class="num avail">30</td><td class="num zero">0</td><td class="num">12</td><td></td></tr>
+              <tr class="is-low" data-low="1" data-inc="1"><td class="sku">OFF-100</td><td class="item-c item">Field notebook</td><td>Each</td><td class="num">4</td><td class="num zero">0</td><td class="num avail">4</td><td class="num">6</td><td class="num">10</td><td><span class="badge b-attention">Low</span></td></tr>
+              <tr><td class="sku">OFF-120</td><td class="item-c item">Carpenter pencil, box of 12</td><td>Box</td><td class="num">22</td><td class="num">2</td><td class="num avail">20</td><td class="num zero">0</td><td class="num">6</td><td></td></tr>
+              <tr><td class="sku">SAF-510</td><td class="item-c item">Safety glasses, clear</td><td>Each</td><td class="num">75</td><td class="num">15</td><td class="num avail">60</td><td class="num zero">0</td><td class="num">25</td><td></td></tr>
+              <tr class="empty-row" id="stockEmpty" hidden><td colspan="9">No items match. Clear the search to see all 10 items.</td></tr>
+            </tbody>
+            <tfoot id="stockFoot"><tr><td colspan="3">Total · 10 items</td><td class="num">3,917</td><td class="num">797</td><td class="num">3,120</td><td class="num">530</td><td></td><td></td></tr></tfoot>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <!-- ================= SALES ORDER ================= -->
+    <section class="page" data-screen="so" hidden>
+      <nav class="crumb" aria-label="Breadcrumb"><a href="#">Sales</a><span class="sep">/</span><a href="#">Sales orders</a><span class="sep">/</span><span>SO-000031</span></nav>
+      <div class="doc-h">
+        <div>
+          <div class="eyebrow">Sales order</div>
+          <div class="title-row"><h1 class="doc-no">SO-000031</h1><span class="badge b-progress">Confirmed</span></div>
+          <p class="sub">Lethbridge Millwork · ordered Nov 16, 2026 by Jordan Lee</p>
+        </div>
+        <div class="acts">
+          <button class="btn" type="button">Edit</button>
+          <button class="btn" type="button" aria-label="More actions"><svg class="ic"><use href="#i-more"/></svg></button>
+        </div>
+      </div>
+
+      <section class="nextstep" aria-label="Progress and next step">
+        <ol class="steps" style="--n:6" aria-label="Order progress">
+          <li class="done"><span class="dot"><svg class="ic"><use href="#i-check"/></svg></span><span class="sl">Draft</span><span class="sd">Nov 16</span></li>
+          <li class="cur" aria-current="step"><span class="dot"></span><span class="sl">Confirmed</span><span class="sd">Nov 17</span></li>
+          <li><span class="dot"></span><span class="sl">Reserved</span><span class="sd">&nbsp;</span></li>
+          <li><span class="dot"></span><span class="sl">Shipped</span><span class="sd">&nbsp;</span></li>
+          <li><span class="dot"></span><span class="sl">Invoiced</span><span class="sd">&nbsp;</span></li>
+          <li><span class="dot"></span><span class="sl">Paid</span><span class="sd">&nbsp;</span></li>
+        </ol>
+        <p class="steps-m">Step 2 of 6 · <b>Confirmed</b></p>
+        <div class="ns-row">
+          <div class="ns-text">
+            <span class="ns-k">Next step</span>
+            <p class="ns-s"><b>4 of 4</b> Soft-close hinge, pair still to reserve.</p>
+            <p class="ns-d">6 available at Calgary warehouse · ship by Nov 19, 2026</p>
+          </div>
+          <button class="btn btn-p" type="button"><svg class="ic"><use href="#i-lock"/></svg>Reserve 4</button>
+        </div>
+      </section>
+
+      <div class="doc-grid">
+        <article class="sheet">
+          <div class="parties">
+            <div>
+              <div class="lbl">Bill to</div>
+              <address><b>Lethbridge Millwork</b><br>Accounts payable<br>2810 5 Avenue N, Lethbridge, AB T1H 0N8</address>
+            </div>
+            <div>
+              <div class="lbl">Ship to</div>
+              <address><b>Lethbridge Millwork</b><br>Rear dock<br>2810 5 Avenue N, Lethbridge, AB T1H 0N8</address>
+            </div>
+          </div>
+          <dl class="facts">
+            <div><dt>Order date</dt><dd>Nov 16, 2026</dd></div>
+            <div><dt>Ship by</dt><dd>Nov 19, 2026</dd></div>
+            <div><dt>Customer PO</dt><dd class="mono">LM-2291</dd></div>
+            <div><dt>Payment terms</dt><dd>Net 30</dd></div>
+            <div><dt>Sales rep</dt><dd>Jordan Lee</dd></div>
+            <div><dt>Ship from</dt><dd>Calgary warehouse</dd></div>
+            <div><dt>Currency</dt><dd>CAD</dd></div>
+            <div><dt>Tax</dt><dd>GST 5%</dd></div>
+          </dl>
+          <div class="tw">
+            <table class="t lines">
+              <thead><tr><th>#</th><th>Item</th><th class="num">Reserved</th><th class="num">Unit price</th><th class="num">Amount</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>1</td>
+                  <td><span class="item">Soft-close hinge, pair</span><span class="sku">HDW-315 · pair</span></td>
+                  <td class="num"><span class="prog"><span class="pbar"><i style="width:0%"></i></span><span><b>0</b> <span class="of">of 4</span></span></span></td>
+                  <td class="num">12.50</td>
+                  <td class="num">50.00</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="sum">
+            <div class="sum-note">Payment terms <b>Net 30</b> from the invoice date.<br>Amounts in CAD, before tax.</div>
+            <dl class="totals">
+              <dt>Subtotal</dt><dd>50.00</dd>
+              <dt>GST 5%</dt><dd>2.50</dd>
+              <dt class="tt">Total<span class="cur-code">CAD</span></dt><dd class="tt">52.50</dd>
+            </dl>
+          </div>
+          <div class="note"><svg class="ic"><use href="#i-note"/></svg><div><b>Notes</b> · Jordan Lee, Nov 16: deliver to the rear dock before 3 pm.</div></div>
+        </article>
+
+        <aside class="rail">
+          <section class="panel">
+            <header class="panel-h"><h2>Availability</h2><span class="cnt">Calgary warehouse</span></header>
+            <div class="av-body">
+              <div class="av-item"><b>Soft-close hinge, pair</b><span class="sku mono muted">HDW-315</span></div>
+              <dl class="av3">
+                <div><dt>Required</dt><dd>4</dd></div>
+                <div class="hl"><dt>Available</dt><dd>6</dd></div>
+                <div><dt>Incoming</dt><dd>0</dd></div>
+              </dl>
+              <div>
+                <div class="bar" role="img" aria-label="This order uses 4 of 6 available"><span style="width:66.67%"></span></div>
+                <div class="bar-l"><span>This order uses 4</span><span>2 left after</span></div>
+              </div>
+              <p class="av-note"><svg class="ic"><use href="#i-check"/></svg><span>Enough to reserve all 4. 2 left after, below the reorder point of 10.</span></p>
+            </div>
+          </section>
+          <section class="panel">
+            <header class="panel-h"><h2>Activity</h2></header>
+            <ol class="tline">
+              <li class="now"><b>Waiting to reserve 4 Soft-close hinge, pair</b><time>Ship by Nov 19, 2026</time></li>
+              <li><span>Jordan Lee confirmed SO-000031</span><time>Nov 17, 09:52</time></li>
+              <li><span>Jordan Lee added a note</span><time>Nov 16, 14:07</time></li>
+              <li><span>Jordan Lee created SO-000031 · customer PO LM-2291</span><time>Nov 16, 14:05</time></li>
+            </ol>
+          </section>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ================= CUSTOM RECORD (generic parts only) ================= -->
+    <section class="page" data-screen="record" hidden>
+      <nav class="crumb" aria-label="Breadcrumb"><a href="#">Custom</a><span class="sep">/</span><a href="#">Equipment</a><span class="sep">/</span><span>EQ-0007</span></nav>
+      <div class="doc-h">
+        <div>
+          <div class="eyebrow">Equipment</div>
+          <div class="title-row"><h1 class="doc-no">EQ-0007</h1><span class="badge b-success">In service</span></div>
+          <p class="sub">Forklift 3 · Calgary warehouse</p>
+        </div>
+        <div class="acts">
+          <button class="btn" type="button">Change status</button>
+          <button class="btn" type="button">Edit</button>
+          <button class="btn" type="button" aria-label="More actions"><svg class="ic"><use href="#i-more"/></svg></button>
+        </div>
+      </div>
+
+      <div class="doc-grid">
+        <article class="sheet">
+          <div class="lbl">Details</div>
+          <dl class="facts solo">
+            <div><dt>Name</dt><dd>Forklift 3</dd></div>
+            <div><dt>Serial number</dt><dd class="mono">8FGU25-41187</dd></div>
+            <div><dt>Purchase date</dt><dd>Mar 14, 2022</dd></div>
+            <div><dt>Status</dt><dd><span class="badge b-success">In service</span></dd></div>
+            <div><dt>Location</dt><dd>Calgary warehouse</dd></div>
+            <div><dt>Make and model</dt><dd>Toyota 8FGU25</dd></div>
+            <div><dt>Hour meter</dt><dd>4,812 h</dd></div>
+            <div><dt>Next service due</dt><dd>Jan 4, 2027</dd></div>
+          </dl>
+          <p class="meta">Created Mar 14, 2022 by Priya Nair · last changed Oct 2, 2026 by Tom Becker</p>
+        </article>
+
+        <aside class="rail">
+          <section class="panel">
+            <header class="panel-h"><h2>Activity</h2></header>
+            <ol class="tline">
+              <li><span>Tom Becker changed Status from <span class="v">In repair</span> to <span class="v">In service</span></span><time>Oct 2, 2026, 09:10</time></li>
+              <li><span>Tom Becker changed Hour meter from <span class="v">4,655 h</span> to <span class="v">4,812 h</span></span><time>Oct 2, 2026, 09:08</time></li>
+              <li><span>Tom Becker changed Status from <span class="v">In service</span> to <span class="v">In repair</span></span><time>Sep 28, 2026, 16:40</time></li>
+              <li><span>Priya Nair changed Location from <span class="v">Edmonton warehouse</span> to <span class="v">Calgary warehouse</span></span><time>May 4, 2025, 11:02</time></li>
+              <li><span>Priya Nair created EQ-0007</span><time>Mar 14, 2022, 10:15</time></li>
+            </ol>
+          </section>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ================= NEW PURCHASE ORDER ================= -->
+    <section class="page" data-screen="new-po" hidden>
+      <div class="form-wrap">
+        <nav class="crumb" aria-label="Breadcrumb"><a href="#">Purchasing</a><span class="sep">/</span><a href="#">Purchase orders</a><span class="sep">/</span><span>New</span></nav>
+        <div class="doc-h">
+          <div>
+            <div class="eyebrow">Purchase order</div>
+            <div class="title-row"><h1 class="doc-no">New purchase order</h1><span class="badge b-neutral">Draft</span></div>
+            <p class="sub">Number assigned when saved</p>
+          </div>
+        </div>
+
+        <form class="sheet" id="newPoForm" novalidate>
+          <div class="form-grid">
+            <label class="f f-sup"><span>Supplier<span class="req">*</span></span><span class="combo"><svg class="ic"><use href="#i-search"/></svg><input id="npSupplier" type="text" value="Cascade Fastener Works" aria-label="Supplier"><svg class="ic"><use href="#i-chev-d"/></svg></span><small>Net 30 · CAD · Surrey, BC</small></label>
+            <label class="f"><span>Order date</span><input class="inp" id="npDate" type="text" value="Nov 17, 2026"><small>Today</small></label>
+            <label class="f"><span>Receive into</span><span class="sel"><select id="npLoc"><option>Calgary warehouse</option><option>Edmonton warehouse</option></select><svg class="ic"><use href="#i-chev-d"/></svg></span><small>Your default location</small></label>
+          </div>
+
+          <details class="disclose">
+            <summary><svg class="ic"><use href="#i-chev-r"/></svg>More details<span class="muted">Expected date, supplier reference, payment terms, currency, freight, notes</span></summary>
+            <div class="form-grid">
+              <label class="f"><span>Expected date</span><input class="inp" id="npExp" type="text" value="Nov 24, 2026"></label>
+              <label class="f"><span>Supplier reference</span><input class="inp" id="npRef" type="text" placeholder="Optional"></label>
+              <label class="f"><span>Payment terms</span><span class="sel"><select id="npTerms"><option>Net 30</option><option>Net 15</option><option>Due on receipt</option></select><svg class="ic"><use href="#i-chev-d"/></svg></span></label>
+              <label class="f"><span>Currency</span><span class="sel"><select id="npCur"><option>CAD</option><option>USD</option></select><svg class="ic"><use href="#i-chev-d"/></svg></span></label>
+              <label class="f"><span>Tax</span><span class="sel"><select id="npTaxCode"><option>GST 5%</option><option>No tax</option></select><svg class="ic"><use href="#i-chev-d"/></svg></span></label>
+              <label class="f"><span>Freight</span><input class="inp" id="npFreight" type="text" inputmode="decimal" placeholder="0.00"></label>
+              <label class="f f-wide"><span>Notes</span><textarea class="inp" id="npNotes" rows="2" placeholder="Optional"></textarea></label>
+            </div>
+          </details>
+
+          <div class="lines-h"><div class="lbl">Lines</div><span class="muted" style="font-size:12px">2 lines</span></div>
+          <div class="tw">
+            <table class="t lines form-lines">
+              <thead><tr><th>#</th><th>Product</th><th class="num">Quantity</th><th class="num">Unit cost</th><th class="num">Amount</th><th></th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>1</td>
+                  <td class="pr"><span class="combo"><input id="npP1" type="text" value="Field notebook" aria-label="Product, line 1"><span class="sku">OFF-100</span></span></td>
+                  <td class="num q" data-l="Quantity"><input class="qi np" id="npQ1" type="text" inputmode="numeric" value="20" aria-label="Quantity, line 1"></td>
+                  <td class="num c" data-l="Unit cost"><input class="qi np" id="npC1" type="text" inputmode="decimal" value="5.00" aria-label="Unit cost, line 1"></td>
+                  <td class="num amt" id="npA1">100.00</td>
+                  <td class="rm"><button class="ib" type="button" aria-label="Remove line 1"><svg class="ic"><use href="#i-x"/></svg></button></td>
+                </tr>
+                <tr>
+                  <td>2</td>
+                  <td class="pr"><span class="combo"><input id="npP2" type="text" value="Hex bolt M8 × 40" aria-label="Product, line 2"><span class="sku">FAS-208</span></span></td>
+                  <td class="num q" data-l="Quantity"><input class="qi np" id="npQ2" type="text" inputmode="numeric" value="500" aria-label="Quantity, line 2"></td>
+                  <td class="num c" data-l="Unit cost"><input class="qi np" id="npC2" type="text" inputmode="decimal" value="0.12" aria-label="Unit cost, line 2"></td>
+                  <td class="num amt" id="npA2">60.00</td>
+                  <td class="rm"><button class="ib" type="button" aria-label="Remove line 2"><svg class="ic"><use href="#i-x"/></svg></button></td>
+                </tr>
+                <tr class="add-row"><td></td><td colspan="5"><button class="btn btn-ghost btn-sm" type="button"><svg class="ic"><use href="#i-plus"/></svg>Add line</button></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="form-sum">
+            <dl class="totals">
+              <dt>Subtotal</dt><dd id="npSub">160.00</dd>
+              <dt>GST 5%</dt><dd id="npTax">8.00</dd>
+              <dt class="tt">Total<span class="cur-code">CAD</span></dt><dd class="tt" id="npTot">168.00</dd>
+            </dl>
+          </div>
+        </form>
+
+        <div class="form-bar">
+          <span class="run">Total <b id="npRun">168.00</b> CAD · 2 lines</span>
+          <span class="acts"><button class="btn btn-ghost" type="button">Save draft</button><button class="btn btn-p" type="button">Save and place</button></span>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ================= RECEIVE DIALOG ================= -->
+<div class="scrim" id="scrim" data-close hidden></div>
+<div class="dlg" id="dlg" role="dialog" aria-modal="true" aria-labelledby="dlgTitle" hidden>
+  <header class="dlg-h">
+    <div><h2 id="dlgTitle">Receive items</h2><p>PO-000012 · Cascade Fastener Works</p></div>
+    <button class="ib" type="button" data-close aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+  </header>
+  <div class="dlg-b">
+    <div class="fields">
+      <label class="f"><span>Receive into</span><span class="sel"><select id="rcvLoc"><option>Calgary warehouse</option><option>Edmonton warehouse</option></select><svg class="ic"><use href="#i-chev-d"/></svg></span></label>
+      <label class="f"><span>Received on</span><input class="inp" id="rcvDate" type="text" value="Nov 17, 2026"></label>
+      <label class="f"><span>Packing slip</span><input class="inp" id="rcvSlip" type="text" placeholder="Optional"></label>
+    </div>
+    <div class="rl">
+      <div class="rl-row rl-head"><span>Item</span><span class="r">Open</span><span class="r">Receive</span><span class="r">Unit cost</span><span class="r">Value</span></div>
+      <div class="rl-row">
+        <span class="it"><span class="item">Field notebook</span><span class="sku">OFF-100 · ordered 10, received 4</span></span>
+        <span class="r open-c" data-l="Open">6</span>
+        <span class="r" data-l="Receive"><span class="unit-in"><input class="qi" id="rcvQty" type="text" inputmode="numeric" value="6" aria-label="Quantity to receive"><i>ea</i></span></span>
+        <span class="r" data-l="Unit cost"><input class="qi" id="rcvCost" type="text" inputmode="decimal" value="5.00" aria-label="Unit cost"></span>
+        <span class="r val" data-l="Value"><span id="rcvVal">30.00</span></span>
+      </div>
+      <div class="rl-row rl-off">
+        <span class="it"><span class="item">Hex bolt M8 × 40</span><span class="sku">FAS-208 · ordered 200</span></span>
+        <span class="r open-c">0</span>
+        <span class="done-note"><svg class="ic"><use href="#i-check"/></svg>200 of 200 received</span>
+      </div>
+    </div>
+    <div class="impact" aria-live="polite">
+      <div class="head">After you post</div>
+      <span class="k">On hand at Calgary</span><span class="v big">Field notebook&nbsp; <s>4</s><span class="arrow">→</span><span id="rcvAfter">10</span></span>
+      <span class="k">PO-000012</span><span class="v" id="rcvStatus">Receiving → Billed next</span>
+      <span class="k">Inventory value</span><span class="v" id="rcvValue">+30.00 CAD</span>
+    </div>
+  </div>
+  <footer class="dlg-f">
+    <span class="muted">Creates RCV-000008 · cost from PO-000012</span>
+    <span class="acts"><button class="btn btn-ghost" type="button" data-close>Cancel</button><button class="btn btn-p" id="rcvPost" type="button">Post receipt of 6</button></span>
+  </footer>
+</div>
+
+<script>
+(function(){
+  var root=document.documentElement;
+  var valid={home:1,po:1,receive:1,stock:1,so:1,record:1,'new-po':1};
+  var navFor={'new-po':'po'};
+  var dlg=document.getElementById('dlg'), scrim=document.getElementById('scrim');
+  var current=null;
+  function show(name){
+    if(!valid[name]) name='home';
+    var base=name==='receive'?'po':name;
+    var prevBase=current==='receive'?'po':current;
+    var navKey=navFor[base]||base;
+    document.querySelectorAll('[data-screen]').forEach(function(s){ s.hidden=s.getAttribute('data-screen')!==base; });
+    document.querySelectorAll('.mock-tab').forEach(function(t){ t.setAttribute('aria-selected', String(t.getAttribute('data-go')===name)); });
+    document.querySelectorAll('[data-nav]').forEach(function(n){ if(n.getAttribute('data-nav')===navKey){ n.setAttribute('aria-current','page'); } else { n.removeAttribute('aria-current'); } });
+    var open=name==='receive';
+    dlg.hidden=!open; scrim.hidden=!open;
+    document.body.classList.toggle('locked',open);
+    if(open){ setTimeout(function(){ var q=document.getElementById('rcvQty'); if(q){ try{ q.focus({preventScroll:true}); }catch(e){} } },0); }
+    if(base!==prevBase){ window.scrollTo(0,0); }
+    current=name;
+    try{ if(location.hash.slice(1)!==name){ history.replaceState(null,'','#'+name); } }catch(e){}
+  }
+  document.addEventListener('click',function(e){
+    var c=e.target.closest('[data-close]');
+    if(c){ e.preventDefault(); show('po'); var p=document.getElementById('poPrimary'); if(p){ try{ p.focus({preventScroll:true}); }catch(err){} } return; }
+    var g=e.target.closest('[data-go]');
+    if(g){ e.preventDefault(); show(g.getAttribute('data-go')); return; }
+    var a=e.target.closest('a[href="#"]');
+    if(a){ e.preventDefault(); }
+  });
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape' && current==='receive'){ show('po'); } });
+  window.addEventListener('hashchange',function(){ var h=location.hash.slice(1); if(h && h!==current){ show(h); } });
+
+  function money(n){ return n.toLocaleString('en-CA',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+  /* receive line: keep the numbers honest while typing */
+  var qty=document.getElementById('rcvQty'), cost=document.getElementById('rcvCost');
+  function recalc(){
+    var n=parseInt(qty.value,10); if(isNaN(n)||n<0){ n=0; } if(n>6){ n=6; }
+    var c=parseFloat(cost.value); if(isNaN(c)||c<0){ c=0; }
+    var v=money(n*c);
+    document.getElementById('rcvVal').textContent=v;
+    document.getElementById('rcvAfter').textContent=String(4+n);
+    document.getElementById('rcvValue').textContent='+'+v+' CAD';
+    document.getElementById('rcvStatus').textContent= n===6 ? 'Receiving → Billed next' : 'Stays in Receiving · '+(6-n)+' of 10 open';
+    document.getElementById('rcvPost').textContent='Post receipt of '+n;
+  }
+  qty.addEventListener('input',recalc); cost.addEventListener('input',recalc);
+
+  /* new purchase order: running total */
+  function npCalc(){
+    var sub=0;
+    [1,2].forEach(function(i){
+      var q=parseFloat(document.getElementById('npQ'+i).value), c=parseFloat(document.getElementById('npC'+i).value);
+      var a=(isNaN(q)||isNaN(c))?0:q*c; sub+=a;
+      document.getElementById('npA'+i).textContent=money(a);
+    });
+    var tax=Math.round(sub*5)/100, tot=sub+tax;
+    document.getElementById('npSub').textContent=money(sub);
+    document.getElementById('npTax').textContent=money(tax);
+    document.getElementById('npTot').textContent=money(tot);
+    document.getElementById('npRun').textContent=money(tot);
+  }
+  document.querySelectorAll('.np').forEach(function(el){ el.addEventListener('input',npCalc); });
+  document.getElementById('newPoForm').addEventListener('submit',function(e){ e.preventDefault(); });
+
+  /* stock search and filter */
+  var si=document.getElementById('stockSearch'), mode='all';
+  var rows=[].slice.call(document.querySelectorAll('#stockBody tr:not(.empty-row)'));
+  function filter(){
+    var t=si.value.trim().toLowerCase(), shown=0;
+    rows.forEach(function(r){ var ok=(!t || r.textContent.toLowerCase().indexOf(t)>-1) && (mode==='all' || r.getAttribute('data-'+mode)==='1'); r.hidden=!ok; if(ok){ shown++; } });
+    document.getElementById('stockEmpty').hidden=shown>0;
+    document.getElementById('stockFoot').hidden=(t!=='' || mode!=='all');
+  }
+  si.addEventListener('input',filter);
+  document.querySelectorAll('[data-filter]').forEach(function(b){
+    b.addEventListener('click',function(){
+      mode=b.getAttribute('data-filter');
+      document.querySelectorAll('[data-filter]').forEach(function(x){ x.setAttribute('aria-pressed', String(x===b)); });
+      filter();
+    });
+  });
+
+  /* theme: auto, light, dark */
+  var tb=document.getElementById('themeBtn'), modes=['Auto','Light','Dark'], mi=0;
+  tb.addEventListener('click',function(){
+    mi=(mi+1)%3; tb.textContent=modes[mi];
+    if(mi===0){ root.removeAttribute('data-theme'); } else { root.setAttribute('data-theme', modes[mi].toLowerCase()); }
+  });
+  /* density: compact, comfortable */
+  var db=document.getElementById('densBtn');
+  db.addEventListener('click',function(){
+    var comfy=root.getAttribute('data-density')!=='comfortable';
+    if(comfy){ root.setAttribute('data-density','comfortable'); db.textContent='Comfortable'; } else { root.removeAttribute('data-density'); db.textContent='Compact'; }
+  });
+
+  show(location.hash.slice(1)||'home');
+})();
+</script>
