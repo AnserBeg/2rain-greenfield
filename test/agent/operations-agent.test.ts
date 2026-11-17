@@ -276,12 +276,13 @@ test('context carries the business date and the declared default currency', asyn
     },
   ]).call('erp_discover', { mode: 'context' });
   const context = declared.content as {
-    today: { date: string; asDateTime: string; timeZone: string };
+    today: { date: string; asDateTime: string; now: string; timeZone: string };
     currency: { default: string | null; offered: string[] };
   };
   assert.equal(context.today.date, '2026-11-16');
   assert.equal(context.today.asDateTime, '2026-11-16T00:00:00.000Z');
   assert.equal(context.today.timeZone, 'America/Edmonton');
+  assert.equal(context.today.now, '2026-11-17T05:30:00.000Z');
   assert.equal(context.currency.default, 'CAD');
   assert.deepEqual(context.currency.offered, ['CAD', 'USD']);
 });

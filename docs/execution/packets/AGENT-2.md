@@ -1,6 +1,6 @@
 # AGENT-2 — the agent stops guessing (date, currency, permissions) and the terminal stops switching releases
 
-Status: slices 1-3 integrated (merge `18ec624a`, CI run 44087242803, PR #47); slice 4 harness code integrated, real-model eval NOT yet run (Docker engine hung) · Tier: Mechanical (no Critical path) · Stops taken: none
+Status: slices 1-3 integrated (merge `18ec624a`, CI run 44087242803, PR #47); slice 4 harness code integrated; real-model eval run 2026-11-17: 7 of 10 (bar 8) · Tier: Mechanical (no Critical path) · Stops taken: none
 Charter: [AGENT-2-charter.md](AGENT-2-charter.md) from `main` `e244abbd`. Branch `packet/AGENT-2`, base `08224859`.
 
 ## Claims
@@ -24,6 +24,10 @@ Charter: [AGENT-2-charter.md](AGENT-2-charter.md) from `main` `e244abbd`. Branch
 ## Slices
 
 1. Context. 2. Permission-filtered discovery. 3. Terminal release guard. 4. Harness hygiene, task-3 rule, new eval. Test it yourself below.
+
+## Result (run 2026-11-17, [result file](../evidence/2026-11-17T15-33-32-358Z-agent-eval.md), JSONL beside it)
+
+`claude-opus-5-5`, effort high, prices read 2026-11-17 (4 / 20 / 0.20 / 5 USD per MTok), task-3 rule v2. **7 of 10 passed; USD 1.2911 total; USD 0.1844 per completed task.** Tasks 1-5, 9, 10 pass (task 3 now passes). Failures: 6 (confirm refused: no ship-to on the order), 7 (shipment refused INVENTORY_STOCK_NEGATIVE), 8 (no payment: asked the person for a method). Task 7 traced to this packet: the context told the model to write dates as midnight UTC, so it posted `shipment_effective_at` at 00:00Z, before stock that arrived later that day. Fixed after the run: context now also carries `today.now` and says to use it for moments (postings, shipments, receipts); not re-measured. 6 and 8 read as model behavior (ship-to, payment method not named in the request), not tooling. The 7-of-10 stands as run; the next dated run owes a re-measure.
 
 ## Gates
 
