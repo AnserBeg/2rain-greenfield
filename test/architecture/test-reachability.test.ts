@@ -40,6 +40,7 @@ const workflowPath = '.github/workflows/ci.yml';
 const rootScriptCiAllowlist = {
   'check:boundaries':
     'transitively enforced by test/architecture/dependency-boundaries.test.ts',
+  'test:postgres': 'developer aggregate for the three CI PostgreSQL shards',
   test: 'developer aggregate for running the CI test commands locally',
 } as const;
 const nodeSelectionArguments =
@@ -369,7 +370,17 @@ test('declared unfiltered producers are wired to CI and their evidence paths', (
   );
 
   for (const producer of reachabilityProducers) {
-    const job = extractWorkflowJob(workflow, producer.ciJob);
+    let job = extractWorkflowJob(workflow, producer.ciJob);
+    if (producer.ciJob === 'postgres') {
+      const shard = producer.id.slice('postgres-'.length);
+      assert.match(job, /shard: \[1, 2, 3\]/u);
+      assert.ok(
+        job.includes(
+          `if: matrix.shard == ${shard}\n        run: ${producer.ciInvocation}\n`,
+        ),
+      );
+      job = job.replaceAll('${{ matrix.shard }}', shard);
+    }
     assert.ok(
       job.includes(producer.ciInvocation),
       `${producer.id} is absent from CI job ${producer.ciJob}`,
