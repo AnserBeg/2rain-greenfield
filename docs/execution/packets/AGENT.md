@@ -38,7 +38,7 @@ Every task: the watched document lists (orders, lines, receipts, reservations, s
 
 ## Gates
 
-CI at `f0eb507f` (PR #42, [run 44030692398](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44030692398)): 14 of 14 jobs green. Merge SHA: the ledger row. Local: format, typecheck, lint, `check:boundaries` PASS, audit (high) clean, `test/agent/operations-agent.test.ts` 5/5, `test/postgres/agent-tasks.test.ts` green.
+CI at `f0eb507f` (PR #42, [run 44030692398](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44030692398)): 14 of 14 jobs green. Merge SHA: the ledger row. Local: format, typecheck, lint, `check:boundaries` PASS, audit (high) clean, `test/agent/operations-agent.test.ts` 5/5, `test/postgres/agent-tasks.test.ts` green. Main CI at the merge (`5694b8fd`, run 44033887844) was red only on gitleaks: the model's own `executionIdempotencyKey` in the task-6 run record read as a key (false positive; neither model key is in the evidence, scanned by value). Fixed by a fingerprinted `.gitleaksignore` entry (as G2-P1's) and the harness logging `[given]`.
 
 ## Test it yourself (observed 2026-11-17 on a fresh dev container `dev-agent-check`, stopped with SIGINT)
 
