@@ -18,6 +18,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import {
   agentPreamble,
+  CUSTOMIZE_HANDOFF,
   OperationsAgentSession,
   runOperationsAgent,
   SpendMeter,
@@ -59,6 +60,23 @@ export interface AssistantEndpointOptions {
   readonly model: () => Promise<ModelAdapter | { unavailable: string }>;
   readonly prices?: ModelPrices;
   readonly capUsd?: number;
+  /**
+   * The customization lane (CUSTOMIZE's service): a change to the
+   * application is handed to its AI draft, shown as a plain diff, and never
+   * approved or activated from here (plan §9.1). Absent, the panel says where
+   * to make the change.
+   */
+  readonly customize?: () => Promise<CustomizeDrafter>;
+}
+
+/** The one call the panel makes into the customization lane. */
+export interface CustomizeDrafter {
+  draftFromRequest(
+    request: string,
+  ): Promise<
+    | { status: 'drafted'; renderedDiff: string; reused: boolean }
+    | { status: string; message: string; missingCapability?: string }
+  >;
 }
 
 interface PendingPlan {
@@ -304,6 +322,20 @@ export function createAssistantEndpoint(
       },
     });
     conversation.history = run.conversation;
+    const handoff =
+      run.stop === 'answered' ? CUSTOMIZE_HANDOFF.exec(run.answer) : null;
+    if (handoff) {
+      emit({ type: 'step', label: 'Drafting the change' });
+      emit({
+        type: 'answer',
+        ...(await handOff(text)),
+        stop: 'handoff',
+        links: [],
+        usd: run.usd,
+        spentUsd: conversation.meter.usd,
+      });
+      return;
+    }
     emit({
       type: 'answer',
       text:
@@ -318,6 +350,33 @@ export function createAssistantEndpoint(
       usd: run.usd,
       spentUsd: conversation.meter.usd,
     });
+  }
+
+  /** The person's own words go to the customization lane's AI draft. */
+  async function handOff(
+    request: string,
+  ): Promise<{ text: string; draft?: { diff: string } }> {
+    if (!options.customize)
+      return {
+        text: 'That is a change to the application, not to your records. Make it on the Customize screen.',
+      };
+    try {
+      const drafted = await (
+        await options.customize()
+      ).draftFromRequest(request);
+      if (drafted.status === 'drafted' && 'renderedDiff' in drafted)
+        return {
+          text: `That is a change to the application. I drafted it${drafted.reused ? ' (the same draft already existed)' : ''}; nothing is live yet. Read the change below, then approve and activate it on the Customize screen.`,
+          draft: { diff: drafted.renderedDiff },
+        };
+      return {
+        text: `That is a change to the application, and it could not be drafted: ${'message' in drafted ? drafted.message : drafted.status}. Nothing was changed.`,
+      };
+    } catch (error) {
+      return {
+        text: `That is a change to the application, and drafting it failed: ${error instanceof Error ? error.message : String(error)}. Nothing was changed.`,
+      };
+    }
   }
 
   function askThePerson(

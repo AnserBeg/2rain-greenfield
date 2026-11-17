@@ -7,7 +7,10 @@ import {
   ASSISTANT_PANEL_SCRIPT,
   withAssistantPanel,
 } from '../../apps/web/src/assistant-panel.js';
-import { createAssistantEndpoint } from '../../apps/api/src/assistant-endpoint.js';
+import {
+  createAssistantEndpoint,
+  type CustomizeDrafter,
+} from '../../apps/api/src/assistant-endpoint.js';
 import {
   scriptedModel,
   type ModelAdapter,
@@ -70,12 +73,14 @@ async function serve(
   model: ModelAdapter,
   log: string[],
   capUsd?: number,
+  customize?: CustomizeDrafter,
 ): Promise<{ url: string; server: Server }> {
   const endpoint = createAssistantEndpoint({
     runtime: fakeRuntime(log) as never,
     companyId: 'company',
     model: () => Promise.resolve(model),
     ...(capUsd !== undefined ? { capUsd } : {}),
+    ...(customize ? { customize: () => Promise.resolve(customize) } : {}),
   });
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://local');
@@ -406,6 +411,49 @@ test('Stop ends the run before the next model call; the reply says what happened
       .find((event) => event.type === 'answer')!;
     assert.equal(answer.stop, 'stopped');
     assert.match(String(answer.text), /^Stopped\./u);
+  } finally {
+    server.close();
+  }
+});
+
+test('a request to change the application goes to the customization draft, shown as a diff, never approved', async () => {
+  const asked: string[] = [];
+  const drafter: CustomizeDrafter = {
+    draftFromRequest: (request) => {
+      asked.push(request);
+      return Promise.resolve({
+        status: 'drafted',
+        reused: false,
+        renderedDiff:
+          'New field "Serial number" on Equipment\nNothing is live yet',
+      });
+    },
+  };
+  const { url, server } = await serve(
+    scriptedModel([
+      () => ({ text: 'HANDOFF customize: add a serial number to Equipment' }),
+    ]),
+    [],
+    undefined,
+    drafter,
+  );
+  try {
+    const stream = await events(
+      await fetch(`${url}/?assistant=ask`, {
+        method: 'POST',
+        headers: headers('buyer', url),
+        body: JSON.stringify({ text: 'Add a serial number to Equipment' }),
+      }),
+    );
+    const answer = stream.find((event) => event.type === 'answer')!;
+    assert.equal(answer.stop, 'handoff');
+    assert.deepEqual(answer.draft, {
+      diff: 'New field "Serial number" on Equipment\nNothing is live yet',
+    });
+    assert.match(String(answer.text), /nothing is live yet/u);
+    // The person's own words are drafted; the panel has no approve path.
+    assert.deepEqual(asked, ['Add a serial number to Equipment']);
+    assert.ok(!stream.some((event) => event.type === 'plan'));
   } finally {
     server.close();
   }

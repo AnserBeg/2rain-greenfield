@@ -140,6 +140,11 @@ export async function startComposedApplication(
   let seededRecords: readonly ComposedApplicationSeedReceipt[];
   let server: Server;
   let assistant: AssistantEndpoint | undefined;
+  // The customization lane opens on the panel's first handoff only.
+  let customizing: ReturnType<typeof openCustomizeService> | undefined;
+  const closeCustomizing = async () => {
+    await (await customizing?.catch(() => undefined))?.close();
+  };
   try {
     seededRecords = await seedComposedApplication(
       runtime,
@@ -177,6 +182,15 @@ export async function startComposedApplication(
             companyId: COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId,
             businessCalendar: COMPOSED_APPLICATION_INVENTORY_SCOPE,
             model: options.assistantModel ?? keyFileAssistantModel(),
+            customize: async () => {
+              customizing ??= openCustomizeService(options).catch(
+                (error: unknown) => {
+                  customizing = undefined;
+                  throw error;
+                },
+              );
+              return (await customizing).service;
+            },
           })
         : undefined;
     server = createSurfaceRuntimeServer(
@@ -221,6 +235,7 @@ export async function startComposedApplication(
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
       });
+      await closeCustomizing();
       await runtime.close();
     },
     runtime,

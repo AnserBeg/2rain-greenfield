@@ -216,6 +216,13 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
                 anchor.href = link.href;
               });
             }
+            if (event.draft) {
+              const draft = reply.appendChild(element('section', null, 'assistant-plan'));
+              draft.setAttribute('data-assistant-draft', '');
+              draft.appendChild(element('pre', event.draft.diff, 'assistant-diff'));
+              const open = draft.appendChild(element('a', 'Review it on the Customize screen'));
+              open.href = '/?customize';
+            }
             if (event.did) {
               const did = reply.appendChild(element('p', 'Did: ' + event.did.summary + ' ', 'assistant-did'));
               did.setAttribute('data-assistant-did', event.did.changeId);
@@ -300,6 +307,7 @@ const PANEL_STYLES = `
 .assistant-muted{color:var(--ink-muted,#666);font-size:.85em}
 .assistant-error{color:var(--status-blocked-ink,#a00)}
 .assistant-links{display:flex;flex-wrap:wrap;gap:8px}
+.assistant-diff{white-space:pre-wrap;font:inherit;font-size:.9em;margin:0 0 6px}
 .assistant-did{padding:6px 8px;border-radius:var(--radius-control,6px);background:var(--status-success-ground,#e7f6ea);color:var(--status-success-ink,#185c2a)}
 .assistant-did button{min-height:36px;margin-left:6px}
 .assistant-plan{border:1px solid var(--line-strong,#999);border-radius:var(--radius-container,8px);padding:10px 12px;background:var(--status-attention-ground,#fff7e0)}
