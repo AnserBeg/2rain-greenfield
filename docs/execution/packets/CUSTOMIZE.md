@@ -1,8 +1,8 @@
 # CUSTOMIZE — a non-developer adds a record type, field, choice or layout, reads a plain diff, approves, activates, rolls back
 
-Status: slices 1, 2 and 4 integrated (merges `41697099`, `9bbc6adf`, `273c7129`; main CI green); slice 5 (rehearsal) integrating; slice 3 (the Customize screen) STOPPED for a ruling (below).
+Status: slices 1, 2 and 4 integrated (merges `41697099`, `9bbc6adf`, `273c7129`); slice 5 (rehearsal) and slice 3 (the Customize screen, ruled 2026-11-17) integrating.
 Tier: Critical-touching — `db/migrations/0029_customization_patch_lineage.sql` (RLS/grant SQL). Merges are logged `merged — unread`.
-Base: `main` `a7a4cba1`. Stops: slice 3 (ux-grammar seam).
+Base: `main` `a7a4cba1`. Stops: slice 3 (ux-grammar seam), ruled.
 
 ## Claims
 
@@ -32,7 +32,7 @@ Base: `main` `a7a4cba1`. Stops: slice 3 (ux-grammar seam).
 
 ## Slices
 
-1. Draft and diff — `customize draft`. 2. Approve, live activation, rollback — `customize approve|activate|rollback`, `test/postgres/customization*.test.ts`. 3. Customize screen — STOPPED, built on `packet/CUSTOMIZE-s3`. 4. AI drafting — `customize ask`. 5. Rehearsal — [result](../evidence/2026-11-17-customize-week6-rehearsal.md): request to live record 46.6 s, rollback 3.0 s (CI run 44077868142).
+1. Draft and diff — `customize draft`. 2. Approve, live activation, rollback — `customize approve|activate|rollback`, `test/postgres/customization*.test.ts`. 3. Customize screen — `/?customize` (ruled exception), browser journey `customize.composed-application.spec.ts`. 4. AI drafting — `customize ask`. 5. Rehearsal — [result](../evidence/2026-11-17-customize-week6-rehearsal.md): request to live record 46.6 s, rollback 3.0 s (CI run 44077868142).
 
 ## Gates
 
@@ -40,11 +40,12 @@ Base: `main` `a7a4cba1`. Stops: slice 3 (ux-grammar seam).
 
 ## Test it yourself
 
-With `corepack pnpm dev` running: `corepack pnpm customize draft apps/api/scripts/examples/equipment.json` prints "New record type "Equipment" with 4 fields" and "Nothing is live yet"; `customize status` lists it; `customize approve <id>` then `customize activate <id>`; reload the app: Equipment is in the menu, no restart. `customize rollback`: Equipment is gone; records entered under it return after approve and activate again. With `NORTH_STAR_AGENT_KEY_FILE` set, `corepack pnpm customize ask "customers need a tax exempt number"` drafts a field on Party.
+With `corepack pnpm dev` running: `corepack pnpm customize draft apps/api/scripts/examples/equipment.json` prints "New record type "Equipment" with 4 fields" and "Nothing is live yet"; `customize status` lists it; `customize approve <id>` then `customize activate <id>`; reload the app: Equipment is in the menu, no restart. `customize rollback`: Equipment is gone; records entered under it return after approve and activate again. On the screen: open <http://127.0.0.1:4174/?customize>, fill "A new record type" (Equipment; Serial number; Purchase date as Date; Status as Choice with "In service, Under repair, Retired"), Draft, read the plain diff, Approve, Activate now, Open Equipment; back on `/?customize`, Roll back the latest change. With `NORTH_STAR_AGENT_KEY_FILE` set, `corepack pnpm customize ask "customers need a tax exempt number"` drafts a field on Party.
 
-## STOP — slice 3, the Customize screen
+## STOP — slice 3, the Customize screen (ruled)
 
 What: the ux-grammar skill ("Every screen renders through SurfaceRuntime… Never build a bespoke screen outside SurfaceRuntime… a separate builder application") and SURF001 forbid the minimal screen the charter asks for "in the web app"; the only application screen outside the seam is owner-ratified (RECEIPT §5.11). Options: (1) ratify a one-line seam exception for a local-demo-only Customize screen (`apps/web/src/customize-screen.ts`, built and tested on `packet/CUSTOMIZE-s3`: four forms, plain diff, Approve, Activate, Roll back; any demo persona can approve and the approval names the fixture approver); (2) build Customize through SurfaceRuntime as compiled surfaces with registered capability operations — the §8.5 builder the charter filed. Recommendation: (1).
+Ruling 2026-11-17 (orchestrator under owner standing rule; owner may veto): option (1). One allowlist line in `packages/dev-tooling/src/surface-runtime-seam.ts` and one line in the ux-grammar skill name `apps/web/src/customize-screen.ts`: local demo only, the §8.5 builder replaces it.
 
 ## Filed
 

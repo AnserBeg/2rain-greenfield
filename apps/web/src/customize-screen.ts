@@ -1,10 +1,58 @@
-import type {
-  ActivationOutcome,
-  ApprovalOutcome,
-  CustomizationStatus,
-  CustomizationTargets,
-  DraftOutcome,
-} from '@north-star/postgres-provider/customization-service';
+/*
+ * The shapes this screen reads from the customization service, declared here:
+ * apps/web never imports the provider (surface-data-binding gate); the
+ * composition hands in the service, whose results are structurally these.
+ */
+type PatchBody = Readonly<Record<string, unknown>> & { readonly kind: string };
+interface ScreenPatch {
+  readonly createdAt: string;
+  readonly patch: PatchBody;
+  readonly patchId: string;
+  readonly state: 'live' | 'approved' | 'drafted' | 'stale';
+}
+interface CustomizationStatus {
+  readonly activeChain: readonly { readonly patch: PatchBody }[];
+  readonly patches: readonly ScreenPatch[];
+}
+interface CustomizationTargets {
+  readonly choiceFields: readonly {
+    readonly fieldId: string;
+    readonly label: string;
+    readonly options: readonly string[];
+  }[];
+  readonly lists: readonly {
+    readonly columns: readonly {
+      readonly fieldId: string;
+      readonly label: string;
+    }[];
+    readonly label: string;
+    readonly surfaceId: string;
+  }[];
+  readonly recordTypes: readonly {
+    readonly entityId: string;
+    readonly label: string;
+    readonly tenantAuthored: boolean;
+  }[];
+}
+type DraftOutcome =
+  | {
+      readonly patchId: string;
+      readonly renderedDiff: string;
+      readonly status: 'drafted';
+    }
+  | {
+      readonly code?: string;
+      readonly issues?: readonly string[];
+      readonly message: string;
+      readonly missingCapability?: string;
+      readonly status: 'invalid' | 'refused' | 'rejected' | 'unsupported';
+    };
+interface ApprovalOutcome {
+  readonly renderedDiff: string;
+}
+interface ActivationOutcome {
+  readonly releaseRoot: string;
+}
 
 import { escapeHtml } from './html.js';
 
