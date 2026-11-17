@@ -632,6 +632,11 @@ function scanForBypass(
     // Owner-ratified RECEIPT §5.11 exception: this focused renderer is consumed
     // only by the closed registry; it is not an alternate surface authority.
     'apps/web/src/receiving-section.ts',
+    // Ratified 2026-11-17 (CUSTOMIZE slice 3; orchestrator under the owner's
+    // standing rule, owner may veto): the local-demo-only Customize screen,
+    // served by the app server at /?customize. Not an alternate surface
+    // authority; the §8.5 builder replaces it.
+    'apps/web/src/customize-screen.ts',
     // Owner ruling 2026-11-17 (AGENT-3 charter, "chat panel seam
     // exception"): the assistant panel, local demo only, one panel on every
     // app page. It renders no surface and reads no business data itself.
