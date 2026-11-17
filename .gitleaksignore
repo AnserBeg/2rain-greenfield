@@ -1,2 +1,5 @@
 # G2-P1 synthetic SECRET redaction sentinel; its test proves this exact value never persists.
 a71aa33157ac35f54dd3c9e4f36bd65b5c5e0861:test/postgres/trust-substrate.test.ts:generic-api-key:52
+# AGENT eval run record: the model's own erp_execute executionIdempotencyKey (a
+# 25-character label it chose), not a credential; the harness now logs "[given]".
+86d318fac8f10afa860830a6fd691d43215b8ec6:docs/execution/evidence/2026-11-17-agent-eval-runs-2026-11-17T06-22-33-731Z/task-06.jsonl:generic-api-key:69
