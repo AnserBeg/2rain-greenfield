@@ -677,15 +677,12 @@ export async function createComposedApplicationRuntime(
         applicationIdentity.releaseId,
         applicationRelease,
       );
-    if (tenantServing) {
-      // Provisioning above recorded the lineage tip; the posting kernel posts
-      // only for the release the scope names, so it names the one served.
-      await advanceInventoryContractRoot(
-        adminPool,
-        identities.runtime,
-        tenantServing.releaseRoot,
-      );
-    }
+    // Provisioning above recorded the lineage tip; the posting kernel posts
+    // only for the release a scope names, so every scope is reconciled to the
+    // pointer as re-read under the lock the customize swap also takes.
+    await withReleaseScopeLock(adminPool, identities.runtime, async (client) =>
+      reconcileInventoryScopeToPointer(client, identities.runtime),
+    );
     if (options.localDemoIdentity) {
       await provisionLocalDemoReleaseAuthorization(
         adminPool,
@@ -1038,7 +1035,7 @@ function viewReleaseId(view: unknown): string | null {
  * The read ingress of the composed runtime: each request is answered by the
  * gateway built for the release its view was issued against.
  */
-class ReleaseRoutingQueryGateway extends SemanticQueryGateway {
+export class ReleaseRoutingQueryGateway extends SemanticQueryGateway {
   readonly #route: RouteServing;
   readonly #fallback: SemanticQueryGateway;
 
@@ -1060,6 +1057,12 @@ class ReleaseRoutingQueryGateway extends SemanticQueryGateway {
     return (await this.#gateway(args[0])).invokeAggregate(...args);
   }
 
+  override async previewEligibility(
+    ...args: Parameters<SemanticQueryGateway['previewEligibility']>
+  ): ReturnType<SemanticQueryGateway['previewEligibility']> {
+    return (await this.#gateway(args[0])).previewEligibility(...args);
+  }
+
   async #gateway(view: unknown): Promise<SemanticQueryGateway> {
     const releaseId = viewReleaseId(view);
     // A malformed view is refused by the gateway's own view assertion.
@@ -1070,7 +1073,7 @@ class ReleaseRoutingQueryGateway extends SemanticQueryGateway {
 }
 
 /** The write ingress, routed the same way. */
-class ReleaseRoutingOperationGateway extends SemanticOperationGateway {
+export class ReleaseRoutingOperationGateway extends SemanticOperationGateway {
   readonly #route: RouteServing;
   readonly #fallback: SemanticOperationGateway;
 
@@ -1487,20 +1490,61 @@ export async function provisionLocalDemoAuthorization(
 }
 
 /**
- * Moves every inventory scope of one tenant environment to the release now
- * active (CUSTOMIZE: a tenant release, or the release a rollback returns to).
- * `contract_release_root` is provenance the posting kernel requires to equal
- * the active release (`INVENTORY_POSTING_RELEASE_MISMATCH`). This re-runs the
- * provisioning function with each scope's own stored policy, so policy stays
- * assert-identical and only the root advances (migration 0019); the entity
- * code and name it validates as non-blank are not stored by it.
+ * One tenant environment's release-scope lock (CUSTOMIZE review F1): a
+ * session advisory lock held on one admin connection across a pointer swap,
+ * the pointer re-read and the inventory scope reconcile, so no swap can land
+ * between another swap and its reconcile.
  */
-export async function advanceInventoryContractRoot(
+export async function withReleaseScopeLock<T>(
   adminPool: pg.Pool,
   identity: AuthenticatedIdentity,
-  releaseRoot: string,
-): Promise<void> {
-  await adminPool.query(
+  run: (client: pg.PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await adminPool.connect();
+  const key = `northstar.release-scope:${identity.tenantId}:${identity.environmentId}`;
+  try {
+    await client.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [
+      key,
+    ]);
+    try {
+      return await run(client);
+    } finally {
+      await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [
+        key,
+      ]);
+    }
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Sets every inventory scope of one tenant environment to the root of the
+ * release the active pointer names, read here -- never a root computed
+ * earlier. `contract_release_root` is provenance the posting kernel requires
+ * to equal the active release (`INVENTORY_POSTING_RELEASE_MISMATCH`). It
+ * re-runs the provisioning function with each scope's own stored policy, so
+ * policy stays assert-identical and only the root moves (migration 0019); the
+ * entity code and name it validates as non-blank are not stored by it. Call it
+ * holding `withReleaseScopeLock`. Returns the root, or null with no pointer.
+ */
+export async function reconcileInventoryScopeToPointer(
+  client: pg.PoolClient,
+  identity: AuthenticatedIdentity,
+): Promise<string | null> {
+  const pointer = await client.query<{ content_hash: string }>(
+    `SELECT release.content_hash
+       FROM platform.active_release_pointers AS pointer
+       JOIN platform.tenant_releases AS release
+         ON release.tenant_id = pointer.tenant_id
+        AND release.environment_id = pointer.environment_id
+        AND release.release_id = pointer.release_id
+      WHERE pointer.tenant_id = $1 AND pointer.environment_id = $2`,
+    [identity.tenantId, identity.environmentId],
+  );
+  const releaseRoot = pointer.rows[0]?.content_hash ?? null;
+  if (releaseRoot === null) return null;
+  await client.query(
     `SELECT platform.provision_inventory_scope(
        configuration.tenant_id, configuration.environment_id,
        configuration.legal_entity_id, 'scope', 'scope',
@@ -1521,9 +1565,11 @@ export async function advanceInventoryContractRoot(
        JOIN platform.inventory_tenant_calendars AS calendar
          ON calendar.tenant_id = configuration.tenant_id
       WHERE configuration.tenant_id = $1
-        AND configuration.environment_id = $2`,
+        AND configuration.environment_id = $2
+        AND configuration.contract_release_root IS DISTINCT FROM $3`,
     [identity.tenantId, identity.environmentId, releaseRoot],
   );
+  return releaseRoot;
 }
 
 async function provisionInventoryScope(
@@ -1638,6 +1684,12 @@ async function ensureAuthority(
   }
 }
 
+/** A staged release already belongs to another parent or authorship. */
+export class PersistedReleaseConflict extends Error {
+  override readonly name = 'PersistedReleaseConflict';
+  readonly code = 'CUSTOMIZE_RELEASE_REVISION_CONFLICT' as const;
+}
+
 export async function ensurePersistedRelease(
   pool: pg.Pool,
   context: TrustedRequestContext,
@@ -1645,6 +1697,50 @@ export async function ensurePersistedRelease(
   parentRevisionId: MintedUuid | null,
   provenance: 'firstParty' | 'tenantAuthored' = 'firstParty',
 ): Promise<PersistedReleaseIdentity> {
+  // A release already staged for this root carries its own revision: return
+  // that one (CUSTOMIZE review F2). Two identical drafts racing could each mint
+  // a revision; the release links one, and the patch must record the same.
+  const existing = await withTrustedRequestTransaction(
+    pool,
+    context,
+    async (client) =>
+      client.query<{
+        parent_revision_id: MintedUuid | null;
+        provenance: string;
+        release_id: MintedUuid;
+        revision_id: MintedUuid;
+        verification_evidence_id: MintedUuid;
+      }>(
+        `SELECT release.release_id, release.verification_evidence_id,
+                revision.revision_id, revision.provenance,
+                revision.parent_revision_id
+           FROM platform.tenant_releases AS release
+           JOIN platform.app_package_revisions AS revision
+             ON revision.tenant_id = release.tenant_id
+            AND revision.revision_id = release.app_package_revision_id
+          WHERE release.tenant_id = $1 AND release.environment_id = $2
+            AND release.content_hash = $3
+          ORDER BY release.created_at LIMIT 1`,
+        [context.tenantId, context.environmentId, release.compiled.releaseRoot],
+      ),
+  );
+  const stagedRow = existing.rows[0];
+  if (stagedRow) {
+    if (
+      provenance === 'tenantAuthored' &&
+      (stagedRow.provenance !== 'tenantAuthored' ||
+        stagedRow.parent_revision_id !== parentRevisionId)
+    ) {
+      throw new PersistedReleaseConflict(
+        'this release is already recorded under a different parent or authorship; nothing was recorded',
+      );
+    }
+    return Object.freeze({
+      evidenceId: stagedRow.verification_evidence_id,
+      releaseId: stagedRow.release_id,
+      revisionId: stagedRow.revision_id,
+    });
+  }
   const normalizedDefinition = parseNormalizedApplicationPackageJson(
     release.normalizedDefinitionBytes,
   );
@@ -1685,23 +1781,8 @@ export async function ensurePersistedRelease(
       tenantId: context.tenantId,
     });
   }
-  const existingRelease = await withTrustedRequestTransaction(
-    pool,
-    context,
-    async (client) =>
-      client.query<{
-        release_id: MintedUuid;
-        verification_evidence_id: MintedUuid;
-      }>(
-        `SELECT release_id, verification_evidence_id
-           FROM platform.tenant_releases
-          WHERE tenant_id = $1 AND environment_id = $2 AND content_hash = $3
-          ORDER BY created_at LIMIT 1`,
-        [context.tenantId, context.environmentId, release.compiled.releaseRoot],
-      ),
-  );
-  let releaseId = existingRelease.rows[0]?.release_id;
-  let evidenceId = existingRelease.rows[0]?.verification_evidence_id;
+  let releaseId: MintedUuid | undefined;
+  let evidenceId: MintedUuid | undefined;
   if (!releaseId || !evidenceId) {
     releaseId = minted(randomUUID());
     const staged = await repository.stageTenantReleaseCandidate(context, {

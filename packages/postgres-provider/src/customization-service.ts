@@ -29,7 +29,9 @@ import pg from 'pg';
 import type { PostgresCapabilityOperationExecutorFactory } from './capability-operation-executor-factory.js';
 import {
   activateWithExactSwapTrigger,
-  advanceInventoryContractRoot,
+  PersistedReleaseConflict,
+  reconcileInventoryScopeToPointer,
+  withReleaseScopeLock,
   approveModuleRelease,
   approveReleaseWithoutStorageTransition,
   assertExactSwapTriggerEnabled,
@@ -50,7 +52,10 @@ import {
 import type { ModuleProviderErrorMapping } from './module-runtime-interpreter.js';
 import { PostgresModuleStorageMaterializer } from './module-storage-materializer.js';
 import { PostgresReleaseActivationService } from './release-activation-service.js';
-import { authorizeReverseTransitionIfApplicable } from './release-reverse-transition-policy.js';
+import {
+  authorizeReverseTransitionIfApplicable,
+  ReleaseReverseTransitionRefusal,
+} from './release-reverse-transition-policy.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 
 /**
@@ -82,7 +87,9 @@ export type CustomizationRefusalCode =
   | 'CUSTOMIZE_NOT_APPROVED'
   | 'CUSTOMIZE_ALREADY_ACTIVE'
   | 'CUSTOMIZE_NOTHING_TO_ROLL_BACK'
-  | 'CUSTOMIZE_ACTIVATION_FAILED';
+  | 'CUSTOMIZE_ACTIVATION_FAILED'
+  | 'CUSTOMIZE_RELEASE_REVISION_CONFLICT'
+  | 'CUSTOMIZE_ROLLBACK_NOT_REVERSIBLE';
 
 export class CustomizationServiceRefusal extends Error {
   override readonly name = 'CustomizationServiceRefusal';
@@ -114,6 +121,11 @@ export interface CustomizationServiceOptions {
    * first use, so a missing key fails only that request.
    */
   readonly draftingModel?: () => Promise<DraftingModel>;
+  /**
+   * Test seam: runs after a swap and before the inventory scope reconcile,
+   * while the release-scope lock is held.
+   */
+  readonly afterSwapBeforeScope?: () => Promise<void>;
 }
 
 export interface CustomizationConnection {
@@ -340,13 +352,25 @@ export class PostgresCustomizationService {
     this.#assertReproduced(active.chain, steps);
     const step = steps.at(-1)!;
     const candidate = parseSerializedRelease(step.release);
-    const identity = await ensurePersistedRelease(
-      this.connection.runtimePool,
-      context,
-      candidate,
-      active.revisionId,
-      'tenantAuthored',
-    );
+    let identity: PersistedReleaseIdentity;
+    try {
+      identity = await ensurePersistedRelease(
+        this.connection.runtimePool,
+        context,
+        candidate,
+        active.revisionId,
+        'tenantAuthored',
+      );
+    } catch (error) {
+      if (error instanceof PersistedReleaseConflict) {
+        return Object.freeze({
+          code: error.code,
+          message: error.message,
+          status: 'refused' as const,
+        });
+      }
+      throw error;
+    }
     const payload = new TextEncoder().encode(canonicalize(parsed.patch));
     const payloadDigest = createHash('sha256').update(payload).digest('hex');
     const normalized = parseNormalizedApplicationPackageJson(
@@ -517,10 +541,13 @@ export class PostgresCustomizationService {
     const active = await this.#active(context);
     const record = await this.#patch(context, patchId);
     if (active.chain.some((applied) => applied.patchId === record.patchId)) {
-      throw new CustomizationServiceRefusal(
-        'CUSTOMIZE_ALREADY_ACTIVE',
-        'this change is already live',
-      );
+      // Already live: finish what a cut-off activation may have left undone.
+      const releaseRoot = await this.#reconcile();
+      return Object.freeze({
+        releaseId: active.releaseId,
+        releaseRoot: releaseRoot ?? active.releaseRoot,
+        status: 'activated' as const,
+      });
     }
     const approval = await withTrustedRequestTransaction(
       this.connection.runtimePool,
@@ -612,46 +639,55 @@ export class PostgresCustomizationService {
     const active = await this.#active(context);
     const record = active.chain.at(-1);
     if (!record) {
+      // Nothing live to undo: finish what a cut-off rollback may have left.
+      await this.#reconcile();
       throw new CustomizationServiceRefusal(
         'CUSTOMIZE_NOTHING_TO_ROLL_BACK',
         'the live application has no customization to roll back',
       );
     }
-    const targetReleaseId = await withTrustedRequestTransaction(
-      this.connection.runtimePool,
-      context,
-      async (client) => {
-        const swap = await client.query<{ previous_release_id: MintedUuid }>(
-          `SELECT previous_release_id
-             FROM platform.release_activation_swap_receipts
-            WHERE tenant_id = $1 AND environment_id = $2
-              AND activated_release_id = $3 AND fence = $4`,
-          [
-            context.tenantId,
-            context.environmentId,
-            active.releaseId,
-            active.pointer.fence,
-          ],
-        );
-        return swap.rows[0]?.previous_release_id ?? null;
-      },
-    );
+    // The release this change was built on: the previous change's release,
+    // or the first-party release (review F5) -- not whatever the last swap
+    // came from, which after an earlier rollback is a later change.
+    const targetReleaseId =
+      active.chain.at(-2)?.resultingReleaseId ??
+      (await this.#releaseIdForRoot(context, this.#tip.compiled.releaseRoot));
     if (!targetReleaseId) {
       throw new CustomizationServiceRefusal(
         'CUSTOMIZE_NOTHING_TO_ROLL_BACK',
-        'the live customization has no recorded activation to reverse',
+        'the release this customization was built on is not recorded here',
       );
     }
-    const reverse = await withTrustedRequestTransaction(
-      this.connection.runtimePool,
-      context,
-      async (client) =>
-        authorizeReverseTransitionIfApplicable(client, context, {
-          expectedFence: active.pointer.fence,
-          sourceReleaseId: active.releaseId,
-          targetReleaseId,
-        }),
-    );
+    let reverse: Awaited<
+      ReturnType<typeof authorizeReverseTransitionIfApplicable>
+    >;
+    try {
+      reverse = await withTrustedRequestTransaction(
+        this.connection.runtimePool,
+        context,
+        async (client) =>
+          authorizeReverseTransitionIfApplicable(client, context, {
+            expectedFence: active.pointer.fence,
+            sourceReleaseId: active.releaseId,
+            targetReleaseId,
+          }),
+      );
+    } catch (error) {
+      if (
+        error instanceof ReleaseReverseTransitionRefusal &&
+        error.code === 'ROLLBACK_FORWARD_ACTIVATION_NOT_VERIFIED'
+      ) {
+        // The reverse-transition policy reverses only the activation that
+        // made the current release live. A change made live again by rolling
+        // back a later one was made live by that rollback, not by its own
+        // activation, so it cannot be rolled back further (filed).
+        throw new CustomizationServiceRefusal(
+          'CUSTOMIZE_ROLLBACK_NOT_REVERSIBLE',
+          'this change became live again when a later change was rolled back; rolling back past it is not supported yet',
+        );
+      }
+      throw error;
+    }
     if (!reverse) {
       throw new CustomizationServiceRefusal(
         'CUSTOMIZE_NOTHING_TO_ROLL_BACK',
@@ -690,6 +726,11 @@ export class PostgresCustomizationService {
     );
   }
 
+  /**
+   * Swap, re-read the pointer and reconcile the inventory scopes to it, all
+   * holding the release-scope lock (review F1): a concurrent swap waits, so a
+   * scope is never set to a root another swap has already replaced.
+   */
   async #swap(
     context: TrustedRequestContext,
     activationAttemptId: MintedUuid,
@@ -697,34 +738,73 @@ export class PostgresCustomizationService {
     status: ActivationOutcome['status'],
     expectedReleaseId: MintedUuid = record.resultingReleaseId,
   ): Promise<ActivationOutcome> {
-    const activated = await activateWithExactSwapTrigger(
-      this.connection.adminPool,
-      new PostgresReleaseActivationService(this.connection.runtimePool),
-      await trustedContext(this.connection.identities.system),
-      activationAttemptId,
-    );
-    if (activated.status !== 'SWAPPED_VERIFIED') {
-      throw new CustomizationServiceRefusal(
-        'CUSTOMIZE_ACTIVATION_FAILED',
-        `activation did not verify: ${activated.status}`,
-      );
-    }
-    const pointer = await readPointer(this.connection.runtimePool, context);
-    if (pointer.releaseId !== expectedReleaseId) {
-      throw new CustomizationServiceRefusal(
-        'CUSTOMIZE_ACTIVATION_FAILED',
-        'activation selected another release',
-      );
-    }
-    const releaseRoot = await this.#root(context, expectedReleaseId);
-    // Until this lands, a posting refuses loudly (release mismatch); it is
-    // never written under the wrong release.
-    await advanceInventoryContractRoot(
+    return withReleaseScopeLock(
       this.connection.adminPool,
       this.connection.identities.runtime,
-      releaseRoot,
+      async (client) => {
+        const activated = await activateWithExactSwapTrigger(
+          this.connection.adminPool,
+          new PostgresReleaseActivationService(this.connection.runtimePool),
+          await trustedContext(this.connection.identities.system),
+          activationAttemptId,
+        );
+        if (activated.status !== 'SWAPPED_VERIFIED') {
+          throw new CustomizationServiceRefusal(
+            'CUSTOMIZE_ACTIVATION_FAILED',
+            `activation did not verify: ${activated.status}`,
+          );
+        }
+        const pointer = await readPointer(this.connection.runtimePool, context);
+        if (pointer.releaseId !== expectedReleaseId) {
+          throw new CustomizationServiceRefusal(
+            'CUSTOMIZE_ACTIVATION_FAILED',
+            'activation selected another release',
+          );
+        }
+        await this.options.afterSwapBeforeScope?.();
+        const releaseRoot = await reconcileInventoryScopeToPointer(
+          client,
+          this.connection.identities.runtime,
+        );
+        return Object.freeze({
+          releaseId: expectedReleaseId,
+          releaseRoot:
+            releaseRoot ?? (await this.#root(context, expectedReleaseId)),
+          status,
+        });
+      },
     );
-    return Object.freeze({ releaseId: expectedReleaseId, releaseRoot, status });
+  }
+
+  async #reconcile(): Promise<string | null> {
+    return withReleaseScopeLock(
+      this.connection.adminPool,
+      this.connection.identities.runtime,
+      async (client) =>
+        reconcileInventoryScopeToPointer(
+          client,
+          this.connection.identities.runtime,
+        ),
+    );
+  }
+
+  async #releaseIdForRoot(
+    context: TrustedRequestContext,
+    releaseRoot: string,
+  ): Promise<MintedUuid | null> {
+    return withTrustedRequestTransaction(
+      this.connection.runtimePool,
+      context,
+      async (client) => {
+        const result = await client.query<{ release_id: MintedUuid }>(
+          `SELECT release_id FROM platform.tenant_releases
+            WHERE tenant_id = $1 AND environment_id = $2 AND content_hash = $3
+            ORDER BY created_at LIMIT 1`,
+          [context.tenantId, context.environmentId, releaseRoot],
+        );
+        return result.rows[0]?.release_id ?? null;
+      },
+    );
   }
 
   /**

@@ -37,10 +37,11 @@ import {
   SpendMeter,
 } from '../../packages/operations-agent/src/index.js';
 import { COMPANY, worldOver, type AgentWorld } from '../agent/agent-world.js';
-import { snapshot } from '../agent/arrange.js';
+import { ids, openingStock, snapshot } from '../agent/arrange.js';
 import { referenceScript } from '../agent/reference-scripts.js';
 import { TASKS } from '../agent/tasks.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
+import type pg from 'pg';
 
 const equipment = JSON.parse(
   readFileSync(resolve('apps/api/scripts/examples/equipment.json'), 'utf8'),
@@ -72,7 +73,7 @@ test(
   async () => {
     await withEphemeralPostgres(
       'customize-world',
-      async ({ connection }) => {
+      async ({ connection, pool }) => {
         const databaseUrl = `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`;
         const seeded = await startComposedApplication({
           databaseUrl,
@@ -85,7 +86,7 @@ test(
           databaseUrl,
           tenantSlug,
         });
-        const opened = await openCustomizationService({
+        const serviceOptions = {
           acknowledgement: readUnboundPermissionAcknowledgementFor(
             authoredPath,
             'northstar.app:package.application',
@@ -106,11 +107,12 @@ test(
             readFileSync(authoredPath, 'utf8'),
           ) as Record<string, unknown>,
           draftingModel: () => Promise.resolve(scriptedDrafter),
-          localDemoIdentity: true,
+          localDemoIdentity: true as const,
           migrationsDirectory: resolve('db/migrations'),
           providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
           tenantSlug,
-        });
+        };
+        const opened = await openCustomizationService(serviceOptions);
         try {
           const world = worldOver(runtime, String(connection.database));
           const firstParty = runtime.releaseRoot;
@@ -139,6 +141,20 @@ test(
           });
           assert.equal(created.outcome, 'succeeded');
           const liveAt = performance.now();
+          // Review F3: discovery on the never-restarted runtime sees the new
+          // record type's queries under the live release's policy.
+          assert.equal(
+            await runtime.entry.run(
+              { headers: { cookie: 'northstar-demo-actor=manager' } },
+              (view) =>
+                runtime.queryGateway.previewEligibility(
+                  view,
+                  'northstar.app:query.custom_equipment_list',
+                  null,
+                ),
+            ),
+            'eligible',
+          );
 
           // Receiving and shipping post through executors pinned per release.
           // Task 7 asserts an absolute on-hand figure, so it runs first.
@@ -166,6 +182,56 @@ test(
           // the tasks after the rollback are ones not yet run here.
           await runTask(world, 6);
           await runTask(world, 8);
+          await assertScopesNamePointer(pool, runtime);
+
+          // Review F1 (a): a rollback started in the gap between an
+          // activation's swap and its scope reconcile waits for the lock; the
+          // scopes end on the release the pointer names and a posting works.
+          await opened.service.approve(drafted.patchId);
+          let racing: Promise<unknown> | undefined;
+          const racer = await openCustomizationService(serviceOptions);
+          const pausing = await openCustomizationService({
+            ...serviceOptions,
+            afterSwapBeforeScope: async () => {
+              racing = racer.service.rollback();
+              await waitForAdvisoryLockWaiter(pool);
+            },
+          });
+          try {
+            await pausing.service.activate(drafted.patchId);
+            await racing;
+          } finally {
+            await pausing.close();
+            await racer.close();
+          }
+          assert.equal(
+            (await opened.service.status()).activeReleaseRoot,
+            firstParty,
+          );
+          await assertScopesNamePointer(pool, runtime);
+          const { notebook, calgary } = ids();
+          await openingStock(world, notebook, calgary, '3');
+
+          // Review F1 (b): a reconcile that fails after the swap is repaired
+          // by running activate again.
+          await opened.service.approve(drafted.patchId);
+          const failing = await openCustomizationService({
+            ...serviceOptions,
+            afterSwapBeforeScope: () =>
+              Promise.reject(new Error('injected reconcile failure')),
+          });
+          try {
+            await assert.rejects(
+              failing.service.activate(drafted.patchId),
+              /injected reconcile failure/u,
+            );
+          } finally {
+            await failing.close();
+          }
+          const repaired = await opened.service.activate(drafted.patchId);
+          assert.equal(repaired.releaseRoot, drafted.releaseRoot);
+          await assertScopesNamePointer(pool, runtime);
+          await openingStock(world, notebook, calgary, '2');
         } finally {
           await opened.close();
           await runtime.close();
@@ -175,6 +241,44 @@ test(
     );
   },
 );
+
+async function assertScopesNamePointer(
+  pool: pg.Pool,
+  runtime: { readonly identity: { readonly tenantId: string } },
+): Promise<void> {
+  const result = await pool.query<{ mismatched: number; scopes: number }>(
+    `SELECT count(*)::integer AS scopes,
+            count(*) FILTER (
+              WHERE configuration.contract_release_root <> release.content_hash
+            )::integer AS mismatched
+       FROM platform.inventory_posting_configurations AS configuration
+       JOIN platform.active_release_pointers AS pointer
+         ON pointer.tenant_id = configuration.tenant_id
+        AND pointer.environment_id = configuration.environment_id
+       JOIN platform.tenant_releases AS release
+         ON release.release_id = pointer.release_id
+      WHERE configuration.tenant_id = $1`,
+    [runtime.identity.tenantId],
+  );
+  assert.ok(result.rows[0]!.scopes > 0);
+  assert.equal(
+    result.rows[0]!.mismatched,
+    0,
+    'every inventory scope names the active release',
+  );
+}
+
+async function waitForAdvisoryLockWaiter(pool: pg.Pool): Promise<void> {
+  for (let attempt = 0; attempt < 600; attempt += 1) {
+    const waiting = await pool.query<{ waiting: number }>(
+      `SELECT count(*)::integer AS waiting FROM pg_locks
+        WHERE locktype = 'advisory' AND NOT granted`,
+    );
+    if (waiting.rows[0]!.waiting > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error('the racing rollback never reached the release-scope lock');
+}
 
 async function runTask(world: AgentWorld, id: number): Promise<void> {
   const task = TASKS.find((candidate) => candidate.id === id)!;
