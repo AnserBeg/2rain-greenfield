@@ -373,33 +373,17 @@ export function orderEntrySurfaces(
               'Customer',
               counterparty('customer'),
             ),
-            // Customer defaults (owner ruling E): choosing a customer resets
-            // each of these to that customer's value, then they are the
-            // order's to change.
-            field(`${local}_salesperson_party_id`, 'Salesperson', {
-              ...salesperson,
-              ...fromCustomer('party_default_salesperson_party_id'),
-            }),
-            field(`${local}_order_date`, 'Order date'),
+            // Today, to the second (LOOP-1); the user may change it.
+            field(`${local}_order_date`, 'Order date', { defaultNow: true }),
             // A new order asks for delivery three weeks out, as the reference
             // does; the user changes it before saving.
             field(`${local}_requested_date`, 'Requested date', {
               defaultDaysFromToday: 21,
             }),
+            // The order's currency, from the customer, before the ship-to.
             field(`${local}_currency`, 'Currency', {
               ...currency,
               ...fromCustomer('party_default_currency'),
-            }),
-            field(
-              `${local}_payment_terms`,
-              'Payment terms',
-              fromCustomer('party_payment_terms'),
-            ),
-            // The order's tax code (ruling B): the customer's, then each new
-            // line and charge starts from it.
-            field(`${local}_tax_code_id`, 'Tax code', {
-              ...taxCode,
-              ...fromCustomer('party_default_tax_code_id'),
             }),
             // The ship-to address is chosen from that customer's own book; the
             // order keeps its own copy of the lines, filled from the choice.
@@ -432,6 +416,26 @@ export function orderEntrySurfaces(
               'Country',
               fromAddress('country'),
             ),
+            // The fields the job needs lead (LOOP-1): customer, dates and
+            // where it goes; then who sells it, the money terms and charges.
+            // Customer defaults (owner ruling E): choosing a customer resets
+            // each of these to that customer's value, then they are the
+            // order's to change.
+            field(`${local}_salesperson_party_id`, 'Salesperson', {
+              ...salesperson,
+              ...fromCustomer('party_default_salesperson_party_id'),
+            }),
+            field(
+              `${local}_payment_terms`,
+              'Payment terms',
+              fromCustomer('party_payment_terms'),
+            ),
+            // The order's tax code (ruling B): the customer's, then each new
+            // line and charge starts from it.
+            field(`${local}_tax_code_id`, 'Tax code', {
+              ...taxCode,
+              ...fromCustomer('party_default_tax_code_id'),
+            }),
             // Two charges, each taxed by its own code (ruling B).
             field(`${local}_freight_amount`, 'Freight'),
             field(`${local}_freight_tax_code_id`, 'Freight tax code', {
@@ -463,12 +467,15 @@ export function orderEntrySurfaces(
               'Vendor',
               counterparty('supplier'),
             ),
-            field(`${local}_order_date`, 'Order date'),
+            // Today, to the second (LOOP-1); the user may change it.
+            field(`${local}_order_date`, 'Order date', { defaultNow: true }),
+            // The fields the job needs lead (LOOP-1): vendor, order date,
+            // where the goods arrive; then the dates, terms and charges.
+            field(`${local}_receiving_location_id`, 'Receive into', location),
             // Two weeks out, as the reference defaults it.
             field(`${local}_${date}`, 'Expected date', {
               defaultDaysFromToday: 14,
             }),
-            field(`${local}_receiving_location_id`, 'Receive into', location),
             field(`${local}_currency`, 'Currency', {
               ...currency,
               ...fromVendor('party_default_currency'),

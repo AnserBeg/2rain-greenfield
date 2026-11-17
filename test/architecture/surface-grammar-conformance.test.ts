@@ -367,18 +367,21 @@ test('compiled navigation stays flat within budget and groups mounted modules be
             delete field.presentation?.tiers;
           }
         }
-      // LOOP-1's order payment pays each open invoice in per-row steps that
-      // read their own row's read-backs, as a counter sale does.
+      // LOOP-1's order payment and Ship work in per-row steps that read their
+      // own row's read-backs, as a counter sale does.
       if (counterSales && surface.composition) {
         surface.composition.actions = surface.composition.actions.filter(
           (action) =>
             !action.actionId.includes(':action.counter_sale_') &&
-            !action.actionId.endsWith(':action.order_record_payment'),
+            !action.actionId.endsWith(':action.order_record_payment') &&
+            !action.actionId.endsWith(':action.ship_lines'),
         );
         const progression = surface.composition.presentation?.progression;
         if (progression)
           progression.next = progression.next.filter(
-            (entry) => !entry.action?.endsWith(':action.order_record_payment'),
+            (entry) =>
+              !entry.action?.endsWith(':action.order_record_payment') &&
+              !entry.action?.endsWith(':action.ship_lines'),
           );
       }
     }

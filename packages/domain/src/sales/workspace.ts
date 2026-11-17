@@ -288,6 +288,60 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
     type: 'quantity',
     required: true,
   };
+  // LOOP-1's rows Tasks over the lines: a line still open to ship with
+  // nothing reserved for it.
+  const unreservedOpenLines = [
+    {
+      value: selected(id('metric', 'open_to_ship')),
+      operator: 'positive',
+      compare: null,
+    },
+    {
+      value: selected(id('metric', 'coverage')),
+      operator: 'equals',
+      compare: '0',
+    },
+  ];
+  const perRowQuantity = (name: string, label: string) => ({
+    inputId: id('input', name),
+    label,
+    orderKey: 10,
+    type: 'quantity',
+    required: true,
+    perRow: {
+      fillFrom: { datasetId: lines, columnId: id('column', 'open') },
+    },
+  });
+  const stockLocation = (name: string, label = 'Stock location') => ({
+    inputId: id('input', name),
+    label,
+    orderKey: 20,
+    type: 'reference',
+    required: true,
+    query: q('location_list'),
+    labelField: ref('fieldReference', field('location_name')),
+  });
+  /** A draft reservation of the row's line, at the Task's location. */
+  const reserveLine = (
+    name: string,
+    quantity: string,
+    location: string,
+    reason: string,
+  ) =>
+    create(
+      name,
+      'reservation',
+      {
+        number: generated('uuid'),
+        state: literal(id('option', 'reservation_state_draft')),
+        item_id: selected(field('sales_order_line_item_id')),
+        location_id: input(location),
+        quantity: input(quantity),
+        unit_id: selected(field('sales_order_line_unit_id')),
+        reason: literal(reason),
+      },
+      { order_line: selected('recordId') },
+    );
   /**
    * A counter sale (SALES-EXTRAS) in one Task, through the operations the
    * order already has: it marks the draft as a counter sale, confirms it
@@ -578,6 +632,8 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
               id('operation', 'sales_order_release'),
             ),
           },
+          // LOOP-1: a confirmed order's next step is to ship its lines.
+          { action: id('action', 'ship_lines') },
           { action: id('action', 'invoice_shipped') },
           // LOOP-1: once invoiced, the payment is the order's next step.
           { action: id('action', 'order_record_payment') },
@@ -1052,6 +1108,133 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         ],
       },
       {
+        // LOOP-1: reserve and ship in one rows Task over the lines, the way a
+        // purchase order is received -- one quantity per line ("Fill open
+        // quantities"), one location, one shipment. Offered for lines with
+        // nothing reserved yet; a line already reserved ships from its
+        // reservation ("Ship reserved stock"), so stock is never held twice.
+        actionId: id('action', 'ship_lines'),
+        label: 'Ship',
+        description:
+          'Reserves and ships each line given a quantity from one location, on one shipment. On hand decreases by the shipped quantity. A line left empty is not shipped.',
+        orderKey: 15,
+        conditions: [released],
+        rows: {
+          datasetId: lines,
+          conditions: unreservedOpenLines,
+          fillLabel: 'Fill open quantities',
+        },
+        inputs: [
+          perRowQuantity('ship_lines_quantity', 'Quantity to ship'),
+          stockLocation('ship_lines_location', 'Ship from'),
+          {
+            inputId: id('input', 'ship_lines_carrier'),
+            label: 'Carrier',
+            orderKey: 30,
+            type: 'text',
+            required: false,
+          },
+          {
+            inputId: id('input', 'ship_lines_reference_kind'),
+            label: 'Reference type',
+            orderKey: 40,
+            type: 'text',
+            required: true,
+            presentation: {
+              kind: 'choice',
+              options: [
+                {
+                  value: id(
+                    'option',
+                    'shipment_shipping_reference_kind_tracking',
+                  ),
+                  label: 'Tracking number',
+                },
+                {
+                  value: id('option', 'shipment_shipping_reference_kind_bol'),
+                  label: 'Bill of lading',
+                },
+              ],
+              defaultValue: id(
+                'option',
+                'shipment_shipping_reference_kind_tracking',
+              ),
+            },
+          },
+          {
+            inputId: id('input', 'ship_lines_reference'),
+            label: 'Tracking or BOL number',
+            orderKey: 50,
+            type: 'text',
+            required: false,
+          },
+        ],
+        steps: [
+          create(
+            'ship_lines_shipment',
+            'shipment',
+            {
+              // The shipment number is assigned on create (SHP-000001).
+              carrier: input('ship_lines_carrier'),
+              shipping_reference_kind: input('ship_lines_reference_kind'),
+              shipping_reference: input('ship_lines_reference'),
+              state: literal(id('option', 'shipment_state_draft')),
+              kind: literal(id('option', 'shipment_kind_initial')),
+              effective_at: generated('instant'),
+              location_id: input('ship_lines_location'),
+              external_reference: literal(null),
+              reason_code: literal('SHIP'),
+              reason_narrative: literal('Ship order lines'),
+              // The shipment keeps the address it went to (ruling E).
+              ...Object.fromEntries(
+                SHIP_TO_LINES.map(([name]) => [
+                  name,
+                  record(field(`sales_order_${name}`)),
+                ]),
+              ),
+            },
+            { order: record('recordId') },
+          ),
+          {
+            ...reserveLine(
+              'ship_lines_reservation',
+              'ship_lines_quantity',
+              'ship_lines_location',
+              'Ship order lines',
+            ),
+            each: true as const,
+          },
+          {
+            ...command(
+              'ship_lines_reserve',
+              'reservation_reserve',
+              'ship_lines_reservation',
+            ),
+            each: true as const,
+          },
+          {
+            ...create(
+              'ship_lines_line',
+              'shipment_line',
+              {
+                line_number: selected(field('sales_order_line_line_number')),
+                item_id: selected(field('sales_order_line_item_id')),
+                quantity: input('ship_lines_quantity'),
+                unit_id: selected(field('sales_order_line_unit_id')),
+                reversal_of_movement_id: literal(null),
+              },
+              {
+                shipment: stepValue('ship_lines_shipment', 'recordId'),
+                order_line: selected('recordId'),
+                reservation: stepValue('ship_lines_reservation', 'recordId'),
+              },
+            ),
+            each: true as const,
+          },
+          command('ship_lines_post', 'shipment_post', 'ship_lines_shipment'),
+        ],
+      },
+      {
         actionId: id('action', 'ship_reserved'),
         presentation: taskPresentation('ship'),
         label: 'Ship reserved stock',
@@ -1062,12 +1245,14 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         conditions: [released, active],
         inputs: [
           { ...quantityInput, label: 'Quantity to ship' },
+          // Optional (LOOP-1): a customer pickup or a local delivery has no
+          // carrier or tracking number to give.
           {
             inputId: id('input', 'carrier'),
             label: 'Carrier',
             orderKey: 20,
             type: 'text',
-            required: true,
+            required: false,
           },
           {
             inputId: id('input', 'shipping_reference_kind'),
@@ -1101,7 +1286,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
             label: 'Tracking or BOL number',
             orderKey: 40,
             type: 'text',
-            required: true,
+            required: false,
           },
         ],
         steps: [

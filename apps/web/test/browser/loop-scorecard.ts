@@ -32,6 +32,8 @@ import {
  */
 export class LoopScorecard {
   readonly steps: ScorecardStep[] = [];
+  /** Facts a step measures beside its counts, such as a form's field count. */
+  readonly notes = new Map<string, string>();
   /** Every page and fragment request, with the database work it caused. */
   readonly requests: RequestTally[] = [];
   private current: ScorecardStep | undefined;
@@ -236,6 +238,14 @@ export class LoopScorecard {
       'read after its statistics settle, less the reads themselves; it counts',
       'the resets the same way and work outside a request.',
       '',
+      ...(this.notes.size
+        ? [
+            '## Screens',
+            '',
+            ...[...this.notes].map(([key, value]) => `- ${key}: ${value}`),
+            '',
+          ]
+        : []),
       '## Raw codes and developer sentences seen',
       '',
       ...this.steps.flatMap((step) =>
@@ -572,7 +582,6 @@ export async function walkToShipped(
   await receiveInFull(card);
   await findStock(card);
   await createSale(card);
-  await reserve(card);
   await ship(card);
 }
 
@@ -582,11 +591,8 @@ export async function placePurchaseOrder(card: LoopScorecard): Promise<void> {
   card.begin(LOOP_STEPS.placePurchase);
   await openFromMenu(card, 'Purchasing', 'Purchase orders');
   await card.click(page.getByRole('link', { name: 'New', exact: true }));
+  await noteFormFields(card, 'New purchase order');
   await pick(card, 'Vendor', ...f.vendor);
-  await card.fill(
-    page.getByLabel(/^Order date/u),
-    new Date().toISOString().slice(0, 16),
-  );
   await pick(card, 'Receive into', ...f.location);
   await pick(card, 'Line 1 product', ...f.item);
   await card.fill(
@@ -650,11 +656,8 @@ export async function createSale(card: LoopScorecard): Promise<void> {
   card.begin(LOOP_STEPS.createSale);
   await openFromMenu(card, 'Sales', 'Sales orders');
   await card.click(page.getByRole('link', { name: 'New', exact: true }));
+  await noteFormFields(card, 'New sales order');
   await pick(card, 'Customer', ...f.customer);
-  await card.fill(
-    page.getByLabel(/^Order date/u),
-    new Date().toISOString().slice(0, 16),
-  );
   await pick(card, 'Line 1 product', ...f.item);
   await card.fill(page.getByLabel('Line 1 quantity', { exact: true }), f.sold);
   await card.click(
@@ -666,54 +669,22 @@ export async function createSale(card: LoopScorecard): Promise<void> {
   await card.end('done');
 }
 
-export async function reserve(card: LoopScorecard): Promise<void> {
-  const { page } = card;
-  const f = LOOP_FIXTURE;
-  card.begin(LOOP_STEPS.reserve);
-  await card.click(
-    dataset(page, 'fulfillment_lines').getByRole('link', {
-      name: 'Select',
-      exact: true,
-    }),
-  );
-  await runTask(card, control(page, 'Reserve stock'), 'Reserve stock', {
-    async enter() {
-      await card.fill(taskField(page, 'Quantity to reserve'), f.sold);
-      await chooseReference(card, 'Stock location', f.location[1]);
-    },
-    review: 'Review reservation',
-    confirm: 'Confirm reservation',
-  });
-  await expect(cell(page, 'fulfillment_lines', 'Reserved')).toHaveText(f.sold);
-  await card.end('done');
-}
-
+/**
+ * Ship the confirmed order: its next action reserves and ships every line
+ * with nothing reserved yet, from one location, on one shipment.
+ */
 export async function ship(card: LoopScorecard): Promise<void> {
   const { page } = card;
   const f = LOOP_FIXTURE;
   card.begin(LOOP_STEPS.ship);
-  await card.click(
-    dataset(page, 'line_reservations').getByRole('link', {
-      name: 'Select',
-      exact: true,
-    }),
-  );
-  await runTask(
-    card,
-    control(page, 'Ship reserved stock'),
-    'Ship reserved stock',
-    {
-      async enter() {
-        await card.fill(taskField(page, 'Quantity to ship'), f.sold);
-        await card.fill(taskField(page, 'Carrier'), 'N/A', { invented: true });
-        await card.fill(taskField(page, 'Tracking or BOL number'), 'N/A', {
-          invented: true,
-        });
-      },
-      review: 'Review shipment',
-      confirm: 'Confirm shipment',
+  await runTask(card, nextAction(page), 'Ship', {
+    async enter() {
+      await chooseReference(card, 'Ship from', f.location[1]);
+      await card.click(
+        page.getByRole('button', { name: 'Fill open quantities', exact: true }),
+      );
     },
-  );
+  });
   await expect(cell(page, 'fulfillment_lines', 'Shipped')).toHaveText(f.sold);
   await card.end('done');
 }
@@ -768,6 +739,19 @@ export async function invoiceAndPay(card: LoopScorecard): Promise<boolean> {
   }
   await card.end(fromOrder ? 'done' : 'done, through the invoice page');
   return fromOrder;
+}
+
+/** How many fields a person sees on a new document: its header and one line. */
+async function noteFormFields(
+  card: LoopScorecard,
+  form: string,
+): Promise<void> {
+  const fields = await card.page
+    .locator(
+      'input[name^="draft"]:visible, select[name^="draft"]:visible, textarea[name^="draft"]:visible',
+    )
+    .count();
+  card.notes.set(`${form}: fields on the create screen`, String(fields));
 }
 
 async function openFromMenu(
