@@ -1,80 +1,97 @@
 # AGENT-3 — the office assistant in the web app: fast, screen-aware, act-then-undo, measured honestly
 
-Status: slice 1 integrating; slices 2-6 built · Tier: Mechanical (no Critical path) · Stops taken: none
+Status: slice 1 integrated (`39463ffb`, PR #57, with audit fixes A1/A2); slices 2-6 PR #58 · Tier: Mechanical (no Critical path) · Stops: none
 Charter: [AGENT-3-charter.md](AGENT-3-charter.md) from `main` `f1abcb3a`. Branch `packet/AGENT-3`, base `5c25acdb`.
 
-## Pre-registered measures (written 2026-11-17, before any real-model run of this packet)
+## Pre-registered measures (2026-11-17, before any real-model run of this packet)
 
-- **Discovery calls** = every `erp_discover` call, any mode; reported per task by tool and mode. Baseline (run 16:52): 5 / 4 / 5 / 6 / 11 /
-  9 / 13 / 10 / 12 / 2, **median 7.5**; slice-1 target ≤ 3.75. **Seconds** = the run on a monotonic clock, arrangement excluded; the
-  baseline's from its JSONL stamps: **median 34.8**. Pass rate must not fall below 9 of 10; one attempt per task is noisy, reported as run.
-- Development set (tasks 11-34, `test/agent/dev-tasks.ts`, rules registered in its header before any real-model run of them):
-  write, multi-step and customized tasks run 3 attempts; reported pass-every-time and pass-at-least-once.
+Discovery calls = every `erp_discover` call, by tool and mode; baseline (16:52) median **7.5**, slice-1 target ≤ 3.75. Seconds = the
+run on a monotonic clock, arrangement excluded; baseline median **34.8** (from JSONL stamps). Pass rate must not fall below 9 of 10. The
+development set's rules (tasks 11-34) are registered in `test/agent/dev-tasks.ts`; write tasks run 3 attempts.
 
 ## Claims
 
-1. The session starts with a business map generated from the pinned release (record types, states, operations with writable fields,
-   queries with views, screen recipes), cached unfiltered by release root (a customized release has its own) and filtered per person,
-   on every call, through the routed eligibility previews; the filtered text is never cached or shared (`business-map.ts`).
+1. The session starts with a business map generated from the pinned release, cached unfiltered by release root (a customized release
+   has its own) and filtered per person through the routed eligibility previews on every call; filtered text is never shared.
 2. A short name resolves to exactly one id of the pinned contract or to none (`matchId`).
-3. The panel's screen is a claim: the surface is named only when the release declares it, and its record is read fresh as the person
-   through the query gateway (`turnContext`); a conversation belongs to the principal that started it; requests are same-origin JSON.
-4. A plan that needs a yes waits for one bound to its id and digest; Stop ends a run before the next model or tool call; a conversation
-   is capped at USD 1.50 and says so plainly (`assistant-endpoint.ts`, `test/agent/assistant-endpoint.test.ts`).
-5. Risk class from contract facts only (`risk.ts`): tier o0 create (inverse: archive) or update with a patch (inverse: prior values),
-   confirmation none, no confirmed operation writing the same fields, no write advancing the record's `_state` past its first option ->
-   reversible; anything else or unknown -> needs a yes. A reversible plan runs at once, recorded `by: 'riskClass'`, never as the person.
-6. Undo is the latest change only, itself planned, executed and verified; it refuses, saying why, when a record changed after the
-   agent's write (`test/postgres/agent-tasks.test.ts`).
-7. `erp_plan` refuses, naming the value, a record id no lookup in the session returned and a currency that is neither the company
-   default, a returned record's, nor named by the person. Dates, amounts and quantities stay with the prompt.
-8. A request to change the application is answered with a handoff line; the panel drafts the person's words through CUSTOMIZE's
-   `draftFromRequest` and shows the plain diff; it has no approve or activate path.
-9. The model still supplies no tenant, release, principal, permission, handler or risk class; five tools; no migration.
+3. A plan is bound to the release it was made on (id and content hash, in the approval digest); execute refuses before any step and
+   before each step, in that step's view, with a typed `replan` naming what committed. Verify compares values and patched fields.
+4. The panel's screen is a claim: named only when declared, its record read fresh as the person; a conversation is its starter's;
+   requests are same-origin JSON; a plan waits for a yes bound to its id and digest; Stop ends a run; USD 1.50 per conversation.
+5. Risk class from contract facts only (`risk.ts`): o0 create (inverse archive) or update with a patch (inverse prior values),
+   confirmation none, no confirmed operation writing those fields, no write of `<type>_state` past its first option -> reversible,
+   runs at once, recorded `by: 'riskClass'`; anything else or unknown needs a yes. Undo: latest change only, planned, executed,
+   verified; refuses when a record changed after the agent's write.
+6. `erp_plan` refuses, naming it, a record id (target, relation or `_id` field) no lookup returned, and a currency that is neither the
+   company default, a returned record's, nor named by the person. Dates, amounts and quantities stay with the prompt.
+7. A change to the application is answered with a handoff line; the panel drafts the person's words through CUSTOMIZE's
+   `draftFromRequest` and shows the plain diff, with no approve or activate path. Five tools; no migration; no gateway change.
 
 ## Decisions
 
-- Map: one block per record type, local names, fields without their type's prefix, `!` = needs confirmation, bound 60,000 characters
-  (about 33,600) degrading to no fields, then ids only. Caching: an explicit breakpoint on prompt + map; per-turn context in the user turn.
-- Panel: `apps/web/src/assistant-panel.ts` (static script pinned by CSP hash, text nodes only), endpoint `apps/api/src/assistant-endpoint.ts`
-  at `/?assistant=ask|decide|stop|undo`, NDJSON stream; step labels: Thinking, Looking up "…", Reading <query>, Preparing the change,
-  Making the change, Checking the result. Spend cap USD 1.50 per conversation at Opus 5.5 list prices (read 2026-11-17).
-- Seam exception line in `ux-grammar` and the seam scanner's allow-list, as the Customize screen's; local demo identity only.
-- Handoff is a final-answer line (`HANDOFF customize: …`), a host capability, not a tool; the person's own words are drafted.
-- Slices 2-5 integrate as one merge: they share the session, loop and endpoint files (as AGENT-2's slices 1-3 did).
+- Map: local names, fields without their type's prefix, `!` = needs confirmation, bound 60,000 characters (about 33,600); explicit
+  cache breakpoint on prompt + map, per-turn context in the user turn. Panel `assistant-panel.ts` (CSP-hash-pinned, text nodes only)
+  + `assistant-endpoint.ts` at `/?assistant=ask|decide|stop|undo`; Customize screen's lazily opened service shared for the handoff.
+- Seam exception line in `ux-grammar` and the seam allow-list, as the Customize screen's. Slices 2-6 merge as one: shared files.
+- Pins tripped: `meta-sales.spec.ts` counts the page's own scripts, so the panel's is marked `data-assistant-script` and excluded.
+- Audit A1/A2 (orchestrator, 2026-11-17) went to main with slice 1, before act-then-undo.
 
 ## Results (each dated result file stands as registered)
 
-| run | pass | median discovery calls | median s | median calls | USD total | USD / completed task |
+| run | pass | median discovery | median s | median calls | USD | USD / completed |
 |---|---|---|---|---|---|---|
-| baseline 2026-11-17 16:52 (AGENT-2, no map) | 9/10 | 7.5 | 34.8 (JSONL stamps) | 13.5 | 1.5282 | 0.1698 |
-| slice 1 17:54 at `7c604fda` ([result](../evidence/2026-11-17T17-54-02-978Z-agent-eval.md)) | 10/10 | 2 | 18.6 | 7 | 0.8869 | 0.0887 |
-| slice 3 18:25 at `47bc6c82` ([result](../evidence/2026-11-17T18-25-11-573Z-agent-eval.md)) | 10/10 | 2 | 18.3 | 6.5 | 0.8482 | 0.0848 |
-| slice 4 18:35 at `ae5c4443` ([result](../evidence/2026-11-17T18-35-50-111Z-agent-eval.md)) | 10/10 | 2 | 20.9 | 7 | 0.9030 | 0.0903 |
-| dev set 19:49 at `281b5cf2` ([result](../evidence/2026-11-17T19-49-59-349Z-agent-eval.md)), 34 tasks, 66 runs | 61/66 runs; every time 31/34, at least once 32/34; by attempt 31/34, 15/16, 15/16 | 2 | 17.0 | 7.5 | 5.8596 | 0.0961 |
+| baseline 16:52 (no map) | 9/10 | 7.5 | 34.8 | 13.5 | 1.5282 | 0.1698 |
+| slice 1 17:54 `7c604fda` ([r](../evidence/2026-11-17T17-54-02-978Z-agent-eval.md)) | 10/10 | 2 | 18.6 | 7 | 0.8869 | 0.0887 |
+| slice 3 18:25 `47bc6c82` ([r](../evidence/2026-11-17T18-25-11-573Z-agent-eval.md)) | 10/10 | 2 | 18.3 | 6.5 | 0.8482 | 0.0848 |
+| slice 4 18:35 `ae5c4443` ([r](../evidence/2026-11-17T18-35-50-111Z-agent-eval.md)) | 10/10 | 2 | 20.9 | 7 | 0.9030 | 0.0903 |
+| dev set 19:49 `281b5cf2` ([r](../evidence/2026-11-17T19-49-59-349Z-agent-eval.md)), 34 tasks, 66 runs | 61/66; every time 31/34, once 32/34; by attempt 31/34, 15/16, 15/16 | 2 | 17.0 | 7.5 | 5.8596 | 0.0961 |
 
-Dev-set failures, as registered: task 18 x3 (the rule expected option id `location_type_store`; the release's is `option.store`, so
-a correct store failed; rule v2 fixes it for later runs), task 22 attempt 1 (contracts asked for by short name read as `denied`, a
-slice-1 defect fixed after the run; attempts 2-3 passed), task 29 (the agent chose Lethbridge Millwork because the other "Millwork"
-has no customer role, and said so; the rule wanted no write). Fixed after this run, so not in it: A1/A2, the contracts lookup.
-
-Slice 4's run found an over-refusal (task 7: a reservation number the model minted as a uuid, as the screen recipe does, was refused
-as an unlooked-up reference; it recovered) and a 0-based `fromStep` twice; both fixed after the run (`_id` fields only; "steps count
-from 1"). Tasks 7-8 ran 104 s and 93 s while this laptop also typechecked (a 14 s resolve is the host, not the model).
-
-## Slices
-
-1. Context instead of discovery. 2. The panel. 3. Act-then-undo. 4. Narrow host refusals. 5. One chat, three lanes. 6. The guarding eval.
+Dev-set failures as registered: task 18 x3 (my rule's option id was wrong, `option.store`; agent correct; rule v2), task 22 attempt 1
+(contracts by short name read `denied`, a slice-1 defect fixed after), task 29 (the agent picked the only "Millwork" with a customer
+role and said so; the rule wanted no write). Slice 4's run found an over-refusal (a minted uuid in a free text field) and a 0-based
+`fromStep`; both fixed after it. Not in the dev run: A1/A2, the contracts fix.
 
 ## Gates
+
+Slice 1: branch CI 44166005372, main CI 44171233909 green. Local: format, typecheck, lint, unit 192/192, agent 32, and the PG agent
+tests run once locally (they found masters are not company-scoped, an archive's read-back needs archived rows, and a full volume).
 
 ## Test it yourself
 
 1. `node --import tsx --test test/agent/business-map.test.ts test/agent/assistant-endpoint.test.ts` passes.
-2. Start `NORTH_STAR_AGENT_KEY_FILE=/mnt/c/Users/rvham/rent_soft/.env corepack pnpm dev`, open the URL, click **Assistant** (bottom right).
-   Ask "How many Field notebooks are on hand at Calgary warehouse?": a step label and timer run, then the answer with a link.
-3. On a customer's page ask "Set this customer's payment terms to Net 45": it runs at once, shows "Did: changed party …" and **Undo**;
-   click Undo and the page (reloaded) shows the old terms. Ask to "ship" something: a plan card waits for **Yes, do it**.
-4. Ask "Add a serial number field to items": a plain diff appears with a link to the Customize screen; nothing is live.
+2. `NORTH_STAR_AGENT_KEY_FILE=/mnt/c/Users/rvham/rent_soft/.env corepack pnpm dev`, open the URL, click **Assistant**. Ask "How many
+   Field notebooks are on hand at Calgary warehouse?": a step label and timer, then the answer with a link.
+3. On a customer's page: "Set this customer's payment terms to Net 45" runs at once with "Did: …" and **Undo**; Undo puts it back.
+   Ask to ship an order: a plan card waits for **Yes, do it**. "Add a serial number field to items": a plain diff, nothing live.
 
 ## Filed
+
+- Durable conversations and the §9.4 run record (charter: filed). Model routing: measure first; the dev set's numbers are above.
+- The agent asks for `source_id`/`actor_id` on a manual adjustment (task 22): the screens have no adjustment recipe to copy.
+
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1",
+  "packet": "AGENT-3",
+  "base": "5c25acdb",
+  "head": "89184409",
+  "changedPaths": [
+    ".agents/skills/ux-grammar/SKILL.md", "apps/api/src/agent-cli.ts", "apps/api/src/assistant-endpoint.ts", "apps/api/src/composition-root.ts",
+    "apps/web/src/app-server.ts", "apps/web/src/assistant-panel.ts", "apps/web/test/browser/assistant-panel.composed-application.spec.ts",
+    "apps/web/test/browser/meta-sales.spec.ts", "docs/execution/packets/AGENT-3.md", "package.json", "packages/dev-tooling/src/surface-runtime-seam.ts",
+    "packages/operations-agent/src/anthropic-model.ts", "packages/operations-agent/src/business-map.ts", "packages/operations-agent/src/catalog.ts",
+    "packages/operations-agent/src/index.ts", "packages/operations-agent/src/loop.ts", "packages/operations-agent/src/model.ts",
+    "packages/operations-agent/src/risk.ts", "packages/operations-agent/src/session.ts", "packages/operations-agent/src/tools.ts",
+    "test/agent/agent-world.ts", "test/agent/assistant-endpoint.test.ts", "test/agent/business-map.test.ts", "test/agent/compiled-view.ts",
+    "test/agent/dev-tasks.ts", "test/agent/eval-harness.ts", "test/architecture/repository-hygiene.test.ts", "test/helpers/reachability-producers.ts",
+    "test/postgres/agent-dev-tasks.test.ts", "test/postgres/agent-tasks.test.ts"
+  ],
+  "symbols": [
+    {"path": "packages/operations-agent/src/business-map.ts", "name": "businessMapStructure"},
+    {"path": "packages/operations-agent/src/risk.ts", "name": "operationRisk"},
+    {"path": "packages/operations-agent/src/session.ts", "name": "OperationsAgentSession"},
+    {"path": "apps/api/src/assistant-endpoint.ts", "name": "createAssistantEndpoint"},
+    {"path": "apps/web/src/assistant-panel.ts", "name": "withAssistantPanel"}
+  ]
+}
+```
