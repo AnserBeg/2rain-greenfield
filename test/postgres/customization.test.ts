@@ -367,6 +367,24 @@ test(
           assert.equal(activated.status, 'activated');
           assert.equal(activated.releaseId, drafted.releaseId);
 
+          // A second process opening the same database -- the agent
+          // terminal -- serves the live customization too and moves nothing.
+          const fenceBefore = await pointerFence(
+            pool,
+            runtime.identity.tenantId,
+          );
+          const terminal = await startRuntime(databaseUrl, liveTenant);
+          try {
+            assert.equal(terminal.releaseRoot, drafted.releaseRoot);
+          } finally {
+            await terminal.close();
+          }
+          assert.equal(
+            await pointerFence(pool, runtime.identity.tenantId),
+            fenceBefore,
+            'opening another runtime does not switch the active release',
+          );
+
           // The SAME runtime, never restarted, now serves Equipment.
           const recordId = randomUUID();
           const created = await createEquipment(runtime, recordId);
@@ -487,4 +505,12 @@ function createEquipment(
       runtime.operationMediation.issueInvocation(view, 'UI'),
     ),
   );
+}
+
+async function pointerFence(pool: pg.Pool, tenantId: string): Promise<string> {
+  const result = await pool.query<{ fence: string; release_id: string }>(
+    'SELECT fence::text AS fence, release_id FROM platform.active_release_pointers WHERE tenant_id = $1',
+    [tenantId],
+  );
+  return `${result.rows[0]!.release_id}@${result.rows[0]!.fence}`;
 }
