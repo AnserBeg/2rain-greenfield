@@ -677,6 +677,15 @@ export async function createComposedApplicationRuntime(
         applicationIdentity.releaseId,
         applicationRelease,
       );
+    if (tenantServing) {
+      // Provisioning above recorded the lineage tip; the posting kernel posts
+      // only for the release the scope names, so it names the one served.
+      await advanceInventoryContractRoot(
+        adminPool,
+        identities.runtime,
+        tenantServing.releaseRoot,
+      );
+    }
     if (options.localDemoIdentity) {
       await provisionLocalDemoReleaseAuthorization(
         adminPool,
@@ -1475,6 +1484,46 @@ export async function provisionLocalDemoAuthorization(
   } finally {
     client.release();
   }
+}
+
+/**
+ * Moves every inventory scope of one tenant environment to the release now
+ * active (CUSTOMIZE: a tenant release, or the release a rollback returns to).
+ * `contract_release_root` is provenance the posting kernel requires to equal
+ * the active release (`INVENTORY_POSTING_RELEASE_MISMATCH`). This re-runs the
+ * provisioning function with each scope's own stored policy, so policy stays
+ * assert-identical and only the root advances (migration 0019); the entity
+ * code and name it validates as non-blank are not stored by it.
+ */
+export async function advanceInventoryContractRoot(
+  adminPool: pg.Pool,
+  identity: AuthenticatedIdentity,
+  releaseRoot: string,
+): Promise<void> {
+  await adminPool.query(
+    `SELECT platform.provision_inventory_scope(
+       configuration.tenant_id, configuration.environment_id,
+       configuration.legal_entity_id, 'scope', 'scope',
+       calendar.time_zone, calendar.business_day_boundary, $3,
+       configuration.configuration_version, configuration.negative_stock,
+       configuration.maximum_backdate_days,
+       configuration.adjustment_reason_requirement,
+       configuration.transfer_reason_requirement,
+       configuration.count_reason_requirement,
+       configuration.correction_reason_requirement,
+       configuration.rebaseline_reason_requirement,
+       configuration.adjustment_approval_threshold,
+       configuration.transfer_approval_threshold,
+       configuration.count_approval_threshold,
+       configuration.correction_approval_threshold,
+       configuration.rebaseline_approval_threshold)
+       FROM platform.inventory_posting_configurations AS configuration
+       JOIN platform.inventory_tenant_calendars AS calendar
+         ON calendar.tenant_id = configuration.tenant_id
+      WHERE configuration.tenant_id = $1
+        AND configuration.environment_id = $2`,
+    [identity.tenantId, identity.environmentId, releaseRoot],
+  );
 }
 
 async function provisionInventoryScope(
