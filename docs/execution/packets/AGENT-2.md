@@ -1,0 +1,38 @@
+# AGENT-2 — the agent stops guessing (date, currency, permissions) and the terminal stops switching releases
+
+Status: slices 1-4 built (eval result below) · Tier: Mechanical (no Critical path) · Stops taken: none
+Charter: [AGENT-2-charter.md](AGENT-2-charter.md) from `main` `e244abbd`. Branch `packet/AGENT-2`, base `08224859`.
+
+## Claims
+
+1. `erp_discover` context carries the company's business date (tenant zone and business-day boundary, ADR-0018) and the default currency (`business-context.ts`; `test/agent/operations-agent.test.ts`).
+2. With no currency declared, context says so and carries none; a plan that names no currency writes none (`test/postgres/agent-tasks.test.ts`, scripted model).
+3. Search, contracts and resolve return only operations and queries the acting person may use now; an unauthorized id loads as `denied`; the buyer and the manager see different catalogs (`agent-tasks.test.ts`).
+4. `corepack pnpm agent` compares its compiled release root with the dev database's active pointer before opening any runtime and refuses on a difference; it reads, never installs or activates (`agent-release-guard.ts`, `agent-tasks.test.ts`).
+5. The eval result file is named by run timestamp and created exclusively; JSONL lines are appended in call order (`test/agent/eval-harness.ts`).
+6. The model still supplies no tenant, release, principal, permission or handler; no new tool, migration or projection.
+
+## Decisions
+
+- Context envelope: `today {date, asDateTime, timeZone, businessDayBoundary, use}` and `currency {default, offered, use}`; the business date is read from `COMPOSED_APPLICATION_INVENTORY_SCOPE` (the values provisioned into the database), passed as the session's required `businessCalendar`; a `clock` option lets a test fix "now".
+- Default currency: the domain holds no company-level setting. It is read from the pinned surface projection's declared editor default for `*_currency` fields (CAD today); a customer's or supplier's own default currency takes precedence and is read from its record. More than one distinct default, or none, reports `null`.
+- When neither the request, context nor a record gives a currency or date, the system prompt tells the model to leave an optional field out and, for a required one, plan nothing and ask in its answer.
+- Eligibility: the operation gateway's existing `previewTaskEligibility` (plans are confirmed) and a new `SemanticQueryGateway.previewEligibility` (a disclosed small bridge in `packages/runtime`; no read, no denial row), cached per principal, policy version and release; a failed preview withholds the id.
+- Release guard: new read-only `readActiveReleaseRoot` in `packages/postgres-provider` (a disclosed bridge; apps/api has no `pg`), plain refusal text; slices 1-3 merged together because their edits share files.
+- Task 3 rule v2 (`task3AnswerFailures`, registered 2026-11-17, applies from the next run): the paid invoice may be named when called paid. The 2026-11-17 result stands as registered.
+
+## Slices
+
+1. Context. 2. Permission-filtered discovery. 3. Terminal release guard. 4. Harness hygiene, task-3 rule, new eval. Test it yourself below.
+
+## Gates
+
+CI: see the ledger row. Local: prettier, typecheck, eslint on changed files, `test/agent/operations-agent.test.ts` 9/9.
+
+## Test it yourself
+
+Start `corepack pnpm dev`. Then `NORTH_STAR_AGENT_KEY_FILE=/mnt/c/Users/rvham/rent_soft/.env corepack pnpm agent "Create and place a purchase order: 10 Field notebook from Cascade Fastener Works at 5.00"`: the plan shows CAD and today's Calgary date, not USD or yesterday. Run the same command from a checkout with a different release: it stops with "The dev database is serving release ... but this checkout is release ...".
+
+## Filed
+
+- A plan whose last step fails still leaves earlier creates as drafts (no compensation; out of scope).

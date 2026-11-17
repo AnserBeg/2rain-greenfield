@@ -242,7 +242,7 @@ function compactField(field: {
         : kind === 'integer'
           ? 'integer as a string, e.g. "1"'
           : kind === 'dateTime'
-            ? 'ISO-8601 UTC instant, e.g. "2026-11-16T00:00:00.000Z"'
+            ? 'ISO-8601 UTC instant; a business date is its midnight-UTC instant (see erp_discover context today)'
             : kind === 'text' && field.bounds.maximumLength !== null
               ? `text (max ${String(field.bounds.maximumLength)})`
               : kind,
