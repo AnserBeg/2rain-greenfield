@@ -51,6 +51,12 @@ Charter: [AGENT-3-charter.md](AGENT-3-charter.md) from `main` `f1abcb3a`. Branch
 | slice 1 17:54 at `7c604fda` ([result](../evidence/2026-11-17T17-54-02-978Z-agent-eval.md)) | 10/10 | 2 | 18.6 | 7 | 0.8869 | 0.0887 |
 | slice 3 18:25 at `47bc6c82` ([result](../evidence/2026-11-17T18-25-11-573Z-agent-eval.md)) | 10/10 | 2 | 18.3 | 6.5 | 0.8482 | 0.0848 |
 | slice 4 18:35 at `ae5c4443` ([result](../evidence/2026-11-17T18-35-50-111Z-agent-eval.md)) | 10/10 | 2 | 20.9 | 7 | 0.9030 | 0.0903 |
+| dev set 19:49 at `281b5cf2` ([result](../evidence/2026-11-17T19-49-59-349Z-agent-eval.md)), 34 tasks, 66 runs | 61/66 runs; every time 31/34, at least once 32/34; by attempt 31/34, 15/16, 15/16 | 2 | 17.0 | 7.5 | 5.8596 | 0.0961 |
+
+Dev-set failures, as registered: task 18 x3 (the rule expected option id `location_type_store`; the release's is `option.store`, so
+a correct store failed; rule v2 fixes it for later runs), task 22 attempt 1 (contracts asked for by short name read as `denied`, a
+slice-1 defect fixed after the run; attempts 2-3 passed), task 29 (the agent chose Lethbridge Millwork because the other "Millwork"
+has no customer role, and said so; the rule wanted no write). Fixed after this run, so not in it: A1/A2, the contracts lookup.
 
 Slice 4's run found an over-refusal (task 7: a reservation number the model minted as a uuid, as the screen recipe does, was refused
 as an unlooked-up reference; it recovered) and a 0-based `fromStep` twice; both fixed after the run (`_id` fields only; "steps count
