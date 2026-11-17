@@ -98,4 +98,3 @@ also counts work outside a request (background and seed tails).
 | Sales order: invoice and record payment | POST customer_invoice_detail (task prepare) | 255 | 537 |
 | Sales order: invoice and record payment | POST customer_invoice_detail (task confirm) | 297 | 653 |
 | Sales order: invoice and record payment | GET customer_invoice_detail | 253 | 537 |
-
