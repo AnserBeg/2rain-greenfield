@@ -135,3 +135,49 @@ export function declaredCurrencyDefault(
   currencies.set(payload, result);
   return result;
 }
+
+const choiceDefaults = new WeakMap<object, Readonly<Record<string, string>>>();
+
+/**
+ * What the screens pre-select when nobody chooses, read from the compiled
+ * surface projection: every declared choice default on a field or form input,
+ * keyed by its local name (`invoice_method`, `sales_order_currency`). It is the
+ * domain's own default, so an agent that was not told a value may use it.
+ */
+export function declaredChoiceDefaults(
+  view: RequestRuntimeView,
+): Readonly<Record<string, string>> {
+  const payload = view.projections.surface.payload as object;
+  const cached = choiceDefaults.get(payload);
+  if (cached) return cached;
+  const found: Record<string, string> = {};
+  const visit = (value: ImmutableJsonValue): void => {
+    if (Array.isArray(value)) {
+      for (const member of value) visit(member);
+      return;
+    }
+    if (typeof value !== 'object' || value === null) return;
+    const record = value as Readonly<Record<string, ImmutableJsonValue>>;
+    const presentation = record.presentation as
+      Readonly<Record<string, ImmutableJsonValue>> | undefined;
+    const id = record.fieldId ?? record.inputId;
+    if (
+      typeof id === 'string' &&
+      typeof presentation === 'object' &&
+      presentation !== null &&
+      !Array.isArray(presentation) &&
+      presentation.kind === 'choice' &&
+      typeof presentation.defaultValue === 'string'
+    )
+      found[id.slice(id.lastIndexOf('.') + 1)] = presentation.defaultValue;
+    for (const member of Object.values(record)) visit(member);
+  };
+  visit(payload as ImmutableJsonValue);
+  const sorted = Object.freeze(
+    Object.fromEntries(
+      Object.entries(found).sort(([a], [b]) => a.localeCompare(b)),
+    ),
+  );
+  choiceDefaults.set(payload, sorted);
+  return sorted;
+}

@@ -13,6 +13,7 @@ import { performance } from 'node:perf_hooks';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
+import { checkTerminalRelease } from '../../apps/api/src/agent-release-guard.js';
 import {
   openComposedApplicationRuntime,
   startComposedApplication,
@@ -22,6 +23,11 @@ import {
   DRAFT_CUSTOMIZATION_TOOL,
   type DraftingModel,
 } from '../../packages/customization/src/index.js';
+import {
+  ensureScope,
+  rolePool,
+  trustedContext,
+} from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { openCustomizationService } from '../../packages/postgres-provider/src/customization-service.js';
 import { FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/fulfillment-capability-executor.js';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
@@ -30,6 +36,7 @@ import { PAYABLES_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-pr
 import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
 import { RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receivables-capability-executor.js';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
+import { PostgresReleaseActivationService } from '../../packages/postgres-provider/src/release-activation-service.js';
 import {
   OperationsAgentSession,
   runOperationsAgent,
@@ -156,6 +163,26 @@ test(
             'eligible',
           );
 
+          // The terminal's release guard (AGENT-2): a customization built on
+          // this checkout's release matches; one built on another does not.
+          const guarded = { databaseUrl, tenantSlug };
+          assert.deepEqual(
+            await checkTerminalRelease({
+              ...guarded,
+              compiledRoot: firstParty,
+            }),
+            { kind: 'match' },
+          );
+          const foreignBase = await checkTerminalRelease({
+            ...guarded,
+            compiledRoot: 'cd'.repeat(32),
+          });
+          assert.equal(foreignBase.kind, 'differs');
+          assert.match(
+            JSON.stringify(foreignBase),
+            /customization of a different application version/u,
+          );
+
           // Receiving and shipping post through executors pinned per release.
           // Task 7 asserts an absolute on-hand figure, so it runs first.
           await runTask(world, 7);
@@ -177,6 +204,13 @@ test(
           assert.ok(
             timings.requestToLiveMs < 600_000,
             'a new record type is live within ten minutes of the request',
+          );
+          assert.deepEqual(
+            await checkTerminalRelease({
+              ...guarded,
+              compiledRoot: firstParty,
+            }),
+            { kind: 'match' },
           );
           // Each reference script replays its own fixed idempotency key, so
           // the tasks after the rollback are ones not yet run here.
@@ -232,6 +266,135 @@ test(
           assert.equal(repaired.releaseRoot, drafted.releaseRoot);
           await assertScopesNamePointer(pool, runtime);
           await openingStock(world, notebook, calgary, '2');
+
+          // Review R1: two swaps at once on ONE service, whose admin pool
+          // holds two connections, both finish: one rolls back, the other is
+          // refused once it holds the lock.
+          const concurrent = await within(
+            Promise.allSettled([
+              opened.service.rollback(),
+              opened.service.rollback(),
+            ]),
+            300_000,
+            'two concurrent rollbacks on one service never finished',
+          );
+          assert.deepEqual(concurrent.map((outcome) => outcome.status).sort(), [
+            'fulfilled',
+            'rejected',
+          ]);
+          assert.equal(
+            refusalCode(
+              concurrent.find((outcome) => outcome.status === 'rejected'),
+            ),
+            'CUSTOMIZE_NOTHING_TO_ROLL_BACK',
+          );
+          assert.equal(
+            (await opened.service.status()).activeReleaseRoot,
+            firstParty,
+          );
+          await assertScopesNamePointer(pool, runtime);
+
+          // Review R3: base -> A -> B, then a B -> A rollback whose scope
+          // reconcile fails. The retry sets the scopes to A before it decides,
+          // so posting works even though the retry itself is refused.
+          await opened.service.approve(drafted.patchId);
+          await opened.service.activate(drafted.patchId);
+          const vehicle = await opened.service.draft(
+            {
+              fields: [{ label: 'Name', required: true, type: 'text' }],
+              kind: 'addRecordType',
+              label: 'Vehicle',
+            },
+            'declarativeEditor',
+          );
+          assert.equal(vehicle.status, 'drafted');
+          if (vehicle.status !== 'drafted') return;
+          await opened.service.approve(vehicle.patchId);
+          await opened.service.activate(vehicle.patchId);
+          const cutRollback = await openCustomizationService({
+            ...serviceOptions,
+            afterSwapBeforeScope: () =>
+              Promise.reject(new Error('injected reconcile failure')),
+          });
+          try {
+            await assert.rejects(
+              cutRollback.service.rollback(),
+              /injected reconcile failure/u,
+            );
+          } finally {
+            await cutRollback.close();
+          }
+          await assert.rejects(
+            opened.service.rollback(),
+            (error: unknown) =>
+              refusalCode({ reason: error, status: 'rejected' }) ===
+              'CUSTOMIZE_ROLLBACK_NOT_REVERSIBLE',
+          );
+          assert.equal(
+            (await opened.service.status()).activeReleaseRoot,
+            drafted.releaseRoot,
+          );
+          await assertScopesNamePointer(pool, runtime);
+          await openingStock(world, notebook, calgary, '4');
+
+          // Review R2: an activation cut between the pointer swap and its
+          // verification. A retry is refused, never "activated", until the
+          // kernel itself verifies that activation; then it repairs.
+          const approvedVehicle = await opened.service.approve(vehicle.patchId);
+          const cutActivation = await openCustomizationService({
+            ...serviceOptions,
+            activationKernel: (runtimePool) =>
+              new CutBeforeVerification(runtimePool),
+          });
+          try {
+            await assert.rejects(
+              cutActivation.service.activate(vehicle.patchId),
+              /cut between the swap and its verification/u,
+            );
+          } finally {
+            await cutActivation.close();
+          }
+          for (const retry of [
+            () => opened.service.activate(vehicle.patchId),
+            () => opened.service.rollback(),
+          ]) {
+            await assert.rejects(
+              retry(),
+              (error: unknown) =>
+                refusalCode({ reason: error, status: 'rejected' }) ===
+                'CUSTOMIZE_ACTIVATION_UNVERIFIED',
+            );
+          }
+          // A restart does not bless it either: boot leaves the scopes on
+          // the last proven release (or refuses to start).
+          await openComposedApplicationRuntime({
+            databaseUrl,
+            tenantSlug,
+          }).then(
+            (restarted) => restarted.close(),
+            () => undefined,
+          );
+          assert.ok(
+            (await scopeMismatches(pool, runtime)) > 0,
+            'a restart did not set the scopes to an unverified release',
+          );
+          const identities = await ensureScope(pool, tenantSlug, 'production');
+          const kernelPool = rolePool(databaseUrl, 'north_star_runtime', 2);
+          try {
+            const verified = await new PostgresReleaseActivationService(
+              kernelPool,
+            ).verifyActivation(await trustedContext(identities.system), {
+              activationAttemptId: approvedVehicle.activationAttemptId,
+            });
+            assert.equal(verified.status, 'SWAPPED_VERIFIED');
+          } finally {
+            await kernelPool.end();
+          }
+          const finished = await opened.service.activate(vehicle.patchId);
+          assert.equal(finished.status, 'activated');
+          assert.equal(finished.releaseRoot, vehicle.releaseRoot);
+          await assertScopesNamePointer(pool, runtime);
+          await openingStock(world, notebook, calgary, '5');
         } finally {
           await opened.close();
           await runtime.close();
@@ -242,10 +405,54 @@ test(
   },
 );
 
+/** A kernel cut after the pointer swap commits, before it verifies. */
+class CutBeforeVerification extends PostgresReleaseActivationService {
+  override verifyActivation(): never {
+    throw new Error('cut between the swap and its verification');
+  }
+}
+
+function refusalCode(
+  outcome: PromiseSettledResult<unknown> | undefined,
+): string | undefined {
+  if (outcome?.status !== 'rejected') return undefined;
+  const reason = outcome.reason as { readonly code?: unknown };
+  return typeof reason.code === 'string' ? reason.code : undefined;
+}
+
+async function within<T>(
+  promise: Promise<T>,
+  milliseconds: number,
+  message: string,
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), milliseconds);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function assertScopesNamePointer(
   pool: pg.Pool,
   runtime: { readonly identity: { readonly tenantId: string } },
 ): Promise<void> {
+  assert.equal(
+    await scopeMismatches(pool, runtime),
+    0,
+    'every inventory scope names the active release',
+  );
+}
+
+async function scopeMismatches(
+  pool: pg.Pool,
+  runtime: { readonly identity: { readonly tenantId: string } },
+): Promise<number> {
   const result = await pool.query<{ mismatched: number; scopes: number }>(
     `SELECT count(*)::integer AS scopes,
             count(*) FILTER (
@@ -261,11 +468,7 @@ async function assertScopesNamePointer(
     [runtime.identity.tenantId],
   );
   assert.ok(result.rows[0]!.scopes > 0);
-  assert.equal(
-    result.rows[0]!.mismatched,
-    0,
-    'every inventory scope names the active release',
-  );
+  return result.rows[0]!.mismatched;
 }
 
 async function waitForAdvisoryLockWaiter(pool: pg.Pool): Promise<void> {

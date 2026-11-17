@@ -1,6 +1,6 @@
 # CUSTOMIZE — a non-developer adds a record type, field, choice or layout, reads a plain diff, approves, activates, rolls back
 
-Status: slices 1, 2 and 4 integrated (merges `41697099`, `9bbc6adf`, `273c7129`; main CI green); slice 5 (rehearsal) integrating; slice 3 (the Customize screen) STOPPED for a ruling (below).
+Status: slices 1, 2 and 4 integrated (merges `41697099`, `9bbc6adf`, `273c7129`), review fixes integrated (`6d06f76c`, `1aa1b630`); slice 5 (rehearsal) integrating; slice 3 (the Customize screen) ruled 2026-11-17 (option 1, seam exception), integrating after slice 5.
 Tier: Critical-touching — `db/migrations/0029_customization_patch_lineage.sql` (RLS/grant SQL). Merges are logged `merged — unread`.
 Base: `main` `a7a4cba1`. Stops: slice 3 (ux-grammar seam).
 
@@ -54,3 +54,14 @@ What: the ux-grammar skill ("Every screen renders through SurfaceRuntime… Neve
 - F5's deeper case: after base→A→B and a rollback to A, rolling A back to base is refused (`CUSTOMIZE_ROLLBACK_NOT_REVERSIBLE`): the reverse-transition policy reverses only the activation that made the current release live (here B's rollback). Needs a policy change (orchestrator's call).
 - F4 (TRUNCATE bypasses the append-only rules, repo-wide) and F6 (terminal guard) are the orchestrator's and AGENT-2's.
 - AGENT harness: under the scope mismatch above, the receive task's scripted run answered with no refused tool call while posting nothing; only its end-state check caught it (for AGENT-2).
+- No operator path finishes an unverified activation: after a cut between swap and verification, draft, approve, activate and rollback refuse `CUSTOMIZE_ACTIVATION_UNVERIFIED` and posting is refused (the scopes still name the last proven release) until the kernel's `verifyActivation` (or `reconcileActivation`) is run for that attempt; a `customize verify` command is not built.
+
+## Review fix 2 (read of `884ee0ba..08434a73`, R1-R4)
+
+- One shape for every state change (`#locked` in `customization-service.ts`): draft recording, approve, activate and rollback each run on one admin connection holding the release-scope lock, first prove the live pointer's activation verified (its swap receipt at the current pointer and fence has a `SWAPPED_VERIFIED` receipt) and set the inventory scopes to it, then read the live state and decide.
+- R1: inside the lock no admin work touches the pool; `activateWithExactSwapTrigger`, `assertExactSwapTriggerEnabled` and the local-demo grants take the held client. Test: two concurrent rollbacks on one service (admin pool of two) both finish, one refused, under a 300 s bound.
+- R2: an unverified live pointer is refused `CUSTOMIZE_ACTIVATION_UNVERIFIED`, naming the attempt and its state; never `activated`. A restart does not bless it either: boot reconciles scopes only for a proven pointer (`unprovenLivePointer`, shared). The kernel's own `verifyActivation` finishes it, after which the retry activates. Test seam: `activationKernel` (a test subclass cuts `verifyActivation`; production always uses the PostgreSQL kernel).
+- R3: a B -> A rollback whose reconcile failed is repaired by the retry before it is refused; posting works. The reverse-transition policy is unchanged.
+- R4: a reused patch returns the release and revision its row recorded; identical drafts are serialized by the lock, so the second finds the first's patch. The content-hash lookup in `ensurePersistedRelease` is at its head (since fix 1); the dead branch after it is gone.
+- `approve` holds the lock too (it records an approval bound to the pointer and fence, a state change): about 40 s for a storage change, during which a second click or a boot waits.
+- `status` stays lock-free (the screen reads it on every page load; it changes nothing).
