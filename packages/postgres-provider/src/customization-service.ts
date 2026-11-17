@@ -345,19 +345,21 @@ export class PostgresCustomizationService {
       record,
     ]);
     const identity = await this.#identity(context, record.resultingReleaseId);
-    await ensureReleaseAdmitted(
-      this.connection.runtimePool,
-      context,
-      identity,
-      candidate,
-      this.options.providerErrorMappings ?? [],
-      this.options.capabilityOperationExecutorFactories ?? [],
-    );
+    const admit = () =>
+      ensureReleaseAdmitted(
+        this.connection.runtimePool,
+        context,
+        identity,
+        candidate,
+        this.options.providerErrorMappings ?? [],
+        this.options.capabilityOperationExecutorFactories ?? [],
+      );
     const binding = releaseDiffBinding(parent, candidate);
     const approver = await trustedContext(this.connection.identities.approver);
     await assertExactSwapTriggerEnabled(this.connection.adminPool);
     let activationAttemptId: MintedUuid;
     if (storageElements(candidate.compiled).length === 0) {
+      await admit();
       activationAttemptId = await approveReleaseWithoutStorageTransition(
         this.connection.runtimePool,
         context,
@@ -369,6 +371,8 @@ export class PostgresCustomizationService {
         binding,
       );
     } else {
+      // As at boot: the inert part of the plan (a new table) is prepared
+      // first, so the candidate's verification scenarios run against it.
       const preparationId = randomUUID() as MintedUuid;
       const prepared = await this.#materializer().prepare({
         context,
@@ -379,6 +383,7 @@ export class PostgresCustomizationService {
         preparationId,
         targetReleaseId: identity.releaseId,
       });
+      await admit();
       activationAttemptId = await approveModuleRelease(
         this.connection.runtimePool,
         context,
