@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import {
   globSync,
   mkdtempSync,
@@ -568,6 +569,36 @@ test('CI aggregates only after every evidence-producing job succeeds', () => {
   assert.match(job, /test\/helpers\/begin-reachability-run\.ts/u);
   assert.match(job, /actions\/download-artifact@[0-9a-f]{40}/u);
   assert.doesNotMatch(job, /if:\s*always\(\)/u);
+  assert.match(job, /CI_JOB_RESULTS: \$\{\{ toJSON\(needs\) \}\}/u);
+  assert.match(job, /run: node \.github\/scripts\/check-ci-results\.mjs/u);
+  for (const [prose, result, accepted] of [
+    ['false', 'success', true],
+    ['false', 'skipped', false],
+    ['false', 'failure', false],
+    ['true', 'skipped', true],
+    ['true', 'failure', false],
+    ['', 'skipped', false],
+  ] as const) {
+    const run = spawnSync(
+      process.execPath,
+      ['.github/scripts/check-ci-results.mjs'],
+      {
+        env: {
+          ...process.env,
+          CI_JOB_RESULTS: JSON.stringify({
+            changes: { result: 'success', outputs: { prose_only: prose } },
+            quality: { result: 'success' },
+            postgres: { result },
+          }),
+        },
+      },
+    );
+    assert.equal(
+      run.status === 0,
+      accepted,
+      `prose=${prose}, postgres=${result}`,
+    );
+  }
 });
 
 test('every root test/check script is CI-invoked or explicitly justified', () => {

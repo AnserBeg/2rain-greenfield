@@ -51,8 +51,11 @@ run_gitleaks() {
 }
 
 set +e
-corepack pnpm audit --audit-level=high --json >"$dependency_report" 2>"$dependency_stderr"
-dependency_status=$?
+dependency_status=null
+if [[ "${1:-}" != --secrets-only ]]; then
+  corepack pnpm audit --audit-level=high --json >"$dependency_report" 2>"$dependency_stderr"
+  dependency_status=$?
+fi
 
 run_gitleaks "$repository_root" "$clean_report"
 clean_status=$?
@@ -88,7 +91,7 @@ if grep --fixed-strings --quiet "\"RuleID\": \"$synthetic_rule_id\"" "$negative_
   negative_rule_detected=true
 fi
 
-printf '{\n  "dependencyAuditExitCode": %d,\n  "cleanSecretScanExitCode": %d,\n  "negativeSecretScanExitCode": %d,\n  "negativeRuleDetected": %s\n}\n' \
+printf '{\n  "dependencyAuditExitCode": %s,\n  "cleanSecretScanExitCode": %d,\n  "negativeSecretScanExitCode": %d,\n  "negativeRuleDetected": %s\n}\n' \
   "$dependency_status" \
   "$clean_status" \
   "$negative_status" \
@@ -97,7 +100,7 @@ printf '{\n  "dependencyAuditExitCode": %d,\n  "cleanSecretScanExitCode": %d,\n 
 
 gate_failed=false
 
-if [[ $dependency_status -ne 0 ]]; then
+if [[ $dependency_status != null && $dependency_status -ne 0 ]]; then
   printf 'Dependency audit failed (exit %d); see %s.\n' \
     "$dependency_status" "$dependency_report" >&2
   gate_failed=true
