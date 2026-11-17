@@ -18,6 +18,12 @@ export interface PageBudget {
   readonly repeats: number | null;
   readonly statements: number | null;
   readonly transactions: number | null;
+  /** Warm parses of each pinned catalog (LOOP-1's `catalogParseCount`). */
+  readonly operationCatalogParses: number | null;
+  readonly queryCatalogParses: number | null;
+  readonly surfaceManifestParses: number | null;
+  /** At most the number of distinct surfaces the page binds. */
+  readonly surfaceBindingParses: number | null;
 }
 
 export const PAGE_BUDGET_NAMES = [
@@ -54,5 +60,14 @@ function budget(
   authorization: number,
   repeats: number,
 ): PageBudget {
-  return Object.freeze({ authorization, repeats, statements, transactions });
+  return Object.freeze({
+    authorization,
+    operationCatalogParses: null,
+    queryCatalogParses: null,
+    repeats,
+    statements,
+    surfaceBindingParses: null,
+    surfaceManifestParses: null,
+    transactions,
+  });
 }

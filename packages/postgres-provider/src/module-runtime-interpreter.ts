@@ -3935,17 +3935,6 @@ async function listSharedRecords(
     predicates,
   );
   const whereSql = predicates.length > 0 ? predicates.join(' AND ') : 'true';
-  const count = await client.query<{ total_count: string }>(
-    `SELECT count(*)::text AS total_count ${fromSql} WHERE ${whereSql}`,
-    values,
-  );
-  const totalCount = Number(count.rows[0]?.total_count ?? '0');
-  if (!Number.isSafeInteger(totalCount) || totalCount < 0) {
-    throw failure(
-      'MODULE_LIST_RESULT_INVALID',
-      'list count is not a non-negative safe integer',
-    );
-  }
   const pageValues = [...values];
   const limitSql = parameter(pageValues, list.query.effectivePageSize + 1);
   const offsetSql = parameter(pageValues, list.query.pageOffset);
@@ -3964,6 +3953,26 @@ async function listSharedRecords(
     pageValues,
   );
   const hasMore = rows.rows.length > list.query.effectivePageSize;
+  // The first page holding every row (same FROM and WHERE) is its own count;
+  // any other page asks the database (SPEED-1: one statement, not two, for
+  // every short list on a page).
+  const totalCount =
+    list.query.pageOffset === 0 && !hasMore
+      ? rows.rows.length
+      : Number(
+          (
+            await client.query<{ total_count: string }>(
+              `SELECT count(*)::text AS total_count ${fromSql} WHERE ${whereSql}`,
+              values,
+            )
+          ).rows[0]?.total_count ?? '0',
+        );
+  if (!Number.isSafeInteger(totalCount) || totalCount < 0) {
+    throw failure(
+      'MODULE_LIST_RESULT_INVALID',
+      'list count is not a non-negative safe integer',
+    );
+  }
   const pageRows = rows.rows.slice(0, list.query.effectivePageSize);
   const records = pageRows.map((row) =>
     toListDto(
