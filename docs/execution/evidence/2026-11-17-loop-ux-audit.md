@@ -12,7 +12,13 @@ The plan that answers it: [loop-ux-plan.md](../loop-ux-plan.md).
 | Receive in full | ~5 | 4 | 1 | done; quantity and cost empty until asked |
 | Find the stock | 3 | 2 | 1 | done; 119 rows, 11 columns, search needs Apply |
 | Sales order: create, confirm, reserve, ship | ~30 | ~14 | 7 | done; **saved, confirmed and shipped with no price**; "N/A" typed for carrier and tracking |
-| Invoice and record payment | — | — | — | **not possible**: no action on the shipped order |
+| Invoice and record payment | — | — | — | ~~not possible~~ **corrected:** possible on a priced order (see below); not possible only on the unpriced one |
+
+**Correction (2026-11-17, orchestrator re-check with an order priced at 12.50):** invoicing and payment are reachable by
+screen today. "Invoice shipped quantities" is the shipped order's next action and posts the invoice; the payment is "Open
+invoice" → "Record payment" on the invoice page (amount typed, method EFT by default, a required reference). The "not
+possible" above came only from the unpriced order. The measured baseline, priced order included, is LOOP-1's scorecard:
+[2026-11-17-loop-scorecard.md](2026-11-17-loop-scorecard.md).
 
 ## The twelve problems, ranked, with cause
 
@@ -21,7 +27,7 @@ concept in `packages/canonical-model/src/schemas.ts` plus compiler and renderer.
 
 | # | problem | class | where | fix |
 |---|---|---|---|---|
-| 1 | No way to invoice or take payment from a shipped order; the Invoices "New" form is a raw field dump | DEFINITION | `sales/workspace.ts:1174-1196` offers `invoice_shipped` only while `order_total` is positive; counter-sale payment steps at `:442-473` | Require a price (2); add an order-level payment action; drop or trim the raw Invoices form |
+| 1 | **Corrected:** an unpriced shipped order cannot be invoiced; a priced one offers invoicing as its next action, but the payment is two hops away on the invoice page with the amount typed and a required reference; the Invoices "New" form is a raw field dump | DEFINITION | `sales/workspace.ts:1174-1196` offers `invoice_shipped` only while `order_to_invoice` and `order_total` are positive; payment is `invoice_record_payment` (`:1883`) on the invoice page; counter-sale payment steps at `:442-473` | Require a price (2); the payment as the order's next action; the reference optional; drop or trim the raw Invoices form |
 | 2 | An order saves, confirms and ships with no unit price | DEFINITION | `app/order-entry.ts:530` (`unit_price` not required) | Require it; refuse confirm on a missing total |
 | 3 | Every action is input → Review → Confirm, a full page load each | LANGUAGE | `schemas.ts:884-891` (confirmation mandatory); `surface-composition.ts:1633`, `:2053`, `:2332` | Authored opt-out of the review stage for low-consequence tasks; stage changes as in-place fragments |
 | 4 | Reserve and ship need two "Select" row clicks before the button appears | DEFINITION | `sales/workspace.ts:211-220` (selection placement); receive already uses a `rows` task (`purchasing/workspace.ts:333-350`) | Re-author reserve and ship as `rows` tasks over the lines |
