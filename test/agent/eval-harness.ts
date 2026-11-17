@@ -189,7 +189,7 @@ async function main(): Promise<void> {
                 append({
                   kind: 'tool',
                   tool: event.name,
-                  arguments: event.input,
+                  arguments: loggedArguments(event.input),
                 }),
               );
             if (event.kind === 'result')
@@ -304,3 +304,19 @@ main().catch((error: unknown) => {
   );
   process.exitCode = 1;
 });
+
+/**
+ * Tool arguments as the run record keeps them. The model's own
+ * `executionIdempotencyKey` is a label, not a credential, but a secret
+ * scanner reads any `...Key` with an opaque value as one; the record keeps
+ * that a key was given, not its text.
+ */
+function loggedArguments(input: unknown): unknown {
+  if (typeof input !== 'object' || input === null || Array.isArray(input))
+    return input;
+  return Object.fromEntries(
+    Object.entries(input).map(([name, value]) =>
+      /key$/iu.test(name) ? [name, '[given]'] : [name, value],
+    ),
+  );
+}
