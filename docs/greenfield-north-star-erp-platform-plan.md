@@ -289,6 +289,27 @@ stock dimensions beyond entity/item/location (ADR-0016), unit conversion (ADR-00
 inventory valuation (ADR-0017), and bitemporal reporting (ADR-0018). Excluding a
 capability never authorizes discarding what that capability will need.
 
+### 2.4 Where the product must differentiate
+
+*Added 2026-11-16 at the owner's request, after a comparison with DOSS ARP's published
+engineering record (the doss.com engineering blog, Nov 2023 – Oct 2026).* DOSS is the
+nearest AI-native ERP competitor. It is in production and far ahead of us in breadth:
+it has a general ledger, more than 30 connectors, analytics and paying customers. **We
+do not compete on breadth.** We compete on the problems its own record leaves open, and
+each of them maps to a gate this plan already owns or that this amendment adds:
+
+| Problem left open in DOSS's published record | Our commitment | Where it is proved |
+| --- | --- | --- |
+| A customized tenant taking a platform upgrade. Its "Gen4" answer (Apr 2026) is a roadmap item: an AI-generated "candidate merged system" routed to "human review (if that's even required!)". Its source of truth is undecided: "We're still on the fence" | Customization lives only at declared extension points in one package lineage, so a platform upgrade recompiles the tenant revision and reports conflicts as diagnostics before activation, with no hand merge | section 12.14, the customized-tenant upgrade proof |
+| Financial truth staying correct while operations stay flexible. Its World Model post (Oct 2026) cites "an accidental edit on the production floor [that] caused an invoicing flow to break days later", and it publishes no correction, costing or concurrency mechanism for its "immutable Transactions Log" | Posted facts come only from versioned capabilities; tenant rules may narrow but never produce them; corrections append | sections 6.3, 10.6; G3 and G4 gates |
+| Agent trust at volume. As published in Nov 2025, its agent calls the API "with the user's own JWT token", and every write tool "Require[s] explicit user approval". "Formal eval pipelines" were then still being developed. Its Feb 2026 panel called agentic authorization "far too nascent" | Risk-classed plans, one approval for a bounded bulk job, read-back verification of every accepted effect, published success rate and cost per task | sections 9.2–9.4, 14.4 |
+| Six stores kept in step (Postgres, Elasticsearch, Memgraph, Materialize, Redis and a Restate durable-execution log), with two permission models (Postgres RLS and Elasticsearch document/field security) kept in agreement by role sync | One PostgreSQL authority and one policy model; derived stores are rebuildable read models or nothing | sections 4.2, 7.1, 7.2 |
+| Schema and configuration changes with no published release, pinning or rollback model. Its workflow runs do pin to the workflow and SDK version they started on (Oct 2026) | Every request, job, agent run and workflow run pins one immutable release covering schema, configuration and code together; rollback is a pointer swap | sections 5.4, 10.1 |
+| Implementation runs through people: a hands-on product manager ("PMO") spans pre- and post-sale for each customer, and deployments take weeks (BVP, Contrary) | A non-developer gets a new record type live in under ten minutes, with rollback | G6; the week-6 decision in `current-plan.md` |
+
+Absence from a public blog is not proof of absence in DOSS's code. This table names what
+we must **demonstrate**, not what DOSS lacks. It is reviewed when DOSS publishes on any row.
+
 ## 3. Non-negotiable architecture doctrine
 
 1. One application identity/reference graph and one active release authority.
@@ -311,6 +332,10 @@ capability never authorizes discarding what that capability will need.
     policy, required sinks, migration, read-back, recovery, and tests agree.
 11. The in-app agent never edits source, runs shell tools, uses raw database
     tools, installs arbitrary tools, or activates its own customization.
+    *(Clarified 2026-11-16.)* A workflow body that the customization lane drafts
+    (section 12.5) is package-revision content. Like every revision, it is
+    compiled, verified, shown as a diff and activated by a human. This is not
+    source editing, and the operations lane still cannot author one.
 12. Start as a modular monolith. Split deployment only for measured isolation,
     scale, security, or ownership.
 
@@ -1154,7 +1179,7 @@ here once.
 | ------- | ---- | ----------- | -------------- |
 | Expression | inside a user request | **no** | bounded folds and quantifiers over a declared relation |
 | Bulk operation | worker, durable job | yes | platform-owned, checkpointed, per-target idempotent |
-| Workflow (N2) | worker, durable engine | yes | declared control structures with checkpoints and compensation |
+| Workflow (N2) | worker, durable engine | yes | a TypeScript body on the sandbox host; every host call is journaled, and replay is deterministic (section 12.5) |
 
 The governing principle is not "loops are unsafe". It is:
 
@@ -1969,6 +1994,17 @@ does not invent identifiers.
   crash recovery and handoff.
 - Agent behavior is evaluated with real models as well as deterministic
   contract tests.
+- *(Added 2026-11-16.)* Every run is persisted as an append-only record at four
+  levels: conversation, run (one user request), model call (the exact messages
+  sent, the response and token use) and tool call (tool, arguments, result,
+  status, and any approval or rejection with its reason). The record serves
+  three purposes: crash-resume, the per-task cost figure, and **offline replay**.
+  A recorded run can be re-driven against a new model, prompt or release, so the
+  section 14.4 eval set grows from real failures rather than only authored
+  cases. Hidden reasoning is still not stored.
+- *(Added 2026-11-16.)* Confirmation follows the plan's risk class, never "every
+  write". A bounded bulk job (section 9.2.4) is approved once, as one plan.
+  Approval on every write trades safety for an agent nobody uses at volume.
 
 ### 9.5 Launch agent journeys
 
@@ -2115,15 +2151,35 @@ Customization expands only by completing support cells in this order:
 2. new Tier-A entities using generated typed storage;
 3. relations, indexes, uniqueness, archive policy, and generated CRUD;
 4. declarative states, transitions, and operation effects;
-5. event/rule/workflow/schedule composition;
+5. event/rule/workflow/schedule composition, with workflow bodies authored as
+   sandboxed TypeScript against the release SDK (section 12.5);
 6. reusable domain capability packs;
 7. protocol-dispatched Q2 queries and O2 operations;
-8. connectors, secrets, inbound/outbound contracts, and delivery policy;
-9. constrained compute or WASM for pure algorithms; and
+8. connectors, secrets, inbound/outbound contracts, and delivery policy, with
+   per-tenant mapping as a workflow body rather than a mapping language;
+9. constrained compute for pure algorithms on the same sandbox host as rung 5,
+   not a second runtime; and
 10. reviewed services/UI components for genuinely novel infrastructure.
 
 Each addition extends the same compiler, release, gateway, and verification
 architecture. It does not create a parallel builder runtime.
+
+**The line between declarative and code (amended 2026-11-16).** The language stays
+closed and declarative for everything that runs **while a caller waits** or that
+**defines the application**:
+- entities, fields, relations, states;
+- queries, permissions, surfaces;
+- validations, guards, formulas and derived values.
+
+These must lower to SQL, render as UI, appear in agent catalogs and stay provably
+finite (section 5.14). Durable **process** logic does not: "when X happens, wait,
+ask, call, create" is code. Growing a workflow node vocabulary or an `EffectGraph`
+into a programming language is the treadmill DOSS climbed and abandoned on
+2026-10-19: "Every time a workflow required capabilities the builder couldn't express,
+we had to extend our DSL". Models given its JSON format "often hallucinated syntax
+mistakes and came up with inefficient designs". Code is never allowed where a primitive
+belongs. A workflow body cannot serve as a validation, guard or derived value, because
+it never runs in a request path.
 
 ### 10.5 First whole-module proof
 
@@ -3054,7 +3110,7 @@ end-to-end support, not merely a DSL keyword.
 | Semantic Operation    | CRUD, state transition, compound atomic effect, bulk/job effect, approval-aware effect, protocol dispatch, extension-backed operation          |
 | Formula and rule      | deterministic typed expressions, validation, derivation, eligibility, routing, policy narrowing, explanation                                   |
 | Event and effect      | typed domain events, transactional outbox, idempotent consumers, retries, dead-letter/reconciliation, subscriptions                            |
-| Workflow              | trigger, steps, branching, wait, timer, approval, human task, service task, compensation, versioned instance semantics                         |
+| Workflow              | trigger, steps, branching, wait, timer, approval, human task, service task, compensation, versioned instance semantics; authored as sandboxed TypeScript bodies (section 12.5) |
 | Schedule              | one-time/recurring schedules, tenant timezone, catch-up policy, concurrency, cancellation, observability                                       |
 | Surface               | navigation, list, detail, form, table, child collection, board, calendar, dashboard, document, mobile workflow, accessible component registry  |
 | Search and reporting  | registered search projections, dimensions/measures, aggregates, drill-through, exports, governed ad hoc analysis                               |
@@ -3079,6 +3135,12 @@ CRUD.
 | A - declarative composition    | behavior fits safe general primitives                             | custom inspections, registers, approvals, forms, dashboards, simple case management                  | package objects compiled into generated runtime/storage            |
 | B - reusable domain capability | business semantics need specialized invariant-preserving logic    | inventory movement, reservation allocation, work-order costing, pricing, tax, communication delivery | versioned protocol/domain pack with semantic queries/operations    |
 | C - controlled extension       | a genuinely novel algorithm or infrastructure adapter is required | optimization solver, proprietary scoring, CAD viewer, unusual device protocol                        | reviewed signed extension behind narrow typed contracts and grants |
+
+*(Amended 2026-11-16.)* Durable process logic (workflows, schedules and per-tenant
+connector mapping) is Tier A in **authority**: it is tenant-owned, release-pinned and
+has no invariants of its own. It is code in **form**: a sandboxed TypeScript body
+against the release SDK (section 12.5). It is not Tier C, because it gains no authority
+that a user acting through Semantic Operations lacks.
 
 A request is possible when every required object has a supported realization
 tier and support cell. More capability packs make more features composable.
@@ -3153,14 +3215,75 @@ and `runtime-automation-source-coverage` tests; REFERENCE
 `m0c-rrule-spike-report.md` for schedule semantics (DST, catch-up, missed-run
 policy) and the monotonic-clock lesson in
 `server/langgraph-checkpoint-retention.ts` for timer-adjacent tests.
-REFERENCE v1 corpus sections 14.1-14.3: own the workflow IR, not a workflow
-engine — the Temporal/DBOS conformance bakeoff (crash-at-boundary, timers,
-signals, compensation, repair), the typed node vocabulary, and
-run-pinning/version-coexistence rules.
+REFERENCE v1 corpus sections 14.1-14.3 for the durable-engine conformance bakeoff
+(crash-at-boundary, timers, signals, compensation, repair) and the
+run-pinning/version-coexistence rules. **Superseded 2026-11-16:** that corpus's
+"own the workflow IR" and its typed node vocabulary are not the authoring form;
+see below.
+
+**Workflow bodies are code (amended 2026-11-16).** Items 1–2 above are delivered as
+TypeScript workflow bodies, not as a node vocabulary that the compiler interprets.
+The platform owns the **host and the SDK**, not a workflow language:
+
+- **Sandbox.** Each run executes in a fresh isolate with memory and CPU limits and
+  no filesystem, network, npm, real clock or randomness. Its only exit is one host
+  call. The host checks that the target exists in the pinned release, that its
+  input matches the contract, and that it is within the body's declared grants.
+  The isolate technology is a bakeoff decision; QuickJS compiled to WebAssembly is
+  the reference candidate.
+- **SDK.** A typed client is generated from the pinned `TenantRelease`. It exposes
+  only Semantic Queries and Semantic Operations, plus `sleep`, `now`,
+  `waitForEvent`, `requestApproval` and connector calls. There is no table, SQL,
+  handler or storage name. A workflow is an **actor**, governed like a user
+  (permissions, confirmation, idempotency), not a rule. It produces a Tier B fact
+  only by invoking that capability's own operation, exactly as a person clicking
+  would.
+- **Open obligation: computed values reaching Tier B inputs.** A body can still
+  compute a quantity or a cost and pass it as an argument that lands in a
+  capability's published dependency set (section 10.6). That is the field-default
+  case §10.6 forbids, and it fails silently. N2-00's contract must decide the rule.
+  Until then the host fails closed: an operation whose inputs intersect any
+  published Tier B dependency set is confirmation-class when a body invokes it, so
+  a human approves the exact values.
+- **Confirmation-class calls.** When a body invokes an operation that needs
+  confirmation, a pending plan is created. The run waits durably on
+  `requestApproval`, and a human confirms the exact plan. Unattended execution of
+  such a call requires an N5 autonomy grant (section 12.8). Before N5 it never
+  happens, consistent with section 2.3's exclusion of unattended high-risk
+  autonomy.
+- **Durability.** Every host call and its result go to an append-only journal. On
+  resume the body reruns, and recorded calls return their saved results. Timers
+  are durable, so a waiting run holds no isolate. The journal lives in
+  PostgreSQL, and a separate durable-execution cluster needs a measured reason
+  (section 4.2).
+- **Determinism.** Lint rules refuse `Date.now`, `Math.random` and ambient I/O
+  before compile. Every workflow test runs twice, the second run replaying the
+  first run's journal, and any divergence fails it. Integration calls in tests
+  are mocked, and an unmocked call fails immediately.
+- **Release pinning.** A body is package-revision content, compiled (type-check,
+  lint, tests) during candidate verification and activated with the release. Each
+  run pins the release it started on, so in-flight runs finish on old code. This
+  is section 3 rule 7 applied to workflows, and it goes further than per-workflow
+  versioning.
+- **Identity.** A run acts as its own automation principal. Its grants are the
+  intersection of its declared grants and the approver's authority at
+  activation, rechecked on every call under rule 8. The record shows both who
+  authored the body and who or what triggered the run.
+- **Authoring.** The customization lane drafts bodies. The agent's loop is draft,
+  type-check, lint, test, fix, and then present the diff for human approval. The
+  operations lane never authors one (section 3 rule 11).
+- **Approval a non-developer can read.** A code diff alone is not an approvable
+  diff for a business owner. The approval screen leads with a plain-language
+  account of what the run can do, derived from the body's declared triggers,
+  grants and host-call sites: "when a receipt posts, it may create an inspection
+  and email the supplier". The code diff sits alongside. Any flow view is derived
+  from the code, never the reverse.
 
 **Gate N2:** a generated approval workflow and a business-object-linked
 conversation survive retries, provider failure, release upgrade, permission
-changes, and recovery without duplicate external delivery.
+changes, and recovery without duplicate external delivery. Every workflow in the
+proof passes the run-twice replay test. A run that started before an upgrade
+finishes on its pinned release.
 
 ### 12.6 N3 - Inventory and commercial depth
 
@@ -3302,7 +3425,8 @@ reconciliation, permissions, close, audit, and regulatory evidence.
 
 Add extension mechanisms last and keep them narrow:
 
-- pure constrained compute for deterministic algorithms;
+- pure constrained compute for deterministic algorithms, run on N2's sandbox host
+  with no host calls granted (amended 2026-11-16: one isolate runtime, not two);
 - isolated service extensions for stateful or networked behavior;
 - signed connector adapters;
 - reviewed UI components rendered through explicit slots;
@@ -3459,6 +3583,17 @@ For proofs 1-3:
 - complete generated projections and support cells; and
 - ordinary UI/agent/report/workflow/recovery behavior.
 
+**The customized-tenant upgrade proof** (added 2026-11-16, section 2.4) is not a
+package and adds no count to the proofs above. It is required from N1 onward and
+repeated at every later stage. A tenant whose revision customizes a first-party
+package must take a new platform version of that package. The required changes are a
+custom field, a validation, a narrowed permission and a layout, plus a workflow body
+from N2 onward. The upgrade recompiles the tenant revision against the new package.
+Every customization at a declared extension point survives with no hand merge. Every
+conflict is a stable compiler diagnostic naming both sides, reported before activation.
+Rollback returns to the prior release. An AI-proposed resolution may be offered, but it
+is a draft revision like any other and is never auto-activated.
+
 The north-star gate also requires a fifth package, selected only after N6, from
 a materially different domain such as project costing, manufacturing, rental,
 or a financial subledger. This guards against an architecture accidentally
@@ -3557,7 +3692,9 @@ scaffolding.
 | N1-03 | N1    | Declarative states, transitions, events, corrections, and bulk effects | N1-02        | transition/concurrency/audit/read-back/property tests                   |
 | N1-04 | N1    | Goods Receipt Inspection generated package                             | N1-03        | no-branch scan plus complete user/agent/recovery journey                |
 | N1-05 | N1    | Repeatability drill with a second simple generated module              | N1-04        | zero platform changes and productivity benchmark                        |
-| N2-01 | N2    | Versioned workflow definition/instance/task/timer/compensation kernel  | N1           | workflow recovery, upgrade, concurrency, cancellation tests             |
+| N1-06 | N1    | Customized-tenant upgrade proof (section 12.14), repeated each stage   | N1-04        | customized revision recompiles on a new package version with no hand merge; conflicts are diagnostics; rollback; workflow body included from N2 |
+| N2-00 | N2    | Sandbox host, release-generated SDK and journal (section 12.5)         | N1           | isolation/resource-limit/grant tests; run-twice replay; release-pinned resume |
+| N2-01 | N2    | Versioned workflow definition/instance/task/timer/compensation kernel  | N2-00        | workflow recovery, upgrade, concurrency, cancellation tests             |
 | N2-02 | N2    | Documents, files, templates, signatures, and retention                 | N2-01        | security/content/version/retention/recovery evidence                    |
 | N2-03 | N2    | Communication thread/message/participant/consent/channel model         | N2-01,N2-02  | permission, retention, inbound/outbound correlation tests               |
 | N2-04 | N2    | Email provider binding through connector/outbox contract               | N2-03        | retry, duplicate, bounce, replay, secret and recovery tests             |
@@ -3581,7 +3718,7 @@ scaffolding.
 | N6-03 | N6    | Implement selected domain package/capabilities                         | N6-02        | domain-specific safety, migration, UI, agent, report and recovery gates |
 | N6-04 | N6    | Cross-domain breadth proof and upgrade from existing tenants           | N6-03        | fifth no-platform-branch package and compatibility evidence             |
 | N6-05 | N6    | Additional domain-pack admission queue                                 | N6-04        | every candidate classified Tier A/B/C with dependencies and evidence    |
-| N7-01 | N7    | Pure constrained compute extension runtime                             | N6           | determinism/resource/isolation/version/revocation tests                 |
+| N7-01 | N7    | Pure constrained compute on the N2-00 sandbox host                     | N6,N2-00     | determinism/resource/isolation/version/revocation tests                 |
 | N7-02 | N7    | Isolated service and signed connector extension runtime                | N7-01,N5-03  | network/secret/grant/rate/retry/kill-switch evidence                    |
 | N7-03 | N7    | Reviewed isolated UI component/slot extension runtime                  | N7-01        | CSP/data/action/accessibility/failure containment evidence              |
 | N7-04 | N7    | Novel optimization/scoring extension proof                             | N7-01..N7-03 | typed contract, no ambient authority, observability and revocation      |
@@ -3718,6 +3855,11 @@ catalog and lane handoffs mature, grade them against the v1 corpus protocols
 in section 22.8 (semantic operability: held-out probes independent of the
 authoring model, per-critical-object must-pass) and section 22.10 (the
 one-conversation capability-continuity golden scenario).
+
+*(Added 2026-11-16.)* Every failed or rejected production run, taken from the
+section 9.4 run record, is a candidate eval case. It is replayed against the
+candidate model, prompt or release before promotion. Each eval report states the
+success rate and the cost per completed task.
 
 Promotion requires repeated runs on the exact model, prompt, tool profile,
 compiler/release version, and representative data shape. Unsafe-write success,
@@ -3975,6 +4117,12 @@ re-ratifies the target before promotion.
 | Unowned hierarchy            | ancestor and descendant questions are met by ad-hoc traversal or silent descope | §5.14's materialized ancestry, reported as a capability gap until admitted |
 | Customer forks               | short-term delivery destroys composability                        | support-cell/gap process and reusable capability funding             |
 | Unsafe escape hatch          | arbitrary code bypasses tenant/policy/release controls            | constrained signed extensions with explicit grants and revocation    |
+| Workflow-language treadmill  | every new workflow need extends a home-grown node vocabulary; models author it badly (DOSS, 2026-10-19) | TypeScript bodies on a sandbox host against the release SDK (section 12.5); the declarative/code line in section 10.4 |
+| Code substituting for primitives | a workflow body quietly does a validation's, guard's or derived value's job | bodies never run in a request path (section 5.14); the section 10.4 line |
+| Nondeterministic workflow replay | a resumed run takes a different branch and double-delivers | journaled host calls, lint ban on ambient clock and randomness, run-twice replay tests |
+| Agent approval fatigue       | approval on every write makes the agent useless at volume, so users route around it | risk-classed confirmation, one approval per bounded bulk plan (section 9.4) |
+| Customized tenant cannot upgrade | each tenant becomes a fork, and platform releases stall | customization only at declared extension points; section 12.14's customized-tenant upgrade proof |
+| Derived-store sprawl         | search, graph and formula engines drift from PostgreSQL, and two permission models disagree | one PostgreSQL authority; a new store needs a measured reason and must be a rebuildable read model under the same policy |
 | False gate confidence        | implementer-approved tests miss real behavior                     | evidence packets, independent review, real-model and recovery drills |
 
 ## 17. Stop, revise, and promotion rules
