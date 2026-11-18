@@ -277,8 +277,10 @@ async function command(
   const secondary = page.locator(
     '.composition-record-actions:not([open]) > summary',
   );
-  if (await secondary.count()) await secondary.click();
-  await page.getByRole('button', { name: label, exact: true }).click();
+  const post = page.getByRole('button', { name: label, exact: true });
+  if (!(await post.isVisible()) && (await secondary.count()))
+    await secondary.click();
+  await post.click();
   const dialog = page.getByRole('dialog');
   await expect(
     dialog.getByRole('heading', { name: label, exact: true }),

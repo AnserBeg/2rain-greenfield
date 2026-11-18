@@ -244,6 +244,10 @@ export function inventoryDocumentWorkspace(
             },
             recordActions: 'progressive',
             technicalDetails: 'progressive',
+            context: {
+              label: 'Stock document',
+              description: 'Post the saved draft when its lines are ready.',
+            },
             task: { mode: 'nativeDialog', fallback: 'page' },
           },
         }
