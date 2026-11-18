@@ -688,3 +688,319 @@ test('X4: the lines a posting will read are bound to the yes; a line changed aft
   );
   assert.deepEqual(state.invoked, []);
 });
+
+// ---------------------------------- end review X7, X8 (Stop, verify, Undo)
+
+interface StoredRow {
+  recordId: string;
+  revision: number;
+  archived: boolean;
+  values: Record<string, string>;
+}
+
+/**
+ * A session over the compiled release with a small record store: creates
+ * mint rows, updates and archives compare `expectedRevision` like the
+ * gateway, list filters match exactly, and a test can fail the next
+ * invocation of an operation or move a row's revision between reads.
+ */
+function storeSession() {
+  const base = compiledAppView('manager');
+  const rows = new Map<string, StoredRow>();
+  rows.set(PARTY, {
+    recordId: PARTY,
+    revision: 1,
+    archived: false,
+    values: { [`${NS}:field.party_number`]: 'P-2016' },
+  });
+  const state = {
+    rows,
+    invoked: [] as string[],
+    failNext: new Set<string>(),
+    onGet: (() => undefined) as (id: string) => void,
+  };
+  const session = new OperationsAgentSession({
+    runtime: {
+      entry: {
+        run: (_r: unknown, work: (v: unknown) => unknown) =>
+          Promise.resolve(work(base)),
+      },
+      operationGateway: {
+        previewTaskEligibility: () => Promise.resolve('eligible'),
+        invoke: (
+          _v: unknown,
+          request: {
+            operationId: string;
+            input: {
+              recordId: string;
+              expectedRevision?: number;
+              values?: Record<string, string>;
+              patch?: Record<string, string>;
+            };
+          },
+        ) => {
+          state.invoked.push(local(request.operationId));
+          if (state.failNext.delete(local(request.operationId)))
+            return Promise.resolve({
+              outcome: 'unsupported',
+              unsupportedReason: 'injected failure',
+            });
+          const id = request.input.recordId;
+          let row = rows.get(id);
+          if (local(request.operationId).endsWith('_create')) {
+            row = {
+              recordId: id,
+              revision: 1,
+              archived: false,
+              values: { ...request.input.values },
+            };
+            rows.set(id, row);
+          } else {
+            if (!row || row.revision !== request.input.expectedRevision)
+              return Promise.resolve({
+                outcome: 'unsupported',
+                unsupportedReason: 'revision conflict',
+              });
+            row.revision += 1;
+            if (local(request.operationId).endsWith('_archive'))
+              row.archived = true;
+            Object.assign(row.values, request.input.patch ?? {});
+          }
+          return Promise.resolve({
+            outcome: 'succeeded',
+            readBack: { ...row, values: { ...row.values } },
+          });
+        },
+      },
+      operationMediation: {
+        issueInvocation: () => ({}),
+        issueConfirmationGrant: () => ({}),
+      },
+      queryGateway: {
+        previewEligibility: () => Promise.resolve('eligible'),
+        invoke: (
+          _v: unknown,
+          request: {
+            arguments: {
+              recordId?: string;
+              includeArchived?: boolean;
+              list?: { fieldFilters?: { fieldId: string; value: string }[] };
+            };
+          },
+        ) => {
+          const args = request.arguments;
+          if (args.recordId) {
+            state.onGet(args.recordId);
+            const row = rows.get(args.recordId);
+            const visible = row && (!row.archived || args.includeArchived);
+            return Promise.resolve({
+              outcome: visible ? 'exact' : 'not-found',
+              records: visible ? [{ ...row, values: { ...row.values } }] : [],
+            });
+          }
+          const filters = args.list?.fieldFilters ?? [];
+          const matched = [...rows.values()].filter(
+            (row) =>
+              !row.archived &&
+              filters.every(
+                (filter) => row.values[filter.fieldId] === filter.value,
+              ),
+          );
+          return Promise.resolve({ outcome: 'exact', records: matched });
+        },
+      },
+    } as never,
+    personHeaders: {},
+    companyId: 'c',
+    autoApproveReversible: true,
+    approve: () => Promise.resolve(true),
+  });
+  return { session, state };
+}
+
+function local(id: string): string {
+  return id.slice(id.lastIndexOf('.') + 1);
+}
+
+async function runPlan(
+  session: OperationsAgentSession,
+  intents: Record<string, unknown>[],
+  key: string,
+): Promise<{ planId: string; content: Record<string, unknown> }> {
+  const planned = (await session.call('erp_plan', { intents })).content as {
+    planId?: string;
+  };
+  assert.equal(typeof planned.planId, 'string', JSON.stringify(planned));
+  const executed = await session.call('erp_execute', {
+    planId: planned.planId,
+    executionIdempotencyKey: key,
+  });
+  return {
+    planId: planned.planId!,
+    content: executed.content as Record<string, unknown>,
+  };
+}
+
+test('X7: Stop before a mutation step writes nothing more; the host verifies what the model did not', async () => {
+  const { session, state } = storeSession();
+  await session.call('erp_query', {
+    queryId: 'party_get',
+    arguments: { recordId: PARTY },
+  });
+  const planned = (
+    await session.call('erp_plan', {
+      intents: [
+        { operationId: 'party_update', target: PARTY, patch: { name: 'A' } },
+      ],
+    })
+  ).content as { planId: string };
+  const stop = new AbortController();
+  stop.abort();
+  const stopped = (
+    await session.call(
+      'erp_execute',
+      { planId: planned.planId, executionIdempotencyKey: 's' },
+      { signal: stop.signal },
+    )
+  ).content as { steps: { outcome: string }[] };
+  assert.equal(stopped.steps[0]!.outcome, 'not-run');
+  assert.deepEqual(state.invoked, []);
+  // A plan that ran and was never verified by the model is checked by the
+  // host; a failed plan never becomes the latest change.
+  const made = await runPlan(
+    session,
+    [{ operationId: 'party_update', target: PARTY, patch: { name: 'B' } }],
+    'b',
+  );
+  state.failNext.add('party_update');
+  await session
+    .call('erp_plan', {
+      intents: [
+        { operationId: 'party_update', target: PARTY, patch: { name: 'C' } },
+      ],
+    })
+    .then(async (planned2) =>
+      session.call('erp_execute', {
+        planId: (planned2.content as { planId: string }).planId,
+        executionIdempotencyKey: 'c',
+      }),
+    );
+  assert.equal(session.latestChange()?.changeId, made.planId);
+  const checked = await session.verifyPending();
+  assert.deepEqual(
+    checked.map((entry) => [entry.planId, entry.verified]),
+    [[made.planId, true]],
+  );
+});
+
+test('X8: Undo pins the written revision, refuses after later work, refuses a referenced record, and finishes a partial undo', async () => {
+  // Pinned: an edit landing between Undo's reads is not overwritten.
+  {
+    const { session, state } = storeSession();
+    await session.call('erp_query', {
+      queryId: 'party_get',
+      arguments: { recordId: PARTY },
+    });
+    const change = await runPlan(
+      session,
+      [
+        {
+          operationId: 'party_update',
+          target: PARTY,
+          patch: { name: 'Agent' },
+        },
+      ],
+      'a',
+    );
+    let reads = 0;
+    state.onGet = (id) => {
+      reads += 1;
+      // Someone edits the record right after Undo's first read.
+      if (id === PARTY && reads === 1) {
+        const row = state.rows.get(PARTY)!;
+        queueMicrotask(() => {
+          row.revision += 1;
+          row.values[`${NS}:field.party_name`] = 'Person';
+        });
+      }
+    };
+    const undone = await session.undo(change.planId);
+    assert.equal(undone.outcome, 'refused');
+    assert.equal(
+      state.rows.get(PARTY)!.values[`${NS}:field.party_name`],
+      'Person',
+    );
+  }
+  // Later work in the conversation blocks Undo of an earlier change.
+  {
+    const { session } = storeSession();
+    await session.call('erp_query', {
+      queryId: 'party_get',
+      arguments: { recordId: PARTY },
+    });
+    const change = await runPlan(
+      session,
+      [
+        {
+          operationId: 'party_update',
+          target: PARTY,
+          patch: { name: 'Agent' },
+        },
+      ],
+      'a',
+    );
+    await runPlan(
+      session,
+      [{ operationId: 'party_archive', target: PARTY }],
+      'b',
+    );
+    const undone = await session.undo(change.planId);
+    assert.equal(undone.outcome, 'refused');
+  }
+  // A created record another active record names is not archived.
+  {
+    const { session, state } = storeSession();
+    const created = await runPlan(
+      session,
+      [{ operationId: 'party_create', values: { number: 'P-9', name: 'New' } }],
+      'a',
+    );
+    const madeId = (created.content.steps as { recordId: string }[])[0]!
+      .recordId;
+    state.rows.set('77777777-7777-4777-8777-777777777777', {
+      recordId: '77777777-7777-4777-8777-777777777777',
+      revision: 1,
+      archived: false,
+      values: {
+        [`${NS}:field.sales_order_number`]: 'SO-1',
+        [`${NS}:field.sales_order_customer_party_id`]: madeId,
+      },
+    });
+    const undone = await session.undo(created.planId);
+    assert.equal(undone.outcome, 'refused');
+    assert.match((undone as { reason: string }).reason, /now uses/u);
+    assert.equal(state.rows.get(madeId)!.archived, false);
+  }
+  // A partial Undo keeps what it did and finishes only what is left.
+  {
+    const { session, state } = storeSession();
+    const created = await runPlan(
+      session,
+      [
+        { operationId: 'party_create', values: { number: 'P-8', name: 'One' } },
+        { operationId: 'party_create', values: { number: 'P-7', name: 'Two' } },
+      ],
+      'a',
+    );
+    state.failNext.add('party_archive');
+    const first = await session.undo(created.planId);
+    assert.equal(first.outcome, 'refused');
+    assert.match((first as { reason: string }).reason, /partway/u);
+    const second = await session.undo(created.planId);
+    assert.equal(second.outcome, 'undone', JSON.stringify(second));
+    const ids = (created.content.steps as { recordId: string }[]).map(
+      (s) => s.recordId,
+    );
+    assert.ok(ids.every((id) => state.rows.get(id)!.archived));
+  }
+});

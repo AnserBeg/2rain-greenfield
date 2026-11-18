@@ -208,6 +208,8 @@ interface StoredPlan {
   execution?: {
     readonly key: string;
     readonly results: readonly StepResult[];
+    /** When it ran, in this session's commit order. */
+    readonly sequence: number;
   };
 }
 
@@ -255,6 +257,13 @@ export class OperationsAgentSession {
   /** Currency codes the person named in the current request only. */
   #requestCurrencies = new Set<string>();
   readonly #undone = new Set<string>();
+  /** Executions in commit order, and the plans the host has verified. */
+  #sequence = 0;
+  readonly #verified = new Set<string>();
+  /** The person's Stop for the current run: no mutation starts after it. */
+  #signal: AbortSignal | undefined;
+  /** For an Undo that stopped partway: the records it already put back. */
+  readonly #undoneRecords = new Map<string, Set<string>>();
 
   constructor(options: OperationsAgentSessionOptions) {
     this.#options = options;
@@ -274,7 +283,12 @@ export class OperationsAgentSession {
       }));
   }
 
-  async call(tool: string, input: unknown): Promise<ToolOutcome> {
+  async call(
+    tool: string,
+    input: unknown,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<ToolOutcome> {
+    this.#signal = options.signal;
     let outcome: ToolOutcome;
     try {
       if (!isRecord(input)) throw new ToolInputError('input must be an object');
@@ -573,15 +587,22 @@ export class OperationsAgentSession {
     return null;
   }
 
-  /** The latest change the agent made at once in this session, if any. */
+  /**
+   * The latest change the agent made at once in this session, if any: the
+   * last reversible plan, in commit order, that actually wrote something,
+   * summarized from the steps that succeeded.
+   */
   latestChange(): AgentChange | null {
     const plan = [...this.#plans.values()]
       .filter(
         (candidate) =>
           candidate.riskClass === 'reversible' &&
-          candidate.execution &&
-          !this.#undoPlans.has(candidate.planId),
+          !this.#undoPlans.has(candidate.planId) &&
+          candidate.execution?.results.some(
+            (result) => result.outcome === 'succeeded',
+          ),
       )
+      .sort((a, b) => a.execution!.sequence - b.execution!.sequence)
       .at(-1);
     if (!plan?.execution) return null;
     return {
@@ -608,11 +629,30 @@ export class OperationsAgentSession {
       return { outcome: 'refused', reason: 'That change was already undone.' };
     const plan = this.#plans.get(changeId)!;
     const results = plan.execution!.results;
+    // Anything this session wrote after the change may depend on it.
+    const later = [...this.#plans.values()].find(
+      (other) =>
+        other.planId !== changeId &&
+        !this.#undoPlans.has(other.planId) &&
+        (other.execution?.sequence ?? 0) > plan.execution!.sequence &&
+        other.execution?.results.some((r) => r.outcome === 'succeeded'),
+    );
+    if (later)
+      return {
+        outcome: 'refused',
+        reason:
+          'Something else was done after this change in this conversation and may depend on it, so it cannot be undone here.',
+      };
+    const done = this.#undoneRecords.get(changeId) ?? new Set<string>();
     // The revision each record had right after the agent's last write to it.
     const written = new Map<string, { revision: number; step: PlanStep }>();
     for (const step of plan.steps) {
       const result = results.find((entry) => entry.step === step.step);
-      if (result?.outcome === 'succeeded' && result.recordId)
+      if (
+        result?.outcome === 'succeeded' &&
+        result.recordId &&
+        !done.has(result.recordId)
+      )
         written.set(result.recordId, {
           revision: result.revision ?? 0,
           step: written.get(result.recordId)?.step ?? step,
@@ -620,36 +660,38 @@ export class OperationsAgentSession {
     }
     if (written.size === 0)
       return { outcome: 'refused', reason: 'That change wrote nothing.' };
-    const changed = await this.#run(async (view) => {
-      const catalog = pinnedCatalog(view);
-      for (const [recordId, { revision, step }] of written) {
-        const record = await readRecord(
-          this.#options.runtime,
-          view,
-          catalog,
-          step.operation.readBackQueryId,
-          recordId,
-          this.#options.companyId,
-        );
-        if (!record)
-          return `${localName(step.entity).replaceAll('_', ' ')} ${recordId} can no longer be read.`;
-        if (record.revision !== revision)
-          return `${recordLabel(record) ?? localName(step.entity).replaceAll('_', ' ')} changed after the assistant's change (revision ${String(revision)} is now ${String(record.revision)}); undoing would overwrite that later change.`;
-      }
-      return null;
-    });
-    if (changed) return { outcome: 'refused', reason: changed };
-    // Reverse order: archive what was made, put back what was changed. A
-    // record made in this change is archived, not restored field by field.
-    const intents: ImmutableJsonValue[] = [];
     const created = new Set(
       plan.steps
         .filter((step) => step.risk.inverse?.kind === 'archive')
         .map((step) => results.find((r) => r.step === step.step)?.recordId),
     );
+    const blocked = await this.#run(async (view) => {
+      const catalog = pinnedCatalog(view);
+      for (const [recordId, { step }] of written) {
+        if (!created.has(recordId)) continue;
+        const user = await this.#referencedBy(
+          view,
+          catalog,
+          step.entity,
+          recordId,
+        );
+        if (user)
+          return `${user} now uses the ${localName(step.entity).replaceAll('_', ' ')} this change created, so archiving it would break that record.`;
+      }
+      return null;
+    });
+    if (blocked) return { outcome: 'refused', reason: blocked };
+    // Reverse order: archive what was made, put back what was changed. A
+    // record made in this change is archived, not restored field by field.
+    const intents: ImmutableJsonValue[] = [];
     for (const step of [...plan.steps].reverse()) {
       const result = results.find((entry) => entry.step === step.step);
-      if (result?.outcome !== 'succeeded' || !result.recordId) continue;
+      if (
+        result?.outcome !== 'succeeded' ||
+        !result.recordId ||
+        done.has(result.recordId)
+      )
+        continue;
       const inverse = step.risk.inverse;
       if (inverse?.kind === 'archive')
         intents.push({
@@ -667,7 +709,13 @@ export class OperationsAgentSession {
           patch: step.prior,
         });
     }
-    const planned = (await this.#plan({ intents }, true)) as Record<
+    // Each inverse is pinned to the revision the agent's write left, so the
+    // gateway's compare-and-write refuses it if anyone changed the record
+    // since; the check and the write are one.
+    const pins = new Map(
+      [...written].map(([recordId, entry]) => [recordId, entry.revision]),
+    );
+    const planned = (await this.#plan({ intents }, true, pins)) as Record<
       string,
       ImmutableJsonValue
     >;
@@ -678,24 +726,72 @@ export class OperationsAgentSession {
       };
     this.#undoPlans.add(planned.planId);
     this.toolCalls.push({ tool: 'undo:plan', isError: false });
-    const executed = (await this.#execute({
+    await this.#execute({
       planId: planned.planId,
-      executionIdempotencyKey: `undo-${changeId}`,
-    })) as Record<string, ImmutableJsonValue>;
-    if (executed.outcome !== 'executed')
-      return {
-        outcome: 'refused',
-        reason: `Undo stopped: ${JSON.stringify(executed.steps)}`,
-      };
-    this.#undone.add(changeId);
+      executionIdempotencyKey: `undo-${changeId}-${String(done.size)}`,
+    });
+    const undoPlan = this.#plans.get(planned.planId)!;
+    const undoResults = undoPlan.execution?.results ?? [];
+    for (const result of undoResults)
+      if (result.outcome === 'succeeded' && result.recordId)
+        done.add(result.recordId);
+    this.#undoneRecords.set(changeId, done);
     const verified = (await this.#verify({
       operationSessionId: planned.planId,
-    })) as Record<string, ImmutableJsonValue>;
+    }).catch(() => ({ verified: false }))) as Record<
+      string,
+      ImmutableJsonValue
+    >;
+    const failed = undoResults.find((result) => result.outcome !== 'succeeded');
+    if (failed)
+      return {
+        outcome: 'refused',
+        reason: `Undo stopped partway: ${String(done.size)} record(s) put back; the next one did not (${failed.error ?? failed.outcome}). Click Undo again to finish only what is left.`,
+      };
+    this.#undone.add(changeId);
     return {
       outcome: 'undone',
       summary: `Undid: ${latest.summary}`,
       verified: verified.verified === true,
     };
+  }
+
+  /**
+   * The first active record that names `recordId` in a reference field
+   * (`..._<type>_id`), as its number or name; null when none does.
+   */
+  async #referencedBy(
+    view: RequestRuntimeView,
+    catalog: PinnedCatalog,
+    entity: string,
+    recordId: string,
+  ): Promise<string | null> {
+    const type = localName(entity);
+    const word = type.split('_').at(-1)!;
+    for (const query of catalog.queries) {
+      if (
+        query.queryType !== 'list' ||
+        query.sourceEntityId === entity ||
+        localName(query.queryId) !== `${localName(query.sourceEntityId)}_list`
+      )
+        continue;
+      const field = query.selections.find((selection) => {
+        const name = localName(selection.fieldId);
+        return name.endsWith(`_${type}_id`) || name.endsWith(`_${word}_id`);
+      });
+      if (!field) continue;
+      const found = await this.#list(
+        view,
+        query,
+        { filters: [{ fieldId: field.fieldId, value: recordId }] },
+        1,
+        catalog,
+      ).catch(() => ({ records: [] as SemanticRecordDto[] }));
+      const row = found.records[0];
+      if (row)
+        return `${localName(query.sourceEntityId).replaceAll('_', ' ')} ${recordLabel(row) ?? row.recordId}`;
+    }
+    return null;
   }
 
   /** Records this session read or wrote, newest last; written ones marked. */
@@ -1154,6 +1250,8 @@ export class OperationsAgentSession {
     input: Record<string, ImmutableJsonValue>,
     /** Undo passes the person's click; the model's plans never do. */
     personsUndo = false,
+    /** Undo pins each record to the revision the agent's write left. */
+    pins?: ReadonlyMap<string, number>,
   ): Promise<ImmutableJsonValue> {
     if (
       input.requestedBulkMode !== undefined &&
@@ -1194,6 +1292,7 @@ export class OperationsAgentSession {
           operation,
           intent,
           step,
+          pins,
         );
         steps.push(built.step);
         checks.push(built.check);
@@ -1333,6 +1432,7 @@ export class OperationsAgentSession {
     operation: RegisteredOperationDefinition,
     intent: Record<string, ImmutableJsonValue>,
     step: number,
+    pins?: ReadonlyMap<string, number>,
   ): Promise<{ step: PlanStep; check: ImmutableJsonValue; refused?: string }> {
     const where = `step ${String(step)} (${localName(operation.operationId)})`;
     const contract = operation.inputContract;
@@ -1513,7 +1613,9 @@ export class OperationsAgentSession {
           record.values,
         ),
         recordId: target,
-        pinnedRevision: record.revision,
+        // Undo pins the revision the agent's write left; otherwise the
+        // revision read now.
+        pinnedRevision: pins?.get(target) ?? record.revision,
         targetLabel: recordLabel(record),
         ...(patch
           ? {
@@ -1527,11 +1629,15 @@ export class OperationsAgentSession {
           : {}),
       },
       check,
-      ...(evaluation.outcome === 'refused'
+      ...(pins?.has(target) && pins.get(target) !== record.revision
         ? {
-            refused: `the declared precondition does not hold for this record (${describePredicate(operation.precondition)})`,
+            refused: `${recordLabel(record) ?? 'the record'} changed after the assistant's change (revision ${String(pins.get(target))} is now ${String(record.revision)}); undoing would overwrite that later change`,
           }
-        : {}),
+        : evaluation.outcome === 'refused'
+          ? {
+              refused: `the declared precondition does not hold for this record (${describePredicate(operation.precondition)})`,
+            }
+          : {}),
     };
   }
 
@@ -1592,6 +1698,19 @@ export class OperationsAgentSession {
     let stopped = false;
     let releaseChanged: PlanRelease | null = null;
     for (const step of plan.steps) {
+      if (!stopped && this.#signal?.aborted) {
+        // The person's Stop: nothing more is written after it.
+        stopped = true;
+        results.push({
+          step: step.step,
+          operationId: step.operation.operationId,
+          outcome: 'not-run',
+          recordId: null,
+          revision: null,
+          error: 'stopped by the person before this step; it did not run',
+        });
+        continue;
+      }
       if (stopped) {
         results.push({
           step: step.step,
@@ -1736,7 +1855,8 @@ export class OperationsAgentSession {
         });
       }
     }
-    plan.execution = { key, results };
+    this.#sequence += 1;
+    plan.execution = { key, results, sequence: this.#sequence };
     plan.status = stopped ? 'failed' : 'executed';
     if (releaseChanged) return replanResult(plan, releaseChanged, results);
     return executionReport(plan);
@@ -1847,6 +1967,7 @@ export class OperationsAgentSession {
           ...(record ? { observed: compactValues(record.values) } : {}),
         });
       }
+      this.#verified.add(planId);
       return {
         operationSessionId: planId,
         verified: checks.every(
@@ -1855,6 +1976,30 @@ export class OperationsAgentSession {
         steps: checks,
       };
     });
+  }
+
+  /**
+   * The host's own read-back of every plan that wrote something and was not
+   * verified (a Stop, a handoff or an error cut the model off before
+   * erp_verify). Verification never depends on the model or the connection.
+   */
+  async verifyPending(): Promise<
+    readonly { planId: string; verified: boolean }[]
+  > {
+    const checked: { planId: string; verified: boolean }[] = [];
+    for (const plan of this.#plans.values()) {
+      if (
+        !plan.execution ||
+        this.#verified.has(plan.planId) ||
+        !plan.execution.results.some((r) => r.outcome === 'succeeded')
+      )
+        continue;
+      const report = (await this.#verify({
+        operationSessionId: plan.planId,
+      }).catch(() => ({ verified: false }))) as { verified?: unknown };
+      checked.push({ planId: plan.planId, verified: report.verified === true });
+    }
+    return checked;
   }
 
   #bounded(
@@ -1996,7 +2141,13 @@ function currencyCode(value: string): string | null {
 
 /** What an executed plan did, in short words, for "Did: ..." and Undo. */
 function changeSummary(plan: StoredPlan): string {
+  // Only what succeeded, in the order it committed.
   return plan.steps
+    .filter(
+      (step) =>
+        plan.execution?.results.find((entry) => entry.step === step.step)
+          ?.outcome === 'succeeded',
+    )
     .map((step) => {
       const result = plan.execution?.results.find(
         (entry) => entry.step === step.step,
