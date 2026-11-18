@@ -7,7 +7,13 @@
 // The compiled modules read the release and the migrations relative to
 // themselves, so `dist/` gets links to the checked-in `apps/web/release`,
 // `db/` and the web package's dependencies (created once; never copies).
-import { existsSync, lstatSync, mkdirSync, symlinkSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { register } from 'node:module';
 import { dirname, relative, resolve } from 'node:path';
 import process from 'node:process';
@@ -32,6 +38,10 @@ for (const [link, target] of [
   mkdirSync(dirname(at), { recursive: true });
   symlinkSync(relative(dirname(at), resolve(root, target)), at, 'dir');
 }
+// The compiled modules are ES modules, like their sources.
+const distManifest = resolve(root, 'dist/package.json');
+if (!existsSync(distManifest))
+  writeFileSync(distManifest, '{ "type": "module" }\n');
 register('./production-resolve.mjs', import.meta.url);
 await import(pathToFileURL(entry).href);
 
