@@ -489,3 +489,90 @@ test('X6: without the host option a reversible change is asked like any plan', a
     [['person', 'reversible']],
   );
 });
+
+// ------------------------------------------------ end review X12 (provenance)
+
+test('X12: an id the model typed and a result echoed, or one in free text, is not provenance', async () => {
+  const { session, state } = guardedSession();
+  const typed = '11111111-2222-4333-8444-555555555555';
+  const inNote = '66666666-7777-4888-8999-aaaaaaaaaaaa';
+  await session.call('erp_discover', {
+    mode: 'contracts',
+    canonicalIds: [typed],
+  });
+  await session.call('erp_query', { queryId: typed, arguments: {} });
+  state.record = {
+    ...state.record,
+    values: {
+      ...state.record.values,
+      [`${NS}:field.party_contact_summary`]: `see ${inNote}`,
+    },
+  };
+  await session.call('erp_query', {
+    queryId: 'party_get',
+    arguments: { recordId: PARTY },
+  });
+  for (const target of [typed, inNote]) {
+    const planned = (
+      await session.call('erp_plan', {
+        intents: [
+          { operationId: 'party_update', target, patch: { name: 'X' } },
+        ],
+      })
+    ).content as { outcome?: string; reason?: string };
+    assert.equal(planned.outcome, 'refused', target);
+    assert.match(String(planned.reason), /did not come from a lookup/u);
+  }
+});
+
+test('X12: a reference position refuses any unlooked-up value, a nested argument, an odd currency, and a currency named in an earlier request', async () => {
+  const { session } = guardedSession();
+  await session.call('erp_query', {
+    queryId: 'party_get',
+    arguments: { recordId: PARTY },
+  });
+  const order = (values: Record<string, unknown>) =>
+    session.call('erp_plan', {
+      intents: [
+        {
+          operationId: 'purchase_order_create',
+          values: {
+            supplier_party_id: PARTY,
+            order_date: '2026-11-18T00:00:00.000Z',
+            currency: 'CAD',
+            ...values,
+          },
+        },
+      ],
+    });
+  const reason = async (values: Record<string, unknown>) =>
+    String(
+      ((await order(values)).content as { reason?: string }).reason ??
+        'planned',
+    );
+  assert.match(
+    await reason({ supplier_party_id: 'Cascade' }),
+    /did not come from a lookup/u,
+  );
+  assert.match(await reason({ currency: 'usd' }), /currency USD is not/u);
+  assert.match(
+    await reason({ currency: 'dollars' }),
+    /is not a currency code/u,
+  );
+  session.noteRequest('Order it in EUR');
+  assert.equal(await reason({ currency: 'EUR' }), 'planned');
+  session.noteRequest('Now something else');
+  assert.match(await reason({ currency: 'EUR' }), /currency EUR is not/u);
+  const nested = (
+    await session.call('erp_plan', {
+      intents: [
+        {
+          operationId: 'purchase_order_release',
+          target: PARTY,
+          arguments: { lines: [{ quantity: '5' }] },
+        },
+      ],
+    })
+  ).content;
+  assert.match(JSON.stringify(nested), /flat object of plain values/u);
+});

@@ -231,10 +231,17 @@ export class OperationsAgentSession {
   readonly approvals: ApprovalRecord[] = [];
   readonly #touched = new Map<string, TouchedRecord>();
   readonly #undoPlans = new Set<string>();
-  /** Record ids the host returned to the model in this session. */
-  readonly #seenIds = new Set<string>();
-  /** Currency codes of records the host returned, and ones the person named. */
-  readonly #seenCurrencies = new Set<string>();
+  /**
+   * Record ids the host returned in this session, from typed positions only:
+   * a returned record's own id (with its record type), its `..._id`
+   * reference fields, and the records an execution wrote. Never an id the
+   * model typed and a result echoed back.
+   */
+  readonly #seenIds = new Map<string, string>();
+  /** Currency codes held by records the host returned. */
+  readonly #recordCurrencies = new Set<string>();
+  /** Currency codes the person named in the current request only. */
+  #requestCurrencies = new Set<string>();
   readonly #undone = new Set<string>();
 
   constructor(options: OperationsAgentSessionOptions) {
@@ -261,10 +268,6 @@ export class OperationsAgentSession {
       if (!isRecord(input)) throw new ToolInputError('input must be an object');
       const content = await this.#dispatch(tool, input);
       outcome = { content: this.#bounded(content), isError: false };
-      // What the host showed the model is what a plan may name (slice 4):
-      // record ids and currencies from lookups, reads, writes and checks,
-      // never from a plan's echo of the model's own input.
-      if (tool !== 'erp_plan') this.#remember(outcome.content);
     } catch (error) {
       outcome = {
         content: {
@@ -447,7 +450,7 @@ export class OperationsAgentSession {
         ).catch(() => null);
         if (record) {
           this.#touch(named.entityId, record, false);
-          this.#remember(compactRecord(record));
+          this.#learn(named.entityId, [record]);
           lines.push(
             `That record, read just now through ${localName(named.getQueryId)}: ${JSON.stringify(
               this.#bounded(compactRecord(record), 4_000),
@@ -467,28 +470,29 @@ export class OperationsAgentSession {
    * are kept: a plan may use a currency the person named.
    */
   noteRequest(text: string): void {
+    // A currency named in an earlier request does not carry over.
+    this.#requestCurrencies = new Set();
     for (const code of text.match(/\b[A-Z]{3}\b/gu) ?? [])
-      this.#seenCurrencies.add(code);
+      this.#requestCurrencies.add(code);
     for (const [words, code] of CURRENCY_WORDS)
-      if (words.test(text)) this.#seenCurrencies.add(code);
+      if (words.test(text)) this.#requestCurrencies.add(code);
   }
 
-  #remember(content: ImmutableJsonValue, fieldId = ''): void {
-    if (typeof content === 'string') {
-      if (uuidPattern.test(content)) this.#seenIds.add(content.toLowerCase());
-      if (/_currency$/u.test(fieldId)) {
-        const code = currencyCode(content);
-        if (code) this.#seenCurrencies.add(code);
+  /** Learns the typed identities a successful read or write returned. */
+  #learn(entityId: string, records: readonly SemanticRecordDto[]): void {
+    for (const record of records) {
+      this.#seenIds.set(record.recordId.toLowerCase(), entityId);
+      for (const [fieldId, value] of Object.entries(record.values)) {
+        if (typeof value !== 'string' || value === '') continue;
+        const name = localName(fieldId);
+        if (name.endsWith('_id') && uuidPattern.test(value))
+          this.#seenIds.set(value.toLowerCase(), '');
+        if (name.endsWith('_currency')) {
+          const code = currencyCode(value);
+          if (code) this.#recordCurrencies.add(code);
+        }
       }
-      return;
     }
-    if (Array.isArray(content)) {
-      for (const entry of content) this.#remember(entry, fieldId);
-      return;
-    }
-    if (isRecord(content))
-      for (const [key, value] of Object.entries(content))
-        this.#remember(value, key.includes(':') ? localName(key) : fieldId);
   }
 
   /**
@@ -504,6 +508,8 @@ export class OperationsAgentSession {
     const defaultCurrency = declaredCurrencyDefault(view).code;
     for (const step of steps) {
       const where = `step ${String(step.step)} (${localName(step.operation.operationId)})`;
+      // Every declared reference position, whatever the value looks like:
+      // the existing target, each relation, and each `..._id` field.
       const references: [string, ImmutableJsonValue][] = [
         [
           'target',
@@ -512,34 +518,44 @@ export class OperationsAgentSession {
             : null,
         ],
         ...Object.entries(step.relations ?? {}),
-        ...Object.entries({ ...step.values, ...step.patch }),
+        ...Object.entries({ ...step.values, ...step.patch }).filter(
+          ([fieldId]) => localName(fieldId).endsWith('_id'),
+        ),
       ];
       for (const [name, value] of references) {
-        if (typeof value !== 'string' || !uuidPattern.test(value)) continue;
-        // A reference is the target, a relation, or a field named `..._id`
-        // (`item_id`, `customer_party_id`): a free text field such as a
-        // reservation number may hold a fresh uuid the screens also mint.
-        if (
-          name !== 'target' &&
-          !(step.relations && name in step.relations) &&
-          !localName(name).endsWith('_id')
-        )
-          continue;
+        if (value === null || value === undefined) continue;
+        if (isRecord(value) && typeof value.fromStep === 'number') continue;
+        const label = name === 'target' ? 'the target record' : localName(name);
+        if (typeof value !== 'string')
+          return `${where}: ${label} must be a record id, not ${JSON.stringify(value)}.`;
         if (!this.#seenIds.has(value.toLowerCase()))
-          return `${where}: ${name === 'target' ? 'the target record' : localName(name)} ${value} did not come from a lookup in this conversation. Find the record with erp_discover resolve or a query, then plan with the id it returns.`;
+          return `${where}: ${label} ${value} did not come from a lookup in this conversation. Find the record with erp_discover resolve or a query, then plan with the id it returns.`;
+      }
+      // Arguments are a flat object of plain values; anything else is a
+      // structure no operation here declares.
+      if (step.arguments !== undefined && step.arguments !== null) {
+        if (
+          !isRecord(step.arguments) ||
+          Object.values(step.arguments).some(
+            (value) => typeof value === 'object' && value !== null,
+          )
+        )
+          return `${where}: arguments must be a flat object of plain values; nested lists or objects are not supported.`;
       }
       for (const [fieldId, value] of Object.entries({
         ...step.values,
         ...step.patch,
       })) {
+        if (!/_currency$/u.test(localName(fieldId)) || value === null) continue;
+        const code = typeof value === 'string' ? currencyCode(value) : null;
+        if (!code)
+          return `${where}: ${localName(fieldId)} ${JSON.stringify(value)} is not a currency code such as CAD.`;
         if (
-          !/_currency$/u.test(localName(fieldId)) ||
-          typeof value !== 'string'
+          code !== defaultCurrency &&
+          !this.#recordCurrencies.has(code) &&
+          !this.#requestCurrencies.has(code)
         )
-          continue;
-        const code = currencyCode(value);
-        if (code && code !== defaultCurrency && !this.#seenCurrencies.has(code))
-          return `${where}: currency ${code} is not the company default${defaultCurrency ? ` (${defaultCurrency})` : ''}, the currency of a record you read, or one the person named. Use one of those, or ask the person.`;
+          return `${where}: currency ${code} is not the company default${defaultCurrency ? ` (${defaultCurrency})` : ''}, the currency of a record you read, or one the person named in this request. Use one of those, or ask the person.`;
       }
     }
     return null;
@@ -845,6 +861,7 @@ export class OperationsAgentSession {
             queryId: query.queryId,
             arguments: withScope(query, { text }, this.#options.companyId),
           });
+          this.#learn(query.sourceEntityId, result.records.slice(0, limit));
           if (result.records.length > 0 || !list)
             return {
               mode,
@@ -856,6 +873,7 @@ export class OperationsAgentSession {
             };
         }
         const listed = await this.#list(view, list!, { search: text }, 10);
+        this.#learn(list!.sourceEntityId, listed.records);
         return {
           mode,
           queryId: list!.queryId,
@@ -935,6 +953,7 @@ export class OperationsAgentSession {
         );
         for (const record of listed.records.slice(0, 10))
           this.#touch(query.sourceEntityId, record, false);
+        this.#learn(query.sourceEntityId, listed.records);
         return {
           queryId,
           outcome: listed.records.length === 0 ? 'not-found' : 'exact',
@@ -957,6 +976,8 @@ export class OperationsAgentSession {
       });
       for (const record of result.records.slice(0, 10))
         this.#touch(query.sourceEntityId, record, false);
+      if (result.outcome !== 'unsupported')
+        this.#learn(query.sourceEntityId, result.records.slice(0, limit));
       return {
         queryId,
         outcome: result.outcome,
@@ -1241,6 +1262,19 @@ export class OperationsAgentSession {
     for (const key of ['values', 'relations', 'patch', 'arguments'])
       if (intent[key] !== undefined && intent[key] !== null && !keys.has(key))
         throw new ToolInputError(`${where}: this operation takes no ${key}`);
+    // Arguments are a flat object of plain values (a quantity, a reason);
+    // no operation here declares nested lists or objects.
+    if (
+      intent.arguments !== undefined &&
+      intent.arguments !== null &&
+      (!isRecord(intent.arguments) ||
+        Object.values(intent.arguments).some(
+          (value) => typeof value === 'object' && value !== null,
+        ))
+    )
+      throw new ToolInputError(
+        `${where}: arguments must be a flat object of plain values; nested lists or objects are not supported`,
+      );
     const fields = new Map(
       (contract?.fields ?? []).map((field) => [field.fieldId, field]),
     );
@@ -1272,6 +1306,15 @@ export class OperationsAgentSession {
           step,
           `${where} ${fieldId}`,
         );
+        // A currency is written as its code in capitals ("usd" -> "USD").
+        const written = out[fieldId];
+        if (
+          /_currency$/u.test(localName(fieldId)) &&
+          field.enumOptionIds.length === 0 &&
+          typeof written === 'string' &&
+          /^\s*[a-z]{3}\s*$/iu.test(written)
+        )
+          out[fieldId] = written.trim().toUpperCase();
       }
       return out;
     };
@@ -1553,6 +1596,7 @@ export class OperationsAgentSession {
             result.readBack.revision,
           );
           this.#touch(step.entity, result.readBack, true);
+          this.#learn(step.entity, [result.readBack]);
         }
         results.push({
           step: step.step,
