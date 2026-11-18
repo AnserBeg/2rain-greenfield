@@ -662,7 +662,7 @@ test(
             relations: {},
             values: {
               'northstar.app:field.purchase_order_supplier_party_id': seededId(
-                'Alpine Office Supply',
+                'Cascade Fastener Works',
               ),
               'northstar.app:field.purchase_order_order_date':
                 '2026-11-18T00:00:00.000Z',
