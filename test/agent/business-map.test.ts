@@ -450,3 +450,42 @@ test('a replayed execute returns the receipt; values only from a read allowed no
     'Changed since',
   );
 });
+
+test('X6: without the host option a reversible change is asked like any plan', async () => {
+  const asked: string[] = [];
+  const base = compiledAppView('manager');
+  const session = new OperationsAgentSession({
+    runtime: {
+      entry: {
+        run: (_r: unknown, work: (v: unknown) => unknown) =>
+          Promise.resolve(work(base)),
+      },
+      operationGateway: {
+        previewTaskEligibility: () => Promise.resolve('eligible'),
+      },
+      queryGateway: { previewEligibility: () => Promise.resolve('eligible') },
+    } as never,
+    personHeaders: {},
+    companyId: 'c',
+    approve: (plan) => {
+      asked.push(plan.planId);
+      return Promise.resolve(false);
+    },
+  });
+  const planned = (
+    await session.call('erp_plan', {
+      intents: [
+        {
+          operationId: 'party_create',
+          values: { number: 'P-9', name: 'Asked first' },
+        },
+      ],
+    })
+  ).content as { approval: string };
+  assert.equal(asked.length, 1);
+  assert.equal(planned.approval, 'declined by the person');
+  assert.deepEqual(
+    session.approvals.map((entry) => [entry.by, entry.riskClass]),
+    [['person', 'reversible']],
+  );
+});

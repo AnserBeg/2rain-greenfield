@@ -64,8 +64,12 @@ export interface PlanForApproval {
   readonly steps: readonly {
     readonly step: number;
     readonly operationId: string;
+    /** The operation's declared label, or its name in words. */
+    readonly operationLabel: string;
     readonly effect: string;
     readonly target: string;
+    /** The target's number or name as the host read it at planning. */
+    readonly targetLabel: string | null;
     readonly confirmation: 'humanRequired' | 'none';
     readonly inputs: Readonly<Record<string, ImmutableJsonValue>>;
   }[];
@@ -85,6 +89,11 @@ export interface OperationsAgentSessionOptions {
   /** The instant "now" is read at; a test fixes it. */
   readonly clock?: () => Date;
   readonly approve: PlanApprover;
+  /**
+   * Run reversible in-app changes at once (risk class `reversible`), for a
+   * host that offers Undo. Off by default: the plan is asked like any other.
+   */
+  readonly autoApproveReversible?: boolean;
   readonly mintId?: () => string;
   /** Upper bound on one tool result's serialized size, in characters. */
   readonly maximumResultCharacters?: number;
@@ -154,6 +163,8 @@ interface PlanStep {
   readonly relations?: Readonly<Record<string, ImmutableJsonValue>>;
   readonly patch?: Readonly<Record<string, ImmutableJsonValue>>;
   readonly arguments?: ImmutableJsonValue;
+  /** The existing target's number or name, read by the host at planning. */
+  readonly targetLabel?: string | null;
   /** For an update of an existing record: the patched fields' values before. */
   readonly prior?: Readonly<Record<string, ImmutableJsonValue>>;
   readonly risk: OperationRisk;
@@ -1151,8 +1162,12 @@ export class OperationsAgentSession {
         steps: steps.map((step) => ({
           step: step.step,
           operationId: step.operation.operationId,
+          operationLabel:
+            step.operation.label ??
+            localName(step.operation.operationId).replaceAll('_', ' '),
           effect: describeEffect(step.operation, step.entity),
           target: refText(step.recordId),
+          targetLabel: step.targetLabel ?? null,
           confirmation: step.operation.confirmation,
           inputs: {
             ...(step.values ? { values: step.values } : {}),
@@ -1164,7 +1179,12 @@ export class OperationsAgentSession {
           },
         })),
       };
-      const automatic = riskClass === 'reversible' && !personsUndo;
+      // Act-then-undo is a host option: only a host that offers Undo (the
+      // panel) turns it on; anywhere else a reversible plan asks too.
+      const automatic =
+        riskClass === 'reversible' &&
+        !personsUndo &&
+        this.#options.autoApproveReversible === true;
       const approved =
         automatic || personsUndo
           ? true
@@ -1358,6 +1378,7 @@ export class OperationsAgentSession {
         ...base,
         recordId: target,
         pinnedRevision: record.revision,
+        targetLabel: recordLabel(record),
         ...(patch
           ? {
               prior: Object.fromEntries(

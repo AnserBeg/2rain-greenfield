@@ -3,6 +3,7 @@ import { createServer, type Server } from 'node:http';
 import test from 'node:test';
 
 import {
+  ASSISTANT_AFFIRMATIVE,
   ASSISTANT_PANEL_CSP_HASH,
   ASSISTANT_PANEL_SCRIPT,
   withAssistantPanel,
@@ -479,4 +480,100 @@ test('a request to change the application goes to the customization draft, shown
   } finally {
     server.close();
   }
+});
+
+test('X1: the plan card names the operation, the record as the host read it, and every bound input as bound', async () => {
+  let plan: Record<string, unknown> | undefined;
+  const model = scriptedModel([
+    () => ({
+      toolCalls: [
+        {
+          name: 'erp_query',
+          input: { queryId: 'party_get', arguments: { recordId: RECORD } },
+        },
+      ],
+    }),
+    () => ({
+      toolCalls: [
+        {
+          name: 'erp_plan',
+          input: {
+            intents: [
+              {
+                operationId: 'purchase_order_line_amend',
+                target: RECORD,
+                arguments: { quantity: '10.25', reason: 'Short shipped' },
+              },
+            ],
+          },
+        },
+      ],
+    }),
+    () => ({ text: 'ok' }),
+  ]);
+  const { url, server } = await serve(model, []);
+  try {
+    const response = await fetch(`${url}/?assistant=ask`, {
+      method: 'POST',
+      headers: headers('buyer', url),
+      body: JSON.stringify({ text: 'amend it' }),
+    });
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let conversation = '';
+    while (!plan) {
+      const { value, done } = await reader.read();
+      assert.ok(!done, 'no plan was shown');
+      buffer += decoder.decode(value, { stream: true });
+      for (const line of buffer.split('\n').slice(0, -1)) {
+        const event = JSON.parse(line) as Record<string, unknown>;
+        if (event.type === 'conversation') conversation = event.id as string;
+        if (event.type === 'plan') plan = event;
+      }
+      buffer = buffer.slice(buffer.lastIndexOf('\n') + 1);
+    }
+    const step = (
+      plan.steps as { text: string; target: string; inputs: string }[]
+    )[0]!;
+    assert.match(step.text, /^Request amendment: /u);
+    assert.match(step.target, /^P-2016 \(/u);
+    assert.match(step.inputs, /quantity: 10\.25/u);
+    assert.match(step.inputs, /reason: Short shipped/u);
+    await fetch(`${url}/?assistant=decide`, {
+      method: 'POST',
+      headers: headers('buyer', url),
+      body: JSON.stringify({
+        conversation,
+        planId: plan.planId,
+        digest: plan.digest,
+        approve: false,
+      }),
+    });
+    while (!(await reader.read()).done);
+  } finally {
+    server.close();
+  }
+});
+
+test('X2: only a whole, plain yes approves a plan typed into the panel', () => {
+  for (const yes of [
+    'yes',
+    'Yes.',
+    'ok!',
+    'Okay',
+    'yes please',
+    'Go ahead',
+    'confirm',
+  ])
+    assert.ok(ASSISTANT_AFFIRMATIVE.test(yes.trim()), yes);
+  for (const no of [
+    "Okay, don't ship it",
+    'Yes, but change the quantity first',
+    'go back',
+    'ok wait',
+    'no',
+    'yes but only the first line',
+  ])
+    assert.ok(!ASSISTANT_AFFIRMATIVE.test(no.trim()), no);
 });
