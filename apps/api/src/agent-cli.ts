@@ -12,7 +12,6 @@ import { createInterface } from 'node:readline/promises';
 import {
   anthropicModel,
   agentPreamble,
-  CUSTOMIZE_HANDOFF,
   DEFAULT_ANTHROPIC_MODEL,
   loadModelKey,
   OperationsAgentSession,
@@ -117,9 +116,8 @@ try {
     },
   });
   out('');
-  const handoff = CUSTOMIZE_HANDOFF.exec(result.answer);
   out(
-    handoff
+    result.handoff
       ? `That is a change to the application. Draft it with: corepack pnpm customize ask ${posixQuoted(request)}`
       : result.answer || '(no answer)',
   );

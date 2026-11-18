@@ -8,6 +8,7 @@ import Anthropic from '@anthropic-ai/sdk';
 
 import type { ModelKey } from './keys.js';
 import type { ConversationEntry, ModelAdapter, ModelTurn } from './model.js';
+import { asData } from './tools.js';
 
 /** Stated in the packet record; the owner may name another. */
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-opus-5-5';
@@ -118,7 +119,12 @@ export function anthropicModel(options: AnthropicModelOptions): ModelAdapter {
   };
 }
 
-function toMessages(
+/**
+ * The conversation as Messages API turns. A tool's result reaches the model
+ * inside <tool-data>, which the system prompt calls data (end review X11);
+ * the session and the scripted models keep the raw JSON.
+ */
+export function toMessages(
   conversation: readonly ConversationEntry[],
 ): Anthropic.MessageParam[] {
   return conversation.map((entry): Anthropic.MessageParam => {
@@ -142,7 +148,7 @@ function toMessages(
       content: entry.results.map((result) => ({
         type: 'tool_result' as const,
         tool_use_id: result.id,
-        content: result.content,
+        content: asData('tool-data', result.content),
         ...(result.isError ? { is_error: true } : {}),
       })),
     };

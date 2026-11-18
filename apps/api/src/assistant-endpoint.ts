@@ -18,7 +18,6 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import {
   agentPreamble,
-  CUSTOMIZE_HANDOFF,
   OperationsAgentSession,
   runOperationsAgent,
   SpendMeter,
@@ -343,6 +342,7 @@ export function createAssistantEndpoint(
     const changeBefore = conversation.session.latestChange()?.changeId ?? null;
     emit({ type: 'step', label: 'Reading the screen' });
     const preamble = await agentPreamble(conversation.session, screen);
+    let callText = '';
     const run = await runOperationsAgent({
       model,
       session: conversation.session,
@@ -354,8 +354,15 @@ export function createAssistantEndpoint(
       onEvent: (event) => {
         const label = stepLabel(event);
         if (label) emit({ type: 'step', label });
-        if (event.kind === 'delta') emit({ type: 'delta', text: event.text });
-        if (event.kind === 'text') emit({ type: 'text', text: event.text });
+        if (event.kind === 'thinking') callText = '';
+        if (event.kind === 'delta') callText += event.text;
+        // A typed answer (the handoff's JSON) is not shown as prose; the
+        // answer event says it in words.
+        const typed = callText.trimStart().startsWith('{');
+        if (event.kind === 'delta' && !typed)
+          emit({ type: 'delta', text: event.text });
+        if (event.kind === 'text' && !event.text.trimStart().startsWith('{'))
+          emit({ type: 'text', text: event.text });
       },
     });
     conversation.history = run.conversation;
@@ -363,9 +370,8 @@ export function createAssistantEndpoint(
     // back every write of this turn that the model did not verify.
     const checked = await conversation.session.verifyPending();
     const unverified = checked.filter((entry) => !entry.verified).length;
-    const handoff =
-      run.stop === 'answered' ? CUSTOMIZE_HANDOFF.exec(run.answer) : null;
-    if (handoff) {
+    // The typed handoff only (X11); the drafter gets the person's own words.
+    if (run.handoff) {
       emit({ type: 'step', label: 'Drafting the change' });
       emit({
         type: 'answer',

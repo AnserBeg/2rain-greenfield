@@ -7,6 +7,7 @@
 import type { ConversationEntry, ModelAdapter, ModelUsage } from './model.js';
 import type { AgentScreen, OperationsAgentSession } from './session.js';
 import {
+  customizeHandoff,
   OPERATIONS_AGENT_SYSTEM_PROMPT,
   OPERATIONS_AGENT_TOOLS,
 } from './tools.js';
@@ -64,6 +65,11 @@ export interface AgentRunResult {
   /** Wall time of the run on a monotonic clock, in seconds. */
   readonly seconds: number;
   readonly error?: string;
+  /**
+   * Set when the model's whole final answer is the typed customization
+   * handoff (end review X11); hosts read this, never the answer's text.
+   */
+  readonly handoff?: { readonly change: string };
 }
 
 export interface AgentRunOptions {
@@ -164,17 +170,21 @@ export async function runOperationsAgent(
     stop: AgentRunResult['stop'],
     answer: string,
     error?: string,
-  ): AgentRunResult => ({
-    answer,
-    stop,
-    turns,
-    toolCalls,
-    usage: { ...usage },
-    usd: options.meter.usd - startUsd,
-    conversation,
-    seconds: (performance.now() - started) / 1000,
-    ...(error ? { error } : {}),
-  });
+  ): AgentRunResult => {
+    const change = stop === 'answered' ? customizeHandoff(answer) : null;
+    return {
+      answer,
+      stop,
+      turns,
+      toolCalls,
+      usage: { ...usage },
+      usd: options.meter.usd - startUsd,
+      conversation,
+      seconds: (performance.now() - started) / 1000,
+      ...(error ? { error } : {}),
+      ...(change !== null ? { handoff: { change } } : {}),
+    };
+  };
   const maximumTurns = options.maximumTurns ?? 40;
   while (turns < maximumTurns) {
     if (options.signal?.aborted)
