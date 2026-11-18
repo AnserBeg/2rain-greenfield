@@ -61,11 +61,6 @@ import {
 import { DESIGN_TOKENS } from './design-tokens.js';
 import { SURFACE_CLIENT_SCRIPT } from './surface-client.js';
 import { FONT_STYLESHEET_HREF, registerStaticAsset } from './surface-assets.js';
-import {
-  loadQueueCounts,
-  queueCounts,
-  queueCountsFor,
-} from './queue-counts.js';
 import { escapeHtml, shortIdentity } from './html.js';
 import {
   operationMessageRef,
