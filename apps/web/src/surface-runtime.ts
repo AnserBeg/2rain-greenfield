@@ -61,6 +61,11 @@ import {
 import { DESIGN_TOKENS } from './design-tokens.js';
 import { SURFACE_CLIENT_SCRIPT } from './surface-client.js';
 import { FONT_STYLESHEET_HREF, registerStaticAsset } from './surface-assets.js';
+import {
+  loadQueueCounts,
+  queueCounts,
+  queueCountsFor,
+} from './queue-counts.js';
 import { escapeHtml, shortIdentity } from './html.js';
 import {
   operationMessageRef,
@@ -245,6 +250,16 @@ export async function renderSurfaceRuntimeWithData(
     legalEntitySelection,
     url,
     entry,
+  );
+  // The sidebar's queue counts, read with the page's other reads (SPEED-1).
+  await loadQueueCounts(
+    view,
+    selection.surfaces,
+    gateways.queryGateway,
+    legalEntitySelection.length === 1
+      ? legalEntitySelection[0]!
+      : (entry?.selected ?? null),
+    gateways.clock?.() ?? new Date(),
   );
   // A record every company shares reads its company-owned sections in the
   // company its entry settled on; its own record and commands stay unscoped.
@@ -2223,6 +2238,7 @@ function shellDocument(
     <div class="app-shell" data-release-id="${escapeHtml(view.release.releaseId)}" data-release-content-hash="${escapeHtml(view.release.contentHash)}" data-pointer-fence="${view.pointer.fence}">
       <aside class="sidebar" data-compact-nav-count="${String(Math.min(navigation.length, 5))}">
         <div class="brand"><span class="brand__mark" aria-hidden="true">2</span><span><strong>2rain</strong><small>Compiled workspace</small></span></div>
+        ${queueCounts(queueCountsFor(view))}
         <nav aria-label="Release navigation">
           <p class="nav-label">Application</p>
           <ul class="navigation-tree">${navigation.map((entry) => navigationItem(view, entry, surfaces, selected, workspaceContext)).join('')}</ul>
@@ -2961,3 +2977,79 @@ export const SURFACE_STYLESHEET = Object.freeze({
     true,
   ),
 });
+
+/**
+ * The queue counts every page shows at the top of its sidebar (SPEED-1,
+ * owner's look): the home launcher's first three tiles -- today To receive,
+ * To ship and Not yet paid -- each its declared List view's count, read with
+ * the page's other reads (inside its read snapshot) and under current policy.
+ * A count that could not be read is `null`, never a guess.
+ */
+export interface QueueCount {
+  readonly count: number | null;
+  readonly href: string;
+  readonly label: string;
+}
+
+const QUEUE_COUNT_LIMIT = 3;
+
+/** Each request view's queue counts, read once while the page reads. */
+const loadedQueueCounts = new WeakMap<object, readonly QueueCount[]>();
+
+async function loadQueueCounts(
+  view: RuntimeViewContract.RequestRuntimeView,
+  surfaces: readonly CompiledSurfaceDefinition[],
+  queryGateway: SemanticQueryGateway,
+  company: string | null,
+  now: Date,
+): Promise<void> {
+  // The home page is the first active surface; its launcher declares the
+  // day's queues. Without one, a page shows none.
+  const launcher = surfaces[0]?.launcher;
+  if (!launcher) return;
+  const first = [...launcher.tiles]
+    .sort(
+      (left, right) =>
+        left.orderKey - right.orderKey ||
+        (left.tileId < right.tileId ? -1 : left.tileId > right.tileId ? 1 : 0),
+    )
+    .slice(0, QUEUE_COUNT_LIMIT);
+  const tiles = await launcherTiles(
+    view,
+    { ...launcher, tiles: first },
+    surfaces,
+    company,
+    queryGateway,
+    now,
+  );
+  loadedQueueCounts.set(
+    view,
+    Object.freeze(
+      tiles.map((tile) =>
+        Object.freeze({
+          count: tile.count,
+          href: tile.href,
+          label: tile.label,
+        }),
+      ),
+    ),
+  );
+}
+
+function queueCountsFor(view: object): readonly QueueCount[] {
+  return loadedQueueCounts.get(view) ?? [];
+}
+
+/**
+ * The sidebar's queue counts, as minimal markup. LOOK-1 owns this function's
+ * look; its data comes from `loadQueueCounts`.
+ */
+export function queueCounts(counts: readonly QueueCount[]): string {
+  if (counts.length === 0) return '';
+  return `<nav class="queue-counts" aria-label="Queues"><ul>${counts
+    .map(
+      (queue) =>
+        `<li><a href="${escapeHtml(queue.href)}"><span class="queue-counts__label">${escapeHtml(queue.label)}</span> <span class="queue-counts__count" data-queue-count="${queue.count === null ? '' : String(queue.count)}">${queue.count === null ? '—' : String(queue.count)}</span></a></li>`,
+    )
+    .join('')}</ul></nav>`;
+}
