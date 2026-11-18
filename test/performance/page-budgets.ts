@@ -52,12 +52,16 @@ export type PageBudgetName = (typeof PAGE_BUDGET_NAMES)[number];
 export const PAGE_BUDGETS: Readonly<Record<PageBudgetName, PageBudget>> =
   Object.freeze({
     // LOOP-1 slice 5's Today tiles read their counts inside the snapshot.
+    // Raised once, by the sidebar's queue counts (orchestrator-ruled, option
+    // (a)): every page but home reads Today's first three counts in its
+    // snapshot, +5 statements and no transaction; home's tiles are the same
+    // reads, answered once.
     home: budget([4, 42, 6, 0], [0, 0, 0, 49]),
-    'purchase order list': budget([2, 32, 3, 0], [0, 0, 0, 92]),
-    'purchase order detail': budget([2, 33, 3, 0], [0, 0, 0, 95]),
-    'new purchase order': budget([2, 18, 3, 0], [0, 0, 0, 100]),
-    'stock by item': budget([2, 23, 3, 0], [0, 0, 0, 70]),
-    'sales order detail': budget([2, 56, 3, 5], [0, 0, 0, 99]),
+    'purchase order list': budget([2, 35, 3, 0], [0, 0, 0, 92]),
+    'purchase order detail': budget([2, 38, 3, 0], [0, 0, 0, 95]),
+    'new purchase order': budget([2, 23, 3, 0], [0, 0, 0, 100]),
+    'stock by item': budget([2, 28, 3, 0], [0, 0, 0, 70]),
+    'sales order detail': budget([2, 61, 3, 5], [0, 0, 0, 99]),
     'task: open': budget([2, 36, 3, 0], [0, 0, 0, 75]),
     'task: review': budget([2, 36, 3, 0], [0, 0, 0, 75]),
     // Raised once, by the security fix round (S1, orchestrator-ruled): every

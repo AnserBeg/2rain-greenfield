@@ -75,7 +75,7 @@ import {
   type SharedListFigureWithin,
   type SharedListSupply,
 } from '../../runtime/src/list-behavior/index.js';
-import type { Pool, PoolClient, QueryResultRow } from 'pg';
+import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 
 import {
   currentPolicyVersionOf,
@@ -364,7 +364,7 @@ export class PostgresModuleRuntimeInterpreter
         async (client, snapshot) => {
           const execute = () =>
             executeQueryOnClient(
-              client,
+              snapshot ? statementMemoClient(client, snapshot) : client,
               loaded.storage,
               request,
               this.observeAggregateCache,
@@ -1414,6 +1414,55 @@ export async function assertScopePolicyCurrent(
  * Everything an executed read depends on besides the snapshot itself, or null
  * when some part does not serialize (then the read is never shared).
  */
+/**
+ * A page snapshot's client whose identical read statements run once
+ * (SPEED-1): two queries that compile to the same statement -- a List's tab
+ * count and a sidebar queue's, say, read through different registered
+ * queries over one table -- send it once. The key is the statement's text,
+ * its parameters and the module role the snapshot holds; within one READ
+ * ONLY REPEATABLE READ snapshot those determine its rows. A locking read and
+ * anything but a plain SELECT or WITH is sent as it is. Each caller gets its
+ * own copy of the rows.
+ */
+function statementMemoClient(
+  client: PoolClient,
+  snapshot: ReadSnapshotHandle,
+): PoolClient {
+  const send = client.query.bind(client) as (
+    text: string,
+    values?: unknown,
+  ) => Promise<QueryResult>;
+  const query = (text: unknown, values?: unknown) => {
+    if (
+      typeof text !== 'string' ||
+      !/^\s*(?:SELECT|WITH)\b/iu.test(text) ||
+      /\bFOR\s+(?:NO\s+KEY\s+)?(?:UPDATE|SHARE|KEY\s+SHARE)\b/iu.test(text)
+    )
+      return (client.query as (...args: unknown[]) => unknown)(text, values);
+    let key: string;
+    try {
+      key = `module-statement:${MODULE_RUNTIME_READ_ROLE}\u0000${text}\u0000${JSON.stringify(values ?? null)}`;
+    } catch {
+      return send(text, values);
+    }
+    return snapshot
+      .memo(key, () => send(text, values))
+      .then((result) =>
+        Object.freeze({
+          ...result,
+          rows: result.rows.map((row: object) => ({ ...row })),
+        }),
+      );
+  };
+  return new Proxy(client, {
+    get(target, property, receiver) {
+      if (property === 'query') return query;
+      const value = Reflect.get(target, property, receiver) as unknown;
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
 export function identicalReadKey(
   request:
     SemanticAggregateQueryExecutionRequest | SemanticQueryExecutionRequest,

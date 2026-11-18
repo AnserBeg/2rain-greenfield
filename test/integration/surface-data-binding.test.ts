@@ -8915,7 +8915,9 @@ test('PURCHASING-PARITY: Expected receipts sums, counts and marks late orders in
   assert.match(earlier.html, /data-list-total="1"/u);
   assert.match(earlier.html, /data-overdue-days="1">1 day late/u);
 
-  // Every progress read passed current policy for the companies listed.
+  // Every progress read passed current policy for the companies listed --
+  // the page's and the sidebar's queue counts' (To ship sums sales order
+  // lines), each on every request (SPEED-1).
   const progressCalls = f.policy.calls.filter(
     (call) =>
       (call.decisionInput as { kind?: string }).kind ===
@@ -8926,16 +8928,23 @@ test('PURCHASING-PARITY: Expected receipts sums, counts and marks late orders in
     [
       id('permission', 'purchase_order_line_read'),
       id('permission', 'purchase_order_received_read'),
+      id('permission', 'sales_order_line_read'),
+      id('permission', 'sales_order_shipped_read'),
     ],
   );
+  // Each for the List's company: the page's by its own scope parameter, a
+  // queue's by its List's.
   assert.ok(
-    progressCalls.every(
-      (call) =>
-        JSON.stringify(
-          (call.decisionInput as { arguments: Record<string, unknown> })
-            .arguments[parameter],
-        ) === JSON.stringify([scope]),
-    ),
+    progressCalls.every((call) => {
+      const { arguments: values } = call.decisionInput as {
+        arguments: Record<string, unknown>;
+      };
+      return call.permissionId.startsWith(id('permission', 'purchase_order_'))
+        ? JSON.stringify(values[parameter]) === JSON.stringify([scope])
+        : Object.values(values).some(
+            (value) => JSON.stringify(value) === JSON.stringify([scope]),
+          );
+    }),
   );
 
   // The export carries the figures as exact decimals, one statement per view.
@@ -9375,7 +9384,9 @@ test('ORDER-PARITY: order Lists sum their lines, link each row to its work, and 
     assert.equal(view.label, 'View');
     assert.equal(new URL(view.href, 'http://fixture.local').hash, '');
   }
-  // Progress re-enters current policy for the companies listed, every request.
+  // Progress re-enters current policy for the companies listed, every request
+  // -- the page's and the sidebar's queue counts' (To receive sums purchase
+  // order lines; SPEED-1).
   const progressCalls = f.policy.calls.filter(
     (call) =>
       (call.decisionInput as { kind?: string }).kind ===
@@ -9384,13 +9395,16 @@ test('ORDER-PARITY: order Lists sum their lines, link each row to its work, and 
   assert.deepEqual(
     [...new Set(progressCalls.map((call) => call.permissionId))].sort(),
     [
+      id('permission', 'purchase_order_line_read'),
+      id('permission', 'purchase_order_received_read'),
       id('permission', 'sales_order_line_read'),
       id('permission', 'sales_order_shipped_read'),
     ],
   );
-  // One page, eight tab counts: each passed both reads. Counter sales
-  // (SALES-EXTRAS) are a worklist of their own (INTEGRATION, I-M8(a)).
-  assert.equal(progressCalls.length, 2 * 9);
+  // One page, eight tab counts and the two queues that sum lines (To receive,
+  // To ship): each passed both reads. Counter sales (SALES-EXTRAS) are a
+  // worklist of their own (INTEGRATION, I-M8(a)).
+  assert.equal(progressCalls.length, 2 * 9 + 2 * 2);
   const toShip = await renderSurfaceRuntimeWithData(
     f.view,
     salesUrl({ view: salesView('to_ship') }),
@@ -9990,7 +10004,8 @@ test('SUPPLY-WARNINGS: the Sales orders List counts Blocked by supply and Reserv
   for (const order of [draft, closed])
     assert.equal(action(sales.html, order.orderId)?.label, 'View');
   // The supply re-enters current policy for the List's company on every
-  // request -- the page and each of the eight tab counts -- query by query.
+  // request -- the page, each of the eight tab counts and the To ship queue
+  // count (SPEED-1) -- query by query.
   const calls = supplyCalls().slice(before);
   assert.deepEqual(
     [...new Set(calls.map((call) => call.permissionId))].sort(),
@@ -10001,7 +10016,7 @@ test('SUPPLY-WARNINGS: the Sales orders List counts Blocked by supply and Reserv
       id('permission', 'reservation_read'),
     ],
   );
-  assert.equal(calls.length, 5 * 9);
+  assert.equal(calls.length, 5 * 10);
   const scopeParameter = id('parameter', 'sales_order_list_legal_entity_scope');
   for (const call of calls) {
     const input = call.decisionInput as {
