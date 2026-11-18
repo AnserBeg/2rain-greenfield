@@ -17,19 +17,20 @@ BUILD · 2026-11-18 · [PR 90](https://github.com/AnserBeg/2rain-greenfield/pull
 | 9, 27 | Fixed. Each committed receipt has its own Did and Open, including after failure and recovery. Only the latest eligible update offers Undo. | `a205ed66`, `8f9d1e6f` | Endpoint 9/27 observes both host reads and both link targets. Panel streams Did on error. |
 | 11–13 | Removed by R1. Creates and every multi-step plan require confirmation. Archive inverses, dependency scans and partial inverse execution are gone. | `a205ed66` | Map risk class and X8 exercise a create, two updates, and a later write to another record. |
 | 14 | Fixed for the remaining single update. Undo requires a successful inverse receipt for the original record. | `a205ed66` | Map 8/10/14 switches the release between inverse planning and execution. |
-| 15–16 | Fixed. Selected surface scope governs the company. Recovery and Undo require the current company to match. | `a205ed66`, `8f9d1e6f` | PostgreSQL agent-tasks resolves a company B invoice with the real runtime. Endpoint X9 tests recovery, Undo and identical-card digests. |
+| 15–16 | Fixed. Selected surface scope governs the company. Recovery and Undo require the current company to match. | `a205ed66`, `8f9d1e6f`, `999a198f` | PostgreSQL agent-tasks resolves a company B invoice with the real runtime. Endpoint X9 tests recovery, Undo and identical-card digests. Map X9 changes the company before execution. |
 | 17 | Fixed. A bare loopback Host is accepted on HTTP port 80. | `a205ed66` | Endpoint 17 and X10 exercise default port and foreign Host. |
 | 18 | Fixed. Only a standalone customization intent through `erp_plan` requests a draft. The drafter gets the user’s words. | `a205ed66` | Endpoint X11 quotes the entire instruction. PostgreSQL dev task 35 exercises the legacy line recognizer. |
 | 19–21 | Fixed. References have declared targets. Text currencies use supported codes. Planning shares purchase approval argument validation with execution. | `a205ed66` | Map 19/20/21 covers literal IDs, earlier step types, actor codes, currency and invalid reason. |
 | 22–23 | Fixed. Admission reserves the serialized request at the highest input rate. An oversized request can be retried. A resumed conversation survives concurrent eviction. | `a205ed66`, `8f9d1e6f` | Endpoint 22 retries with a short request and 23 races two tabs. |
 | 24 | Fixed. Stop reaches the drafter, staging and patch recording transaction. | `a205ed66`, `8f9d1e6f` | PostgreSQL customization stops while waiting for the release lock. Panel checks the composed draft meter. |
 | 25–26 | Fixed. An exact successful read establishes “this record.” A partial plan reports only the role that committed. | `a205ed66` | Map turn context, X14 and 26 check failed reads and a refused customer role. |
-| R5 | Strengthened card, host read-back, latest-write, company, quotation, draft wiring and CLI caller tests. R1 removes the partial Undo premise. | `a205ed66`, `8f9d1e6f` | Panel, endpoint X9/X11/X15 and 9/27, Map X8, PostgreSQL agent-tasks and dev task 35. |
+| R5 | Strengthened card, host read-back, latest-write, company, quotation, draft wiring and CLI caller tests. R1 removes the partial Undo premise. | `a205ed66`, `8f9d1e6f`, `999a198f` | Panel, endpoint X9/X11/X15 and 9/27, Map X8, PostgreSQL agent-tasks and dev task 35. |
 
 ## Decisions and gates
 
 - Under R1, a single eligible O0 master or draft update can run immediately. Undo restores its prior fields against the revision that the update wrote. The plan records this narrower implementation in §9.4.
 - Five tools. Customization uses the existing plan tool. The submitting surface supplies the company's scope for both recovery and Undo.
+- Selective reversions failed the CLI caller, endpoint read-back, later-write Undo, identical-card endpoint digest and execution digest assertions.
 - Gate is the [PR’s CI checks](https://github.com/AnserBeg/2rain-greenfield/pull/90/checks). Local checks cover format, typecheck, lint, focused assistant tests and record fidelity.
 
 ## Test it yourself
@@ -46,7 +47,7 @@ Finding 5, R3. A line edit committed after the final agent re-read and before th
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "AGENT-4",
-  "base": "8561a73d546439b34427bfab5ed3e31f4693901b", "head": "8f9d1e6fa0c6f44ff8db77bd0415ef91f89bc5c8",
+  "base": "8561a73d546439b34427bfab5ed3e31f4693901b", "head": "999a198f35ec54fbca43220d592518bf20259271",
   "changedPaths": [
     "apps/api/src/assistant-endpoint.ts", "apps/api/src/composition-root.ts", "apps/web/src/assistant-panel.ts",
     "apps/web/src/surface-runtime.ts", "apps/web/test/browser/assistant-panel.composed-application.spec.ts", "packages/domain/src/purchasing/approval-arguments.ts",
