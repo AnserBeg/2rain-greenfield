@@ -66,4 +66,5 @@ button; a purchase order shows its stepper, the next step sentence and button, e
 - Tenant record types have no line datasets yet, so `presentation.progress` does not touch the patch kinds.
 - Totals show no currency code: no declared currency column for the totals block.
 - The assistant panel (AGENT-3, PR #58) is not on main yet; its markup gets the Ledger classes when it lands.
-- The record page is one column; the mockup's right rail (linked documents, activity) has no declared split.
+- Right rail on record pages (mockup: linked documents, activity): the language has no carrier placing a composition
+  dataset in the shell's right rail; a language change (orchestrator ruling 2026-11-18: file, merge without).
