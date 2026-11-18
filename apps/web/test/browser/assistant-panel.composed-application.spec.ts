@@ -155,6 +155,13 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
         const href = await link.getAttribute('href');
         expect(href).toContain('record=');
 
+        // The link opens the record the assistant made, on its own page.
+        const opened = await page.context().newPage();
+        await opened.goto(`${application.baseUrl}${href!}`);
+        await expect(opened.locator('main')).toContainText(
+          'Panel Test Customer',
+        );
+
         await say('Archive the first customer');
         const plan = panel.locator('[data-assistant-plan]');
         await expect(plan).toContainText('archives one party record');
@@ -165,18 +172,14 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
         await plan.locator('[data-assistant-yes]').click();
         await expect(reply(2)).toContainText('Archived.');
 
-        // Undo the create (the latest change made at once), verified.
+        // Undo the create (the latest change made at once), verified: the
+        // record it made is archived, so its page no longer finds it.
         await did.locator('[data-assistant-undo]').click();
         await expect(did).toContainText(
           'Undid: created party P-7701 (checked)',
         );
-
-        // The link opens the record the assistant made, on its own page.
-        const opened = await page.context().newPage();
-        await opened.goto(`${application.baseUrl}${href!}`);
-        await expect(opened.locator('main')).toContainText(
-          'Panel Test Customer',
-        );
+        await opened.reload();
+        await expect(opened.locator('main')).toContainText('Record not found');
       } finally {
         await application.close();
       }
