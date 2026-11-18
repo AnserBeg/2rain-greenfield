@@ -284,6 +284,9 @@ async function taskStep(
     return;
   }
   measured.set('task: open', opened.counts);
+  // A task step's page shows the day's queues too, each counted.
+  if (!QUEUE_COUNTS.test(opened.html))
+    problems.push('task: open: did not render the counted queues');
   const review = await serve(truckPage, {
     taskToken: token,
     compositionAction: action,
@@ -301,6 +304,8 @@ async function taskStep(
     return;
   }
   measured.set('task: review', review.counts);
+  if (!QUEUE_COUNTS.test(review.html))
+    problems.push('task: review: did not render the counted queues');
   const done = await serve(truckPage, {
     taskToken: token,
     compositionAction: action,
@@ -312,6 +317,8 @@ async function taskStep(
     return;
   }
   measured.set('task: confirm', done.counts);
+  if (!QUEUE_COUNTS.test(done.html))
+    problems.push('task: confirm: did not render the counted queues');
 }
 
 function table(

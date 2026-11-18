@@ -78,9 +78,19 @@ export function companyParameterFor(
 
 /**
  * Each tile's link to its List at its view, in the page's company, with that
- * view's count asked exactly as the List counts its own tab. A count current
- * policy withholds, or one without the company its List needs, is omitted:
- * the tile still opens its List, which says why.
+ * view's count asked exactly as the List counts its own tab. A count that
+ * cannot be read, or one without the company its List needs, is omitted: the
+ * tile still opens its List, which says why.
+ *
+ * A tile whose count the principal may not read -- the List's query, or any
+ * query its count reads (progress, supply, labels), ineligible under current
+ * policy -- is left out (SPEED-1, orchestrator ruling): asked first by
+ * the gateway's non-recording eligibility check, so a queue the person cannot
+ * open never writes a denial on every page view, and a failed denial record
+ * can never fail a page over its queues. `counted` limits which tiles are
+ * counted; the others are still checked, and listed without a count. With
+ * `omitIneligible` false (a launcher other than Today), such a tile stays,
+ * uncounted and unread.
  */
 export async function launcherTiles(
   view: RuntimeViewContract.RequestRuntimeView,
@@ -89,6 +99,8 @@ export async function launcherTiles(
   company: string | null,
   queryGateway: SemanticQueryGateway,
   now: Date,
+  counted: ReadonlySet<string> | null = null,
+  omitIneligible = true,
 ): Promise<readonly LauncherTile[]> {
   const ordered = [...launcher.tiles].sort(
     (left, right) =>
@@ -114,18 +126,28 @@ export async function launcherTiles(
             list,
             new URL(`http://launcher.local/?${parameters.toString()}`),
           );
-          const result = await queryGateway.invoke(view, {
-            arguments: declaredListArguments(list, state, {
-              mode: 'count',
-              now,
-              queryId: binding.query.queryId,
-              scopeArguments: scope ? { [scope]: company } : {},
-              viewId: state.viewId,
-            }),
+          const listArguments = declaredListArguments(list, state, {
+            mode: 'count',
+            now,
             queryId: binding.query.queryId,
-            schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+            scopeArguments: scope ? { [scope]: company } : {},
+            viewId: state.viewId,
           });
-          count = result.listCoverage?.totalCount ?? null;
+          const eligible = await countEligible(
+            view,
+            queryGateway,
+            [binding.query.queryId, ...namedQueries(listArguments)],
+            scope ? company : null,
+          );
+          if (!eligible && omitIneligible) continue;
+          if (eligible && (!counted || counted.has(tile.tileId))) {
+            const result = await queryGateway.invoke(view, {
+              arguments: listArguments,
+              queryId: binding.query.queryId,
+              schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+            });
+            count = result.listCoverage?.totalCount ?? null;
+          }
         }
       } catch {
         count = null;
@@ -145,6 +167,40 @@ export async function launcherTiles(
     );
   }
   return Object.freeze(tiles);
+}
+
+/** Every query id a declared List request names (progress, supply). */
+function namedQueries(value: unknown, found = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) for (const item of value) namedQueries(item, found);
+  else if (value && typeof value === 'object')
+    for (const [key, item] of Object.entries(value))
+      if (key === 'queryId' && typeof item === 'string') found.add(item);
+      else namedQueries(item, found);
+  return found;
+}
+
+/**
+ * Whether current policy would let the principal read each named query in
+ * the company, asked without reading or recording anything. A policy failure
+ * is not eligibility: the tile is left out.
+ */
+async function countEligible(
+  view: RuntimeViewContract.RequestRuntimeView,
+  queryGateway: SemanticQueryGateway,
+  queryIds: readonly string[],
+  company: string | null,
+): Promise<boolean> {
+  try {
+    for (const queryId of new Set(queryIds))
+      if (
+        (await queryGateway.previewEligibility(view, queryId, company)) !==
+        'eligible'
+      )
+        return false;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
