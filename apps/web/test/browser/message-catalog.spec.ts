@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
+import { addTestStyle } from './test-style.js';
 import { RequestRuntimeViewLoadError } from '@north-star/postgres-provider/request-runtime-view-service';
 
 import {
@@ -18,6 +19,7 @@ import {
   type CurrentPolicyGateway,
 } from '../../../../packages/runtime/src/request-runtime-view.js';
 import { createSurfaceRuntimeServer } from '../../src/app-server.js';
+import { staticAsset } from '../../src/surface-assets.js';
 import { renderSurfaceDataComponent } from '../../src/component-registry.js';
 import { createDemoRequestRuntimeEntry } from '../../src/demo-runtime.js';
 import {
@@ -377,6 +379,16 @@ async function censusServerUrl(): Promise<string> {
   );
   return await listen(
     createServer((request, response) => {
+      // The page links the runtime's stylesheet and fonts (SPEED-1 slice 5):
+      // the census serves them as the app server does.
+      const asset = staticAsset(
+        new URL(request.url ?? '/', 'http://gate.local').pathname,
+      );
+      if (asset) {
+        response.setHeader('content-type', asset.contentType);
+        response.end(asset.body);
+        return;
+      }
       const parameters = new URL(request.url ?? '/', 'http://gate.local')
         .searchParams;
       const code = parameters.get('code') ?? '';
@@ -1137,9 +1149,10 @@ test('control: a part hidden on its own is observed while the card stays visible
   // Card-level visibility called this correct: the section is visible and
   // textContent still returns the words nobody can read.
   await page.goto(`${censusUrl}/?code=AUTHENTICATION_REQUIRED`);
-  await page.addStyleTag({
-    content: '[data-message-next-action]{display:none!important}',
-  });
+  await addTestStyle(
+    page,
+    '[data-message-next-action]{display:none!important}',
+  );
   const samples = await readMessageSamples(page);
   expect(samples[0]?.visible).toBe(true);
   expect(samples[0]?.nextAction.text.length).toBeGreaterThan(0);
@@ -1167,9 +1180,7 @@ test('control: a message hidden from the user reds as imperceptible, not as corr
   page,
 }) => {
   await page.goto(`${censusUrl}/?code=ROUTE_NOT_FOUND`);
-  await page.addStyleTag({
-    content: '[data-message]{display:none!important}',
-  });
+  await addTestStyle(page, '[data-message]{display:none!important}');
   expect(
     observeCatalogMessages(await readMessageSamples(page), ['ROUTE_NOT_FOUND']),
   ).toEqual(['MESSAGE_IMPERCEPTIBLE:ROUTE_NOT_FOUND']);

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 import { expect, test } from '@playwright/test';
+import { addTestStyle } from './test-style.js';
 import type { Page } from '@playwright/test';
 import {
   PROJECTION_FAMILY_IDS,
@@ -718,7 +719,7 @@ async function readFocusRingCoverage(
   for (const state of states) {
     await page.setViewportSize({ height: 720, width: 1280 });
     await state.go();
-    if (injected) await page.addStyleTag({ content: injected });
+    if (injected) await addTestStyle(page, injected);
     for (const viewport of [
       { height: 720, label: 'wide', width: 1280 },
       { height: 844, label: 'compact', width: 390 },
