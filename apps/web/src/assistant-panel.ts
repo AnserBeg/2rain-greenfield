@@ -304,11 +304,10 @@ const PANEL_STYLES = `
 .assistant-toggle--floating{position:fixed;right:16px;bottom:16px;z-index:40;height:44px;min-height:44px;border-color:var(--accent);background:var(--accent);color:var(--paper);box-shadow:var(--shadow-dlg)}
 .assistant-panel{position:fixed;top:0;right:0;bottom:0;z-index:70;width:min(420px,100vw);display:flex;flex-direction:column;border-left:1px solid var(--rule);background:var(--sheet);color:var(--ink);box-shadow:var(--shadow-dlg);font:400 13px/1.45 var(--f-ui)}
 .assistant-panel[hidden]{display:none}
-body:has(.assistant-panel:not([hidden]))::before{content:"";position:fixed;inset:0;z-index:69;background:var(--scrim);pointer-events:none}
 .assistant-panel .visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .assistant-panel header{display:flex;align-items:center;gap:8px;min-height:48px;padding:8px 16px;border-bottom:1px solid var(--rule)}
 .assistant-panel header h2{flex:1;margin:0;color:var(--ink);font-size:14px;font-weight:600}
-.assistant-panel button{display:inline-flex;align-items:center;justify-content:center;height:var(--ctl-h);min-height:var(--ctl-h);padding:0 10px;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);color:var(--ink);font:500 12px/1 var(--f-ui);cursor:pointer}
+.assistant-panel button{display:inline-flex;align-items:center;justify-content:center;height:30px;min-height:30px;padding:0 10px;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);color:var(--ink);font:500 12px/1 var(--f-ui);cursor:pointer}
 .assistant-panel button:hover{background:var(--sunk)}
 .assistant-log{flex:1;display:flex;flex-direction:column;gap:12px;overflow:auto;padding:14px 16px;background:var(--paper)}
 .assistant-me{align-self:flex-end;max-width:85%;padding:8px 12px;border-radius:6px;background:var(--accent-soft);color:var(--ink);white-space:pre-wrap}
