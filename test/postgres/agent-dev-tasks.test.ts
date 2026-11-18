@@ -136,6 +136,8 @@ test(
             const context = await task.arrange(world);
             const before = await snapshot(world);
             const session = new OperationsAgentSession({
+              // The panel's act-then-undo (a host option since the end review X6).
+              autoApproveReversible: true,
               runtime: world.runtime,
               personHeaders: {
                 cookie: `northstar-demo-actor=${task.actor ?? 'buyer'}`,
