@@ -36,9 +36,9 @@ test('the item page shows stock by location and the recent movements, in the com
       .filter({ hasText: 'More' });
     await more.getByText('More', { exact: true }).click();
     await more.getByText('Catalog', { exact: true }).click();
-    await navigation.getByRole('link', { name: 'Item', exact: true }).click();
+    await navigation.getByRole('link', { name: 'Items', exact: true }).click();
     await expect(
-      page.getByRole('heading', { level: 1, name: 'Item' }),
+      page.getByRole('heading', { level: 1, name: 'Items' }),
     ).toBeVisible();
     await page
       .locator('tr', { hasText: 'Field notebook' })
@@ -119,7 +119,7 @@ test('the item page shows stock by location and the recent movements, in the com
       .locator('.navigation-tree > li')
       .getByRole('group')
       .filter({ hasText: 'Stock' });
-    const postedStock = inventory.locator('a', { hasText: 'Posted stock' });
+    const postedStock = inventory.locator('a', { hasText: 'Stock by location' });
     expect(
       new URL(
         (await postedStock.getAttribute('href'))!,

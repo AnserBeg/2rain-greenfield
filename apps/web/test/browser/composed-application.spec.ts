@@ -1016,13 +1016,7 @@ async function inventoryNavigationJourney(
     primaryEntries.locator(
       ':scope > a > span:nth-child(2), :scope > details > summary > span:nth-child(2) > .nav-group-label',
     ),
-  ).toHaveText([
-    'Sales',
-    'Purchasing',
-    'Stock',
-    'Customers and suppliers',
-    'More',
-  ]);
+  ).toHaveText(['Sales', 'Purchasing', 'Stock', 'Contacts', 'More']);
   // Sales lists its counter sales (SALES-EXTRAS; INTEGRATION, decision
   // I-M8(a)) and invoices (ruling C) beside its orders, Purchasing its
   // expected receipts (PURCHASING-PARITY), approvals/settings (APPROVALS) and
@@ -1038,23 +1032,23 @@ async function inventoryNavigationJourney(
     'Purchase orders',
     'Purchasing settings',
     'Bills',
-    'Inventory movement',
-    'Inventory period lock',
+    'Stock movements',
+    'Period locks',
     'Today',
     'Inventory transactions',
     'Warehouse',
     'Buying worklist',
     'Stock by item',
-    'Legal entity',
-    'Posted stock',
-    'Stock count',
-    'Party',
-    'Party role',
+    'Companies',
+    'Stock by location',
+    'Stock counts',
+    'Customers and suppliers',
+    'Contact roles',
     'Inventory value',
-    'Item',
-    'Price list',
-    'Tax code',
-    'Location',
+    'Items',
+    'Price lists',
+    'Tax codes',
+    'Locations',
   ]);
   // Inside the collapsed Sales and Purchasing groups: hidden text names
   // nothing, so each link is found by its text rather than its accessible name.
@@ -1097,9 +1091,7 @@ async function inventoryNavigationJourney(
     navigation.getByRole('link', { name: /detail|form/i }),
   ).toHaveCount(0);
   await expect(
-    primaryEntries
-      .getByRole('group')
-      .filter({ hasText: 'Customers and suppliers' }),
+    primaryEntries.getByRole('group').filter({ hasText: 'Contacts' }),
   ).toBeVisible();
   const moreNavigation = primaryEntries
     .getByRole('group')
@@ -1109,7 +1101,7 @@ async function inventoryNavigationJourney(
     moreNavigation.getByText('Catalog', { exact: true }),
   ).toBeVisible();
   await expect(
-    navigation.getByRole('link', { name: 'Location', exact: true }),
+    navigation.getByRole('link', { name: 'Locations', exact: true }),
   ).toBeVisible();
   await moreNavigation.getByText('More', { exact: true }).click();
   const inventoryNavigation = primaryEntries.getByRole('group').filter({
@@ -1119,16 +1111,16 @@ async function inventoryNavigationJourney(
   await inventoryNavigation.getByText('Stock', { exact: true }).click();
   await expect(inventoryNavigation.locator('a > span:nth-child(2)')).toHaveText(
     [
-      'Inventory movement',
-      'Inventory period lock',
+      'Stock movements',
+      'Period locks',
       'Today',
       'Inventory transactions',
       'Warehouse',
       'Buying worklist',
       'Stock by item',
-      'Legal entity',
-      'Posted stock',
-      'Stock count',
+      'Companies',
+      'Stock by location',
+      'Stock counts',
     ],
   );
   await inventoryNavigation.getByText('Stock', { exact: true }).click();
@@ -1195,15 +1187,15 @@ async function inventoryNavigationJourney(
   // content: no legal-entity hurdle and no unreadable binding. Line tables are
   // shown inside their documents rather than as destinations of their own.
   for (const destination of [
-    'Inventory movement',
-    'Inventory period lock',
+    'Stock movements',
+    'Period locks',
     'Today',
     'Inventory transactions',
     'Warehouse',
     // REPLENISHMENT: Catalog's items, read in the company like the rest.
     'Buying worklist',
     'Stock by item',
-    'Stock count',
+    'Stock counts',
   ]) {
     await inventoryNavigation
       .getByRole('link', { name: destination, exact: true })
@@ -1257,9 +1249,9 @@ async function inventoryRecordNavigationJourney(
 
   // Catalog is a group of its items and tax codes (ruling B).
   await moreNavigation.getByText('Catalog', { exact: true }).click();
-  await navigation.getByRole('link', { name: 'Item', exact: true }).click();
+  await navigation.getByRole('link', { name: 'Items', exact: true }).click();
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Item' }),
+    page.getByRole('heading', { level: 1, name: 'Items' }),
   ).toBeVisible();
   await expect(
     page.getByRole('cell', { name: 'Field notebook', exact: true }),
@@ -1268,9 +1260,11 @@ async function inventoryRecordNavigationJourney(
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
   ).toHaveCount(0);
   await moreNavigation.getByText('More', { exact: true }).click();
-  await navigation.getByRole('link', { name: 'Location', exact: true }).click();
+  await navigation
+    .getByRole('link', { name: 'Locations', exact: true })
+    .click();
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Location' }),
+    page.getByRole('heading', { level: 1, name: 'Locations' }),
   ).toBeVisible();
   await expect(
     page.getByRole('cell', { name: 'Calgary warehouse', exact: true }),
@@ -1280,10 +1274,10 @@ async function inventoryRecordNavigationJourney(
   ).toHaveCount(0);
   await inventoryNavigation.getByText('Stock', { exact: true }).click();
   await inventoryNavigation
-    .getByRole('link', { name: 'Posted stock', exact: true })
+    .getByRole('link', { name: 'Stock by location', exact: true })
     .click();
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Posted stock' }),
+    page.getByRole('heading', { level: 1, name: 'Stock by location' }),
   ).toBeVisible();
   const company = page.getByRole('navigation', { name: 'Company' });
   await expect(company).toHaveAttribute(
@@ -1627,7 +1621,7 @@ async function scopedInventoryListJourney(
   await page.setViewportSize({ height: 720, width: 1280 });
   await defaultLegalEntity.click();
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Inventory movement' }),
+    page.getByRole('heading', { level: 1, name: 'Stock movements' }),
   ).toBeVisible();
   let movementRow = page.locator('tr', {
     hasText: 'browser-posted-adjustment',
@@ -1638,7 +1632,7 @@ async function scopedInventoryListJourney(
     .getByRole('link', { name: browserAlternateInventoryScope.entityCode })
     .click();
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Inventory movement' }),
+    page.getByRole('heading', { level: 1, name: 'Stock movements' }),
   ).toBeVisible();
   await expect(movementRow).toHaveCount(0);
   expect(

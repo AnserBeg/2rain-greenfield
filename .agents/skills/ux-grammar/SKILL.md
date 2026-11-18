@@ -170,6 +170,10 @@ Rules that follow:
   cognitive. `G3-P6a` is the first real test: mounting Inventory took the
   composed application to **eleven leaves under four top-level groups** — within
   budget precisely because ADR-0030's grouping is doing the work.
+- **Work queues (owner ruling 2026-11-17, Ledger):** the landing launcher's
+  declared tiles sit above the area groups in a fixed order, zero counts
+  shown. They open saved views; they are not navigation entries and do not
+  count toward the budget.
 - One global command palette (navigate + create + ask). One New button.
 - Draft vs published state is always visible (banner in customize mode).
 
@@ -420,7 +424,8 @@ One responsive web app serves every device. Mobile rendering is a
 deterministic platform transformation per archetype — never a per-screen or
 per-tenant design:
 
-- shell → bottom tab bar (max five, scan/task centered); right rail →
+- shell → a menu button that opens the sidebar as a drawer, a native
+  disclosure with no script (owner ruling 2026-11-17, Ledger); right rail →
   bottom sheet; command bar → sticky bottom action bar, primary action
   thumb-reachable;
 - list → priority-ranked cards derived from declared column priority;

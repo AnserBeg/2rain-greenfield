@@ -240,9 +240,9 @@ async function openWarehouse(page: Page) {
 
 /** Inventory -> Inventory period lock -> the company's one lock. */
 async function openPeriodLock(page: Page) {
-  await openInventory(page, 'Inventory period lock');
+  await openInventory(page, 'Period locks');
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Inventory period lock' }),
+    page.getByRole('heading', { level: 1, name: 'Period locks' }),
   ).toBeVisible();
   await page
     .locator('[data-platform-slot="list:dataGrid"] a.record-link')

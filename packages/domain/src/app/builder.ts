@@ -132,7 +132,7 @@ const MODULE_REGISTRY = Object.freeze([
  */
 const COMPOSED_MODULE_LABELS: Readonly<Record<string, string>> = Object.freeze({
   inventory: 'Stock',
-  party: 'Customers and suppliers',
+  party: 'Contacts',
 });
 
 /** Each menu group's icon (LOOK-1), from the language's closed icon set. */
@@ -166,18 +166,18 @@ const COMPOSED_DESTINATIONS: Readonly<
   item_stock_list: { icon: 'boxes' },
   item_buying_list: { icon: 'alert' },
   inventory_transaction_list: { icon: 'wrench' },
-  posted_stock_balance_list: { icon: 'location' },
-  inventory_movement_list: { icon: 'transfer' },
-  stock_count_list: { icon: 'clipboard' },
-  inventory_period_lock_list: { icon: 'lock' },
-  legal_entity_list: { icon: 'building' },
+  posted_stock_balance_list: { icon: 'location', label: 'Stock by location' },
+  inventory_movement_list: { icon: 'transfer', label: 'Stock movements' },
+  stock_count_list: { icon: 'clipboard', label: 'Stock counts' },
+  inventory_period_lock_list: { icon: 'lock', label: 'Period locks' },
+  legal_entity_list: { icon: 'building', label: 'Companies' },
   inventory_value_list: { icon: 'chart' },
-  party_list: { icon: 'users' },
-  party_role_list: { icon: 'users' },
-  item_list: { icon: 'box' },
-  tax_code_list: { icon: 'calculator' },
-  price_list_list: { icon: 'tag' },
-  location_list: { icon: 'location' },
+  party_list: { icon: 'users', label: 'Customers and suppliers' },
+  party_role_list: { icon: 'users', label: 'Contact roles' },
+  item_list: { icon: 'box', label: 'Items' },
+  tax_code_list: { icon: 'calculator', label: 'Tax codes' },
+  price_list_list: { icon: 'tag', label: 'Price lists' },
+  location_list: { icon: 'location', label: 'Locations' },
 });
 
 /** Record surfaces presented as documents with their own lines and actions. */
@@ -465,6 +465,13 @@ export function composedApplicationDefinition(): Record<string, unknown> {
 export function composedDestinationIcon(local: string): string | undefined {
   return Object.hasOwn(COMPOSED_DESTINATIONS, local)
     ? COMPOSED_DESTINATIONS[local]?.icon
+    : undefined;
+}
+
+/** A composed destination's plain name, where it has one (LOOK-1). */
+export function composedDestinationLabel(local: string): string | undefined {
+  return Object.hasOwn(COMPOSED_DESTINATIONS, local)
+    ? COMPOSED_DESTINATIONS[local]?.label
     : undefined;
 }
 

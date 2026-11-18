@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual } from 'node:util';
 
-import { composedDestinationIcon } from '../../packages/domain/src/app/builder.js';
+import {
+  composedDestinationIcon,
+  composedDestinationLabel,
+} from '../../packages/domain/src/app/builder.js';
 import { declareLists } from '../../packages/domain/src/app/list-declarations.js';
 
 type Value = Readonly<Record<string, unknown>>;
@@ -374,11 +377,15 @@ export function assertComposedInventoryCollection(
         `composition altered protected slots for ${String(source.surfaceId)}`,
       );
     }
+    // A destination's plain name (LOOK-1) is the composed label.
+    const plainName = composedDestinationLabel(local);
     assert.deepEqual(
       protectedSurface,
       stockDocument && source.surfaceRole === 'list'
         ? { ...protectedSource, label: STOCK_DOCUMENT_LIST_LABEL }
-        : protectedSource,
+        : plainName
+          ? { ...protectedSource, label: plainName }
+          : protectedSource,
       `composition altered protected bindings for ${String(source.surfaceId)}`,
     );
     assert.deepEqual(
