@@ -63,11 +63,18 @@ export const PAGE_BUDGETS: Readonly<Record<PageBudgetName, PageBudget>> =
     'new purchase order': budget([2, 23, 3, 0], [0, 0, 0, 100]),
     'stock by item': budget([2, 28, 3, 0], [0, 0, 0, 70]),
     'sales order detail': budget([2, 56, 3, 0], [0, 0, 0, 99]),
-    'task: open': budget([2, 36, 3, 0], [0, 0, 0, 75]),
-    'task: review': budget([2, 36, 3, 0], [0, 0, 0, 75]),
+    // Raised by the memo read's Medium (orchestrator-ruled): a task's steps
+    // are POSTs and read live, outside any snapshot (ADR-0071's GET-only
+    // boundary), so a revocation between a step's reads is refused and
+    // recorded; each step also reads the sidebar's queues. Back near the
+    // charter baseline (open ~393): winning it back needs a live per-request
+    // read path for POSTs, its own design.
+    'task: open': budget([392, 3103, 327, 373], [0, 0, 0, 75]),
+    'task: review': budget([244, 1910, 207, 208], [0, 0, 0, 75]),
     // Raised once, by the security fix round (S1, orchestrator-ruled): every
     // decision on Confirm's write path is now read live in its own transaction.
-    'task: confirm': budget([21, 287, 17, 17], [0, 0, 0, 75]),
+    // Raised again by the same ruling: Confirm's reads are live too.
+    'task: confirm': budget([256, 2098, 215, 223], [0, 0, 0, 75]),
   });
 
 /**
