@@ -1,3 +1,4 @@
+import { reviewTask } from './complete-task.js';
 import { test, expect, type Page } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -154,7 +155,7 @@ test('the Warehouse opens the floor work with its counts, and a scanned SKU or d
 // The period lock page: Close period through, then Reopen to, each reviewed
 // and confirmed; a stock document dated now is refused while its period is
 // closed and posts once it is reopened.
-test('the period lock closes a period and reopens it, each reviewed and confirmed, and a closed period refuses a posting', async ({
+test('the period lock uses its declared confirmation stages and a closed period refuses a posting', async ({
   page,
 }, testInfo) => {
   test.setTimeout(480_000);
@@ -176,7 +177,7 @@ test('the period lock closes a period and reopens it, each reviewed and confirme
     page.getByRole('button', { name: 'Reopen to', exact: true }),
   ).toHaveCount(0);
 
-  // Close through the end of today (UTC): reviewed, then confirmed.
+  // Close through the end of today (UTC): its ordinary operation applies directly.
   await command(
     page,
     'Close period through',
@@ -312,15 +313,24 @@ async function command(
 ) {
   await page.getByRole('button', { name: label, exact: true }).click();
   await page.getByLabel(`${input} (UTC)`, { exact: true }).fill(value);
-  await page
-    .getByRole('button', { name: `Review ${label}`, exact: true })
-    .click();
-  await expect(page.locator('.composition-reviewed-inputs')).toContainText(
-    `${value.length === 16 ? `${value}:00` : value}.000Z`,
-  );
-  await page
-    .getByRole('button', { name: `Confirm ${label}`, exact: true })
-    .click();
+  const dialog = page.locator('[data-composition-task]');
+  const apply = dialog.locator('footer button[value="apply"]');
+  const instant = `${value.length === 16 ? `${value}:00` : value}.000Z`;
+  if (await apply.count()) {
+    await expect(apply).toHaveText(label);
+    await apply.click();
+    await expect(page.locator('.composition-reviewed-inputs')).toContainText(
+      instant,
+    );
+  } else {
+    await reviewTask(dialog, `Review ${label}`);
+    await expect(page.locator('.composition-reviewed-inputs')).toContainText(
+      instant,
+    );
+    await page
+      .getByRole('button', { name: `Confirm ${label}`, exact: true })
+      .click();
+  }
   if (refusal)
     await expect(page.locator('[data-message-subject]').first()).toHaveText(
       refusal,
@@ -424,7 +434,7 @@ function serveFixture(): ServedFixture {
     });
   const stop = async () => {
     child.stdin.end();
-    child.kill('SIGTERM');
+    child.kill('SIGINT');
     const [code] = await exited;
     expect(code, output).toBe(0);
   };

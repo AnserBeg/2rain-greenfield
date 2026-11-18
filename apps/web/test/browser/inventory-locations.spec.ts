@@ -1,3 +1,4 @@
+import { completeTask } from './complete-task.js';
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -146,8 +147,7 @@ test('a quarantined location keeps its stock on hand but neither usable nor avai
       .getByLabel('Inventory status')
       .selectOption({ label: 'Usable' });
     await dialog.getByLabel('Reason').fill('Inspected and released');
-    await dialog.getByRole('button', { name: 'Review Change status' }).click();
-    await dialog.getByRole('button', { name: 'Confirm Change status' }).click();
+    await completeTask(dialog, 'Change status');
     await expect(page.getByRole('status').first()).toContainText(
       'Change status: done',
     );
