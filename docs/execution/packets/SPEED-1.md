@@ -1,6 +1,6 @@
 # SPEED-1 — a record page in a few database trips, measured and held there
 
-Status: slice 1 (count it and gate it) on `packet/SPEED-1`. Tier: Critical-adjacent (request security path; slices 2-4 are read
+Status: slice 1 (count it and gate it) integrated at `3ab5853a`. Tier: Critical-adjacent (request security path; slices 2-4 are read
 by the orchestrator's two critical reviews). Base: `main` `74b3367f`. Stops: none. Charter: [SPEED-1-charter.md](SPEED-1-charter.md).
 
 ## Claims
@@ -45,7 +45,7 @@ by the orchestrator's two critical reviews). Base: `main` `74b3367f`. Stops: non
 
 ## Gates
 
-- Slice 1: CI on PR #62. Local: format, typecheck, lint, `test/unit/request-work-meter.test.ts`, the architecture tests that read
+- Slice 1: CI run 44201921559 green at `81c218b0` (PR #62). Local: format, typecheck, lint, `test/unit/request-work-meter.test.ts`, the architecture tests that read
   the changed files.
 
 ## Test it yourself
