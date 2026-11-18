@@ -217,12 +217,8 @@ test('an arranged list becomes order, hide and relabel by field', () => {
   assert.deepEqual(patch, {
     hide: ['northstar.app:field.location_code'],
     kind: 'arrangeLayout',
-    order: [
-      'northstar.app:field.location_name',
-      'northstar.app:field.location_code',
-    ],
+    order: ['northstar.app:field.location_name'],
     relabel: [
-      { field: 'northstar.app:field.location_code', label: 'Code' },
       { field: 'northstar.app:field.location_name', label: 'Location' },
     ],
     surface: 'northstar.app:surface.location_list',

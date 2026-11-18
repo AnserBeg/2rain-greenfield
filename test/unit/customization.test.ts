@@ -404,6 +404,16 @@ test('Purchase order binds the new field to both draft editors, Details and the 
   const ops = artifacts.find(
     (a) => a.kind === 'operationCatalogPayload',
   )!.operations!;
+  assert.deepEqual(
+    ops
+      .filter((op) => op.inputContract.writableFieldIds.includes(fieldId))
+      .map((op) => op.operationId)
+      .sort(),
+    [
+      'northstar.app:operation.purchase_order_create',
+      'northstar.app:operation.purchase_order_update',
+    ],
+  );
   for (const intent of ['create', 'update']) {
     const op = ops.find((o) =>
       o.operationId.endsWith('.purchase_order_' + intent),

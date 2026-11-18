@@ -366,9 +366,11 @@ export function patchFromForm(form: CustomizeScreenSubmission): unknown {
           .filter((column) => column.hidden)
           .map((column) => column.field),
         kind: 'arrangeLayout',
-        order: ordered.map((column) => column.field),
+        order: ordered
+          .filter((column) => !column.hidden)
+          .map((column) => column.field),
         relabel: columns
-          .filter((column) => column.label !== '')
+          .filter((column) => !column.hidden && column.label !== '')
           .map((column) => ({ field: column.field, label: column.label })),
         surface: form.surface,
       };

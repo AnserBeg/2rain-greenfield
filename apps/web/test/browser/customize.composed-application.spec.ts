@@ -144,7 +144,7 @@ for (const target of ['purchase_order', 'party'] as const) {
           await page.getByRole('link', { name: 'New', exact: true }).click();
           if (target === 'purchase_order') {
             for (const [label, term, result] of [
-              ['Vendor', 'Alpine', 'Alpine Office Supply'],
+              ['Vendor', 'Cascade', 'Cascade Fastener Works'],
               ['Line 1 product', 'OFF-100', 'Field notebook'],
             ] as const) {
               const box = page.getByRole('combobox', {
@@ -189,7 +189,7 @@ for (const target of ['purchase_order', 'party'] as const) {
             await expect(
               page.getByRole('status').filter({ hasText: 'Create complete' }),
             ).toBeVisible();
-            await page.goto(surface('list'));
+            await page.goto(surface('list') + '&q=C2-PARTY');
             await page.getByRole('link', { name: /C2-PARTY/u }).click();
           }
           await expect(page).toHaveURL(new RegExp(target + '_detail', 'u'));
