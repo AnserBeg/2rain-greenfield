@@ -761,6 +761,10 @@ test('SPEED-1 security fixes: one scope per page, both scopes of a moved grant, 
         await withTrustedRequestTransaction(runtime, context, (client) =>
           assertScopePolicyCurrent(client, scoped(now)),
         );
+        // A version another policy gateway issued names no epoch here.
+        await withTrustedRequestTransaction(runtime, context, (client) =>
+          assertScopePolicyCurrent(client, scoped('a-test-policy/v1')),
+        );
         await assert.rejects(
           withTrustedRequestTransaction(runtime, context, (client) =>
             assertScopePolicyCurrent(

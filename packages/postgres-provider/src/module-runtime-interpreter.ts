@@ -77,7 +77,10 @@ import {
 } from '../../runtime/src/list-behavior/index.js';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 
-import { currentPolicyVersionOf } from './current-policy.js';
+import {
+  currentPolicyVersionOf,
+  isCurrentPolicyVersion,
+} from './current-policy.js';
 import {
   withTrustedRequestRead,
   withTrustedRequestTransaction,
@@ -1389,7 +1392,9 @@ export async function assertScopePolicyCurrent(
     SemanticAggregateQueryExecutionRequest | SemanticQueryExecutionRequest,
 ): Promise<void> {
   const scope = request.legalEntityReadScope;
-  if (!scope) return;
+  // Only a scope this provider's live policy issued names its epoch; one
+  // issued by another policy gateway (a test double) has no epoch here.
+  if (!scope || !isCurrentPolicyVersion(scope.policyVersion)) return;
   const result = await client.query<{ policy_version: string }>(
     `SELECT COALESCE(
        (SELECT policy_version::text

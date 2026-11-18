@@ -517,6 +517,11 @@ function policyVersion(value: string | undefined): string {
 /** The policy version this gateway reports for a raw epoch value. */
 export const currentPolicyVersionOf = policyVersion;
 
+/** Whether `value` is a version this gateway reported. */
+export function isCurrentPolicyVersion(value: string): boolean {
+  return /^northstar\.current-policy\/\d+$/u.test(value);
+}
+
 function canonicalId(value: string): boolean {
   return /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+:[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(
     value,
