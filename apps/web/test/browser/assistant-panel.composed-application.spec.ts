@@ -395,6 +395,31 @@ test('a resized assistant follows the person onto the new PO and finishes a deta
           }
         }
       }
+      await page.setViewportSize({ width: 960, height: 900 });
+      const narrow = (await separator.boundingBox())!;
+      await page.mouse.move(narrow.x + narrow.width / 2, narrow.y + 80);
+      await page.mouse.down();
+      await page.mouse.move(10, narrow.y + 80);
+      await page.mouse.up();
+      await expect(separator).toHaveAttribute('aria-valuenow', '480');
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth),
+      ).toBe(960);
+      await page.setViewportSize({ width: 1440, height: 900 });
+      // A real click reaches the form even with the dock against its footer.
+      await Promise.all([
+        page.waitForRequest(
+          (request) =>
+            request.isNavigationRequest() &&
+            new URLSearchParams(request.postData() ?? '').get('draftAction') ===
+              'save',
+        ),
+        save.click(),
+      ]);
+      await expect(
+        page.locator('[data-document-editor] [aria-invalid=true]').first(),
+      ).toBeVisible();
+      await expect(panel).toBeVisible();
       await panel.getByRole('button', { name: 'Close the assistant' }).click();
       await page.goto(app.baseUrl);
       await expect(panel).toBeHidden();

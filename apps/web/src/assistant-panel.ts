@@ -534,7 +534,7 @@ const PANEL_STYLES = `
   .ledger-viewport~.assistant-panel{top:48px}
   .assistant-resize{display:block;position:absolute;left:-5px;top:0;bottom:0;width:10px;cursor:col-resize;touch-action:none;user-select:none}
   .assistant-resize::after{content:"";position:absolute;inset:0 auto 0 4px;width:1px;background:var(--rule)}
-  .assistant-resize:is(:hover,:focus-visible)::after{width:3px;background:var(--accent)}
+  .assistant-resize:is(:hover,:focus)::after{width:3px;background:var(--accent)}
 }
 @media (max-width:800px){.assistant-panel{width:100%;border-left:0}.assistant-panel button,.assistant-panel form button[type=submit]{height:44px;min-height:44px;padding:0 14px}.assistant-toggle--inline{height:36px}}
 `;
@@ -557,14 +557,20 @@ const SHELL_ACCOUNT = '<details class="shell-account">';
 const PANEL_MARKUP = `<aside id="assistant-panel" class="assistant-panel" data-assistant-panel aria-label="Assistant" hidden><div class="assistant-resize" role="separator" tabindex="0" aria-label="Resize assistant" aria-orientation="vertical" aria-controls="assistant-panel" aria-valuemin="320" aria-valuenow="420"></div><header><h2>Assistant</h2><button type="button" data-assistant-new>New conversation</button><button type="button" data-assistant-close aria-label="Close the assistant">Close</button></header><div class="assistant-log" data-assistant-log aria-live="polite"></div><div class="assistant-status" data-assistant-status role="status" hidden><span data-assistant-step>Working</span><span data-assistant-elapsed>0 s</span><button type="button" data-assistant-stop hidden>Stop</button></div><form data-assistant-form><label class="visually-hidden" for="assistant-input">Ask the assistant</label><textarea id="assistant-input" name="text" rows="2" placeholder="Ask or tell the assistant…"></textarea><button type="submit">Send</button></form><p class="assistant-muted" data-assistant-spend hidden></p></aside>`;
 
 /**
- * The page with the panel added before `</body>`. Only a full page served
- * with 200 gets it; fragments, downloads, redirects and diagnostics do not.
+ * Mount on full pages, including the shell returning a form for correction.
  */
 export function withAssistantPanel<
   T extends { statusCode: number; html: string; download?: unknown },
 >(result: T): T {
   if (
-    result.statusCode !== 200 ||
+    (result.statusCode !== 200 &&
+      !(
+        result.statusCode === 422 &&
+        result.html.includes(SHELL_ACCOUNT) &&
+        /<(?:form|dialog)\b[^>]*\bdata-(?:document-editor|composition-task)\b/u.test(
+          result.html,
+        )
+      )) ||
     result.download !== undefined ||
     !result.html.includes('</body>') ||
     result.html.includes('data-assistant-panel')
