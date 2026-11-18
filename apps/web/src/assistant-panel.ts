@@ -146,7 +146,10 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
 
   // A card settles once: its buttons go dead and never speak for another plan.
   const settle = (card) => {
-    if (pending && pending.card === card) pending = null;
+    if (pending && pending.card === card) {
+      pending = null;
+      form.querySelector('button[type=submit]').disabled = Boolean(running);
+    }
     card.setAttribute('data-assistant-settled', '');
     card.querySelectorAll('button').forEach((button) => { button.disabled = true; });
   };
@@ -337,7 +340,7 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     const text = input.value.trim();
-    if (!text) return;
+    if (!text || (running && !pending)) return;
     input.value = '';
     if (pending) {
       // Only a whole, plain yes approves the plan on screen. Anything else

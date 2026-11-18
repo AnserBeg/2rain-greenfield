@@ -224,16 +224,14 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
         const href = await link.getAttribute('href');
         expect(href).toContain('record=');
 
-        // The link opens the record the assistant made, on its own page.
+        // Open the edited record and verify its new name on its own page.
         const opened = await page.context().newPage();
         await opened.goto(`${application.baseUrl}${href!}`);
         await expect(opened.locator('main')).toContainText(
           'Panel Test Customer',
         );
 
-        // Undo the create (the latest change made at once) before anything
-        // else runs (X8: a later write could depend on it), verified: the
-        // record it made is archived, so its page no longer finds it.
+        // Undo restores the previous name on the same record.
         await did.locator('[data-assistant-undo]').click();
         await expect(did).toContainText(
           'Undid: changed record Panel Test Customer (checked)',
@@ -306,6 +304,72 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
         await expect(panel.locator('[data-assistant-spend]')).toContainText(
           'USD 0.04',
         );
+        // A timed-out card settles while the host is still composing its answer.
+        // Feed those stream events separately to observe the client between them.
+        const finishEvent = await page.evaluateHandle(() => {
+          const original = window.fetch;
+          let complete!: () => void;
+          window.fetch = (...args) => {
+            if (!String(args[0]).includes('assistant=ask'))
+              return original(...args);
+            window.fetch = original;
+            const encoder = new TextEncoder();
+            return Promise.resolve(
+              new Response(
+                new ReadableStream({
+                  start(controller) {
+                    const emit = (value: unknown) =>
+                      controller.enqueue(
+                        encoder.encode(JSON.stringify(value) + '\n'),
+                      );
+                    emit({
+                      type: 'plan',
+                      planId: 'timed-out-card',
+                      digest: 'd',
+                      steps: [],
+                    });
+                    emit({
+                      type: 'decided',
+                      planId: 'timed-out-card',
+                      approved: false,
+                    });
+                    complete = () => {
+                      emit({
+                        type: 'error',
+                        message: 'The model stopped after writing.',
+                        changes: [
+                          {
+                            changeId: 'saved-receipt',
+                            summary: 'archived the order',
+                            undoable: false,
+                          },
+                        ],
+                      });
+                      controller.close();
+                    };
+                  },
+                }),
+              ),
+            );
+          };
+          return () => complete();
+        });
+        await say('Prepare another plan');
+        const timedOut = panel.locator(
+          '[data-assistant-plan="timed-out-card"]',
+        );
+        await expect(timedOut).toContainText('Not done.');
+        const input = panel.locator('textarea');
+        await input.fill('My next request');
+        await input.press('Enter');
+        await expect(input).toHaveValue('My next request');
+        await finishEvent.evaluate((finish) => finish());
+        await expect(
+          panel.locator('[data-assistant-did="saved-receipt"]'),
+        ).toContainText('archived the order');
+        await expect(
+          panel.locator('[data-assistant-did="saved-receipt"] button'),
+        ).toHaveCount(0);
       } finally {
         await application.close();
       }

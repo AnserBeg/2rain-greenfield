@@ -2251,7 +2251,6 @@ function writeRisk(
         dataSourceQueryId?: string;
         workspace?: {
           membership?: string;
-          icon?: string;
           entry?: { companyQueryId?: string };
         };
       }[];
@@ -2261,7 +2260,7 @@ function writeRisk(
   const settings = surfaces.some(
     (s) =>
       s.workspace?.membership === 'setup' &&
-      s.workspace.icon === 'settings' &&
+      prefix.endsWith('_settings') &&
       catalog.query(s.dataSourceQueryId ?? '')?.sourceEntityId === entity,
   );
   const company = surfaces.some(

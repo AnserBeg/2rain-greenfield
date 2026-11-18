@@ -735,7 +735,7 @@ test('X15: the suggested customize command quotes the request as one shell word;
   }
 });
 
-test('X11: only an answer that is wholly the typed handoff hands off; a quoted one is an answer', async () => {
+test('X11: only the structured plan hands off; quoted instructions are ordinary answers', async () => {
   const asked: string[] = [];
   const drafter: CustomizeDrafter = {
     draftFromRequest(request) {

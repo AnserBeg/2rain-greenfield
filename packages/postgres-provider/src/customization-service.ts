@@ -477,6 +477,7 @@ export class PostgresCustomizationService {
               normalized.normalizationProfileVersion,
             ],
           );
+          signal?.throwIfAborted();
         },
       );
       return {

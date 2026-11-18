@@ -278,17 +278,27 @@ export function createAssistantEndpoint(
       // The page's company, proved for this person now (X9). A conversation
       // stays in the company it opened in: a page in another company starts
       // a new one.
-      const pageCompany = () =>
-        options
+      const pageCompany = () => {
+        if (
+          body.page !== undefined &&
+          (typeof body.page !== 'string' || body.page.length > 2000)
+        )
+          return Promise.resolve(null);
+        const search = typeof body.page === 'string' ? body.page : '';
+        const selected = new URLSearchParams(search).getAll('surface');
+        if (
+          selected.length > 1 ||
+          (selected[0] && screen && screen.surfaceId !== selected[0])
+        )
+          return Promise.resolve(null);
+        return options
           .company({
             cookie: String(request.headers.cookie ?? ''),
-            surfaceId: screen?.surfaceId ?? null,
-            search:
-              typeof body.page === 'string' && body.page.length <= 2_000
-                ? body.page
-                : '',
+            surfaceId: selected[0] ?? screen?.surfaceId ?? null,
+            search,
           })
           .catch(() => null);
+      };
       if (['undo', 'latest', 'history'].includes(action) && mine) {
         const page = typeof body.page === 'string' ? await pageCompany() : null;
         if (
@@ -532,7 +542,7 @@ export function createAssistantEndpoint(
       type: 'answer',
       text:
         run.stop === 'spend-cap'
-          ? `This conversation reached its spending limit of USD ${capUsd.toFixed(2)}, so I stopped. Start a new conversation to keep going.`
+          ? `This request exceeds the conversation’s remaining budget. Try a shorter request or start a new conversation.`
           : run.stop === 'stopped'
             ? `Stopped. Nothing more will run; anything already done stays done${checked.length > 0 ? ` and was checked${unverified > 0 ? ` (${String(unverified)} check(s) did not confirm it; look at the records)` : ''}` : ''}.`
             : run.answer || '(no answer)',
