@@ -54,7 +54,7 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
   ],
   "symbols": [
     {
-      "path": "apps/web/src/surface-runtime.ts",
+      "path": "apps/web/src/surface-composition.ts",
       "name": "taskCanApplyDirectly"
     }
   ]
