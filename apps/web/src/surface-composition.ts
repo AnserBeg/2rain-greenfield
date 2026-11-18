@@ -2828,7 +2828,7 @@ export async function submitCompositionAction(
       else
         return taskDocument(
           () =>
-            `<section data-task-prepared>${previewInputs()}${current.action.stockImpacts ? impactRows : `<p class="composition-task-consequence">${h(current.action.description)}</p>`}<form class="composition-task-footer" method="post" action="${h(url)}">${hidden}<input type="hidden" name="preparedId" value="${h(prepared.id)}"><button class="secondary-action" name="taskStage" value="edit">Edit inputs</button><button name="taskStage" value="confirm">${h(confirmLabel())}</button></form></section>${back}`,
+            `<section data-task-prepared><div data-task-review-summary>${previewInputs()}</div>${current.action.stockImpacts ? `<section class="composition-task-after" aria-label="After you post"><p class="eyebrow">After you post</p>${impactRows}</section>` : `<p class="composition-task-consequence">${h(current.action.description)}</p>`}<form class="composition-task-footer" method="post" action="${h(url)}">${hidden}<input type="hidden" name="preparedId" value="${h(prepared.id)}"><button class="secondary-action" name="taskStage" value="edit">Edit inputs</button><button name="taskStage" value="confirm">${h(confirmLabel())}</button></form></section>${back}`,
           inputs,
           prepared,
         );
@@ -3114,7 +3114,7 @@ export async function submitCompositionAction(
       : (current.action.presentation?.task?.confirmation.reviewLabel ??
         `Review ${current.action.label}`);
     const liveReview = !direct && taskRowsDeclared?.fillLabel;
-    return `${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}" novalidate${liveReview ? ' data-task-live-review' : ''}>${hidden}${taskRowsDeclared?.fillLabel ? `<button type="submit" class="sr-only" name="taskStage" value="${stage}" tabindex="-1" aria-hidden="true" data-task-default></button>` : ''}${controls.join('')}${rows}<section class="composition-task-after" aria-label="After you post"><p class="eyebrow">After you post</p>${current.action.stockImpacts ? impactRows : `<p class="composition-task-consequence">${h(current.action.description)}</p>`}</section><footer class="composition-task-footer"><a class="secondary-action" href="${h(url)}">Cancel</a><button name="taskStage" value="${stage}">${h(label)}</button></footer></form>${liveReview ? '<section data-task-inline-review hidden aria-label="Review and confirm"></section>' : ''}`;
+    return `${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}" novalidate${liveReview ? ' data-task-live-review' : ''}>${hidden}${taskRowsDeclared?.fillLabel ? `<button type="submit" class="sr-only" name="taskStage" value="${stage}" tabindex="-1" aria-hidden="true" data-task-default></button>` : ''}${controls.join('')}${rows}<section class="composition-task-after" aria-label="After you post"${current.action.stockImpacts ? ' data-task-entry-impact' : ''}><p class="eyebrow">After you post</p>${current.action.stockImpacts ? impactRows : `<p class="composition-task-consequence">${h(current.action.description)}</p>`}</section><footer class="composition-task-footer"><a class="secondary-action" href="${h(url)}">Cancel</a><button name="taskStage" value="${stage}">${h(label)}</button></footer></form>${liveReview ? '<section data-task-inline-review hidden aria-label="Review and confirm"></section>' : ''}`;
   });
 }
 

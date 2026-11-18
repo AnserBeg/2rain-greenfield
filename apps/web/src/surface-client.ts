@@ -79,6 +79,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
     const region = form.parentElement.querySelector('[data-task-inline-review]');
     const review = form.querySelector('footer button[value="prepare"]');
     if (!region || !review) return;
+    form.querySelector('[data-task-entry-impact]')?.setAttribute('hidden', '');
     region.hidden = true;
     region.replaceChildren();
     review.hidden = false;
@@ -96,6 +97,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
           }
           const preview = rendered.querySelector('#record-task-region [data-task-prepared]');
           if (preview) {
+            preview.querySelector('[data-task-review-summary]')?.setAttribute('hidden', '');
             preview.querySelector('button[value="edit"]')?.setAttribute('hidden', '');
             region.replaceChildren(preview);
             region.hidden = false;
@@ -175,6 +177,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
       submitting = false;
     }
   });
+  scheduleReview(document.querySelector('form[data-task-live-review]'));
 })();
 (() => {
   // ADR-0036 behaviour 7: draft-editor reference fields answered in place.

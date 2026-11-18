@@ -148,6 +148,9 @@ test('an order page names its short lines and its progress, receives a truck of 
     const prepared = dialog.getByRole('region', { name: 'Review and confirm' });
     // Two lines are reviewed in place; clearing line 2 omits it from the prepared receipt.
     await expect(prepared.locator('[data-task-row]')).toHaveCount(2);
+    await expect(dialog.locator('.composition-task-after:visible')).toHaveCount(
+      1,
+    );
     const impacts = prepared.locator('[data-stock-impact="onHand"]');
     await expect(impacts).toHaveCount(2);
     for (const [index, quantity] of [5, 4].entries()) {
