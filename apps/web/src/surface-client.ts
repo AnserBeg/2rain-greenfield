@@ -141,6 +141,12 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
     clearTimeout(previewTimer);
     ++previewGeneration;
     form.setAttribute('aria-busy', 'true');
+    // A stage response replaces the form. Hold its controls while it is in
+    // flight so a late replacement cannot discard edits made after submit.
+    const pendingRoot = form.closest('[data-composition-task]') || form;
+    const pendingControls = [...pendingRoot.querySelectorAll('button, input:not([type="hidden"]), select, textarea')].filter(control => !control.disabled);
+    const restoreControls = () => pendingControls.forEach(control => { control.disabled = false; });
+    pendingControls.forEach(control => { control.disabled = true; });
     const error = document.querySelector('dialog[open] [data-task-transport-error]') || document.querySelector('#record-task-region [data-task-transport-error]');
     if (error) error.hidden = true;
     try {
@@ -153,6 +159,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
         return;
       }
       if (fallback) {
+        restoreControls();
         pageFallback = true;
         try {
           form.requestSubmit(event.submitter || undefined);
@@ -184,6 +191,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
       // task and its server-issued keys and let the person choose to retry.
       if (error) error.hidden = false;
     } finally {
+      restoreControls();
       form.removeAttribute('aria-busy');
       submitting = false;
     }

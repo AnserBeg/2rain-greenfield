@@ -161,7 +161,7 @@ test('a partly received order shows what is still open, closes its remainder wit
         .getByRole('dialog')
         .getByRole('button', { name: 'Confirm Place order', exact: true })
         .click();
-      await expect(page.locator('[data-composition-task]')).toContainText(
+      await expect(page.locator('[data-task-result]')).toContainText(
         'Place order: done',
       );
       await page.goto(orderUrl);
@@ -175,7 +175,6 @@ test('a partly received order shows what is still open, closes its remainder wit
         .filter({ hasText: 'Field notebook' });
     const cell = (label: string) =>
       row().locator(`td[data-column-label="${label}"]`);
-    const task = () => page.locator('[data-composition-task]');
     const runTask = async (
       label: string,
       fill: () => Promise<void>,
@@ -184,7 +183,7 @@ test('a partly received order shows what is still open, closes its remainder wit
       await page.getByRole('button', { name: label, exact: true }).click();
       await fill();
       await completeTask(page.getByRole('dialog'), label);
-      await expect(task().locator('[data-task-result]')).toContainText(
+      await expect(page.locator('[data-task-result]')).toContainText(
         `${label}: done`,
       );
       await returnToRecord(page);

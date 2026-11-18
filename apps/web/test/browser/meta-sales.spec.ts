@@ -1,4 +1,5 @@
 import { returnToRecord, reviewTask } from './complete-task.js';
+import { SURFACE_CLIENT_SCRIPT } from '../../src/surface-client.js';
 import { test, expect } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -54,9 +55,9 @@ for (const javaScriptEnabled of [true, false]) {
           await page.setViewportSize({ width: 1280, height: 800 });
         };
         await page.goto(url);
-        await expect(
-          page.locator('script:not([data-assistant-script])'),
-        ).toHaveCount(0);
+        const taskScript = page.locator('script:not([data-assistant-script])');
+        await expect(taskScript).toHaveCount(1);
+        expect(await taskScript.textContent()).toBe(SURFACE_CLIENT_SCRIPT);
         await expect(
           page.getByText('Alpine Office Supply', { exact: true }),
         ).toBeVisible();
@@ -335,7 +336,11 @@ for (const javaScriptEnabled of [true, false]) {
           'partial-ship-review',
           'Review ship 2 EA; selected reservation remaining 3 EA; not confirmed',
         );
-        await returnToRecord(page);
+        if (javaScriptEnabled)
+          await task()
+            .getByRole('link', { name: 'Cancel', exact: true })
+            .click();
+        else await returnToRecord(page);
         await totals(['5', '3', '2']);
         await page.locator('.composition-context-overflow summary').click();
         await page
@@ -426,7 +431,9 @@ for (const javaScriptEnabled of [true, false]) {
             () => document.documentElement.scrollWidth <= innerWidth,
           ),
         ).toBe(true);
-        await returnToRecord(page);
+        await page
+          .getByRole('link', { name: 'Back to order', exact: true })
+          .click();
         expect(new URL(page.url()).searchParams.get('record')).toBe(orderId);
       });
     });
