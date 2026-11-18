@@ -612,7 +612,7 @@ test('SPEED-1 security fixes: one scope per page, both scopes of a moved grant, 
         // Fix read 4: an invocation and a sibling read of one cold release in
         // one page, the invocation first, the release's real route loading it
         // (with a connection of its own) while the page holds the other.
-        const route = releaseServingRoute(
+        const coldRoute = releaseServingRoute(
           async () => {
             await withTrustedRequestTransaction(runtime, context, (client) =>
               client.query(`SELECT 1`),
@@ -629,12 +629,12 @@ test('SPEED-1 security fixes: one scope per page, both scopes of a moved grant, 
             }) as never,
         );
         const coldOperations = new ReleaseRoutingOperationGateway(
-          route as never,
+          coldRoute as never,
           policy,
           new SemanticOperationMediationAuthority(),
         );
         const coldQueries = new ReleaseRoutingQueryGateway(
-          route as never,
+          coldRoute as never,
           policy,
         );
         const cold = { release: { releaseId: 'cold' } } as never;

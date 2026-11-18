@@ -21,6 +21,7 @@ import {
   type EvidenceMetadataInput,
 } from '../../platform-runtime/src/trust/contracts.js';
 import {
+  failReadSnapshot,
   withTrustedRequestRead,
   withTrustedRequestTransaction,
 } from './request-context.js';
@@ -280,7 +281,13 @@ export class PostgresSemanticQueryDenialRecorder implements SemanticQueryDenialR
   async recordDenied(
     request: Parameters<SemanticQueryDenialRecorder['recordDenied']>[0],
   ) {
-    await this.#record(request);
+    try {
+      await this.#record(request);
+    } catch (error) {
+      // Unrecorded evidence fails the page, not just the section that read.
+      failReadSnapshot(error);
+      throw error;
+    }
   }
 
   async #record(

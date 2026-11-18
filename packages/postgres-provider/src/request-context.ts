@@ -64,6 +64,15 @@ export async function withoutReadSnapshot<T>(
 }
 
 /**
+ * Fail the page this request is reading (SPEED-1 fix read 1): evidence that
+ * had to be written -- a denial -- was not, so the page must not be answered
+ * as if it were, whatever its sections do with the error.
+ */
+export function failReadSnapshot(error: unknown): void {
+  heldSnapshots.getStore()?.fail(error);
+}
+
+/**
  * Run `work` detached from any page's read snapshot without ending it: for
  * shared work another request may also wait on (a release load), which must
  * never queue behind one page's turn (SPEED-1 fix read 4).
@@ -259,6 +268,7 @@ class ReadSnapshot {
   #assumed = new Set<SnapshotRoleSwitch>();
   #restored = new Set<SnapshotRoleSwitch>();
   #finished = false;
+  #failure: { readonly error: unknown } | null = null;
   #turn: Promise<unknown> = Promise.resolve();
   /** The tenant and environment this page's snapshots belong to. */
   #scope: string | null = null;
@@ -373,9 +383,14 @@ class ReadSnapshot {
     }
   }
 
+  fail(error: unknown): void {
+    this.#failure ??= { error };
+  }
+
   /** No more reads join; the snapshot ends and the live policy is checked. */
   async finish(): Promise<void> {
     await this.#exclusive(async () => {
+      if (this.#failure) throw this.#failure.error;
       if (this.#finished) return;
       this.#finished = true;
       if (this.#client) await this.#endWithLivePolicy();
