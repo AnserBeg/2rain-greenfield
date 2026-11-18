@@ -8,9 +8,11 @@ import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
 
 // SPEED-1 fix read, through the composed application: a denial is committed
 // by the real recorder before the page is answered, on its own connections,
-// so the page still reads one snapshot, and a failed denial fails the page;
-// a Confirm that committed while the policy changed offers the session's own
-// retry, which finishes with the same request keys.
+// so the page still reads one snapshot, and a failed denial fails the page.
+// A task step reads in one snapshot (ADR-0071, amended): a grant revoked
+// between its two reads of the record discards the response; a Confirm that
+// committed while the policy changed offers the session's own retry, which
+// finishes with the same request keys.
 
 const ns = 'northstar.app';
 type Fixture = Parameters<Parameters<typeof withOrderEntryFixture>[0]>[0];
@@ -60,7 +62,7 @@ const hidden = (html: string, name: string) =>
   new RegExp(`name="${name}" value="([^"]+)"`, 'u').exec(html)?.[1] ?? null;
 
 test(
-  'SPEED-1 fix read: denials committed by the real recorder before the answer, one snapshot kept; a Confirm under a policy change offers its own retry',
+  'SPEED-1 fix read: denials committed by the real recorder before the answer, one snapshot kept; a task step under a revocation is discarded; a Confirm under a policy change offers its own retry',
   { timeout: 900_000 },
   async () => {
     await withOrderEntryFixture(async (fixture) => {
@@ -98,6 +100,31 @@ test(
         // transaction per denial on the evidence connections: no reopen.
         assert.equal(withheld.work?.transactions, 2 + recorded);
 
+        // A queue the person cannot open (To ship, without order read) is
+        // neither shown nor counted, on any page or on Today's own tiles, and
+        // asking writes no denial: eligibility is checked without one.
+        const quiet = await denials();
+        const orderPage = await serve(
+          pageUrl(
+            fixture,
+            'purchase_order_detail',
+            'commercial_purchase_order_get',
+            { record: scenario.truck.recordId },
+          ),
+        );
+        assert.equal(orderPage.status, 200);
+        assert.match(
+          orderPage.html,
+          /today_receive"[^>]*>[^]*?<span>To receive<\/span><span class="queue-count">\d+<\/span>/u,
+        );
+        assert.doesNotMatch(orderPage.html, /today_ship"/u);
+        const today = await fetch(`${fixture.app.baseUrl}/`);
+        const todayHtml = await today.text();
+        assert.equal(today.status, 200);
+        assert.match(todayHtml, /data-launcher-tile="[^"]*today_receive"/u);
+        assert.doesNotMatch(todayHtml, /today_ship"/u);
+        assert.equal(await denials(), quiet, 'no queue writes a denial');
+
         // A denial that cannot be recorded fails the page.
         await fixture.pool.query(
           `CREATE FUNCTION public.speed_refuse_denial() RETURNS trigger
@@ -127,9 +154,6 @@ test(
         );
       }
 
-      // A Confirm whose receipt commits together with a policy change: the
-      // step is answered with the session's own retry, nothing of the record,
-      // and the retry finishes with the same request keys -- one receipt.
       const target = await governedStorageTarget();
       const receipt = target.entities.find(
         (entity) => entity.entityId === `${ns}:entity.goods_receipt`,
@@ -143,6 +167,54 @@ test(
       const action = `${ns}:action.receive_lines_known`;
       const input = (local: string) => `${ns}:input.${local}`;
       const [first] = scenario.truck.lines as [string];
+
+      // A task's steps read in one snapshot (ADR-0071, amended), so a grant
+      // revoked between the step's first read of its record (to open the
+      // task) and the second (to show it) is answered from the snapshot's
+      // grants -- and the end-of-request epoch check discards the response:
+      // the step is sent again by GET, and nothing of the order is shown.
+      const orderGet = `${ns}:query.commercial_purchase_order_get`;
+      const gateway = fixture.app.runtime.queryGateway;
+      const invoke = gateway.invoke.bind(gateway);
+      let armed = false;
+      gateway.invoke = async (view, request, context) => {
+        const result = await invoke(view, request, context);
+        if (
+          armed &&
+          (request as { queryId?: unknown } | null)?.queryId === orderGet
+        ) {
+          armed = false;
+          await fixture.measure(
+            'deny',
+            undefined,
+            undefined,
+            'purchase_order_read',
+          );
+        }
+        return result;
+      };
+      try {
+        armed = true;
+        const discarded = await serve(truckPage, {
+          compositionAction: action,
+        });
+        assert.equal(armed, false, 'the order was read to open the task');
+        assert.equal(discarded.status, 303, discarded.html.slice(0, 600));
+        assert.equal(discarded.html, '');
+        assert.ok(!discarded.html.includes(scenario.truck.number));
+      } finally {
+        gateway.invoke = invoke;
+        await fixture.measure(
+          'allow',
+          undefined,
+          undefined,
+          'purchase_order_read',
+        );
+      }
+
+      // A Confirm whose receipt commits together with a policy change: the
+      // step is answered with the session's own retry, nothing of the record,
+      // and the retry finishes with the same request keys -- one receipt.
       const opened = await serve(truckPage, { compositionAction: action });
       const token = hidden(opened.html, 'taskToken');
       assert.ok(token, 'the task opens');

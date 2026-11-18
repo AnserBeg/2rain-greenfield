@@ -53,10 +53,10 @@ export interface RequestWorkProbe {
 
 export interface SurfaceRuntimeServerOptions {
   /**
-   * SPEED-1: a page read (a GET) runs all its reads in one read snapshot,
-   * ended by `finishReads` or when the page is assembled; a policy change
-   * while it was held discards the page. Absent, each read is a transaction
-   * of its own.
+   * SPEED-1: a page read (a GET, or a task's step) runs all its reads in one
+   * read snapshot, ended by `finishReads` or when the page is assembled; a
+   * policy change while it was held discards the page. Absent, each read is
+   * a transaction of its own.
    */
   readonly readSnapshot?: <T>(
     work: (finishReads: () => Promise<void>) => Promise<T>,
@@ -272,10 +272,12 @@ async function handleRequest(
     const result = gateways
       ? submission
         ? readSnapshot && taskStep(submission)
-          ? // A task's steps read in one snapshot too. Confirm's invocation
-            // runs outside it and decides live (the provider's invoke). A
-            // policy change during the step is never repeated: the step's
-            // page is sent again by a fresh GET (SPEED-1 S2).
+          ? // A task's steps read in one snapshot too (ADR-0071, amended: a
+            // read-only request with the end-of-request epoch check, whatever
+            // its method). Confirm's invocation runs outside it and decides
+            // live (the provider's invoke). A policy change during the step
+            // is never repeated: the step's page is sent again by a fresh GET
+            // (SPEED-1 S2).
             await readSnapshot(
               () =>
                 entry.run({ headers: request.headers }, (view) =>

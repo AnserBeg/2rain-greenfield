@@ -1,15 +1,14 @@
 # SPEED-1 — a record page in a few database trips, measured and held there
 
-Status: slice 1 at `3ab5853a`; slices 2-4 at `69b7adc1` (one integration, orchestrator ruling); slices 5-6 at `1663ade6`; security fix round at `ab5ab5e2`; fix read and queue counts at `e37c126e`. Tier: request
-security path, no file of the `AGENTS.md` §4 Critical set; slices 2-4 get the orchestrator's two critical reviews. Base: `main`
+Status: slice 1 at `3ab5853a`; slices 2-4 at `69b7adc1` (one integration, orchestrator ruling); slices 5-6 at `1663ade6`; security fix round at `ab5ab5e2`; fix read and queue counts at `e37c126e`; final slice at `e4d3c3aa`. Tier: request
+security path; migrations 0030 and 0031 are in the `AGENTS.md` §4 Critical set; slices 2-4 get the orchestrator's two critical reviews. Base: `main`
 `74b3367f`. Stops: none. Charter: [SPEED-1-charter.md](SPEED-1-charter.md). ADR: [ADR-0071](../../decisions/ADR-0071-read-decisions-are-live-per-request-writes-per-call.md).
 
 ## Claims
 
 1. `Server-Timing` on the local server (`request-work-meter.ts`): `db-transactions`, `db-statements`, `db-authorization`,
    `db-repeats` (`desc="N"`), `app;dur=<ms>`. Statements include BEGIN/COMMIT/RESET; a transaction is a BEGIN or a statement
-   outside one, never the RESETs; repeats exclude control and the trusted envelope. The 1,204-statement log replays to 1,204 / 148
-   / 120 policy reads.
+   outside one, never the RESETs; repeats exclude control and the trusted envelope. A 1,204-statement log replays to 148 / 120.
 2. `test/performance/page-budget.test.ts` fails when a page exceeds a ceiling in `page-budgets.ts`; each page must render its
    content; parse columns read LOOP-1's `catalogParseCount()` around each request.
 3. A GET page and a task step run their reads in one read-only `REPEATABLE READ` snapshot (`withReadSnapshot`,
@@ -34,8 +33,9 @@ security path, no file of the `AGENTS.md` §4 Critical set; slices 2-4 get the o
     (S4); the anchor holds `lock_current_policy_epoch` (FOR SHARE) to commit (S5, read 2); denials commit on their own pool
     before the answer, and an unrecorded one fails the page (read 1); the editor finishes outside its catch (S7); one
     connection per request (S8, S9); two opposite moves both commit (read 5, red 40P01). Each test red on the reverted code.
-11. Queue counts: Today's first three tiles counted in every page's snapshot, shown by LOOK-1's `renderWorkQueues`; a snapshot
-    sends an identical statement once (PO list repeats 2 -> 0, SO detail 5 -> 0); +5 statements a page, no transaction.
+11. Queue counts: Today's first three tiles, counted in each page's and task step's snapshot, shown by `renderWorkQueues` (LOOK-1);
+    a queue the person may not open is left out by a non-recording eligibility check; a snapshot sends an identical statement
+    once (repeats 2 -> 0, 5 -> 0); +5 statements, no transaction. ADR-0071 amended: a read-only task step reads in one snapshot.
 
 ## Decisions (one line each)
 
@@ -56,8 +56,8 @@ security path, no file of the `AGENTS.md` §4 Critical set; slices 2-4 get the o
 | new purchase order | 29 / 242 / 22 / 23 | 2 / 32 | 2 / 18 / 3 / 0; 2 / 23 / 3 / 0 with queues |
 | stock by item | 76 / 586 / 67 / 62 | 2 / 43 | 2 / 23 / 3 / 0; 2 / 28 / 3 / 0 with queues |
 | sales order detail | 259 / 2139 / 207 / 236 (269 / 2209 after LOOP-1 slice 3) | 2 / 186 | 2 / 56 / 3 / 5; 2 / 56 / 3 / 0 with queues |
-| task open / review | 393 / 205 transactions | unchanged | 2 / 36 / 3 / 0 each |
-| task Confirm | 217 / 1879 / 169 / 204 | unchanged | 16 / 248 / 14 / 15; 21 / 287 / 17 / 17 after fix S1 |
+| task open / review | 393 / 205 transactions | unchanged | 2 / 36 / 3 / 0 each; 2 / 41 / 3 / 0 with queues |
+| task Confirm | 217 / 1879 / 169 / 204 | unchanged | 16 / 248 / 14 / 15; 21 / 287 / 17 / 17 after S1; 21 / 292 with queues |
 
 Warm parses: operation and query catalogs and the manifest 0 everywhere; bindings 49-100. PO detail per request, one laptop:
 base 16.3 s wall / 12.4 s CPU; after ~141-206 ms / 120-170 ms, tsx and compiled alike. Slice 5: 58 KB less HTML a page.
@@ -66,7 +66,7 @@ Confirm's 16 transactions: the step's snapshot, 7 live re-authorizations, 2 trus
 
 ## Gates
 
-- CI runs: slice 1 44201921559, 2-4 44225809436, 5-6 44237933304, fix read and queues 44305308130 (`86763ae3`).
+- CI runs: slice 1 44201921559, 2-4 44225809436, 5-6 44237933304, fix read and queues 44305308130, final 44329884456.
   Local: format, lint, unit tests, approved runs of `read-snapshot.test.ts` and `page-budget.test.ts` under the lock.
 
 ## Test it yourself
