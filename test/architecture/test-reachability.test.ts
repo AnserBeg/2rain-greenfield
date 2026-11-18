@@ -402,7 +402,7 @@ test('declared unfiltered producers are wired to CI and their evidence paths', (
         readFileSync('test/helpers/prepare-reachability-evidence.ts', 'utf8'),
         /ensureReachabilityRun\(\{ repositoryRoot \}\)/u,
       );
-      assert.doesNotMatch(job, /^    needs:/mu);
+      assert.doesNotMatch(job, /^ {4}needs:/mu);
     } else {
       assert.match(job, /test\/helpers\/begin-reachability-run\.ts/u);
     }
