@@ -1,4 +1,7 @@
-import { expect, test } from '@playwright/test';
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import { expect, test, type Page } from '@playwright/test';
 
 import { startComposedApplication } from '../../../api/src/composition-root.js';
 import {
@@ -196,6 +199,9 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
           "Because the operation is declared to need the person's confirmation.",
         );
         await expect(panel.locator('[data-assistant-status]')).toBeVisible();
+        // LOOK-1: the panel in the Ledger look, wide and phone, light and
+        // dark -- a reply's table, a change with Undo, a plan awaiting yes.
+        await shootAssistant(page);
         await plan.locator('[data-assistant-yes]').click();
         await expect(reply(2)).toContainText('Archived.');
 
@@ -230,3 +236,27 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
     },
   );
 });
+
+/**
+ * The panel's evidence for LOOK-1, written where the look proof writes its
+ * screenshots when LOOK_EVIDENCE_OUT names a directory; otherwise nothing.
+ */
+async function shootAssistant(page: Page): Promise<void> {
+  const out = process.env.LOOK_EVIDENCE_OUT;
+  if (!out) return;
+  mkdirSync(resolve(out), { recursive: true });
+  const original = page.viewportSize();
+  for (const scheme of ['light', 'dark'] as const)
+    for (const [width, height] of [
+      [1440, 900],
+      [390, 844],
+    ] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.setViewportSize({ width, height });
+      await page.screenshot({
+        path: `${resolve(out)}/app-assistant-${String(width)}-${scheme}.png`,
+      });
+    }
+  await page.emulateMedia({ colorScheme: 'light' });
+  if (original) await page.setViewportSize(original);
+}
