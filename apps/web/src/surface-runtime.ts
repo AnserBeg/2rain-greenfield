@@ -546,6 +546,7 @@ export async function renderSurfaceRuntimeWithData(
         url,
         gateways.queryGateway,
         declaredList.now,
+        selection.selected.surfaceId,
       );
     } else {
       const result = await gateways.queryGateway.invoke(view, request);
@@ -779,6 +780,7 @@ async function declaredListData(
   url: URL,
   queryGateway: SemanticQueryGateway,
   now: Date,
+  surfaceId: string,
 ): Promise<SurfaceDataRenderState> {
   const scopeArguments = legalEntityScopeArguments(binding, url);
   const read = (
@@ -819,7 +821,10 @@ async function declaredListData(
       // tab shows no count, and its own page refuses.
       if (!viewServes(list, withheld, listView.viewId)) continue;
       const queue = unfiltered
-        ? launcher?.tiles.find((tile) => tile.view === listView.viewId)
+        ? launcher?.tiles.find(
+            (tile) =>
+              tile.surface === surfaceId && tile.view === listView.viewId,
+          )
         : undefined;
       const queueCount = queue ? queues?.get(queue.tileId) : undefined;
       if (queueCount !== undefined) {
