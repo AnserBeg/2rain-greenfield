@@ -444,6 +444,8 @@ function spawnDevEntryPoint(options: {
     {
       env: {
         ...process.env,
+        // Always exercise managed-container startup through the Docker stub.
+        DATABASE_URL: undefined,
         NORTH_STAR_DATABASE_PORT: '55999',
         NORTH_STAR_DEV_DATABASE_CONTAINER: 'stub-dev-db',
         PATH: `${root}:${process.env.PATH ?? ''}`,
