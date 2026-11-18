@@ -304,7 +304,7 @@ test(
           careful.approvals.map((entry) => [entry.by, entry.riskClass]),
           [['person', 'needsYes']],
         );
-        assert.match(asked.join(' '), /registered business capability/u);
+        assert.match(asked.join(' '), /moves stock or money/u);
 
         // Undo: the latest change, planned, executed and verified as the
         // person's own operation, archives what the change created.

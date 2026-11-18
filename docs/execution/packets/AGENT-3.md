@@ -1,6 +1,6 @@
 # AGENT-3 — the office assistant in the web app: fast, screen-aware, act-then-undo, measured honestly
 
-Status: slice 1 integrated `39463ffb` (PR #57, audit A1/A2); slices 2-6 integrated `c6a156b4` (PR #58) · Mechanical (no Critical path) · Stops: none · Charter:
+Status: slice 1 `39463ffb` (PR #57); slices 2-6 `c6a156b4` (PR #58); end-review fixes (a) `2cfb6fc2` (#81), (b) `1d3a7c35` (#83), (c) PR #84 · Mechanical (no Critical path) · Stops: none · Charter:
 [AGENT-3-charter.md](AGENT-3-charter.md) from `main` `f1abcb3a`; branch `packet/AGENT-3`, base `5c25acdb`.
 
 ## Pre-registered measures (2026-11-17, before any real-model run of this packet)
@@ -15,23 +15,23 @@ development set's rules (tasks 11-34) are registered in `test/agent/dev-tasks.ts
 3. A plan is bound to the release it was made on (id and content hash, in the approval digest); execute refuses before any step and
    before each step, in that step's view, with a typed `replan` naming what committed. Verify compares values and patched fields. A replayed
    execute returns the receipt; its values come only from a read authorized now (security review).
-4. The panel's screen is a claim: named only when declared, its record read fresh as the person; a conversation is its starter's;
-   requests are same-origin JSON; a plan waits for a yes bound to its id and digest; Stop ends a run; USD 1.50 per conversation.
-5. Risk class from contract facts only (`risk.ts`): o0 create (inverse archive) or update with a patch (inverse prior values),
-   confirmation none, no confirmed operation writing those fields, no write of `<type>_state` past its first option -> reversible,
-   runs at once, recorded `by: 'riskClass'`; anything else or unknown needs a yes. Undo: latest change only, planned, executed,
-   verified; refuses when a record changed after the agent's write.
-6. `erp_plan` refuses, naming it, a record id (target, relation or `_id` field) no lookup returned, and a currency that is neither the
-   company default, a returned record's, nor named by the person. Dates, amounts and quantities stay with the prompt.
-7. A change to the application is answered with a handoff line; the panel drafts the person's words through CUSTOMIZE's
-   `draftFromRequest` and shows the plain diff, with no approve or activate path. Five tools; no migration; no gateway change.
+4. The panel's screen is a claim, its record read fresh as the person; requests are same-origin JSON naming this server's loopback
+   Host (X10); a conversation is its starter's, in the company the page's workspace entry proves (X9, in both digests and on the card),
+   bounded (30 min idle, 5 per person, 200 per process: X13); a card answers only for its own plan and digest, and only a whole plain
+   yes typed approves (X2, X3); Stop is checked before each write and the host verifies what was written on every exit (X7).
+5. Risk class from contract facts (`risk.ts`, `writeRisk`): an O0 create whose archive the person may run, or an update with a patch,
+   is reversible and runs at once where the host offers Undo (X6); a state or status change off the first option, a settings
+   update, or anything else needs a yes (X5). Undo is pinned to the agent's revision, refused after a later write or when an active
+   record names a created one, and resumable (X8). A capability's child lines are bound to the yes and re-read before it runs (X4).
+6. `erp_plan` refuses a reference no lookup returned (target, relation, an `_id` field naming a record type, any value carrying an
+   id), nested arguments, and a currency not canonical or not default, read or named in this request (X12).
+7. Record and tool data reach the model inside `<record-data>` / `<tool-data>`, called data (X11). A change to the application is
+   the typed whole answer `{"handoff":"customize","change":…}`; the panel drafts the person's words through CUSTOMIZE, metered
+   against the same cap and Stop (X13). Each model call gets only the output the cap leaves. Five tools; no migration.
 
 ## Decisions
-- Map: local names, fields without their type's prefix, `!` = needs confirmation, bound 60,000 characters (about 33,600); explicit
-  cache breakpoint on prompt + map, per-turn context in the user turn. Panel `assistant-panel.ts` (top-bar toggle; script CSP-hash-pinned, text nodes only; content-hash stylesheet)
-  + `assistant-endpoint.ts` at `/?assistant=ask|decide|stop|undo`; Customize screen's lazily opened service shared for the handoff.
-- Seam exception line in `ux-grammar` and the seam allow-list, as the Customize screen's. Slices 2-6 merge as one: shared files.
-  Pin tripped: `meta-sales.spec.ts` counts the page's own scripts; the panel's is marked `data-assistant-script` and excluded.
+- Map: local names, `!` = needs confirmation, bound 60,000 characters; cache breakpoint on prompt + map. Panel `assistant-panel.ts`
+  (script CSP-hash-pinned, text nodes only) + `assistant-endpoint.ts` (`/?assistant=ask|decide|stop|undo|latest`); seam line in `ux-grammar`.
 
 ## Results (each dated result file stands as registered)
 | run | pass | median discovery | median s | median calls | USD | USD / completed |
@@ -44,37 +44,37 @@ development set's rules (tasks 11-34) are registered in `test/agent/dev-tasks.ts
 | after LOOP-1, 11-18 03:08 `8e3d4a21` ([r](../evidence/2026-11-18T03-08-05-680Z-agent-eval.md)) | 10/10 | 2 | 19.9 | 5.5 | 0.8145 | 0.0815 |
 | after SPEED-1, 03:33 `f5414386` ([r](../evidence/2026-11-18T03-33-36-579Z-agent-eval.md)) | 10/10 | 2 | 11.9 | 5.5 | 0.6837 | 0.0684 |
 
-Dev-set failures as registered: task 18 x3 (my rule's option id was wrong, `option.store`; agent correct; rule v2), task 22 attempt 1
-(contracts by short name read `denied`, a slice-1 defect fixed after), task 29 (the agent picked the only "Millwork" with a customer
-role and said so; the rule wanted no write). Slice 4's run found an over-refusal (a minted uuid in a free text field) and a 0-based
-`fromStep`; both fixed after it. Not in the dev run: A1/A2, the contracts fix.
+Dev-set failures as registered: task 18 x3 (my rule's option id was wrong; rule v2), task 22 attempt 1 (a slice-1 defect, fixed),
+task 29 (the agent picked the only "Millwork" with a customer role and said so; the rule wanted no write).
+
+## End-review fix round (2026-11-18): each item's test was red on the prior code
+X1-X3, X6 `f55efebe`; X12 `ae5a17dd`+`a3105ef8`; X14 `723afdb9`; X5 `c58c273f`; X4 `55244f56`; X7-X8 `4bc9b303`; X10, X15
+`9c710fbd`; X11 `59c8459d`; X13 `23784d5c`; X9 `637c3f21`+`e90ed6fb`; X16 `c5908191`. Tests: X-named cases, dev task 35, panel spec.
 
 ## Gates
-Slice 1: branch CI 44166005372, main CI 44171233909 green. Local: format, typecheck, lint, unit 192/192, agent 32, and the PG agent
-tests run once locally (they found masters are not company-scoped, an archive's read-back needs archived rows, and a full volume).
+Slice 1: branch CI 44166005372, main CI 44171233909. Fix round: (a) run 44358468254 att. 4, (b) 44375822997; (c) PR #84.
 
 ## Test it yourself
 1. `node --import tsx --test test/agent/business-map.test.ts test/agent/assistant-endpoint.test.ts` passes.
 2. `NORTH_STAR_AGENT_KEY_FILE=/mnt/c/Users/rvham/rent_soft/.env corepack pnpm dev`, open the URL, click **Assistant**. Ask "How many
    Field notebooks are on hand at Calgary warehouse?": a step label and timer, then the answer with a link.
-3. On a customer's page: "Set this customer's payment terms to Net 45" runs at once with "Did: …" and **Undo**; Undo puts it back.
-   Ask to ship an order: a plan card waits for **Yes, do it**. "Add a serial number field to items": a plain diff, nothing live.
+3. On a customer's page: "Set this customer's payment terms to Net 45" runs at once ("Did: changed customer …", **Undo**). Shipping
+   an order waits for **Yes, do it** ("In <company>."). "Add a serial number field to items": a plain diff, nothing live.
 
 ## Filed
-- Durable conversations and the §9.4 run record (charter: filed). Model routing: measure first; the dev set's numbers are above.
-- The agent asks for `source_id`/`actor_id` on a manual adjustment (task 22): the screens have no adjustment recipe to copy.
+- Durable conversations and the §9.4 run record; model routing; `source_id`/`actor_id` on a manual adjustment (task 22); cached link
+  labels after a read revocation (end review, Astra 20).
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "AGENT-3",
-  "base": "f76da787fb684b010ea671d713b2b924d440d664", "head": "2dc0b0055b59930ee4909ec4b040c1442738fb5b",
+  "base": "62d34bd6328ae24524151547d527bd1162e5e8a2", "head": "3189562a337638a04a5e492d084cf2c21fbb9071",
   "changedPaths": [
-    ".agents/skills/ux-grammar/SKILL.md", "apps/api/src/agent-cli.ts", "apps/api/src/assistant-endpoint.ts", "apps/api/src/composition-root.ts", "apps/web/src/app-server.ts", "apps/web/src/assistant-panel.ts",
-    "apps/web/test/browser/assistant-panel.composed-application.spec.ts", "apps/web/test/browser/meta-sales.spec.ts", "docs/execution/packets/AGENT-3.md", "package.json", "packages/dev-tooling/src/surface-runtime-seam.ts",
-    "packages/operations-agent/src/anthropic-model.ts", "packages/operations-agent/src/index.ts", "packages/operations-agent/src/loop.ts", "packages/operations-agent/src/model.ts", "packages/operations-agent/src/risk.ts",
-    "packages/operations-agent/src/session.ts", "packages/operations-agent/src/tools.ts", "test/agent/agent-world.ts", "test/agent/assistant-endpoint.test.ts", "test/agent/business-map.test.ts", "test/agent/dev-tasks.ts",
-    "test/agent/eval-harness.ts", "test/architecture/repository-hygiene.test.ts", "test/helpers/reachability-producers.ts", "test/postgres/agent-dev-tasks.test.ts", "test/postgres/agent-tasks.test.ts"
+    "apps/api/src/agent-cli.ts", "apps/api/src/assistant-endpoint.ts", "apps/api/src/composition-root.ts", "apps/api/src/draft-budget.ts", "apps/api/src/posix-quote.ts", "apps/web/src/app-server.ts",
+    "apps/web/src/assistant-panel.ts", "apps/web/src/surface-runtime.ts", "apps/web/test/browser/assistant-panel.composed-application.spec.ts", "packages/operations-agent/src/anthropic-model.ts", "packages/operations-agent/src/business-words.ts",
+    "packages/operations-agent/src/index.ts", "packages/operations-agent/src/loop.ts", "packages/operations-agent/src/model.ts", "packages/operations-agent/src/risk.ts", "packages/operations-agent/src/session.ts", "packages/operations-agent/src/tools.ts",
+    "test/agent/assistant-endpoint.test.ts", "test/agent/business-map.test.ts", "test/agent/dev-tasks.ts", "test/agent/eval-harness.ts", "test/postgres/agent-dev-tasks.test.ts", "test/postgres/agent-tasks.test.ts"
   ],
-  "symbols": [{"path": "packages/operations-agent/src/risk.ts", "name": "operationRisk"}, {"path": "packages/operations-agent/src/session.ts", "name": "OperationsAgentSession"}, {"path": "apps/api/src/assistant-endpoint.ts", "name": "createAssistantEndpoint"}, {"path": "apps/web/src/assistant-panel.ts", "name": "withAssistantPanel"}]
+  "symbols": [{"path": "packages/operations-agent/src/business-words.ts", "name": "businessWords"}, {"path": "packages/operations-agent/src/loop.ts", "name": "meteredNext"}, {"path": "apps/api/src/draft-budget.ts", "name": "budgetedDraftingModel"}, {"path": "apps/web/src/surface-runtime.ts", "name": "assistantCompany"}, {"path": "packages/operations-agent/src/tools.ts", "name": "customizeHandoff"}]
 }
 ```
