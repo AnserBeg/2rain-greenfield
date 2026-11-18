@@ -22,8 +22,10 @@ import {
   type SandboxRunnerOptions,
   type SandboxStep,
 } from '@north-star/customization';
-import type { CompileSuccess } from '@north-star/compiler';
-import { PostgresImmutableReleaseRepository } from './release-repository.js';
+import type {
+  CompileSuccess,
+  ContentAddressedArtifact,
+} from '@north-star/compiler';
 import type { MintedUuid } from '@north-star/platform-runtime';
 import type { TrustedRequestContext } from '@north-star/runtime';
 import pg from 'pg';
@@ -1206,8 +1208,8 @@ export class PostgresCustomizationService {
     return { candidate: releases.at(-1)!, parent: releases.at(-2) ?? parent };
   }
 
-  /** Immutable admitted releases are sufficient as compiler parents. The current
-   * first-party tip may still be staged, so use its checked-in bundle. */
+  /** Read immutable first-party compiler input, including bases retained only in
+   * the database after a pre-tenant baseline. Admission belongs to the candidate. */
   async #loadRelease(
     context: TrustedRequestContext,
     releaseId: MintedUuid,
@@ -1218,36 +1220,60 @@ export class PostgresCustomizationService {
       (release) => release.compiled.releaseRoot === root,
     );
     if (checkedIn) return checkedIn;
-    const repository = new PostgresImmutableReleaseRepository(
+    const stored = await withTrustedRequestTransaction(
       this.connection.runtimePool,
+      context,
+      async (client) => {
+        const metadata = await client.query<{
+          desired_state: Buffer;
+          output_protocol_version: string;
+        }>(
+          `SELECT revision.desired_state, release.output_protocol_version
+           FROM platform.tenant_releases AS release
+           JOIN platform.app_package_revisions AS revision
+             ON revision.tenant_id = release.tenant_id AND revision.revision_id = release.app_package_revision_id
+          WHERE release.tenant_id = $1 AND release.environment_id = $2 AND release.release_id = $3
+            AND revision.provenance = 'firstParty'`,
+          [context.tenantId, context.environmentId, releaseId],
+        );
+        const artifacts = await client.query<{
+          artifact_kind: ContentAddressedArtifact['artifactKind'];
+          content_hash: string;
+          domain_tag: string;
+          media_type: ContentAddressedArtifact['mediaType'];
+          canonical_bytes: Buffer;
+        }>('SELECT * FROM platform.read_tenant_release_artifacts($1)', [
+          releaseId,
+        ]);
+        return { metadata: metadata.rows[0], artifacts: artifacts.rows };
+      },
     );
-    const persisted = await repository.getTenantRelease(context, releaseId);
-    const revision =
-      persisted &&
-      (await repository.getAppPackageRevision(
-        context,
-        persisted.release.appPackageRevisionId,
-      ));
-    if (!persisted || !revision) {
+    if (!stored.metadata) {
       throw new CustomizationServiceRefusal(
         'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
-        'the recorded compiler parent is not an admitted release',
+        'the recorded first-party base is missing',
       );
     }
-    const manifest = persisted.artifacts.find(
+    const artifacts: ContentAddressedArtifact[] = stored.artifacts.map(
+      (artifact) => ({
+        artifactKind: artifact.artifact_kind,
+        contentHash: artifact.content_hash,
+        domainTag: artifact.domain_tag,
+        mediaType: artifact.media_type,
+        canonicalBytes: artifact.canonical_bytes,
+        kind: 'contentAddressedArtifact',
+      }),
+    );
+    const manifest = artifacts.find(
       (artifact) => artifact.contentHash === root,
     );
     if (!manifest)
       throw new CustomizationServiceRefusal(
         'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
-        'the compiler parent has no manifest',
+        'the first-party base has no manifest',
       );
-    const artifacts = persisted.artifacts.map((artifact) => ({
-      ...artifact,
-      kind: 'contentAddressedArtifact' as const,
-    }));
     return {
-      normalizedDefinitionBytes: revision.desiredState,
+      normalizedDefinitionBytes: stored.metadata.desired_state,
       compiled: {
         bundle: {
           artifacts,
@@ -1255,7 +1281,7 @@ export class PostgresCustomizationService {
             new TextDecoder().decode(manifest.canonicalBytes),
           ),
           releaseManifestBytes: manifest.canonicalBytes,
-          outputProtocolVersion: persisted.release.outputProtocolVersion,
+          outputProtocolVersion: stored.metadata.output_protocol_version,
           nodeContracts: [],
           kind: 'compiledReleaseBundle',
         },

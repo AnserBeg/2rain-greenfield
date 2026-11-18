@@ -901,7 +901,28 @@ test(
           } finally {
             await restarted.close();
           }
-          await service.service.rollback();
+          // A later pre-tenant baseline omits the old first-party releases from
+          // the file. Their immutable database artifacts still reproduce intent.
+          const nextBase = platformLabelVariant('Platform stock number', true);
+          const nextRuntime = await openComposedApplicationRuntime({
+            ...options,
+            compiledApplication: nextBase.envelope,
+          });
+          const nextService = await openCustomizeService({
+            ...options,
+            compiledApplication: nextBase.envelope,
+          });
+          try {
+            assert.equal(nextRuntime.customizationUpgrade?.status, 'drafted');
+            assert.equal(
+              (await nextService.service.status()).activeReleaseRoot,
+              prepared.releaseRoot,
+            );
+            await nextService.service.rollback();
+          } finally {
+            await nextService.close();
+            await nextRuntime.close();
+          }
           assert.equal(
             (await service.service.status()).activeReleaseRoot,
             sourceRoot,
@@ -922,7 +943,7 @@ test(
   },
 );
 
-function platformLabelVariant(label: string) {
+function platformLabelVariant(label: string, baseline = false) {
   const authored = structuredClone(firstPartyAuthored) as Record<
     string,
     unknown
@@ -931,7 +952,8 @@ function platformLabelVariant(label: string) {
   fields.find(
     (field) => field.fieldId === 'northstar.app:field.item_sku',
   )!.label = label;
-  const parent = parseCompiledApplication(compiledApplication).application;
+  const original = parseCompiledApplication(compiledApplication);
+  const parent = baseline ? original.bootstrap : original.application;
   const normalized = normalizeApplicationPackage(authored);
   const normalizedDefinitionBytes = new TextEncoder().encode(
     canonicalize(normalized),
@@ -967,7 +989,7 @@ function platformLabelVariant(label: string) {
       schemaVersion: 'northstar.web:compiled-application-release/v2',
       bootstrap: serializeRelease(parsed.bootstrap),
       applications: [
-        ...parsed.applications.map(serializeRelease),
+        ...(baseline ? [] : parsed.applications.map(serializeRelease)),
         serializeRelease({ compiled, normalizedDefinitionBytes }),
       ],
     },
