@@ -495,6 +495,27 @@ export function composedDestinationLabel(local: string): string | undefined {
     : undefined;
 }
 
+/**
+ * A composed destination's placement (LOOK-1 round 2): the menu group it is
+ * listed in when not its own module's, and whether it is occasional.
+ */
+export function composedDestinationPlacement(local: string): {
+  readonly navigationModuleId?: string;
+  readonly occasional: boolean;
+} {
+  const destination = Object.hasOwn(COMPOSED_DESTINATIONS, local)
+    ? COMPOSED_DESTINATIONS[local]
+    : undefined;
+  return {
+    ...(destination?.group
+      ? {
+          navigationModuleId: `${APPLICATION_NAMESPACE}:module.${destination.group}`,
+        }
+      : {}),
+    occasional: destination?.occasional === true,
+  };
+}
+
 /** A navigation destination's declared icon and plain name (LOOK-1). */
 function withDestinationPresentation(
   surface: Record<string, unknown>,

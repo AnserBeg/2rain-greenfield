@@ -407,6 +407,7 @@ composedTest.describe('focus ring coverage', () => {
       assert.ok(result.measurementsRead > 0);
       assert.deepEqual(result.violations, [
         'FOCUS_RING_CONTRAST:.navigation-group > summary:focus-visible',
+        'FOCUS_RING_CONTRAST:.navigation-more > summary:focus-visible',
         'FOCUS_RING_CONTRAST:.sidebar a:focus-visible',
       ]);
     },
@@ -573,6 +574,7 @@ composedTest.describe('focus ring coverage', () => {
       );
       assert.deepEqual(result.violations, [
         'FOCUS_RING_CONTRAST:.navigation-group > summary:focus-visible',
+        'FOCUS_RING_CONTRAST:.navigation-more > summary:focus-visible',
         'FOCUS_RING_CONTRAST:.sidebar a:focus-visible',
       ]);
     },

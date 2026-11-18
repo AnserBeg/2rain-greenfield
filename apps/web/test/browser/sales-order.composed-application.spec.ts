@@ -126,7 +126,10 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
       await control.fill(
         (await control.getAttribute('type')) === 'datetime-local'
           ? value.slice(0, 16)
-          : value,
+          : // A date-only entry takes the day (LOOK-1 round 2).
+            (await control.getAttribute('type')) === 'date'
+            ? value.slice(0, 10)
+            : value,
       );
   };
   const save = async () => {

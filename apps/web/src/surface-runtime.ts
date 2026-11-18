@@ -2405,7 +2405,11 @@ function navigationItem(
       entry.children[0]?.kind === 'navigationSurface'
     ) {
       const surface = surfaceForNavigation(surfaces, entry.children[0]);
-      return `<li class="navigation-node navigation-node--direct">${navigationLink(view, surface, selected, entry.label, workspaceContext, surfaces)}</li>`;
+      // A destination placed in the group from another module (the Custom
+      // group's one record type) keeps its own name (LOOK-1 round 2).
+      const placed =
+        surface.workspace?.navigationModuleId === entry.navigationId;
+      return `<li class="navigation-node navigation-node--direct">${navigationLink(view, surface, selected, placed ? navigationLabel(surface) : entry.label, workspaceContext, surfaces)}</li>`;
     }
     // A group's occasional destinations -- its settings and records looked
     // at now and then -- wait under its own "Other" when there are several
@@ -2432,50 +2436,23 @@ function navigationItem(
 }
 
 /**
- * Customization's record types: their module's local id carries the tenant
- * prefix packages/customization declares (TENANT_LOCAL_PREFIX), read here as
- * the Customize screen reads it.
- */
-const CUSTOM_MODULE_MARKER = ':module.custom_';
-
-/**
- * The sidebar's reading of the compiled tree (LOOK-1 round 2). The landing
- * launcher heads the work queues, so its group does not repeat it; and the
- * record types a customization added gather under one "Custom" group -- at
- * the top level while the five-entry budget allows, else inside More.
+ * The sidebar's reading of the compiled tree (LOOK-1 round 2): the landing
+ * launcher heads the work queues, so its group does not repeat it.
  */
 function sidebarNavigation(
   entries: readonly CompiledNavigationEntry[],
   launcher: CompiledSurfaceDefinition | null,
 ): readonly CompiledNavigationEntry[] {
-  const custom: CompiledNavigationEntry[] = [];
   const read = (
     list: readonly CompiledNavigationEntry[],
   ): CompiledNavigationEntry[] =>
     list.flatMap((entry): CompiledNavigationEntry[] => {
       if (entry.kind === 'navigationSurface')
         return entry.surfaceId === launcher?.surfaceId ? [] : [entry];
-      if (entry.navigationId.includes(CUSTOM_MODULE_MARKER)) {
-        custom.push(entry);
-        return [];
-      }
       const children = read(entry.children);
       return children.length > 0 ? [{ ...entry, children }] : [];
     });
-  const tree = read(entries);
-  if (custom.length === 0) return tree;
-  const group: CompiledNavigationEntry = {
-    children: custom,
-    kind: 'navigationGroup',
-    label: 'Custom',
-    navigationId: 'sidebar:navigation.custom',
-  };
-  if (tree.length < 5) return [...tree, group];
-  // Past the budget the compiler's More is last: the custom groups were in it.
-  const more = tree.at(-1)!;
-  return more.kind === 'navigationGroup'
-    ? [...tree.slice(0, -1), { ...more, children: [...more.children, group] }]
-    : [...tree, group];
+  return read(entries);
 }
 
 /**

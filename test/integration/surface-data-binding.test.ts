@@ -6459,7 +6459,7 @@ test('order entry values: exact decimals, bounded before any write, choice set a
         const header = refused.slots!.keyFacts!;
         assert.match(
           header,
-          /<label class="form-field__label" for="([^"]+)">Order date \(UTC\) \*<\/label><input(?=[^>]*\sid="\1")(?=[^>]*\saria-describedby="\1-error")/,
+          /<label class="form-field__label" for="([^"]+)">Order date \*<\/label><input(?=[^>]*\sid="\1")(?=[^>]*\saria-describedby="\1-error")/,
         );
         assert.match(header, /<small class="field-error" id="[^"]+-error">/);
         assert.doesNotMatch(
@@ -11729,7 +11729,9 @@ test('PAYABLES: the order lists its bills and offers billing only while the orde
         'complete',
         'complete',
         'current',
-        offered ? 'attention' : 'current',
+        // Exactly one current step (LOOK-1 round 2): a later reached step
+        // that needs nothing waits as upcoming.
+        offered ? 'attention' : 'upcoming',
         'upcoming',
       ],
       `the order's progression with ${String(toBill)} to bill`,
