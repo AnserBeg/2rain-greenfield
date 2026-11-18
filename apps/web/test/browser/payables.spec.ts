@@ -1,3 +1,4 @@
+import { completeTask, reviewTask } from './complete-task.js';
 import { test, expect, type Page } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -28,8 +29,7 @@ test('a received purchase order is billed, paid in part and credited for the res
         .locator('dd');
     const finish = async (label: string) => {
       const dialog = page.getByRole('dialog');
-      await dialog.getByRole('button', { name: `Review ${label}` }).click();
-      await dialog.getByRole('button', { name: `Confirm ${label}` }).click();
+      await completeTask(dialog, label);
       await expect(page.getByRole('status').first()).toContainText(
         `${label}: done`,
       );
@@ -134,10 +134,10 @@ test('a received purchase order is billed, paid in part and credited for the res
     await page
       .getByLabel('Reference (cheque or transaction number)')
       .fill('CHQ-3300');
-    await page
-      .getByRole('dialog')
-      .getByRole('button', { name: 'Review Record payment' })
-      .click();
+    await reviewTask(
+      page.locator('[data-composition-task]'),
+      'Review Record payment',
+    );
     await page
       .getByRole('dialog')
       .getByRole('button', { name: 'Confirm Record payment' })

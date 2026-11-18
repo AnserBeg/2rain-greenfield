@@ -1,3 +1,4 @@
+import { completeTask, returnToRecord, reviewTask } from './complete-task.js';
 import { test, expect, type Page } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -12,7 +13,6 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
   test.setTimeout(480_000);
   page.setDefaultTimeout(30_000);
   await fixture(async (orderUrl) => {
-    const task = () => page.locator('[data-composition-task]');
     const dataset = (name: string) =>
       page.locator(`[data-composition-dataset$="dataset.${name}"]`);
     const fact = (label: string) =>
@@ -22,8 +22,7 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
         .locator('dd');
     const finish = async (label: string) => {
       const dialog = page.getByRole('dialog');
-      await dialog.getByRole('button', { name: `Review ${label}` }).click();
-      await dialog.getByRole('button', { name: `Confirm ${label}` }).click();
+      await completeTask(dialog, label);
       await expect(page.getByRole('status').first()).toContainText(
         `${label}: done`,
       );
@@ -43,16 +42,17 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
         await page
           .getByLabel('Stock location')
           .selectOption({ label: 'Calgary warehouse' });
-        await page
-          .getByRole('button', { name: 'Review reservation', exact: true })
-          .click();
+        await reviewTask(
+          page.locator('[data-composition-task]'),
+          'Review reservation',
+        );
         await page
           .getByRole('button', { name: 'Confirm reservation', exact: true })
           .click();
-        await expect(task()).toContainText('complete');
-        await page
-          .getByRole('link', { name: 'Back to order', exact: true })
-          .click();
+        await expect(page.locator('[data-task-result]')).toContainText(
+          ': done',
+        );
+        await returnToRecord(page);
       }
       await dataset('line_reservations')
         .getByRole('link', { name: 'Select', exact: true })
@@ -65,13 +65,14 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
       await page
         .getByLabel('Tracking or BOL number', { exact: true })
         .fill(`PUR-AR-${ship}`);
-      await page
-        .getByRole('button', { name: 'Review shipment', exact: true })
-        .click();
+      await reviewTask(
+        page.locator('[data-composition-task]'),
+        'Review shipment',
+      );
       await page
         .getByRole('button', { name: 'Confirm shipment', exact: true })
         .click();
-      await expect(task()).toContainText('complete');
+      await expect(page.locator('[data-task-result]')).toContainText(': done');
       await page.goto(orderUrl);
     };
     const invoiceTask = () =>
@@ -132,10 +133,10 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
     await page
       .getByLabel('Reference (cheque or transaction number)')
       .fill('EFT-1001');
-    await page
-      .getByRole('dialog')
-      .getByRole('button', { name: 'Review Record payment' })
-      .click();
+    await reviewTask(
+      page.locator('[data-composition-task]'),
+      'Review Record payment',
+    );
     await page
       .getByRole('dialog')
       .getByRole('button', { name: 'Confirm Record payment' })

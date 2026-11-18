@@ -4038,6 +4038,13 @@ test('composed tasks retain reviewed inputs and retry keys, and stop on committe
       );
     const initial = await submit({});
     const taskToken = hiddenValue(initial.html, 'taskToken');
+    const direct = await submit({
+      taskToken,
+      taskStage: 'apply',
+      'workshop.jobs:input.title': 'Bypass review',
+    });
+    assert.match(direct.html, /COMPOSITION_TASK_UNAVAILABLE/u);
+    assert.equal(calls.length, 0);
     const invalid = await submit({
       taskToken,
       taskStage: 'prepare',
@@ -7651,6 +7658,11 @@ test('Milestone C: receiving inputs are derived, offered and exact, never free t
  */
 test('Milestone C: a renamed non-Sales Task input uses the same declared choice semantics', async () => {
   const definition = workshopComposition('Work title');
+  const update = (definition.operations as Array<Record<string, unknown>>).find(
+    (operation) =>
+      operation.operationId === 'workshop.jobs:operation.job_update',
+  )!;
+  update.confirmation = 'none';
   const authoredSurface = (
     definition.surfaces as Array<Record<string, unknown>>
   ).find((surface) => surface.composition)!;
@@ -7772,31 +7784,34 @@ test('Milestone C: a renamed non-Sales Task input uses the same declared choice 
       (html) => ({ statusCode: 200, html }),
     );
   const initial = await submit({});
+  assert.match(initial.html, /name="taskStage" value="apply">Classify work/u);
   assert.match(
     initial.html,
     /<select name="workshop\.jobs:input\.class" required>[\s\S]*?<option value="Routine" selected>Routine work<\/option>/,
   );
   const taskToken = hiddenValue(initial.html, 'taskToken');
+  const unopened = await submit({
+    taskStage: 'apply',
+    'workshop.jobs:input.class': 'Urgent',
+  });
+  assert.match(unopened.html, /COMPOSITION_TASK_UNAVAILABLE/u);
+  assert.equal(calls.length, 0);
   const forged = await submit({
     taskToken,
-    taskStage: 'prepare',
+    taskStage: 'apply',
     'workshop.jobs:input.class': 'Anything',
   });
   assert.match(forged.html, /Choose one of the offered values\./);
   assert.equal(calls.length, 0);
-  const review = await submit({
-    taskToken,
-    taskStage: 'prepare',
-    'workshop.jobs:input.class': 'Urgent',
-  });
-  assert.match(review.html, /<dd>Urgent work<\/dd>/);
   const done = await submit({
     taskToken,
-    taskStage: 'confirm',
-    preparedId: hiddenValue(review.html, 'preparedId'),
+    taskStage: 'apply',
+    'workshop.jobs:input.class': 'Urgent',
   });
   assert.match(done.html, /data-task-result/);
   assert.match(done.html, /Classify work: done/);
+  assert.match(done.html, /<dd>Urgent work<\/dd>/);
+  assert.equal(calls.length, 1);
   assert.deepEqual(asRecord(calls[0]!.input).patch, {
     'workshop.jobs:field.job_name': 'Urgent',
   });

@@ -48,7 +48,8 @@ deliberate, hash-bound exception rather than a relaxation that later admits anyt
    focus. A typed compiled policy must explicitly declare `fallback: page`.
    Forms, preparation, confirmation, execution, outcomes and fresh Record reads
    remain server-owned. Closing dispatches nothing and never implies rollback.
-   No fetching, replay, retry, routing, business rendering or client task state.
+   Task stages also use behaviour 7's bounded fragment transport under the
+   2026-11-18 amendment below.
 6. Reference-control keyboard presentation in the draft document editor: Enter
    in a picker's search box activates that field's own server-rendered Search
    submit instead of the form's default action; arrow keys and Escape move focus
@@ -77,6 +78,24 @@ deliberate, hash-bound exception rather than a relaxation that later admits anyt
    nothing: every read is authorized per request on the server, every choice is
    admitted there against the field's newest offered set and generation, and
    search mutates no business data.
+
+   **Task-stage amendment, 2026-11-18 (INTERACT-1).** A declared native-dialog
+   Task sends its own server-rendered form to its originating page by same-origin
+   POST with `x-rain-fragment: task`. The response contains the server-rendered
+   task region, or the refreshed originating record and queue counts after a
+   verified outcome. The script replaces only those named regions, maintains
+   native dialog focus and pending presentation, and serializes submissions.
+   A server-declared live review prepares inputs after they settle. A later edit
+   hides that preparation immediately and discards older responses. The person
+   explicitly confirms the server-issued preparation before a consequential
+   operation runs. A task may apply directly only when every step resolves to an
+   active ordinary operation with `confirmation: none` and no declared review
+   presentation. Eligibility is derived from the pinned contract on every
+   request. Preparation, validation, execution, retries and outcome verification
+   remain server-owned. Transport failure retains the issued form for a
+   deliberate retry. Regular page submits provide the JavaScript-disabled path.
+   Task reads use ADR-0071's request snapshot and final epoch check. An invocation
+   checks policy live through its existing gateway.
 
 The owner approved this bounded amendment for RAIN-META-SALES on 2026-09-15:
 document context is essential while reserving and partially shipping. Native HTML

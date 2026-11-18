@@ -1,3 +1,4 @@
+import { completeTask } from './complete-task.js';
 import { test, expect } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -72,12 +73,7 @@ test('Buyer submits, Manager rejects and approves, then Buyer places and stages 
         })
         .click();
       const dialog = page.getByRole('dialog');
-      await dialog
-        .getByRole('button', { name: `Review ${label}`, exact: true })
-        .click();
-      await dialog
-        .getByRole('button', { name: `Confirm ${label}`, exact: true })
-        .click();
+      await completeTask(dialog, label);
       await expect(page.getByRole('status').first()).toContainText(
         `${label}: done`,
       );
@@ -85,12 +81,7 @@ test('Buyer submits, Manager rejects and approves, then Buyer places and stages 
     };
     const finish = async (label: string) => {
       const dialog = page.getByRole('dialog');
-      await dialog
-        .getByRole('button', { name: `Review ${label}`, exact: true })
-        .click();
-      await dialog
-        .getByRole('button', { name: `Confirm ${label}`, exact: true })
-        .click();
+      await completeTask(dialog, label);
       await expect(page.getByRole('status').first()).toContainText(
         `${label}: done`,
       );
