@@ -1,6 +1,6 @@
 # SPEED-1 — a record page in a few database trips, measured and held there
 
-Status: slice 1 (count it and gate it) on `packet/SPEED-1`. Tier: Critical-adjacent (request security path; slices 2-4 are read
+Status: slice 1 (count it and gate it) integrated at `3ab5853a`. Tier: Critical-adjacent (request security path; slices 2-4 are read
 by the orchestrator's two critical reviews). Base: `main` `74b3367f`. Stops: none. Charter: [SPEED-1-charter.md](SPEED-1-charter.md).
 
 ## Claims
@@ -40,12 +40,12 @@ by the orchestrator's two critical reviews). Base: `main` `74b3367f`. Stops: non
 | purchase order detail | 169 | 1384 | 135 | 153 |
 | new purchase order | 29 | 242 | 22 | 23 |
 | stock by item | 76 | 586 | 67 | 62 |
-| sales order detail | 255 | 2111 | 203 | 232 |
+| sales order detail | 259 | 2139 | 207 | 236 |
 | task: open / review / confirm | 393 / 205 / 217 | 3237 / 1692 / 1879 | 311 / 161 / 169 | 417 / 190 / 204 |
 
 ## Gates
 
-- Slice 1: CI on PR #62. Local: format, typecheck, lint, `test/unit/request-work-meter.test.ts`, the architecture tests that read
+- Slice 1: CI run 44201921559 green at `81c218b0` (PR #62). Local: format, typecheck, lint, `test/unit/request-work-meter.test.ts`, the architecture tests that read
   the changed files.
 
 ## Test it yourself
