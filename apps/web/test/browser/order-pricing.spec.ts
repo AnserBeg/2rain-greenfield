@@ -39,6 +39,7 @@ test('an order is priced in its currency, discounted and taxed per line, with ch
     await expect(
       page.getByLabel('Line 1 list price', { exact: true }),
     ).toHaveText('12.5');
+    await openLineMore(page, 1);
     await expect(combo(page, 'Line 1 tax code')).toHaveAttribute(
       'data-selected-label',
       'GST-AB',
@@ -261,4 +262,13 @@ async function openMoreDetails(target: Page): Promise<void> {
   const more = target.locator('details.draft-more');
   if ((await more.count()) && (await more.getAttribute('open')) === null)
     await more.locator('summary').click();
+}
+
+/** Opens a line's More (LOOK-1 round 3): its discount and tax. */
+async function openLineMore(target: Page, line: number): Promise<void> {
+  const more = target.locator(
+    `details.draft-line-more:has(> summary[aria-label="More for line ${String(line)}"])`,
+  );
+  if ((await more.getAttribute('open')) === null)
+    await more.locator(':scope > summary').click();
 }

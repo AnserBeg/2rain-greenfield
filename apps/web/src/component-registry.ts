@@ -914,11 +914,12 @@ function renderTitleStatus(context: SurfaceComponentContext): string {
       : record
         ? `<span class="status-pill" data-status-role="${record.archived ? 'attention' : 'success'}">${record.archived ? 'Archived' : 'Active'}<span class="sr-only"> · revision ${record.revision}</span></span>`
         : form
-          ? '<span class="status-pill" data-status-role="inProgress">Draft</span>'
+          ? // A new record is a draft: the neutral outlined badge (round 3).
+            '<span class="status-pill">Draft</span>'
           : '';
   return slotPanel(
     context,
-    `<header class="surface-heading surface-heading--slot"><div>${record && !form ? `<p class="eyebrow">${escapeHtml(entityLabel(context.surface))}</p>` : ''}<h1>${escapeHtml(title)}</h1></div>${status}</header>${feedbackHtml(context.feedback)}`,
+    `<header class="surface-heading surface-heading--slot"><div>${record || form ? `<p class="eyebrow">${escapeHtml(entityLabel(context.surface))}</p>` : ''}<h1>${escapeHtml(title)}</h1></div>${status}</header>${feedbackHtml(context.feedback)}`,
     'title-status-slot',
   );
 }

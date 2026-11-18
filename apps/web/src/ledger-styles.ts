@@ -328,10 +328,20 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 /* ---------- record (generic) ---------- */
 .command-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-height:0;padding:0;border:0;background:transparent}
 .command-bar .action-overflow{margin-left:auto}
-.command-bar [data-save-boundary]{flex-basis:100%;margin:0;color:var(--muted);font-size:12px}
+.command-bar [data-save-boundary]{flex:1 1 auto;min-width:0;margin:0;color:var(--muted);font-size:12px}
 /* The editor's save bar (LOOK-1): sticky under the form, one primary action. */
 .panel:has(>.command-bar [data-save-boundary]){position:sticky;bottom:0;z-index:5;padding:10px var(--pad-x);box-shadow:var(--shadow-bar)}
-.command-bar:has([data-save-boundary]){flex-wrap:wrap;justify-content:flex-end}
+.command-bar:has([data-save-boundary]){flex-wrap:nowrap;align-items:center;justify-content:flex-end}
+/* An order line reads product, quantity and price; its discount and tax
+   wait behind its own More, its removal a quiet × (LOOK-1 round 3). */
+.draft-line-more{position:relative}
+.draft-line-more>summary{color:var(--accent-text);font-size:12px;font-weight:500;cursor:pointer;list-style:none}
+.draft-line-more>summary::-webkit-details-marker{display:none}
+.draft-line-more[open]>.draft-line-more__fields{display:grid;gap:8px;width:14rem;margin-top:6px}
+.draft-line-more__field{display:grid;gap:4px}
+.draft-line-more__field>span{color:var(--muted);font-size:11px;font-weight:500}
+.draft-line__remove{min-width:28px;color:var(--muted);font-size:16px;line-height:1;text-decoration:none}
+.draft-line__remove:hover{color:var(--ink)}
 .panel:has([data-document-editor]) fieldset{margin:0;padding:0;border:0;background:transparent}
 .draft-header.form-fields{grid-template-columns:repeat(3,minmax(0,1fr));gap:14px 18px;margin:0}
 .draft-lines-panel .panel__heading{align-items:center;margin-bottom:10px}
@@ -370,6 +380,7 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .launcher-scan__field input{min-height:44px;padding:0 12px;font-family:var(--f-mono);font-size:14px}
 .launcher-scan__message{margin-top:10px}
 .launcher-action button{min-height:44px}
+.launcher-empty{grid-column:1/-1;margin:24px 0 0;color:var(--muted);font-size:13px;text-align:center}
 /* The find box's button sits beside it, at the input's line (LOOK-1 round 2). */
 @media(min-width:801px){
 .surface-grid:has(.launcher-scan):has(.launcher-action) .launcher-scan{grid-column:1/12}
@@ -580,6 +591,22 @@ td[data-cell-role=actions] a:not([class]){color:var(--muted);font-size:12px}
 .composition-task-context .record-fields dd{font-size:12px}
 .composition-task-context section+section{margin-top:10px;padding-top:10px;border-top:1px solid var(--rule)}
 .composition-task-consequence{margin:12px 0;padding:10px 12px;border-radius:4px;background:var(--accent-soft);color:var(--ink-2);font-size:12px}
+/* The Receive dialog as the mockup draws it (LOOK-1 round 3): the title,
+   then the order; the header fields three to a row; the declared
+   consequence as "After you post"; Cancel beside the one primary. */
+.composition-task-dialog:modal{width:min(44rem,calc(100vw - 32px))}
+.composition-task-header>div{display:flex;flex-direction:column;gap:2px}
+.composition-task-header>div>h2{order:-1;margin:0}
+.composition-task-header>div>p{margin:0;color:var(--muted);font-size:12px}
+.composition-task-header>div>.muted{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+.composition-inputs:has(>.composition-task-after){grid-template-columns:repeat(3,minmax(0,1fr));align-items:start}
+.composition-inputs:has(>.composition-task-after)>:not(.composition-input),.composition-inputs:has(>.composition-task-after)>.composition-input:has(textarea){grid-column:1/-1}
+.composition-inputs .composition-input textarea{min-height:56px}
+.composition-task-after{display:grid;gap:4px;padding:10px 12px;border-radius:4px;background:var(--accent-soft)}
+.composition-task-after .eyebrow{margin:0;color:var(--accent-text)}
+.composition-task-after .composition-task-consequence{margin:0;padding:0;background:none}
+.composition-task-rows button[value=fill]{min-height:0;height:auto;padding:0;border:0;background:none;color:var(--accent-text);font-size:12px;font-weight:500;text-decoration:underline}
+.composition-task-footer:has(>a.secondary-action){display:flex;justify-content:flex-end;align-items:center;gap:8px}
 .composition-task-result{margin-bottom:14px;padding:10px 12px;border-radius:4px;background:var(--success-soft);color:var(--success)}
 .composition-task-result h3{margin:0 0 6px;font-size:13px}
 .composition-task-result dd,.composition-task-result dt{color:var(--success)}
@@ -662,7 +689,8 @@ body:has(.shell-menu[open]) .sidebar{visibility:visible}
 body:has(.shell-menu[open])::after{content:"";position:fixed;inset:48px 0 0;z-index:55;background:var(--scrim)}
 .topbar{position:sticky;top:0;z-index:58;min-height:48px;height:auto;gap:10px;flex-wrap:wrap;padding:6px max(16px,env(safe-area-inset-right,0px)) 6px 56px}
 .topbar__context{display:block;flex:1}
-.shell-search{display:none}
+.shell-search{order:3;flex-basis:100%;margin:0}
+.shell-search label{width:100%}
 .principal{margin-left:0}
 main{padding:14px max(16px,env(safe-area-inset-left,0px)) 40px}
 /* In the drawer each group is a disclosure again, with thumb-sized rows. */
@@ -674,6 +702,7 @@ main{padding:14px max(16px,env(safe-area-inset-left,0px)) 40px}
 
 /* ---------- 800px and below: the compact projection ---------- */
 @media(max-width:800px){
+.composition-inputs:has(>.composition-task-after){grid-template-columns:minmax(0,1fr)}
 .list-controls{flex-wrap:wrap}
 .list-controls__search{flex-basis:100%}
 .list-pagination a,.list-pagination button{min-height:44px}

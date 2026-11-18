@@ -617,6 +617,40 @@ function holds(condition: Condition, data: CompositionData): boolean {
  * whose conditions hold, each judged as that row's `selected` values, in the
  * dataset's order. A dataset that failed to load offers none.
  */
+/** A multi-row Task's rows filled from their declared fill column. */
+function prefilledRows(
+  action: Action,
+  data: CompositionData,
+): Record<string, Record<string, string>> {
+  const filled: Record<string, Record<string, string>> = {};
+  const declared = action.rows;
+  const child = declared
+    ? data.children.find(
+        (value) => value.definition.datasetId === declared.datasetId,
+      )
+    : undefined;
+  if (!declared?.fillLabel || !child) return filled;
+  for (const row of taskRows(action, data))
+    for (const input of action.inputs) {
+      const fill = input.perRow?.fillFrom;
+      const column = fill
+        ? child.definition.columns.find(
+            (value) => value.columnId === fill.columnId,
+          )
+        : undefined;
+      if (!column) continue;
+      let value: ImmutableJsonValue = null;
+      try {
+        value = recordValue(row.record, column.field);
+      } catch {
+        /* An unstated figure fills nothing. */
+      }
+      if (typeof value === 'string' && POSITIVE_DECIMAL.test(value))
+        (filled[row.record.recordId] ??= {})[input.inputId] = value;
+    }
+  return filled;
+}
+
 function taskRows(action: Action, data: CompositionData): Row[] {
   const rows = action.rows;
   if (!rows) return [];
@@ -2104,7 +2138,10 @@ export async function submitCompositionAction(
       rowIds: Object.freeze(
         taskRows(action, data).map((row) => row.record.recordId),
       ),
-      rowInputs: {},
+      // Each row starts with what is still open (LOOK-1 round 3, ruling):
+      // the declared fill, applied as the Task opens; nothing is filled on
+      // a guess.
+      rowInputs: prefilledRows(action, data),
       results: {},
       rowResults: {},
       generated: {},
@@ -2705,7 +2742,7 @@ export async function submitCompositionAction(
     const reviewLabel =
       current.action.presentation?.task?.confirmation.reviewLabel ??
       `Review ${current.action.label}`;
-    return `${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}" novalidate>${hidden}${taskRowsDeclared?.fillLabel ? '<button type="submit" class="sr-only" name="taskStage" value="prepare" tabindex="-1" aria-hidden="true" data-task-default></button>' : ''}${controls.join('')}${rows}<p class="composition-task-consequence">${h(current.action.description)}</p><footer class="composition-task-footer"><button name="taskStage" value="prepare">${h(reviewLabel)}</button></footer></form>${back}`;
+    return `${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}" novalidate>${hidden}${taskRowsDeclared?.fillLabel ? '<button type="submit" class="sr-only" name="taskStage" value="prepare" tabindex="-1" aria-hidden="true" data-task-default></button>' : ''}${controls.join('')}${rows}<section class="composition-task-after" aria-label="After you post"><p class="eyebrow">After you post</p><p class="composition-task-consequence">${h(current.action.description)}</p></section><footer class="composition-task-footer"><a class="secondary-action" href="${h(url)}">Cancel</a><button name="taskStage" value="prepare">${h(reviewLabel)}</button></footer></form>`;
   });
 }
 

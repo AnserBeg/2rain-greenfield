@@ -180,7 +180,8 @@ async function requireLedgerParts(
   if (width > 900) await expect.soft(page.locator('.sidebar')).toBeVisible();
   else await expect.soft(page.locator('.shell-menu > summary')).toBeVisible();
   const parts: Readonly<Record<Screen, readonly string[]>> = {
-    home: ['.launcher-tiles .launcher-tile', '.launcher-scan'],
+    // Searched from the top bar (round 3): no find box of its own.
+    home: ['.launcher-tiles .launcher-tile', '.shell-search input'],
     po: [
       '.composition-header h1',
       '.composition-business-status',

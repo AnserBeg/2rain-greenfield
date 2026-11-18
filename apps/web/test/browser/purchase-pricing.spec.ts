@@ -51,6 +51,7 @@ test('a purchase order takes its supplier defaults, is discounted and taxed per 
     ).toHaveText('5');
     // A line's tax code starts from the order's, with its rate frozen.
     await pick(page, 'Line 1 product', 'OFF-100', 'Field notebook');
+    await openLineMore(page, 1);
     await expect(combo(page, 'Line 1 tax code')).toHaveAttribute(
       'data-selected-label',
       'GST-AB',
@@ -384,4 +385,13 @@ async function openMoreDetails(target: Page): Promise<void> {
   const more = target.locator('details.draft-more');
   if ((await more.count()) && (await more.getAttribute('open')) === null)
     await more.locator('summary').click();
+}
+
+/** Opens a line's More (LOOK-1 round 3): its discount and tax. */
+async function openLineMore(target: Page, line: number): Promise<void> {
+  const more = target.locator(
+    `details.draft-line-more:has(> summary[aria-label="More for line ${String(line)}"])`,
+  );
+  if ((await more.getAttribute('open')) === null)
+    await more.locator(':scope > summary').click();
 }

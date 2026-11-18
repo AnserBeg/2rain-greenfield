@@ -596,19 +596,23 @@ export function orderEntrySurfaces(
                   tiers: priceLists('table'),
                 },
               }),
-              field(`${local}_line_discount_percent`, 'Discount %'),
+              // A line's discount and tax wait behind its own More (LOOK-1
+              // round 3): the row reads product, quantity and price.
+              field(`${local}_line_discount_percent`, 'Discount %', {
+                disclosure: 'more',
+              }),
               field(`${local}_line_tax_code_id`, 'Tax code', {
                 ...taxCode,
+                disclosure: 'more',
                 defaultFrom: {
                   referenceFieldId: id('field', `${local}_line_item_id`),
                   headerFieldId: id('field', `${local}_tax_code_id`),
                 },
               }),
-              field(
-                `${local}_line_tax_rate_percent`,
-                'Tax rate %',
-                rateOf(`${local}_line_tax_code_id`),
-              ),
+              field(`${local}_line_tax_rate_percent`, 'Tax rate %', {
+                ...rateOf(`${local}_line_tax_code_id`),
+                disclosure: 'more',
+              }),
             ]
           : [
               field(
@@ -623,19 +627,23 @@ export function orderEntrySurfaces(
                     }
                   : {},
               ),
-              field(`${local}_line_discount_percent`, 'Discount %'),
+              // A line's discount and tax wait behind its own More (LOOK-1
+              // round 3): the row reads product, quantity and price.
+              field(`${local}_line_discount_percent`, 'Discount %', {
+                disclosure: 'more',
+              }),
               field(`${local}_line_tax_code_id`, 'Tax code', {
                 ...taxCode,
+                disclosure: 'more',
                 defaultFrom: {
                   referenceFieldId: id('field', `${local}_line_item_id`),
                   headerFieldId: id('field', `${local}_tax_code_id`),
                 },
               }),
-              field(
-                `${local}_line_tax_rate_percent`,
-                'Tax rate %',
-                rateOf(`${local}_line_tax_code_id`),
-              ),
+              field(`${local}_line_tax_rate_percent`, 'Tax rate %', {
+                ...rateOf(`${local}_line_tax_code_id`),
+                disclosure: 'more',
+              }),
             ]),
       ],
     };

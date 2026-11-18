@@ -10754,10 +10754,13 @@ test('ORDER-PARITY: a truck receipt receives several lines in one receipt, fille
   const quantity = (line: string) =>
     `${id('input', 'receive_lines_quantity')}@${line}`;
   const cost = (line: string) => `${id('input', 'receive_lines_cost')}@${line}`;
-  for (const line of [lineA!, lineC!, lineD!]) {
-    assert.equal(controlValue(start.html, quantity(line)), '');
+  // Each row starts with what is still open (LOOK-1 round 3, ruling); the
+  // line whose figure is withheld starts empty -- nothing on a guess.
+  assert.equal(controlValue(start.html, quantity(lineA!)), '5');
+  assert.equal(controlValue(start.html, quantity(lineD!)), '3');
+  assert.equal(controlValue(start.html, quantity(lineC!)), '');
+  for (const line of [lineA!, lineC!, lineD!])
     assert.equal(controlValue(start.html, cost(line)), '');
-  }
   // Each row's inputs are named with the line they belong to.
   assert.match(
     start.html,
