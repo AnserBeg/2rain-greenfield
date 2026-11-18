@@ -772,6 +772,20 @@ function surfaceManifestPayload(
           ),
       ),
     );
+  const recordFieldPresentation =
+    [...compositions.values()].some((value) =>
+      value?.fields.some((column) => column.showWhenEmpty),
+    ) ||
+    original.surfaces.some(
+      (surface) =>
+        'form' in surface &&
+        (surface.form as SurfaceForm | undefined)?.fields !== undefined,
+    );
+  const editorFloor = recordFieldPresentation
+    ? 23
+    : rankedDefaultsOrChainedTasks
+      ? 22
+      : null;
   const payloadSchemaVersion = composed
     ? COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION
     : navigation
@@ -958,8 +972,8 @@ function surfaceManifestPayload(
       // 9: picker eligibility and typed Task inputs. A reader that dropped
       // either would offer every party as a customer, or ask for free text
       // where a governed value is declared -- a wrong render, not a lesser one.
-      minimumVersion: rankedDefaultsOrChainedTasks
-        ? 22
+      minimumVersion: editorFloor
+        ? editorFloor
         : original.surfaces.some((surface) => {
               const list =
                 'list' in surface
