@@ -158,12 +158,13 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
 
 /**
  * Text only a machine writes (round 2): a canonical id such as an option's,
- * or a raw instant -- what a value shown by its field kind never is.
+ * a raw instant, or a record or principal id (round 3: the chrome too) --
+ * what a page shown to a person never is.
  */
 function machineText(text: string): readonly string[] {
   return [
     ...text.matchAll(
-      /\b[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+:[a-z]+\.[a-z0-9_-]+|\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/gu,
+      /\b[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+:[a-z]+\.[a-z0-9_-]+|\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gu,
     ),
   ].map((match) => match[0]);
 }

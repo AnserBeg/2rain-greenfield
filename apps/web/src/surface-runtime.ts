@@ -103,14 +103,27 @@ export function withLocalDemoIdentity(
 ): SurfaceRuntimeResponse {
   if (!actors) return response;
   const bar = `<aside class="demo-identity" aria-label="Local demo identity"><form method="post"><label>Acting as <select name="localDemoActAs" aria-label="Acting as">${actors.map((actor) => `<option value="${actor.key}"${actor.key === selected ? ' selected' : ''}>${escapeHtml(actor.label)}</option>`).join('')}</select></label><button type="submit">Switch person</button><span>Local demo</span></form></aside>`;
-  // Inside the shell it sits in the sidebar's footer beside the principal
-  // (LOOK-1); a page without the shell keeps it at the top of the body.
-  const footer = '<div class="side-foot" data-shell-region="principal">';
+  // Inside the shell the switch sits in the avatar's menu, and the footer
+  // names the person and their role (LOOK-1 round 3); a page without the
+  // shell keeps it at the top of the body.
+  const menu = '<div class="shell-account__menu">';
+  const who = '<span class="side-foot__who"><strong>Signed in</strong></span>';
+  const person = actors.find((actor) => actor.key === selected)?.label;
+  if (!response.html.includes(menu))
+    return {
+      ...response,
+      html: response.html.replace('<body>', `<body>${bar}`),
+    };
   return {
     ...response,
-    html: response.html.includes(footer)
-      ? response.html.replace(footer, `${footer}${bar}`)
-      : response.html.replace('<body>', `<body>${bar}`),
+    html: response.html
+      .replace(menu, `${menu}${bar}`)
+      .replace(
+        who,
+        person
+          ? `<span class="side-foot__who"><strong>${escapeHtml(person)}</strong><small>Local demo</small></span>`
+          : who,
+      ),
   };
 }
 
@@ -2232,10 +2245,6 @@ function shellDocument(
   );
   const landing = landingSurface(compiledNavigation, surfaces);
   const launcher = landing?.launcher ? landing : null;
-  const company =
-    workspaceContext?.options.find(
-      (option) => option.recordId === workspaceContext.selectedRecordId,
-    )?.label ?? null;
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -2251,24 +2260,21 @@ function shellDocument(
     <div class="app-shell" data-release-id="${escapeHtml(view.release.releaseId)}" data-release-content-hash="${escapeHtml(view.release.contentHash)}" data-pointer-fence="${view.pointer.fence}">
       <aside class="sidebar" id="shell-sidebar">
         <details class="shell-menu"><summary aria-label="Menu" aria-controls="shell-sidebar">${svgIcon('<path d="M4 7h16M4 12h16M4 17h16"/>')}</summary></details>
-        <div class="brand"><span class="brand__mark" aria-hidden="true">${escapeHtml(initials(company ?? '2rain'))}</span><span><strong>${escapeHtml(company ?? '2rain')}</strong><small>${company ? '2rain' : 'Compiled workspace'}</small></span></div>
+        ${workspaceContext ? renderWorkspaceContextBar(workspaceContext) : '<div class="brand"><span class="brand__mark" aria-hidden="true">2</span><span><strong>2rain</strong></span></div>'}
+        <div class="sidebar-scroll">
         ${launcher ? renderWorkQueues(view, launcher, surfaces, selected, workspaceContext, queueCounts) : ''}
-        <nav aria-label="Release navigation">
-          <ul class="navigation-tree">${sidebarNavigation(navigation, launcher)
-            .map((entry) =>
-              navigationItem(view, entry, surfaces, selected, workspaceContext),
-            )
-            .join('')}</ul>
-        </nav>
-        <div class="side-foot" data-shell-region="principal"><span class="principal__avatar" aria-hidden="true">${escapeHtml(initials('Signed in'))}</span><span class="side-foot__who"><strong>Signed in</strong><small>${escapeHtml(view.environmentId)}</small></span></div>
+        <nav aria-label="Release navigation">${renderSidebarNavigation(view, sidebarNavigation(navigation, launcher), surfaces, selected, workspaceContext)}</nav>
+        </div>
+        <div class="side-foot" data-shell-region="principal"><span class="principal__avatar" aria-hidden="true">${escapeHtml(initials('Signed in'))}</span><span class="side-foot__who"><strong>Signed in</strong></span></div>
       </aside>
       <div class="workspace">
         <header class="topbar">
           <strong class="topbar__context">${escapeHtml(activeDestination ?? selected?.label ?? 'Workspace')}</strong>
-          ${launcher && launcher !== selected ? renderShellSearch(view, launcher, workspaceContext) : ''}
-          ${workspaceContext ? renderWorkspaceContextBar(workspaceContext) : ''}
+          ${launcher ? renderShellSearch(view, launcher, workspaceContext) : ''}
+          <details class="shell-account"><summary aria-label="Account and diagnostics"><span class="principal__avatar" aria-hidden="true">${escapeHtml(initials('Signed in'))}</span></summary><div class="shell-account__menu">
           <div class="principal" aria-label="Signed-in principal">Signed in</div>
           <details class="shell-diagnostics"><summary>Diagnostics</summary><dl><dt>Tenant</dt><dd>${escapeHtml(view.tenantId)}</dd><dt>Environment</dt><dd>${escapeHtml(view.environmentId)}</dd><dt>Principal</dt><dd>${escapeHtml(view.principalId)}</dd><dt>Pinned release</dt><dd>${escapeHtml(view.release.releaseId)}</dd><dt>Release root</dt><dd>${escapeHtml(view.release.contentHash)}</dd><dt>Fence</dt><dd>${view.pointer.fence}</dd></dl></details>
+          </div></details>
         </header>
         <main id="surface-content" tabindex="-1">${body}</main>
       </div>
@@ -2390,9 +2396,6 @@ function navigationItem(
   workspaceContext: WorkspaceContextBar | null,
 ): string {
   if (entry.kind === 'navigationGroup') {
-    const isOccasional = (child: CompiledNavigationEntry): boolean =>
-      child.kind === 'navigationSurface' &&
-      surfaceForNavigation(surfaces, child).workspace?.membership === 'setup';
     const current = navigationEntryIsCurrent(view, entry, surfaces, selected);
     const destination = currentNavigationDestination(
       view,
@@ -2411,28 +2414,62 @@ function navigationItem(
         : null;
     if (only && only.workspace?.navigationModuleId !== entry.navigationId)
       return `<li class="navigation-node navigation-node--direct">${navigationLink(view, only, selected, entry.label, workspaceContext, surfaces)}</li>`;
-    // A group's occasional destinations -- its settings and records looked
-    // at now and then -- wait under its own "Other" when there are several
-    // and the group also lists day-to-day work (LOOK-1 round 2).
-    const occasional = entry.children.filter(isOccasional);
-    const daily = entry.children.filter((child) => !isOccasional(child));
-    const more = occasional.length > 1 && daily.length > 0 ? occasional : [];
-    const items = (more.length > 0 ? daily : entry.children)
+    const items = entry.children
       .map((child) =>
         navigationItem(view, child, surfaces, selected, workspaceContext),
       )
       .join('');
-    const moreOpen = more.some((child) =>
-      navigationEntryIsCurrent(view, child, surfaces, selected),
-    );
-    const moreItems =
-      more.length > 0
-        ? `<li class="navigation-node navigation-node--more"><details class="navigation-more"${moreOpen ? ' open' : ''}><summary><span class="nav-icon" aria-hidden="true">${NAVIGATION_ICONS.group}</span><span>Other</span></summary><ul class="navigation-children">${more.map((child) => navigationItem(view, child, surfaces, selected, workspaceContext)).join('')}</ul></details></li>`
-        : '';
-    return `<li class="navigation-node navigation-node--group"><details class="navigation-group"${current ? ' data-current="true"' : ''}><summary><span class="nav-icon" aria-hidden="true">${declaredIcon(entry.icon) ?? NAVIGATION_ICONS.group}</span><span class="nav-text"><span class="nav-group-label">${escapeHtml(entry.label)}</span>${destination && destination !== entry.label ? `<small>${escapeHtml(destination)}</small>` : ''}</span><span class="nav-arrow" aria-hidden="true">›</span></summary><ul class="navigation-children">${items}${moreItems}</ul></details></li>`;
+    return `<li class="navigation-node navigation-node--group"><details class="navigation-group"${current ? ' data-current="true"' : ''}><summary><span class="nav-icon" aria-hidden="true">${declaredIcon(entry.icon) ?? NAVIGATION_ICONS.group}</span><span class="nav-text"><span class="nav-group-label">${escapeHtml(entry.label)}</span>${destination && destination !== entry.label ? `<small>${escapeHtml(destination)}</small>` : ''}</span><span class="nav-arrow" aria-hidden="true">›</span></summary><ul class="navigation-children">${items}</ul></details></li>`;
   }
   const surface = surfaceForNavigation(surfaces, entry);
   return `<li class="navigation-node navigation-node--surface">${navigationLink(view, surface, selected, navigationLabel(surface), workspaceContext, surfaces)}</li>`;
+}
+
+/**
+ * The navigation tree, and one "Settings" disclosure (LOOK-1 round 3) for
+ * the occasional destinations -- declared `setup` members -- of groups that
+ * also list day-to-day work, so the groups show the day's work. A group of
+ * masters only (Contacts, Catalog) keeps its own. Outside the tree, so the
+ * five-entry budget is unchanged.
+ */
+function renderSidebarNavigation(
+  view: RuntimeViewContract.RequestRuntimeView,
+  entries: readonly CompiledNavigationEntry[],
+  surfaces: readonly CompiledSurfaceDefinition[],
+  selected: CompiledSurfaceDefinition | null,
+  workspaceContext: WorkspaceContextBar | null,
+): string {
+  const occasional = (entry: CompiledNavigationEntry): boolean =>
+    entry.kind === 'navigationSurface' &&
+    surfaceForNavigation(surfaces, entry).workspace?.membership === 'setup';
+  const settings: CompiledNavigationEntry[] = [];
+  const read = (
+    list: readonly CompiledNavigationEntry[],
+  ): CompiledNavigationEntry[] =>
+    list.map((entry) => {
+      if (entry.kind !== 'navigationGroup') return entry;
+      const daily = entry.children.filter(
+        (child) => child.kind === 'navigationSurface' && !occasional(child),
+      );
+      if (daily.length === 0)
+        return { ...entry, children: read(entry.children) };
+      settings.push(...entry.children.filter(occasional));
+      return {
+        ...entry,
+        children: read(entry.children.filter((child) => !occasional(child))),
+      };
+    });
+  const tree = read(entries);
+  const item = (entry: CompiledNavigationEntry) =>
+    navigationItem(view, entry, surfaces, selected, workspaceContext);
+  const open = settings.some((entry) =>
+    navigationEntryIsCurrent(view, entry, surfaces, selected),
+  );
+  return `<ul class="navigation-tree">${tree.map(item).join('')}</ul>${
+    settings.length > 0
+      ? `<details class="navigation-settings"${open ? ' open' : ''}><summary><span class="nav-icon" aria-hidden="true">${declaredIcon('settings') ?? NAVIGATION_ICONS.group}</span><span>Settings</span></summary><ul class="navigation-children">${settings.map(item).join('')}</ul></details>`
+      : ''
+  }`;
 }
 
 /**
@@ -2582,24 +2619,30 @@ function navigationLink(
 }
 
 function renderWorkspaceContextBar(context: WorkspaceContextBar): string {
-  return `<nav class="workspace-context-bar" aria-label="Company" data-shell-region="workspace-context-bar" data-scope-parameter-id="${escapeHtml(context.parameterId)}">
-    <span class="workspace-context-bar__label">Company</span>
-    <span class="workspace-context-bar__options">${
-      context.options.length === 0
-        ? '<span class="muted">No authorized active companies available. Contact your administrator for access or setup.</span>'
-        : context.options
-            .map((option) => {
-              const parameters = new URLSearchParams(
-                context.preservedParameters.map(([key, value]) => [key, value]),
-              );
-              parameters.set('surface', context.targetSurfaceId);
-              parameters.set(context.parameterId, option.recordId);
-              const current = option.recordId === context.selectedRecordId;
-              return `<a class="secondary-action" href="/?${parameters.toString()}" data-legal-entity-id="${escapeHtml(option.recordId)}"${current ? ' aria-current="true"' : ''}>${escapeHtml(option.label)}</a>`;
-            })
-            .join('')
-    }</span>
-  </nav>`;
+  // The sidebar's head (LOOK-1 round 3): the page's company as the brand,
+  // any other authorized company a link beneath it -- the same links, so
+  // switching is unchanged.
+  const current = context.options.find(
+    (option) => option.recordId === context.selectedRecordId,
+  );
+  const ordered = current
+    ? [current, ...context.options.filter((option) => option !== current)]
+    : context.options;
+  return `<nav class="workspace-context-bar" aria-label="Company" data-shell-region="workspace-context-bar" data-scope-parameter-id="${escapeHtml(context.parameterId)}"><span class="brand__mark" aria-hidden="true">${escapeHtml(initials(current?.label ?? '2rain'))}</span><span class="workspace-context-bar__options">${
+    context.options.length === 0
+      ? '<span class="muted">No authorized active companies available. Contact your administrator for access or setup.</span>'
+      : ordered
+          .map((option) => {
+            const parameters = new URLSearchParams(
+              context.preservedParameters.map(([key, value]) => [key, value]),
+            );
+            parameters.set('surface', context.targetSurfaceId);
+            parameters.set(context.parameterId, option.recordId);
+            const selected = option.recordId === context.selectedRecordId;
+            return `<a class="workspace-company" href="/?${parameters.toString()}" data-legal-entity-id="${escapeHtml(option.recordId)}"${selected ? ' aria-current="true"' : ''}>${escapeHtml(option.label)}</a>`;
+          })
+          .join('')
+  }</span></nav>`;
 }
 
 function navigationEntries(
