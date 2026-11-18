@@ -522,7 +522,7 @@ td[data-cell-role=primary]>.composition-cell-secondary>span+span::before{content
 .composition-cell-details{margin-top:4px}
 .composition-cell-details>summary{display:inline;color:var(--muted);font-size:11px;cursor:pointer}
 .composition-cell-details[open]>.composition-cell-secondary{margin-top:4px}
-[data-task-resume][hidden]{display:none!important}
+[data-task-resume][hidden],body:has(dialog.composition-task-dialog[open]) [data-task-resume]{display:none!important}
 .composition-collection[data-resolution=empty]:not([data-composition-rail]){display:none!important}
 td[data-cell-role=actions] a:not([class]){color:var(--muted);font-size:12px}
 /* One document sheet (LOOK-1 round 3): the facts, the line datasets and the

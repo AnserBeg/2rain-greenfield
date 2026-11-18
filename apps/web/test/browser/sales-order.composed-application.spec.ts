@@ -298,7 +298,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   );
   await expect(lineRow.locator('td[data-column-label="Line"]')).toHaveText('1');
   await expect(
-    lineRow.locator('[data-cell-role="primary"] .composition-cell-secondary'),
+    lineRow.locator('[data-cell-role="primary"] > .composition-cell-secondary'),
   ).toContainText('Unit EA');
   await page.locator('.composition-record-actions > summary').click();
   await page.getByRole('button', { name: 'Confirm', exact: true }).click();
