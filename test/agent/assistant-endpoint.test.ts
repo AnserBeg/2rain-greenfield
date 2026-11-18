@@ -250,7 +250,7 @@ test('history replays the rendered exchange only to the person who asked', async
     const other = await post('history', 'manager', { conversation });
     assert.equal(other.status, 204);
     assert.equal(await other.text(), '');
-    const mine = await post('history', 'buyer', { conversation });
+    const mine = await post('history', 'buyer', { conversation, page: '' });
     const history = (await mine.json()) as {
       transcript: { type: string; text: string }[];
       pending: unknown;

@@ -113,7 +113,7 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
   const post = (action, body) => fetch('/?assistant=' + action, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-northstar-assistant': '1' },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, page: location.search }),
     keepalive: action === 'ask',
   });
   const element = (tag, text, cls) => {
@@ -339,9 +339,9 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     try {
       const response = await post('history', { conversation: owner, after });
       if (version !== generation) return;
-      if (response.status === 204) {
+      if (response.status === 204 || response.status === 409) {
         // Navigation can overtake creation of a just-submitted conversation.
-        if (missing < 4) {
+        if (response.status === 204 && missing < 4) {
           setTimeout(() => restore(owner, version, after, missing + 1), 500);
           return;
         }
@@ -388,7 +388,6 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
       const response = await post('ask', {
         conversation, startId, text,
         screen: params.get('surface') ? { surfaceId: params.get('surface'), recordId: params.get('record') } : null,
-        page: location.search,
       });
       if (!response.ok || !response.body) throw new Error('The assistant did not answer (' + response.status + ').');
       const reader = response.body.getReader();

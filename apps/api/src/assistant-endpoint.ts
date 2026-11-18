@@ -339,6 +339,29 @@ export function createAssistantEndpoint(
           response.end();
           return true;
         }
+        const page =
+          typeof body.page === 'string' && body.page.length <= 2_000
+            ? body.page
+            : null;
+        const surfaces = new URLSearchParams(page ?? '').getAll('surface');
+        const company =
+          page !== null && surfaces.length <= 1
+            ? await options
+                .company({
+                  cookie: String(request.headers.cookie ?? ''),
+                  search: page,
+                  surfaceId: surfaces[0] ?? null,
+                })
+                .catch(() => null)
+            : null;
+        if (
+          company?.companyId !== mine.company.companyId ||
+          conversations.get(mine.id) !== mine
+        ) {
+          response.statusCode = 409;
+          response.end();
+          return true;
+        }
         const change = mine.session.latestChange();
         const after =
           typeof body.after === 'number' &&
