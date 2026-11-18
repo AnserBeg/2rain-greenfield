@@ -28,7 +28,7 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "INTERACT-1",
   "base": "c31f17df1ebc3bfca7819ef34e60e0fb43160cba",
-  "head": "77c1c2956b69b56896282110aa0836ea0ccd2ad6",
+  "head": "0d5da9e164a20cbab400ae0dd235191346141ab8",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
