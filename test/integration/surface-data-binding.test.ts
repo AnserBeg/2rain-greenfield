@@ -282,7 +282,7 @@ test('compiled fixture surfaces bind live Q0/O0 data through one pinned request 
   }
 });
 
-test('SPEED-1: a page finishes its reads before it renders; a policy change then is the page own; a task step never reads in a snapshot', async () => {
+test('SPEED-1: a page finishes its reads before it renders; a policy change then is the page own, and a task step under one redirects', async () => {
   const compiled = compileFixture();
   const policy = new RecordingPolicy('ALLOW');
   const entry = runtimeEntry(compiled, policy, {
@@ -329,14 +329,12 @@ test('SPEED-1: a page finishes its reads before it renders; a policy change then
     (error: unknown) => error === changed,
   );
 
-  // A task's steps are POSTs: each read decides live, never in a GET's read
-  // snapshot (ADR-0071), so a grant revoked between a step's two reads of its
-  // record is refused, and recorded, at the second.
-  let snapshots = 0;
+  // A task step under a policy change is sent again by a fresh GET, its task
+  // parameters dropped; it never reports a failure of what it committed.
   const server = createSurfaceRuntimeServer(entry, gateways, null, undefined, {
     readSnapshot: async (work) => {
-      snapshots += 1;
-      return work(async () => undefined);
+      await work(async () => undefined);
+      throw changed;
     },
   });
   const baseUrl = await listen(server);
@@ -355,16 +353,17 @@ test('SPEED-1: a page finishes its reads before it renders; a policy change then
       redirect: 'manual',
     });
   try {
-    for (const stage of ['prepare', 'confirm']) {
-      const step = await post(stage);
-      await step.text();
-      assert.equal(snapshots, 0, `a ${stage} step read in a snapshot`);
-    }
-    const read = await fetch(`${baseUrl}${listUrl}`, {
-      headers: { authorization: 'a' },
-    });
-    await read.text();
-    assert.equal(snapshots, 1, 'a GET reads in one snapshot');
+    // A Review commits nothing: the page is sent again by GET.
+    const review = await post('prepare');
+    assert.equal(review.status, 303);
+    assert.equal(review.headers.get('location'), listUrl);
+    // A Confirm may have committed: only the session's own retry is offered.
+    const confirm = await post('confirm');
+    assert.equal(confirm.status, 409);
+    const notice = await confirm.text();
+    assert.match(notice, /data-task-recovery/u);
+    assert.match(notice, /name="taskToken" value="t"/u);
+    assert.match(notice, /name="taskStage" value="retry"/u);
   } finally {
     await close(server);
   }

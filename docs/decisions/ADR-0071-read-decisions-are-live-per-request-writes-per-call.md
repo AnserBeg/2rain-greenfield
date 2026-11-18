@@ -33,6 +33,22 @@ owner wants pages "super super fast"; the security guarantees may not move.
    discarded and assembled once more; a second change refuses the request.
 5. A real denial is still recorded in its own durable transaction, as before.
 
+## Amendment (2026-11-18): a read-only request, whatever its method
+
+The snapshot covers one read-only request, a GET or a composition task's step POST (open,
+Review, and Confirm's render reads). Invocations stay live, as rule 3 says. A read-only
+task step carries exactly the hazard this ADR accepts for a GET: a decision is reused
+within one request, the end-of-request epoch check discards the response on any policy
+change, and no data reaches the person. The boundary was drawn at the HTTP method; the
+property that matters is a read-only request with an end-of-request epoch check. The
+memo read of `40de0205` raised it as a Medium ("outside the stated boundary"); it is
+resolved by this amendment (orchestrator ruling), on three conditions:
+
+- the snapshot transaction is `READ ONLY`, so any write attempted in it fails;
+- every write goes through the live invocation path, outside the snapshot;
+- the end-of-request epoch check runs on a task step's response exactly as on a GET's
+  (a step is never re-run: it is sent again by GET, or a Confirm offers its own retry).
+
 ## Consequences
 
 - A revocation that commits while a page is being assembled is not seen by the page's
@@ -46,7 +62,9 @@ owner wants pages "super super fast"; the security guarantees may not move.
 ## Evidence
 
 `test/postgres/read-snapshot.test.ts` (revoked mid-page: discarded and re-assembled to
-DENY; changed twice: refused; writes apart; pool of one). The page budget
+DENY; changed twice: refused; writes apart; pool of one; a write inside a step's
+snapshot refused `25006`). `test/postgres/speed-fixes.test.ts` (a grant revoked between a
+task step's two reads of its record: the response is discarded, the order never shown). The page budget
 (`test/performance/page-budget.test.ts`) measures the statements before and after.
 
 ## Enforcement

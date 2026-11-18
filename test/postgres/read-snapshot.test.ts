@@ -592,6 +592,30 @@ test('SPEED-1 security fixes: one scope per page, both scopes of a moved grant, 
           [tenantId, otherMembershipId],
         );
 
+        // ADR-0071 (amended): a task step's snapshot is READ ONLY too, so a
+        // write attempted inside it fails; writes go through the live
+        // invocation path, outside the snapshot.
+        await assert.rejects(
+          page(
+            () =>
+              withTrustedRequestRead(runtime, context, (client) =>
+                client.query(
+                  `INSERT INTO public.snapshot_probe VALUES ('in snapshot')`,
+                ),
+              ),
+            { retry: false },
+          ),
+          (error: unknown) => (error as { code?: unknown }).code === '25006',
+        );
+        assert.equal(
+          (
+            await admin.query(
+              `SELECT 1 FROM public.snapshot_probe WHERE note = 'in snapshot'`,
+            )
+          ).rowCount,
+          0,
+        );
+
         // retry: false refuses at once.
         let tries = 0;
         await assert.rejects(

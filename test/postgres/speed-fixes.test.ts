@@ -9,9 +9,10 @@ import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
 // SPEED-1 fix read, through the composed application: a denial is committed
 // by the real recorder before the page is answered, on its own connections,
 // so the page still reads one snapshot, and a failed denial fails the page.
-// A task's steps (POSTs) read live: a grant revoked between a step's two
-// reads of its record is refused and recorded at the second (the memo read's
-// finding), and a Confirm under a policy change finishes.
+// A task step reads in one snapshot (ADR-0071, amended): a grant revoked
+// between its two reads of the record discards the response; a Confirm that
+// committed while the policy changed offers the session's own retry, which
+// finishes with the same request keys.
 
 const ns = 'northstar.app';
 type Fixture = Parameters<Parameters<typeof withOrderEntryFixture>[0]>[0];
@@ -61,7 +62,7 @@ const hidden = (html: string, name: string) =>
   new RegExp(`name="${name}" value="([^"]+)"`, 'u').exec(html)?.[1] ?? null;
 
 test(
-  'SPEED-1 fix read: denials committed by the real recorder before the answer, one snapshot kept; a task step reads live, its second read refused and recorded',
+  'SPEED-1 fix read: denials committed by the real recorder before the answer, one snapshot kept; a task step under a revocation is discarded; a Confirm under a policy change offers its own retry',
   { timeout: 900_000 },
   async () => {
     await withOrderEntryFixture(async (fixture) => {
@@ -167,10 +168,11 @@ test(
       const input = (local: string) => `${ns}:input.${local}`;
       const [first] = scenario.truck.lines as [string];
 
-      // A task's steps read live, never in a GET's snapshot (ADR-0071): a
-      // grant revoked between the step's first read of its record (to open
-      // the task) and the second (to show it) is refused at the second, and
-      // the refusal is recorded -- nothing of the record is shown.
+      // A task's steps read in one snapshot (ADR-0071, amended), so a grant
+      // revoked between the step's first read of its record (to open the
+      // task) and the second (to show it) is answered from the snapshot's
+      // grants -- and the end-of-request epoch check discards the response:
+      // the step is sent again by GET, and nothing of the order is shown.
       const orderGet = `${ns}:query.commercial_purchase_order_get`;
       const gateway = fixture.app.runtime.queryGateway;
       const invoke = gateway.invoke.bind(gateway);
@@ -192,16 +194,14 @@ test(
         return result;
       };
       try {
-        const before = await denials();
         armed = true;
-        const refused = await serve(truckPage, { compositionAction: action });
+        const discarded = await serve(truckPage, {
+          compositionAction: action,
+        });
         assert.equal(armed, false, 'the order was read to open the task');
-        assert.notEqual(refused.status, 200, refused.html.slice(0, 600));
-        assert.ok(!refused.html.includes(scenario.truck.number));
-        assert.ok(
-          (await denials()) > before,
-          "the step's second read is refused and recorded",
-        );
+        assert.equal(discarded.status, 303, discarded.html.slice(0, 600));
+        assert.equal(discarded.html, '');
+        assert.ok(!discarded.html.includes(scenario.truck.number));
       } finally {
         gateway.invoke = invoke;
         await fixture.measure(
@@ -212,9 +212,9 @@ test(
         );
       }
 
-      // A Confirm whose receipt commits together with a policy change
-      // finishes: each of its decisions was live, so nothing is discarded,
-      // and it commits one receipt.
+      // A Confirm whose receipt commits together with a policy change: the
+      // step is answered with the session's own retry, nothing of the record,
+      // and the retry finishes with the same request keys -- one receipt.
       const opened = await serve(truckPage, { compositionAction: action });
       const token = hidden(opened.html, 'taskToken');
       assert.ok(token, 'the task opens');
@@ -231,16 +231,6 @@ test(
       });
       const prepared = hidden(review.html, 'preparedId');
       assert.ok(prepared, 'the task reviews');
-      const receipts = async () =>
-        Number(
-          (
-            await fixture.pool.query<{ n: string }>(
-              `SELECT count(*)::text AS n FROM ${fulfillmentTable(receipt)}
-                WHERE archived_at IS NULL`,
-            )
-          ).rows[0]!.n,
-        );
-      const before = await receipts();
       await fixture.pool.query(
         `CREATE FUNCTION public.speed_bump_policy() RETURNS trigger
            LANGUAGE plpgsql SECURITY DEFINER AS $$ BEGIN
@@ -250,9 +240,9 @@ test(
          CREATE TRIGGER speed_bump_policy AFTER INSERT ON ${fulfillmentTable(receipt)}
            FOR EACH ROW EXECUTE FUNCTION public.speed_bump_policy()`,
       );
-      let confirmed: Awaited<ReturnType<typeof serve>>;
+      let notice: Awaited<ReturnType<typeof serve>>;
       try {
-        confirmed = await serve(truckPage, {
+        notice = await serve(truckPage, {
           compositionAction: action,
           preparedId: prepared,
           taskStage: 'confirm',
@@ -264,9 +254,27 @@ test(
            DROP FUNCTION public.speed_bump_policy()`,
         );
       }
-      assert.equal(confirmed.status, 200, confirmed.html.slice(0, 600));
-      assert.match(confirmed.html, /Receive: done/u);
-      assert.equal(await receipts(), before + 1);
+      assert.equal(notice.status, 409, notice.html.slice(0, 600));
+      assert.match(notice.html, /data-task-recovery/u);
+      assert.equal(hidden(notice.html, 'taskToken'), token);
+      assert.ok(!notice.html.includes(scenario.truck.number));
+      const receipts = async () =>
+        Number(
+          (
+            await fixture.pool.query<{ n: string }>(
+              `SELECT count(*)::text AS n FROM ${fulfillmentTable(receipt)}
+                WHERE archived_at IS NULL`,
+            )
+          ).rows[0]!.n,
+        );
+      const committed = await receipts();
+      const retried = await serve(truckPage, {
+        compositionAction: action,
+        taskStage: 'retry',
+        taskToken: token,
+      });
+      assert.match(retried.html, /Receive: done/u);
+      assert.equal(await receipts(), committed, 'the retry reuses its keys');
     });
   },
 );
