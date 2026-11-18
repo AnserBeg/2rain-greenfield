@@ -251,6 +251,19 @@ async function addEquipment(page: Page, base: string): Promise<string> {
   await page.getByRole('link', { name: 'Open Equipment' }).click();
   await expect(page.locator('main')).toContainText('Equipment');
   const list = page.url();
+  // The record type is listed under the Custom group its customization
+  // declares, by its own name (round 2).
+  await expect(
+    page
+      .getByRole('navigation', { name: 'Release navigation' })
+      .locator('details.navigation-group')
+      .filter({
+        has: page.locator(':scope > summary .nav-group-label', {
+          hasText: /^Custom$/u,
+        }),
+      })
+      .getByRole('link', { name: 'Equipment', exact: true }),
+  ).toBeAttached();
   // One piece of equipment, entered as an office person would (round 2):
   // its record page is the screen.
   await page.getByRole('link', { name: 'New', exact: true }).click();

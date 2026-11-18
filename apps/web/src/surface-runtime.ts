@@ -2400,17 +2400,17 @@ function navigationItem(
       surfaces,
       selected,
     );
-    if (
+    // A one-destination group is shown as that destination, by the group's
+    // name -- unless the destination was placed in the group from another
+    // module (the Custom group's one record type): the group then keeps its
+    // heading and the destination its own name (LOOK-1 round 2).
+    const only =
       entry.children.length === 1 &&
       entry.children[0]?.kind === 'navigationSurface'
-    ) {
-      const surface = surfaceForNavigation(surfaces, entry.children[0]);
-      // A destination placed in the group from another module (the Custom
-      // group's one record type) keeps its own name (LOOK-1 round 2).
-      const placed =
-        surface.workspace?.navigationModuleId === entry.navigationId;
-      return `<li class="navigation-node navigation-node--direct">${navigationLink(view, surface, selected, placed ? navigationLabel(surface) : entry.label, workspaceContext, surfaces)}</li>`;
-    }
+        ? surfaceForNavigation(surfaces, entry.children[0])
+        : null;
+    if (only && only.workspace?.navigationModuleId !== entry.navigationId)
+      return `<li class="navigation-node navigation-node--direct">${navigationLink(view, only, selected, entry.label, workspaceContext, surfaces)}</li>`;
     // A group's occasional destinations -- its settings and records looked
     // at now and then -- wait under its own "Other" when there are several
     // and the group also lists day-to-day work (LOOK-1 round 2).
