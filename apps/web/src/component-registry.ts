@@ -1244,10 +1244,18 @@ function renderSections(context: SurfaceComponentContext): string {
   }
   const record = recordFrom(data);
   if (context.surface.surfaceRole === 'record') {
+    const labels = new Map(
+      findRelatedSurface(
+        context.view,
+        context.surface,
+        context.surfaces ?? [],
+        'form',
+      )?.form?.fields?.map((field) => [String(field.fieldId), field.label]),
+    );
     return slotPanel(
       context,
       record
-        ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}<section class="panel data-panel" data-data-state="exact"><details class="record-section-group" open><summary><h2>Details</h2></summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`
+        ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}<section class="panel data-panel" data-data-state="exact"><details class="record-section-group" open><summary><h2>Details</h2></summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(labels.get(fieldId) ?? fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`
         : dataDiagnostic('QUERY_NOT_FOUND'),
       'sections-slot',
     );
@@ -2051,13 +2059,20 @@ function renderFormFields(
   const inputFieldsById = new Map(
     (operation.inputFields ?? []).map((field) => [field.fieldId, field]),
   );
-  return formFieldIds(surface)
+  const presentation = new Map(
+    (surface.form?.fields ?? []).map((field) => [String(field.fieldId), field]),
+  );
+  const more: string[] = [];
+  const moreLabels: string[] = [];
+  const first = formFieldIds(surface)
     .filter(
       (fieldId) =>
         operation.inputFields === null || inputFieldsById.has(fieldId),
     )
     .map((fieldId, index) => {
-      const label = fieldLabel(fieldId, surfaceEntityId(context));
+      const declared = presentation.get(fieldId);
+      const label =
+        declared?.label ?? fieldLabel(fieldId, surfaceEntityId(context));
       const value = record ? record.values[fieldId] : undefined;
       const field = fieldsById.get(fieldId);
       const inputField = inputFieldsById.get(fieldId);
@@ -2089,9 +2104,16 @@ function renderFormFields(
       const unavailableValue = control.storedValueUnavailable
         ? renderUnavailableStoredValue(fieldId, index, inputField, value)
         : '';
-      return `<div class="form-field"><label><span>${escapeHtml(label)}</span>${control.html}</label>${unavailableValue}${emptyIntent}</div>`;
+      const html = `<div class="form-field"><label><span>${escapeHtml(label)}</span>${control.html}</label>${unavailableValue}${emptyIntent}</div>`;
+      if (declared?.disclosure !== 'more') return html;
+      more.push(html);
+      moreLabels.push(escapeHtml(label));
+      return '';
     })
     .join('');
+  return more.length
+    ? `${first}<details class="draft-more form-field--wide"><summary>More details <span class="draft-more__names">${moreLabels.join(', ')}</span></summary><div class="form-fields">${more.join('')}</div></details>`
+    : first;
 }
 
 /**
