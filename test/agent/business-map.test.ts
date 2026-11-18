@@ -266,6 +266,7 @@ function guardedSession() {
     },
     invoked: [] as string[],
     afterInvoke: () => {},
+    denyReads: false,
   };
   const session = new OperationsAgentSession({
     runtime: {
@@ -295,7 +296,9 @@ function guardedSession() {
       queryGateway: {
         previewEligibility: () => Promise.resolve('eligible'),
         invoke: () =>
-          Promise.resolve({ outcome: 'exact', records: [state.record] }),
+          state.denyReads
+            ? Promise.reject(new Error('QUERY_PERMISSION_DENIED'))
+            : Promise.resolve({ outcome: 'exact', records: [state.record] }),
       },
     } as never,
     personHeaders: {},
@@ -408,5 +411,42 @@ test('a contract asked for by its short name loads, as the map writes it', async
       (entry) => entry.operationId ?? entry.queryId ?? entry.outcome,
     ),
     [`${NS}:operation.party_update`, `${NS}:query.party_get`],
+  );
+});
+
+test('a replayed execute returns the receipt; values only from a read allowed now', async () => {
+  const { session, state } = guardedSession();
+  const planId = await plannedUpdate(session, [{ contact_summary: 'New' }]);
+  const first = (
+    await session.call('erp_execute', { planId, executionIdempotencyKey: 'k' })
+  ).content as { steps: { values?: unknown; recordId?: string }[] };
+  assert.ok(first.steps[0]!.values, 'the execution shows its read-back');
+  // The person loses read access: a replay under the same key shows the
+  // receipt (record id, outcome) and no stored business values.
+  state.denyReads = true;
+  const replay = (
+    await session.call('erp_execute', { planId, executionIdempotencyKey: 'k' })
+  ).content as {
+    steps: { values?: unknown; recordId?: string; outcome: string }[];
+  };
+  assert.equal(replay.steps[0]!.recordId, PARTY);
+  assert.equal(replay.steps[0]!.outcome, 'succeeded');
+  assert.equal(replay.steps[0]!.values, undefined);
+  assert.doesNotMatch(JSON.stringify(replay), /New|P-2016/u);
+  // Allowed again: values come back from a fresh read, not from memory.
+  state.denyReads = false;
+  state.record = {
+    ...state.record,
+    values: {
+      ...state.record.values,
+      [`${NS}:field.party_contact_summary`]: 'Changed since',
+    },
+  };
+  const again = (
+    await session.call('erp_execute', { planId, executionIdempotencyKey: 'k' })
+  ).content as { steps: { values?: Record<string, string> }[] };
+  assert.equal(
+    again.steps[0]!.values?.[`${NS}:field.party_contact_summary`],
+    'Changed since',
   );
 });

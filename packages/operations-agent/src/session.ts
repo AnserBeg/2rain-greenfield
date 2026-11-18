@@ -1395,7 +1395,29 @@ export class OperationsAgentSession {
         throw new ToolInputError(
           'this plan was already executed under another key; plan again to repeat it',
         );
-      return executionReport(plan);
+      // A replay returns the stored receipt (ids and outcomes). Business
+      // values come only from a read authorized now, as the person; a record
+      // they may no longer read is withheld, never served from memory.
+      return this.#run(async (view) => {
+        const catalog = pinnedCatalog(view);
+        const fresh = new Map<number, Record<string, ImmutableJsonValue>>();
+        for (const step of plan.steps) {
+          const result = plan.execution!.results.find(
+            (entry) => entry.step === step.step,
+          );
+          if (result?.outcome !== 'succeeded' || !result.recordId) continue;
+          const record = await readRecord(
+            this.#options.runtime,
+            view,
+            catalog,
+            step.operation.readBackQueryId,
+            result.recordId,
+            this.#options.companyId,
+          ).catch(() => null);
+          if (record) fresh.set(step.step, compactValues(record.values));
+        }
+        return executionReport(plan, fresh);
+      });
     }
     if (plan.status !== 'approved')
       throw new ToolInputError(
@@ -1829,7 +1851,14 @@ function relationIds(catalog: PinnedCatalog): readonly string[] {
   return ids;
 }
 
-function executionReport(plan: StoredPlan): ImmutableJsonValue {
+/**
+ * An execution's receipt. Values are the execution's own read-back, or, for a
+ * replay, `fresh` reads made now (a step missing from it shows no values).
+ */
+function executionReport(
+  plan: StoredPlan,
+  fresh?: ReadonlyMap<number, Record<string, ImmutableJsonValue>>,
+): ImmutableJsonValue {
   const results = plan.execution!.results;
   return {
     operationSessionId: plan.planId,
@@ -1840,7 +1869,13 @@ function executionReport(plan: StoredPlan): ImmutableJsonValue {
       outcome: result.outcome,
       ...(result.recordId ? { recordId: result.recordId } : {}),
       ...(result.error ? { error: result.error } : {}),
-      ...(result.values ? { values: result.values } : {}),
+      ...(fresh
+        ? fresh.has(result.step)
+          ? { values: fresh.get(result.step)! }
+          : {}
+        : result.values
+          ? { values: result.values }
+          : {}),
     })),
     next:
       plan.status === 'executed'

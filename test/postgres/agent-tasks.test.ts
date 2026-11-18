@@ -239,7 +239,18 @@ test(
           executionIdempotencyKey: 'once',
         });
         assert.equal(first.isError, false);
-        assert.deepEqual(again.content, first.content);
+        // A replay returns the same receipt; its values are read again now.
+        const receipt = (content: unknown) =>
+          (
+            content as {
+              steps: { step: number; outcome: string; recordId?: string }[];
+            }
+          ).steps.map(({ step, outcome, recordId }) => ({
+            step,
+            outcome,
+            recordId,
+          }));
+        assert.deepEqual(receipt(again.content), receipt(first.content));
         const other = await approved.call('erp_execute', {
           planId: id,
           executionIdempotencyKey: 'twice',
