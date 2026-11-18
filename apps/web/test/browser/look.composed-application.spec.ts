@@ -249,7 +249,10 @@ async function addEquipment(page: Page, base: string): Promise<string> {
   await expect(page.locator('[data-customize-result="drafted"]')).toBeVisible({
     timeout: 180_000,
   });
-  await page.getByRole('button', { name: 'Approve' }).click();
+  // Approving compiles the change in the sandbox: as slow as drafting.
+  await page
+    .getByRole('button', { name: 'Approve' })
+    .click({ timeout: 180_000 });
   await page
     .getByRole('button', { name: 'Activate now' })
     .click({ timeout: 180_000 });
