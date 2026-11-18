@@ -52,7 +52,13 @@ function compileChain(
 ): SandboxResponse {
   let parent = parseSerializedRelease(request.tip);
   const steps: SandboxStep[] = [];
-  for (let length = 1; length <= request.chain.length; length += 1) {
+  for (
+    let length = request.upgradeBaseRoot
+      ? request.chain.length
+      : (request.startAt ?? 0) + 1;
+    length <= request.chain.length;
+    length += 1
+  ) {
     const result = compileCustomizationCandidate({
       acknowledgement: request.acknowledgement,
       base: request.base,
@@ -60,6 +66,27 @@ function compileChain(
       parent,
       sandbox,
     });
+    if (request.upgradeBaseRoot && result.status !== 'compiled') {
+      const patchIndex =
+        'patchIndex' in result ? result.patchIndex : length - 1;
+      return {
+        code: 'CUSTOMIZE_UPGRADE_CONFLICT',
+        diagnostics: [
+          {
+            code: 'CUSTOMIZE_UPGRADE_CONFLICT',
+            firstPartyBase: request.upgradeBaseRoot,
+            tenantPatch: request.chain[patchIndex],
+            patchIndex,
+            reason: result.message,
+            details: 'diagnostics' in result ? result.diagnostics : [],
+          },
+        ],
+        message:
+          'a recorded tenant patch conflicts with the new first-party base',
+        patchIndex,
+        status: 'rejected',
+      };
+    }
     if (result.status === 'refused') {
       return {
         code: result.code,

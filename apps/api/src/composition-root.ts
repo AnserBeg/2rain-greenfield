@@ -1,8 +1,13 @@
+import {
+  canonicalAuthoredProjection,
+  parseNormalizedApplicationPackageJson,
+} from '@north-star/canonical-model';
 import { readFile } from 'node:fs/promises';
 import type { Server } from 'node:http';
 
 import {
   createComposedApplicationRuntime,
+  parseCompiledApplication,
   type ComposedApplicationRuntime,
   type InventoryScopeProvisioning,
 } from '@north-star/postgres-provider/composed-application-runtime';
@@ -335,6 +340,19 @@ export async function openComposedApplicationRuntime(
   return createComposedApplicationRuntime({
     capabilityOperationExecutorFactories: CAPABILITY_EXECUTOR_FACTORIES,
     compiledApplication,
+    customization: {
+      acknowledgement: readUnboundPermissionAcknowledgementFor(
+        new URL('../../web/release/app.authored.json', import.meta.url)
+          .pathname,
+        'northstar.app:package.application',
+      ),
+      firstPartyAuthored: canonicalAuthoredProjection(
+        parseNormalizedApplicationPackageJson(
+          parseCompiledApplication(compiledApplication).application
+            .normalizedDefinitionBytes,
+        ),
+      ) as unknown as Record<string, unknown>,
+    },
     databaseUrl: options.databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
     localDemoIdentity: true,
@@ -364,9 +382,17 @@ export async function openCustomizeService(
     '../../web/release/app.authored.json',
     import.meta.url,
   ).pathname;
-  const firstPartyAuthored = JSON.parse(
-    await readFile(authoredPath, 'utf8'),
-  ) as Record<string, unknown>;
+  const firstPartyAuthored = options.compiledApplication
+    ? (canonicalAuthoredProjection(
+        parseNormalizedApplicationPackageJson(
+          parseCompiledApplication(options.compiledApplication).application
+            .normalizedDefinitionBytes,
+        ),
+      ) as unknown as Record<string, unknown>)
+    : (JSON.parse(await readFile(authoredPath, 'utf8')) as Record<
+        string,
+        unknown
+      >);
   return openCustomizationService({
     acknowledgement: readUnboundPermissionAcknowledgementFor(
       authoredPath,

@@ -592,3 +592,36 @@ test('an owner can publish screens for a previously live query-only field while 
     'refused',
   );
 });
+
+test('upgrade diagnostics name the missing tenant target and the new first-party base deterministically', async () => {
+  const base = structuredClone(authored);
+  const surface = 'northstar.app:surface.item_list';
+  base.surfaces = (base.surfaces as { surfaceId: string }[]).filter(
+    (entry) => entry.surfaceId !== surface,
+  );
+  const request = {
+    acknowledgement,
+    base,
+    chain: [
+      patch({
+        kind: 'arrangeLayout',
+        surface,
+        relabel: [
+          { field: 'northstar.app:field.item_name', label: 'Warehouse name' },
+        ],
+      }),
+    ],
+    tip: serializeRelease(tip),
+    upgradeBaseRoot: tip.compiled.releaseRoot,
+  };
+  const first = await compileInSandbox(request);
+  const second = await compileInSandbox(request);
+  assert.deepEqual(first, second);
+  assert.equal(first.status, 'rejected');
+  assert.ok(first.status === 'rejected');
+  assert.equal(first.code, 'CUSTOMIZE_UPGRADE_CONFLICT');
+  assert.match(
+    JSON.stringify(first.diagnostics),
+    /firstPartyBase.*tenantPatch.*item_list.*There is no screen/u,
+  );
+});

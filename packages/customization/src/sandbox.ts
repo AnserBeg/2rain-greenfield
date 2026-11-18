@@ -29,6 +29,10 @@ export interface SandboxRequest {
   readonly chain: readonly CustomizationPatch[];
   /** The first-party release the base compiles to. */
   readonly tip: SerializedRelease;
+  /** Already reproduced chain prefix. The next step compiles its successor. */
+  readonly startAt?: number;
+  /** Replay the entire chain once against tip, the previously live release. */
+  readonly upgradeBaseRoot?: string;
 }
 
 export interface SandboxStep {
