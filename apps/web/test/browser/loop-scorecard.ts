@@ -560,6 +560,7 @@ export async function receiveInFull(card: LoopScorecard): Promise<void> {
       );
     },
     inline: true,
+    confirm: `Receive ${f.purchased}`,
   });
   await expect(cell(page, 'purchasing_lines', 'Received')).toHaveText(
     f.purchased,
@@ -617,6 +618,7 @@ export async function ship(card: LoopScorecard): Promise<void> {
       await chooseReference(card, 'Ship from', f.location[1]);
     },
     inline: true,
+    confirm: `Ship ${f.sold}`,
   });
   await expect(cell(page, 'fulfillment_lines', 'Shipped')).toHaveText(f.sold);
   await card.end('done');

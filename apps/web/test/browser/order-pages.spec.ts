@@ -148,7 +148,7 @@ test('an order page names its short lines and its progress, receives a truck of 
     await expect(prepared.locator('[data-task-row]')).toHaveCount(2);
     await dialog
       .getByRole('button', {
-        name: 'Confirm Receive',
+        name: 'Receive 9',
         exact: true,
       })
       .click();
