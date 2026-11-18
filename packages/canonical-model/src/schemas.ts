@@ -1070,6 +1070,12 @@ export const SurfaceCompositionSchema = z.strictObject({
            * and total; an invoice adds what is paid, credited and owed.
            */
           totals: z.array(CanonicalIdSchema).min(1).max(8).optional(),
+          /**
+           * The declared column holding the document's currency, read beside
+           * its grand total ("Total CAD", LOOK-1 round 3). Optional v6 key;
+           * absence preserves bytes.
+           */
+          currency: CanonicalIdSchema.optional(),
         })
         .optional(),
       /**
@@ -1940,6 +1946,13 @@ export const SurfaceListSchema = z.strictObject({
   progress: listProgress.optional(),
   rowActions: z.array(listRowAction).min(1).max(3).optional(),
   figures: listFigures.optional(),
+  /**
+   * At compact width the List stays a table that scrolls sideways in its
+   * panel, its first columns first, rather than one card per row -- for a
+   * List of figures read across (LOOK-1 round 3). Optional v6 key; absence
+   * preserves bytes and the card projection.
+   */
+  compact: z.literal('scrollTable').optional(),
   searchChildren: z.array(listSearchChild).min(1).max(2).optional(),
 });
 export type SurfaceList = z.infer<typeof SurfaceListSchema>;

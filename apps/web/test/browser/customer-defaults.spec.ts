@@ -173,7 +173,7 @@ test('a customer workspace sets order defaults and an address book that a new sa
     await page.getByLabel('Line 1 quantity', { exact: true }).fill('2');
     await page.getByLabel('Line 1 unit price', { exact: true }).fill('12.5');
     await capture(page, testInfo, 'order-defaults');
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await expect(page).toHaveURL(/sales_order_detail/u);
     const header = page.locator('.composition-header');
     for (const text of ['USD', 'Priya Natarajan', 'Net 45'])
@@ -235,7 +235,9 @@ test('without JavaScript, choosing a customer fills its defaults, and an incompl
       await page.getByLabel('Order date *').fill('2026-09-28');
       await pick(page, 'Line 1 product', 'OFF-100', 'Field notebook');
       await page.getByLabel('Line 1 quantity', { exact: true }).fill('1');
-      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await page
+        .getByRole('button', { name: 'Save draft', exact: true })
+        .click();
       await expect(page).toHaveURL(/sales_order_detail/u);
       const commands = () =>
         page
@@ -258,7 +260,9 @@ test('without JavaScript, choosing a customer fills its defaults, and an incompl
       );
       await openMoreDetails(page);
       await page.getByLabel('City', { exact: true }).fill('Chestermere');
-      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await page
+        .getByRole('button', { name: 'Save draft', exact: true })
+        .click();
       await expect(page).toHaveURL(/sales_order_detail/u);
       expect(await commands()).toContain('Confirm');
       await page.screenshot({

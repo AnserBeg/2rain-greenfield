@@ -32,7 +32,7 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
             )
             .boundingBox();
           const save = await page
-            .getByRole('button', { name: 'Save', exact: true })
+            .getByRole('button', { name: 'Save draft', exact: true })
             .boundingBox();
           expect(boundary).not.toBeNull();
           expect(save).not.toBeNull();
@@ -83,7 +83,7 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     );
     await expect(page.locator('[data-draft-line]')).toHaveCount(2);
     await capture('sales-draft-editor');
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await expect(page).toHaveURL(/sales_order_detail/);
     // Assigned by the server on first save, never typed.
     const salesNumber = (
@@ -127,7 +127,7 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     await expect(
       page.getByLabel('Line 2 quantity', { exact: true }),
     ).toHaveValue('3');
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await openPurchaseOrders(page);
     await page.getByRole('link', { name: 'New', exact: true }).click();
     await header(page, 'PO-ENTRY-BROWSER', 'Vendor');
@@ -145,7 +145,7 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
       page.getByRole('button', { name: 'Remove line 3', exact: true }).click(),
     );
     await capture('purchase-draft-editor');
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await expect(page).toHaveURL(/purchase_order_detail/);
     const purchaseNumber = (
       await page.locator('.composition-header h1').innerText()
@@ -172,7 +172,7 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     await expect(
       page.getByLabel('Line 2 quantity', { exact: true }),
     ).toHaveValue('3');
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await measure('drafts', orderId!, purchaseId!);
     for (const local of [
       'reservation',
@@ -947,7 +947,7 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
     await page.getByLabel('Line 1 quantity', { exact: true }).fill('2.50');
     await page.getByLabel('Order date *').fill('2026-09-15');
     await page.getByLabel('Line 1 unit price', { exact: true }).fill('3.25');
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await expect(page).toHaveURL(/sales_order_detail/);
     await expect(page.locator('.composition-header')).toContainText(
       'Enter Glazing',

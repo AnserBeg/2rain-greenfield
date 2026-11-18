@@ -629,6 +629,8 @@ export function purchasingWorkspace(
           id('column', 'purchasing_tax'),
           id('column', 'purchasing_total'),
         ],
+        // "Total CAD": the grand total reads with the order's currency.
+        currency: id('column', 'purchasing_currency'),
         note: id('column', 'purchasing_notes'),
       },
       // Purchase to receipt: where this order stands and what to do next.
@@ -804,6 +806,11 @@ export function purchasingWorkspace(
           },
         ],
         columns: [
+          // One line reads as the mockup's (LOOK-1 round 3): the product
+          // with its SKU and unit, its bar over ordered and received (the
+          // quantities a line's progress names), what is open, cost and
+          // amount; the three-way match is its details. The number stays
+          // beside the product: it names the line's receive input.
           column(
             'line',
             'Line',
@@ -855,34 +862,26 @@ export function purchasingWorkspace(
           // The three-way match (PAYABLES, PY-G): what is billed and left to
           // bill beside ordered and received, and how billing compares with
           // what arrived. Shown, never enforced.
-          column(
-            'billed',
-            'Billed',
-            35,
-            metric('billed'),
-            undefined,
-            'quantity',
-          ),
+          column('billed', 'Billed', 35, metric('billed'), undefined, 'detail'),
           column(
             'to_bill',
             'To bill',
             36,
             metric('to_bill'),
             undefined,
-            'quantity',
+            'detail',
           ),
-          // Beside the product, where it is read without opening details.
           column(
             'match',
             'Match',
             37,
             metric('match_status'),
             undefined,
-            'secondary',
+            'detail',
           ),
           column(
             'base_unit',
-            'Product base unit',
+            'Unit',
             40,
             f('purchase_order_line_item_id'),
             ['item_get', 'item_base_unit'],

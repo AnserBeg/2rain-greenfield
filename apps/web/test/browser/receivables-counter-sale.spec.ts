@@ -69,7 +69,10 @@ test('a counter sale confirms, ships, invoices and takes payment in one Task, an
 
     // The order is confirmed and marked; it shipped and is paid in full.
     await page.goto(orderPage.toString());
-    await expect(page.locator('.composition-header')).toContainText('Released');
+    // The badge names the stepper's current step (LOOK-1 round 3).
+    await expect(page.locator('.composition-header')).toContainText(
+      'Fulfillment',
+    );
     await expect(detail('Counter sale')).toHaveText('Yes');
     const shipment = dataset('order_shipments').locator('tbody tr');
     await expect(shipment).toHaveCount(1);

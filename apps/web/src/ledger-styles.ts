@@ -220,8 +220,20 @@ button:disabled{opacity:.55;cursor:not-allowed}
 .list-controls .form-field>label{display:grid;gap:4px;color:var(--muted);font-size:11px;font-weight:500}
 .list-summary{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:flex-end;color:var(--muted);font-size:12px}
 .list-sort{display:inline-flex;gap:4px;align-items:center;color:inherit;text-decoration:none}
+/* Declared Lists (LOOK-1 round 3): the page names the List once; the count
+   is plain; the toolbar is one line; zeros are faint; a status that is the
+   normal outcome reads as text, so only exceptions are badges. */
+[data-declared-list]>.panel__heading h2{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+.list-count{color:var(--muted);font-size:12px}
+td[data-zero]{color:var(--faint)}
+.data-table-wrap td .status-pill[data-status-role=success]{height:auto;padding:0;border:0;background:transparent;color:var(--muted);font-weight:400}
+.data-table-wrap td .status-pill[data-status-role=success]::before{content:none}
+[data-declared-list] td .record-link{font-family:var(--f-mono);font-size:12px;font-weight:400}
+.list-controls{flex-wrap:nowrap;align-items:center}
+.list-controls__search>label>span,.list-controls .form-field:has(>select[name=sort],>select[name=dir])>label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+.list-controls .form-field:has(>select[name=sort],>select[name=dir]){flex:0 0 auto}
+.list-pagination a,.list-pagination button{min-height:44px;padding:0 10px}
 .list-pagination{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:8px;margin-top:12px}
-.list-pagination a,.list-pagination button{min-height:44px}
 .list-page-status{color:var(--muted);font-size:12px}
 .list-page-jump{display:inline-flex;gap:8px;align-items:center}
 .list-pagination .list-page-jump input{width:5rem}
@@ -261,7 +273,7 @@ input::placeholder,textarea::placeholder{color:var(--faint)}
 .draft-header>.form-field:not(.form-field--reference){gap:5px}
 table.draft-lines.form-fields{display:table;width:100%;margin:0;border-collapse:collapse;border-top:1px solid var(--ink);table-layout:fixed}
 .draft-lines th{padding:8px 8px 6px;text-align:left;color:var(--muted);font-size:11px;font-weight:500;border-bottom:1px solid var(--rule)}
-.draft-lines__heading--reference{width:46%}.draft-lines__heading--value{width:17%}.draft-lines__heading--derived{width:10%}.draft-lines__heading--remove{width:6.5rem}
+.draft-lines__heading--reference{width:46%}.draft-lines__heading--value{width:17%}.draft-lines__heading--derived{width:10%}.draft-lines__heading--more{width:4rem}.draft-lines__heading--remove{width:2.5rem}
 .draft-line__cell{padding:8px;vertical-align:top;border:0;border-bottom:1px solid var(--rule);border-radius:0;background:transparent}
 .draft-line__cell:last-child{text-align:right}
 .draft-line__cell input,.draft-line__cell select{width:100%;min-width:0}
@@ -318,8 +330,20 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .command-bar .action-overflow{margin-left:auto}
 .command-bar [data-save-boundary]{flex-basis:100%;margin:0;color:var(--muted);font-size:12px}
 /* The editor's save bar (LOOK-1): sticky under the form, one primary action. */
+/* What scrolls into view lands above the sticky save bar (round 3). */
+html:has([data-save-boundary]){scroll-padding-bottom:120px}
 .panel:has(>.command-bar [data-save-boundary]){position:sticky;bottom:0;z-index:5;padding:10px var(--pad-x);box-shadow:var(--shadow-bar)}
 .command-bar:has([data-save-boundary]){flex-wrap:wrap;justify-content:flex-end}
+/* An order line reads product, quantity and price; its discount and tax
+   wait behind its own More, its removal a quiet × (LOOK-1 round 3). */
+.draft-line-more{position:relative}
+.draft-line-more>summary{color:var(--accent-text);font-size:12px;font-weight:500;cursor:pointer;list-style:none}
+.draft-line-more>summary::-webkit-details-marker{display:none}
+.draft-line-more[open]>.draft-line-more__fields{position:absolute;z-index:6;right:0;top:calc(100% + 4px);display:grid;gap:8px;width:14rem;padding:10px;border:1px solid var(--rule);border-radius:6px;background:var(--sheet);box-shadow:var(--shadow-dlg);text-align:left}
+.draft-line-more__field{display:grid;gap:4px}
+.draft-line-more__field>span{color:var(--muted);font-size:11px;font-weight:500}
+.draft-line__remove{min-width:28px;color:var(--muted);font-size:16px;line-height:1;text-decoration:none}
+.draft-line__remove:hover{color:var(--ink)}
 .panel:has([data-document-editor]) fieldset{margin:0;padding:0;border:0;background:transparent}
 .draft-header.form-fields{grid-template-columns:repeat(3,minmax(0,1fr));gap:14px 18px;margin:0}
 .draft-lines-panel .panel__heading{align-items:center;margin-bottom:10px}
@@ -358,6 +382,7 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .launcher-scan__field input{min-height:44px;padding:0 12px;font-family:var(--f-mono);font-size:14px}
 .launcher-scan__message{margin-top:10px}
 .launcher-action button{min-height:44px}
+.launcher-empty{grid-column:1/-1;margin:24px 0 0;color:var(--muted);font-size:13px;text-align:center}
 /* The find box's button sits beside it, at the input's line (LOOK-1 round 2). */
 @media(min-width:801px){
 .surface-grid:has(.launcher-scan):has(.launcher-action) .launcher-scan{grid-column:1/12}
@@ -371,6 +396,11 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .record-breadcrumb{order:-3}
 .composition-alert,.composition-progression,.surface-grid>.operation-feedback{order:-1}
 .composition-heading{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+/* A record page's title (LOOK-1 round 3): the eyebrow, the record's name in
+   the document face, its state beside it. */
+.surface-heading--slot:has(.eyebrow){justify-content:flex-start;align-items:center;gap:12px}
+.surface-heading--slot:has(.eyebrow) h1{margin:0;font-family:var(--f-doc);font-size:28px;font-weight:500;line-height:1.1;letter-spacing:-.01em;overflow-wrap:anywhere}
+.surface-heading--slot:has(.eyebrow)>.status-pill{align-self:flex-end;margin-bottom:6px}
 .composition-heading h1{margin:0;font-family:var(--f-doc);font-size:28px;font-weight:500;line-height:1.1;letter-spacing:-.01em;overflow-wrap:anywhere}
 .composition-business-status{display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 8px;border:1px solid var(--rule-2);border-radius:999px;color:var(--muted);font-size:11px;font-weight:500;white-space:nowrap}
 .composition-business-status::before{content:"";width:7px;height:7px;border:1.5px solid currentColor;border-radius:50%}
@@ -382,6 +412,7 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .composition-totals{display:grid;gap:5px;width:min(100%,300px);margin:12px 0 0 auto;font-size:13px}
 .composition-totals div{display:flex;justify-content:space-between;gap:16px}
 .composition-totals dt{color:var(--ink-2)}
+.composition-totals__currency{color:var(--muted);font-size:11px;font-weight:500}
 .composition-totals dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
 .composition-totals div:last-child{margin-top:4px;padding:8px 0 3px;border-top:1px solid var(--ink);border-bottom:3px double var(--ink);font-weight:600;font-size:14px}
 .line-progress{display:inline-flex;align-items:center;gap:10px;white-space:nowrap;color:var(--muted)}
@@ -441,7 +472,7 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .composition-record-actions{position:relative;grid-column:1/-1;order:-2;justify-self:end;align-self:end;margin-top:calc(-1 * var(--gap) - var(--ctl-h) - 2px);z-index:4}
 .composition-record-actions>summary{display:inline-flex;align-items:center;min-height:var(--ctl-h);padding:0 12px;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);color:var(--ink);font-size:13px;font-weight:500;cursor:pointer;list-style:none}
 .composition-record-actions>summary::-webkit-details-marker{display:none}
-.composition-record-actions>summary::after{content:"";width:6px;height:6px;margin:-3px 0 0 8px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}
+.composition-record-actions>summary{min-width:var(--ctl-h);justify-content:center;letter-spacing:.08em}
 .composition-record-actions[open]>.command-bar{position:absolute;right:0;top:calc(100% + 4px);display:grid;gap:6px;min-width:14rem;padding:8px;border:1px solid var(--rule);border-radius:6px;background:var(--sheet);box-shadow:var(--shadow-dlg)}
 .composition-local-actions{display:flex;flex-wrap:wrap;gap:8px}
 .composition-local-actions>div{flex:1 1 16rem}
@@ -467,6 +498,7 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .composition-collection[data-resolution=empty],.composition-collection[data-resolution=failed],.data-panel[data-composition-dataset][data-resolution=empty]{display:grid;grid-template-columns:minmax(10rem,auto) minmax(0,1fr);align-items:baseline;gap:4px 16px}
 .composition-collection[data-resolution=empty] [data-message],.data-panel[data-composition-dataset][data-resolution=empty] [data-message]{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;color:var(--muted);font-size:12px}
 .composition-collection[data-resolution=empty] [data-message] [data-message-sentence],.data-panel[data-composition-dataset][data-resolution=empty] [data-message] [data-message-sentence]{margin:0;color:var(--ink-2);font-size:12px;font-weight:500}
+.composition-collection[data-resolution=empty] .composition-collection-heading details{display:none}
 .composition-collection[data-resolution=empty] [data-message] p,.data-panel[data-composition-dataset][data-resolution=empty] [data-message] p{margin:0}
 .data-panel [data-message],.panel>[data-message]{color:var(--muted)}
 .data-panel [data-message] [data-message-sentence]{font-size:13px;font-weight:600;color:var(--ink)}
@@ -482,6 +514,17 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .surface-grid:has(.composition-rail){grid-template-columns:minmax(0,1fr) var(--rail-w);grid-auto-flow:row dense;align-items:start;row-gap:0}
 .surface-grid:has(.composition-rail)>.surface-slot>*,.surface-grid:has(.composition-rail) .composition-header>*{grid-column:1;margin-bottom:var(--gap)}
 .surface-grid:has(.composition-rail) :is(.composition-title,.record-breadcrumb,.composition-alert,.composition-progression,.composition-record-actions,.composition-back){grid-column:1/-1}
+/* Under a line's product its SKU and unit read as values (LOOK-1 round 3):
+   the labels are for screen readers, the values mono, dot-separated. */
+td[data-cell-role=primary] .composition-cell-secondary>span .composition-cell-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+td[data-cell-role=primary] .composition-cell-secondary{font-family:var(--f-mono);font-size:11px;color:var(--muted)}
+td[data-cell-role=primary] .composition-cell-secondary>span+span::before{content:"· ";color:var(--faint)}
+td[data-cell-role=actions] a:not([class]){color:var(--muted);font-size:12px}
+/* One document sheet (LOOK-1 round 3): the facts, the line datasets and the
+   details join into one bordered sheet divided by rules. */
+.surface-grid:has(.composition-rail) :is(.composition-facts,.composition-collection:not([data-composition-rail]),[data-composition-fields]){margin-bottom:0;border-radius:0;border-top-width:0}
+.surface-grid:has(.composition-rail) .composition-facts{border-top-width:1px;border-radius:4px 4px 0 0}
+.surface-grid:has(.composition-rail) [data-composition-fields]{border-radius:0 0 4px 4px;margin-bottom:var(--gap)}
 /* The rail is one column: it spans the sheet's rows, whose gap is each
    item's margin, so the rows it spans past the sheet's last add nothing. */
 .surface-grid:has(.composition-rail) .composition-rail{grid-column:2;grid-row:span 12}
@@ -498,7 +541,13 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .draft-more>summary::before{content:"›";flex:none;color:var(--muted);transition:transform var(--motion-duration) var(--motion-easing)}
 .draft-more[open]>summary::before{transform:rotate(90deg)}
 .draft-more[open]>summary{margin-bottom:10px}
-.composition-rail{grid-column:1/-1;display:grid;gap:var(--gap);align-content:start;min-width:0}
+.composition-rail{grid-column:1/-1;display:grid;gap:0;align-content:start;min-width:0;padding:0}
+.composition-rail__title{margin:0;padding:calc(var(--row-y) + 6px) var(--pad-x);border-bottom:1px solid var(--rule);font-size:13px}
+/* Inside the one Linked documents panel each dataset is a divided row. */
+.composition-rail>[data-composition-rail]{border:0;border-radius:0;border-bottom:1px solid var(--rule);background:transparent}
+.composition-rail>[data-composition-rail]:last-child{border-bottom:0}
+.composition-rail>[data-composition-rail] h2{font-size:12px;font-weight:500;color:var(--ink-2)}
+.composition-rail>[data-composition-rail][data-resolution=empty] [data-message-sentence],.composition-rail>[data-composition-rail][data-resolution=empty] .composition-message strong{display:inline-flex;align-items:center;height:20px;padding:0 8px;border:1px solid var(--rule-2);border-radius:999px;color:var(--muted);font-size:11px;font-weight:500}
 [data-composition-rail]{padding:calc(var(--row-y) + 4px) var(--pad-x) calc(var(--row-y) + 6px)}
 [data-composition-rail]>.data-table-wrap{margin:8px calc(-1 * var(--pad-x)) calc(-1 * (var(--row-y) + 6px));border-top:1px solid var(--rule)}
 [data-composition-rail] .composition-collection-heading details{display:none}
@@ -545,6 +594,22 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .composition-task-context .record-fields dd{font-size:12px}
 .composition-task-context section+section{margin-top:10px;padding-top:10px;border-top:1px solid var(--rule)}
 .composition-task-consequence{margin:12px 0;padding:10px 12px;border-radius:4px;background:var(--accent-soft);color:var(--ink-2);font-size:12px}
+/* The Receive dialog as the mockup draws it (LOOK-1 round 3): the title,
+   then the order; the header fields three to a row; the declared
+   consequence as "After you post"; Cancel beside the one primary. */
+.composition-task-dialog:modal{width:min(44rem,calc(100vw - 32px))}
+.composition-task-header>div{display:flex;flex-direction:column;gap:2px}
+.composition-task-header>div>h2{order:-1;margin:0}
+.composition-task-header>div>p{margin:0;color:var(--muted);font-size:12px}
+.composition-task-header>div>.muted{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+.composition-inputs:has(>.composition-task-after){grid-template-columns:repeat(3,minmax(0,1fr));align-items:start}
+.composition-inputs:has(>.composition-task-after)>:not(.composition-input),.composition-inputs:has(>.composition-task-after)>.composition-input:has(textarea){grid-column:1/-1}
+.composition-inputs .composition-input textarea{min-height:56px}
+.composition-task-after{display:grid;gap:4px;padding:10px 12px;border-radius:4px;background:var(--accent-soft)}
+.composition-task-after .eyebrow{margin:0;color:var(--accent-text)}
+.composition-task-after .composition-task-consequence{margin:0;padding:0;background:none}
+.composition-task-rows button[value=fill]{min-height:0;height:auto;padding:0;border:0;background:none;color:var(--accent-text);font-size:12px;font-weight:500;text-decoration:underline}
+.composition-task-footer:has(>a.secondary-action){display:flex;justify-content:flex-end;align-items:center;gap:8px}
 .composition-task-result{margin-bottom:14px;padding:10px 12px;border-radius:4px;background:var(--success-soft);color:var(--success)}
 .composition-task-result h3{margin:0 0 6px;font-size:13px}
 .composition-task-result dd,.composition-task-result dt{color:var(--success)}
@@ -627,7 +692,8 @@ body:has(.shell-menu[open]) .sidebar{visibility:visible}
 body:has(.shell-menu[open])::after{content:"";position:fixed;inset:48px 0 0;z-index:55;background:var(--scrim)}
 .topbar{position:sticky;top:0;z-index:58;min-height:48px;height:auto;gap:10px;flex-wrap:wrap;padding:6px max(16px,env(safe-area-inset-right,0px)) 6px 56px}
 .topbar__context{display:block;flex:1}
-.shell-search{display:none}
+.shell-search{order:3;flex-basis:100%;margin:0}
+.shell-search label{width:100%}
 .principal{margin-left:0}
 main{padding:14px max(16px,env(safe-area-inset-left,0px)) 40px}
 /* In the drawer each group is a disclosure again, with thumb-sized rows. */
@@ -639,6 +705,10 @@ main{padding:14px max(16px,env(safe-area-inset-left,0px)) 40px}
 
 /* ---------- 800px and below: the compact projection ---------- */
 @media(max-width:800px){
+.composition-inputs:has(>.composition-task-after){grid-template-columns:minmax(0,1fr)}
+.list-controls{flex-wrap:wrap}
+.list-controls__search{flex-basis:100%}
+.list-pagination a,.list-pagination button{min-height:44px}
 .draft-header.form-fields{grid-template-columns:minmax(0,1fr)}
 .composition-collection[data-resolution=empty],.composition-collection[data-resolution=failed],.data-panel[data-composition-dataset][data-resolution=empty]{display:block}
 .sidebar a,.navigation-children a{min-height:44px}
@@ -718,13 +788,15 @@ table.draft-lines.form-fields{border-top:0}
 .composition-task-footer{margin-left:-16px;margin-right:-16px;padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));border-radius:0}
 .composition-task-footer button{flex:1;min-height:44px}
 .composition-task-dialog:not(:modal) .composition-task-footer{bottom:80px}
-.data-table-wrap[data-compact=scrollTable]{overflow-x:auto}
+.data-table-wrap[data-compact=scrollTable]{position:relative;overflow-x:auto;max-width:100%}
+[data-declared-list]:has(>.data-table-wrap[data-compact=scrollTable]){overflow-x:clip}
 .data-table-wrap[data-compact=scrollTable] table{display:table;width:100%}
 .data-table-wrap[data-compact=scrollTable] tbody{display:table-row-group}
 .data-table-wrap[data-compact=scrollTable] thead{display:table-header-group;position:static;width:auto;height:auto;overflow:visible;clip:auto}
 .data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true]{display:table-row;margin:0;padding:0;border:0;background:transparent}
 .data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td{display:table-cell;height:auto;padding:var(--row-y) 12px;border-bottom:1px solid var(--rule);text-align:left}
-.data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td[data-cell-role=quantity]{text-align:right}
+.data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td[data-cell-role=quantity],.data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td[data-cell-kind=number]{text-align:right}
+.data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td{white-space:nowrap}
 .data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td::before{display:none}
 }
 `;

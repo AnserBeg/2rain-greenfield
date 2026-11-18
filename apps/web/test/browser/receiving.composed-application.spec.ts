@@ -189,7 +189,7 @@ async function journey(
   await expect(page.getByLabel('Currency *')).toHaveValue('CAD');
   await pick('Line 1 product', 'OFF-100', 'Field notebook');
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('5');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page).toHaveURL(/purchase_order_detail/u);
   const orderNumber = (
     await page.locator('.composition-header h1').innerText()
@@ -378,8 +378,10 @@ async function journey(
   await page.goto(orderUrl);
   await command('Close');
   await expect(page.getByRole('status')).toContainText('Close complete');
+  // Closed with what arrived still to bill: the stepper's current step,
+  // which the badge names (LOOK-1 round 3), is Billing.
   await expect(page.locator('.composition-business-status')).toHaveText(
-    'Closed',
+    'Billing',
   );
   // A staged correction cannot execute while its order is closed.
   await page.goto(url('goods_receipt', 'detail', correctionId));

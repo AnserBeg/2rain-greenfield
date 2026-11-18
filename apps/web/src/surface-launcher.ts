@@ -7,6 +7,7 @@ import {
 } from '../../../packages/runtime/src/semantic-query-gateway.js';
 
 import { escapeHtml as h } from './html.js';
+import { declaredIcon } from './navigation-icons.js';
 import {
   declaredListArguments,
   readDeclaredListState,
@@ -270,17 +271,38 @@ export function launcherScanFormId(surface: CompiledSurfaceDefinition): string {
   return `launcher-scan-${surface.surfaceId.replace(/[^a-z0-9]+/gu, '-')}`;
 }
 
+/** Whether a launcher declares its own primary action (its Open button). */
+function declaresPrimaryAction(surface: CompiledSurfaceDefinition): boolean {
+  const slots = surface.slots as CompiledSurfaceDefinition['slots'] | undefined;
+  return (
+    slots === undefined || slots.some((slot) => slot.slot === 'primaryAction')
+  );
+}
+
 /** The decision: one large tile per declared destination, with its count. */
 export function renderLauncherTiles(
   surface: CompiledSurfaceDefinition,
   data: LauncherRenderData,
 ): string {
+  // Each tile shows its declared icon (LOOK-1 round 3), as its queue does.
+  const icons = new Map<string, string | undefined>(
+    (surface.launcher?.tiles ?? []).map((tile) => [
+      String(tile.tileId),
+      tile.icon,
+    ]),
+  );
   return `<nav class="launcher-tiles" aria-label="${h(surface.label)}"><ul>${data.tiles
     .map(
       (tile) =>
-        `<li><a class="launcher-tile" href="${h(tile.href)}" data-launcher-tile="${h(tile.tileId)}"><strong class="launcher-tile__label">${h(tile.label)}</strong>${tile.count === null ? '' : `<span class="launcher-tile__count" data-launcher-count>${String(tile.count)}</span>`}${tile.viewLabel ? `<span class="launcher-tile__view">${h(tile.viewLabel)}</span>` : ''}<span class="launcher-tile__description">${h(tile.description)}</span></a></li>`,
+        `<li><a class="launcher-tile" href="${h(tile.href)}" data-launcher-tile="${h(tile.tileId)}"><strong class="launcher-tile__label">${declaredIcon(icons.get(tile.tileId)) ? `<span class="nav-icon" aria-hidden="true">${declaredIcon(icons.get(tile.tileId))}</span>` : ''}${h(tile.label)}</strong>${tile.count === null ? '' : `<span class="launcher-tile__count" data-launcher-count>${String(tile.count)}</span>`}${tile.viewLabel ? `<span class="launcher-tile__view">${h(tile.viewLabel)}</span>` : ''}<span class="launcher-tile__description">${h(tile.description)}</span></a></li>`,
     )
-    .join('')}</ul></nav>`;
+    .join('')}</ul></nav>${
+    // A launcher searched from the top bar (Today) says where to start,
+    // centred under its queues (LOOK-1 round 3, ruling: no list query here).
+    declaresPrimaryAction(surface)
+      ? ''
+      : '<p class="launcher-empty">Pick a queue to start, or search for any order, document or item above.</p>'
+  }`;
 }
 
 /**
@@ -297,6 +319,10 @@ export function renderLauncherScan(
   if (!scan) return '';
   const messageId = `${launcherScanFormId(surface)}-message`;
   const outcome = data.scan?.outcome;
+  // A launcher that declares no primary action is searched from the top bar
+  // (LOOK-1 round 3: Today): its scan box appears only to report what a
+  // search opened nothing for.
+  if (!outcome && !declaresPrimaryAction(surface)) return '';
   return `<section class="panel launcher-scan"><form id="${h(launcherScanFormId(surface))}" class="launcher-scan__form" method="get" action="/" role="search"><input type="hidden" name="surface" value="${h(surface.surfaceId)}">${data.scope ? `<input type="hidden" name="${h(data.scope.parameterId)}" value="${h(data.scope.value)}">` : ''}<label class="launcher-scan__field"><span>${h(scan.label)}</span><input name="scan" value="${h(data.scan?.code ?? '')}" data-scan-input="true" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="go" maxlength="${String(SCAN_CODE_MAXIMUM_LENGTH)}" required autofocus${outcome ? ` aria-invalid="true" aria-describedby="${h(messageId)}"` : ''}></label>${outcome ? `<div id="${h(messageId)}" class="launcher-scan__message" role="alert" ${messageAttributes({ code: outcome })}>${messageBody({ code: outcome }, scan.label, 'h2')}</div>` : ''}</form></section>`;
 }
 
