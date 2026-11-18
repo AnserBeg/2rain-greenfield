@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import type pg from 'pg';
 
+import { readActiveRelease } from '../../packages/postgres-provider/src/active-release-root.js';
 import { OperationsAgentSession } from '../../packages/operations-agent/src/session.js';
 import { COMPANY, worldOver, seededId } from '../agent/agent-world.js';
 import {
@@ -883,6 +884,12 @@ test(
           assert.equal(
             (await service.service.status()).activeReleaseRoot,
             prepared.releaseRoot,
+          );
+          assert.equal(
+            (await readActiveRelease(options))?.baseReleaseRoot,
+            parseCompiledApplication(upgraded.envelope).application.compiled
+              .releaseRoot,
+            'the agent guard follows the new first-party base after activation',
           );
           const restarted = await openComposedApplicationRuntime({
             ...options,
