@@ -1053,21 +1053,21 @@ function renderPresentedChild(
   );
   const progressHeading =
     progressTotal && progressDone
-      ? `<th scope="col" class="composition-progress-heading">${h(progressDone.label)}</th>`
+      ? `<th scope="col" class="composition-progress-heading">Progress</th>`
       : '';
   const progressCell = (row: Row) => {
     if (!progressTotal || !progressDone) return '';
     const total = decimalOf(row.record, progressTotal.field);
     const done = decimalOf(row.record, progressDone.field);
     if (total === null || done === null)
-      return `<td data-cell-role="progress" data-column-label="${h(progressDone.label)}">—</td>`;
+      return `<td data-cell-role="progress" data-column-label="Progress">—</td>`;
     const state =
       !POSITIVE_DECIMAL.test(done) || !POSITIVE_DECIMAL.test(total)
         ? 'none'
         : compareDecimals(done, total) >= 0
           ? 'complete'
           : 'partial';
-    return `<td data-cell-role="progress" data-column-label="${h(progressDone.label)}"><span class="line-progress" data-progress="${state}">${POSITIVE_DECIMAL.test(total) ? `<progress value="${h(done)}" max="${h(total)}">${h(done)} of ${h(total)}</progress>` : ''}<span><b>${h(row.cells[progressDone.columnId] ?? done)}</b> of ${h(row.cells[progressTotal.columnId] ?? total)}</span></span></td>`;
+    return `<td data-cell-role="progress" data-column-label="Progress"><span class="line-progress" data-progress="${state}">${POSITIVE_DECIMAL.test(total) ? `<progress value="${h(done)}" max="${h(total)}">${h(done)} of ${h(total)}</progress>` : ''}<span><b>${h(row.cells[progressDone.columnId] ?? done)}</b> of ${h(row.cells[progressTotal.columnId] ?? total)}</span></span></td>`;
   };
   const cells = (row: Row, values: Column[]) =>
     values

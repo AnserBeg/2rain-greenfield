@@ -319,7 +319,8 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .launcher-tile:hover{background:var(--sunk);text-decoration:none}
 .launcher-tile__label{display:flex;align-items:center;gap:7px;color:var(--ink-2);font-size:12px;font-weight:500}
 .launcher-tile__count{font-size:28px;line-height:1.1;font-weight:500;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
-.launcher-tile__view{color:var(--muted);font-size:11px;font-weight:500}
+/* The view a tile opens is the tile's own label in other words: read, not shown. */
+.launcher-tile__view{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
 .launcher-tile__description{color:var(--muted);font-size:12px}
 .launcher-scan__field{display:grid;gap:6px;color:var(--ink-2);font-size:12px;font-weight:500}
 .launcher-scan__field input{min-height:44px;padding:0 12px;font-family:var(--f-mono);font-size:14px}
