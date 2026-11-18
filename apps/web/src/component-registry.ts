@@ -2740,7 +2740,13 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
           const text = declaredCellText(column, record, input.present);
           // The label leads and the column id ends the cell's attributes, as
           // readers of the List's markup expect; the kind sits between.
-          const label = `data-column-label="${escapeHtml(column.label)}"${kind(column)} data-column-priority="${String(column.priority)}" data-column-id="${escapeHtml(column.columnId)}"`;
+          // A zero figure reads faint, so the figures that matter stand out
+          // (LOOK-1 round 3).
+          const zero =
+            text !== null &&
+            kind(column) !== '' &&
+            /^-?0(?:\.0+)?$/u.test(text);
+          const label = `data-column-label="${escapeHtml(column.label)}"${kind(column)}${zero ? ' data-zero' : ''} data-column-priority="${String(column.priority)}" data-column-id="${escapeHtml(column.columnId)}"`;
           if (column.role === 'title') {
             const title = text ?? record.recordId.slice(0, 8);
             const href = input.detailHref(record);
@@ -2756,13 +2762,8 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
           // What the row is short of now is marked, as the reference marks
           // an exception "!" (SUPPLY-WARNINGS).
           const short = shortMarked(list, column, record);
-          // A zero figure reads faint, so the figures that matter stand out
-          // (LOOK-1 round 3).
-          const zero =
-            text !== null &&
-            kind(column) !== '' &&
-            /^-?0(?:\.0+)?$/u.test(text);
-          return `<td ${label}>${text === null ? '<span class="muted">—</span>' : zero ? `<span class="cell-zero">${escapeHtml(text)}</span>` : escapeHtml(text)}${late === null ? '' : ` <span class="status-pill" data-status-role="attention" data-overdue-days="${String(late)}">${escapeHtml(`${String(late)} ${late === 1 ? 'day' : 'days'} late`)}</span>`}${short ? ' <span class="status-pill" data-status-role="blocked" data-short-mark="true"><span aria-hidden="true">!</span><span class="sr-only">Short of stock</span></span>' : ''}</td>`;
+
+          return `<td ${label}>${text === null ? '<span class="muted">—</span>' : escapeHtml(text)}${late === null ? '' : ` <span class="status-pill" data-status-role="attention" data-overdue-days="${String(late)}">${escapeHtml(`${String(late)} ${late === 1 ? 'day' : 'days'} late`)}</span>`}${short ? ' <span class="status-pill" data-status-role="blocked" data-short-mark="true"><span aria-hidden="true">!</span><span class="sr-only">Short of stock</span></span>' : ''}</td>`;
         })
         .join('');
       const title =

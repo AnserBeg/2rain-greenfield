@@ -225,7 +225,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
    normal outcome reads as text, so only exceptions are badges. */
 [data-declared-list]>.panel__heading h2{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
 .list-count{color:var(--muted);font-size:12px}
-.cell-zero{color:var(--faint)}
+td[data-zero]{color:var(--faint)}
 .data-table-wrap td .status-pill[data-status-role=success]{height:auto;padding:0;border:0;background:transparent;color:var(--muted);font-weight:400}
 .data-table-wrap td .status-pill[data-status-role=success]::before{content:none}
 [data-declared-list] td .record-link{font-family:var(--f-mono);font-size:12px;font-weight:400}
@@ -733,7 +733,8 @@ table.draft-lines.form-fields{border-top:0}
 .composition-task-footer{margin-left:-16px;margin-right:-16px;padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));border-radius:0}
 .composition-task-footer button{flex:1;min-height:44px}
 .composition-task-dialog:not(:modal) .composition-task-footer{bottom:80px}
-.data-table-wrap[data-compact=scrollTable]{overflow-x:auto}
+.data-table-wrap[data-compact=scrollTable]{overflow-x:auto;max-width:100%}
+[data-declared-list]:has(>.data-table-wrap[data-compact=scrollTable]){overflow-x:clip}
 .data-table-wrap[data-compact=scrollTable] table{display:table;width:100%}
 .data-table-wrap[data-compact=scrollTable] tbody{display:table-row-group}
 .data-table-wrap[data-compact=scrollTable] thead{display:table-header-group;position:static;width:auto;height:auto;overflow:visible;clip:auto}
