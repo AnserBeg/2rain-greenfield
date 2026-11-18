@@ -1,7 +1,7 @@
 # LOOK-1 — every screen in the Ledger look the owner chose
 
 Status: in progress. Mechanical (no Critical path). Base `08260fc2`. Stops, each ruled 2026-11-17: line progress carrier
-(option A), icon carrier (option A); plain names for the setup lists required (slice 4).
+(option A), icon carrier (option A); plain names for the setup lists required (slice 4). Queue counts on every page: SPEED-1.
 
 ## Claims
 
@@ -31,13 +31,21 @@ Status: in progress. Mechanical (no Critical path). Base `08260fc2`. Stops, each
 - Status kind of a document: the role its own List's status column declares for that state; none → neutral.
 - Phone touch targets stay ≥ 44px (ux-grammar), not the mockup's 36px.
 - Launcher tiles: four a row, two below 1000px (the WAREHOUSE-MODE contract test moved with them).
-- Re-baselines (ADR-0066): the progress and icon keys and their first-party declarations: `dev:reset`.
+- Re-baselines (ADR-0066): the progress and icon keys and their declarations; the plain names: `dev:reset`.
+- `icon` is a refined string over the closed set, not an enum axis: render-only names add no language-coverage obligations.
+- The header keeps its facts in its markup (pinned by specs) and is `display:contents`; CSS `order` lays them after the stepper.
+- The top bar's search is a text box: the page's own search stays the first searchbox for every journey.
+- Plain names (labels only, ids unchanged): Customers and suppliers (group Contacts), Contact roles, Companies, Period locks,
+  Stock movements, Stock by location, Stock counts, Items, Tax codes, Price lists, Locations.
+- The proof's screenshots come from CI (`look-evidence-<sha>` artifact of the composed browser job; owner rule 2026-11-18).
 
 ## Slices
 
 1. Tokens and type — `0f54907e`.
-2. Shell — queues, groups, icons, menu, search, demo strip in the sidebar footer.
-3. Record page — header, stepper, next-step card, facts, line progress, totals.
+2. Shell — queues, groups, icons, menu, search, demo strip in the sidebar footer — `f01f6e2c`.
+3. Record page — header, stepper, next-step card, facts, line progress, totals — `f01f6e2c`, `44ab99ea`.
+4. Lists, forms, empty states, plain names — `db33d246`, `e48ceb75`.
+5. The proof — `apps/web/test/browser/look.composed-application.spec.ts`; mockup shots in `docs/execution/evidence/look-1/`.
 
 ## Gates
 
@@ -57,3 +65,5 @@ button; a purchase order shows its stepper, the next step sentence and button, e
 - Tenant record types use the structural icon until the customization patch kinds learn the `icon` key.
 - Tenant record types have no line datasets yet, so `presentation.progress` does not touch the patch kinds.
 - Totals show no currency code: no declared currency column for the totals block.
+- The assistant panel (AGENT-3, PR #58) is not on main yet; its markup gets the Ledger classes when it lands.
+- The record page is one column; the mockup's right rail (linked documents, activity) has no declared split.

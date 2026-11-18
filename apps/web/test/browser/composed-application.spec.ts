@@ -2650,7 +2650,7 @@ async function partyLifecycleJourney(
   ).toBeVisible();
   await expect(
     page.getByRole('navigation', { name: 'Breadcrumb' }),
-  ).toContainText('Party list');
+  ).toContainText('Customers and suppliers');
   // A party's page is its customer workspace (SALES-PARITY): the number reads
   // under the name, the contact in Details, and the record's identity,
   // activity and revision in its technical details.

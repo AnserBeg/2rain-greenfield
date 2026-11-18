@@ -127,7 +127,15 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
               });
               await requireLedgerParts(page, screen, viewport.width);
               const text = await page.locator('body').innerText();
-              expect.soft(rawCodes(text), `${screen} raw codes`).toEqual([]);
+              // The order's two date-time inputs keep "(UTC)" (ruling).
+              expect
+                .soft(
+                  rawCodes(text).filter(
+                    (code) => !(screen === 'new-po' && code === '(UTC)'),
+                  ),
+                  `${screen} raw codes`,
+                )
+                .toEqual([]);
               expect
                 .soft(
                   await page.evaluate(

@@ -133,6 +133,8 @@ const MODULE_REGISTRY = Object.freeze([
 const COMPOSED_MODULE_LABELS: Readonly<Record<string, string>> = Object.freeze({
   inventory: 'Stock',
   party: 'Contacts',
+  // A one-destination group is shown as that destination: its plain name.
+  location: 'Locations',
 });
 
 /** Each menu group's icon (LOOK-1), from the language's closed icon set. */

@@ -165,6 +165,12 @@ test('compiled groups keep six list surfaces reachable through five primary entr
 }) => {
   await page.setViewportSize({ height: 844, width: 390 });
   await page.goto(navigationBudgetBaseUrl);
+  // LOOK-1 (owner ruling): at phone width the sidebar is a drawer behind the
+  // menu button, a native disclosure that needs no script.
+  const menu = page.locator('.shell-menu > summary');
+  await expect(page.locator('.sidebar')).toBeHidden();
+  await expect(menu).toBeVisible();
+  await menu.click();
   const navigation = page.getByRole('navigation', {
     name: 'Release navigation',
   });
@@ -173,11 +179,6 @@ test('compiled groups keep six list surfaces reachable through five primary entr
   await expect(primaryEntries.getByRole('link')).toHaveCount(4);
   const more = primaryEntries.getByRole('group').filter({ hasText: 'More' });
   await expect(more).toHaveCount(1);
-  // LOOK-1 (owner ruling): at phone width the sidebar is a drawer behind the
-  // menu button, a native disclosure that needs no script.
-  const menu = page.locator('.shell-menu > summary');
-  await expect(page.locator('.sidebar')).toBeHidden();
-  await expect(menu).toBeVisible();
 
   const primaryTargets = await primaryEntries
     .locator(':scope > a, :scope > details > summary')
@@ -195,6 +196,7 @@ test('compiled groups keep six list surfaces reachable through five primary entr
   assert.deepEqual(observeAccessibility([], primaryTargets).violations, []);
   await expect(page.locator('.sidebar')).toHaveCSS('position', 'fixed');
   await expect(page.locator('.sidebar')).toHaveCSS('bottom', '0px');
+  await page.reload();
   await page.keyboard.press('Tab');
   await expect(page.locator('.skip-link')).toBeFocused();
   await page.keyboard.press('Tab');
@@ -1086,8 +1088,13 @@ async function requireCompactJourney(
   assert.equal(accessibility.targetsRead, expectedNavigation.length);
   assert.deepEqual(accessibility.violations, []);
 
+  // By keyboard from the top: the skip link, the menu, then into the drawer.
+  await page.reload();
   await page.keyboard.press('Tab');
   await expect(page.locator('.skip-link')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.locator('.shell-menu > summary')).toBeFocused();
+  await page.keyboard.press('Enter');
   await page.keyboard.press('Tab');
   await expect(links.first()).toBeFocused();
   const documentWidths = await page.evaluate(() => ({

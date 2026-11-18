@@ -126,11 +126,11 @@ main{width:100%;max-width:var(--page-max);padding:var(--gap) var(--gutter) 56px}
 /* ---------- buttons: one primary per screen; everything else secondary or ghost ---------- */
 button,.button,.primary-action,.secondary-action,.list-page-link{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:var(--ctl-h);padding:0 12px;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);color:var(--ink);font-size:13px;font-weight:500;line-height:1.2;white-space:nowrap;text-decoration:none;cursor:pointer}
 button:hover,.button:hover,.secondary-action:hover{background:var(--sunk);text-decoration:none}
-.primary-action,.list-page-link,.task-primary-action button,.launcher-action button,
+.primary-action,.task-primary-action button,.launcher-action button,
 .composition-progression-next button,.composition-progression-next a.button,
 button[name=taskStage][value=prepare]:not(.sr-only),button[name=taskStage][value=confirm],
 button[name=draftCreate][value=submit],button[name=draftAction][value=confirm],button[name=draftAction][value=save],button[name=draftAction][value=place]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
-.primary-action:hover,.list-page-link:hover,.task-primary-action button:hover,.launcher-action button:hover,
+.primary-action:hover,.task-primary-action button:hover,.launcher-action button:hover,
 .composition-progression-next button:hover,.composition-progression-next a.button:hover,
 button[name=taskStage][value=prepare]:not(.sr-only):hover,button[name=taskStage][value=confirm]:hover,
 button[name=draftCreate][value=submit]:hover,button[name=draftAction][value=confirm]:hover,button[name=draftAction][value=save]:hover,button[name=draftAction][value=place]:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
@@ -178,7 +178,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
 .data-table-wrap td{height:auto;padding:var(--row-y) 12px;border-bottom:1px solid var(--rule);vertical-align:middle}
 .data-table-wrap tbody tr:last-child td{border-bottom:0}
 .data-table-wrap tbody tr:hover td{background:var(--sunk)}
-.data-table-wrap td:has(.cell-numeric){text-align:right}
+.data-table-wrap td:has(.cell-numeric),.data-table-wrap [data-cell-kind=number]{text-align:right}
 .record-link{color:var(--accent-text);font-weight:500}
 .data-table-wrap td[data-column-priority="0"] .record-link{white-space:nowrap}
 .data-panel>.data-table-wrap,.composition-collection>.data-table-wrap{margin:12px calc(-1 * var(--pad-x)) calc(-1 * (var(--row-y) + 8px));border-top:1px solid var(--rule)}
@@ -228,14 +228,14 @@ input::placeholder,textarea::placeholder{color:var(--faint)}
 .form-unavailable-value code{color:var(--ink);overflow-wrap:anywhere}
 .field-error{display:block;margin-top:4px;color:var(--blocked);font-size:12px;font-weight:500;letter-spacing:normal;text-transform:none}
 [aria-invalid="true"]{border-color:var(--blocked)!important}
-[data-document-editor] fieldset,[data-draft-line]{min-width:0;margin:var(--gap) 0;padding:var(--sheet-y) var(--sheet-x);border:1px solid var(--rule);border-radius:4px;background:var(--sheet)}
-[data-document-editor] legend{padding:0 6px;color:var(--muted);font-size:11px;font-weight:500;letter-spacing:.06em;text-transform:uppercase}
+[data-document-editor] fieldset{min-width:0;margin:var(--gap) 0;padding:var(--sheet-y) var(--sheet-x);border:1px solid var(--rule);border-radius:4px;background:var(--sheet)}
+[data-document-editor] legend{margin-bottom:12px;padding:0;color:var(--muted);font-size:11px;font-weight:500;letter-spacing:.06em;text-transform:uppercase}
 .draft-header .form-field__label,.draft-lines th{font-size:12px;font-weight:500;letter-spacing:normal;text-transform:none;color:var(--ink-2)}
 .draft-header>.form-field:not(.form-field--reference){gap:5px}
 table.draft-lines.form-fields{display:table;width:100%;margin:0;border-collapse:collapse;border-top:1px solid var(--ink);table-layout:fixed}
 .draft-lines th{padding:8px 8px 6px;text-align:left;color:var(--muted);font-size:11px;font-weight:500;border-bottom:1px solid var(--rule)}
 .draft-lines__heading--reference{width:46%}.draft-lines__heading--value{width:17%}.draft-lines__heading--derived{width:10%}.draft-lines__heading--remove{width:6.5rem}
-.draft-line__cell{padding:8px;vertical-align:top;border-bottom:1px solid var(--rule);background:transparent}
+.draft-line__cell{padding:8px;vertical-align:top;border:0;border-bottom:1px solid var(--rule);border-radius:0;background:transparent}
 .draft-line__cell:last-child{text-align:right}
 .draft-line__cell input,.draft-line__cell select{width:100%;min-width:0}
 .draft-line--removed td{padding:8px;color:var(--muted)}
@@ -376,7 +376,7 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .composition-progression-steps>li[data-step-state=current] .composition-progression-marker{border:5px solid var(--accent);background:var(--sheet)}
 .composition-progression-steps>li[data-step-state=attention] .composition-progression-marker{border-color:var(--attention);background:var(--attention);color:var(--attention-soft)}
 .composition-progression-steps>li[data-step-state=stopped] .composition-progression-marker{border-color:var(--blocked);color:var(--blocked)}
-.composition-progression-state{display:block;color:var(--muted);font-size:11px}
+.composition-progression-state{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
 .composition-progression-steps strong{display:block;font-size:12px;font-weight:600;overflow-wrap:anywhere}
 .composition-progression-steps>li[data-step-state=current] strong{color:var(--accent-text)}
 .composition-progression-documents{display:flex;flex-wrap:wrap;gap:0 8px;margin:2px 0 0;padding:0;list-style:none;font-family:var(--f-mono);font-size:11px}
@@ -396,8 +396,14 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .composition-context-overflow[open]{padding:6px;border:1px solid var(--rule);border-radius:4px}
 .composition-back{grid-column:1/-1;width:fit-content;display:inline-flex;align-items:center;min-height:var(--ctl-h);font-size:12px}
 .composition-context a,.composition-print{display:inline-flex;align-items:center}
-.composition-record-actions{grid-column:1/-1}
-.composition-record-actions>summary{display:flex;align-items:center;min-height:var(--ctl-h);color:var(--muted);cursor:pointer}
+.composition-title{grid-column:1/-1}
+/* The record's other commands sit at the header's right (spec: secondary
+   actions beside the title, never the primary); opened, they drop down. */
+.composition-record-actions{position:relative;grid-column:1/-1;order:-2;justify-self:end;align-self:end;margin-top:calc(-1 * var(--gap) - var(--ctl-h) - 2px);z-index:4}
+.composition-record-actions>summary{display:inline-flex;align-items:center;min-height:var(--ctl-h);padding:0 12px;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);color:var(--ink);font-size:13px;font-weight:500;cursor:pointer;list-style:none}
+.composition-record-actions>summary::-webkit-details-marker{display:none}
+.composition-record-actions>summary::after{content:"";width:6px;height:6px;margin:-3px 0 0 8px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}
+.composition-record-actions[open]>.command-bar{position:absolute;right:0;top:calc(100% + 4px);display:grid;gap:6px;min-width:14rem;padding:8px;border:1px solid var(--rule);border-radius:6px;background:var(--sheet);box-shadow:var(--shadow-dlg)}
 .composition-local-actions{display:flex;flex-wrap:wrap;gap:8px}
 .composition-local-actions>div{flex:1 1 16rem}
 .composition-local-actions p{margin:6px 0;color:var(--muted)}
@@ -419,10 +425,10 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .composition-collection td[data-cell-role=actions] form{display:inline-flex}
 .composition-collection td[data-cell-role=actions] button,.composition-collection td[data-cell-role=actions] a.button{min-height:calc(var(--ctl-h) - 6px);padding:0 9px;font-size:12px}
 .composition-collection tr[data-selected=true] td{background:var(--accent-soft)}
-.composition-collection[data-resolution=empty],.composition-collection[data-resolution=failed]{display:grid;grid-template-columns:minmax(10rem,auto) minmax(0,1fr);align-items:baseline;gap:4px 16px}
-.composition-collection[data-resolution=empty] [data-message]{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;color:var(--muted);font-size:12px}
-.composition-collection[data-resolution=empty] [data-message] [data-message-sentence]{margin:0;color:var(--ink-2);font-size:12px;font-weight:500}
-.composition-collection[data-resolution=empty] [data-message] p{margin:0}
+.composition-collection[data-resolution=empty],.composition-collection[data-resolution=failed],.data-panel[data-composition-dataset][data-resolution=empty]{display:grid;grid-template-columns:minmax(10rem,auto) minmax(0,1fr);align-items:baseline;gap:4px 16px}
+.composition-collection[data-resolution=empty] [data-message],.data-panel[data-composition-dataset][data-resolution=empty] [data-message]{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;color:var(--muted);font-size:12px}
+.composition-collection[data-resolution=empty] [data-message] [data-message-sentence],.data-panel[data-composition-dataset][data-resolution=empty] [data-message] [data-message-sentence]{margin:0;color:var(--ink-2);font-size:12px;font-weight:500}
+.composition-collection[data-resolution=empty] [data-message] p,.data-panel[data-composition-dataset][data-resolution=empty] [data-message] p{margin:0}
 .data-panel [data-message],.panel>[data-message]{color:var(--muted)}
 .data-panel [data-message] [data-message-sentence]{font-size:13px;font-weight:600;color:var(--ink)}
 .data-panel [data-message] p{margin:3px 0 0;font-size:12px}
@@ -581,8 +587,8 @@ button,.button,.primary-action,.secondary-action,.list-page-link,.action-overflo
 .data-table-wrap tr[data-compact-card=true]{display:grid;gap:2px;margin:0 0 8px;padding:8px 10px;border:1px solid var(--rule);border-radius:4px;background:var(--sheet)}
 .data-table-wrap tr[data-compact-card=true] td{display:grid;grid-template-columns:minmax(104px,38%) minmax(0,1fr);gap:10px;align-items:center;height:auto;min-height:32px;padding:3px 0;border:0;background:transparent;text-align:left}
 .data-table-wrap tr[data-compact-card=true] td::before{content:attr(data-column-label);color:var(--muted);font-size:11px;font-weight:500;letter-spacing:0;text-transform:none}
-.data-table-wrap tr[data-compact-card=true] td:has(.cell-numeric){text-align:right}
-.data-table-wrap tr[data-compact-card=true] td:has(.cell-numeric)::before{text-align:left}
+.data-table-wrap tr[data-compact-card=true] td:has(.cell-numeric),.data-table-wrap tr[data-compact-card=true] td[data-cell-kind=number]{text-align:right}
+.data-table-wrap tr[data-compact-card=true] td:has(.cell-numeric)::before,.data-table-wrap tr[data-compact-card=true] td[data-cell-kind=number]::before{text-align:left}
 .data-table-wrap tr[data-compact-card=true] .selection-cell{width:auto}
 .bulk-bar{align-items:flex-start;flex-direction:column}
 .bulk-bar .secondary-action{width:100%}
@@ -594,17 +600,19 @@ table.draft-lines.form-fields{border-top:0}
 .draft-line__cell::before{content:attr(data-label);display:block;margin-bottom:3px;color:var(--muted);font-size:11px;font-weight:500}
 .draft-line__cell--remove::before{content:none}
 .editor-create__fields{grid-template-columns:minmax(0,1fr)}
-[data-document-editor] fieldset,[data-draft-line]{padding:18px 16px 20px}
+[data-document-editor] fieldset{padding:18px 16px 20px}
 .composition-task-layout{grid-template-columns:minmax(0,1fr)}
 .composition-task-layout .record-fields{grid-template-columns:repeat(2,minmax(0,1fr))}
 .composition-heading{gap:8px}
 .composition-header-facts{font-size:12px}
 .composition-context nav{gap:8px}
-.composition-record-actions .command-bar{position:static;flex-wrap:wrap}
+.composition-record-actions{justify-self:start;margin-top:0}
+.composition-record-actions[open]>.command-bar{left:0;right:auto}
 .composition-progression-steps{grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:3px;padding-bottom:6px}
 .composition-progression-steps>li{grid-template-columns:1fr}
 .composition-progression-steps>li>div{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
 .composition-progression-phone{display:block;margin:0;padding:0 16px 10px;color:var(--muted);font-size:12px}
+.composition-progression-phone:has(+.composition-progression-next){display:none}
 .composition-header-facts{grid-template-columns:repeat(2,minmax(0,1fr))}
 .composition-progression-next .composition-local-actions,.composition-progression-next form,.composition-progression-next a.button,.composition-progression-next button{width:100%}
 .data-table-wrap tr[data-presented-row=true]{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}

@@ -886,10 +886,12 @@ function nextSentence(
     const total = child.definition.columns.find(
       (candidate) => candidate.columnId === progress?.total,
     );
-    const of = total ? decimalOf(row.record, total.field) : null;
-    return `${value}${of ? ` of ${of}` : ''} ${rowName(child.definition, row)} still open.`;
+    // Figures read as the row's own cells show them.
+    const shown = row.cells[column.columnId] ?? plainDecimal(value);
+    const of = total ? row.cells[total.columnId] : undefined;
+    return `${shown}${of ? ` of ${of}` : ''} ${rowName(child.definition, row)} still open.`;
   }
-  return `${sumDecimals(open.map((entry) => entry.value))} units still open on ${String(open.length)} lines.`;
+  return `${plainDecimal(sumDecimals(open.map((entry) => entry.value)))} units still open on ${String(open.length)} lines.`;
 }
 
 /** "{title} is {status}." -- the record and where it stands. */
@@ -915,6 +917,11 @@ function decimalOf(record: SemanticRecordDto, field: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** A decimal without trailing fractional zeros: 10.000 reads 10. */
+function plainDecimal(value: string): string {
+  return value.includes('.') ? value.replace(/\.?0+$/u, '') : value;
 }
 
 /** Compares two non-negative decimal strings exactly. */

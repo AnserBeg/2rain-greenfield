@@ -119,7 +119,9 @@ test('the item page shows stock by location and the recent movements, in the com
       .locator('.navigation-tree > li')
       .getByRole('group')
       .filter({ hasText: 'Stock' });
-    const postedStock = inventory.locator('a', { hasText: 'Stock by location' });
+    const postedStock = inventory.locator('a', {
+      hasText: 'Stock by location',
+    });
     expect(
       new URL(
         (await postedStock.getAttribute('href'))!,
