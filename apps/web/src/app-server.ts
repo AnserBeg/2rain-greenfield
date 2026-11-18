@@ -13,6 +13,7 @@ import {
 import { RequestRuntimeViewRefusalError } from '@north-star/runtime/request-runtime-view';
 import type { AuthenticatedRequestRuntimeEntryAdapter } from '@north-star/runtime/request-runtime-view';
 import { SURFACE_CLIENT_CSP_HASH } from './surface-client.js';
+import { staticAsset, type StaticAsset } from './surface-assets.js';
 import { localDemoActor } from '../../../packages/runtime/src/local-demo-actor.js';
 
 import {
@@ -106,7 +107,7 @@ async function handleRequest(
     'content-security-policy',
     // `connect-src 'self'` admits only the owned script's same-origin fragment
     // POSTs (ADR-0036 behaviour 7); script, style and form rules are unchanged.
-    `default-src 'none'; script-src '${SURFACE_CLIENT_CSP_HASH}'; style-src 'self'; img-src data:; connect-src ${gateways ? "'self'" : "'none'"}; base-uri 'none'; form-action ${gateways ? "'self'" : "'none'"}; frame-ancestors 'none'`,
+    `default-src 'none'; script-src '${SURFACE_CLIENT_CSP_HASH}'; style-src 'self'; font-src 'self'; img-src data:; connect-src ${gateways ? "'self'" : "'none'"}; base-uri 'none'; form-action ${gateways ? "'self'" : "'none'"}; frame-ancestors 'none'`,
   );
   response.setHeader('x-content-type-options', 'nosniff');
 
@@ -125,8 +126,10 @@ async function handleRequest(
   }
 
   const url = new URL(request.url ?? '/', 'http://surface-runtime.local');
-  if (request.method === 'GET' && url.pathname === SURFACE_STYLESHEET.href) {
-    writeStylesheet(request, response);
+  const asset =
+    request.method === 'GET' ? staticAsset(url.pathname) : undefined;
+  if (asset) {
+    writeStaticAsset(request, response, asset);
     return;
   }
   if (url.pathname !== '/') {
@@ -381,29 +384,23 @@ async function readFormSubmission(
 }
 
 /**
- * SPEED-1: the runtime stylesheet, compressed once at start, served from its
- * content-hash route for a year: a changed stylesheet is a new route. It holds
- * no personal or tenant data, so it may be cached anywhere.
+ * SPEED-1: a static asset from its content-hash route (`surface-assets.ts`):
+ * a year, immutable, precompressed where that helps. It holds no personal or
+ * tenant data, so it may be cached anywhere.
  */
-const stylesheetBody = Buffer.from(SURFACE_STYLESHEET.css, 'utf8');
-const stylesheetEncodings = Object.freeze({
-  br: brotliCompressSync(stylesheetBody, {
-    params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 11 },
-  }),
-  gzip: gzipSync(stylesheetBody, { level: 9 }),
-});
-
-function writeStylesheet(
+function writeStaticAsset(
   request: IncomingMessage,
   response: ServerResponse,
+  asset: StaticAsset,
 ): void {
-  const encoding = acceptedEncoding(request);
+  const accepted = acceptedEncoding(request);
+  const encoding = accepted && asset.encodings[accepted] ? accepted : null;
   response.statusCode = 200;
   response.setHeader('cache-control', 'public, max-age=31536000, immutable');
-  response.setHeader('content-type', 'text/css; charset=utf-8');
+  response.setHeader('content-type', asset.contentType);
   response.setHeader('vary', 'accept-encoding');
   if (encoding) response.setHeader('content-encoding', encoding);
-  response.end(encoding ? stylesheetEncodings[encoding] : stylesheetBody);
+  response.end(encoding ? asset.encodings[encoding] : asset.body);
 }
 
 /** The best encoding the client accepts: brotli, then gzip, else none. */

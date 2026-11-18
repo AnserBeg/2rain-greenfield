@@ -5,8 +5,8 @@
 //   node scripts/start-production.mjs dist/apps/api/src/measure-page.js
 //
 // The compiled modules read the release and the migrations relative to
-// themselves, so `dist/` gets links to the checked-in `apps/web/release` and
-// `db/` (created once; never copies).
+// themselves, so `dist/` gets links to the checked-in `apps/web/release`,
+// `db/` and the web package's dependencies (created once; never copies).
 import { existsSync, lstatSync, mkdirSync, symlinkSync } from 'node:fs';
 import { register } from 'node:module';
 import { dirname, relative, resolve } from 'node:path';
@@ -24,6 +24,8 @@ if (!existsSync(entry)) {
 for (const [link, target] of [
   ['dist/apps/web/release', 'apps/web/release'],
   ['dist/db', 'db'],
+  // `createRequire` lookups (the web package's fonts) bypass the resolve hook.
+  ['dist/apps/web/node_modules', 'apps/web/node_modules'],
 ]) {
   const at = resolve(root, link);
   if (existsSync(at) || isLink(at)) continue;

@@ -135,6 +135,9 @@ test(
             );
             return null;
           }
+          // style-src 'self': a rendered page carries no inline style.
+          if (/<style\b|\sstyle=/u.test(served.html))
+            problems.push(`${name}: carries an inline style`);
           const missing = markers.filter((marker) =>
             typeof marker === 'string'
               ? !served.html.includes(marker)

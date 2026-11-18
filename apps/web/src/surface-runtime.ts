@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import {
   compositionRelationTargets,
   loadSurfaceComposition,
@@ -61,6 +60,7 @@ import {
 } from './component-registry.js';
 import { DESIGN_TOKENS } from './design-tokens.js';
 import { SURFACE_CLIENT_SCRIPT } from './surface-client.js';
+import { FONT_STYLESHEET_HREF, registerStaticAsset } from './surface-assets.js';
 import { escapeHtml, shortIdentity } from './html.js';
 import {
   operationMessageRef,
@@ -2127,7 +2127,7 @@ function renderConfirmationTransition(
     )
     .join('');
   return Object.freeze({
-    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm ${escapeHtml(operation.label)} · 2rain</title><link rel="stylesheet" href="${SURFACE_STYLESHEET.href}"></head><body class="standalone"><main class="standalone__card" data-confirmation-step="preview"><p class="eyebrow">Operation preview</p><h1>Confirm ${escapeHtml(operation.label)}</h1><p>Review this ${escapeHtml(surface.label)} operation before it is executed.</p>${operation.capabilityId ? `<section data-predicted-effects="registered-capability"><strong>Predicted effects</strong><p>The registered capability <code>${escapeHtml(operation.capabilityId)}</code> will validate this draft and append its declared business facts. The screen will wait for the committed result.</p></section>` : ''}<form method="post" action="${escapeHtml(action)}">${preserved}<input type="hidden" name="confirmationGrant" value="${escapeHtml(grant)}"><button type="submit">Confirm ${escapeHtml(operation.label)}</button></form></main></body></html>`,
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm ${escapeHtml(operation.label)} · 2rain</title><link rel="stylesheet" href="${FONT_STYLESHEET_HREF}"><link rel="stylesheet" href="${SURFACE_STYLESHEET.href}"></head><body class="standalone"><main class="standalone__card" data-confirmation-step="preview"><p class="eyebrow">Operation preview</p><h1>Confirm ${escapeHtml(operation.label)}</h1><p>Review this ${escapeHtml(surface.label)} operation before it is executed.</p>${operation.capabilityId ? `<section data-predicted-effects="registered-capability"><strong>Predicted effects</strong><p>The registered capability <code>${escapeHtml(operation.capabilityId)}</code> will validate this draft and append its declared business facts. The screen will wait for the committed result.</p></section>` : ''}<form method="post" action="${escapeHtml(action)}">${preserved}<input type="hidden" name="confirmationGrant" value="${escapeHtml(grant)}"><button type="submit">Confirm ${escapeHtml(operation.label)}</button></form></main></body></html>`,
     statusCode: 200,
   });
 }
@@ -2151,7 +2151,7 @@ function printDocumentPage(
   statusCode: number,
 ): SurfaceRuntimeResponse {
   return Object.freeze({
-    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · 2rain</title><link rel="stylesheet" href="${SURFACE_STYLESHEET.href}"></head><body class="standalone print-page"><main class="print-shell" data-release-id="${escapeHtml(view.release.releaseId)}" data-release-content-hash="${escapeHtml(view.release.contentHash)}" data-pointer-fence="${view.pointer.fence}">${body}</main></body></html>`,
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · 2rain</title><link rel="stylesheet" href="${FONT_STYLESHEET_HREF}"><link rel="stylesheet" href="${SURFACE_STYLESHEET.href}"></head><body class="standalone print-page"><main class="print-shell" data-release-id="${escapeHtml(view.release.releaseId)}" data-release-content-hash="${escapeHtml(view.release.contentHash)}" data-pointer-fence="${view.pointer.fence}">${body}</main></body></html>`,
     statusCode,
   });
 }
@@ -2161,7 +2161,7 @@ export function renderApplicationDiagnostic(
   ref: SurfaceMessageRef,
 ): SurfaceRuntimeResponse {
   return Object.freeze({
-    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(surfaceMessage(ref.code).sentence)} · 2rain</title><link rel="stylesheet" href="${SURFACE_STYLESHEET.href}"></head><body class="standalone"><main class="standalone__card" role="alert" ${messageAttributes(ref)}>${messageBody(ref, 'Application diagnostic', 'h1')}</main></body></html>`,
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(surfaceMessage(ref.code).sentence)} · 2rain</title><link rel="stylesheet" href="${FONT_STYLESHEET_HREF}"><link rel="stylesheet" href="${SURFACE_STYLESHEET.href}"></head><body class="standalone"><main class="standalone__card" role="alert" ${messageAttributes(ref)}>${messageBody(ref, 'Application diagnostic', 'h1')}</main></body></html>`,
     statusCode,
   });
 }
@@ -2170,7 +2170,7 @@ function diagnosticDocument(
   view: RuntimeViewContract.RequestRuntimeView,
   ref: SurfaceMessageRef,
 ): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(surfaceMessage(ref.code).sentence)} · 2rain</title><link rel="stylesheet" href="${SURFACE_STYLESHEET.href}"></head><body class="standalone"><main class="standalone__card" role="alert" ${messageAttributes(ref)}>${messageBody(ref, 'Pinned release diagnostic', 'h1')}<p class="diagnostic-release">Release ${escapeHtml(shortIdentity(view.release.releaseId))} · fence ${view.pointer.fence}</p></main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(surfaceMessage(ref.code).sentence)} · 2rain</title><link rel="stylesheet" href="${FONT_STYLESHEET_HREF}"><link rel="stylesheet" href="${SURFACE_STYLESHEET.href}"></head><body class="standalone"><main class="standalone__card" role="alert" ${messageAttributes(ref)}>${messageBody(ref, 'Pinned release diagnostic', 'h1')}<p class="diagnostic-release">Release ${escapeHtml(shortIdentity(view.release.releaseId))} · fence ${view.pointer.fence}</p></main></body></html>`;
 }
 
 /**
@@ -2210,7 +2210,7 @@ function shellDocument(
     <meta name="color-scheme" content="light dark">
     <link rel="icon" href="data:,">
     <title>${escapeHtml(title)} · 2rain</title>
-    <link rel="stylesheet" href="${SURFACE_STYLESHEET.href}">
+    <link rel="stylesheet" href="${FONT_STYLESHEET_HREF}"><link rel="stylesheet" href="${SURFACE_STYLESHEET.href}">
   </head>
   <body>
     <a class="skip-link" href="#surface-content">Skip to content</a>
@@ -2946,6 +2946,12 @@ export function surfaceRuntimeStyles(): string {
  * and the CSP admits `style-src 'self'` with no inline style.
  */
 export const SURFACE_STYLESHEET = Object.freeze({
-  css: styles,
-  href: `/assets/surface-${createHash('sha256').update(styles).digest('hex').slice(0, 20)}.css`,
+  css: surfaceRuntimeStyles(),
+  href: registerStaticAsset(
+    'surface',
+    'css',
+    'text/css; charset=utf-8',
+    Buffer.from(surfaceRuntimeStyles(), 'utf8'),
+    true,
+  ),
 });

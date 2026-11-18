@@ -1,6 +1,6 @@
 # SPEED-1 — a record page in a few database trips, measured and held there
 
-Status: slice 1 integrated at `3ab5853a`; slices 2-4 at `69b7adc1` (one integration, orchestrator ruling). Tier: request
+Status: slice 1 at `3ab5853a`; slices 2-4 at `69b7adc1` (one integration, orchestrator ruling); slices 5-6 on `packet/SPEED-1`. Tier: request
 security path, no file of the `AGENTS.md` §4 Critical set; slices 2-4 get the orchestrator's two critical reviews. Base: `main`
 `74b3367f`. Stops: none. Charter: [SPEED-1-charter.md](SPEED-1-charter.md). ADR: [ADR-0071](../../decisions/ADR-0071-read-decisions-are-live-per-request-writes-per-call.md).
 
@@ -23,6 +23,11 @@ security path, no file of the `AGENTS.md` §4 Critical set; slices 2-4 get the o
 7. In a snapshot the module role is assumed when a read first sends a statement, its facts verified once per direction; an
    identical module read and the company check run once. A short list's first page is its own count; the query catalog is
    parsed once per release content.
+8. Slice 5: the stylesheet and IBM Plex WOFF2 faces (pinned `@fontsource/ibm-plex-*` 5.3.0, Latin and Latin Extended) come
+   from `/assets/<name>-<sha256>.<ext>` (`surface-assets.ts`): a year, `immutable`, CSS precompressed; CSP `style-src 'self';
+   font-src 'self'`; no rendered page carries an inline style; personalized HTML stays `no-store`, compressed when accepted.
+9. Slice 6: `corepack pnpm build && corepack pnpm start` runs the app from `dist/` with plain Node (`start-production.mjs`, resolve
+   hook `production-resolve.mjs`); `apps/api/src/measure-page.ts` times the PO detail the same way under tsx and compiled.
 
 ## Decisions (one line each)
 
@@ -49,13 +54,12 @@ security path, no file of the `AGENTS.md` §4 Critical set; slices 2-4 get the o
 | task Confirm | 217 / 1879 / 169 / 204 | unchanged | 16 / 248 / 14 / 15 |
 
 Warm catalog parses after 2-4: operation catalog, query catalog, surface manifest 0 on every page; surface bindings 49-100.
+PO detail wall / CPU per request, one laptop, 20 warm loads: charter base 16.3 s / 12.4 s; after, tsx 141-189 ms / 120-170 ms,
+compiled 141-206 ms / 120-164 ms (the compiled start helps start-up, not a warm page). Slice 5: 58 KB less HTML per page.
 
-Confirm's 16 transactions (the PO receive task): 1 snapshot of the step's reads (12 statements); 7 live re-authorizations (5
-statements + 2 RESETs each); 2 idempotent accepted mutations through the trust service (23 and 22: advisory lock, idempotency
-read, release check, module role, write, evidence); 2 capability-executor target reads in their own read-only transaction (11
-each, inside the write path); 1 snapshot reopened between writes for one read decision (6); the posting write (66: serializer
-savepoints, locks, movements, evidence); the read-back snapshot (28); the live epoch check (4). No read outside the write path is
-left to fold: the reopened snapshot sits between two writes. Pinned at 16; filed.
+Confirm's 16 transactions: the step's snapshot (12 statements), 7 live re-authorizations, 2 trust-service mutations, 2
+capability-executor target reads (write path), 1 snapshot reopened between writes, the posting write (66), the read-back snapshot
+(28), the live epoch check. No read outside the write path is left to fold; pinned at 16.
 
 ## Gates
 
@@ -66,10 +70,11 @@ left to fold: the reopened snapshot sits between two writes. Pinned at 16; filed
 ## Test it yourself
 
 `corepack pnpm dev`; open a purchase order; DevTools → Network → the document → Timing: `db-transactions` 2, `db-statements`
-about 30. `curl -sIL 'http://127.0.0.1:4174/?surface=northstar.app%3Asurface.purchase_order_list' | grep -i server-timing`.
+about 30; the stylesheet and fonts load once from `/assets/…` and come from cache after. `corepack pnpm build && corepack pnpm
+start` serves the same app compiled. `curl -sIL 'http://127.0.0.1:4174/?surface=northstar.app%3Asurface.purchase_order_list' | grep -i server-timing`.
 
 ## Filed
 
-- LOOP-1's scorecard meter counts the RESETs after each COMMIT as transactions; the orchestrator pointed it at this header.
 - Confirm: 7 live re-authorizations and 2 executor target reads are 9 transactions of the write path (unchanged by charter).
-- Surface binding parses (69-102 per page) are per request view; a cross-request memo is LOOP-1's.
+- Surface binding parses (49-100 per page) are per request view; a cross-request memo is LOOP-1's.
+- The Customize screen's sandbox worker is a `.ts` path, so the compiled start does not serve Customize.

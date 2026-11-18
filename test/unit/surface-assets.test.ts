@@ -5,6 +5,7 @@ import test from 'node:test';
 import { brotliDecompressSync, gunzipSync } from 'node:zlib';
 
 import { createSurfaceRuntimeServer } from '../../apps/web/src/app-server.js';
+import { FONT_STYLESHEET_HREF } from '../../apps/web/src/surface-assets.js';
 import { SURFACE_STYLESHEET } from '../../apps/web/src/surface-runtime.js';
 
 // SPEED-1 slice 5: the stylesheet is served once from its content-hash route,
@@ -80,6 +81,7 @@ test('SPEED-1 assets: the stylesheet route is immutable and compressed; pages li
     assert.equal(stale.headers.get('cache-control'), 'no-store');
     const csp = stale.headers.get('content-security-policy') ?? '';
     assert.match(csp, /style-src 'self';/u);
+    assert.match(csp, /font-src 'self';/u);
     assert.doesNotMatch(csp, /unsafe-inline/u);
     const page = await stale.text();
     assert.ok(
@@ -88,6 +90,40 @@ test('SPEED-1 assets: the stylesheet route is immutable and compressed; pages li
       ),
     );
     assert.doesNotMatch(page, /<style\b|\sstyle=/u);
+
+    // The fonts: their own stylesheet, every face a pinned WOFF2 on its own
+    // immutable route; nothing from a font host.
+    assert.ok(
+      page.includes(`<link rel="stylesheet" href="${FONT_STYLESHEET_HREF}">`),
+    );
+    const fonts = await fetch(`${base}${FONT_STYLESHEET_HREF}`);
+    assert.equal(fonts.status, 200);
+    const faces = await fonts.text();
+    const urls = [...faces.matchAll(/url\(([^)]+)\)/gu)].map(
+      (match) => match[1]!,
+    );
+    assert.equal(urls.length, 12, 'six faces, Latin and Latin Extended each');
+    for (const family of ['IBM Plex Sans', 'IBM Plex Serif', 'IBM Plex Mono'])
+      assert.ok(faces.includes(`font-family:'${family}'`), family);
+    for (const url of urls) {
+      assert.match(
+        url,
+        /^\/assets\/ibm-plex-[a-z]+-latin(?:-ext)?-[456]00-normal-[0-9a-f]{20}\.woff2$/u,
+      );
+      const font = await fetch(`${base}${url}`);
+      assert.equal(font.status, 200);
+      assert.equal(font.headers.get('content-type'), 'font/woff2');
+      assert.equal(
+        font.headers.get('cache-control'),
+        'public, max-age=31536000, immutable',
+      );
+      assert.equal(
+        Buffer.from(await font.arrayBuffer())
+          .subarray(0, 4)
+          .toString('latin1'),
+        'wOF2',
+      );
+    }
   } finally {
     server.close();
   }
