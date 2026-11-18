@@ -555,6 +555,25 @@ test('X12: a reference position refuses any unlooked-up value, a nested argument
     await reason({ supplier_party_id: 'Cascade' }),
     /did not come from a lookup/u,
   );
+  // A name typed into a reference that names a record type is refused, as
+  // is an id wrapped in other text; a code in an `_id` field that names no
+  // record type (a unit) is a code.
+  assert.match(
+    await reason({ supplier_party_id: ` ${PARTY.toUpperCase()}x` }),
+    /did not come from a lookup/u,
+  );
+  const line = (
+    await session.call('erp_plan', {
+      intents: [
+        {
+          operationId: 'purchase_order_line_create',
+          values: { item_id: PARTY, unit_id: 'EA', ordered_quantity: '1' },
+          relations: { order: PARTY },
+        },
+      ],
+    })
+  ).content as { reason?: string };
+  assert.doesNotMatch(String(line.reason), /unit id|unit_id/u);
   assert.match(await reason({ currency: 'usd' }), /currency USD is not/u);
   assert.match(
     await reason({ currency: 'dollars' }),

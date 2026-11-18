@@ -219,6 +219,28 @@ class ToolInputError extends Error {
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+/**
+ * Whether an `..._id` field names a record type of the release: its name
+ * less `_id` is a type, ends with one, or ends with a type's last word
+ * (`default_ship_to_address_id` and `party_address`).
+ */
+function namesRecordType(types: ReadonlySet<string>, fieldId: string): boolean {
+  const base = localName(fieldId).replace(/_id$/u, '');
+  const last = base.split('_').at(-1)!;
+  for (const type of types)
+    if (
+      base === type ||
+      base.endsWith(`_${type}`) ||
+      type === last ||
+      type.endsWith(`_${last}`)
+    )
+      return true;
+  return false;
+}
+
+/** A record id anywhere inside a text, in any case. */
+const embeddedUuid =
+  /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/iu;
 const hostOwnedKeys = new Set([
   'tenantId',
   'tenant',
@@ -532,6 +554,17 @@ export class OperationsAgentSession {
     steps: readonly PlanStep[],
   ): string | null {
     const defaultCurrency = declaredCurrencyDefault(view).code;
+    const catalog = pinnedCatalog(view);
+    const types = new Set(
+      [
+        ...catalog.operations.map((operation) =>
+          catalog.operationEntity(operation),
+        ),
+        ...catalog.queries.map((query) => query.sourceEntityId),
+      ]
+        .filter(Boolean)
+        .map(localName),
+    );
     for (const step of steps) {
       const where = `step ${String(step.step)} (${localName(step.operation.operationId)})`;
       // Every declared reference position, whatever the value looks like:
@@ -554,6 +587,17 @@ export class OperationsAgentSession {
         const label = name === 'target' ? 'the target record' : localName(name);
         if (typeof value !== 'string')
           return `${where}: ${label} must be a record id, not ${JSON.stringify(value)}.`;
+        // An `..._id` field that names no record type of the release holds
+        // a code ("EA" for a unit, an actor): it is a reference only if it
+        // carries a record id in any form (padded, cased, wrapped). One that
+        // names a record type (`..._party_id`) always is.
+        if (
+          name !== 'target' &&
+          !(step.relations && name in step.relations) &&
+          !namesRecordType(types, name) &&
+          !embeddedUuid.test(value)
+        )
+          continue;
         if (!this.#seenIds.has(value.toLowerCase()))
           return `${where}: ${label} ${value} did not come from a lookup in this conversation. Find the record with erp_discover resolve or a query, then plan with the id it returns.`;
       }
