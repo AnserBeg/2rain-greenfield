@@ -278,8 +278,9 @@ export async function renderSurfaceRuntimeWithData(
     selection.selected.surfaceRole === 'form' &&
     legalEntitySelection.length === 1
   ) {
+    let editor: Awaited<ReturnType<typeof documentEditor>>;
     try {
-      const editor = await documentEditor(
+      editor = await documentEditor(
         view,
         selection.selected,
         selection.surfaces,
@@ -287,31 +288,36 @@ export async function renderSurfaceRuntimeWithData(
         legalEntitySelection[0]!,
         gateways,
       );
-      if (editor) {
-        const slots = editor.slots;
-        return slots
-          ? await rendered(() =>
-              renderSelectedSurface(
-                view,
-                selection,
-                {
-                  status: 'READY',
-                  records: editor.record ? [editor.record] : [],
-                  documentEditorSlots: slots,
-                },
-                null,
-                binding.operations,
-                editor.statusCode,
-                legalEntitySelection,
-                workspaceContext,
-              ),
-            )
-          : editor;
-      }
     } catch (error) {
       return renderApplicationDiagnostic(422, {
         code: queryMessageCode(error),
       });
+    }
+    // Finishing the reads is outside the editor's catch: a policy change seen
+    // then is the page's to retry or refuse, never an editor diagnostic
+    // (SPEED-1 S7).
+    if (editor) {
+      const slots = editor.slots;
+      const record = editor.record;
+      const statusCode = editor.statusCode;
+      return slots
+        ? await rendered(() =>
+            renderSelectedSurface(
+              view,
+              selection,
+              {
+                status: 'READY',
+                records: record ? [record] : [],
+                documentEditorSlots: slots,
+              },
+              null,
+              binding.operations,
+              statusCode,
+              legalEntitySelection,
+              workspaceContext,
+            ),
+          )
+        : editor;
     }
   }
   // A launcher Task (WAREHOUSE-MODE) asks its tiles' List counts and resolves

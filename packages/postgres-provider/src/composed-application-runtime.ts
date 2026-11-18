@@ -89,6 +89,7 @@ import {
 } from './release-verification-service.js';
 import { PostgresRequestRuntimeViewService } from './request-runtime-view-service.js';
 import {
+  withoutReadSnapshot,
   withReadSnapshot,
   withTrustedRequestTransaction,
 } from './request-context.js';
@@ -794,14 +795,26 @@ export async function createComposedApplicationRuntime(
       });
     };
     const servings = new Map<string, Promise<ReleaseServing>>();
-    const servingFor = (releaseId: string): Promise<ReleaseServing> => {
+    const loaded = new Map<string, ReleaseServing>();
+    const servingFor = (
+      releaseId: string,
+    ): ReleaseServing | Promise<ReleaseServing> => {
+      const ready = loaded.get(releaseId);
+      if (ready) return ready;
       const known = servings.get(releaseId);
       if (known) return known;
-      const loading = loadServingRelease(
-        runtimePool!,
-        runtimeContext,
-        releaseId as MintedUuid,
-      ).then((release) => buildServing(release));
+      // The load runs outside any page's snapshot, as its own work.
+      const loading = withoutReadSnapshot(() =>
+        loadServingRelease(
+          runtimePool!,
+          runtimeContext,
+          releaseId as MintedUuid,
+        ),
+      ).then((release) => {
+        const serving = buildServing(release);
+        loaded.set(releaseId, serving);
+        return serving;
+      });
       servings.set(releaseId, loading);
       loading.catch(() => servings.delete(releaseId));
       return loading;
@@ -809,10 +822,7 @@ export async function createComposedApplicationRuntime(
     const policy = bootPolicy;
     const queryGateway = new ReleaseRoutingQueryGateway(servingFor, policy);
     routed.queryGateway = queryGateway;
-    servings.set(
-      serving.releaseId,
-      Promise.resolve(buildServing(serving, bootPolicy)),
-    );
+    loaded.set(serving.releaseId, buildServing(serving, bootPolicy));
     const operationGateway = new ReleaseRoutingOperationGateway(
       servingFor,
       policy,
@@ -1044,7 +1054,21 @@ export async function provisionLocalDemoReleaseAuthorization(
   );
 }
 
-type RouteServing = (releaseId: string) => Promise<ReleaseServing>;
+/** A release's serving gateways: at once when loaded, else a pending load. */
+type RouteServing = (
+  releaseId: string,
+) => ReleaseServing | Promise<ReleaseServing>;
+
+/**
+ * Await a release that is still loading only outside the page's read
+ * snapshot (SPEED-1 S9): its loader needs a connection, which a page holding
+ * one while it waits could starve.
+ */
+async function routed(serving: ReleaseServing | Promise<ReleaseServing>) {
+  return serving instanceof Promise
+    ? withoutReadSnapshot(() => serving)
+    : serving;
+}
 
 function viewReleaseId(view: unknown): string | null {
   const release = isRecord(view) ? view.release : null;
@@ -1089,7 +1113,7 @@ export class ReleaseRoutingQueryGateway extends SemanticQueryGateway {
     const releaseId = viewReleaseId(view);
     // A malformed view is refused by the gateway's own view assertion.
     return releaseId
-      ? (await this.#route(releaseId)).queryGateway
+      ? (await routed(this.#route(releaseId))).queryGateway
       : this.#fallback;
   }
 }
@@ -1121,16 +1145,24 @@ export class ReleaseRoutingOperationGateway extends SemanticOperationGateway {
     return (await this.#gateway(args[0])).previewTaskEligibility(...args);
   }
 
+  /**
+   * An invocation runs outside any page read snapshot (SPEED-1 S1, ADR-0071
+   * rule 3): every decision it makes -- its own, a capability's preflight and
+   * read-back -- is read live, and its writes and read-back never meet a
+   * snapshot's epoch check.
+   */
   override async invoke(
     ...args: Parameters<SemanticOperationGateway['invoke']>
   ): ReturnType<SemanticOperationGateway['invoke']> {
-    return (await this.#gateway(args[0])).invoke(...args);
+    return withoutReadSnapshot(async () =>
+      (await this.#gateway(args[0])).invoke(...args),
+    );
   }
 
   async #gateway(view: unknown): Promise<SemanticOperationGateway> {
     const releaseId = viewReleaseId(view);
     return releaseId
-      ? (await this.#route(releaseId)).operationGateway
+      ? (await routed(this.#route(releaseId))).operationGateway
       : this.#fallback;
   }
 }

@@ -13,12 +13,27 @@ import {
   runMigrations,
 } from '../../packages/postgres-provider/src/migrations.js';
 import {
+  afterReadsFinish,
   ReadSnapshotIntegrityError,
   ReadSnapshotPolicyChangedError,
+  ReadSnapshotScopeError,
+  withoutReadSnapshot,
   withReadSnapshot,
   withTrustedRequestRead,
   withTrustedRequestTransaction,
+  type ReadSnapshotHandle,
+  type SnapshotRoleSwitch,
 } from '../../packages/postgres-provider/src/request-context.js';
+import {
+  ReleaseRoutingOperationGateway,
+  ReleaseRoutingQueryGateway,
+} from '../../packages/postgres-provider/src/composed-application-runtime.js';
+import {
+  assertScopePolicyCurrent,
+  identicalReadKey,
+  MODULE_RUNTIME_READ_ROLE,
+} from '../../packages/postgres-provider/src/module-runtime-interpreter.js';
+import { SemanticOperationMediationAuthority } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   meterPoolStatements,
   RequestWorkMeter,
@@ -60,6 +75,7 @@ const binding = RECEIPT_AUTHORIZATION_DEPENDENCY_BINDINGS.find(
     candidate.permissionId === 'northstar.app:permission.goods_receipt_create',
 )!;
 const identity = Object.freeze({ environmentId, principalId, tenantId });
+const otherEnvironmentId = 'b2000000-0000-4000-8000-000000000003';
 
 test('SPEED-1 read snapshot: one transaction per page, writes apart, policy changes discard the page', async () => {
   await withEphemeralPostgres(
@@ -352,6 +368,444 @@ test('SPEED-1 read snapshot: one transaction per page, writes apart, policy chan
       }
     },
   );
+});
+
+test('SPEED-1 security fixes: one scope per page, both scopes of a moved grant, denials after the reads, one connection per request, invocations live', async () => {
+  await withEphemeralPostgres(
+    'read-snapshot-fixes',
+    async ({ connection, pool: admin }) => {
+      const migrationClient = await admin.connect();
+      try {
+        await runMigrations(migrationClient, await loadMigrations(migrations));
+      } finally {
+        migrationClient.release();
+      }
+      await seedPolicy(admin);
+      // A second environment of the tenant, with the same role id.
+      await admin.query(
+        `INSERT INTO platform.environments (tenant_id, id, slug)
+         VALUES ($1, $2, 'staging')`,
+        [tenantId, otherEnvironmentId],
+      );
+      await admin.query(
+        `INSERT INTO platform.current_policy_roles (
+           tenant_id, environment_id, role_id, role_key
+         ) VALUES ($1,$2,$3,'reader')`,
+        [tenantId, otherEnvironmentId, roleId],
+      );
+      await admin.query(
+        `CREATE TABLE public.snapshot_probe (note text NOT NULL);
+         GRANT SELECT, INSERT ON public.snapshot_probe TO north_star_runtime`,
+      );
+      const runtime = meterPoolStatements(
+        new pg.Pool({ ...connection, max: 2, user: 'north_star_runtime' }),
+      );
+      runtime.on('error', () => undefined);
+      const policy = new PostgresCurrentPolicyGateway(
+        runtime,
+        RECEIPT_AUTHORIZATION_DEPENDENCY_BINDINGS,
+      );
+      const entry = requestEntry(identity, policy);
+      const decide = async (
+        view: Parameters<typeof authorizeCurrentPolicy>[1],
+      ) =>
+        (
+          await authorizeCurrentPolicy(
+            policy,
+            view,
+            binding.permissionId,
+            Object.freeze({ kind: 'semanticQueryPolicyInput' }),
+          )
+        ).decision;
+      const page = <T>(
+        work: (finish: () => Promise<void>) => Promise<T>,
+        options?: { retry?: boolean },
+      ) => bounded(withReadSnapshot(runtime, work, options));
+      const context = await trustedContext(identity);
+      try {
+        // S4: a page reads one tenant and environment.
+        const elsewhere = await trustedContext({
+          ...identity,
+          environmentId: otherEnvironmentId,
+        });
+        await assert.rejects(
+          page(async () => {
+            await withTrustedRequestRead(runtime, context, principalOf);
+            await withTrustedRequestRead(runtime, elsewhere, principalOf);
+          }),
+          ReadSnapshotScopeError,
+        );
+
+        // S3: moving the membership from this environment to another bumps
+        // this environment's epoch too, so the page holding its grants is
+        // discarded and assembled again, now denied.
+        let moved = false;
+        const afterMove = await page(() =>
+          entry.run({}, async (view) => {
+            const before = await decide(view);
+            if (!moved) {
+              moved = true;
+              await admin.query(
+                `UPDATE platform.current_policy_memberships
+                    SET environment_id = $3
+                  WHERE tenant_id = $1 AND environment_id = $2
+                    AND membership_id = $4`,
+                [tenantId, environmentId, otherEnvironmentId, membershipId],
+              );
+            }
+            return [before, await decide(view)];
+          }),
+        );
+        assert.deepEqual(afterMove, ['DENY', 'DENY']);
+        await admin.query(
+          `UPDATE platform.current_policy_memberships SET environment_id = $2
+            WHERE tenant_id = $1 AND membership_id = $3`,
+          [tenantId, environmentId, membershipId],
+        );
+
+        // retry: false refuses at once.
+        let tries = 0;
+        await assert.rejects(
+          page(
+            () =>
+              entry.run({}, async (view) => {
+                tries += 1;
+                await decide(view);
+                await admin.query(
+                  `UPDATE platform.current_policy_roles SET role_key = role_key
+                    WHERE tenant_id = $1 AND environment_id = $2`,
+                  [tenantId, environmentId],
+                );
+              }),
+            { retry: false },
+          ),
+          ReadSnapshotPolicyChangedError,
+        );
+        assert.equal(tries, 1);
+
+        // S6: a durable write deferred while the page reads keeps one
+        // snapshot (one transaction start throughout), and lands after.
+        const startedAt = async (client: pg.PoolClient) =>
+          String(
+            (await client.query<{ at: string }>(`SELECT now()::text AS at`))
+              .rows[0]!.at,
+          );
+        const starts = await page(async () => {
+          const first = await withTrustedRequestRead(
+            runtime,
+            context,
+            startedAt,
+          );
+          await afterReadsFinish(runtime, () =>
+            withTrustedRequestTransaction(runtime, context, async (client) => {
+              await client.query(
+                `INSERT INTO public.snapshot_probe VALUES ('denial')`,
+              );
+            }),
+          );
+          const unseen = await withTrustedRequestRead(
+            runtime,
+            context,
+            readProbe,
+          );
+          const second = await withTrustedRequestRead(
+            runtime,
+            context,
+            startedAt,
+          );
+          return { first, second, unseen: unseen.length };
+        });
+        assert.equal(starts.first, starts.second);
+        assert.equal(starts.unseen, 0);
+        assert.equal(
+          (await admin.query(`SELECT note FROM public.snapshot_probe`)).rows
+            .length,
+          1,
+        );
+        // ...and lands even when the page fails.
+        await assert.rejects(
+          page(async () => {
+            await withTrustedRequestRead(runtime, context, startedAt);
+            await afterReadsFinish(runtime, () =>
+              withTrustedRequestTransaction(
+                runtime,
+                context,
+                async (client) => {
+                  await client.query(
+                    `INSERT INTO public.snapshot_probe VALUES ('failed page')`,
+                  );
+                },
+              ),
+            );
+            throw new Error('the page failed');
+          }),
+          /the page failed/u,
+        );
+        assert.equal(
+          (await admin.query(`SELECT note FROM public.snapshot_probe`)).rows
+            .length,
+          2,
+        );
+
+        // S8: parallel reads beside a write of its own never need a second
+        // connection: two pages, a pool of two, each page's write in parallel
+        // with its reads.
+        const busy = () =>
+          page(() =>
+            Promise.all([
+              withTrustedRequestRead(runtime, context, principalOf),
+              withTrustedRequestTransaction(runtime, context, (client) =>
+                client.query(`INSERT INTO public.snapshot_probe VALUES ('w')`),
+              ),
+              withTrustedRequestRead(runtime, context, principalOf),
+              withTrustedRequestRead(runtime, context, principalOf),
+            ]),
+          );
+        await Promise.all([busy(), busy()]);
+
+        // S1: work outside the snapshot decides live: a reusable decision
+        // after a revocation denies, though the page's grants still allow.
+        const observed: string[][] = [];
+        await page(() =>
+          entry.run({}, async (view) => {
+            const read = await decide(view);
+            await admin.query(
+              `UPDATE platform.current_policy_permission_grants
+                  SET revoked_at = clock_timestamp()
+                WHERE tenant_id = $1 AND environment_id = $2
+                  AND permission_id = $3`,
+              [tenantId, environmentId, binding.permissionId],
+            );
+            observed.push([
+              read,
+              await withoutReadSnapshot(() => decide(view)),
+            ]);
+          }),
+        ).catch(() => undefined);
+        assert.deepEqual(observed[0], ['ALLOW', 'DENY']);
+        await admin.query(
+          `UPDATE platform.current_policy_permission_grants SET revoked_at = NULL
+            WHERE tenant_id = $1 AND environment_id = $2 AND permission_id = $3`,
+          [tenantId, environmentId, binding.permissionId],
+        );
+        const insideInvoke: (string | null)[] = [];
+        const route = () =>
+          Object.freeze({
+            operationGateway: {
+              invoke: async () => {
+                insideInvoke.push(
+                  await withTrustedRequestRead(
+                    runtime,
+                    context,
+                    async (_c, held) => (held === null ? 'live' : 'snapshot'),
+                  ),
+                );
+                return {} as never;
+              },
+            },
+            policy,
+            queryGateway: {},
+          }) as never;
+        const operations = new ReleaseRoutingOperationGateway(
+          route,
+          policy,
+          new SemanticOperationMediationAuthority(),
+        );
+        await page(async () => {
+          await withTrustedRequestRead(runtime, context, principalOf);
+          await operations.invoke(
+            { release: { releaseId: 'r' } } as never,
+            {} as never,
+            {} as never,
+          );
+        });
+        assert.deepEqual(insideInvoke, ['live']);
+
+        // S9: a release still loading is awaited outside the snapshot: with
+        // one connection left, the loader (another request) gets it.
+        let release!: () => void;
+        const loader = new Promise<void>((resolve) => {
+          release = resolve;
+        }).then(() =>
+          withTrustedRequestTransaction(
+            runtime,
+            context,
+            async () => undefined,
+          ),
+        );
+        const pending = loader.then(() =>
+          Object.freeze({
+            operationGateway: {},
+            policy,
+            queryGateway: { invoke: async () => 'answered' },
+          }),
+        );
+        const queries = new ReleaseRoutingQueryGateway(
+          () => pending as never,
+          policy,
+        );
+        const blocker = await runtime.connect();
+        try {
+          const answer = page(async () => {
+            await withTrustedRequestRead(runtime, context, principalOf);
+            release();
+            return queries.invoke(
+              { release: { releaseId: 'r' } } as never,
+              {} as never,
+            );
+          });
+          assert.equal(await answer, 'answered');
+        } finally {
+          blocker.release();
+        }
+
+        // Module role: a module read runs as the module role, verified the
+        // first time each way; a runtime read after it runs as the login role.
+        const verified: string[] = [];
+        const spy: SnapshotRoleSwitch = {
+          async assume(client, verify) {
+            verified.push(`assume:${String(verify)}`);
+            await MODULE_RUNTIME_READ_ROLE.assume(client, verify);
+          },
+          async restore(client, verify) {
+            verified.push(`restore:${String(verify)}`);
+            await MODULE_RUNTIME_READ_ROLE.restore(client, verify);
+          },
+        };
+        const whoAmI = async (client: pg.PoolClient) =>
+          (await client.query<{ who: string }>(`SELECT current_user AS who`))
+            .rows[0]!.who;
+        const roles = await page(async () => [
+          await withTrustedRequestRead(runtime, context, whoAmI, spy),
+          await withTrustedRequestRead(runtime, context, whoAmI),
+          await withTrustedRequestRead(runtime, context, whoAmI, spy),
+          await withTrustedRequestRead(runtime, context, whoAmI),
+        ]);
+        assert.deepEqual(roles, [
+          'north_star_module_runtime',
+          'north_star_runtime',
+          'north_star_module_runtime',
+          'north_star_runtime',
+        ]);
+        assert.deepEqual(verified, [
+          'assume:true',
+          'restore:true',
+          'assume:false',
+          'restore:false',
+        ]);
+
+        // A memo lives as long as one snapshot: after a write ends it, the
+        // next snapshot loads again.
+        let loads = 0;
+        await page(async () => {
+          const memoised = (
+            client: pg.PoolClient,
+            held: ReadSnapshotHandle | null,
+          ) =>
+            held!.memo('k', async () => {
+              loads += 1;
+              return principalOf(client);
+            });
+          await withTrustedRequestRead(runtime, context, memoised);
+          await withTrustedRequestRead(runtime, context, memoised);
+          await withTrustedRequestTransaction(
+            runtime,
+            context,
+            async () => undefined,
+          );
+          await withTrustedRequestRead(runtime, context, memoised);
+        });
+        assert.equal(loads, 2);
+
+        // After a failed read the connection returns clean: no role, no identity.
+        await page(async () => {
+          await assert.rejects(
+            withTrustedRequestRead(runtime, context, (client) =>
+              client.query(`SELECT 1/0`),
+            ),
+          );
+        });
+        const clean = await runtime.connect();
+        try {
+          assert.deepEqual(
+            (
+              await clean.query<{ who: string; principal: string | null }>(
+                `SELECT current_user AS who,
+                        nullif(current_setting('north_star.principal_id', true), '') AS principal`,
+              )
+            ).rows[0],
+            { principal: null, who: 'north_star_runtime' },
+          );
+        } finally {
+          clean.release();
+        }
+
+        // S5: a scoped read's anchor transaction refuses a moved epoch.
+        const scoped = (version: string) =>
+          ({
+            context,
+            definition: { queryId: 'northstar.test:query.x' },
+            legalEntityReadScope: { policyVersion: version },
+          }) as never;
+        const current = await withTrustedRequestTransaction(
+          runtime,
+          context,
+          (client) =>
+            client.query<{ v: string }>(
+              `SELECT policy_version::text AS v FROM platform.current_policy_epochs
+              WHERE tenant_id = $1 AND environment_id = $2`,
+              [tenantId, environmentId],
+            ),
+        );
+        const now = `northstar.current-policy/${current.rows[0]!.v}`;
+        await withTrustedRequestTransaction(runtime, context, (client) =>
+          assertScopePolicyCurrent(client, scoped(now)),
+        );
+        // A version another policy gateway issued names no epoch here.
+        await withTrustedRequestTransaction(runtime, context, (client) =>
+          assertScopePolicyCurrent(client, scoped('a-test-policy/v1')),
+        );
+        await assert.rejects(
+          withTrustedRequestTransaction(runtime, context, (client) =>
+            assertScopePolicyCurrent(
+              client,
+              scoped('northstar.current-policy/1'),
+            ),
+          ),
+          /MODULE_READ_SCOPE_POLICY_CHANGED|policy changed after this read/u,
+        );
+      } finally {
+        await runtime.end();
+      }
+    },
+  );
+});
+
+test('SPEED-1 identical-read keys: release, query, arguments, plans and company scope each separate two reads', () => {
+  const base = {
+    arguments: { recordId: 'a' },
+    definition: { queryId: 'q' },
+    filterPlans: [],
+    legalEntityReadScope: { legalEntityIds: ['c1'] },
+    list: null,
+    parameterValues: {},
+    view: { release: { contentHash: 'h', releaseId: 'r' } },
+  };
+  const key = (change: object) =>
+    identicalReadKey({ ...base, ...change } as never);
+  const keys = [
+    key({}),
+    key({ view: { release: { contentHash: 'h', releaseId: 'r2' } } }),
+    key({ view: { release: { contentHash: 'h2', releaseId: 'r' } } }),
+    key({ definition: { queryId: 'q2' } }),
+    key({ arguments: { recordId: 'b' } }),
+    key({ legalEntityReadScope: { legalEntityIds: ['c2'] } }),
+    key({ legalEntityReadScope: null }),
+    key({ list: { cursor: 'x' } }),
+    key({ parameterValues: { p: 1 } }),
+  ];
+  assert.equal(new Set(keys).size, keys.length);
+  assert.equal(key({}), keys[0]);
 });
 
 const settingsSql = `SELECT current_setting('transaction_isolation') AS isolation,
