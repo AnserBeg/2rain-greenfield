@@ -1,6 +1,6 @@
 # AGENT-3 — the office assistant in the web app: fast, screen-aware, act-then-undo, measured honestly
 
-Status: slice 1 integrated (`39463ffb`, PR #57, audit A1/A2); slices 2-6 PR #58 · Mechanical (no Critical path) · Stops: none · Charter:
+Status: slice 1 integrated `39463ffb` (PR #57, audit A1/A2); slices 2-6 integrated `c6a156b4` (PR #58) · Mechanical (no Critical path) · Stops: none · Charter:
 [AGENT-3-charter.md](AGENT-3-charter.md) from `main` `f1abcb3a`; branch `packet/AGENT-3`, base `5c25acdb`.
 
 ## Pre-registered measures (2026-11-17, before any real-model run of this packet)
