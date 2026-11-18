@@ -13777,7 +13777,7 @@ test('LOCATIONS: a location changes its status with a reason in one update, its 
   assert.equal(holdPage.statusCode, 200);
   assert.match(
     holdPage.html,
-    /<span class="composition-business-status">Quarantine<\/span>/u,
+    /<span class="composition-business-status"(?: data-status-role="[a-zA-Z]+")?>Quarantine<\/span>/u,
   );
   assert.match(holdPage.html, /<dt>Status reason<\/dt><dd>Water damage<\/dd>/u);
   assert.match(holdPage.html, /Change status/u);

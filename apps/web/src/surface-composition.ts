@@ -660,14 +660,16 @@ export function renderCompositionHeader(
   // The Ledger page header (LOOK-1): eyebrow, the record's number with its
   // status badge, then the subtitle. A state with no declared kind is the
   // neutral outlined badge.
-  return `<header class="composition-header"><p class="eyebrow">${h(surface.label)}</p><div class="composition-heading"><h1>${cell(header.title)}</h1>${header.status ? `<span class="composition-business-status"${statusRole ? ` data-status-role="${h(statusRole)}"` : ''}>${cell(header.status)}</span>` : ''}</div><p class="composition-subtitle">${header.subtitle.map(cell).join(' · ')}</p></header>`;
+  // The facts stay in the header's markup and are laid out after the
+  // stepper (the header is `display:contents`; see ledger-styles.ts).
+  return `<header class="composition-header"><div class="composition-title"><p class="eyebrow">${h(surface.label)}</p><div class="composition-heading"><h1>${cell(header.title)}</h1>${header.status ? `<span class="composition-business-status"${statusRole ? ` data-status-role="${h(statusRole)}"` : ''}>${cell(header.status)}</span>` : ''}</div><p class="composition-subtitle">${header.subtitle.map(cell).join(' · ')}</p></div>${renderCompositionFacts(surface, data)}</header>`;
 }
 
 /**
  * The record's facts grid (LOOK-1): the header's declared facts, label over
  * value, in definition order; an empty value reads "—".
  */
-export function renderCompositionFacts(
+function renderCompositionFacts(
   surface: CompiledSurfaceDefinition,
   data: CompositionData,
 ): string {

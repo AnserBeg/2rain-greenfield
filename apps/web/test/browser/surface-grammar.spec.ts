@@ -1022,6 +1022,10 @@ async function requireCompactJourney(
   }
   await expect(grid.getByRole('alert')).toHaveCount(0);
 
+  // At phone width the navigation is a drawer behind the menu button
+  // (LOOK-1, owner ruling): closed it is hidden, opened it lists every entry.
+  await expect(page.locator('.sidebar')).toBeHidden();
+  await page.locator('.shell-menu > summary').click();
   const navigation = page.getByRole('navigation', {
     name: 'Release navigation',
   });

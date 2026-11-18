@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual } from 'node:util';
 
+import { composedDestinationIcon } from '../../packages/domain/src/app/builder.js';
 import { declareLists } from '../../packages/domain/src/app/list-declarations.js';
 
 type Value = Readonly<Record<string, unknown>>;
@@ -58,8 +59,12 @@ function expectedInventoryWorkspace(namespace: string, surface: Value): Value {
         ? 'contextual'
         : 'setup'
     : 'contextual';
+  // A navigation destination's declared icon (LOOK-1).
+  const icon =
+    membership === 'contextual' ? undefined : composedDestinationIcon(local);
   return {
     membership,
+    ...(icon ? { icon } : {}),
     ...(owner ? { ownerSurfaceId: `${namespace}:surface.${owner}_list` } : {}),
     ...(owner ||
     document === 'posted_stock_balance' ||

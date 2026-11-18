@@ -461,6 +461,13 @@ export function composedApplicationDefinition(): Record<string, unknown> {
   });
 }
 
+/** A composed destination's declared icon, by its surface's local id (LOOK-1). */
+export function composedDestinationIcon(local: string): string | undefined {
+  return Object.hasOwn(COMPOSED_DESTINATIONS, local)
+    ? COMPOSED_DESTINATIONS[local]?.icon
+    : undefined;
+}
+
 /** A navigation destination's declared icon and plain name (LOOK-1). */
 function withDestinationPresentation(
   surface: Record<string, unknown>,

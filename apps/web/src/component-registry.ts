@@ -3,7 +3,6 @@ import {
   renderCompositionFields,
   renderCompositionActions,
   renderCompositionChildren,
-  renderCompositionFacts,
   renderCompositionHeader,
   renderCompositionProgression,
   displayFieldValue,
@@ -850,8 +849,7 @@ function renderTitleStatus(context: SurfaceComponentContext): string {
           operationControl,
           // Nothing else is started while a Task is open.
           !context.data.compositionTask,
-        ) +
-        renderCompositionFacts(context.surface, composition),
+        ),
       'title-status-slot',
     );
   }

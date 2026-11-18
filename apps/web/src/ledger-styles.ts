@@ -78,8 +78,7 @@ th,td,dd,output,.cell-numeric,code{font-variant-numeric:tabular-nums}
 .shell-menu svg{width:18px;height:18px}
 .shell-search{flex:0 1 340px;min-width:0}
 .shell-search label{display:flex;align-items:center;gap:8px;height:var(--ctl-h);padding:0 8px 0 10px;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);color:var(--muted);font-weight:400}
-.shell-search input{flex:1;min-width:0;height:100%;border:0;outline:0;background:transparent;color:var(--ink);font-size:13px}
-.shell-search label:focus-within{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.shell-search input{flex:1;min-width:0;height:100%;border:0;background:transparent;color:var(--ink);font-size:13px}
 .principal{margin-left:auto;display:flex;align-items:center;gap:8px;color:var(--muted)}
 .principal__avatar{display:grid;place-items:center;flex:none;width:26px;height:26px;border-radius:50%;background:var(--accent-soft);color:var(--accent-text);font-size:11px;font-weight:600}
 .shell-diagnostics summary{display:flex;align-items:center;min-height:30px;padding:0 6px;border-radius:4px;color:var(--muted);font-size:11px;cursor:pointer;list-style:none}
@@ -290,7 +289,7 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 /* ---------- record (generic) ---------- */
 .command-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-height:0;padding:0;border:0;background:transparent}
 .command-bar .action-overflow{margin-left:auto}
-.command-bar [data-save-boundary]{flex:1 1 16rem;margin:0;color:var(--muted);font-size:12px}
+.command-bar [data-save-boundary]{flex-basis:100%;margin:0;color:var(--muted);font-size:12px}
 /* The editor's save bar (LOOK-1): sticky under the form, one primary action. */
 .panel:has(>.command-bar [data-save-boundary]){position:sticky;bottom:0;z-index:5;padding:10px var(--pad-x);box-shadow:var(--shadow-bar)}
 .command-bar:has([data-save-boundary]){flex-wrap:wrap;justify-content:flex-end}
@@ -328,7 +327,10 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .launcher-action button{min-height:44px}
 
 /* ---------- composition (documents) ---------- */
-.composition-header{grid-column:1/-1;padding:0;border:0;background:transparent}
+.composition-header{display:contents}
+.composition-title{grid-column:1/-1;order:-2}
+.record-breadcrumb{order:-3}
+.composition-alert,.composition-progression,.surface-grid>.operation-feedback{order:-1}
 .composition-heading{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .composition-heading h1{margin:0;font-family:var(--f-doc);font-size:28px;font-weight:500;line-height:1.1;letter-spacing:-.01em;overflow-wrap:anywhere}
 .composition-business-status{display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 8px;border:1px solid var(--rule-2);border-radius:999px;color:var(--muted);font-size:11px;font-weight:500;white-space:nowrap}

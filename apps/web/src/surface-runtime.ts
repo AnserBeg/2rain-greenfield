@@ -2344,7 +2344,7 @@ function renderShellSearch(
         `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`,
     )
     .join('');
-  return `<form class="shell-search" method="get" action="/" role="search">${hidden}<label><span class="sr-only">${escapeHtml(scan.label)}</span><span class="nav-icon" aria-hidden="true">${NAVIGATION_ICONS.search}</span><input name="scan" type="search" placeholder="${escapeHtml(scan.label)}" autocomplete="off" spellcheck="false" enterkeyhint="go" maxlength="120"></label></form>`;
+  return `<form class="shell-search" method="get" action="/" role="search">${hidden}<label><span class="sr-only">${escapeHtml(scan.label)}</span><span class="nav-icon" aria-hidden="true">${NAVIGATION_ICONS.search}</span><input name="scan" type="text" placeholder="${escapeHtml(scan.label)}" autocomplete="off" spellcheck="false" enterkeyhint="go" maxlength="120"></label></form>`;
 }
 
 /** A surface's link in the page's company, as navigation builds it. */
