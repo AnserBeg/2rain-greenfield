@@ -151,7 +151,8 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     .fill('Stock for fulfillment walkthrough');
   await page
     .getByLabel('Effective date (UTC) *', { exact: true })
-    .fill(instant.slice(0, 19));
+    // Chromium canonicalizes zero seconds away; fill requires that exact form.
+    .fill(instant.slice(0, 19).replace(/:00$/u, ''));
   await pick('Line 1 product', 'OFF-100', 'Field notebook');
   await pick('Line 1 to location', 'Calgary', 'Calgary warehouse');
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('10');

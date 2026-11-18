@@ -1415,7 +1415,7 @@ export function renderCompositionPrintDocument(
 
 export function renderCompositionFields(
   surface: CompiledSurfaceDefinition,
-  data: CompositionData,
+  data: Pick<CompositionData, 'fields' | 'fieldsFailed'>,
 ): string {
   if (data.fieldsFailed)
     return compositionMessage('COMPOSITION_CHILD_FAILED', 'alert');
@@ -1442,15 +1442,16 @@ export function renderCompositionFields(
   const place = (columnId: string) =>
     surface.composition!.fields.find((column) => column.columnId === columnId)
       ?.orderKey ?? 0;
-  // Under a declared header a field with nothing in it is not listed
-  // (LOOK-1 round 3): Details says what the record holds.
+  // A record can explicitly keep an empty field visible in Details.
   const present = (columnId: string) => {
     const value = data.fields.cells[columnId];
     return !!value && value !== '—';
   };
   const cards = [
     ...fields
-      .filter((column) => !header || present(column.columnId))
+      .filter(
+        (column) => !header || column.showWhenEmpty || present(column.columnId),
+      )
       .map((column) => ({
         orderKey: column.orderKey,
         html: `<div><dt>${h(column.label)}</dt><dd>${h(data.fields.cells[column.columnId] ?? '—')}</dd></div>`,

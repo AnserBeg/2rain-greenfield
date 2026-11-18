@@ -127,7 +127,26 @@ export function renderReleaseDiff(input: {
         `The "${String(after.label)}" list shows the columns ${now.map((c) => `"${c}"`).join(', ')} (was ${was.map((c) => `"${c}"`).join(', ')}).`,
       );
     } else {
-      lines.push(`The "${String(after.label)}" screen changes.`);
+      const placements = (surface: Json) =>
+        ((surface.documentEditor as Json | undefined)?.headerFields ??
+          (surface.form as Json | undefined)?.fields ??
+          []) as Json[];
+      const previous = new Map(
+        placements(before).map((field) => [field.fieldId, field]),
+      );
+      const moved = placements(after).filter(
+        (field) =>
+          !previous.has(field.fieldId) ||
+          previous.get(field.fieldId)?.disclosure !== field.disclosure,
+      );
+      if (moved.length) {
+        for (const field of moved)
+          lines.push(
+            `The "${String(after.label)}" editor shows "${String(field.label)}" ${field.disclosure === 'more' ? 'under More details' : 'up front'}.`,
+          );
+      } else {
+        lines.push(`The "${String(after.label)}" screen changes.`);
+      }
     }
   }
 

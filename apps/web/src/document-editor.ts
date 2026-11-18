@@ -2964,6 +2964,12 @@ function capture(
     // A decimal is kept in canonical spelling when it is one; anything else is
     // kept exactly as typed so the operator sees it, and save refuses it.
     const kind = inputs.get(field.fieldId)?.kind ?? '';
+    if (kind === 'booleanFieldType' && value !== '') {
+      if (value === 'true' || value === 'false')
+        row.values[field.fieldId] = value === 'true';
+      else refused.push(field.label);
+      continue;
+    }
     const decimal = DECIMAL_KINDS.includes(kind)
       ? canonicalDecimal(value)
       : null;

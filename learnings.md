@@ -757,3 +757,8 @@ How to apply: serialize the complete base-envelope rebuild and its checks before
 Date: 2026-10-04
 Why: APPROVALS' PostgreSQL test refused Buyer approval correctly, while the browser still showed Buyer an Approve button because shared Tasks checked record conditions but not current permission.
 How to apply: test permitted, denied and unavailable-policy Task offers through the shared runtime; keep previews advisory and test that execution still requires its own confirmation and current authorization. See [APPROVALS](docs/execution/packets/APPROVALS.md).
+
+## Use canonical zero seconds in datetime-local browser fills
+Date: 2026-11-18
+Why: [CI 44386300951](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44386300951) hit Playwright's `Malformed value` for `2026-11-18T20:25:00`. A one-browser reproduction confirmed that Chromium drops zero seconds, while nonzero seconds remain valid.
+How to apply: when filling a seconds-precision datetime-local control, omit only a trailing `:00`; preserve nonzero seconds. This keeps the same instant and the existing business assertions. [INTERACT-1](docs/execution/packets/INTERACT-1.md).

@@ -96,6 +96,7 @@ const toolSchema = {
     option: { type: 'string' },
     surface: { type: 'string' },
     order: { type: 'array', items: { type: 'string' } },
+    upFront: { type: 'array', items: { type: 'string' } },
     hide: { type: 'array', items: { type: 'string' } },
     relabel: {
       type: 'array',
@@ -140,6 +141,11 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
           (field) =>
             `- ${field.fieldId} — ${field.label} (${field.options.join(', ')})`,
         )),
+    'For a form, arrangeLayout {kind, surface, upFront} lists the added fields to show up front. Other optional added fields wait under More details.',
+    ...(targets.forms ?? []).map(
+      (form) =>
+        `- ${form.surfaceId} — ${form.label}: ${form.fields.map((field) => `${field.fieldId} "${field.label}"`).join(', ')}`,
+    ),
     'Lists you can arrange:',
     ...targets.lists.map(
       (list) =>
