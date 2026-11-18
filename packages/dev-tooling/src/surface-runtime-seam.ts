@@ -637,6 +637,10 @@ function scanForBypass(
     // served by the app server at /?customize. Not an alternate surface
     // authority; the §8.5 builder replaces it.
     'apps/web/src/customize-screen.ts',
+    // Owner ruling 2026-11-17 (AGENT-3 charter, "chat panel seam
+    // exception"): the assistant panel, local demo only, one panel on every
+    // app page. It renders no surface and reads no business data itself.
+    'apps/web/src/assistant-panel.ts',
   ]);
   const allowedSurfaceConsumers = new Set<string>([
     paths.controlSemantics,

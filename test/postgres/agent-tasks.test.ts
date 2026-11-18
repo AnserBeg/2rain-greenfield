@@ -34,8 +34,27 @@ import {
   type AgentWorld,
 } from '../agent/agent-world.js';
 import { f, ids, NAMES, op, q, rel, snapshot } from '../agent/arrange.js';
+import { readRecord } from '../agent/dev-tasks.js';
 import { referenceScript } from '../agent/reference-scripts.js';
 import { TASKS } from '../agent/tasks.js';
+
+/**
+ * Look the seeded supplier and item up, as a model must before naming them
+ * in a plan (AGENT-3 slice 4: record ids come from lookups in the session).
+ */
+async function lookUp(agent: OperationsAgentSession): Promise<void> {
+  for (const [entity, name] of [
+    ['party', NAMES.cascade],
+    ['item', NAMES.notebook],
+  ] as const) {
+    const found = await agent.call('erp_discover', {
+      mode: 'resolve',
+      canonicalIds: [entity],
+      search: name,
+    });
+    assert.equal(found.isError, false, JSON.stringify(found.content));
+  }
+}
 
 const session = (world: AgentWorld, approve: boolean) =>
   new OperationsAgentSession({
@@ -109,10 +128,79 @@ test(
           },
         ];
         const before = await snapshot(world);
+        // AGENT-3 slice 3: placing the order (an O1 capability) needs the
+        // person's yes, so this plan is one that can be declined.
+        const needsYes = [
+          ...intents,
+          { operationId: op('purchase_order_submit'), target: { fromStep: 1 } },
+        ];
 
         // Planning writes nothing, and a declined plan cannot be executed.
         const declined = session(world, false);
-        const plan = await declined.call('erp_plan', { intents });
+        // Slice 4: an id no lookup returned is refused, naming it; so is a
+        // currency nobody named. Nothing is planned, nothing written.
+        const guessed = await declined.call('erp_plan', { intents });
+        assert.match(
+          JSON.stringify(guessed.content),
+          new RegExp(
+            `supplier_party_id ${cascade} did not come from a lookup`,
+            'u',
+          ),
+        );
+        await lookUp(declined);
+        const usd = await declined.call('erp_plan', {
+          intents: [
+            {
+              ...intents[0],
+              values: {
+                ...intents[0]!.values,
+                [f('purchase_order_currency')]: 'USD',
+              },
+            },
+          ],
+        });
+        assert.match(
+          JSON.stringify(usd.content),
+          /currency USD is not the company default \(CAD\)/u,
+        );
+        declined.noteRequest('Order it in USD');
+        const named = await declined.call('erp_plan', {
+          intents: [
+            {
+              ...intents[0],
+              values: {
+                ...intents[0]!.values,
+                [f('purchase_order_currency')]: 'USD',
+              },
+            },
+          ],
+        });
+        assert.equal(
+          typeof (named.content as { planId?: unknown }).planId,
+          'string',
+          JSON.stringify(named.content),
+        );
+        // A fresh uuid in a free text field (a supplier reference, as a
+        // reservation number in the 18:35 run) is not a record reference.
+        const freeText = await declined.call('erp_plan', {
+          intents: [
+            {
+              ...intents[0],
+              values: {
+                ...intents[0]!.values,
+                [f('purchase_order_supplier_reference')]:
+                  '5f3c2a1e-8b7d-4c6e-9a2f-1d0e3b4c5a61',
+              },
+            },
+          ],
+        });
+        assert.equal(
+          typeof (freeText.content as { planId?: unknown }).planId,
+          'string',
+          JSON.stringify(freeText.content),
+        );
+        assert.deepEqual(await snapshot(world), before);
+        const plan = await declined.call('erp_plan', { intents: needsYes });
         assert.equal(plan.isError, false);
         const planId = (plan.content as { planId: string }).planId;
         assert.deepEqual(await snapshot(world), before);
@@ -139,6 +227,7 @@ test(
 
         // An approved plan runs once per key; a replay returns the same result.
         const approved = session(world, true);
+        await lookUp(approved);
         const approvedPlan = await approved.call('erp_plan', { intents });
         const id = (approvedPlan.content as { planId: string }).planId;
         const first = await approved.call('erp_execute', {
@@ -150,7 +239,18 @@ test(
           executionIdempotencyKey: 'once',
         });
         assert.equal(first.isError, false);
-        assert.deepEqual(again.content, first.content);
+        // A replay returns the same receipt; its values are read again now.
+        const receipt = (content: unknown) =>
+          (
+            content as {
+              steps: { step: number; outcome: string; recordId?: string }[];
+            }
+          ).steps.map(({ step, outcome, recordId }) => ({
+            step,
+            outcome,
+            recordId,
+          }));
+        assert.deepEqual(receipt(again.content), receipt(first.content));
         const other = await approved.call('erp_execute', {
           planId: id,
           executionIdempotencyKey: 'twice',
@@ -172,6 +272,126 @@ test(
           (verified.content as { verified: boolean }).verified,
           true,
         );
+        // A reversible in-app change (O0 creates) runs at once even for a
+        // person who would decline: the approval names the risk class, never
+        // the person.
+        assert.deepEqual(
+          approved.approvals.map((entry) => [entry.by, entry.riskClass]),
+          [['riskClass', 'reversible']],
+        );
+        assert.match(
+          JSON.stringify(approvedPlan.content),
+          /risk class reversible/u,
+        );
+        const asked: string[] = [];
+        const careful = new OperationsAgentSession({
+          runtime: world.runtime,
+          personHeaders: { cookie: 'northstar-demo-actor=buyer' },
+          companyId: COMPANY,
+          businessCalendar: BUSINESS_CALENDAR,
+          approve: (presented) => {
+            asked.push(...(presented.reasons ?? []));
+            return Promise.resolve(false);
+          },
+        });
+        await lookUp(careful);
+        await careful.call('erp_plan', { intents: needsYes });
+        assert.deepEqual(
+          careful.approvals.map((entry) => [entry.by, entry.riskClass]),
+          [['person', 'needsYes']],
+        );
+        assert.match(asked.join(' '), /registered business capability/u);
+
+        // Undo: the latest change, planned, executed and verified as the
+        // person's own operation, archives what the change created.
+        const change = approved.latestChange();
+        assert.equal(change?.changeId, id);
+        assert.match(change!.summary, /created purchase order PO-/u);
+        const undone = await approved.undo(id);
+        assert.deepEqual(
+          {
+            outcome: undone.outcome,
+            verified: (undone as { verified?: boolean }).verified,
+          },
+          { outcome: 'undone', verified: true },
+        );
+        const executed = approved.executedPlans()[0]!.results;
+        for (const [local, result] of [
+          ['purchase_order', executed[0]!],
+          ['purchase_order_line', executed[1]!],
+        ] as const)
+          assert.equal(
+            (await readRecord(world, local, result.recordId!, true)).archived,
+            true,
+            `${local} was not archived by Undo`,
+          );
+        assert.equal(approved.approvals.at(-1)?.by, 'person');
+        assert.equal((await approved.undo(id)).outcome, 'refused');
+
+        // Undo refuses, saying why, when the record changed after the
+        // agent's write; and puts prior values back when it did not.
+        {
+          const agent = new OperationsAgentSession({
+            runtime: world.runtime,
+            personHeaders: { cookie: 'northstar-demo-actor=manager' },
+            companyId: COMPANY,
+            businessCalendar: BUSINESS_CALENDAR,
+            approve: () => Promise.resolve(false),
+          });
+          await lookUp(agent);
+          const change = async (name: string) => {
+            const planned = await agent.call('erp_plan', {
+              intents: [
+                {
+                  operationId: 'party_update',
+                  target: cascade,
+                  patch: { contact_summary: name },
+                },
+              ],
+            });
+            const planId = (planned.content as { planId: string }).planId;
+            assert.equal(typeof planId, 'string', JSON.stringify(planned));
+            await agent.call('erp_execute', {
+              planId,
+              executionIdempotencyKey: name,
+            });
+            return planId;
+          };
+          const original =
+            (await readRecord(world, 'party', cascade)).values[
+              f('party_contact_summary')
+            ] ?? null;
+          const first = await change('Changed by the agent');
+          const party = await readRecord(world, 'party', cascade);
+          const later = await world.invoke('party_update', {
+            recordId: cascade,
+            expectedRevision: party.revision,
+            patch: { [f('party_contact_summary')]: 'Changed by a person' },
+          });
+          assert.equal(later.outcome, 'succeeded');
+          const refusedUndo = await agent.undo(first);
+          assert.equal(refusedUndo.outcome, 'refused');
+          assert.match(
+            (refusedUndo as { reason: string }).reason,
+            /changed after the assistant's change/u,
+          );
+          assert.equal(
+            (await readRecord(world, 'party', cascade)).values[
+              f('party_contact_summary')
+            ],
+            'Changed by a person',
+          );
+          const second = await change('Changed again by the agent');
+          const putBack = await agent.undo(second);
+          assert.equal(putBack.outcome, 'undone');
+          assert.equal(
+            (await readRecord(world, 'party', cascade)).values[
+              f('party_contact_summary')
+            ] ?? null,
+            'Changed by a person',
+          );
+          assert.notEqual(original, 'Changed by a person');
+        }
 
         // Context, no guessing: the business date and default currency come
         // from erp_discover; a currency the request and context never gave is
@@ -185,6 +405,7 @@ test(
             clock: () => new Date('2026-11-17T05:30:00Z'),
             approve: () => Promise.resolve(true),
           });
+          await lookUp(agent);
           let context: Record<string, any> = {}; // eslint-disable-line @typescript-eslint/no-explicit-any
           const model = scriptedModel([
             () => ({

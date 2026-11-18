@@ -458,6 +458,7 @@ must make every new field/entity usable with zero design work.
 
 - a sixth archetype or a bespoke screen outside SurfaceRuntime;
   (ratified exception, 2026-11-17: `apps/web/src/customize-screen.ts`, local demo only, the §8.5 builder replaces it);
+  (owner-ruled exception, 2026-11-17: `apps/web/src/assistant-panel.ts`, the assistant panel, local demo only);
 - module-specific UI dialects, routes, or navigation mega-menus;
 - modal-in-modal; a separate builder application;
 - recolored or hex-literal status colors;

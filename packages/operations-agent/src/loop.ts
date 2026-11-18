@@ -50,7 +50,12 @@ export class SpendMeter {
 export interface AgentRunResult {
   readonly answer: string;
   readonly stop:
-    'answered' | 'turn-limit' | 'spend-cap' | 'refusal' | 'model-error';
+    | 'answered'
+    | 'turn-limit'
+    | 'spend-cap'
+    | 'refusal'
+    | 'model-error'
+    | 'stopped';
   readonly turns: number;
   readonly toolCalls: number;
   readonly usage: ModelUsage;
@@ -76,6 +81,8 @@ export interface AgentRunOptions {
   readonly preamble?: AgentPreamble;
   /** Earlier turns of the same conversation, replayed unchanged. */
   readonly history?: readonly ConversationEntry[];
+  /** The person's Stop: no model or tool call starts after it fires. */
+  readonly signal?: AbortSignal;
 }
 
 export interface AgentPreamble {
@@ -117,6 +124,8 @@ export type AgentEvent =
       readonly usd: number;
     }
   | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'delta'; readonly text: string }
+  | { readonly kind: 'thinking' }
   | { readonly kind: 'tool'; readonly name: string; readonly input: unknown }
   | {
       readonly kind: 'result';
@@ -138,6 +147,9 @@ export async function runOperationsAgent(
     },
   ];
   const system = systemPrompt(options.preamble);
+  // The person's own words: currencies they name are theirs to use.
+  if (typeof options.session.noteRequest === 'function')
+    options.session.noteRequest(options.request);
   const started = performance.now();
   const usage = {
     inputTokens: 0,
@@ -165,17 +177,29 @@ export async function runOperationsAgent(
   });
   const maximumTurns = options.maximumTurns ?? 40;
   while (turns < maximumTurns) {
+    if (options.signal?.aborted)
+      return finish('stopped', 'Stopped by the person.');
     if (options.meter.exhausted())
       return finish('spend-cap', 'Stopped: the run reached its spend cap.');
     turns += 1;
     let turn;
+    options.onEvent?.({ kind: 'thinking' });
     try {
       turn = await options.model.next({
         system,
         tools: OPERATIONS_AGENT_TOOLS,
         conversation,
+        ...(options.signal ? { signal: options.signal } : {}),
+        ...(options.onEvent
+          ? {
+              onText: (delta: string) =>
+                options.onEvent?.({ kind: 'delta', text: delta }),
+            }
+          : {}),
       });
     } catch (error) {
+      if (options.signal?.aborted)
+        return finish('stopped', 'Stopped by the person.');
       return finish(
         'model-error',
         'Stopped: the model call failed.',
@@ -209,6 +233,15 @@ export async function runOperationsAgent(
     if (turn.toolCalls.length === 0) return finish('answered', turn.text);
     const results = [];
     for (const call of turn.toolCalls) {
+      if (options.signal?.aborted) {
+        // Every tool_use needs its result before the next model call.
+        results.push({
+          id: call.id,
+          content: JSON.stringify({ error: 'stopped by the person' }),
+          isError: true,
+        });
+        continue;
+      }
       toolCalls += 1;
       options.onEvent?.({ kind: 'tool', name: call.name, input: call.input });
       const outcome = await options.session.call(call.name, call.input);
@@ -225,6 +258,8 @@ export async function runOperationsAgent(
       });
     }
     conversation.push({ role: 'tool', results });
+    if (options.signal?.aborted)
+      return finish('stopped', 'Stopped by the person.');
   }
   return finish('turn-limit', 'Stopped: the run reached its turn limit.');
 }

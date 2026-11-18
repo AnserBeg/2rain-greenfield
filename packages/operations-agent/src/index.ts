@@ -10,6 +10,7 @@ export {
   type ToolOutcome,
 } from './session.js';
 export {
+  CUSTOMIZE_HANDOFF,
   OPERATIONS_AGENT_SYSTEM_PROMPT,
   OPERATIONS_AGENT_TOOLS,
   type ModelToolDefinition,

@@ -14,6 +14,7 @@ import { RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-pr
 import { PAYABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/payables-capability-executor';
 import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '@north-star/postgres-provider/purchase-order-approval-executor';
 import {
+  AGENT_KEY_FILE_VARIABLE,
   anthropicModel,
   DEFAULT_ANTHROPIC_MODEL,
   loadModelKey,
@@ -26,6 +27,11 @@ import {
 import { createRequestWorkProbe } from '@north-star/postgres-provider/request-work-meter';
 import { createSurfaceRuntimeServer } from '@north-star/web/app-server';
 import { COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/sales-section';
+
+import {
+  createAssistantEndpoint,
+  type AssistantEndpoint,
+} from './assistant-endpoint.js';
 
 import {
   composedApplicationSeed,
@@ -54,6 +60,15 @@ export interface ComposedApplicationServerOptions {
   readonly tenantSlug?: string;
   /** The approval demo fixture opts in; tenant absence/default remains off. */
   readonly purchaseOrdersRequireApproval?: true;
+  /**
+   * The assistant panel's model (AGENT-3). Tests pass a scripted model; by
+   * default the panel reads the key file named by NORTH_STAR_AGENT_KEY_FILE
+   * on first use and says plainly when there is none. The panel is served
+   * only under the local demo identity.
+   */
+  readonly assistantModel?: () => Promise<
+    ModelAdapter | { unavailable: string }
+  >;
 }
 
 export interface RunningComposedApplication {
@@ -139,6 +154,7 @@ export async function startComposedApplication(
   // object to close and its pools and container still held.
   let seededRecords: readonly ComposedApplicationSeedReceipt[];
   let server: Server;
+  let assistant: AssistantEndpoint | undefined;
   try {
     seededRecords = await seedComposedApplication(
       runtime,
@@ -169,6 +185,18 @@ export async function startComposedApplication(
         },
       );
     }
+    assistant =
+      runtime.identityMode === 'LOCAL_DEMO'
+        ? createAssistantEndpoint({
+            runtime,
+            companyId: COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId,
+            businessCalendar: COMPOSED_APPLICATION_INVENTORY_SCOPE,
+            model: options.assistantModel ?? keyFileAssistantModel(),
+            // The panel's handoff drafts through the Customize screen's
+            // own lazily opened service: one service per server.
+            customize,
+          })
+        : undefined;
     server = createSurfaceRuntimeServer(
       runtime.entry,
       {
@@ -185,6 +213,7 @@ export async function startComposedApplication(
         readSnapshot: (work, snapshotOptions) =>
           runtime.readSnapshot(work, snapshotOptions),
         requestWork: createRequestWorkProbe(),
+        ...(assistant ? { assistant } : {}),
       },
     );
     await new Promise<void>((resolve, reject) => {
@@ -215,6 +244,7 @@ export async function startComposedApplication(
     async close() {
       if (closed) return;
       closed = true;
+      assistant?.close();
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
       });
@@ -225,6 +255,28 @@ export async function startComposedApplication(
     seededRecords,
     server,
   });
+}
+
+/** The panel's default model: the key file, read once on first use. */
+function keyFileAssistantModel(): () => Promise<
+  ModelAdapter | { unavailable: string }
+> {
+  let model: Promise<ModelAdapter | { unavailable: string }> | undefined;
+  return () =>
+    (model ??= loadModelKey('anthropic').then(
+      (key) =>
+        anthropicModel({
+          key,
+          modelId:
+            process.env.NORTH_STAR_AGENT_MODEL ?? DEFAULT_ANTHROPIC_MODEL,
+        }),
+      () => {
+        model = undefined;
+        return {
+          unavailable: `The assistant has no model key. Start the app with ${AGENT_KEY_FILE_VARIABLE} naming the key file, then ask again.`,
+        };
+      },
+    ));
 }
 
 /** The release this checkout compiled, as `pnpm dev` would install it. */
