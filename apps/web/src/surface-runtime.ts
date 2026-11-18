@@ -2438,6 +2438,9 @@ function sharesSurfaceEntity(
   surfaces: readonly CompiledSurfaceDefinition[],
 ): boolean {
   if (navigation.surfaceRole !== 'list') return false;
+  // A launcher is a destination of its own, not a page of the records its
+  // Task happens to read (LOOP-1: Today and Warehouse read stock movements).
+  if (selected.launcher) return false;
   const entityId = surfaceSourceEntityId(view, selected);
   if (entityId === null || surfaceSourceEntityId(view, navigation) !== entityId)
     return false;
@@ -2578,6 +2581,7 @@ main{width:min(1200px,100%);margin:0 auto;padding:var(--page-padding) var(--page
 .data-panel,.data-empty,.operation-feedback{grid-column:span 12}
 .surface-grid[data-surface-archetype=task]{max-width:768px;margin:0 auto}
 .task-decision-slot,.task-scan-input-slot,.task-primary-action-slot,.task-primary-action{grid-column:span 12}
+.launcher-tiles{grid-column:1/-1}
 .task-decision output{display:block;margin:var(--space-3) 0;font-family:var(--font-sans);font-size:var(--text-title);font-weight:var(--weight-emphasis)}
 .task-primary-action{display:flex;justify-content:flex-end}
 .task-primary-action button{min-width:192px;min-height:44px}
