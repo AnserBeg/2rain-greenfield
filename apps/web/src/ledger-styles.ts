@@ -232,7 +232,7 @@ td[data-zero]{color:var(--faint)}
 .list-controls{flex-wrap:nowrap;align-items:center}
 .list-controls__search>label>span,.list-controls .form-field:has(>select[name=sort],>select[name=dir])>label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
 .list-controls .form-field:has(>select[name=sort],>select[name=dir]){flex:0 0 auto}
-.list-pagination a,.list-pagination button{min-height:var(--ctl-h);padding:0 10px}
+.list-pagination a,.list-pagination button{min-height:44px;padding:0 10px}
 .list-pagination{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:8px;margin-top:12px}
 .list-page-status{color:var(--muted);font-size:12px}
 .list-page-jump{display:inline-flex;gap:8px;align-items:center}
