@@ -183,6 +183,10 @@ async function ensureLocalPostgres(): Promise<void> {
         'exec',
         container.name,
         'pg_isready',
+        // The image's temporary initialization server listens only on a Unix
+        // socket. The final server is the first to accept TCP connections.
+        '--host',
+        '127.0.0.1',
         '--username',
         'postgres',
       ])
