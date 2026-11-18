@@ -18,14 +18,14 @@ Base `c2c12e7f`. No Critical path touched.
 
 ## Gates
 
-The unit regression failed on the original purchase order create form. Both browser journeys and the PostgreSQL rollback journey passed in CI. The refusal tests now expect the runtime to report its new supported floor.
+The unit regression failed on the original purchase order create form. Both browser journeys and the PostgreSQL rollback journey passed in CI. The refusal tests pass at the new runtime floor. The standalone Party fixture uses the shared HTTP teardown after CI observed a 15-second shutdown timeout.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-2",
-  "base": "fe5079d39277ba6d0e39946c23158888a4fe8ce2",
-  "head": "f86dc9bf91b4b69f8cf35bca78f58b79d69ee393",
+  "base": "8561a73d546439b34427bfab5ed3e31f4693901b",
+  "head": "b2623b8551f70005f5f4d2f9b89d553017c51d46",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
     "apps/web/src/document-editor.ts", "apps/web/src/surface-client.ts",
@@ -35,7 +35,7 @@ The unit regression failed on the original purchase order create form. Both brow
     "packages/customization/src/patch.ts", "packages/customization/src/render.ts",
     "packages/customization/src/targets.ts", "packages/postgres-provider/src/customization-service.ts",
     "packages/runtime/src/request-runtime-view.ts", "test/fixtures/g2/language-conformance/coverage-decisions.json",
-    "test/postgres/customization.test.ts", "test/postgres/request-runtime-view.test.ts",
+    "test/fixtures/g2/party/browser-server.ts", "test/postgres/customization.test.ts", "test/postgres/request-runtime-view.test.ts",
     "test/unit/customization.test.ts", "test/unit/customize-screen.test.ts"
   ],
   "symbols": [
