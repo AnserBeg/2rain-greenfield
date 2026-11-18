@@ -1,7 +1,7 @@
 # AGENT-3 — the office assistant in the web app: fast, screen-aware, act-then-undo, measured honestly
 
-Status: slice 1 integrated (`39463ffb`, PR #57, with audit fixes A1/A2); slices 2-6 PR #58 · Tier: Mechanical (no Critical path) · Stops: none
-Charter: [AGENT-3-charter.md](AGENT-3-charter.md) from `main` `f1abcb3a`. Branch `packet/AGENT-3`, base `5c25acdb`.
+Status: slice 1 integrated (`39463ffb`, PR #57, audit A1/A2); slices 2-6 PR #58 · Mechanical (no Critical path) · Stops: none · Charter:
+[AGENT-3-charter.md](AGENT-3-charter.md) from `main` `f1abcb3a`; branch `packet/AGENT-3`, base `5c25acdb`.
 
 ## Pre-registered measures (2026-11-17, before any real-model run of this packet)
 Discovery calls = every `erp_discover` call, by tool and mode; baseline (16:52) median **7.5**, slice-1 target ≤ 3.75. Seconds = the
@@ -13,7 +13,8 @@ development set's rules (tasks 11-34) are registered in `test/agent/dev-tasks.ts
    has its own) and filtered per person through the routed eligibility previews on every call; filtered text is never shared.
 2. A short name resolves to exactly one id of the pinned contract or to none (`matchId`).
 3. A plan is bound to the release it was made on (id and content hash, in the approval digest); execute refuses before any step and
-   before each step, in that step's view, with a typed `replan` naming what committed. Verify compares values and patched fields.
+   before each step, in that step's view, with a typed `replan` naming what committed. Verify compares values and patched fields. A replayed
+   execute returns the receipt; its values come only from a read authorized now (security review).
 4. The panel's screen is a claim: named only when declared, its record read fresh as the person; a conversation is its starter's;
    requests are same-origin JSON; a plan waits for a yes bound to its id and digest; Stop ends a run; USD 1.50 per conversation.
 5. Risk class from contract facts only (`risk.ts`): o0 create (inverse archive) or update with a patch (inverse prior values),
@@ -30,10 +31,9 @@ development set's rules (tasks 11-34) are registered in `test/agent/dev-tasks.ts
   cache breakpoint on prompt + map, per-turn context in the user turn. Panel `assistant-panel.ts` (CSP-hash-pinned, text nodes only)
   + `assistant-endpoint.ts` at `/?assistant=ask|decide|stop|undo`; Customize screen's lazily opened service shared for the handoff.
 - Seam exception line in `ux-grammar` and the seam allow-list, as the Customize screen's. Slices 2-6 merge as one: shared files.
-- Pins tripped: `meta-sales.spec.ts` counts the page's own scripts, so the panel's is marked `data-assistant-script` and excluded.
+  Pin tripped: `meta-sales.spec.ts` counts the page's own scripts; the panel's is marked `data-assistant-script` and excluded.
 
 ## Results (each dated result file stands as registered)
-
 | run | pass | median discovery | median s | median calls | USD | USD / completed |
 |---|---|---|---|---|---|---|
 | baseline 16:52 (no map) | 9/10 | 7.5 | 34.8 | 13.5 | 1.5282 | 0.1698 |
@@ -41,6 +41,8 @@ development set's rules (tasks 11-34) are registered in `test/agent/dev-tasks.ts
 | slice 3 18:25 `47bc6c82` ([r](../evidence/2026-11-17T18-25-11-573Z-agent-eval.md)) | 10/10 | 2 | 18.3 | 6.5 | 0.8482 | 0.0848 |
 | slice 4 18:35 `ae5c4443` ([r](../evidence/2026-11-17T18-35-50-111Z-agent-eval.md)) | 10/10 | 2 | 20.9 | 7 | 0.9030 | 0.0903 |
 | dev set 19:49 `281b5cf2` ([r](../evidence/2026-11-17T19-49-59-349Z-agent-eval.md)), 34 tasks, 66 runs | 61/66; every time 31/34, once 32/34; by attempt 31/34, 15/16, 15/16 | 2 | 17.0 | 7.5 | 5.8596 | 0.0961 |
+| after LOOP-1, 11-18 03:08 `8e3d4a21` ([r](../evidence/2026-11-18T03-08-05-680Z-agent-eval.md)) | 10/10 | 2 | 19.9 | 5.5 | 0.8145 | 0.0815 |
+| after SPEED-1, 03:33 `f5414386` ([r](../evidence/2026-11-18T03-33-36-579Z-agent-eval.md)) | 10/10 | 2 | 11.9 | 5.5 | 0.6837 | 0.0684 |
 
 Dev-set failures as registered: task 18 x3 (my rule's option id was wrong, `option.store`; agent correct; rule v2), task 22 attempt 1
 (contracts by short name read `denied`, a slice-1 defect fixed after), task 29 (the agent picked the only "Millwork" with a customer
@@ -65,7 +67,7 @@ tests run once locally (they found masters are not company-scoped, an archive's 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "AGENT-3",
-  "base": "72e7ac6a10d71b52daa9817929c4bbf13ee80a7e", "head": "8918440985c08fc080c30d3048133e3e29d25579",
+  "base": "c13f1308ef1c1be21abf8dfdb2f8a0ac19849765", "head": "92b643e1b1d2255ff95a320f1562434a838f6c63",
   "changedPaths": [
     ".agents/skills/ux-grammar/SKILL.md", "apps/api/src/agent-cli.ts", "apps/api/src/assistant-endpoint.ts", "apps/api/src/composition-root.ts", "apps/web/src/app-server.ts", "apps/web/src/assistant-panel.ts",
     "apps/web/test/browser/assistant-panel.composed-application.spec.ts", "apps/web/test/browser/meta-sales.spec.ts", "docs/execution/packets/AGENT-3.md", "package.json", "packages/dev-tooling/src/surface-runtime-seam.ts",
