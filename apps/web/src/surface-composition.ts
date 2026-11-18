@@ -2286,6 +2286,23 @@ export async function submitCompositionAction(
           current.prepared.presentation,
         )
       : `<dl class="composition-reviewed-inputs">${headerInputs.map((input) => `<div><dt>${h(input.label)}</dt><dd>${h(shownInput(input, displayInputs[input.inputId] ?? ''))}</dd></div>`).join('')}</dl>${previewRows(figures)}`;
+  const confirmLabel = () => {
+    const declared =
+      current.action.presentation?.task?.confirmation.confirmLabel;
+    if (declared) return declared;
+    const quantities = perRowInputs.filter(
+      (input) => input.type === 'quantity',
+    );
+    if (
+      taskRowsDeclared?.fillLabel &&
+      quantities.length === 1 &&
+      current.prepared
+    ) {
+      const quantity = quantities[0]!;
+      return `${current.action.label} ${plainDecimal(sumDecimals(current.prepared.rows.map((row) => current.prepared!.rowInputs[row]![quantity.inputId]!)))}`;
+    }
+    return `Confirm ${current.action.label}`;
+  };
   const hidden = `<input type="hidden" name="taskToken" value="${h(token!)}"><input type="hidden" name="compositionAction" value="${h(current.action.actionId)}">`;
   if (current.busy)
     return taskDocument(
@@ -2524,7 +2541,7 @@ export async function submitCompositionAction(
       else
         return taskDocument(
           () =>
-            `<section data-task-prepared>${previewInputs()}<p class="composition-task-consequence">${h(current.action.description)}</p><form class="composition-task-footer" method="post" action="${h(url)}">${hidden}<input type="hidden" name="preparedId" value="${h(prepared.id)}"><button class="secondary-action" name="taskStage" value="edit">Edit inputs</button><button name="taskStage" value="confirm">${h(current.action.presentation?.task?.confirmation.confirmLabel ?? `Confirm ${current.action.label}`)}</button></form></section>${back}`,
+            `<section data-task-prepared>${previewInputs()}<p class="composition-task-consequence">${h(current.action.description)}</p><form class="composition-task-footer" method="post" action="${h(url)}">${hidden}<input type="hidden" name="preparedId" value="${h(prepared.id)}"><button class="secondary-action" name="taskStage" value="edit">Edit inputs</button><button name="taskStage" value="confirm">${h(confirmLabel())}</button></form></section>${back}`,
           inputs,
           prepared,
         );
