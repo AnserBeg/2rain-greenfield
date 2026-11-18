@@ -888,8 +888,13 @@ function compositionStatusRole(
   const field = context.surface.composition?.fields.find(
     (column) => column.columnId === header?.status,
   )?.field;
-  if (!field || !Object.hasOwn(record.values, field)) return null;
-  const raw = record.values[field];
+  if (!field) return null;
+  // Read as the header reads it: the stored value, or the id a relation or
+  // derived state names (its label is what the badge shows).
+  const raw = Object.hasOwn(record.values, field)
+    ? record.values[field]
+    : (record.relationLabels?.[field]?.recordId ?? null);
+  if (raw === null || raw === undefined) return null;
   // A state field belongs to one entity, so the List whose status column
   // reads that same field is that entity's List.
   for (const surface of context.surfaces ?? []) {

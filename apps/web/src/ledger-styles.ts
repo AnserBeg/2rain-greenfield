@@ -221,6 +221,8 @@ body:has(.record-selector__input:checked) .bulk-ready{display:inline-flex}
 .form-field--wide{grid-column:1/-1}
 .form-fields input,.form-fields select,.list-controls input,.list-controls select,.list-page-jump input,.composition-inputs input,.composition-inputs select,.reference-search input{width:100%;min-height:var(--ctl-h);padding:0 9px;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);color:var(--ink);font:inherit;font-size:13px}
 .draft-header textarea,.editor-create__fields textarea,.composition-inputs textarea{width:100%;padding:7px 9px;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);color:var(--ink);font:inherit;font-size:13px;resize:vertical}
+/* Every text control reads the sheet and ink, whatever form it sits in. */
+input:not([type=checkbox]):not([type=radio]):not([type=hidden]),select,textarea{border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);color:var(--ink)}
 input::placeholder,textarea::placeholder{color:var(--faint)}
 .form-fields input[type="checkbox"]{width:16px;height:16px;min-height:16px;padding:0;justify-self:start;margin:6px 0;accent-color:var(--accent)}
 .form-fields .form-empty-intent{padding-top:4px}
@@ -553,7 +555,7 @@ main{padding:14px max(16px,env(safe-area-inset-left,0px)) 40px}
 /* ---------- 800px and below: the compact projection ---------- */
 @media(max-width:800px){
 .draft-header.form-fields{grid-template-columns:minmax(0,1fr)}
-.composition-collection[data-resolution=empty],.composition-collection[data-resolution=failed]{display:block}
+.composition-collection[data-resolution=empty],.composition-collection[data-resolution=failed],.data-panel[data-composition-dataset][data-resolution=empty]{display:block}
 .sidebar a,.navigation-children a{min-height:44px}
 .surface-heading{align-items:flex-start;flex-direction:column;gap:10px}
 .surface-status{justify-content:flex-start}
