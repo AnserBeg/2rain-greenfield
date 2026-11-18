@@ -201,7 +201,7 @@ test(
         taskStage: 'retry',
         taskToken: token,
       });
-      assert.match(retried.html, /Receive lines with actual cost: done/u);
+      assert.match(retried.html, /Receive: done/u);
       assert.equal(await receipts(), committed, 'the retry reuses its keys');
     });
   },

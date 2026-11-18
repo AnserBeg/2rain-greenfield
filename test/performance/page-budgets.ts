@@ -55,13 +55,14 @@ export const PAGE_BUDGETS: Readonly<Record<PageBudgetName, PageBudget>> =
     // Raised once, by the sidebar's queue counts (orchestrator-ruled, option
     // (a)): every page but home reads Today's first three counts in its
     // snapshot, +5 statements and no transaction; home's tiles are the same
-    // reads, answered once.
+    // reads, answered once. A snapshot sends an identical statement once, so
+    // the sales order detail's queues and its own five repeats cost nothing.
     home: budget([4, 42, 6, 0], [0, 0, 0, 49]),
     'purchase order list': budget([2, 35, 3, 0], [0, 0, 0, 92]),
     'purchase order detail': budget([2, 38, 3, 0], [0, 0, 0, 95]),
     'new purchase order': budget([2, 23, 3, 0], [0, 0, 0, 100]),
     'stock by item': budget([2, 28, 3, 0], [0, 0, 0, 70]),
-    'sales order detail': budget([2, 61, 3, 5], [0, 0, 0, 99]),
+    'sales order detail': budget([2, 56, 3, 0], [0, 0, 0, 99]),
     'task: open': budget([2, 36, 3, 0], [0, 0, 0, 75]),
     'task: review': budget([2, 36, 3, 0], [0, 0, 0, 75]),
     // Raised once, by the security fix round (S1, orchestrator-ruled): every

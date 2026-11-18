@@ -483,7 +483,10 @@ test('SPEED-1 security fixes: one scope per page, both scopes of a moved grant, 
         // two moves queue: the first (B to A) waits for it, the second (A to
         // B) behind; when it is released, both commit. Bumped OLD first, the
         // first holds B and waits for A, which the second holds: 40P01.
-        const [scopeA, scopeB] = [environmentId, otherEnvironmentId].sort();
+        const [scopeA, scopeB] = [environmentId, otherEnvironmentId].sort() as [
+          string,
+          string,
+        ];
         assert.equal(scopeA, environmentId, 'the seeded membership is in A');
         await admin.query(
           `INSERT INTO platform.current_policy_epochs (
