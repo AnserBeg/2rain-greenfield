@@ -165,7 +165,10 @@ test('Buyer submits, Manager rejects and approves, then Buyer places and stages 
       .fill('SUP-7781');
     await finish('Place order');
     await page.goto(orderUrl);
-    await expect(page.locator('.composition-header')).toContainText('Released');
+    // The badge names the stepper's current step (LOOK-1 round 3).
+    await expect(page.locator('.composition-header')).toContainText(
+      'Receiving',
+    );
     await expect(page.locator('main')).toContainText('SUP-7781');
     const lines = page.locator(
       '[data-composition-dataset$="dataset.purchasing_lines"]',

@@ -247,8 +247,10 @@ test('a partly received order shows what is still open, closes its remainder wit
     await page.goto(orderUrl);
     await command(page, 'Close');
     await expect(page.getByRole('status')).toContainText('Close complete');
+    // Closed with what arrived still to bill: the stepper's current step,
+    // which the badge names (LOOK-1 round 3), is Billing.
     await expect(page.locator('.composition-business-status')).toHaveText(
-      'Closed',
+      'Billing',
     );
 
     // An order with nothing received still cancels.

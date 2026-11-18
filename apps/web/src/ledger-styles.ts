@@ -273,7 +273,7 @@ input::placeholder,textarea::placeholder{color:var(--faint)}
 .draft-header>.form-field:not(.form-field--reference){gap:5px}
 table.draft-lines.form-fields{display:table;width:100%;margin:0;border-collapse:collapse;border-top:1px solid var(--ink);table-layout:fixed}
 .draft-lines th{padding:8px 8px 6px;text-align:left;color:var(--muted);font-size:11px;font-weight:500;border-bottom:1px solid var(--rule)}
-.draft-lines__heading--reference{width:46%}.draft-lines__heading--value{width:17%}.draft-lines__heading--derived{width:10%}.draft-lines__heading--remove{width:6.5rem}
+.draft-lines__heading--reference{width:46%}.draft-lines__heading--value{width:17%}.draft-lines__heading--derived{width:10%}.draft-lines__heading--more{width:4rem}.draft-lines__heading--remove{width:2.5rem}
 .draft-line__cell{padding:8px;vertical-align:top;border:0;border-bottom:1px solid var(--rule);border-radius:0;background:transparent}
 .draft-line__cell:last-child{text-align:right}
 .draft-line__cell input,.draft-line__cell select{width:100%;min-width:0}
@@ -328,16 +328,16 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 /* ---------- record (generic) ---------- */
 .command-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-height:0;padding:0;border:0;background:transparent}
 .command-bar .action-overflow{margin-left:auto}
-.command-bar [data-save-boundary]{flex:1 1 auto;min-width:0;margin:0;color:var(--muted);font-size:12px}
+.command-bar [data-save-boundary]{flex-basis:100%;margin:0;color:var(--muted);font-size:12px}
 /* The editor's save bar (LOOK-1): sticky under the form, one primary action. */
 .panel:has(>.command-bar [data-save-boundary]){position:sticky;bottom:0;z-index:5;padding:10px var(--pad-x);box-shadow:var(--shadow-bar)}
-.command-bar:has([data-save-boundary]){flex-wrap:nowrap;align-items:center;justify-content:flex-end}
+.command-bar:has([data-save-boundary]){flex-wrap:wrap;justify-content:flex-end}
 /* An order line reads product, quantity and price; its discount and tax
    wait behind its own More, its removal a quiet × (LOOK-1 round 3). */
 .draft-line-more{position:relative}
 .draft-line-more>summary{color:var(--accent-text);font-size:12px;font-weight:500;cursor:pointer;list-style:none}
 .draft-line-more>summary::-webkit-details-marker{display:none}
-.draft-line-more[open]>.draft-line-more__fields{display:grid;gap:8px;width:14rem;margin-top:6px}
+.draft-line-more[open]>.draft-line-more__fields{position:absolute;z-index:6;right:0;top:calc(100% + 4px);display:grid;gap:8px;width:14rem;padding:10px;border:1px solid var(--rule);border-radius:6px;background:var(--sheet);box-shadow:var(--shadow-dlg);text-align:left}
 .draft-line-more__field{display:grid;gap:4px}
 .draft-line-more__field>span{color:var(--muted);font-size:11px;font-weight:500}
 .draft-line__remove{min-width:28px;color:var(--muted);font-size:16px;line-height:1;text-decoration:none}
