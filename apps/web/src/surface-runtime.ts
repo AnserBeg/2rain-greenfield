@@ -2998,7 +2998,7 @@ export const SURFACE_STYLESHEET = Object.freeze({
 
 /**
  * The queue counts every page shows at the top of its sidebar (SPEED-1,
- * owner's look): the home launcher's first three tiles -- today To receive,
+ * owner's look): the first launcher's first three tiles -- today To receive,
  * To ship and Not yet paid -- each its declared List view's count, read with
  * the page's other reads (inside its read snapshot) and under current policy.
  * A count that could not be read is `null`, never a guess.
@@ -3021,9 +3021,9 @@ async function loadQueueCounts(
   company: string | null,
   now: Date,
 ): Promise<void> {
-  // The home page is the first active surface; its launcher declares the
+  // The release's first launcher (in manifest order: Today) declares the
   // day's queues. Without one, a page shows none.
-  const launcher = surfaces[0]?.launcher;
+  const launcher = surfaces.find((surface) => surface.launcher)?.launcher;
   if (!launcher) return;
   const first = [...launcher.tiles]
     .sort(
