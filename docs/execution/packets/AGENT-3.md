@@ -67,7 +67,7 @@ tests run once locally (they found masters are not company-scoped, an archive's 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "AGENT-3",
-  "base": "b60985008bbc03a41e78bcdbb61a7d9005c40797", "head": "59a10a6b13686804686eda71dbff3be049cb28cb",
+  "base": "f76da787fb684b010ea671d713b2b924d440d664", "head": "2dc0b0055b59930ee4909ec4b040c1442738fb5b",
   "changedPaths": [
     ".agents/skills/ux-grammar/SKILL.md", "apps/api/src/agent-cli.ts", "apps/api/src/assistant-endpoint.ts", "apps/api/src/composition-root.ts", "apps/web/src/app-server.ts", "apps/web/src/assistant-panel.ts",
     "apps/web/test/browser/assistant-panel.composed-application.spec.ts", "apps/web/test/browser/meta-sales.spec.ts", "docs/execution/packets/AGENT-3.md", "package.json", "packages/dev-tooling/src/surface-runtime-seam.ts",
