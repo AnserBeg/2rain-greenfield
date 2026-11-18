@@ -244,7 +244,11 @@ export async function runOperationsAgent(
       }
       toolCalls += 1;
       options.onEvent?.({ kind: 'tool', name: call.name, input: call.input });
-      const outcome = await options.session.call(call.name, call.input);
+      const outcome = await options.session.call(
+        call.name,
+        call.input,
+        options.signal ? { signal: options.signal } : {},
+      );
       options.onEvent?.({
         kind: 'result',
         name: call.name,

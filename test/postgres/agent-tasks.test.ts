@@ -58,6 +58,8 @@ async function lookUp(agent: OperationsAgentSession): Promise<void> {
 
 const session = (world: AgentWorld, approve: boolean) =>
   new OperationsAgentSession({
+    // The panel's act-then-undo (a host option since the end review X6).
+    autoApproveReversible: true,
     runtime: world.runtime,
     personHeaders: { cookie: 'northstar-demo-actor=buyer' },
     companyId: COMPANY,
@@ -285,6 +287,8 @@ test(
         );
         const asked: string[] = [];
         const careful = new OperationsAgentSession({
+          // The panel's act-then-undo (a host option since the end review X6).
+          autoApproveReversible: true,
           runtime: world.runtime,
           personHeaders: { cookie: 'northstar-demo-actor=buyer' },
           companyId: COMPANY,
@@ -332,6 +336,8 @@ test(
         // agent's write; and puts prior values back when it did not.
         {
           const agent = new OperationsAgentSession({
+            // The panel's act-then-undo (a host option since the end review X6).
+            autoApproveReversible: true,
             runtime: world.runtime,
             personHeaders: { cookie: 'northstar-demo-actor=manager' },
             companyId: COMPANY,
@@ -398,6 +404,8 @@ test(
         // never written.
         const planPurchaseOrder = async (withCurrency: boolean) => {
           const agent = new OperationsAgentSession({
+            // The panel's act-then-undo (a host option since the end review X6).
+            autoApproveReversible: true,
             runtime: world.runtime,
             personHeaders: { cookie: 'northstar-demo-actor=buyer' },
             companyId: COMPANY,
@@ -622,6 +630,8 @@ test(
         // differ, and an operation the buyer may not use loads as denied.
         const as = (actor: 'buyer' | 'manager') =>
           new OperationsAgentSession({
+            // The panel's act-then-undo (a host option since the end review X6).
+            autoApproveReversible: true,
             runtime: world.runtime,
             personHeaders: { cookie: `northstar-demo-actor=${actor}` },
             companyId: COMPANY,
@@ -766,6 +776,8 @@ test(
         let rollBackAfterFirst = false;
         const real = world.runtime.operationGateway;
         const agent = new OperationsAgentSession({
+          // The panel's act-then-undo (a host option since the end review X6).
+          autoApproveReversible: true,
           runtime: {
             entry: world.runtime.entry,
             operationMediation: world.runtime.operationMediation,
