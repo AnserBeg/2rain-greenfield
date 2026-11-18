@@ -30,6 +30,18 @@ screenshot of the app and the mockup for the seven mockup screens shows the same
    (customization draft, approve, activate), screenshots each at 1440 and 390 in light and dark, and fails on raw codes or a missing
    generic part. Commit the screenshots under `docs/execution/evidence/` with the mockup's for comparison.
 
+## Amendments (orchestrator, 2026-11-17, at launch)
+- **The owner tries the app only after this packet.** He said "dont start until we have built the ledger look", so this packet is what
+  he sees first. Finish all five slices before anything is handed to him.
+- **The assistant panel** (AGENT-3's panel in `apps/web`, merging as PR #58) gets the Ledger look through the same tokens and
+  components. Restyle only its markup and classes, never its behaviour or endpoint; coordinate through the orchestrator if its files are
+  still moving.
+- **"More details" on create forms** needs a per-field disclosure carrier, which is phase 3 (a language change). Until then, render the
+  fields the job needs first, and authored groups where the definition already has them. No renderer guess about which fields to hide.
+- **The fonts** in the spec (IBM Plex) are served from the same-origin asset route that SPEED-1 slice 5 builds. If that has not merged
+  when you reach slice 1, use system fallbacks first and switch when it lands. Never use an external font host.
+- **SPEED-1's page budget is green on main** (PO detail 2 transactions, 33 statements). The look must keep it green.
+
 ## Decided (do not reopen)
 - Through the generator: renderer, tokens, message catalog and the authored definition only. No hand-built screen; no branch on an
   operation or entity id.

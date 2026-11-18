@@ -556,6 +556,24 @@ export function validateSurfaceWorkspaces(
             surface.surfaceId,
             'a default counted from today is a UTC date-time field with no other default',
           );
+        // LOOK-1 round 2: a field behind "More details" is never one the save
+        // requires, and a date-only entry is an instant's calendar day.
+        if (
+          field.disclosure === 'more' &&
+          fields.get(field.fieldId)?.presence === 'required'
+        )
+          fail(
+            surface.surfaceId,
+            'a required field is never behind More details',
+          );
+        if (
+          field.dateOnly &&
+          (target?.kind !== 'dateTimeFieldType' ||
+            target.timezoneSemantics !== 'utcInstant' ||
+            field.presentation ||
+            field.reference)
+        )
+          fail(surface.surfaceId, 'a date-only entry is a UTC date-time field');
         if (
           field.defaultNow &&
           (field.defaultDaysFromToday !== undefined ||

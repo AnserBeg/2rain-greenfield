@@ -366,6 +366,31 @@ export function validateSurfaceCompositions(
           surface.surfaceId,
           'selected row actions require explicit selection',
         );
+      // The rail (LOOK-1 round 2) holds linked documents; a dataset whose
+      // lines show their progress is the record's own lines, on the sheet.
+      if (child.presentation?.rail && child.presentation.progress)
+        fail(
+          surface.surfaceId,
+          'a dataset with line progress stays on the sheet, not in the rail',
+        );
+      // Per-line progress (LOOK-1) measures one quantity column of this
+      // dataset against another: two distinct columns it declares, each a
+      // quantity, never a column of another dataset or a text column.
+      const progress = child.presentation?.progress;
+      if (progress) {
+        const quantity = (columnId: string) =>
+          child.columns.find((column) => column.columnId === columnId)
+            ?.presentation?.role === 'quantity';
+        if (
+          progress.total === progress.done ||
+          !quantity(progress.total) ||
+          !quantity(progress.done)
+        )
+          fail(
+            surface.surfaceId,
+            "line progress names two of the dataset's quantity columns",
+          );
+      }
       if (
         child.sort?.some(
           (entry) =>

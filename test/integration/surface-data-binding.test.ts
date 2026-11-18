@@ -282,6 +282,83 @@ test('compiled fixture surfaces bind live Q0/O0 data through one pinned request 
   }
 });
 
+test('SPEED-1: a page finishes its reads before it renders; a policy change then is the page own, and a task step under one redirects', async () => {
+  const compiled = compileFixture();
+  const policy = new RecordingPolicy('ALLOW');
+  const entry = runtimeEntry(compiled, policy, {
+    a: identity(tenantA, environmentA, principalA),
+  });
+  const view = await issuedView(entry, 'a');
+  const operationMediation = new SemanticOperationMediationAuthority();
+  const gateways = {
+    operationGateway: new SemanticOperationGateway(
+      policy,
+      new InMemoryGenericExecutor(),
+      operationMediation,
+    ),
+    operationMediation,
+    queryGateway: fixedQueryGateway('exact', []),
+  };
+  const listUrl = `/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_list`)}`;
+  const order: string[] = [];
+  const page = await renderSurfaceRuntimeWithData(
+    view,
+    listUrl,
+    gateways,
+    null,
+    {
+      finishReads: async () => {
+        order.push('finished');
+      },
+    },
+  );
+  order.push('rendered');
+  assert.deepEqual(order, ['finished', 'rendered']);
+  assert.match(page.html, /data-data-state="empty"/);
+
+  const changed = Object.assign(new Error('the policy changed'), {
+    code: 'READ_SNAPSHOT_POLICY_CHANGED',
+    name: 'ReadSnapshotPolicyChangedError',
+  });
+  await assert.rejects(
+    renderSurfaceRuntimeWithData(view, listUrl, gateways, null, {
+      finishReads: async () => {
+        throw changed;
+      },
+    }),
+    (error: unknown) => error === changed,
+  );
+
+  // A task step under a policy change is sent again by a fresh GET, its task
+  // parameters dropped; it never reports a failure of what it committed.
+  const server = createSurfaceRuntimeServer(entry, gateways, null, undefined, {
+    readSnapshot: async (work) => {
+      await work(async () => undefined);
+      throw changed;
+    },
+  });
+  const baseUrl = await listen(server);
+  try {
+    const step = await fetch(`${baseUrl}${listUrl}&taskToken=t`, {
+      body: new URLSearchParams({
+        compositionAction: 'northstar.fixture:action.x',
+        taskStage: 'confirm',
+        taskToken: 't',
+      }).toString(),
+      headers: {
+        authorization: 'a',
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      method: 'POST',
+      redirect: 'manual',
+    });
+    assert.equal(step.status, 303);
+    assert.equal(step.headers.get('location'), listUrl.replace('%3A', '%3A'));
+  } finally {
+    await close(server);
+  }
+});
+
 test('frozen Q0 outcomes and gateway failures render bounded safe states', async () => {
   const compiled = compileFixture();
   const policy = new RecordingPolicy('ALLOW');
@@ -5935,7 +6012,7 @@ test('order entry F3: read loss between partial-save submissions redacts acknowl
     assert.doesNotMatch(first.html, /DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD/);
     if (pending === 'cleared') {
       assert.match(first.html, /1 save operations committed/);
-      assert.match(first.html, />Save draft<\/button>/);
+      assert.match(first.html, />Save<\/button>/);
     } else {
       assert.match(first.html, /data-save-progress/);
       assert.match(first.html, />Retry save<\/button>/);
@@ -6382,7 +6459,7 @@ test('order entry values: exact decimals, bounded before any write, choice set a
         const header = refused.slots!.keyFacts!;
         assert.match(
           header,
-          /<label class="form-field__label" for="([^"]+)">Order date \(UTC\) \*<\/label><input(?=[^>]*\sid="\1")(?=[^>]*\saria-describedby="\1-error")/,
+          /<label class="form-field__label" for="([^"]+)">Order date \*<\/label><input(?=[^>]*\sid="\1")(?=[^>]*\saria-describedby="\1-error")/,
         );
         assert.match(header, /<small class="field-error" id="[^"]+-error">/);
         assert.doesNotMatch(
@@ -10660,10 +10737,7 @@ test('ORDER-PARITY: a truck receipt receives several lines in one receipt, fille
     page.html,
     new RegExp(`data-next-action="${regexpText(action)}"`, 'u'),
   );
-  assert.match(
-    page.html,
-    /aria-label="Next action: Receive lines with actual cost"/u,
-  );
+  assert.match(page.html, /aria-label="Next action: Receive"/u);
 
   const start = await submitSurfaceRuntimeIntent(
     f.view,
@@ -10768,7 +10842,7 @@ test('ORDER-PARITY: a truck receipt receives several lines in one receipt, fille
   assert.match(failed.html, /COMPOSITION_UNCERTAIN/u);
   f.executor.failAt = 0;
   const done = await post({ taskStage: 'retry' });
-  assert.match(done.html, /Receive lines with actual cost: done/u);
+  assert.match(done.html, /Receive: done/u);
   const calls = f.executor.calls;
   assert.deepEqual(
     calls.map((call) => call.definition.operationId),
@@ -11270,10 +11344,7 @@ test('ORDER-PARITY: an order page names the lines it is short and shows where it
       'u',
     ),
   );
-  assert.match(
-    confirmed.html,
-    /aria-label="Next action: Invoice shipped quantities"/u,
-  );
+  assert.match(confirmed.html, /aria-label="Next action: Invoice"/u);
   // A cancelled order stopped at every step, with nothing next -- even with
   // figures that would otherwise offer a step.
   const cancelled = seedOrder('cancelled');
@@ -11646,7 +11717,7 @@ test('PAYABLES: the order lists its bills and offers billing only while the orde
     assert.equal(
       html.includes(`value="${ns}:action.bill_received"`),
       offered,
-      `Bill received quantities with ${String(toBill)} to bill`,
+      `Bill with ${String(toBill)} to bill`,
     );
     // Its progression's Billing step needs attention exactly then; a
     // released order is otherwise billing as it receives.
@@ -11658,7 +11729,9 @@ test('PAYABLES: the order lists its bills and offers billing only while the orde
         'complete',
         'complete',
         'current',
-        offered ? 'attention' : 'current',
+        // Exactly one current step (LOOK-1 round 2): a later reached step
+        // that needs nothing waits as upcoming.
+        offered ? 'attention' : 'upcoming',
         'upcoming',
       ],
       `the order's progression with ${String(toBill)} to bill`,
@@ -13777,7 +13850,7 @@ test('LOCATIONS: a location changes its status with a reason in one update, its 
   assert.equal(holdPage.statusCode, 200);
   assert.match(
     holdPage.html,
-    /<span class="composition-business-status">Quarantine<\/span>/u,
+    /<span class="composition-business-status"(?: data-status-role="[a-zA-Z]+")?>Quarantine<\/span>/u,
   );
   assert.match(holdPage.html, /<dt>Status reason<\/dt><dd>Water damage<\/dd>/u);
   assert.match(holdPage.html, /Change status/u);

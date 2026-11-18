@@ -8,6 +8,33 @@ const DOCUMENT_LIST_LABELS: Readonly<Record<string, string>> = {
 };
 
 /** Product declarations for the shared draft document renderer. */
+
+/** The order fields a person fills first; every other header field is behind "More details". */
+const FIRST_PURCHASE_FIELDS = Object.freeze([
+  'supplier_party_id',
+  'order_date',
+  'receiving_location_id',
+  'currency',
+]);
+const FIRST_SALES_FIELDS = Object.freeze([
+  'customer_party_id',
+  'order_date',
+  'currency',
+  'ship_to_address_id',
+]);
+
+/** Marks the header fields not named first as behind "More details" (LOOK-1). */
+function withMoreDetails<T extends { fieldId: string }>(
+  first: readonly string[],
+  fields: readonly T[],
+): T[] {
+  return fields.map((value) =>
+    first.some((local) => value.fieldId.endsWith(`_${local}`))
+      ? value
+      : { ...value, disclosure: 'more' as const },
+  );
+}
+
 export function orderEntrySurfaces(
   namespace: string,
   surfaces: Record<string, unknown>[],
@@ -366,157 +393,164 @@ export function orderEntrySurfaces(
       editableStateIds: [id('state', `${local}_draft`)],
       lineNumberFieldId: id('field', `${local}_line_line_number`),
       // The order number is assigned by the server on first save.
-      headerFields: sales
-        ? [
-            field(
-              `${local}_customer_party_id`,
-              'Customer',
-              counterparty('customer'),
-            ),
-            // Today (LOOP-1): a date, read as such; the user may change it.
-            field(`${local}_order_date`, 'Order date', {
-              defaultDaysFromToday: 0,
-            }),
-            // A new order asks for delivery three weeks out, as the reference
-            // does; the user changes it before saving.
-            field(`${local}_requested_date`, 'Requested date', {
-              defaultDaysFromToday: 21,
-            }),
-            // The order's currency, from the customer, before the ship-to.
-            field(`${local}_currency`, 'Currency', {
-              ...currency,
-              ...fromCustomer('party_default_currency'),
-            }),
-            // The ship-to address is chosen from that customer's own book; the
-            // order keeps its own copy of the lines, filled from the choice.
-            field(`${local}_ship_to_address_id`, 'Ship-to address', {
-              ...shipTo,
-              ...fromCustomer('party_default_ship_to_address_id'),
-            }),
-            field(
-              `${local}_ship_to_name`,
-              'Recipient',
-              fromAddress('recipient'),
-            ),
-            field(`${local}_ship_to_street`, 'Street', {
-              presentation: { kind: 'multiline' },
-              ...fromAddress('street'),
-            }),
-            field(`${local}_ship_to_city`, 'City', fromAddress('city')),
-            field(
-              `${local}_ship_to_region`,
-              'Province or state',
-              fromAddress('region'),
-            ),
-            field(
-              `${local}_ship_to_postal_code`,
-              'Postal code',
-              fromAddress('postal_code'),
-            ),
-            field(
-              `${local}_ship_to_country`,
-              'Country',
-              fromAddress('country'),
-            ),
-            // The fields the job needs lead (LOOP-1): customer, dates and
-            // where it goes; then who sells it, the money terms and charges.
-            // Customer defaults (owner ruling E): choosing a customer resets
-            // each of these to that customer's value, then they are the
-            // order's to change.
-            field(`${local}_salesperson_party_id`, 'Salesperson', {
-              ...salesperson,
-              ...fromCustomer('party_default_salesperson_party_id'),
-            }),
-            field(
-              `${local}_payment_terms`,
-              'Payment terms',
-              fromCustomer('party_payment_terms'),
-            ),
-            // The order's tax code (ruling B): the customer's, then each new
-            // line and charge starts from it.
-            field(`${local}_tax_code_id`, 'Tax code', {
-              ...taxCode,
-              ...fromCustomer('party_default_tax_code_id'),
-            }),
-            // Two charges, each taxed by its own code (ruling B).
-            field(`${local}_freight_amount`, 'Freight'),
-            field(`${local}_freight_tax_code_id`, 'Freight tax code', {
-              ...taxCode,
-              ...fromOrderTaxCode,
-            }),
-            field(
-              `${local}_freight_tax_rate_percent`,
-              'Freight tax rate %',
-              rateOf(`${local}_freight_tax_code_id`),
-            ),
-            field(`${local}_other_fee_amount`, 'Other fee'),
-            field(`${local}_other_fee_tax_code_id`, 'Other fee tax code', {
-              ...taxCode,
-              ...fromOrderTaxCode,
-            }),
-            field(
-              `${local}_other_fee_tax_rate_percent`,
-              'Other fee tax rate %',
-              rateOf(`${local}_other_fee_tax_code_id`),
-            ),
-            field(`${local}_notes`, 'Notes', {
-              presentation: { kind: 'multiline' },
-            }),
-          ]
-        : [
-            field(
-              `${local}_${party}_party_id`,
-              'Vendor',
-              counterparty('supplier'),
-            ),
-            // Today (LOOP-1): a date, read as such; the user may change it.
-            field(`${local}_order_date`, 'Order date', {
-              defaultDaysFromToday: 0,
-            }),
-            // The fields the job needs lead (LOOP-1): vendor, order date,
-            // where the goods arrive; then the dates, terms and charges.
-            field(`${local}_receiving_location_id`, 'Receive into', location),
-            // Two weeks out, as the reference defaults it.
-            field(`${local}_${date}`, 'Expected date', {
-              defaultDaysFromToday: 14,
-            }),
-            field(`${local}_currency`, 'Currency', {
-              ...currency,
-              ...fromVendor('party_default_currency'),
-            }),
-            field(
-              `${local}_payment_terms`,
-              'Payment terms',
-              fromVendor('party_payment_terms'),
-            ),
-            field(`${local}_tax_code_id`, 'Tax code', {
-              ...taxCode,
-              ...fromVendor('party_default_tax_code_id'),
-            }),
-            field(`${local}_freight_amount`, 'Freight'),
-            field(`${local}_freight_tax_code_id`, 'Freight tax code', {
-              ...taxCode,
-              ...fromOrderTaxCode,
-            }),
-            field(
-              `${local}_freight_tax_rate_percent`,
-              'Freight tax rate %',
-              rateOf(`${local}_freight_tax_code_id`),
-            ),
-            field(`${local}_other_fee_amount`, 'Other fee'),
-            field(`${local}_other_fee_tax_code_id`, 'Other fee tax code', {
-              ...taxCode,
-              ...fromOrderTaxCode,
-            }),
-            field(
-              `${local}_other_fee_tax_rate_percent`,
-              'Other fee tax rate %',
-              rateOf(`${local}_other_fee_tax_code_id`),
-            ),
-            field(`${local}_notes`, 'Notes', {
-              presentation: { kind: 'multiline' },
-            }),
-          ],
+      // LOOK-1 round 2: the fields the job needs first; the rest behind
+      // "More details" (never a field the save requires).
+      headerFields: withMoreDetails(
+        sales ? FIRST_SALES_FIELDS : FIRST_PURCHASE_FIELDS,
+        sales
+          ? [
+              field(
+                `${local}_customer_party_id`,
+                'Customer',
+                counterparty('customer'),
+              ),
+              // Today (LOOP-1): a date, read as such; the user may change it.
+              field(`${local}_order_date`, 'Order date', {
+                defaultDaysFromToday: 0,
+                dateOnly: true,
+              }),
+              // A new order asks for delivery three weeks out, as the reference
+              // does; the user changes it before saving.
+              field(`${local}_requested_date`, 'Requested date', {
+                defaultDaysFromToday: 21,
+              }),
+              // The order's currency, from the customer, before the ship-to.
+              field(`${local}_currency`, 'Currency', {
+                ...currency,
+                ...fromCustomer('party_default_currency'),
+              }),
+              // The ship-to address is chosen from that customer's own book; the
+              // order keeps its own copy of the lines, filled from the choice.
+              field(`${local}_ship_to_address_id`, 'Ship-to address', {
+                ...shipTo,
+                ...fromCustomer('party_default_ship_to_address_id'),
+              }),
+              field(
+                `${local}_ship_to_name`,
+                'Recipient',
+                fromAddress('recipient'),
+              ),
+              field(`${local}_ship_to_street`, 'Street', {
+                presentation: { kind: 'multiline' },
+                ...fromAddress('street'),
+              }),
+              field(`${local}_ship_to_city`, 'City', fromAddress('city')),
+              field(
+                `${local}_ship_to_region`,
+                'Province or state',
+                fromAddress('region'),
+              ),
+              field(
+                `${local}_ship_to_postal_code`,
+                'Postal code',
+                fromAddress('postal_code'),
+              ),
+              field(
+                `${local}_ship_to_country`,
+                'Country',
+                fromAddress('country'),
+              ),
+              // The fields the job needs lead (LOOP-1): customer, dates and
+              // where it goes; then who sells it, the money terms and charges.
+              // Customer defaults (owner ruling E): choosing a customer resets
+              // each of these to that customer's value, then they are the
+              // order's to change.
+              field(`${local}_salesperson_party_id`, 'Salesperson', {
+                ...salesperson,
+                ...fromCustomer('party_default_salesperson_party_id'),
+              }),
+              field(
+                `${local}_payment_terms`,
+                'Payment terms',
+                fromCustomer('party_payment_terms'),
+              ),
+              // The order's tax code (ruling B): the customer's, then each new
+              // line and charge starts from it.
+              field(`${local}_tax_code_id`, 'Tax code', {
+                ...taxCode,
+                ...fromCustomer('party_default_tax_code_id'),
+              }),
+              // Two charges, each taxed by its own code (ruling B).
+              field(`${local}_freight_amount`, 'Freight'),
+              field(`${local}_freight_tax_code_id`, 'Freight tax code', {
+                ...taxCode,
+                ...fromOrderTaxCode,
+              }),
+              field(
+                `${local}_freight_tax_rate_percent`,
+                'Freight tax rate %',
+                rateOf(`${local}_freight_tax_code_id`),
+              ),
+              field(`${local}_other_fee_amount`, 'Other fee'),
+              field(`${local}_other_fee_tax_code_id`, 'Other fee tax code', {
+                ...taxCode,
+                ...fromOrderTaxCode,
+              }),
+              field(
+                `${local}_other_fee_tax_rate_percent`,
+                'Other fee tax rate %',
+                rateOf(`${local}_other_fee_tax_code_id`),
+              ),
+              field(`${local}_notes`, 'Notes', {
+                presentation: { kind: 'multiline' },
+              }),
+            ]
+          : [
+              field(
+                `${local}_${party}_party_id`,
+                'Vendor',
+                counterparty('supplier'),
+              ),
+              // Today (LOOP-1): a date, read as such; the user may change it.
+              field(`${local}_order_date`, 'Order date', {
+                defaultDaysFromToday: 0,
+                dateOnly: true,
+              }),
+              // The fields the job needs lead (LOOP-1): vendor, order date,
+              // where the goods arrive; then the dates, terms and charges.
+              field(`${local}_receiving_location_id`, 'Receive into', location),
+              // Two weeks out, as the reference defaults it.
+              field(`${local}_${date}`, 'Expected date', {
+                defaultDaysFromToday: 14,
+              }),
+              field(`${local}_currency`, 'Currency', {
+                ...currency,
+                ...fromVendor('party_default_currency'),
+              }),
+              field(
+                `${local}_payment_terms`,
+                'Payment terms',
+                fromVendor('party_payment_terms'),
+              ),
+              field(`${local}_tax_code_id`, 'Tax code', {
+                ...taxCode,
+                ...fromVendor('party_default_tax_code_id'),
+              }),
+              field(`${local}_freight_amount`, 'Freight'),
+              field(`${local}_freight_tax_code_id`, 'Freight tax code', {
+                ...taxCode,
+                ...fromOrderTaxCode,
+              }),
+              field(
+                `${local}_freight_tax_rate_percent`,
+                'Freight tax rate %',
+                rateOf(`${local}_freight_tax_code_id`),
+              ),
+              field(`${local}_other_fee_amount`, 'Other fee'),
+              field(`${local}_other_fee_tax_code_id`, 'Other fee tax code', {
+                ...taxCode,
+                ...fromOrderTaxCode,
+              }),
+              field(
+                `${local}_other_fee_tax_rate_percent`,
+                'Other fee tax rate %',
+                rateOf(`${local}_other_fee_tax_code_id`),
+              ),
+              field(`${local}_notes`, 'Notes', {
+                presentation: { kind: 'multiline' },
+              }),
+            ],
+      ),
       lineFields: [
         field(`${local}_line_item_id`, 'Product', product),
         field(`${local}_line_ordered_quantity`, 'Quantity'),

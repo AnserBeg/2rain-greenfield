@@ -128,10 +128,9 @@ export const SURFACE_MESSAGE_CATALOG = Object.freeze({
     subject: null,
   },
   COMPOSITION_CHILD_EMPTY: {
-    sentence: 'Nothing here yet',
-    detail: 'Records show here as soon as there are any.',
-    nextAction:
-      'Where this section follows a row you select above, select one to see its records.',
+    sentence: 'None yet',
+    detail: 'Records appear here as soon as there are any.',
+    nextAction: 'Nothing to do here yet.',
     consequence: 'advisory',
     placements: ['slot'],
     subject: null,

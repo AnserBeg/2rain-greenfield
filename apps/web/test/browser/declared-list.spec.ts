@@ -65,7 +65,10 @@ test('a declared Sales List navigates views, search, sort, filters, pages and ex
     );
 
     // Sort by customer name from its header; the order is the label's order.
-    await page.getByRole('link', { name: /^Customer/ }).click();
+    await page
+      .locator('thead')
+      .getByRole('link', { name: /^Customer/ })
+      .click();
     await expect(page.locator('th[aria-sort="ascending"]')).toContainText(
       'Customer',
     );

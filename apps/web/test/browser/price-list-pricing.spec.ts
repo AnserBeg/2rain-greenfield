@@ -61,7 +61,7 @@ test('a sales line is priced from its customer’s price list, by quantity break
     await page.goto(url);
     await page.getByRole('link', { name: 'New', exact: true }).click();
     await pick(page, 'Customer', 'Alpine', 'Alpine Office Supply');
-    await page.getByLabel('Order date (UTC) *').fill('2026-10-05T12:00');
+    await page.getByLabel('Order date *').fill('2026-10-05');
     await pick(page, 'Line 1 product', 'OFF-100', 'Field notebook');
     const unitPrice = page.getByLabel('Line 1 unit price', { exact: true });
     const listPrice = page.getByLabel('Line 1 list price', { exact: true });
@@ -75,7 +75,7 @@ test('a sales line is priced from its customer’s price list, by quantity break
     await expect(unitPrice).toHaveValue('9.5');
     await expect(listPrice).toHaveText('9.5');
     await capture(page, testInfo, 'price-list-editor');
-    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page).toHaveURL(/sales_order_detail/u);
     const line = dataset('order_lines').locator('tbody tr').first();
     await expect(line.locator('td[data-column-label="Amount"]')).toHaveText(
@@ -93,7 +93,7 @@ test('a sales line is priced from its customer’s price list, by quantity break
     await page.getByLabel('Line 1 quantity', { exact: true }).press('Enter');
     await expect(unitPrice).toHaveValue('9');
     await expect(listPrice).toHaveText('8.75');
-    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page).toHaveURL(/sales_order_detail/u);
     await expect(line.locator('td[data-column-label="Amount"]')).toHaveText(
       '540.00',

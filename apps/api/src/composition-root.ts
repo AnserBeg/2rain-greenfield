@@ -35,6 +35,7 @@ import {
 
 import {
   composedApplicationSeed,
+  DISTRIBUTOR_COMPANY_NAME,
   type ComposedApplicationSeedProfile,
 } from '../../../packages/domain/src/app/seed.js';
 import { readUnboundPermissionAcknowledgementFor } from '../../web/scripts/unbound-permission-acknowledgement.js';
@@ -425,6 +426,31 @@ async function seedComposedApplication(
             recordId: result.readBack.recordId,
             trust: result.trust,
           }),
+        );
+      }
+      // The distributor profile names its company (LOOK-1 round 2): one
+      // update of the provisioned default company at its first revision,
+      // replayed by its key when the server restarts on the same database.
+      // Never fatal: a company someone renamed since keeps its name, and the
+      // server still starts.
+      if (profile === 'distributor') {
+        await runtime.operationGateway.invoke(
+          view,
+          {
+            confirmationGrant: null,
+            idempotencyKey: '72000000-0000-4000-8000-000000009999',
+            input: {
+              recordId: COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId,
+              expectedRevision: 1,
+              patch: {
+                'northstar.app:field.legal_entity_name':
+                  DISTRIBUTOR_COMPANY_NAME,
+              },
+            },
+            operationId: 'northstar.app:operation.legal_entity_update',
+            schemaVersion: 'northstar.semantic-operation-request/v1',
+          },
+          runtime.operationMediation.issueInvocation(view, 'UI'),
         );
       }
       return Object.freeze(receipts);

@@ -184,10 +184,10 @@ test('web surface colour literals all resolve inside the one token-definition bl
 });
 
 test('token-block red: a hex literal injected into a render path is located and fails', () => {
-  const runtimePath = 'apps/web/src/surface-runtime.ts';
+  const runtimePath = 'apps/web/src/ledger-styles.ts';
   const root = webSourceFixture({
     [runtimePath]: readFileSync(resolve(runtimePath), 'utf8').replace(
-      '.record-link{color:var(--accent-ink)',
+      '.record-link{color:var(--accent-text)',
       '.record-link{color:#1478AE',
     ),
   });
@@ -216,11 +216,11 @@ test('token-block red: a literal moved out of the block fails while the count is
   const root = webSourceFixture({
     // The palette shrinks by one and the render path gains one, so the total is
     // unmoved. A count-only ratchet is silent here; the location check is not.
-    [tokensPath]: tokens.replace('--n0:#FFFFFF;', '--n0:white;'),
-    'apps/web/src/surface-runtime.ts': readFileSync(
-      resolve('apps/web/src/surface-runtime.ts'),
+    [tokensPath]: tokens.replace('--sheet:#FFFFFF;', '--sheet:white;'),
+    'apps/web/src/ledger-styles.ts': readFileSync(
+      resolve('apps/web/src/ledger-styles.ts'),
       'utf8',
-    ).replace('.muted{color:var(--ink-muted)}', '.muted{color:#FFFFFF}'),
+    ).replace('.muted{color:var(--muted)}', '.muted{color:#FFFFFF}'),
   });
 
   try {

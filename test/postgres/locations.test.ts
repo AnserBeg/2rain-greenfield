@@ -375,7 +375,7 @@ test(
       assert.equal(shown.status, 200);
       assert.match(
         shown.html,
-        /<span class="composition-business-status">Quarantine<\/span>/u,
+        /<span class="composition-business-status"(?: data-status-role="[a-zA-Z]+")?>Quarantine<\/span>/u,
       );
       const action = `${ns}:action.location_change_status`;
       const started = await post(page, { compositionAction: action });

@@ -35,6 +35,7 @@ export function todaySurface(namespace: string): Record<string, unknown> {
     orderKey: number,
     list: string,
     view: string,
+    icon: string,
   ) => ({
     tileId: id('launcher_tile', `today_${name}`),
     label,
@@ -42,6 +43,8 @@ export function todaySurface(namespace: string): Record<string, unknown> {
     orderKey,
     surface: id('surface', list),
     view: id('list_view', `${list}_${view}`),
+    // The work queue's icon in the sidebar (LOOK-1).
+    icon,
   });
   const target = (local: string, page = `${local}_detail`) => ({
     query: id('query', `${local}_resolve`),
@@ -68,6 +71,7 @@ export function todaySurface(namespace: string): Record<string, unknown> {
           10,
           'expected_receipt_list',
           'to_receive',
+          'inbox',
         ),
         tile(
           'ship',
@@ -76,6 +80,7 @@ export function todaySurface(namespace: string): Record<string, unknown> {
           20,
           'sales_order_list',
           'to_ship',
+          'truck',
         ),
         tile(
           'get_paid',
@@ -84,6 +89,7 @@ export function todaySurface(namespace: string): Record<string, unknown> {
           30,
           'customer_invoice_list',
           'open',
+          'invoice',
         ),
         tile(
           'reorder',
@@ -92,6 +98,7 @@ export function todaySurface(namespace: string): Record<string, unknown> {
           40,
           'item_stock_list',
           'reorder',
+          'alert',
         ),
       ],
       scan: {

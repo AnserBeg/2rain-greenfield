@@ -2441,11 +2441,11 @@ test('a record names its short rows and its progress, and offers only the first 
 });
 
 test('the task rows, alert and progression lay out at phone width without a sideways scroll', () => {
-  const source = readFileSync(`${webRoot}/src/surface-runtime.ts`, 'utf8');
-  // Steps wrap into as many columns as fit; the banner and every panel span
-  // the page; a task row becomes a labelled card through the shared rule.
+  const source = readFileSync(`${webRoot}/src/ledger-styles.ts`, 'utf8');
+  // Steps share the row in as many columns as fit; the banner and every panel
+  // span the page; a task row becomes a labelled card through the shared rule.
   for (const rule of [
-    '.composition-progression-steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))',
+    '.composition-progression-steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(8rem,1fr))',
     '.composition-alert{grid-column:1/-1;',
     '.composition-progression{grid-column:1/-1;',
     '.composition-progression-next>div{flex:1 1 16rem;min-width:0}',
@@ -2465,18 +2465,20 @@ test('the task rows, alert and progression lay out at phone width without a side
 });
 
 test('WAREHOUSE-MODE: a launcher renders large tiles and one scan field that works without script, and lays out at phone width', () => {
-  const source = readFileSync(`${webRoot}/src/surface-runtime.ts`, 'utf8');
-  // Three tiles a row on a tablet, one at phone width, each a target far
-  // above 44px; the scan field and its action are as tall as a thumb.
+  const source = readFileSync(`${webRoot}/src/ledger-styles.ts`, 'utf8');
+  // The Ledger tile strip (LOOK-1): four tiles a row, two below 1000px, each
+  // a target far above 44px; the scan field and its action are as tall as a
+  // thumb, and the action fills the width at phone size.
   for (const rule of [
-    '.launcher-tiles ul{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))',
-    '.launcher-tile{display:flex;flex-direction:column;gap:var(--space-1);min-height:144px',
-    '.launcher-scan__field input{min-height:56px',
-    '.launcher-action button{min-height:56px}',
-    '@media(max-width:800px){.launcher-tiles ul{grid-template-columns:minmax(0,1fr)}.launcher-tile{min-height:96px}.launcher-action button{width:100%}}',
-    // The action is a Task's primary action: at phone width it sticks above
-    // the bottom navigation, as every Task's does.
-    '.command-bar,.task-primary-action{position:sticky;z-index:3;bottom:80px;',
+    '.launcher-tiles ul{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))',
+    '.launcher-tile{position:relative;display:grid;align-content:start;gap:4px;width:100%;min-height:88px',
+    '.launcher-scan__field input{min-height:44px',
+    '.launcher-action button{min-height:44px}',
+    '.launcher-tiles ul{grid-template-columns:repeat(2,minmax(0,1fr))}',
+    '.launcher-action button{width:100%}',
+    // The action is a Task's primary action: at phone width it sticks to the
+    // bottom of the screen, as every Task's does.
+    '.command-bar,.task-primary-action{position:sticky;z-index:3;bottom:12px}',
   ])
     assert.ok(source.includes(rule), rule);
 

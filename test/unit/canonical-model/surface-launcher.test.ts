@@ -259,3 +259,88 @@ test('WAREHOUSE-MODE: the period lock page offers Close and Reopen as its own op
     ],
   );
 });
+
+test('LOOK-1: icons come from the closed set on a module, a destination and a queue', () => {
+  const app = application();
+  const today = app.surfaces.find(
+    (surface) => surface.surfaceId === id('surface', 'inventory_today'),
+  )!;
+  const launcher = today.launcher as Omit<Launcher, 'tiles'> & {
+    tiles: Array<Launcher['tiles'][number] & { icon?: string }>;
+  };
+  // Accepted as the composed application declares them.
+  assert.deepEqual(
+    launcher.tiles.map((tile) => tile.icon),
+    ['inbox', 'truck', 'invoice', 'alert'],
+  );
+  assert.equal((today.workspace as { icon?: string }).icon, 'home');
+  const modules = app.modules as Array<{ icon?: string }>;
+  assert.ok(modules.every((module) => typeof module.icon === 'string'));
+  normalizeApplicationPackage(app as never);
+  // A name outside the set is refused wherever it is declared.
+  assert.equal(
+    SurfaceLauncherSchema.safeParse({
+      ...launcher,
+      tiles: [{ ...launcher.tiles[0], icon: 'rocket' }],
+    }).success,
+    false,
+  );
+  assert.equal(
+    SurfaceWorkspaceSchema.safeParse({
+      ...(today.workspace as Json),
+      icon: 'rocket',
+    }).success,
+    false,
+  );
+  const unknownModuleIcon = application();
+  (unknownModuleIcon.modules as Array<{ icon?: string }>)[0]!.icon = 'rocket';
+  assert.throws(
+    () => normalizeApplicationPackage(unknownModuleIcon as never),
+    CanonicalModelError,
+  );
+  // Absent, the key is absent: an undeclared icon falls back in the renderer.
+  const plain = application();
+  delete (plain.modules as Array<{ icon?: string }>)[0]!.icon;
+  normalizeApplicationPackage(plain as never);
+});
+
+test('LOOK-1 round 2: More details never hides a required field; a date-only entry is a UTC date-time', () => {
+  const editorFields = (app: Json & { surfaces: Json[] }) =>
+    (
+      app.surfaces.find(
+        (surface) => surface.surfaceId === id('surface', 'purchase_order_form'),
+      )!.documentEditor as { headerFields: Json[] }
+    ).headerFields;
+  const field = (app: Json & { surfaces: Json[] }, local: string) =>
+    editorFields(app).find(
+      (value) => value.fieldId === id('field', `purchase_order_${local}`),
+    )!;
+  // Accepted as declared: the expected date behind More details, the order
+  // date entered as a day.
+  const app = application();
+  assert.equal(field(app, 'expected_date').disclosure, 'more');
+  assert.equal(field(app, 'order_date').dateOnly, true);
+  normalizeApplicationPackage(app as never);
+  // The vendor is required: never behind More details.
+  const hidden = application();
+  field(hidden, 'supplier_party_id').disclosure = 'more';
+  assert.throws(
+    () => normalizeApplicationPackage(hidden as never),
+    (error: unknown) =>
+      error instanceof CanonicalModelError &&
+      /a required field is never behind More details/u.test(
+        JSON.stringify(error.diagnostics),
+      ),
+  );
+  // A text field is not a date-time.
+  const notDate = application();
+  field(notDate, 'notes').dateOnly = true;
+  assert.throws(
+    () => normalizeApplicationPackage(notDate as never),
+    (error: unknown) =>
+      error instanceof CanonicalModelError &&
+      /a date-only entry is a UTC date-time field/u.test(
+        JSON.stringify(error.diagnostics),
+      ),
+  );
+});

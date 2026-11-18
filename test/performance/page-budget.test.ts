@@ -302,7 +302,7 @@ async function taskStep(
     taskStage: 'confirm',
     preparedId: prepared,
   });
-  if (!/Receive lines with actual cost: done/u.test(done.html)) {
+  if (!/Receive: done/u.test(done.html)) {
     problems.push(`task: confirm: not done ${done.html.slice(-600)}`);
     return;
   }

@@ -271,10 +271,10 @@ async function handleRequest(
     const result = gateways
       ? submission
         ? readSnapshot && taskStep(submission)
-          ? // A task's steps read in one snapshot too. Confirm's writes never
-            // join it: each ends the snapshot first and decides live in its
-            // own transaction. A policy change refuses the step rather than
-            // repeating it.
+          ? // A task's steps read in one snapshot too. Confirm's invocation
+            // runs outside it and decides live (the provider's invoke). A
+            // policy change during the step is never repeated: the step's
+            // page is sent again by a fresh GET (SPEED-1 S2).
             await readSnapshot(
               () =>
                 entry.run({ headers: request.headers }, (view) =>
@@ -286,7 +286,10 @@ async function handleRequest(
                   ),
                 ),
               { retry: false },
-            )
+            ).catch((error: unknown) => {
+              if (!policyChangedDuringStep(error)) throw error;
+              return policyChangedRedirect(url);
+            })
           : await entry.run({ headers: request.headers }, (view) =>
               submitSurfaceRuntimeIntent(view, url.href, submission, gateways),
             )
@@ -349,6 +352,34 @@ export function runtimeViewRefusalMessage(
   return {
     code: 'REQUEST_RUNTIME_VIEW_REFUSED' as const,
     subject: error.code,
+  };
+}
+
+/**
+ * The provider's `ReadSnapshotPolicyChangedError`, known by name: the web
+ * layer never imports the provider.
+ */
+function policyChangedDuringStep(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.name === 'ReadSnapshotPolicyChangedError' &&
+    (error as { code?: unknown }).code === 'READ_SNAPSHOT_POLICY_CHANGED'
+  );
+}
+
+/**
+ * The step's page again, under the policy now current. Whatever the step
+ * committed stays committed (its receipt is the invocation's own); the
+ * protected page is assembled afresh, or refused, by the GET.
+ */
+function policyChangedRedirect(url: URL): SurfaceRuntimeResponse {
+  const page = new URL(url.href);
+  for (const name of [...page.searchParams.keys()])
+    if (name.toLowerCase().includes('task')) page.searchParams.delete(name);
+  return {
+    html: '',
+    location: `${page.pathname}${page.search}`,
+    statusCode: 303,
   };
 }
 

@@ -364,7 +364,7 @@ composedTest.describe('focus ring coverage', () => {
         page,
         baseUrl,
         'light',
-        '.skip-link:focus-visible{outline:3px solid var(--n100);outline-offset:2px}',
+        '.skip-link:focus-visible{outline:3px solid var(--paper);outline-offset:2px}',
       );
       const result = observeFocusRingCoverage(after);
 
@@ -394,19 +394,20 @@ composedTest.describe('focus ring coverage', () => {
     'focus-ring red: one token everywhere fails wherever it is not the right end of the ramp',
     async ({ composedApplication, page }) => {
       composedTest.setTimeout(journeyTimeoutMilliseconds.focusRing);
-      // §2.1's answer, and the trap: a single token measured only against light
-      // surfaces looks correct and fails where the sidebar and its flyout are.
+      // A ring token that reads on the sheet but not on the sidebar's ground:
+      // the Ledger sidebar is its own ground, so its ring is measured there.
       const observed = await readFocusRingCoverage(
         page,
         composedApplication.currentBaseUrl(),
         'light',
-        ':root{--focus-ring-surface:var(--b600)!important;--focus-ring-rail:var(--b600)!important}',
+        ':root{--focus-ring-rail:var(--faint)!important}',
       );
       const result = observeFocusRingCoverage(observed);
 
       assert.ok(result.measurementsRead > 0);
       assert.deepEqual(result.violations, [
         'FOCUS_RING_CONTRAST:.navigation-group > summary:focus-visible',
+        'FOCUS_RING_CONTRAST:.navigation-more > summary:focus-visible',
         'FOCUS_RING_CONTRAST:.sidebar a:focus-visible',
       ]);
     },
@@ -466,17 +467,16 @@ composedTest.describe('focus ring coverage', () => {
       // selector control exits through CONTRAST. A branch never seen to fail is
       // not evidence.
       //
-      // `--n0` is a real token on this rail (`--ink-on-rail`), so this is the
-      // realistic shape of the defect — another rule declaring a different
-      // legitimate token wins — rather than an implausible colour. Measured on
-      // both grounds `.sidebar a` occupies: 12.00:1 on `--surface-rail`
-      // (`#0B3A55`) and 6.92:1 on `--surface-rail-raised` (`#0F5F8C`), against a
-      // 3:1 floor, so contrast cannot fire and only the cascade check can.
+      // `--ink` is a real token on this sidebar, so this is the realistic shape
+      // of the defect — another rule declaring a different legitimate token
+      // wins — rather than an implausible colour. On both grounds `.sidebar a`
+      // occupies (`--side` and the current item's `--sheet`) ink clears the
+      // 3:1 floor by far, so contrast cannot fire and only the cascade check can.
       const observed = await readFocusRingCoverage(
         page,
         composedApplication.currentBaseUrl(),
         'light',
-        '.sidebar a{outline-color:#FFFFFF!important}',
+        '.sidebar a{outline-color:var(--ink)!important}',
       );
       const result = observeFocusRingCoverage(observed);
       assert.ok(result.measurementsRead > 0);
@@ -489,11 +489,11 @@ composedTest.describe('focus ring coverage', () => {
       assert.ok(railSubjects.length > 0);
       assert.deepEqual(
         [...new Set(railSubjects.map((subject) => subject.renderedColor))],
-        ['rgb(255, 255, 255)'],
+        ['rgb(23, 25, 28)'],
       );
       assert.deepEqual(
         [...new Set(railSubjects.map((subject) => subject.declaredRing))],
-        ['rgb(137, 207, 240)'],
+        ['rgb(14, 102, 112)'],
       );
 
       // Isolation, in order: contrast green, the two neighbouring branches
@@ -522,13 +522,13 @@ composedTest.describe('focus ring coverage', () => {
     'focus-ring red: a regression confined to the dark block is observed',
     async ({ composedApplication, page }) => {
       composedTest.setTimeout(journeyTimeoutMilliseconds.focusRing);
-      // §2.2 gives the surface context --b600 light and --b300 dark. Putting the
-      // light value into the dark scheme is invisible to any light-only run.
+      // The ring is the accent, which dark redefines. Putting the light
+      // accent into the dark scheme is invisible to any light-only run.
       const observed = await readFocusRingCoverage(
         page,
         composedApplication.currentBaseUrl(),
         'dark',
-        ':root{--focus-ring-surface:var(--b600)!important}',
+        ':root{--focus-ring-surface:#0E6670!important}',
       );
       const result = observeFocusRingCoverage(observed);
 
@@ -547,46 +547,34 @@ composedTest.describe('focus ring coverage', () => {
   );
 
   composedTest(
-    'focus-ring red: the retired --b500 fails on the ground §2.1 never measured',
+    'focus-ring red: a ring that reads on the sheet fails on the sidebar ground it also lands on',
     async ({ composedApplication, page }) => {
       composedTest.setTimeout(journeyTimeoutMilliseconds.focusRing);
+      // The Ledger sidebar is its own ground (--side), and its current item
+      // sits on a sheet. A rail ring of --rule-2 is a hairline on both, so
+      // both sidebar selectors red, and only they do.
       const observed = await readFocusRingCoverage(
         page,
         composedApplication.currentBaseUrl(),
         'light',
-        ':root{--focus-ring-rail:var(--b500)!important}',
+        ':root{--focus-ring-rail:var(--rule-2)!important}',
       );
       const result = observeFocusRingCoverage(observed);
 
-      // The control is only meaningful if the flyout ground was actually
+      // The control is only meaningful if the sidebar ground was actually
       // reached, so that is asserted before the violation is.
-      assert.ok(
-        result.grounds.some((ground) => ground.includes('#0f5f8c')),
-        `rail-raised was never measured; grounds were ${result.grounds.join(' | ')}`,
-      );
-      const summaryGrounds = observed.measurements
-        .filter(
-          (measurement) =>
-            measurement.selector ===
-            '.navigation-group > summary:focus-visible',
-        )
-        .map((measurement) => parseComputedColor(measurement.groundColor).hex);
       const linkGrounds = observed.measurements
         .filter(
           (measurement) => measurement.selector === '.sidebar a:focus-visible',
         )
         .map((measurement) => parseComputedColor(measurement.groundColor).hex);
-      // An outline with positive offset lands outside the summary on its
-      // details/rail ground. Child-link outlines in the open More flyout land
-      // on rail-raised, and so does the summary of Catalog, a group nested in
-      // that flyout since it lists tax codes too. --b500 clears the former
-      // (3.61:1) and fails the latter (2.08:1), so this control pins the
-      // observed grounds before the exact red.
-      assert.ok(summaryGrounds.includes('#0b3a55'));
-      assert.ok(summaryGrounds.includes('#0f5f8c'));
-      assert.ok(linkGrounds.includes('#0f5f8c'));
+      assert.ok(
+        linkGrounds.includes('#edede9'),
+        `the sidebar ground was never measured; grounds were ${result.grounds.join(' | ')}`,
+      );
       assert.deepEqual(result.violations, [
         'FOCUS_RING_CONTRAST:.navigation-group > summary:focus-visible',
+        'FOCUS_RING_CONTRAST:.navigation-more > summary:focus-visible',
         'FOCUS_RING_CONTRAST:.sidebar a:focus-visible',
       ]);
     },
@@ -1030,19 +1018,16 @@ async function inventoryNavigationJourney(
     primaryEntries.locator(
       ':scope > a > span:nth-child(2), :scope > details > summary > span:nth-child(2) > .nav-group-label',
     ),
-  ).toHaveText([
-    'Sales',
-    'Purchasing',
-    'Stock',
-    'Customers and suppliers',
-    'More',
-  ]);
+  ).toHaveText(['Sales', 'Purchasing', 'Stock', 'Contacts', 'More']);
   // Sales lists its counter sales (SALES-EXTRAS; INTEGRATION, decision
   // I-M8(a)) and invoices (ruling C) beside its orders, Purchasing its
   // expected receipts (PURCHASING-PARITY), approvals/settings (APPROVALS) and
   // bills (PAYABLES) beside its orders, Inventory Catalog's Buying worklist and
   // Stock by item (REPLENISHMENT) and Catalog its tax codes (ruling B) and
   // price lists (SALES-EXTRAS) beside its items.
+  // LOOK-1 round 2: Today heads the work queues, so Stock does not repeat
+  // it; Stock lists its day-to-day destinations and keeps the occasional ones
+  // under its own Other; Companies are Contacts and Inventory value is Stock.
   await expect(navigation.locator('a > span:nth-child(2)')).toHaveText([
     'Counter sales',
     'Invoices',
@@ -1052,23 +1037,22 @@ async function inventoryNavigationJourney(
     'Purchase orders',
     'Purchasing settings',
     'Bills',
-    'Inventory movement',
-    'Inventory period lock',
-    'Today',
-    'Inventory transactions',
+    'Inventory value',
     'Warehouse',
     'Buying worklist',
     'Stock by item',
-    'Legal entity',
-    'Posted stock',
-    'Stock count',
-    'Party',
-    'Party role',
-    'Inventory value',
-    'Item',
-    'Price list',
-    'Tax code',
-    'Location',
+    'Stock by location',
+    'Stock movements',
+    'Period locks',
+    'Inventory transactions',
+    'Stock counts',
+    'Companies',
+    'Customers and suppliers',
+    'Contact roles',
+    'Items',
+    'Price lists',
+    'Tax codes',
+    'Locations',
   ]);
   // Inside the collapsed Sales and Purchasing groups: hidden text names
   // nothing, so each link is found by its text rather than its accessible name.
@@ -1111,9 +1095,7 @@ async function inventoryNavigationJourney(
     navigation.getByRole('link', { name: /detail|form/i }),
   ).toHaveCount(0);
   await expect(
-    primaryEntries
-      .getByRole('group')
-      .filter({ hasText: 'Customers and suppliers' }),
+    primaryEntries.getByRole('group').filter({ hasText: 'Contacts' }),
   ).toBeVisible();
   const moreNavigation = primaryEntries
     .getByRole('group')
@@ -1123,7 +1105,7 @@ async function inventoryNavigationJourney(
     moreNavigation.getByText('Catalog', { exact: true }),
   ).toBeVisible();
   await expect(
-    navigation.getByRole('link', { name: 'Location', exact: true }),
+    navigation.getByRole('link', { name: 'Locations', exact: true }),
   ).toBeVisible();
   await moreNavigation.getByText('More', { exact: true }).click();
   const inventoryNavigation = primaryEntries.getByRole('group').filter({
@@ -1133,16 +1115,15 @@ async function inventoryNavigationJourney(
   await inventoryNavigation.getByText('Stock', { exact: true }).click();
   await expect(inventoryNavigation.locator('a > span:nth-child(2)')).toHaveText(
     [
-      'Inventory movement',
-      'Inventory period lock',
-      'Today',
-      'Inventory transactions',
+      'Inventory value',
       'Warehouse',
       'Buying worklist',
       'Stock by item',
-      'Legal entity',
-      'Posted stock',
-      'Stock count',
+      'Stock by location',
+      'Stock movements',
+      'Period locks',
+      'Inventory transactions',
+      'Stock counts',
     ],
   );
   await inventoryNavigation.getByText('Stock', { exact: true }).click();
@@ -1178,7 +1159,8 @@ async function inventoryNavigationJourney(
     '[data-platform-slot="list:bulkActions"] [data-bulk-selection-form]',
   );
   const firstSelector = firstResponsiveRow.getByRole('checkbox');
-  await expect(bulkBar.getByText('Select records to begin')).toBeVisible();
+  // No instructions before a choice (LOOK-1): the bar appears with one.
+  await expect(bulkBar).toBeHidden();
   await expect(bulkBar.getByText('Selection ready')).toBeHidden();
   await firstSelector.check();
   await expect(bulkBar.getByText('Selection ready')).toBeVisible();
@@ -1188,21 +1170,16 @@ async function inventoryNavigationJourney(
   await page.setViewportSize({ height: 844, width: 390 });
   await expect(responsiveList).toHaveCount(1);
   await expect(firstResponsiveRow).toHaveCSS('display', 'grid');
+  // LOOK-1 (owner ruling): at phone width the sidebar is a drawer behind the
+  // menu button; opened, it shows at most five top-level entries, each group
+  // a disclosure.
   await expect(page.locator('.sidebar')).toHaveCSS('position', 'fixed');
-  await expect(page.locator('.sidebar')).toHaveCSS('bottom', '0px');
-  expect(
-    await navigation.getByRole('link').evaluateAll(
-      (links) =>
-        links.filter((link) => {
-          const item = link.closest('li');
-          return (
-            item !== null &&
-            getComputedStyle(item).display !== 'none' &&
-            getComputedStyle(link).display !== 'none'
-          );
-        }).length,
-    ),
-  ).toBeLessThanOrEqual(5);
+  await expect(page.locator('.sidebar')).toBeHidden();
+  await page.locator('.shell-menu > summary').click();
+  await expect(page.locator('.sidebar')).toBeVisible();
+  await expect(navigation.locator('.navigation-tree > li')).toHaveCount(5);
+  await page.locator('.shell-menu > summary').click();
+  await expect(page.locator('.sidebar')).toBeHidden();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -1214,19 +1191,23 @@ async function inventoryNavigationJourney(
   // content: no legal-entity hurdle and no unreadable binding. Line tables are
   // shown inside their documents rather than as destinations of their own.
   for (const destination of [
-    'Inventory movement',
-    'Inventory period lock',
-    'Today',
+    'Stock movements',
+    'Period locks',
     'Inventory transactions',
     'Warehouse',
     // REPLENISHMENT: Catalog's items, read in the company like the rest.
     'Buying worklist',
     'Stock by item',
-    'Stock count',
+    'Stock counts',
   ]) {
-    await inventoryNavigation
-      .getByRole('link', { name: destination, exact: true })
-      .click();
+    const link = inventoryNavigation.getByRole('link', {
+      name: destination,
+      exact: true,
+    });
+    // An occasional destination waits under Stock's Other (LOOK-1 round 2).
+    if (!(await link.isVisible()))
+      await inventoryNavigation.locator('.navigation-more > summary').click();
+    await link.click();
     await expect(
       page.getByRole('heading', { level: 1, name: destination }),
     ).toBeVisible();
@@ -1276,9 +1257,9 @@ async function inventoryRecordNavigationJourney(
 
   // Catalog is a group of its items and tax codes (ruling B).
   await moreNavigation.getByText('Catalog', { exact: true }).click();
-  await navigation.getByRole('link', { name: 'Item', exact: true }).click();
+  await navigation.getByRole('link', { name: 'Items', exact: true }).click();
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Item' }),
+    page.getByRole('heading', { level: 1, name: 'Items' }),
   ).toBeVisible();
   await expect(
     page.getByRole('cell', { name: 'Field notebook', exact: true }),
@@ -1287,9 +1268,11 @@ async function inventoryRecordNavigationJourney(
     page.locator('[data-diagnostic-code="UNSUPPORTED_COMPONENT"]'),
   ).toHaveCount(0);
   await moreNavigation.getByText('More', { exact: true }).click();
-  await navigation.getByRole('link', { name: 'Location', exact: true }).click();
+  await navigation
+    .getByRole('link', { name: 'Locations', exact: true })
+    .click();
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Location' }),
+    page.getByRole('heading', { level: 1, name: 'Locations' }),
   ).toBeVisible();
   await expect(
     page.getByRole('cell', { name: 'Calgary warehouse', exact: true }),
@@ -1299,10 +1282,10 @@ async function inventoryRecordNavigationJourney(
   ).toHaveCount(0);
   await inventoryNavigation.getByText('Stock', { exact: true }).click();
   await inventoryNavigation
-    .getByRole('link', { name: 'Posted stock', exact: true })
+    .getByRole('link', { name: 'Stock by location', exact: true })
     .click();
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Posted stock' }),
+    page.getByRole('heading', { level: 1, name: 'Stock by location' }),
   ).toBeVisible();
   const company = page.getByRole('navigation', { name: 'Company' });
   await expect(company).toHaveAttribute(
@@ -1646,7 +1629,7 @@ async function scopedInventoryListJourney(
   await page.setViewportSize({ height: 720, width: 1280 });
   await defaultLegalEntity.click();
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Inventory movement' }),
+    page.getByRole('heading', { level: 1, name: 'Stock movements' }),
   ).toBeVisible();
   let movementRow = page.locator('tr', {
     hasText: 'browser-posted-adjustment',
@@ -1657,7 +1640,7 @@ async function scopedInventoryListJourney(
     .getByRole('link', { name: browserAlternateInventoryScope.entityCode })
     .click();
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Inventory movement' }),
+    page.getByRole('heading', { level: 1, name: 'Stock movements' }),
   ).toBeVisible();
   await expect(movementRow).toHaveCount(0);
   expect(
@@ -1726,9 +1709,16 @@ async function scopedInventoryJourney(
       has: page.locator(':scope > summary').getByText('Stock', { exact: true }),
     });
   await scopedInventoryNavigation.getByText('Stock', { exact: true }).click();
-  await scopedInventoryNavigation
-    .getByRole('link', { name: 'Inventory transactions', exact: true })
-    .click();
+  const transactionsLink = scopedInventoryNavigation.getByRole('link', {
+    name: 'Inventory transactions',
+    exact: true,
+  });
+  // An occasional destination waits under the group's Other (LOOK-1 round 2).
+  if (!(await transactionsLink.isVisible()))
+    await scopedInventoryNavigation
+      .locator('.navigation-more > summary')
+      .click();
+  await transactionsLink.click();
   expect(
     new URL(page.url()).searchParams.get(
       inventoryScopeParameters.transactionList,
@@ -1756,11 +1746,13 @@ async function scopedInventoryJourney(
   expect(new URL(page.url()).searchParams.get('record')).toBe(
     browserTransactionId,
   );
+  // The record's identity is on its page, in its quiet technical details
+  // (LOOK-1 round 2).
   await expect(
     page.locator('main code', {
       hasText: `${browserTransactionId.slice(0, 8)}…${browserTransactionId.slice(-4)}`,
     }),
-  ).toBeVisible();
+  ).toBeAttached();
   await expect(page.locator('form.capability-command')).toHaveCount(0);
   // THE THIRD INVERSION, and it is the one ADR-0054 predicted rather than found.
   //
@@ -1808,11 +1800,13 @@ async function scopedInventoryJourney(
     );
   }
   await page.goto(inventoryTransactionDetailUrl);
+  // The record's identity is on its page, in its quiet technical details
+  // (LOOK-1 round 2).
   await expect(
     page.locator('main code', {
       hasText: `${browserTransactionId.slice(0, 8)}…${browserTransactionId.slice(-4)}`,
     }),
-  ).toBeVisible();
+  ).toBeAttached();
   const inventoryTransactionFormUrl = scopedSurfaceUrl(
     baseUrl,
     'inventory_transaction_form',
@@ -2243,7 +2237,7 @@ async function createScopedStockDocument(
     'Calgary warehouse',
   );
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('1');
-  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page).toHaveURL(/inventory_transaction_detail/u);
   // Saved, not refused. The save opens the document's own page, whose
   // sections render: its line, and Posted movements stating its declared
@@ -2452,7 +2446,7 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
     ).toBeVisible();
     await expect(editPage.locator('form#draft-editor-form')).toHaveCount(1);
     await expect(
-      editPage.getByRole('button', { name: 'Save draft', exact: true }),
+      editPage.getByRole('button', { name: 'Save', exact: true }),
     ).toBeVisible();
 
     // The line's own operation-addressed edit form, captured while the
@@ -2540,9 +2534,7 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
 
     // The editor opened before posting is a second UI boundary: its Save
     // draft is refused against the posted document rather than applied.
-    await editPage
-      .getByRole('button', { name: 'Save draft', exact: true })
-      .click();
+    await editPage.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(
       editPage.locator('[data-diagnostic-code="DRAFT_EDITOR_LOCKED"]'),
     ).toHaveCount(1);
@@ -2675,7 +2667,7 @@ async function partyLifecycleJourney(
   ).toBeVisible();
   await expect(
     page.getByRole('navigation', { name: 'Breadcrumb' }),
-  ).toContainText('Party list');
+  ).toContainText('Customers and suppliers');
   // A party's page is its customer workspace (SALES-PARITY): the number reads
   // under the name, the contact in Details, and the record's identity,
   // activity and revision in its technical details.

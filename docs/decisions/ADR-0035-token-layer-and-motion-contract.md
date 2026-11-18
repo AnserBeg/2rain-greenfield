@@ -6,6 +6,11 @@ recorded 2026-07-31. Nothing implements it yet; the implementing packet is `U2`,
 with the `U0` hex ratchet landing first as its hedge.
 Tier: Critical (it moves every surface at once)
 
+**Amended 2026-11-17 (owner ruling, LOOK-1):** the palette (§1-§3), the `inProgress` hue (§4) and the type
+scale (§6) are superseded by the Ledger look in [ledger-spec.md](../design/ledger-spec.md). The token layer,
+the hex ratchet, redundant encoding (§5), motion (§9) and designed dark mode (§10) stand. `inProgress` now
+rides the accent hue; the other three roles stay outside it.
+
 Rationale, full evidence base and the approved mockup:
 [ux-strategy-proposal.md](../execution/ux-strategy-proposal.md) Part II.
 

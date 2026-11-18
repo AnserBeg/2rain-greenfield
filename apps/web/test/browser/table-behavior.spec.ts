@@ -99,10 +99,11 @@ test('compiled list surface preserves covered paging, pre-page search, archive c
 
     await page.goto(surfaceUrl(fixture.baseUrl, 'party_role_list'));
     const roleHeaders = await page.locator('thead').innerText();
-    expect(roleHeaders).toContain('KIND');
-    expect(roleHeaders).toContain('PARTY');
-    expect(roleHeaders).not.toContain('PARTY ROLE KIND');
-    expect(roleHeaders).not.toContain('PARTY ROLE PARTY');
+    // Ledger table heads are sentence case (LOOK-1), never uppercased.
+    expect(roleHeaders).toContain('Kind');
+    expect(roleHeaders).toContain('Party');
+    expect(roleHeaders).not.toContain('Party role kind');
+    expect(roleHeaders).not.toContain('Party role party');
     await expect(
       page.getByRole('cell', { name: 'Supplier', exact: true }),
     ).toBeVisible();

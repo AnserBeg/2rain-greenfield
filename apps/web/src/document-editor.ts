@@ -2767,34 +2767,52 @@ async function editorResponse(
     };
     const required = (surfaceId: string, fieldId: string) =>
       shape(surfaceId).inputs.get(fieldId)?.required ? ' *' : '';
-    const header = (
-      await Promise.all(
-        definition.headerFields.map(async (field, index) => {
-          const html = await control(
-            definition.headerFormSurfaceId,
-            buffer.header,
-            field,
-            index,
-            frozen,
-            null,
-          );
-          const label = `${h(field.label)}${
-            field.presentation?.kind !== 'derived' &&
-            shape(definition.headerFormSurfaceId).inputs.get(field.fieldId)
-              ?.temporal?.timezoneSemantics === 'utcInstant'
-              ? ' (UTC)'
-              : ''
-          }${required(definition.headerFormSurfaceId, field.fieldId)}`;
-          const wide =
-            field.presentation?.kind === 'multiline' ? ' form-field--wide' : '';
-          return field.reference
-            ? `<div class="form-field form-field--reference${wide}" role="group" aria-labelledby="${h(controlId(buffer.header.id, field.fieldId))}-label"><span class="form-field__label" id="${h(controlId(buffer.header.id, field.fieldId))}-label">${label}</span>${html}</div>`
-            : // The label names only its control; a problem shown after the
-              // control describes it (aria-describedby) without renaming it.
-              `<div class="form-field${wide}"><label class="form-field__label" for="${h(controlId(buffer.header.id, field.fieldId))}">${label}</label>${html}</div>`;
-        }),
+    const headerParts = await Promise.all(
+      definition.headerFields.map(async (field, index) => {
+        const html = await control(
+          definition.headerFormSurfaceId,
+          buffer.header,
+          field,
+          index,
+          frozen,
+          null,
+        );
+        const label = `${h(field.label)}${
+          field.presentation?.kind !== 'derived' &&
+          !field.dateOnly &&
+          shape(definition.headerFormSurfaceId).inputs.get(field.fieldId)
+            ?.temporal?.timezoneSemantics === 'utcInstant'
+            ? ' (UTC)'
+            : ''
+        }${required(definition.headerFormSurfaceId, field.fieldId)}`;
+        const wide =
+          field.presentation?.kind === 'multiline' ? ' form-field--wide' : '';
+        return field.reference
+          ? `<div class="form-field form-field--reference${wide}" role="group" aria-labelledby="${h(controlId(buffer.header.id, field.fieldId))}-label"><span class="form-field__label" id="${h(controlId(buffer.header.id, field.fieldId))}-label">${label}</span>${html}</div>`
+          : // The label names only its control; a problem shown after the
+            // control describes it (aria-describedby) without renaming it.
+            `<div class="form-field${wide}"><label class="form-field__label" for="${h(controlId(buffer.header.id, field.fieldId))}">${label}</label>${html}</div>`;
+      }),
+    );
+    // The fields the job needs first, then the rest behind "More details",
+    // whose summary names them (LOOK-1 round 2; never a required field). It
+    // opens itself when one of its fields has a problem to show.
+    const first = headerParts
+      .filter(
+        (_, index) => definition.headerFields[index]!.disclosure !== 'more',
       )
-    ).join('');
+      .join('');
+    const moreFields = definition.headerFields.filter(
+      (field) => field.disclosure === 'more',
+    );
+    const more = headerParts
+      .filter(
+        (_, index) => definition.headerFields[index]!.disclosure === 'more',
+      )
+      .join('');
+    const header = more
+      ? `${first}<details class="draft-more form-field--wide"${more.includes('aria-invalid="true"') ? ' open' : ''}><summary>More details <span class="draft-more__names">${h(moreFields.map((field) => field.label).join(', '))}</span></summary><div class="form-fields draft-header">${more}</div></details>`
+      : first;
     // One aligned row per line under shared column headings. Each control keeps
     // an accessible name of its own ("Line 2 quantity"), so the headings are a
     // visual aid, never the only label.
@@ -2840,7 +2858,7 @@ async function editorResponse(
       : '';
     const commands = buffer.pending
       ? `<button form="draft-editor-form" name="draftAction" value="${buffer.pending.some((step) => step.grant && !step.done) ? 'confirm' : 'retry'}">${buffer.pending.some((step) => step.grant && !step.done) ? 'Confirm removal and save' : 'Retry save'}</button>`
-      : '<button form="draft-editor-form" name="draftAction" value="save">Save draft</button>';
+      : '<button form="draft-editor-form" name="draftAction" value="save">Save</button>';
     return {
       statusCode,
       html: '',
@@ -3047,6 +3065,8 @@ function plan(
         typeof value === 'string' &&
         temporal?.timezoneSemantics === 'utcInstant'
       ) {
+        // A date-only entry is that day's midnight UTC (LOOK-1 round 2).
+        if (/^\d{4}-\d{2}-\d{2}$/.test(value)) value += 'T00:00:00';
         if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) value += ':00';
         if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(value))
           value += temporal.precision === 'millisecond' ? '.000Z' : 'Z';
