@@ -660,3 +660,31 @@ test('X5: a status or state change, a settings update, and a create its maker ca
     'reversible',
   );
 });
+
+test('X4: the lines a posting will read are bound to the yes; a line changed after it refuses the step', async () => {
+  const { session, state } = guardedSession();
+  await session.call('erp_query', {
+    queryId: 'party_get',
+    arguments: { recordId: PARTY },
+  });
+  const planned = (
+    await session.call('erp_plan', {
+      intents: [{ operationId: 'goods_receipt_post', target: PARTY }],
+    })
+  ).content as { planId?: string };
+  assert.equal(typeof planned.planId, 'string', JSON.stringify(planned));
+  // A receipt line is edited after the yes (its revision moves).
+  state.record = { ...state.record, revision: state.record.revision + 1 };
+  const executed = (
+    await session.call('erp_execute', {
+      planId: planned.planId,
+      executionIdempotencyKey: 'k',
+    })
+  ).content as { steps: { outcome: string; error?: string }[] };
+  assert.equal(executed.steps[0]!.outcome, 'not-run');
+  assert.match(
+    String(executed.steps[0]!.error),
+    /lines changed after the plan/u,
+  );
+  assert.deepEqual(state.invoked, []);
+});

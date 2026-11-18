@@ -163,11 +163,23 @@ interface PlanStep {
   readonly relations?: Readonly<Record<string, ImmutableJsonValue>>;
   readonly patch?: Readonly<Record<string, ImmutableJsonValue>>;
   readonly arguments?: ImmutableJsonValue;
+  /**
+   * For a registered capability on an existing record: the child lines it
+   * will read at execution (a receipt's lines), as ids and revisions. The
+   * yes binds them; execution re-reads them and refuses on any drift.
+   */
+  readonly children?: readonly ChildSnapshot[];
   /** The existing target's number or name, read by the host at planning. */
   readonly targetLabel?: string | null;
   /** For an update of an existing record: the patched fields' values before. */
   readonly prior?: Readonly<Record<string, ImmutableJsonValue>>;
   readonly risk: OperationRisk;
+}
+
+interface ChildSnapshot {
+  readonly queryId: string;
+  readonly relationId: string;
+  readonly rows: readonly (readonly [string, number])[];
 }
 
 interface StepResult {
@@ -1086,6 +1098,56 @@ export class OperationsAgentSession {
     };
   }
 
+  /**
+   * The child lines of a record a capability reads at execution: every
+   * record type whose create requires a relation to this one, listed under
+   * the parent through its own list query.
+   */
+  async #children(
+    view: RequestRuntimeView,
+    catalog: PinnedCatalog,
+    entity: string,
+    recordId: string,
+  ): Promise<readonly ChildSnapshot[]> {
+    const snapshots: ChildSnapshot[] = [];
+    const seen = new Set<string>();
+    for (const operation of catalog.operations) {
+      if (effectKind(operation) !== 'createRecordEffect') continue;
+      const child = catalog.operationEntity(operation);
+      for (const relation of operation.inputContract?.relationInputs ?? []) {
+        if (
+          !relation.required ||
+          relation.targetEntityId !== entity ||
+          seen.has(relation.relationId)
+        )
+          continue;
+        seen.add(relation.relationId);
+        const query = catalog.queries.find(
+          (candidate) =>
+            candidate.sourceEntityId === child &&
+            candidate.queryType === 'list' &&
+            localName(candidate.queryId) === `${localName(child)}_list`,
+        );
+        if (!query) continue;
+        const listed = await this.#list(
+          view,
+          query,
+          { parent: { relationId: relation.relationId, recordId } },
+          100,
+          catalog,
+        );
+        snapshots.push({
+          queryId: query.queryId,
+          relationId: relation.relationId,
+          rows: listed.records
+            .map((row) => [row.recordId, row.revision] as const)
+            .sort((a, b) => a[0].localeCompare(b[0])),
+        });
+      }
+    }
+    return snapshots;
+  }
+
   // -------------------------------------------------------------------- plan
 
   #plan(
@@ -1440,6 +1502,9 @@ export class OperationsAgentSession {
     return {
       step: {
         ...base,
+        ...(effectKind(operation) === 'registeredCapabilityEffect'
+          ? { children: await this.#children(view, catalog, entity, target) }
+          : {}),
         risk: writeRisk(
           catalog,
           operation,
@@ -1565,10 +1630,29 @@ export class OperationsAgentSession {
         // Checked in the same view the step runs in: a release that changed
         // between two steps stops the plan before the next one runs.
         let changedTo: PlanRelease | null = null;
-        const result = await this.#run((view) => {
+        let linesChanged: string | null = null;
+        const result = await this.#run(async (view) => {
           if (!sameRelease(releaseOf(view), plan.release)) {
             changedTo = releaseOf(view);
-            return Promise.resolve(null);
+            return null;
+          }
+          // End review X4: the lines the yes covered are re-read just before
+          // the capability runs; any drift refuses the step. The window that
+          // remains is between this read and the capability's own read in
+          // its transaction (not under the posting locks).
+          if (step.children && typeof step.recordId === 'string') {
+            const now = await this.#children(
+              view,
+              pinnedCatalog(view),
+              step.entity,
+              step.recordId,
+            );
+            if (JSON.stringify(now) !== JSON.stringify(step.children)) {
+              linesChanged = `its lines changed after the plan was approved (${step.children
+                .map((child) => localName(child.queryId))
+                .join(', ')}); it did not run. Plan again and ask the person.`;
+              return null;
+            }
           }
           return this.#options.runtime.operationGateway.invoke(
             view,
@@ -1592,7 +1676,7 @@ export class OperationsAgentSession {
             ),
           );
         });
-        if (changedTo || !result) {
+        if (changedTo || linesChanged || !result) {
           stopped = true;
           releaseChanged = changedTo;
           results.push({
@@ -1602,6 +1686,7 @@ export class OperationsAgentSession {
             recordId: null,
             revision: null,
             error:
+              linesChanged ??
               'the active release changed before this step; it did not run',
           });
           continue;
@@ -2231,6 +2316,7 @@ function planDigest(steps: readonly PlanStep[], release: PlanRelease): string {
           relations: step.relations ?? null,
           patch: step.patch ?? null,
           arguments: step.arguments ?? null,
+          children: step.children ?? null,
         })),
       }),
     )
