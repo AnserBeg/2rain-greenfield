@@ -56,7 +56,7 @@ security path, no file of the `AGENTS.md` §4 Critical set; slices 2-4 get the o
 | stock by item | 76 / 586 / 67 / 62 | 2 / 43 | 2 / 23 / 3 / 0 |
 | sales order detail | 259 / 2139 / 207 / 236 (269 / 2209 after LOOP-1 slice 3) | 2 / 186 | 2 / 56 / 3 / 5 |
 | task open / review | 393 / 205 transactions | unchanged | 2 / 36 / 3 / 0 each |
-| task Confirm | 217 / 1879 / 169 / 204 | unchanged | 16 / 248 / 14 / 15 |
+| task Confirm | 217 / 1879 / 169 / 204 | unchanged | 16 / 248 / 14 / 15; 21 / 287 / 17 / 17 after fix S1 |
 
 Warm parses: operation and query catalogs and the manifest 0 everywhere; bindings 49-100. PO detail per request, one laptop:
 base 16.3 s wall / 12.4 s CPU; after ~141-206 ms / 120-170 ms, tsx and compiled alike. Slice 5: 58 KB less HTML a page.

@@ -60,7 +60,9 @@ export const PAGE_BUDGETS: Readonly<Record<PageBudgetName, PageBudget>> =
     'sales order detail': budget([2, 56, 3, 5], [0, 0, 0, 99]),
     'task: open': budget([2, 36, 3, 0], [0, 0, 0, 75]),
     'task: review': budget([2, 36, 3, 0], [0, 0, 0, 75]),
-    'task: confirm': budget([16, 248, 14, 15], [0, 0, 0, 75]),
+    // Raised once, by the security fix round (S1, orchestrator-ruled): every
+    // decision on Confirm's write path is now read live in its own transaction.
+    'task: confirm': budget([21, 287, 17, 17], [0, 0, 0, 75]),
   });
 
 /**
