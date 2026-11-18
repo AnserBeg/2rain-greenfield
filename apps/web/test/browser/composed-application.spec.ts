@@ -363,7 +363,7 @@ composedTest.describe('focus ring coverage', () => {
         page,
         baseUrl,
         'light',
-        '.skip-link:focus-visible{outline:3px solid var(--n100);outline-offset:2px}',
+        '.skip-link:focus-visible{outline:3px solid var(--paper);outline-offset:2px}',
       );
       const result = observeFocusRingCoverage(after);
 
@@ -393,13 +393,13 @@ composedTest.describe('focus ring coverage', () => {
     'focus-ring red: one token everywhere fails wherever it is not the right end of the ramp',
     async ({ composedApplication, page }) => {
       composedTest.setTimeout(journeyTimeoutMilliseconds.focusRing);
-      // §2.1's answer, and the trap: a single token measured only against light
-      // surfaces looks correct and fails where the sidebar and its flyout are.
+      // A ring token that reads on the sheet but not on the sidebar's ground:
+      // the Ledger sidebar is its own ground, so its ring is measured there.
       const observed = await readFocusRingCoverage(
         page,
         composedApplication.currentBaseUrl(),
         'light',
-        ':root{--focus-ring-surface:var(--b600)!important;--focus-ring-rail:var(--b600)!important}',
+        ':root{--focus-ring-rail:var(--faint)!important}',
       );
       const result = observeFocusRingCoverage(observed);
 
@@ -465,17 +465,16 @@ composedTest.describe('focus ring coverage', () => {
       // selector control exits through CONTRAST. A branch never seen to fail is
       // not evidence.
       //
-      // `--n0` is a real token on this rail (`--ink-on-rail`), so this is the
-      // realistic shape of the defect — another rule declaring a different
-      // legitimate token wins — rather than an implausible colour. Measured on
-      // both grounds `.sidebar a` occupies: 12.00:1 on `--surface-rail`
-      // (`#0B3A55`) and 6.92:1 on `--surface-rail-raised` (`#0F5F8C`), against a
-      // 3:1 floor, so contrast cannot fire and only the cascade check can.
+      // `--ink` is a real token on this sidebar, so this is the realistic shape
+      // of the defect — another rule declaring a different legitimate token
+      // wins — rather than an implausible colour. On both grounds `.sidebar a`
+      // occupies (`--side` and the current item's `--sheet`) ink clears the
+      // 3:1 floor by far, so contrast cannot fire and only the cascade check can.
       const observed = await readFocusRingCoverage(
         page,
         composedApplication.currentBaseUrl(),
         'light',
-        '.sidebar a{outline-color:#FFFFFF!important}',
+        '.sidebar a{outline-color:var(--ink)!important}',
       );
       const result = observeFocusRingCoverage(observed);
       assert.ok(result.measurementsRead > 0);
@@ -488,11 +487,11 @@ composedTest.describe('focus ring coverage', () => {
       assert.ok(railSubjects.length > 0);
       assert.deepEqual(
         [...new Set(railSubjects.map((subject) => subject.renderedColor))],
-        ['rgb(255, 255, 255)'],
+        ['rgb(23, 25, 28)'],
       );
       assert.deepEqual(
         [...new Set(railSubjects.map((subject) => subject.declaredRing))],
-        ['rgb(137, 207, 240)'],
+        ['rgb(14, 102, 112)'],
       );
 
       // Isolation, in order: contrast green, the two neighbouring branches

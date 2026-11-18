@@ -399,11 +399,13 @@ test('separability red: a status role moved into the rendered brand hue is obser
   await page.goto(
     `${baseUrl}/?surface=${encodeURIComponent(builder.surfaceId)}`,
   );
-  // b700 on b100 clears 4.5:1 comfortably, so the only thing this can trip is
-  // the separability rule — the contrast gate stays green underneath it.
+  // The accent's text on its soft ground clears 4.5:1 comfortably, so the only
+  // thing this can trip is the separability rule — the contrast gate stays
+  // green underneath it. The soft ground sits under the chroma floor, so only
+  // the foreground is measured as a hue.
   await page.addStyleTag({
     content:
-      '[data-status-role=inProgress]{color:var(--b700)!important;background:var(--b100)!important}',
+      '[data-status-role=success]{color:var(--accent-text)!important;background:var(--accent-soft)!important}',
   });
 
   const samples = await readStatusRoleSamples(page);
@@ -411,34 +413,33 @@ test('separability red: a status role moved into the rendered brand hue is obser
   assert.deepEqual(observeAccessibility(samples, []).violations, []);
   const separability = observeBrandStatusSeparability(samples, brand.hue);
   assert.equal(separability.hueSamplesRead, STATUS_ROLES.length * 2);
-  assert.deepEqual(separability.violations, [
-    'BRAND_HUE:inProgress:background',
-    'BRAND_HUE:inProgress:foreground',
-  ]);
+  assert.deepEqual(separability.violations, ['ACCENT_HUE:success:foreground']);
 });
 
-test('separability red: the band follows the brand token rather than a copied constant', async ({
+test('separability red: the band follows the accent token rather than a copied constant', async ({
   page,
 }) => {
   const builder = fixtureSurface('builder');
   await page.goto(
     `${baseUrl}/?surface=${encodeURIComponent(builder.surfaceId)}`,
   );
-  // Move the BRAND onto inProgress's indigo instead of moving a status role.
-  // A hardcoded 199° comparator stays green here; a derived one cannot.
+  // Move the ACCENT onto success's green instead of moving a status role. A
+  // hardcoded teal comparator stays green here; a derived one cannot: success
+  // now sits in the band, and inProgress, which rides the accent by ruling, is
+  // left outside it.
   await page.addStyleTag({
-    content: ':root{--brand:var(--s-inprogress-ink)!important}',
+    content: ':root{--accent:var(--success)!important}',
   });
 
   const samples = await readStatusRoleSamples(page);
   const brand = await readBrandHue(page);
   assert.ok(brand.chroma >= CHROMATIC_FLOOR);
-  assert.ok(hueDistance(brand.hue, 199) > BRAND_HUE_BAND_DEGREES);
+  assert.ok(hueDistance(brand.hue, 186) > BRAND_HUE_BAND_DEGREES);
   const separability = observeBrandStatusSeparability(samples, brand.hue);
   assert.equal(separability.hueSamplesRead, STATUS_ROLES.length * 2);
-  assert.deepEqual(separability.violations, [
-    'BRAND_HUE:inProgress:background',
-    'BRAND_HUE:inProgress:foreground',
+  assert.deepEqual(separability.violations.toSorted(), [
+    'ACCENT_HUE:success:foreground',
+    'ACCENT_HUE_EXPECTED:inProgress:foreground',
   ]);
 });
 
@@ -558,13 +559,13 @@ test('dark-mode red: one role left on its light values is observed', async ({
   await page.goto(
     `${baseUrl}/?surface=${encodeURIComponent(builder.surfaceId)}`,
   );
-  // `--s-*` are the light status primitives and are NOT redefined under dark, so
-  // this restores exactly the light pair. Contrast stays green (7.07:1) and no
-  // literal moves, which is what makes the partial-remap case invisible without
-  // a per-role comparison.
+  // These are the light success pair (`--success` / `--success-soft` before
+  // dark redefines them), so this restores exactly the light pair. Contrast
+  // stays green and the tokens are untouched, which is what makes the
+  // partial-remap case invisible without a per-role comparison.
   await page.addStyleTag({
     content:
-      '[data-status-role=success]{color:var(--s-success-ink)!important;background:var(--s-success-ground)!important}',
+      '[data-status-role=success]{color:#2E7A2F!important;background:#E4F2E1!important}',
   });
 
   const dark = await readStatusRoleSamples(page);
@@ -583,10 +584,10 @@ test('dark-mode red: the light-ground accent on a dark ground is observed below 
   await page.goto(
     `${baseUrl}/?surface=${encodeURIComponent(builder.surfaceId)}`,
   );
-  // ADR-0035 §10: naive inversion puts --b600 on a dark ground. This is that
-  // inversion, executed, and the gate has to see it.
+  // ADR-0035 §10: naive inversion puts the light accent on a dark ground. This
+  // is that inversion, executed, and the gate has to see it.
   await page.addStyleTag({
-    content: '[data-status-role]{color:var(--b600)!important}',
+    content: '[data-status-role]{color:#0E6670!important}',
   });
 
   const observed = observeAccessibility(await readStatusRoleSamples(page), []);
@@ -811,9 +812,12 @@ function observeReducedMotion(
 }
 
 /**
- * ADR-0035 §4: the brand hue is reserved and no status role may resolve into
- * it. The band is derived from the rendered `--brand` rather than a copied
- * constant, so moving the brand onto a status hue is caught from either side.
+ * ADR-0035 §4 as the Ledger look amends it (owner ruling 2026-11-17): the
+ * accent means "you can act / in motion", so inProgress rides the accent hue
+ * and must stay inside its band, while success, attention and blocked never
+ * resolve into it. The band is derived from the rendered `--accent` rather
+ * than a copied constant, so moving the accent onto a status hue is caught
+ * from either side.
  */
 const BRAND_HUE_BAND_DEGREES = 20;
 // Below this chroma a colour has no hue worth competing with — a near-grey
@@ -828,7 +832,7 @@ async function readBrandHue(
     const probe = document.createElement('span');
     probe.style.position = 'absolute';
     probe.style.left = '-9999px';
-    probe.style.color = 'var(--brand)';
+    probe.style.color = 'var(--accent)';
     document.body.append(probe);
     const color = getComputedStyle(probe).color;
     probe.remove();
@@ -854,8 +858,13 @@ function observeBrandStatusSeparability(
       const measurement = hueOf(color.hex);
       if (measurement.chroma < CHROMATIC_FLOOR) continue;
       chromaticHueSamplesRead += 1;
-      if (hueDistance(measurement.hue, brandHue) <= BRAND_HUE_BAND_DEGREES) {
-        violations.push(`BRAND_HUE:${sample.subjectId}:${channel}`);
+      const inBand =
+        hueDistance(measurement.hue, brandHue) <= BRAND_HUE_BAND_DEGREES;
+      if (sample.subjectId === 'inProgress') {
+        if (!inBand)
+          violations.push(`ACCENT_HUE_EXPECTED:${sample.subjectId}:${channel}`);
+      } else if (inBand) {
+        violations.push(`ACCENT_HUE:${sample.subjectId}:${channel}`);
       }
     }
   }

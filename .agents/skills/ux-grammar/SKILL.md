@@ -176,22 +176,20 @@ Rules that follow:
 ## Status grammar
 
 One global color grammar: `success` (green), `attention` (amber), `blocked`
-(red), and `inProgress` (**indigo**). Modules may add states, but every rendered
-state must resolve to one of these closed semantic roles; they may never
+(red), and `inProgress` (**the accent's teal**). Modules may add states, but every
+rendered state must resolve to one of these closed semantic roles; they may never
 recolor meanings. Status colors resolve only from role tokens — a hex literal
 in surface code is a defect.
 
-**Brand and status hues must remain separable.** The brand hue is reserved. No
-status role may resolve to a token within it. Status is the most
-information-dense colour on screen and must never compete with identity.
-
-That rule is why `inProgress` reads *indigo* rather than *blue*: the brand is now
-baby blue ([ADR-0035](../../../docs/decisions/ADR-0035-token-layer-and-motion-contract.md)),
-so a blue `inProgress` would put the strongest signal on screen in direct
-competition with the identity colour. **The pinned contract is unaffected** — it
-records role *names* only, which are unchanged, and plan §8.5 names roles without
-binding hues. Indigo is a blue, so this narrows the prose rather than
-contradicting it.
+**Amended 2026-11-17 by owner ruling (the Ledger look, `docs/design/ledger-spec.md`
+§1-§3):** the baby-blue brand ramp, the indigo `inProgress` and ADR-0035's type
+sizes are superseded by the spec's tokens (pale paper, one deep teal accent, IBM
+Plex, 13px body). The accent means "you can act / in motion", so `inProgress`
+rides the accent family; `success`, `attention` and `blocked` must stay outside
+the accent hue (the browser gate derives the band from the rendered `--accent`).
+**The pinned contract is unaffected** — it records role *names* only. A spec
+"neutral" status (Draft, Not started) is a status with no role: outlined, hollow
+ring, no colour.
 
 **Every status renders colour + dot + word on a tinted ground. Never colour
 alone.** Three independent reasons, any one sufficient: colour-vision deficiency
