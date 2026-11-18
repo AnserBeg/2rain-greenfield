@@ -2524,7 +2524,10 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
     expect(replay.status()).toBe(200);
     const replayHtml = await replay.text();
     expect(replayHtml).toContain('Post complete');
-    expect(replayHtml).toContain('Active · revision 2');
+    // The revision is the badge's screen-reader text (LOOK-1 round 3).
+    expect(replayHtml).toMatch(
+      /Active<span class="sr-only"> · revision 2<\/span>/u,
+    );
 
     // The editor opened before posting is a second UI boundary: its Save
     // draft is refused against the posted document rather than applied.

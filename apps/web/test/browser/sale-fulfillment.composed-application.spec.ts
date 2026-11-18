@@ -392,9 +392,16 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await command('Post');
   await page.goto(url('sales_order', 'detail', closureOrderId));
   await command('Close');
-  await expect(
-    page.locator('.composition-header').getByText('Closed', { exact: true }),
-  ).toBeVisible();
+  // The badge names the stepper's current step, or "Closed" once every
+  // step is complete (LOOK-1 round 3): the two always agree.
+  const currentStep = page.locator(
+    '.composition-progression-steps li[aria-current="step"] strong',
+  );
+  await expect(page.locator('.composition-business-status')).toHaveText(
+    (await currentStep.count())
+      ? ((await currentStep.first().textContent()) ?? '')
+      : 'Closed',
+  );
   // Ruling F: a closed order may be reopened (nothing is invoiced yet); it
   // returns to the released state, confirmed like any consequential command.
   await command('Reopen');

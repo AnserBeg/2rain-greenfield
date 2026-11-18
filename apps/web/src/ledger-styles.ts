@@ -330,6 +330,8 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .command-bar .action-overflow{margin-left:auto}
 .command-bar [data-save-boundary]{flex-basis:100%;margin:0;color:var(--muted);font-size:12px}
 /* The editor's save bar (LOOK-1): sticky under the form, one primary action. */
+/* What scrolls into view lands above the sticky save bar (round 3). */
+html:has([data-save-boundary]){scroll-padding-bottom:120px}
 .panel:has(>.command-bar [data-save-boundary]){position:sticky;bottom:0;z-index:5;padding:10px var(--pad-x);box-shadow:var(--shadow-bar)}
 .command-bar:has([data-save-boundary]){flex-wrap:wrap;justify-content:flex-end}
 /* An order line reads product, quantity and price; its discount and tax
