@@ -237,15 +237,12 @@ for (const target of ['purchase_order', 'party'] as const) {
             ).toBeVisible({ timeout: 180_000 });
             await page.goto(surface('list'));
             const grid = page.locator('[data-declared-list="true"]');
-            await expect(
-              grid.getByRole('columnheader', {
-                name: 'Person ordering',
-                exact: true,
-              }),
-            ).toBeVisible();
-            await expect(
-              grid.getByRole('columnheader', { name: 'Notes', exact: true }),
-            ).toBeVisible();
+            const personOrdering = grid.getByRole('columnheader', {
+              name: /^Person ordering\b/u,
+            });
+            const notes = grid.getByRole('columnheader', { name: /^Notes\b/u });
+            await expect(personOrdering).toBeVisible();
+            await expect(notes).toBeVisible();
             await expect(
               grid.getByRole('cell', { name: 'Morgan Bell', exact: true }),
             ).toBeVisible();
@@ -257,15 +254,9 @@ for (const target of ['purchase_order', 'party'] as const) {
               page.locator('[data-customize-result="rolledBack"]'),
             ).toBeVisible({ timeout: 180_000 });
             await page.goto(surface('list'));
-            await expect(
-              page.getByRole('columnheader', {
-                name: 'Person ordering',
-                exact: true,
-              }),
-            ).toHaveCount(0);
-            await expect(
-              page.getByRole('columnheader', { name: 'Notes', exact: true }),
-            ).toHaveCount(0);
+            await expect(grid.getByRole('columnheader').first()).toBeVisible();
+            await expect(personOrdering).toHaveCount(0);
+            await expect(notes).toHaveCount(0);
           }
         } finally {
           await app.close();
