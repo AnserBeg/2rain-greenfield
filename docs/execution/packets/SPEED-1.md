@@ -31,6 +31,7 @@ security path, no file of the `AGENTS.md` §4 Critical set; slices 2-4 get the o
 - Snapshot API: `withReadSnapshot` / `withTrustedRequestRead`; a page declares nothing: its reads join through the provider.
 - Slices 2-4 integrate together: their commits interleave and the reviews read them as one diff (orchestrator, 2026-11-17).
 - Bridges: `rolePool` meters its pools; `saved-filter-executor.ts` reads join; the list count skip in the interpreter.
+- A company-scoped aggregate writes its cached anchor, so it never joins; the storage target loads as the runtime role.
 - Not built: references by an `IN` list (identical references already run once); advisory previews need no batch query now.
 - The client script stays inline, hash-pinned (ADR-0036 §1); only the stylesheet moves in slice 5 (orchestrator).
 
