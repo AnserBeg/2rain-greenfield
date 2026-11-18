@@ -29,7 +29,11 @@ export {
 } from './model.js';
 export {
   agentPreamble,
+  CALL_OUTPUT_CEILING,
+  estimateInputTokens,
+  meteredNext,
   runOperationsAgent,
+  SpendCapReached,
   SpendMeter,
   systemPrompt,
   type AgentPreamble,

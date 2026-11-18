@@ -40,13 +40,17 @@ export function anthropicModel(options: AnthropicModelOptions): ModelAdapter {
       conversation,
       signal,
       onText,
+      maxOutputTokens,
     }): Promise<ModelTurn> {
       let response: Anthropic.Message;
       try {
         const stream = client.messages.stream(
           {
             model: modelId,
-            max_tokens: options.maxTokens ?? 16_000,
+            max_tokens: Math.min(
+              options.maxTokens ?? 16_000,
+              maxOutputTokens ?? Number.POSITIVE_INFINITY,
+            ),
             cache_control: { type: 'ephemeral' },
             output_config: { effort: options.effort ?? 'high' },
             // An explicit breakpoint on the system prompt (with the business
@@ -99,13 +103,15 @@ export function anthropicModel(options: AnthropicModelOptions): ModelAdapter {
       return {
         text,
         toolCalls,
+        // A reply cut off at its output limit is 'limit' even when it holds
+        // a tool call: that call may be truncated and is never run.
         stop:
           response.stop_reason === 'refusal'
             ? 'refusal'
-            : toolCalls.length > 0
-              ? 'tools'
-              : response.stop_reason === 'max_tokens'
-                ? 'limit'
+            : response.stop_reason === 'max_tokens'
+              ? 'limit'
+              : toolCalls.length > 0
+                ? 'tools'
                 : 'end',
         usage: {
           inputTokens: response.usage.input_tokens,

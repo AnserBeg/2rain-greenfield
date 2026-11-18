@@ -48,6 +48,17 @@ export const ASSISTANT_DEFAULT_PRICES: ModelPrices = Object.freeze({
 /** How long a plan waits for the person's yes before it counts as a no. */
 const DECISION_TIMEOUT_MS = 10 * 60 * 1000;
 
+/**
+ * Conversations live in this process only, so they are bounded (end review
+ * X13): one idle this long is dropped, a person holds at most this many,
+ * and the process at most this many. A working one is never dropped.
+ */
+export const ASSISTANT_CONVERSATION_LIMITS = Object.freeze({
+  idleMs: 30 * 60 * 1000,
+  perPrincipal: 5,
+  total: 200,
+});
+
 export interface AssistantEndpointOptions {
   readonly runtime: Pick<
     ComposedApplicationRuntime,
@@ -71,12 +82,19 @@ export interface AssistantEndpointOptions {
    * to make the change.
    */
   readonly customize?: () => Promise<CustomizeDrafter>;
+  /** The clock conversations idle by; a test moves it. */
+  readonly now?: () => number;
 }
 
 /** The one call the panel makes into the customization lane. */
 export interface CustomizeDrafter {
+  /**
+   * `budget` is the asking conversation's meter and Stop: the draft's model
+   * calls are charged to the same cap and end on the same Stop (X13).
+   */
   draftFromRequest(
     request: string,
+    budget?: { readonly meter: SpendMeter; readonly signal?: AbortSignal },
   ): Promise<
     | { status: 'drafted'; renderedDiff: string; reused: boolean }
     | { status: string; message: string; missingCapability?: string }
@@ -96,6 +114,8 @@ interface Conversation {
   readonly session: OperationsAgentSession;
   readonly meter: SpendMeter;
   history: readonly ConversationEntry[];
+  /** When the person last used it, on the endpoint's clock. */
+  lastUsed: number;
   running: AbortController | null;
   pending: PendingPlan | null;
   /** Where the current run's events go. */
@@ -119,6 +139,44 @@ export function createAssistantEndpoint(
   const conversations = new Map<string, Conversation>();
   const prices = options.prices ?? ASSISTANT_DEFAULT_PRICES;
   const capUsd = options.capUsd ?? ASSISTANT_CONVERSATION_CAP_USD;
+  const now = options.now ?? Date.now;
+  const limits = ASSISTANT_CONVERSATION_LIMITS;
+  const working = (conversation: Conversation) =>
+    conversation.running !== null || conversation.pending !== null;
+
+  /** Drops idle conversations; nothing working is ever dropped. */
+  const sweep = () => {
+    const cutoff = now() - limits.idleMs;
+    for (const [id, conversation] of conversations)
+      if (!working(conversation) && conversation.lastUsed < cutoff)
+        conversations.delete(id);
+  };
+
+  /**
+   * Room for one more conversation of this person: their oldest idle one is
+   * dropped at their bound, the process's oldest idle one at its bound.
+   * False when everything over a bound is working.
+   */
+  const makeRoom = (principalId: string): boolean => {
+    const oldestIdle = (of: (c: Conversation) => boolean) =>
+      [...conversations.values()]
+        .filter((c) => of(c) && !working(c))
+        .sort((a, b) => a.lastUsed - b.lastUsed)[0];
+    const count = (of: (c: Conversation) => boolean) =>
+      [...conversations.values()].filter(of).length;
+    const theirs = (c: Conversation) => c.principalId === principalId;
+    while (count(theirs) >= limits.perPrincipal) {
+      const victim = oldestIdle(theirs);
+      if (!victim) return false;
+      conversations.delete(victim.id);
+    }
+    while (conversations.size >= limits.total) {
+      const victim = oldestIdle(() => true);
+      if (!victim) return false;
+      conversations.delete(victim.id);
+    }
+    return true;
+  };
 
   const principalOf = (request: IncomingMessage) =>
     options.runtime.entry.run({ headers: request.headers }, (view) =>
@@ -132,6 +190,7 @@ export function createAssistantEndpoint(
       cookie: String(request.headers.cookie ?? ''),
       meter: new SpendMeter(prices, capUsd),
       history: [],
+      lastUsed: now(),
       running: null,
       pending: null,
       emit: () => undefined,
@@ -169,6 +228,7 @@ export function createAssistantEndpoint(
         response.end();
         return true;
       }
+      sweep();
       const body = await readJson(request);
       let principalId: string;
       try {
@@ -185,6 +245,7 @@ export function createAssistantEndpoint(
       // A conversation is its starter's; anyone else gets a fresh one (ask)
       // or nothing (decide, stop).
       const mine = named?.principalId === principalId ? named : undefined;
+      if (mine) mine.lastUsed = now();
       if (action === 'decide') {
         const pending = mine?.pending;
         const bound =
@@ -264,6 +325,11 @@ export function createAssistantEndpoint(
         response.end();
         return true;
       }
+      if (!mine && !makeRoom(principalId)) {
+        response.statusCode = 429;
+        response.end();
+        return true;
+      }
       const conversation = mine ?? open(request, principalId);
       if (conversation.running) {
         response.statusCode = 409;
@@ -290,6 +356,7 @@ export function createAssistantEndpoint(
       const before = conversation.session.latestChange()?.changeId ?? null;
       try {
         await runTurn(conversation, text, screenOf(body.screen), controller);
+        conversation.lastUsed = now();
       } catch (error) {
         // An error is an exit path too: what was written is still checked
         // and still offered for Undo.
@@ -373,13 +440,16 @@ export function createAssistantEndpoint(
     // The typed handoff only (X11); the drafter gets the person's own words.
     if (run.handoff) {
       emit({ type: 'step', label: 'Drafting the change' });
+      const beforeDraft = conversation.meter.usd;
+      const drafted = await handOff(conversation, text, controller.signal);
       emit({
         type: 'answer',
-        ...(await handOff(text)),
+        ...drafted,
         stop: 'handoff',
         links: await links(conversation, run.answer),
         ...didThisTurn(conversation.session.latestChange(), changeBefore),
-        usd: run.usd,
+        // The draft's own model calls count toward this turn and the cap.
+        usd: run.usd + (conversation.meter.usd - beforeDraft),
         spentUsd: conversation.meter.usd,
       });
       return;
@@ -400,18 +470,27 @@ export function createAssistantEndpoint(
     });
   }
 
-  /** The person's own words go to the customization lane's AI draft. */
+  /**
+   * The person's own words go to the customization lane's AI draft, charged
+   * to this conversation's cap and ended by its Stop (X13).
+   */
   async function handOff(
+    conversation: Conversation,
     request: string,
+    signal: AbortSignal,
   ): Promise<{ text: string; draft?: { diff: string } }> {
     if (!options.customize)
       return {
         text: 'That is a change to the application, not to your records. Make it on the Customize screen.',
       };
+    if (conversation.meter.exhausted())
+      return {
+        text: `That is a change to the application, and this conversation has used its spending limit of USD ${capUsd.toFixed(2)}, so it was not drafted. Make it on the Customize screen.`,
+      };
     try {
       const drafted = await (
         await options.customize()
-      ).draftFromRequest(request);
+      ).draftFromRequest(request, { meter: conversation.meter, signal });
       if (drafted.status === 'drafted' && 'renderedDiff' in drafted)
         return {
           text: `That is a change to the application. I drafted it${drafted.reused ? ' (the same draft already existed)' : ''}; nothing is live yet. Read the change below, then approve and activate it on the Customize screen.`,

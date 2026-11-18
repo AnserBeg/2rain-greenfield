@@ -33,6 +33,7 @@ import {
   loopbackAuthorities,
   type AssistantEndpoint,
 } from './assistant-endpoint.js';
+import { budgetedDraftingModel, DRAFT_BUDGET } from './draft-budget.js';
 
 import {
   composedApplicationSeed,
@@ -198,8 +199,19 @@ export async function startComposedApplication(
             model: options.assistantModel ?? keyFileAssistantModel(),
             authorities: () => authorities,
             // The panel's handoff drafts through the Customize screen's
-            // own lazily opened service: one service per server.
-            customize,
+            // own lazily opened service: one service per server. A panel
+            // draft runs inside its conversation's budget (X13).
+            customize: async () => {
+              const service = await customize();
+              return {
+                draftFromRequest: (request, budget) =>
+                  budget
+                    ? DRAFT_BUDGET.run(budget, () =>
+                        service.draftFromRequest(request),
+                      )
+                    : service.draftFromRequest(request),
+              };
+            },
           })
         : undefined;
     server = createSurfaceRuntimeServer(
@@ -384,10 +396,12 @@ export async function openCustomizeService(
  * type is narrowed to the agent's five, so the drafting tool is handed through.
  */
 function draftingModelFrom(
-  adapter: ModelAdapter,
+  provider: ModelAdapter,
 ): NonNullable<
   Awaited<ReturnType<NonNullable<CustomizationServiceOptions['draftingModel']>>>
 > {
+  // A draft the panel asked for is metered against its conversation (X13).
+  const adapter = budgetedDraftingModel(provider);
   return {
     modelId: adapter.modelId,
     next: (request) =>

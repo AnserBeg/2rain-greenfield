@@ -4,7 +4,12 @@
  * checked before every model call, so a run never starts a call once its
  * spend has reached the cap.
  */
-import type { ConversationEntry, ModelAdapter, ModelUsage } from './model.js';
+import type {
+  ConversationEntry,
+  ModelAdapter,
+  ModelTurn,
+  ModelUsage,
+} from './model.js';
 import type { AgentScreen, OperationsAgentSession } from './session.js';
 import {
   customizeHandoff,
@@ -45,6 +50,94 @@ export class SpendMeter {
   }
   exhausted(): boolean {
     return this.#usd >= this.capUsd;
+  }
+  /**
+   * The output tokens one call may use (end review X13): what is left of the
+   * cap after the call's estimated input, priced as uncached input, at the
+   * output price. 0 when less than a minimal reply is left; undefined when
+   * unpriced (no cap to keep).
+   */
+  outputBudget(estimatedInputTokens: number): number | undefined {
+    if (!this.#prices) return undefined;
+    const left =
+      this.capUsd -
+      this.#usd -
+      (estimatedInputTokens * this.#prices.input) / 1_000_000;
+    const tokens = Math.floor((left * 1_000_000) / this.#prices.output);
+    return tokens < MINIMUM_CALL_OUTPUT_TOKENS
+      ? 0
+      : Math.min(tokens, CALL_OUTPUT_CEILING);
+  }
+}
+
+/** The output a call is given when the cap leaves room (the adapter's own). */
+export const CALL_OUTPUT_CEILING = 16_000;
+/** Less than this left under the cap and no call starts. */
+export const MINIMUM_CALL_OUTPUT_TOKENS = 1_024;
+
+/** Thrown before a call the cap no longer leaves room for. */
+export class SpendCapReached extends Error {
+  override readonly name = 'SpendCapReached';
+}
+
+/**
+ * A call's input tokens, estimated before it is sent: every character of the
+ * prompt, the tools and the conversation at three per token (an overcount
+ * for English and JSON, so the reservation errs high).
+ */
+export function estimateInputTokens(request: {
+  readonly system: string;
+  readonly tools: readonly unknown[];
+  readonly conversation: readonly unknown[];
+}): number {
+  return Math.ceil(
+    (request.system.length +
+      JSON.stringify(request.tools).length +
+      JSON.stringify(request.conversation).length) /
+      3,
+  );
+}
+
+/**
+ * One model call under a meter (end review X13): it starts only if the cap
+ * leaves room for its estimated input and a minimal reply, its output is
+ * bounded by what is left, and it is charged its usage; a call that was
+ * stopped or failed after streaming is charged an estimate (its input and
+ * the text it streamed), since the provider may bill it.
+ */
+export async function meteredNext(
+  model: ModelAdapter,
+  meter: SpendMeter,
+  request: Parameters<ModelAdapter['next']>[0],
+): Promise<{ turn: ModelTurn; usd: number; maxOutputTokens?: number }> {
+  if (meter.exhausted()) throw new SpendCapReached('spend cap reached');
+  const inputTokens = estimateInputTokens(request);
+  const maxOutputTokens = meter.outputBudget(inputTokens);
+  if (maxOutputTokens === 0) throw new SpendCapReached('spend cap reached');
+  let streamed = 0;
+  try {
+    const turn = await model.next({
+      ...request,
+      ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+      onText: (delta) => {
+        streamed += delta.length;
+        request.onText?.(delta);
+      },
+    });
+    return {
+      turn,
+      usd: meter.charge(turn.usage),
+      ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+    };
+  } catch (error) {
+    if (request.signal?.aborted || streamed > 0)
+      meter.charge({
+        inputTokens,
+        outputTokens: Math.ceil(streamed / 3),
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      });
+    throw error;
   }
 }
 
@@ -193,23 +286,31 @@ export async function runOperationsAgent(
       return finish('spend-cap', 'Stopped: the run reached its spend cap.');
     turns += 1;
     let turn;
+    let usd: number;
+    let maxOutputTokens: number | undefined;
     options.onEvent?.({ kind: 'thinking' });
     try {
-      turn = await options.model.next({
-        system,
-        tools: OPERATIONS_AGENT_TOOLS,
-        conversation,
-        ...(options.signal ? { signal: options.signal } : {}),
-        ...(options.onEvent
-          ? {
-              onText: (delta: string) =>
-                options.onEvent?.({ kind: 'delta', text: delta }),
-            }
-          : {}),
-      });
+      ({ turn, usd, maxOutputTokens } = await meteredNext(
+        options.model,
+        options.meter,
+        {
+          system,
+          tools: OPERATIONS_AGENT_TOOLS,
+          conversation,
+          ...(options.signal ? { signal: options.signal } : {}),
+          ...(options.onEvent
+            ? {
+                onText: (delta: string) =>
+                  options.onEvent?.({ kind: 'delta', text: delta }),
+              }
+            : {}),
+        },
+      ));
     } catch (error) {
       if (options.signal?.aborted)
         return finish('stopped', 'Stopped by the person.');
+      if (error instanceof SpendCapReached)
+        return finish('spend-cap', 'Stopped: the run reached its spend cap.');
       return finish(
         'model-error',
         'Stopped: the model call failed.',
@@ -222,7 +323,6 @@ export async function runOperationsAgent(
     usage.outputTokens += turn.usage.outputTokens;
     usage.cacheReadTokens += turn.usage.cacheReadTokens;
     usage.cacheWriteTokens += turn.usage.cacheWriteTokens;
-    const usd = options.meter.charge(turn.usage);
     options.onEvent?.({
       kind: 'model',
       messages: conversation.length,
@@ -230,6 +330,24 @@ export async function runOperationsAgent(
       usage: turn.usage,
       usd,
     });
+    if (turn.stop === 'limit' && turn.toolCalls.length > 0) {
+      // Cut off at its output limit: its tool calls may be truncated and are
+      // never run, and history keeps only its text, so no tool call waits
+      // for a result on the next turn (end review X13).
+      conversation.push({
+        role: 'assistant',
+        text: turn.text || '(cut off)',
+        toolCalls: [],
+      });
+      return maxOutputTokens !== undefined &&
+        maxOutputTokens < CALL_OUTPUT_CEILING
+        ? finish('spend-cap', 'Stopped: the run reached its spend cap.')
+        : finish(
+            'model-error',
+            'Stopped: the model reply was cut off.',
+            'the reply reached its output limit inside a tool call',
+          );
+    }
     conversation.push({
       role: 'assistant',
       text: turn.text,

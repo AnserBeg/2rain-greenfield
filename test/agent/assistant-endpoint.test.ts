@@ -11,11 +11,18 @@ import {
 import {
   createAssistantEndpoint,
   loopbackAuthorities,
+  ASSISTANT_CONVERSATION_LIMITS,
   type CustomizeDrafter,
 } from '../../apps/api/src/assistant-endpoint.js';
 import {
+  budgetedDraftingModel,
+  DRAFT_BUDGET,
+} from '../../apps/api/src/draft-budget.js';
+import {
   customizeHandoff,
+  runOperationsAgent,
   scriptedModel,
+  SpendMeter,
   type ModelAdapter,
   type ScriptStep,
 } from '../../packages/operations-agent/src/index.js';
@@ -80,9 +87,11 @@ async function serve(
   capUsd?: number,
   customize?: CustomizeDrafter,
   authorities?: (port: number) => string[],
+  extra: Partial<Parameters<typeof createAssistantEndpoint>[0]> = {},
 ): Promise<{ url: string; server: Server }> {
   let port = 0;
   const endpoint = createAssistantEndpoint({
+    ...extra,
     runtime: fakeRuntime(log) as never,
     companyId: 'company',
     model: () => Promise.resolve(model),
@@ -718,4 +727,238 @@ test('X11: only an answer that is wholly the typed handoff hands off; a quoted o
     ),
     'add a serial number field',
   );
+});
+
+// ------------------------------------------------ end review X13 (spend, memory)
+
+const PRICES = { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 };
+const USAGE = {
+  inputTokens: 1_000,
+  outputTokens: 100,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+};
+/** A session that runs no tool: these tests are about the model calls. */
+const noTools = {
+  call: () => {
+    throw new Error('no tool may run');
+  },
+} as never;
+
+test('X13: each call gets only the output the cap leaves, and none starts without room', async () => {
+  const seen: (number | undefined)[] = [];
+  const model: ModelAdapter = {
+    modelId: 'fake',
+    next: ({ maxOutputTokens }) => {
+      seen.push(maxOutputTokens);
+      return Promise.resolve({
+        text: 'done',
+        toolCalls: [],
+        stop: 'end',
+        usage: USAGE,
+      });
+    },
+  };
+  const meter = new SpendMeter(PRICES, 0.2);
+  const run = await runOperationsAgent({
+    model,
+    session: noTools,
+    request: 'hello',
+    meter,
+  });
+  assert.equal(run.stop, 'answered');
+  assert.equal(seen.length, 1);
+  assert.ok(seen[0]! > 0 && seen[0]! <= 10_000, String(seen[0]));
+  // Almost spent: less than a minimal reply is left, so no call starts.
+  meter.charge({ ...USAGE, inputTokens: 46_000, outputTokens: 0 });
+  assert.ok(!meter.exhausted());
+  const late = await runOperationsAgent({
+    model,
+    session: noTools,
+    request: 'hello again',
+    meter,
+  });
+  assert.equal(late.stop, 'spend-cap');
+  assert.equal(seen.length, 1);
+});
+
+test('X13: a reply cut off at its output limit runs none of its tool calls', async () => {
+  const model: ModelAdapter = {
+    modelId: 'fake',
+    next: () =>
+      Promise.resolve({
+        text: '',
+        toolCalls: [
+          {
+            id: 't1',
+            name: 'erp_execute',
+            input: { planId: 'p', executionIdempotencyKey: 'k' },
+          },
+        ],
+        stop: 'limit',
+        usage: USAGE,
+      }),
+  };
+  const run = await runOperationsAgent({
+    model,
+    session: noTools,
+    request: 'do it',
+    meter: new SpendMeter(PRICES, 0.2),
+  });
+  assert.equal(run.stop, 'spend-cap');
+  assert.equal(run.toolCalls, 0);
+  const last = run.conversation.at(-1)!;
+  assert.ok(last.role === 'assistant' && last.toolCalls.length === 0);
+});
+
+test('X13: a call the person stopped mid-reply is charged an estimate', async () => {
+  const controller = new AbortController();
+  const model: ModelAdapter = {
+    modelId: 'fake',
+    next: ({ onText, signal }) =>
+      new Promise((_resolve, reject) => {
+        onText?.('Reading the order and the stock levels now');
+        signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        controller.abort();
+      }),
+  };
+  const meter = new SpendMeter(PRICES, 1);
+  const run = await runOperationsAgent({
+    model,
+    session: noTools,
+    request: 'stop me',
+    meter,
+    signal: controller.signal,
+  });
+  assert.equal(run.stop, 'stopped');
+  assert.ok(meter.usd > 0, String(meter.usd));
+});
+
+test('X13: a panel draft is charged to the conversation and ends on its Stop', async () => {
+  const budgets: unknown[] = [];
+  const drafter: CustomizeDrafter = {
+    draftFromRequest(_request, budget) {
+      budgets.push(budget);
+      // The draft's model call, as the service would make it.
+      budget?.meter.charge(USAGE);
+      return Promise.resolve({
+        status: 'drafted',
+        reused: false,
+        renderedDiff: 'diff',
+      });
+    },
+  };
+  const { url, server } = await serve(
+    scriptedModel([
+      () => ({ text: '{"handoff":"customize","change":"add a field"}' }),
+    ]),
+    [],
+    undefined,
+    drafter,
+  );
+  try {
+    const answer = (
+      await events(
+        await fetch(`${url}/?assistant=ask`, {
+          method: 'POST',
+          headers: headers('buyer', url),
+          body: JSON.stringify({ text: 'Add a field' }),
+        }),
+      )
+    ).find((event) => event.type === 'answer')!;
+    assert.equal(answer.stop, 'handoff');
+    const budget = budgets[0] as { meter: SpendMeter; signal: AbortSignal };
+    assert.ok(budget.meter instanceof SpendMeter);
+    assert.ok(budget.signal instanceof AbortSignal);
+    // 1000 in at 4 + 100 out at 20 per million.
+    assert.equal(Number(answer.spentUsd).toFixed(4), '0.0060');
+    assert.equal(Number(answer.usd).toFixed(4), '0.0060');
+  } finally {
+    server.close();
+  }
+  // The drafting model honors the budget in context, and only there.
+  const calls: unknown[] = [];
+  const provider: ModelAdapter = {
+    modelId: 'draft',
+    next: (request) => {
+      calls.push(request.maxOutputTokens);
+      return Promise.resolve({
+        text: '',
+        toolCalls: [],
+        stop: 'end',
+        usage: USAGE,
+      });
+    },
+  };
+  const drafting = budgetedDraftingModel(provider);
+  const request = { system: 's', tools: [], conversation: [] };
+  await drafting.next(request);
+  const meter = new SpendMeter(PRICES, 0.5);
+  await DRAFT_BUDGET.run({ meter }, () => drafting.next(request));
+  assert.equal(meter.usd.toFixed(4), '0.0060');
+  assert.deepEqual(calls, [undefined, 16_000]);
+  const stopped = new AbortController();
+  stopped.abort();
+  await assert.rejects(
+    DRAFT_BUDGET.run({ meter, signal: stopped.signal }, () =>
+      drafting.next(request),
+    ),
+    /stopped by the person/u,
+  );
+  const spent = new SpendMeter(PRICES, 0.001);
+  spent.charge(USAGE);
+  await assert.rejects(
+    DRAFT_BUDGET.run({ meter: spent }, () => drafting.next(request)),
+    /spend cap/u,
+  );
+  assert.equal(calls.length, 2);
+});
+
+test('X13: idle conversations are dropped, and a person holds a bounded number', async () => {
+  let clock = 1_000_000;
+  const { url, server } = await serve(
+    scriptedModel(Array.from({ length: 12 }, () => () => ({ text: 'Hello.' }))),
+    [],
+    undefined,
+    undefined,
+    undefined,
+    { now: () => clock },
+  );
+  const ask = async (conversation?: string) =>
+    String(
+      (
+        await events(
+          await fetch(`${url}/?assistant=ask`, {
+            method: 'POST',
+            headers: headers('buyer', url),
+            body: JSON.stringify({ text: 'Hi', conversation }),
+          }),
+        )
+      ).find((event) => event.type === 'conversation')!.id,
+    );
+  try {
+    const ids: string[] = [];
+    for (
+      let index = 0;
+      index < ASSISTANT_CONVERSATION_LIMITS.perPrincipal;
+      index++
+    ) {
+      clock += 1_000;
+      ids.push(await ask());
+    }
+    // Each one is kept while the person is within their bound.
+    clock += 1_000;
+    assert.equal(await ask(ids.at(-1)), ids.at(-1));
+    // One more: their oldest idle one is dropped.
+    clock += 1_000;
+    await ask();
+    clock += 1_000;
+    assert.notEqual(await ask(ids[0]), ids[0]);
+    // Idle past the limit: dropped.
+    const kept = ids.at(-1)!;
+    clock += ASSISTANT_CONVERSATION_LIMITS.idleMs + 1;
+    assert.notEqual(await ask(kept), kept);
+  } finally {
+    server.close();
+  }
 });
