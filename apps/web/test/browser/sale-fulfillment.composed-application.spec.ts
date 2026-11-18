@@ -331,7 +331,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await expect(
     page
       .locator('[data-platform-slot="record:sections"]')
-      .getByText('Released', { exact: true }),
+      .getByText('released', { exact: true }),
   ).toBeVisible();
 
   const reversal = await createShipment({

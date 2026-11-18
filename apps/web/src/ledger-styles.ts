@@ -488,7 +488,7 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 /* An empty section is one quiet line beside its heading. */
 .composition-collection[data-resolution=empty] :is([data-message-detail],[data-message-next-action]),.data-panel[data-composition-dataset][data-resolution=empty] :is([data-message-detail],[data-message-next-action]){display:none}
 /* Identity and revision stay reachable, out of the reading path. */
-.composition-technical{grid-column:1/-1;padding:0;border:0;background:transparent}
+.composition-technical{grid-column:1/-1;order:90;padding:0;border:0;background:transparent}
 .composition-technical>summary{display:inline-flex;min-height:24px;color:var(--faint);font-size:11px;font-weight:400;cursor:pointer}
 .composition-technical[open]{padding:10px var(--pad-x);border:1px solid var(--rule);background:var(--sheet)}
 .composition-record-actions .command-bar>*{width:100%;justify-content:flex-start}
