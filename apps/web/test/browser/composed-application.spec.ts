@@ -407,7 +407,7 @@ composedTest.describe('focus ring coverage', () => {
       assert.ok(result.measurementsRead > 0);
       assert.deepEqual(result.violations, [
         'FOCUS_RING_CONTRAST:.navigation-group > summary:focus-visible',
-        'FOCUS_RING_CONTRAST:.navigation-more > summary:focus-visible',
+        'FOCUS_RING_CONTRAST:.navigation-settings > summary:focus-visible',
         'FOCUS_RING_CONTRAST:.sidebar a:focus-visible',
       ]);
     },
@@ -574,7 +574,7 @@ composedTest.describe('focus ring coverage', () => {
       );
       assert.deepEqual(result.violations, [
         'FOCUS_RING_CONTRAST:.navigation-group > summary:focus-visible',
-        'FOCUS_RING_CONTRAST:.navigation-more > summary:focus-visible',
+        'FOCUS_RING_CONTRAST:.navigation-settings > summary:focus-visible',
         'FOCUS_RING_CONTRAST:.sidebar a:focus-visible',
       ]);
     },
@@ -1035,17 +1035,12 @@ async function inventoryNavigationJourney(
     'Expected receipts',
     'Approvals',
     'Purchase orders',
-    'Purchasing settings',
     'Bills',
     'Inventory value',
     'Warehouse',
     'Buying worklist',
     'Stock by item',
     'Stock by location',
-    'Stock movements',
-    'Period locks',
-    'Inventory transactions',
-    'Stock counts',
     'Companies',
     'Customers and suppliers',
     'Contact roles',
@@ -1053,6 +1048,12 @@ async function inventoryNavigationJourney(
     'Price lists',
     'Tax codes',
     'Locations',
+    // LOOK-1 round 3: the groups' occasional destinations, in one Settings.
+    'Purchasing settings',
+    'Stock movements',
+    'Period locks',
+    'Inventory transactions',
+    'Stock counts',
   ]);
   // Inside the collapsed Sales and Purchasing groups: hidden text names
   // nothing, so each link is found by its text rather than its accessible name.
@@ -1120,10 +1121,6 @@ async function inventoryNavigationJourney(
       'Buying worklist',
       'Stock by item',
       'Stock by location',
-      'Stock movements',
-      'Period locks',
-      'Inventory transactions',
-      'Stock counts',
     ],
   );
   await inventoryNavigation.getByText('Stock', { exact: true }).click();
@@ -1200,13 +1197,13 @@ async function inventoryNavigationJourney(
     'Stock by item',
     'Stock counts',
   ]) {
-    const link = inventoryNavigation.getByRole('link', {
+    const link = navigation.getByRole('link', {
       name: destination,
       exact: true,
     });
-    // An occasional destination waits under Stock's Other (LOOK-1 round 2).
+    // An occasional destination waits under the menu's Settings (round 3).
     if (!(await link.isVisible()))
-      await inventoryNavigation.locator('.navigation-more > summary').click();
+      await navigation.locator('details.navigation-settings > summary').click();
     await link.click();
     await expect(
       page.getByRole('heading', { level: 1, name: destination }),
@@ -1709,15 +1706,12 @@ async function scopedInventoryJourney(
       has: page.locator(':scope > summary').getByText('Stock', { exact: true }),
     });
   await scopedInventoryNavigation.getByText('Stock', { exact: true }).click();
-  const transactionsLink = scopedInventoryNavigation.getByRole('link', {
-    name: 'Inventory transactions',
-    exact: true,
-  });
-  // An occasional destination waits under the group's Other (LOOK-1 round 2).
+  const transactionsLink = page
+    .getByRole('navigation', { name: 'Release navigation' })
+    .getByRole('link', { name: 'Inventory transactions', exact: true });
+  // An occasional destination waits under the menu's Settings (round 3).
   if (!(await transactionsLink.isVisible()))
-    await scopedInventoryNavigation
-      .locator('.navigation-more > summary')
-      .click();
+    await page.locator('details.navigation-settings > summary').click();
   await transactionsLink.click();
   expect(
     new URL(page.url()).searchParams.get(
@@ -2671,7 +2665,11 @@ async function partyLifecycleJourney(
   // A party's page is its customer workspace (SALES-PARITY): the number reads
   // under the name, the contact in Details, and the record's identity,
   // activity and revision in its technical details.
-  const keyFactsSlot = page.locator('[data-platform-slot="record:keyFacts"]');
+  // The record's identity, activity and revision are in its menu (LOOK-1
+  // round 3), never on the page by default.
+  const keyFactsSlot = page.locator(
+    '[data-platform-slot="record:commandBar"] .record-technical',
+  );
   const sectionsSlot = page.locator('[data-platform-slot="record:sections"]');
   const technical = (label: string) =>
     keyFactsSlot

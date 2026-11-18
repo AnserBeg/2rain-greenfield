@@ -35,6 +35,7 @@ import {
   submitSurfaceRuntimeFragment,
   submitSurfaceRuntimeIntent,
   SURFACE_STYLESHEET,
+  taskRecoveryNotice,
   type SurfaceRuntimeGateways,
   type SurfaceRuntimeResponse,
 } from './surface-runtime.js';
@@ -288,7 +289,13 @@ async function handleRequest(
               { retry: false },
             ).catch((error: unknown) => {
               if (!policyChangedDuringStep(error)) throw error;
-              return policyChangedRedirect(url);
+              // A Confirm (or its retry) may have committed part of its
+              // work: the session's own retry is offered, nothing more.
+              return (submission.taskStage === 'confirm' ||
+                submission.taskStage === 'retry') &&
+                typeof submission.taskToken === 'string'
+                ? taskRecoveryNotice(url.href, submission)
+                : policyChangedRedirect(url);
             })
           : await entry.run({ headers: request.headers }, (view) =>
               submitSurfaceRuntimeIntent(view, url.href, submission, gateways),

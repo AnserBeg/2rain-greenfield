@@ -65,7 +65,7 @@ test('migrations upgrade accepted G1 and converge with the checked-in snapshot',
     const migrations = await loadMigrations(checkedInMigrations);
     assert.equal(
       migrations.at(-1)?.name,
-      '0030_policy_epoch_bumps_both_scopes.sql',
+      '0031_policy_epoch_lock_and_ordered_bumps.sql',
     );
     const admin = await pool.connect();
     try {
@@ -107,6 +107,7 @@ test('migrations upgrade accepted G1 and converge with the checked-in snapshot',
         '0028_sale_fulfillment.sql',
         '0029_customization_patch_lineage.sql',
         '0030_policy_epoch_bumps_both_scopes.sql',
+        '0031_policy_epoch_lock_and_ordered_bumps.sql',
       ]);
       assert.equal(upgraded.verified.length, migrations.length);
       await assertSchemaMatchesSnapshot(admin, checkedInSnapshot);

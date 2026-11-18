@@ -89,6 +89,7 @@ import {
 } from './release-verification-service.js';
 import { PostgresRequestRuntimeViewService } from './request-runtime-view-service.js';
 import {
+  detachedFromReadSnapshot,
   withoutReadSnapshot,
   withReadSnapshot,
   withTrustedRequestTransaction,
@@ -288,6 +289,7 @@ export async function createComposedApplicationRuntime(
   let runtimePool: pg.Pool | undefined;
   let materializerPool: pg.Pool | undefined;
   let modulePool: pg.Pool | undefined;
+  let evidencePool: pg.Pool | undefined;
   try {
     await migrate(adminPool, options.migrationsDirectory);
     const identities = await ensureScope(
@@ -312,6 +314,8 @@ export async function createComposedApplicationRuntime(
       2,
     );
     modulePool = rolePool(options.databaseUrl, 'north_star_module_runtime', 2);
+    // Denial evidence is written on its own connections (SPEED-1).
+    evidencePool = rolePool(options.databaseUrl, 'north_star_runtime', 2);
 
     const runtimeContext = await trustedContext(identities.runtime);
     const approverContext = await trustedContext(identities.approver);
@@ -719,6 +723,7 @@ export async function createComposedApplicationRuntime(
     const denialRecorder = new PostgresSemanticQueryDenialRecorder(
       runtimePool,
       actorIssuer,
+      evidencePool,
     );
     // ADR-0032 §2 admits a loading treatment only above a *measured* threshold,
     // so the read ingress is composed with its measurement rather than gaining
@@ -794,35 +799,19 @@ export async function createComposedApplicationRuntime(
         queryGateway,
       });
     };
-    const servings = new Map<string, Promise<ReleaseServing>>();
-    const loaded = new Map<string, ReleaseServing>();
-    const servingFor = (
-      releaseId: string,
-    ): ReleaseServing | Promise<ReleaseServing> => {
-      const ready = loaded.get(releaseId);
-      if (ready) return ready;
-      const known = servings.get(releaseId);
-      if (known) return known;
-      // The load runs outside any page's snapshot, as its own work.
-      const loading = withoutReadSnapshot(() =>
+    const servingFor = releaseServingRoute(
+      (releaseId) =>
         loadServingRelease(
           runtimePool!,
           runtimeContext,
           releaseId as MintedUuid,
         ),
-      ).then((release) => {
-        const serving = buildServing(release);
-        loaded.set(releaseId, serving);
-        return serving;
-      });
-      servings.set(releaseId, loading);
-      loading.catch(() => servings.delete(releaseId));
-      return loading;
-    };
+      (release) => buildServing(release),
+    );
     const policy = bootPolicy;
     const queryGateway = new ReleaseRoutingQueryGateway(servingFor, policy);
     routed.queryGateway = queryGateway;
-    loaded.set(serving.releaseId, buildServing(serving, bootPolicy));
+    servingFor.publish(serving.releaseId, buildServing(serving, bootPolicy));
     const operationGateway = new ReleaseRoutingOperationGateway(
       servingFor,
       policy,
@@ -840,7 +829,13 @@ export async function createComposedApplicationRuntime(
       new PostgresRequestRuntimeViewService(runtimePool),
       policy,
     );
-    const pools = [runtimePool, materializerPool, modulePool, adminPool];
+    const pools = [
+      runtimePool,
+      materializerPool,
+      modulePool,
+      evidencePool,
+      adminPool,
+    ];
     let closed = false;
 
     return Object.freeze({
@@ -877,7 +872,7 @@ export async function createComposedApplicationRuntime(
     });
   } catch (error) {
     await Promise.all(
-      [runtimePool, materializerPool, modulePool, adminPool]
+      [runtimePool, materializerPool, modulePool, evidencePool, adminPool]
         .filter((pool): pool is pg.Pool => pool !== undefined)
         .map((pool) => pool.end().catch(() => undefined)),
     );
@@ -1054,6 +1049,43 @@ export async function provisionLocalDemoReleaseAuthorization(
   );
 }
 
+/**
+ * Each release's serving gateways, built once: at once when loaded, else the
+ * one pending load every request waits on. The load runs detached from any
+ * page's read snapshot and turn (SPEED-1): it is shared, so it must never
+ * queue behind one page's work.
+ */
+export function releaseServingRoute<TRelease, TServing>(
+  load: (releaseId: string) => Promise<TRelease>,
+  build: (release: TRelease) => TServing,
+): ((releaseId: string) => TServing | Promise<TServing>) & {
+  publish(releaseId: string, serving: TServing): void;
+} {
+  const pending = new Map<string, Promise<TServing>>();
+  const loaded = new Map<string, TServing>();
+  const route = (releaseId: string): TServing | Promise<TServing> => {
+    const ready = loaded.get(releaseId);
+    if (ready !== undefined) return ready;
+    const known = pending.get(releaseId);
+    if (known) return known;
+    const loading = detachedFromReadSnapshot(() => load(releaseId)).then(
+      (release) => {
+        const serving = build(release);
+        loaded.set(releaseId, serving);
+        return serving;
+      },
+    );
+    pending.set(releaseId, loading);
+    loading.catch(() => pending.delete(releaseId));
+    return loading;
+  };
+  return Object.assign(route, {
+    publish(releaseId: string, serving: TServing) {
+      loaded.set(releaseId, serving);
+    },
+  });
+}
+
 /** A release's serving gateways: at once when loaded, else a pending load. */
 type RouteServing = (
   releaseId: string,
@@ -1154,9 +1186,10 @@ export class ReleaseRoutingOperationGateway extends SemanticOperationGateway {
   override async invoke(
     ...args: Parameters<SemanticOperationGateway['invoke']>
   ): ReturnType<SemanticOperationGateway['invoke']> {
-    return withoutReadSnapshot(async () =>
-      (await this.#gateway(args[0])).invoke(...args),
-    );
+    // The release is routed first, outside the invocation's turn: a sibling
+    // read may be loading it, and the turn must not wait on that load.
+    const gateway = await this.#gateway(args[0]);
+    return withoutReadSnapshot(() => gateway.invoke(...args));
   }
 
   async #gateway(view: unknown): Promise<SemanticOperationGateway> {

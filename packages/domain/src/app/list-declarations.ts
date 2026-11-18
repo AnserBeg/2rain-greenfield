@@ -61,6 +61,8 @@ export interface ListSpec {
     readonly options: readonly (readonly [value: string, label: string])[];
   }[];
   readonly export: boolean;
+  /** At compact width, a table that scrolls sideways (LOOK-1 round 3). */
+  readonly compact?: 'scrollTable';
   /**
    * Per row, what its lines order and their done rows record, summed by the
    * list statement; outputs are the ids the columns show them under.
@@ -1212,6 +1214,8 @@ function itemFigureList(
           ]),
     ],
     defaultSort: [{ column: 'sku', direction: 'ascending' }],
+    // Figures read across a row: a scrolling table on a phone (round 3).
+    compact: 'scrollTable',
     views: buying
       ? [
           {
@@ -1949,6 +1953,7 @@ function lowerList(namespace: string, listLocal: string, spec: ListSpec) {
       options: filter.options.map(([value, label]) => ({ value, label })),
     })),
     ...(spec.export ? { export: { format: 'csv' } } : {}),
+    ...(spec.compact ? { compact: spec.compact } : {}),
     ...(spec.progress
       ? {
           progress: {

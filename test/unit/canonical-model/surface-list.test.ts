@@ -1679,3 +1679,26 @@ test('a printable document is declared over the record composition and refused w
     /a printed note is a declared column/u,
   );
 });
+
+test('LOOK-1 round 3: a List may stay a scrolling table at compact width, and nothing else', () => {
+  // Declared on Stock by item, it normalizes and survives normalization.
+  const app = application();
+  assert.equal(listOf(app, stockList).list.compact, 'scrollTable');
+  const normalized = normalizeApplicationPackage(app as never) as unknown as {
+    surfaces: Json[];
+  };
+  const surface = normalized.surfaces.find(
+    (value) => value.surfaceId === stockList,
+  )!;
+  assert.equal((surface.list as Json).compact, 'scrollTable');
+  // Absent, the List keeps its card projection: the key is optional.
+  const without = application();
+  delete listOf(without, stockList).list.compact;
+  assert.doesNotThrow(() => normalizeApplicationPackage(without as never));
+  // Any other value is refused: the key is closed.
+  assert.ok(
+    refused((value) => {
+      listOf(value, stockList).list.compact = 'cards';
+    }).length > 0,
+  );
+});
