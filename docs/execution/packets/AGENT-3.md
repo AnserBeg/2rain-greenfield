@@ -1,6 +1,6 @@
 # AGENT-3 — the office assistant in the web app: fast, screen-aware, act-then-undo, measured honestly
 
-Status: slice 1 `39463ffb` (PR #57); slices 2-6 `c6a156b4` (PR #58); end-review fixes (a) `2cfb6fc2` (#81), (b) `1d3a7c35` (#83), (c) PR #84 · Mechanical (no Critical path) · Stops: none · Charter:
+Status: slice 1 `39463ffb` (PR #57); slices 2-6 `c6a156b4` (PR #58); end-review fixes (a) `2cfb6fc2` (#81), (b) `1d3a7c35` (#83), (c) `043ac9f2` (#84) · Mechanical (no Critical path) · Stops: none · Charter:
 [AGENT-3-charter.md](AGENT-3-charter.md) from `main` `f1abcb3a`; branch `packet/AGENT-3`, base `5c25acdb`.
 
 ## Pre-registered measures (2026-11-17, before any real-model run of this packet)
@@ -43,6 +43,7 @@ development set's rules (tasks 11-34) are registered in `test/agent/dev-tasks.ts
 | dev set 19:49 `281b5cf2` ([r](../evidence/2026-11-17T19-49-59-349Z-agent-eval.md)), 34 tasks, 66 runs | 61/66; every time 31/34, once 32/34; by attempt 31/34, 15/16, 15/16 | 2 | 17.0 | 7.5 | 5.8596 | 0.0961 |
 | after LOOP-1, 11-18 03:08 `8e3d4a21` ([r](../evidence/2026-11-18T03-08-05-680Z-agent-eval.md)) | 10/10 | 2 | 19.9 | 5.5 | 0.8145 | 0.0815 |
 | after SPEED-1, 03:33 `f5414386` ([r](../evidence/2026-11-18T03-33-36-579Z-agent-eval.md)) | 10/10 | 2 | 11.9 | 5.5 | 0.6837 | 0.0684 |
+| after the end-review fixes, 20:26 `d33ca17f` ([r](../evidence/2026-11-18T20-26-22-512Z-agent-eval.md)) | 10/10 | 2 | 15.0 | 5.5 | 0.8149 | 0.0815 |
 
 Dev-set failures as registered: task 18 x3 (my rule's option id was wrong; rule v2), task 22 attempt 1 (a slice-1 defect, fixed),
 task 29 (the agent picked the only "Millwork" with a customer role and said so; the rule wanted no write).
@@ -50,9 +51,7 @@ task 29 (the agent picked the only "Millwork" with a customer role and said so; 
 ## End-review fix round (2026-11-18): each item's test was red on the prior code
 X1-X3, X6 `f55efebe`; X12 `ae5a17dd`+`a3105ef8`; X14 `723afdb9`; X5 `c58c273f`; X4 `55244f56`; X7-X8 `4bc9b303`; X10, X15
 `9c710fbd`; X11 `59c8459d`; X13 `23784d5c`; X9 `637c3f21`+`e90ed6fb`; X16 `c5908191`. Tests: X-named cases, dev task 35, panel spec.
-
-## Gates
-Slice 1: branch CI 44166005372, main CI 44171233909. Fix round: (a) run 44358468254 att. 4, (b) 44375822997; (c) PR #84.
+Gates — slice 1: CI 44166005372, main 44171233909. Fix round: (a) 44358468254 att. 4, (b) 44375822997, (c) 44385801368 (`043ac9f2`).
 
 ## Test it yourself
 1. `node --import tsx --test test/agent/business-map.test.ts test/agent/assistant-endpoint.test.ts` passes.
