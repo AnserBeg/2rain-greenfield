@@ -566,14 +566,24 @@ test('X12: a reference position refuses any unlooked-up value, a nested argument
     await session.call('erp_plan', {
       intents: [
         {
-          operationId: 'purchase_order_line_create',
-          values: { item_id: PARTY, unit_id: 'EA', ordered_quantity: '1' },
+          operationId: 'sales_order_line_create',
+          values: {
+            line_number: '1',
+            item_id: PARTY,
+            unit_id: 'EA',
+            ordered_quantity: '1',
+            unit_price: '2',
+          },
           relations: { order: PARTY },
         },
       ],
     })
   ).content as { reason?: string };
-  assert.doesNotMatch(String(line.reason), /unit id|unit_id/u);
+  assert.equal(
+    typeof (line as { planId?: unknown }).planId,
+    'string',
+    JSON.stringify(line),
+  );
   assert.match(await reason({ currency: 'usd' }), /currency USD is not/u);
   assert.match(
     await reason({ currency: 'dollars' }),
