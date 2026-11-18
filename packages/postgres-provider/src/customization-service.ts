@@ -181,6 +181,7 @@ export type DraftOutcome =
     };
 
 export interface PatchRecord {
+  readonly baseReleaseRoot: string;
   readonly channel: AuthoringChannel;
   readonly createdAt: string;
   readonly kind: CustomizationPatch['kind'];
@@ -1587,11 +1588,19 @@ export class PostgresCustomizationService {
         const base = await client.query<{ release_id: MintedUuid }>(
           `SELECT release_id FROM platform.tenant_releases
             WHERE tenant_id = $1 AND environment_id = $2
-              AND app_package_revision_id = $3 ORDER BY created_at LIMIT 1`,
-          [context.tenantId, context.environmentId, revisionId],
+              AND app_package_revision_id = $3
+              AND ($4::text IS NULL OR content_hash = $4)
+            ORDER BY created_at LIMIT 1`,
+          [
+            context.tenantId,
+            context.environmentId,
+            revisionId,
+            chain[0]?.baseReleaseRoot ?? null,
+          ],
         );
         const baseReleaseId =
-          upgrade?.baseReleaseId ?? base.rows[0]?.release_id;
+          upgrade?.baseReleaseId ??
+          (chain.length === 0 ? releaseId : base.rows[0]?.release_id);
         if (!baseReleaseId)
           throw new CustomizationServiceRefusal(
             'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
@@ -1684,6 +1693,7 @@ export async function openCustomizationService(
 }
 
 interface PatchRow {
+  base_release_root: string;
   channel: AuthoringChannel;
   created_at: Date | string;
   parent_revision_id: MintedUuid;
@@ -1696,7 +1706,7 @@ interface PatchRow {
   resulting_revision_id: MintedUuid;
 }
 
-const PATCH_SELECT = `SELECT patch.patch_id, patch.patch_kind, patch.payload,
+const PATCH_SELECT = `SELECT patch.base_release_root, patch.patch_id, patch.patch_kind, patch.payload,
        patch.payload_digest, patch.channel, patch.parent_revision_id,
        patch.resulting_revision_id, patch.resulting_release_id,
        release.content_hash AS resulting_release_root, patch.created_at
@@ -1725,6 +1735,7 @@ function patchRecord(row: PatchRow): PatchRecord {
     );
   }
   return Object.freeze({
+    baseReleaseRoot: row.base_release_root,
     channel: row.channel,
     createdAt: new Date(row.created_at).toISOString(),
     kind: parsed.patch.kind,

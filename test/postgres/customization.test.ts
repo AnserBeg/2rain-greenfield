@@ -1009,6 +1009,49 @@ async function assertUpgradePersistence(
         );
       },
     );
+    const original = await pool.query<{
+      tenant_id: string;
+      environment_id: string;
+      source_release_id: string;
+      base_release_id: string;
+      candidate_release_id: string;
+      candidate_revision_id: string;
+      payload: Buffer;
+      payload_digest: string;
+      authored_by: string;
+    }>('SELECT * FROM platform.customization_upgrades WHERE upgrade_id = $1', [
+      upgradeId,
+    ]);
+    const row = original.rows[0]!;
+    for (const identity of [foreign.runtime, otherEnvironment.runtime]) {
+      await assert.rejects(
+        withTrustedRequestTransaction(
+          runtimePool,
+          await trustedContext(identity),
+          async (client) => {
+            await client.query(
+              `INSERT INTO platform.customization_upgrades (
+             tenant_id, environment_id, upgrade_id, source_release_id, base_release_id,
+             candidate_release_id, candidate_revision_id, payload, payload_digest, authored_by
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+              [
+                row.tenant_id,
+                row.environment_id,
+                randomUUID(),
+                row.source_release_id,
+                row.base_release_id,
+                row.candidate_release_id,
+                row.candidate_revision_id,
+                row.payload,
+                row.payload_digest,
+                identity.principalId,
+              ],
+            );
+          },
+        ),
+        /row-level security/u,
+      );
+    }
     for (const query of [
       'UPDATE platform.customization_upgrades SET payload_digest = payload_digest',
       'DELETE FROM platform.customization_upgrades',
