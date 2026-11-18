@@ -4,7 +4,7 @@ Base `c2c12e7f`. No Critical path touched.
 
 ## Claims
 
-1. An added field is editable on create and update and readable on the record. Order editors and composed Details bind the field and select it through their own queries.
+1. An added field is editable on create and update and readable on the record. Order editors and composed Details bind the field and select it through their own queries. Its label appears even on an existing order with an empty value.
 2. Optional first-party fields start under More details. Customize can promote them on both editors or include them in the list. Tenant record types retain their default list columns.
 3. The compiler's existing entity-field projection makes the field writable through the two record mutations. The PostgreSQL journey reads through the assistant, updates through its governed plan, and reads the saved value on the composed purchase order.
 4. Rolling back removes the field from the active release. Fresh approval and activation read back the previously saved value.
@@ -12,7 +12,7 @@ Base `c2c12e7f`. No Critical path touched.
 
 ## Decisions
 
-- The optional v6 `surface.form.fields` key carries a label and disclosure. Normalization refuses deferred required fields, duplicates and unselected fields. Surface readers declare floor 23 for this key. The first-party re-baseline reproduced the checked-in release byte for byte.
+- The optional v6 `surface.form.fields` key carries a label and disclosure. Normalization refuses deferred required fields, duplicates and unselected fields. Record Details columns can declare `showWhenEmpty`. Both additions require a floor-23 reader. The first-party re-baseline reproduced the checked-in release byte for byte.
 - Newly drafted fields record their screen binding in the patch. Earlier field patches reproduce their original release. Re-drafting the identical legacy field publishes its screens and reuses its column.
 - First-party custom list columns are opt-in. Customize offers fields selected by the list query, including previously hidden custom columns.
 
@@ -24,12 +24,12 @@ The unit regression failed on the original purchase order create form. PostgreSQ
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-2",
-  "base": "c2c12e7f7395900967bfb4d45731d54ce28435a0",
-  "head": "3d663a8dda818aa5e26eee3ba1939b17dfd9a263",
+  "base": "fe5079d39277ba6d0e39946c23158888a4fe8ce2",
+  "head": "c7b3ddd10f667d2d6eeacc15908b914c893c6337",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
     "apps/web/src/document-editor.ts", "apps/web/src/surface-client.ts",
-    "apps/web/test/browser/customize.composed-application.spec.ts", "packages/canonical-model/src/schemas.ts",
+    "apps/web/src/surface-composition.ts", "apps/web/test/browser/customize.composed-application.spec.ts", "packages/canonical-model/src/schemas.ts",
     "packages/canonical-model/src/surface-workspace.ts", "packages/compiler/src/projections.ts",
     "packages/customization/src/ai-draft.ts", "packages/customization/src/apply.ts",
     "packages/customization/src/patch.ts", "packages/customization/src/render.ts",
