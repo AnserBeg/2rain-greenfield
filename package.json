@@ -24,6 +24,7 @@
     "agent": "corepack pnpm --filter @north-star/api agent",
     "agent:eval": "node scripts/run-with-test-lock.mjs exclusive -- node --import tsx test/agent/eval-harness.ts",
     "dev": "corepack pnpm --filter @north-star/api dev",
+    "start": "node scripts/start-production.mjs",
     "format": "prettier --check .",
     "format:write": "prettier --write .",
     "lint": "eslint .",
