@@ -15,7 +15,7 @@ Status — Slice 0, optional list columns. Base `e61e90e2`. No Critical path edi
 
 ## Gates
 
-- The focused customization tests exercise compilation, refusal of a field from another entity and a scripted assistant request.
+- Format, typecheck, lint and 26 focused tests passed locally, including compiler acceptance, refusal of another entity's field and a scripted assistant request.
 - GitHub CI runs the PostgreSQL and browser journeys for standard and custom columns, activation, live use and rollback.
 
 ```record-claim
@@ -23,7 +23,7 @@ Status — Slice 0, optional list columns. Base `e61e90e2`. No Critical path edi
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
   "base": "e61e90e2ffdca32cf92bf39f7c921ca5069b130f",
-  "head": "c987dd8b15b7dc74d8d4b68d9f9b7565a68a8668",
+  "head": "a94aa15923872622dac11947f23d3affe9952d16",
   "changedPaths": [
     "apps/web/test/browser/customize.composed-application.spec.ts",
     "packages/customization/src/ai-draft.ts",
