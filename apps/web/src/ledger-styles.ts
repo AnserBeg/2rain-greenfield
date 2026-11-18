@@ -207,7 +207,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
 
 /* ---------- lists ---------- */
 .list-views{grid-column:1/-1}
-.list-views ul{display:inline-flex;flex-wrap:wrap;margin:0;padding:0;list-style:none;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);overflow:hidden}
+.list-views ul{display:inline-flex;width:max-content;max-width:100%;flex-wrap:wrap;margin:0;padding:0;list-style:none;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);overflow:hidden}
 .list-views li+li{border-left:1px solid var(--rule-2)}
 .list-view{display:inline-flex;align-items:center;gap:6px;min-height:var(--ctl-h);padding:0 11px;color:var(--ink-2);font-size:12px;font-weight:500;text-decoration:none}
 .list-view:hover{background:var(--sunk);text-decoration:none}
@@ -337,12 +337,12 @@ html:has([data-save-boundary]){scroll-padding-bottom:120px}
 /* An order line reads product, quantity and price; its discount and tax
    wait behind its own More, its removal a quiet × (LOOK-1 round 3). */
 .draft-line-more{position:relative}
-.draft-line-more>summary{color:var(--accent-text);font-size:12px;font-weight:500;cursor:pointer;list-style:none}
+.draft-line-more>summary{display:inline-flex;align-items:center;min-height:var(--ctl-h);color:var(--accent-text);font-size:12px;font-weight:500;cursor:pointer;list-style:none}
 .draft-line-more>summary::-webkit-details-marker{display:none}
 .draft-line-more[open]>.draft-line-more__fields{position:absolute;z-index:6;right:0;top:calc(100% + 4px);display:grid;gap:8px;width:14rem;padding:10px;border:1px solid var(--rule);border-radius:6px;background:var(--sheet);box-shadow:var(--shadow-dlg);text-align:left}
 .draft-line-more__field{display:grid;gap:4px}
 .draft-line-more__field>span{color:var(--muted);font-size:11px;font-weight:500}
-.draft-line__remove{min-width:28px;color:var(--muted);font-size:16px;line-height:1;text-decoration:none}
+.draft-line__remove{display:inline-flex;align-items:center;justify-content:center;min-height:var(--ctl-h);min-width:28px;color:var(--muted);font-size:16px;line-height:1;text-decoration:none}
 .draft-line__remove:hover{color:var(--ink)}
 .panel:has([data-document-editor]) fieldset{margin:0;padding:0;border:0;background:transparent}
 .draft-header.form-fields{grid-template-columns:repeat(3,minmax(0,1fr));gap:14px 18px;margin:0}
@@ -516,9 +516,14 @@ html:has([data-save-boundary]){scroll-padding-bottom:120px}
 .surface-grid:has(.composition-rail) :is(.composition-title,.record-breadcrumb,.composition-alert,.composition-progression,.composition-record-actions,.composition-back){grid-column:1/-1}
 /* Under a line's product its SKU and unit read as values (LOOK-1 round 3):
    the labels are for screen readers, the values mono, dot-separated. */
-td[data-cell-role=primary] .composition-cell-secondary>span .composition-cell-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
-td[data-cell-role=primary] .composition-cell-secondary{font-family:var(--f-mono);font-size:11px;color:var(--muted)}
-td[data-cell-role=primary] .composition-cell-secondary>span+span::before{content:"· ";color:var(--faint)}
+td[data-cell-role=primary]>.composition-cell-secondary>span .composition-cell-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+td[data-cell-role=primary]>.composition-cell-secondary{font-family:var(--f-mono);font-size:11px;color:var(--muted)}
+td[data-cell-role=primary]>.composition-cell-secondary>span+span::before{content:"· ";color:var(--faint)}
+.composition-cell-details{margin-top:4px}
+.composition-cell-details>summary{display:inline;color:var(--muted);font-size:11px;cursor:pointer}
+.composition-cell-details[open]>.composition-cell-secondary{margin-top:4px}
+[data-task-resume][hidden],body:has(dialog.composition-task-dialog[open]) [data-task-resume]{display:none!important}
+.composition-collection[data-resolution=empty]:not([data-composition-rail]){display:none!important}
 td[data-cell-role=actions] a:not([class]){color:var(--muted);font-size:12px}
 /* One document sheet (LOOK-1 round 3): the facts, the line datasets and the
    details join into one bordered sheet divided by rules. */
@@ -608,6 +613,13 @@ td[data-cell-role=actions] a:not([class]){color:var(--muted);font-size:12px}
 .composition-task-after{display:grid;gap:4px;padding:10px 12px;border-radius:4px;background:var(--accent-soft)}
 .composition-task-after .eyebrow{margin:0;color:var(--accent-text)}
 .composition-task-after .composition-task-consequence{margin:0;padding:0;background:none}
+/* The Receive grid reads Item · Open · Receive · Unit cost (round 4): the
+   line's other figures and its derived unit stay in the markup, out of view;
+   the item keeps a readable width on one line. */
+.composition-task-rows :is(th,td).composition-task-context,.composition-task-rows :is(th,td).composition-task-derived,.composition-task-rows-review :is(th,td).composition-task-context,.composition-task-rows-review :is(th,td).composition-task-derived{display:none}
+.composition-task-rows td[data-cell-role=primary],.composition-task-rows th:first-child{min-width:220px}
+.composition-task-rows td[data-cell-role=primary] strong{white-space:nowrap}
+.composition-task-rows td[data-cell-role=primary] .composition-cell-secondary{flex-wrap:nowrap;white-space:nowrap}
 .composition-task-rows button[value=fill]{min-height:0;height:auto;padding:0;border:0;background:none;color:var(--accent-text);font-size:12px;font-weight:500;text-decoration:underline}
 .composition-task-footer:has(>a.secondary-action){display:flex;justify-content:flex-end;align-items:center;gap:8px}
 .composition-task-result{margin-bottom:14px;padding:10px 12px;border-radius:4px;background:var(--success-soft);color:var(--success)}
@@ -705,6 +717,11 @@ main{padding:14px max(16px,env(safe-area-inset-left,0px)) 40px}
 
 /* ---------- 800px and below: the compact projection ---------- */
 @media(max-width:800px){
+/* A record's title keeps the gutter; its badge sits beside it or just
+   under it, never alone across the page (round 4). */
+.surface-heading--slot:has(.eyebrow){flex-direction:row;flex-wrap:wrap;align-items:flex-end;justify-content:flex-start;gap:8px}
+.surface-heading--slot:has(.eyebrow)>.status-pill{margin-bottom:4px}
+.surface-heading--slot:has(.eyebrow) h1{font-size:24px}
 .composition-inputs:has(>.composition-task-after){grid-template-columns:minmax(0,1fr)}
 .list-controls{flex-wrap:wrap}
 .list-controls__search{flex-basis:100%}
@@ -728,7 +745,7 @@ button,.button,.primary-action,.secondary-action,.list-page-link,.action-overflo
 [data-composition-task] button,[data-composition-task] input,[data-composition-task] select,[data-composition-dataset] a{min-height:44px}
 [data-composition-dataset] td{overflow-wrap:anywhere}
 [data-composition-dataset] a{display:inline-flex;align-items:center}
-.list-views ul{display:flex;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin}
+.list-views ul{display:inline-flex;max-width:100%;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin}
 .list-view{white-space:nowrap}
 .list-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 .list-controls__search{grid-column:1/-1}
