@@ -7,6 +7,20 @@ import { createHash } from 'node:crypto';
  * field's own server-rendered action, and every answer is server HTML.
  */
 export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
+  for (const form of document.querySelectorAll('[data-customize-action]')) {
+    const progress = form.querySelector('[role="status"]');
+    if (!progress) continue;
+    form.addEventListener('submit', () => {
+      progress.hidden = false;
+      form.querySelector('button').disabled = true;
+    });
+    window.addEventListener('pageshow', () => {
+      progress.hidden = true;
+      form.querySelector('button').disabled = false;
+    });
+  }
+})();
+(() => {
   const enhanceTask = (root) => {
     const task = root.querySelector('dialog[data-composition-task]');
     const resume = root.querySelector('[data-task-resume]');

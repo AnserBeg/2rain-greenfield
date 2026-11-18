@@ -80,6 +80,8 @@ const addField = z.strictObject({
   kind: z.literal('addField'),
   entity: canonicalId,
   field: CustomFieldSchema,
+  // Stored with new patches so earlier chains reproduce their original screens.
+  screens: z.literal('record').optional(),
 });
 
 const addChoice = z.strictObject({
@@ -92,6 +94,7 @@ const arrangeLayout = z
   .strictObject({
     kind: z.literal('arrangeLayout'),
     surface: canonicalId,
+    upFront: z.array(canonicalId).max(30).optional(),
     order: z.array(canonicalId).max(16).optional(),
     hide: z.array(canonicalId).max(16).optional(),
     relabel: z
@@ -100,7 +103,7 @@ const arrangeLayout = z
       .optional(),
   })
   .superRefine((patch, context) => {
-    if (!patch.order && !patch.hide && !patch.relabel) {
+    if (!patch.order && !patch.hide && !patch.relabel && !patch.upFront) {
       context.addIssue({
         code: 'custom',
         message: 'a layout change orders, hides or relabels at least one field',
@@ -114,7 +117,9 @@ export const CustomizationPatchSchema = z.discriminatedUnion('kind', [
   addChoice,
   arrangeLayout,
 ]);
-export type CustomizationPatch = z.infer<typeof CustomizationPatchSchema>;
+type ParsedPatch = z.infer<typeof CustomizationPatchSchema>;
+export type CustomizationPatch =
+  ParsedPatch | (Extract<ParsedPatch, { kind: 'addField' }> & { legacy: true });
 export type CustomizationPatchKind = CustomizationPatch['kind'];
 export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'addRecordType',
