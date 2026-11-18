@@ -8,7 +8,9 @@ import {
   type Page,
   type Request,
 } from '@playwright/test';
-import pg from 'pg';
+import type pg from 'pg';
+
+import { parseServerTiming } from '../../../../packages/postgres-provider/src/request-work-meter.js';
 
 import {
   catalogParseCount,
@@ -44,7 +46,6 @@ export class LoopScorecard {
   constructor(
     readonly page: Page,
     private readonly database?: {
-      readonly meter: DatabaseMeter;
       readonly statistics?: DatabaseStatistics;
     },
   ) {
@@ -52,40 +53,42 @@ export class LoopScorecard {
       this.carried = false;
       if (this.current) this.current.loads += 1;
     });
-    const meter = database?.meter;
-    if (!meter) return;
+    // Each page and fragment request's database work, as the server reports
+    // it in its Server-Timing header (SPEED-1's request meter).
     page.on('request', (request) => {
       if (measured(request))
         this.started.set(request, {
-          count: meter.count(),
           cpu: process.cpuUsage(),
           at: performance.now(),
           parses: catalogParseCount(),
         });
     });
-    const finish = (request: Request) => {
+    page.on('response', (response) => {
+      const request = response.request();
       const before = this.started.get(request);
       if (!before) return;
       this.started.delete(request);
-      const after = meter.count();
+      const work = parseServerTiming(
+        response.headers()['server-timing'] ?? null,
+      );
       const cpu = process.cpuUsage(before.cpu);
       const tally: RequestTally = {
         step: this.current?.name ?? '(start)',
         page: requestLabel(request),
-        transactions: after.transactions - before.count.transactions,
-        statements: after.statements - before.count.statements,
+        transactions: work?.transactions ?? null,
+        statements: work?.statements ?? null,
+        authorization: work?.authorization ?? null,
+        repeats: work?.repeats ?? null,
         wallMs: Math.round(performance.now() - before.at),
         cpuMs: Math.round((cpu.user + cpu.system) / 1000),
         parses: parsesSince(before.parses),
       };
       this.requests.push(tally);
       if (this.current) {
-        this.current.transactions += tally.transactions;
-        this.current.statements += tally.statements;
+        this.current.transactions += tally.transactions ?? 0;
+        this.current.statements += tally.statements ?? 0;
       }
-    };
-    page.on('requestfinished', finish);
-    page.on('requestfailed', finish);
+    });
   }
 
   begin(name: string): void {
@@ -213,7 +216,7 @@ export class LoopScorecard {
         'invented values',
         'raw codes',
         'developer sentences',
-        'db xacts incl. resets',
+        'db transactions',
         'db statements',
         'pg_stat xacts incl. resets',
         'result',
@@ -226,17 +229,13 @@ export class LoopScorecard {
         row([`**${name}**`, ...tally(this.sum(steps)), 'total']),
       ),
       '',
-      'Database work: `db xacts incl. resets` and `db statements` are counted in',
-      "the test process at the application's PostgreSQL client for every page",
-      'and fragment request of the step. A statement outside BEGIN … COMMIT',
-      'counts as its own transaction, so the RESET ROLE / RESET ALL after each',
-      'transaction is counted too: this over-counts the BEGIN … COMMIT pairs',
-      '(SPEED-1 measured 148 pairs on a PO detail page this counts as ~405);',
-      "SPEED-1's request meter replaces it once merged. BEGIN, COMMIT and",
-      'ROLLBACK are not counted as statements. `pg_stat xacts incl. resets` is',
-      "the database's own count (`xact_commit + xact_rollback`) across the step,",
-      'read after its statistics settle, less the reads themselves; it counts',
-      'the resets the same way and work outside a request.',
+      'Database work: `db transactions` and `db statements` are the sums of',
+      "each page and fragment request's Server-Timing counts (SPEED-1's request",
+      'meter, which counts BEGIN … COMMIT pairs, not the RESET after each).',
+      "`pg_stat xacts incl. resets` is the database's own count",
+      '(`xact_commit + xact_rollback`) across the step, read after its',
+      'statistics settle, less the reads themselves: it counts every statement',
+      'outside a transaction, the resets included, and work outside a request.',
       '',
       ...(this.notes.size
         ? [
@@ -261,7 +260,7 @@ export class LoopScorecard {
       '## Database work per request',
       '',
       'Wall and CPU are milliseconds from the browser sending the request to',
-      "its last byte arriving; CPU is this process's (the application and the",
+      "its response arriving; CPU is this process's (the application and the",
       'test client share it). Seconds vary between runners: compare counts.',
       'Parses are the full parses the request caused (catalogParseCount in',
       'packages/runtime): the operation catalog and surface manifest are reused',
@@ -271,19 +270,23 @@ export class LoopScorecard {
       row([
         'step',
         'request',
-        'db xacts incl. resets',
+        'db transactions',
         'db statements',
+        'db authorization',
+        'db repeats',
         'wall ms',
         'cpu ms',
         'parses: operation / manifest / binding / query',
       ]),
-      row(['---', '---', '---', '---', '---', '---', '---']),
+      row(Array.from({ length: 9 }, () => '---')),
       ...this.requests.map((request) =>
         row([
           request.step,
           request.page,
-          request.transactions,
-          request.statements,
+          request.transactions ?? '—',
+          request.statements ?? '—',
+          request.authorization ?? '—',
+          request.repeats ?? '—',
           request.wallMs,
           request.cpuMs,
           `${String(request.parses.operationCatalog)} / ${String(request.parses.surfaceManifest)} / ${String(request.parses.surfaceBinding)} / ${String(request.parses.queryCatalog)}`,
@@ -357,8 +360,11 @@ export interface ScorecardStep {
 export interface RequestTally {
   readonly step: string;
   readonly page: string;
-  readonly transactions: number;
-  readonly statements: number;
+  /** The server's Server-Timing counts; null when it sent none. */
+  readonly transactions: number | null;
+  readonly statements: number | null;
+  readonly authorization: number | null;
+  readonly repeats: number | null;
   readonly wallMs: number;
   readonly cpuMs: number;
   /** Full catalog parses the request caused, by kind. */
@@ -366,7 +372,6 @@ export interface RequestTally {
 }
 
 interface RequestStart {
-  readonly count: DatabaseCount;
   readonly cpu: NodeJS.CpuUsage;
   readonly at: number;
   readonly parses: CatalogParseCount;
@@ -382,79 +387,9 @@ function parsesSince(before: CatalogParseCount): CatalogParseCount {
   };
 }
 
-export interface DatabaseCount {
-  readonly transactions: number;
-  readonly statements: number;
-}
-
-/**
- * Counts what the application sends to PostgreSQL, in this process: every
- * \`pg\` client query is a statement, and a statement outside an explicit
- * transaction is a transaction of its own. Installed by the test that starts
- * the application in-process; clients it ignores (the test's own) are not
- * counted.
- */
-export class DatabaseMeter {
-  readonly ignored = new WeakSet<object>();
-  private transactions = 0;
-  private statements = 0;
-  private readonly open = new WeakMap<object, boolean>();
-  private restore: (() => void) | undefined;
-
-  install(): void {
-    if (this.restore) return;
-    const prototype = pg.Client.prototype as unknown as {
-      query: (...parameters: unknown[]) => unknown;
-    };
-    const original = prototype.query;
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const meter = this;
-    prototype.query = function (this: object, ...parameters: unknown[]) {
-      if (!meter.ignored.has(this)) meter.observe(this, parameters[0]);
-      return original.apply(this, parameters);
-    };
-    this.restore = () => {
-      prototype.query = original;
-    };
-  }
-
-  uninstall(): void {
-    this.restore?.();
-    this.restore = undefined;
-  }
-
-  count(): DatabaseCount {
-    return { transactions: this.transactions, statements: this.statements };
-  }
-
-  private observe(client: object, query: unknown): void {
-    const text =
-      typeof query === 'string'
-        ? query
-        : typeof (query as { text?: unknown } | null)?.text === 'string'
-          ? (query as { text: string }).text
-          : '';
-    const head = text.trimStart().slice(0, 24).toUpperCase();
-    if (/^(BEGIN|START TRANSACTION)\b/u.test(head)) {
-      this.open.set(client, true);
-      this.transactions += 1;
-      return;
-    }
-    if (
-      /^(COMMIT|END|ABORT)\b/u.test(head) ||
-      /^ROLLBACK(?!\s+TO)\b/u.test(head)
-    ) {
-      this.open.set(client, false);
-      return;
-    }
-    this.statements += 1;
-    if (!this.open.get(client)) this.transactions += 1;
-  }
-}
-
 /**
  * The database's own transaction count, \`xact_commit + xact_rollback\` for
- * the test database, read on a client the meter ignores. A backend flushes
+ * the test database, read on a client of the test's own. A backend flushes
  * its counts when it goes idle, at most once a second and otherwise after
  * PostgreSQL's ten-second idle interval, so a read waits that out first.
  */
