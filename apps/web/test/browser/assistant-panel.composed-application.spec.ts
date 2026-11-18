@@ -11,9 +11,10 @@ import {
 } from '../../../../packages/operations-agent/src/index.js';
 import { withEphemeralPostgres } from '../../../../test/helpers/postgres.js';
 
-/** The first record id an `erp_query` returned earlier in the conversation. */
-function firstQueriedRecord(
+/** The nth record id the first `erp_query` returned in the conversation. */
+function queriedRecord(
   conversation: readonly ConversationEntry[],
+  index = 0,
 ): string {
   for (const entry of conversation)
     if (entry.role === 'tool')
@@ -21,10 +22,29 @@ function firstQueriedRecord(
         const content = JSON.parse(result.content) as {
           records?: { recordId: string }[];
         };
-        if (content.records?.[0]) return content.records[0].recordId;
+        if (content.records?.[index]) return content.records[index].recordId;
       }
   throw new Error('no record was queried');
 }
+const firstQueriedRecord = (conversation: readonly ConversationEntry[]) =>
+  queriedRecord(conversation);
+
+const archivePlan =
+  (index: number) => (conversation: readonly ConversationEntry[]) => ({
+    toolCalls: [
+      {
+        name: 'erp_plan',
+        input: {
+          intents: [
+            {
+              operationId: 'party_archive',
+              target: queriedRecord(conversation, index),
+            },
+          ],
+        },
+      },
+    ],
+  });
 
 /**
  * The assistant panel (AGENT-3 slices 2 and 3) with the scripted model only:
@@ -118,6 +138,13 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
       ],
     }),
     () => ({ text: 'Archived.' }),
+    // Turn 4 (X2): a typed "Okay, don't ship it" declines the plan; the
+    // words go to the assistant as the next request.
+    archivePlan(1),
+    () => ({ text: 'Understood, nothing archived.' }),
+    () => ({ text: 'Noted: nothing will be shipped.' }),
+    // Turn 6 (X3): a card left by Stop goes dead.
+    archivePlan(2),
   ]);
   await withEphemeralPostgres(
     'assistant-panel-browser',
@@ -165,6 +192,16 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
           'Panel Test Customer',
         );
 
+        // Undo the create (the latest change made at once) before anything
+        // else runs (X8: a later write could depend on it), verified: the
+        // record it made is archived, so its page no longer finds it.
+        await did.locator('[data-assistant-undo]').click();
+        await expect(did).toContainText(
+          'Undid: created party P-7701 (checked)',
+        );
+        await opened.reload();
+        await expect(opened.locator('main')).toContainText('Record not found');
+
         await say('Archive the first customer');
         const plan = panel.locator('[data-assistant-plan]');
         await expect(plan).toContainText('archives one party record');
@@ -178,14 +215,22 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
         await plan.locator('[data-assistant-yes]').click();
         await expect(reply(2)).toContainText('Archived.');
 
-        // Undo the create (the latest change made at once), verified: the
-        // record it made is archived, so its page no longer finds it.
-        await did.locator('[data-assistant-undo]').click();
-        await expect(did).toContainText(
-          'Undid: created party P-7701 (checked)',
-        );
-        await opened.reload();
-        await expect(opened.locator('main')).toContainText('Record not found');
+        // X2: words that are not a whole yes decline and are sent on.
+        await say('Archive the second customer');
+        const second = panel.locator('[data-assistant-plan]').nth(1);
+        await expect(second.locator('[data-assistant-yes]')).toBeEnabled();
+        await say("Okay, don't ship it");
+        await expect(second).toContainText('Not done.');
+        await expect(reply(4)).toContainText('Noted: nothing will be shipped.');
+
+        // X3: Stop while a card waits leaves that card dead, so it can never
+        // answer for a later plan.
+        await say('Archive the third customer');
+        const third = panel.locator('[data-assistant-plan]').nth(2);
+        await expect(third.locator('[data-assistant-yes]')).toBeEnabled();
+        await panel.locator('[data-assistant-stop]').click();
+        await expect(third.locator('[data-assistant-yes]')).toBeDisabled();
+        await expect(third.locator('[data-assistant-no]')).toBeDisabled();
       } finally {
         await application.close();
       }
