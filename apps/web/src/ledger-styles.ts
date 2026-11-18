@@ -476,6 +476,11 @@ html:has([data-save-boundary]){scroll-padding-bottom:120px}
 .surface-grid:has(.composition-record-actions) .composition-title{grid-row:title;padding-inline-end:calc(var(--ctl-h) + var(--gap))}
 .surface-grid:has(.composition-record-actions) .record-breadcrumb{grid-row:breadcrumb}
 .composition-record-actions{position:relative;grid-row:title;grid-column:1/-1;order:-2;justify-self:end;align-self:start;z-index:4}
+/* Generic records place their declared secondary commands in the title row too. */
+.surface-grid:has(.record-section-group):has(.command-bar-slot>.command-bar>.action-overflow){grid-template-rows:[breadcrumb] auto [title] auto}
+.surface-grid:has(.record-section-group):has(.command-bar-slot>.command-bar>.action-overflow) .surface-heading--slot{grid-row:title;grid-column:1/8;margin-bottom:0;align-self:start}
+.surface-grid:has(.record-section-group) .command-bar-slot>.command-bar:has(>.action-overflow){grid-row:title;grid-column:8/-1;justify-content:flex-end;align-self:start;position:relative;bottom:auto}
+.surface-grid:has(.record-section-group) .command-bar>.action-overflow{margin-left:0}
 .composition-record-actions>summary{display:inline-flex;align-items:center;min-height:var(--ctl-h);padding:0 12px;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);color:var(--ink);font-size:13px;font-weight:500;cursor:pointer;list-style:none}
 .composition-record-actions>summary::-webkit-details-marker{display:none}
 .composition-record-actions>summary{min-width:var(--ctl-h);justify-content:center;letter-spacing:.08em}
@@ -831,6 +836,9 @@ table.draft-lines.form-fields{border-top:0}
 .composition-collection tr[data-presented-row=true] td:is([data-cell-role=quantity],[data-cell-role=progress]){align-items:flex-end;text-align:right}
 .composition-collection tr[data-presented-row=true] td[data-cell-role=actions]{order:1}
 .data-panel>.data-table-wrap[data-compact=scrollTable]{margin-inline:calc(-1 * var(--pad-x));max-width:calc(100% + 2 * var(--pad-x))}
+.data-panel>.data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td:first-child{padding-inline-start:var(--pad-x)}
+.data-panel>.data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td:last-child{padding-inline-end:var(--pad-x)}
+.composition-task-rows .data-table-wrap tr[data-task-row] :is(td[data-cell-role=quantity],td[data-cell-kind=number]){text-align:right}
 .data-panel>.data-table-wrap:not([data-compact=scrollTable]) tr[data-compact-card=true] :is(td:first-child,td:last-child){padding-inline:0}
 [data-declared-list]>.data-table-wrap:not([data-compact=scrollTable]) tr[data-compact-card=true]{padding-inline:0;border-inline:0}
 .draft-lines td[data-cell-kind=number]::before{text-align:right}

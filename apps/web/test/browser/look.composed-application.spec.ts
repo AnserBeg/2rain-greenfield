@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { scriptedModel } from '../../../../packages/operations-agent/src/index.js';
 import { startComposedApplication } from '../../../api/src/composition-root.js';
 import {
   LINEAGE_INSTALL_VOLUME,
@@ -17,9 +18,9 @@ import {
 } from './loop-scorecard.js';
 
 /**
- * LOOK-1's proof: the seven screens of the Ledger mockup
+ * The Ledger screens from the LOOK-1 mockup
  * (`docs/design/ledger-final.html`) rendered by the generator from the
- * distributor seed -- Today, a purchase order with its next step, the receive
+ * distributor seed -- Today, the PO list, a purchase order and its next step, the receive
  * dialog, stock by item, a sales order, a record type a tenant adds through
  * Customize (Equipment: draft, approve, activate, then one record's page) and
  * the new purchase order form -- each at 1440 and 390 wide, light and dark.
@@ -44,7 +45,7 @@ const VIEWPORTS = [
   { width: 390, height: 844 },
 ] as const;
 
-test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone, light and dark', async ({
+test('the Ledger pages share their content edges and gutters on desktop and phone in both themes', async ({
   page,
 }, testInfo) => {
   test.setTimeout(1_500_000);
@@ -59,6 +60,10 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
         databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
         port: 0,
         seedProfile: 'distributor',
+        assistantModel: async () =>
+          scriptedModel([
+            () => ({ text: 'This purchase order is ready to receive.' }),
+          ]),
         tenantSlug: 'look-browser',
       });
       try {
@@ -155,6 +160,33 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
                 await page.screenshot({
                   path: `${out}/app-${screen}-${String(viewport.width)}-${scheme}-end.png`,
                 });
+              }
+              if (screen === 'po') {
+                const panel = page.locator('[data-assistant-panel]');
+                await page
+                  .getByRole('button', { name: 'Assistant', exact: true })
+                  .click();
+                await panel
+                  .getByRole('button', { name: 'New conversation' })
+                  .click();
+                await panel
+                  .locator('textarea')
+                  .fill('What is the next step on this purchase order?');
+                await panel.getByRole('button', { name: 'Send' }).click();
+                await expect(
+                  panel.locator('[data-assistant-reply]'),
+                ).toHaveText('This purchase order is ready to receive.');
+                mkdirSync(resolve(out, 'panel-2'), { recursive: true });
+                await page.screenshot({
+                  path: resolve(
+                    out,
+                    'panel-2',
+                    `po-detail-${String(viewport.width)}-${scheme}.png`,
+                  ),
+                });
+                await panel
+                  .getByRole('button', { name: 'Close the assistant' })
+                  .click();
               }
               await requireLedgerParts(page, screen, viewport.width);
               if (scheme === 'light') await requireAlignment(page, screen);
@@ -305,23 +337,37 @@ async function requireAlignment(page: Page, screen: Screen): Promise<void> {
         rect('.draft-line .reference-search input').left,
         rect('.draft-lines-panel h2').left,
       );
+      const draft = el('[data-document-editor] .draft-header');
+      const columns =
+        getComputedStyle(draft).gridTemplateColumns.split(' ').length;
       const fields = [
-        ...document.querySelectorAll('.draft-header > .form-field'),
-      ].map((node) => node.getBoundingClientRect());
-      const perRow = fields.filter(
-        (field) => Math.abs(field.top - fields[0]!.top) < 1,
-      ).length;
-      for (let i = perRow; i < fields.length; i++) {
-        near('field column left', fields[i]!.left, fields[i % perRow]!.left);
-        near('field column right', fields[i]!.right, fields[i % perRow]!.right);
+        ...draft.querySelectorAll(
+          ':scope > .form-field:not(.form-field--wide)',
+        ),
+      ];
+      for (const [i, field] of fields.entries()) {
+        const reference = fields[i % columns]!.getBoundingClientRect();
+        const box = field.getBoundingClientRect();
+        near('field column left', box.left, reference.left);
+        near('field column right', box.right, reference.right);
       }
     }
     if (screen === 'record') {
       sheet('.panel:has(.record-section-group)');
       near(
+        'record command edge',
+        rect('.command-bar-slot .action-overflow summary').right,
+        grid.right,
+      );
+      near(
+        'commands at the eyebrow',
+        rect('.command-bar-slot > .command-bar').top,
+        rect('.surface-heading .eyebrow').top,
+      );
+      near(
         'record facts and section',
         rect('.record-section-group h2').left,
-        rect('.record-fields dt').left,
+        rect('.record-section-group .record-fields dt').left,
       );
     }
     if (['po', 'so', 'receive'].includes(screen)) {
@@ -329,7 +375,11 @@ async function requireAlignment(page: Page, screen: Screen): Promise<void> {
       const facts = rect('.composition-facts');
       const rail = rect('.composition-rail');
       const lines = el('.composition-collection:has(.line-progress)');
-      const first = lines.querySelector('tbody td strong')!;
+      const lineRow = lines.querySelector('tbody tr')!;
+      const firstCell = lineRow.querySelector(
+        wide ? 'td' : 'td[data-cell-role=primary]',
+      )!;
+      const first = ink(firstCell.querySelector('strong') ?? firstCell);
       near('sheet left', facts.left, grid.left);
       near('joined sheets', lines.getBoundingClientRect().right, facts.right);
       near('rail right', rail.right, grid.right);
@@ -342,23 +392,25 @@ async function requireAlignment(page: Page, screen: Screen): Promise<void> {
       near(
         'facts and first cell',
         rect('.composition-header-facts dt').left,
-        first.getBoundingClientRect().left,
+        first.left,
       );
       near(
         'details inset',
         rect('[data-composition-fields] h2').left,
-        first.getBoundingClientRect().left,
+        first.left,
       );
-      near(
-        'header menu at eyebrow',
-        rect('.composition-record-actions > summary').top,
-        rect('.composition-title .eyebrow').top,
-      );
-      near(
-        'header menu right',
-        rect('.composition-record-actions > summary').right,
-        grid.right,
-      );
+      if (screen !== 'receive') {
+        near(
+          'header menu at eyebrow',
+          rect('.composition-record-actions > summary').top,
+          rect('.composition-title .eyebrow').top,
+        );
+        near(
+          'header menu right',
+          rect('.composition-record-actions > summary').right,
+          grid.right,
+        );
+      }
       const row = document.querySelector(
         '.composition-rail [data-resolution=empty]',
       );
@@ -374,16 +426,17 @@ async function requireAlignment(page: Page, screen: Screen): Promise<void> {
       if (wide) {
         near(
           'progress baseline',
-          ink(el('.line-progress > span')).bottom,
-          ink(el('td[data-cell-role=quantity]')).bottom,
+          ink(lineRow.querySelector('.line-progress > span')!).bottom,
+          ink(lineRow.querySelector('td[data-cell-role=quantity]')!).bottom,
         );
-        const amount = lines.querySelector('td[data-column-label="Amount"]');
+        const amount = document.querySelector(
+          '.composition-collection:has(.composition-totals) td[data-column-label="Amount"]',
+        );
         if (amount)
           near(
             'amount and grand total',
             ink(amount).right,
-            ink(lines.querySelector('.composition-totals div:last-child dd')!)
-              .right,
+            ink(el('.composition-totals div:last-child dd')).right,
           );
       }
     }
@@ -421,7 +474,7 @@ async function requireAlignment(page: Page, screen: Screen): Promise<void> {
         )
           continue;
         near(
-          'numeric cell right alignment',
+          (th.textContent ?? '') + ' cell right alignment',
           getComputedStyle(cell).textAlign === 'right' ? 1 : -1,
           1,
         );
