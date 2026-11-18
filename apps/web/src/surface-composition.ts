@@ -2502,6 +2502,14 @@ export async function submitCompositionAction(
   const typedPerRow = perRowInputs.filter(
     (input) => input.presentation?.kind !== 'derived',
   );
+  // A row's declared open-quantity control decides whether it is included.
+  // Auxiliary defaults, such as ordered cost, must not keep an empty line in.
+  const quantitySelectors = typedPerRow.filter(
+    (input) => input.perRow?.fillFrom,
+  );
+  const inclusionInputs = quantitySelectors.length
+    ? quantitySelectors
+    : typedPerRow;
   const rowField = (inputId: string, rowId: string) => `${inputId}@${rowId}`;
   // A Task that fills its rows from one declared column (what is still
   // open) shows that column as its figure; the rest of the line's figures
@@ -2688,8 +2696,8 @@ export async function submitCompositionAction(
         fieldErrors.set(input.inputId, 'Required.');
       collected[input.inputId] = value;
     }
-    // Each row the operator entered something on is included; a row left
-    // empty is skipped. Without inputs to type, every row is included.
+    // Without quantity selectors, preserve the ordinary all-empty-row rule.
+    // Without inputs to type, every row is included.
     const includedRows: string[] = [];
     const preparedRows: Record<string, Record<string, string>> = {};
     if (taskRowsDeclared) {
@@ -2699,8 +2707,8 @@ export async function submitCompositionAction(
         const values = entered[rowId]!;
         if (
           !row ||
-          (typedPerRow.length &&
-            typedPerRow.every((input) => !values[input.inputId]))
+          (inclusionInputs.length &&
+            inclusionInputs.every((input) => !values[input.inputId]))
         )
           continue;
         const canonical: Record<string, string> = {};
