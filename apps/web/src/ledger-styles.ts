@@ -466,7 +466,7 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 /* A form's other fields wait behind More details; the summary names them
    quietly, on one line (LOOK-1 round 2). */
 .draft-more>summary{display:flex;align-items:baseline;gap:8px;min-width:0;padding:4px 0;color:var(--ink-2);font-size:13px;font-weight:500;cursor:pointer}
-.draft-more__names{min-width:0;overflow:hidden;color:var(--muted);font-size:12px;font-weight:400;white-space:nowrap;text-overflow:ellipsis}
+.draft-more>summary>.draft-more__names{min-width:0;overflow:hidden;color:var(--muted);font-size:12px;font-weight:400;white-space:nowrap;text-overflow:ellipsis}
 .draft-more>summary::-webkit-details-marker{display:none}
 .draft-more>summary::before{content:"›";flex:none;color:var(--muted);transition:transform var(--motion-duration) var(--motion-easing)}
 .draft-more[open]>summary::before{transform:rotate(90deg)}
