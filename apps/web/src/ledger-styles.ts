@@ -130,11 +130,11 @@ button:hover,.button:hover,.secondary-action:hover{background:var(--sunk);text-d
 .primary-action,.list-page-link,.task-primary-action button,.launcher-action button,
 .composition-progression-next button,.composition-progression-next a.button,
 button[name=taskStage][value=prepare]:not(.sr-only),button[name=taskStage][value=confirm],
-button[name=draftCreate][value=submit],button[name=draftAction][value=confirm],button[name=draftAction][value=place]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+button[name=draftCreate][value=submit],button[name=draftAction][value=confirm],button[name=draftAction][value=save],button[name=draftAction][value=place]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 .primary-action:hover,.list-page-link:hover,.task-primary-action button:hover,.launcher-action button:hover,
 .composition-progression-next button:hover,.composition-progression-next a.button:hover,
 button[name=taskStage][value=prepare]:not(.sr-only):hover,button[name=taskStage][value=confirm]:hover,
-button[name=draftCreate][value=submit]:hover,button[name=draftAction][value=confirm]:hover,button[name=draftAction][value=place]:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+button[name=draftCreate][value=submit]:hover,button[name=draftAction][value=confirm]:hover,button[name=draftAction][value=save]:hover,button[name=draftAction][value=place]:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
 .link-action{min-height:30px;padding:0 4px;border:0;background:transparent;color:var(--accent-text);font-weight:500}
 .link-action:hover{background:transparent;text-decoration:underline}
 button:disabled{opacity:.55;cursor:not-allowed}
@@ -290,7 +290,14 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 /* ---------- record (generic) ---------- */
 .command-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-height:0;padding:0;border:0;background:transparent}
 .command-bar .action-overflow{margin-left:auto}
-.command-bar [data-save-boundary]{flex-basis:100%;margin:0}
+.command-bar [data-save-boundary]{flex:1 1 16rem;margin:0;color:var(--muted);font-size:12px}
+/* The editor's save bar (LOOK-1): sticky under the form, one primary action. */
+.panel:has(>.command-bar [data-save-boundary]){position:sticky;bottom:0;z-index:5;padding:10px var(--pad-x);box-shadow:var(--shadow-bar)}
+.command-bar:has([data-save-boundary]){flex-wrap:wrap;justify-content:flex-end}
+.panel:has([data-document-editor]) fieldset{margin:0;padding:0;border:0;background:transparent}
+.draft-header.form-fields{grid-template-columns:repeat(3,minmax(0,1fr));gap:14px 18px;margin:0}
+.draft-lines-panel .panel__heading{align-items:center;margin-bottom:10px}
+.draft-lines-panel .panel__heading h2{color:var(--muted);font-size:11px;font-weight:500;letter-spacing:.06em;text-transform:uppercase}
 .action-overflow{position:relative;width:max-content}
 .action-overflow summary{display:inline-flex;align-items:center;min-height:var(--ctl-h);padding:0 12px;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);color:var(--ink);font-size:13px;font-weight:500;cursor:pointer;list-style:none}
 .action-overflow summary::-webkit-details-marker{display:none}
@@ -506,6 +513,7 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 
 /* ---------- 1000px and below ---------- */
 @media(max-width:1000px){
+.draft-header.form-fields{grid-template-columns:repeat(2,minmax(0,1fr))}
 .record-fields,.key-fact-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 .launcher-tiles ul{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
@@ -535,6 +543,7 @@ main{padding:14px max(16px,env(safe-area-inset-left,0px)) 40px}
 
 /* ---------- 800px and below: the compact projection ---------- */
 @media(max-width:800px){
+.draft-header.form-fields{grid-template-columns:minmax(0,1fr)}
 .composition-collection[data-resolution=empty],.composition-collection[data-resolution=failed]{display:block}
 .sidebar a,.navigation-children a{min-height:44px}
 .surface-heading{align-items:flex-start;flex-direction:column;gap:10px}
