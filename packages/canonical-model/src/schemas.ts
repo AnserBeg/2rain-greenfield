@@ -869,7 +869,15 @@ const compositionInput = z.strictObject({
    * order's receiving location. Optional v6 key (ADR-0047 §7).
    */
   defaultFrom: z
-    .strictObject({ source: z.literal('record'), field: z.string().min(1) })
+    .discriminatedUnion('source', [
+      z.strictObject({ source: z.literal('record'), field: z.string().min(1) }),
+      z.strictObject({
+        source: z.literal('selected'),
+        field: z.string().min(1),
+        query: compositionReference('queryReference').optional(),
+        valueField: compositionReference('fieldReference').optional(),
+      }),
+    ])
     .optional(),
   /**
    * Asked once for each row of the Task's declared `rows`, such as the
