@@ -25,6 +25,15 @@ export class ReadSnapshotIntegrityError extends Error {
   override readonly name = 'ReadSnapshotIntegrityError';
 }
 
+/**
+ * One page's snapshot belongs to one tenant and environment: its policy epoch
+ * is that scope's. A read in another scope inside the same page is refused.
+ */
+export class ReadSnapshotScopeError extends Error {
+  readonly code = 'READ_SNAPSHOT_SCOPE_CHANGED' as const;
+  override readonly name = 'ReadSnapshotScopeError';
+}
+
 export async function withTrustedRequestTransaction<T>(
   pool: Pool,
   context: TrustedRequestContext,
@@ -32,10 +41,41 @@ export async function withTrustedRequestTransaction<T>(
 ): Promise<T> {
   assertTrustedRequestContext(context);
   // A transaction of its own never runs beside a held read snapshot on the
-  // same pool: the snapshot is ended first, so one request never holds two
-  // connections and a full pool cannot deadlock.
-  await currentReadSnapshot(pool)?.suspend();
+  // same pool: it takes the snapshot's turn, ends it, and runs outside it, so
+  // one request never holds two connections and a full pool cannot deadlock.
+  const snapshot = currentReadSnapshot(pool);
+  if (snapshot)
+    return snapshot.runOutside(() => runTrustedTransaction(pool, context, run));
   return runTrustedTransaction(pool, context, run);
+}
+
+/**
+ * Run `work` outside any read snapshot this request holds (SPEED-1 S1): the
+ * snapshot is ended first and `work` sees none, so every policy decision on
+ * a write path -- an invocation and everything it checks -- is read live in
+ * its own transaction. Later reads of the page open a fresh snapshot.
+ */
+export async function withoutReadSnapshot<T>(
+  work: () => Promise<T>,
+): Promise<T> {
+  const snapshot = heldSnapshots.getStore();
+  if (!snapshot) return work();
+  return snapshot.runOutside(work);
+}
+
+/**
+ * A durable write that must not split the page's snapshot (SPEED-1 S6: a
+ * denial row): inside a held snapshot it runs once the page's reads have
+ * finished -- on success and on failure -- in a transaction of its own;
+ * outside one it runs now. A failed deferred write fails the page.
+ */
+export async function afterReadsFinish(
+  pool: Pool,
+  write: () => Promise<void>,
+): Promise<void> {
+  const snapshot = currentReadSnapshot(pool);
+  if (snapshot?.defer(write)) return;
+  await write();
 }
 
 async function runTrustedTransaction<T>(
@@ -136,18 +176,23 @@ export async function withReadSnapshot<T>(
   const attempts = options.retry === false ? 1 : 2;
   for (let attempt = 1; ; attempt += 1) {
     const snapshot = new ReadSnapshot(pool);
+    let result: T;
     try {
-      const result = await heldSnapshots.run(snapshot, () =>
+      result = await heldSnapshots.run(snapshot, () =>
         work(() => snapshot.finish()),
       );
       await snapshot.finish();
-      return result;
     } catch (error) {
       await snapshot.abandon();
+      // Deferred durable writes (denials) run even when the page failed;
+      // the page's own failure is the one reported.
+      await snapshot.flushDeferred().catch(() => undefined);
       if (error instanceof ReadSnapshotPolicyChangedError && attempt < attempts)
         continue;
       throw error;
     }
+    await snapshot.flushDeferred();
+    return result;
   }
 }
 
@@ -224,8 +269,57 @@ class ReadSnapshot {
   #restored = new Set<SnapshotRoleSwitch>();
   #finished = false;
   #turn: Promise<unknown> = Promise.resolve();
+  /** The tenant and environment this page's snapshots belong to. */
+  #scope: string | null = null;
+  #deferred: (() => Promise<void>)[] = [];
 
   constructor(readonly pool: Pool) {}
+
+  /** Queue a durable write for after the reads; false once they finished. */
+  defer(write: () => Promise<void>): boolean {
+    if (this.#finished) return false;
+    this.#deferred.push(write);
+    return true;
+  }
+
+  /** Run the deferred writes, in order, outside any snapshot. */
+  async flushDeferred(): Promise<void> {
+    const writes = this.#deferred;
+    this.#deferred = [];
+    let failure: unknown;
+    for (const write of writes) {
+      try {
+        await heldSnapshots.exit(write);
+      } catch (error) {
+        failure ??= error;
+      }
+    }
+    if (failure !== undefined) throw failure;
+  }
+
+  /**
+   * End the open snapshot and run `work` outside it, holding the page's turn
+   * so no sibling read reopens one meanwhile: one connection per request.
+   */
+  async runOutside<T>(work: () => Promise<T>): Promise<T> {
+    if (joinedReads.getStore() === this)
+      throw new ReadSnapshotIntegrityError(
+        'a joined read may not open a transaction of its own',
+      );
+    return this.#exclusive(async () => {
+      await this.#end();
+      return heldSnapshots.exit(work);
+    });
+  }
+
+  #assertScope(context: TrustedRequestContext): void {
+    const scope = `${context.tenantId}/${context.environmentId}`;
+    if (this.#scope === null) this.#scope = scope;
+    else if (this.#scope !== scope)
+      throw new ReadSnapshotScopeError(
+        'a page reads one tenant and environment; another scope is refused',
+      );
+  }
 
   async join<T>(
     context: TrustedRequestContext,
@@ -235,6 +329,7 @@ class ReadSnapshot {
     ) => Promise<T>,
     role: SnapshotRoleSwitch | null,
   ): Promise<T> {
+    this.#assertScope(context);
     if (joinedReads.getStore() === this) {
       // A read nested inside a joined read: same turn, client and role.
       if (
@@ -308,15 +403,6 @@ class ReadSnapshot {
       this.#assumed.add(role);
       this.#role = role;
     }
-  }
-
-  /** End the open snapshot before a transaction of its own on this pool. */
-  async suspend(): Promise<void> {
-    if (joinedReads.getStore() === this)
-      throw new ReadSnapshotIntegrityError(
-        'a joined read may not open a transaction of its own',
-      );
-    await this.#exclusive(() => this.#end());
   }
 
   /** No more reads join; the snapshot ends and the live policy is checked. */

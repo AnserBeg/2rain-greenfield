@@ -77,6 +77,7 @@ import {
 } from '../../runtime/src/list-behavior/index.js';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 
+import { currentPolicyVersionOf } from './current-policy.js';
 import {
   withTrustedRequestRead,
   withTrustedRequestTransaction,
@@ -311,6 +312,10 @@ export class PostgresModuleRuntimeInterpreter
           this.pool,
           request.context,
           async (client) => {
+            // The anchor this transaction may write is cached evidence of a
+            // read authorized under the scope's policy version: written only
+            // while that version is still the live one (SPEED-1 S5).
+            await assertScopePolicyCurrent(client, request);
             const storage = await this.#loadPinnedStorageTarget(
               client,
               request,
@@ -1375,10 +1380,39 @@ async function assertRestorableRelations(
 }
 
 /**
+ * A company-scoped read's issued scope carries the policy version it was
+ * authorized under; refuse when the live epoch has moved since.
+ */
+export async function assertScopePolicyCurrent(
+  client: PoolClient,
+  request:
+    SemanticAggregateQueryExecutionRequest | SemanticQueryExecutionRequest,
+): Promise<void> {
+  const scope = request.legalEntityReadScope;
+  if (!scope) return;
+  const result = await client.query<{ policy_version: string }>(
+    `SELECT COALESCE(
+       (SELECT policy_version::text
+          FROM platform.current_policy_epochs
+         WHERE tenant_id = $1 AND environment_id = $2),
+       '0'
+     ) AS policy_version`,
+    [request.context.tenantId, request.context.environmentId],
+  );
+  const live = currentPolicyVersionOf(result.rows[0]?.policy_version);
+  if (live !== scope.policyVersion)
+    throw failure(
+      'MODULE_READ_SCOPE_POLICY_CHANGED',
+      'the policy changed after this read was authorized',
+      request.definition.queryId,
+    );
+}
+
+/**
  * Everything an executed read depends on besides the snapshot itself, or null
  * when some part does not serialize (then the read is never shared).
  */
-function identicalReadKey(
+export function identicalReadKey(
   request:
     SemanticAggregateQueryExecutionRequest | SemanticQueryExecutionRequest,
 ): string | null {

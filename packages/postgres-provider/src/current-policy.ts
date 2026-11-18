@@ -21,6 +21,7 @@ import {
   type EvidenceMetadataInput,
 } from '../../platform-runtime/src/trust/contracts.js';
 import {
+  afterReadsFinish,
   withTrustedRequestRead,
   withTrustedRequestTransaction,
 } from './request-context.js';
@@ -262,15 +263,26 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
 
 export class PostgresSemanticQueryDenialRecorder implements SemanticQueryDenialRecorder {
   readonly #trust: PostgresTrustService;
+  readonly #pool: Pool;
 
   constructor(
     pool: Pool,
     private readonly actorIssuer: TrustedActorEnvelopeIssuer,
   ) {
+    this.#pool = pool;
     this.#trust = new PostgresTrustService(pool);
   }
 
   async recordDenied(
+    request: Parameters<SemanticQueryDenialRecorder['recordDenied']>[0],
+  ) {
+    // Inside a page's read snapshot the denial is recorded once the page's
+    // reads finish, in its own durable transaction, so the page keeps one
+    // snapshot (SPEED-1 S6); elsewhere it is recorded now.
+    await afterReadsFinish(this.#pool, () => this.#record(request));
+  }
+
+  async #record(
     request: Parameters<SemanticQueryDenialRecorder['recordDenied']>[0],
   ) {
     const actor = await this.actorIssuer.issue(request.context);
@@ -501,6 +513,9 @@ function extractLegalEntityScope(input: ImmutableJsonValue): ScopeResult {
 function policyVersion(value: string | undefined): string {
   return `northstar.current-policy/${value ?? '0'}`;
 }
+
+/** The policy version this gateway reports for a raw epoch value. */
+export const currentPolicyVersionOf = policyVersion;
 
 function canonicalId(value: string): boolean {
   return /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+:[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(

@@ -309,6 +309,13 @@ export async function renderSurfaceRuntimeWithData(
           : editor;
       }
     } catch (error) {
+      // A policy change seen as the editor's reads finish is the page's to
+      // retry (or refuse), never an editor diagnostic (SPEED-1 S7).
+      if (
+        error instanceof Error &&
+        error.name === 'ReadSnapshotPolicyChangedError'
+      )
+        throw error;
       return renderApplicationDiagnostic(422, {
         code: queryMessageCode(error),
       });
