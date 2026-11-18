@@ -220,8 +220,20 @@ button:disabled{opacity:.55;cursor:not-allowed}
 .list-controls .form-field>label{display:grid;gap:4px;color:var(--muted);font-size:11px;font-weight:500}
 .list-summary{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:flex-end;color:var(--muted);font-size:12px}
 .list-sort{display:inline-flex;gap:4px;align-items:center;color:inherit;text-decoration:none}
+/* Declared Lists (LOOK-1 round 3): the page names the List once; the count
+   is plain; the toolbar is one line; zeros are faint; a status that is the
+   normal outcome reads as text, so only exceptions are badges. */
+[data-declared-list]>.panel__heading h2{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+.list-count{color:var(--muted);font-size:12px}
+.cell-zero{color:var(--faint)}
+.data-table-wrap td .status-pill[data-status-role=success]{height:auto;padding:0;border:0;background:transparent;color:var(--muted);font-weight:400}
+.data-table-wrap td .status-pill[data-status-role=success]::before{content:none}
+[data-declared-list] td .record-link{font-family:var(--f-mono);font-size:12px;font-weight:400}
+.list-controls{flex-wrap:nowrap;align-items:center}
+.list-controls__search>label>span,.list-controls .form-field:has(>select[name=sort],>select[name=dir])>label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+.list-controls .form-field:has(>select[name=sort],>select[name=dir]){flex:0 0 auto}
+.list-pagination a,.list-pagination button{min-height:var(--ctl-h);padding:0 10px}
 .list-pagination{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:8px;margin-top:12px}
-.list-pagination a,.list-pagination button{min-height:44px}
 .list-page-status{color:var(--muted);font-size:12px}
 .list-page-jump{display:inline-flex;gap:8px;align-items:center}
 .list-pagination .list-page-jump input{width:5rem}
@@ -639,6 +651,9 @@ main{padding:14px max(16px,env(safe-area-inset-left,0px)) 40px}
 
 /* ---------- 800px and below: the compact projection ---------- */
 @media(max-width:800px){
+.list-controls{flex-wrap:wrap}
+.list-controls__search{flex-basis:100%}
+.list-pagination a,.list-pagination button{min-height:44px}
 .draft-header.form-fields{grid-template-columns:minmax(0,1fr)}
 .composition-collection[data-resolution=empty],.composition-collection[data-resolution=failed],.data-panel[data-composition-dataset][data-resolution=empty]{display:block}
 .sidebar a,.navigation-children a{min-height:44px}
@@ -724,7 +739,8 @@ table.draft-lines.form-fields{border-top:0}
 .data-table-wrap[data-compact=scrollTable] thead{display:table-header-group;position:static;width:auto;height:auto;overflow:visible;clip:auto}
 .data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true]{display:table-row;margin:0;padding:0;border:0;background:transparent}
 .data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td{display:table-cell;height:auto;padding:var(--row-y) 12px;border-bottom:1px solid var(--rule);text-align:left}
-.data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td[data-cell-role=quantity]{text-align:right}
+.data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td[data-cell-role=quantity],.data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td[data-cell-kind=number]{text-align:right}
+.data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td{white-space:nowrap}
 .data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td::before{display:none}
 }
 `;
