@@ -353,16 +353,20 @@ export class PostgresCustomizationService {
     }
     const context = await this.#context();
     const active = await this.#active(context);
+    const patch =
+      parsed.patch.kind === 'addField'
+        ? { ...parsed.patch, screens: 'record' as const }
+        : parsed.patch;
     const compiled = await this.#compile([
       ...active.chain.map((record) => record.patch),
-      parsed.patch,
+      patch,
     ]);
     if (compiled.status !== 'compiled') return compiled;
     const { steps } = compiled;
     this.#assertReproduced(active.chain, steps);
     const step = steps.at(-1)!;
     const candidate = parseSerializedRelease(step.release);
-    const payload = new TextEncoder().encode(canonicalize(parsed.patch));
+    const payload = new TextEncoder().encode(canonicalize(patch));
     const payloadDigest = createHash('sha256').update(payload).digest('hex');
     const normalized = parseNormalizedApplicationPackageJson(
       candidate.normalizedDefinitionBytes,
@@ -1294,7 +1298,10 @@ function patchRecord(row: PatchRow): PatchRecord {
     createdAt: new Date(row.created_at).toISOString(),
     kind: parsed.patch.kind,
     parentRevisionId: row.parent_revision_id,
-    patch: parsed.patch,
+    patch:
+      parsed.patch.kind === 'addField' && !parsed.patch.screens
+        ? { ...parsed.patch, legacy: true as const }
+        : parsed.patch,
     patchId: row.patch_id,
     resultingReleaseId: row.resulting_release_id,
     resultingReleaseRoot: row.resulting_release_root,

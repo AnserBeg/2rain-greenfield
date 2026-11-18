@@ -5,11 +5,13 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 
 import type pg from 'pg';
+import { normalizeApplicationPackage } from '../../packages/canonical-model/src/index.js';
 
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import {
   applyCustomizationPatches,
   compileCustomizationCandidate,
+  customizationTargets,
   compileInSandbox,
   parseCustomizationPatch,
   parseSerializedRelease,
@@ -337,5 +339,226 @@ test('boot scope provisioning reads and writes only on the release-scope lock cl
     statements[2]!.values[7],
     existingRoot,
     'an existing scope keeps its root',
+  );
+});
+
+test('Purchase order binds the new field to both draft editors, Details and the governed write contracts', async () => {
+  const fieldId = 'northstar.app:field.custom_purchase_order_person_ordering';
+  const change = patch({
+    kind: 'addField',
+    entity: 'northstar.app:entity.purchase_order',
+    field: { label: 'Person ordering', type: 'text' },
+  });
+  const result = await compileInSandbox(sandboxRequest([change]));
+  assert.equal(
+    result.status,
+    'compiled',
+    JSON.stringify(result.status === 'compiled' ? '' : result),
+  );
+  if (result.status !== 'compiled') return;
+  const artifacts = result.steps[0]!.release.artifacts.map(
+    (artifact) =>
+      JSON.parse(
+        Buffer.from(String(artifact.canonicalBytesBase64), 'base64').toString(
+          'utf8',
+        ),
+      ) as {
+        kind: string;
+        surfaces?: {
+          surfaceId: string;
+          fieldIds: string[];
+          documentEditor?: {
+            headerFields: { fieldId: string; disclosure?: string }[];
+          };
+          composition?: { fields: { field: string; label: string }[] };
+        }[];
+        operations?: {
+          operationId: string;
+          inputContract: {
+            fields: { fieldId: string; required: boolean }[];
+            writableFieldIds: string[];
+          };
+        }[];
+      },
+  );
+  const surfaces = artifacts.find(
+    (a) => a.kind === 'surfaceManifestPayload',
+  )!.surfaces!;
+  for (const role of ['form', 'detail']) {
+    const surface = surfaces.find((s) =>
+      s.surfaceId.endsWith('.purchase_order_' + role),
+    )!;
+    assert.equal(
+      surface.documentEditor!.headerFields.find((f) => f.fieldId === fieldId)
+        ?.disclosure,
+      'more',
+      role,
+    );
+    assert.ok(surface.fieldIds.includes(fieldId), surface.surfaceId);
+    if (role === 'detail')
+      assert.equal(
+        surface.composition!.fields.find((f) => f.field === fieldId)?.label,
+        'Person ordering',
+      );
+  }
+  const ops = artifacts.find(
+    (a) => a.kind === 'operationCatalogPayload',
+  )!.operations!;
+  for (const intent of ['create', 'update']) {
+    const op = ops.find((o) =>
+      o.operationId.endsWith('.purchase_order_' + intent),
+    )!;
+    assert.ok(op.inputContract.writableFieldIds.includes(fieldId));
+    assert.equal(
+      op.inputContract.fields.find((f) => f.fieldId === fieldId)?.required,
+      false,
+    );
+  }
+});
+
+test('every offered record type exposes its field in layout choices, on the form and on the page', () => {
+  for (const local of [
+    'purchase_order',
+    'sales_order',
+    'item',
+    'party',
+    'location',
+    'custom_equipment',
+  ]) {
+    const fieldId = `northstar.app:field.${local.startsWith('custom_') ? local : 'custom_' + local}_buyer_note`;
+    const surface = (role: string) =>
+      'northstar.app:surface.' + local + '_' + role;
+    const changes = [
+      ...(local === 'custom_equipment' ? [equipment] : []),
+      patch({
+        kind: 'addField',
+        entity: 'northstar.app:entity.' + local,
+        field: { label: 'Buyer note', type: 'text' },
+      }),
+    ];
+    const model = (extra: CustomizationPatch[] = []) => {
+      const result = applyCustomizationPatches(authored, [
+        ...changes,
+        ...extra,
+      ]);
+      assert.equal(result.status, 'applied');
+
+      const normalized = normalizeApplicationPackage(result.authored);
+      return normalized as unknown as Parameters<
+        typeof customizationTargets
+      >[0];
+    };
+    const original = model();
+    const choices = customizationTargets(original);
+    const listChoice = choices.lists
+      .find((l) => l.surfaceId === surface('list'))
+      ?.columns.find((c) => c.fieldId === fieldId);
+    assert.ok(listChoice, local);
+    if (local !== 'custom_equipment') assert.equal(listChoice.hidden, true);
+    assert.equal(
+      choices.forms
+        ?.find((f) => f.surfaceId === surface('form'))
+        ?.fields.find((f) => f.fieldId === fieldId)?.upFront,
+      local === 'custom_equipment',
+    );
+    const record = original.surfaces.find(
+      (s) => s.surfaceId === surface('detail'),
+    )!;
+    const get = original.queries.find(
+      (q) => q.queryId === (record.dataSource as { targetId: string }).targetId,
+    )!;
+    assert.ok(
+      (get.selections as { field: { targetId: string } }[]).some(
+        (s) => s.field.targetId === fieldId,
+      ),
+      local,
+    );
+    if (record.composition)
+      assert.ok(
+        (record.composition as { fields: { field: string }[] }).fields.some(
+          (f) => f.field === fieldId,
+        ),
+        local,
+      );
+    const arranged = customizationTargets(
+      model([
+        patch({
+          kind: 'arrangeLayout',
+          surface: surface('form'),
+          upFront: [fieldId],
+        }),
+        patch({
+          kind: 'arrangeLayout',
+          surface: surface('list'),
+          order: [fieldId],
+        }),
+      ]),
+    );
+    assert.deepEqual(
+      arranged.lists.find((l) => l.surfaceId === surface('list'))?.columns[0],
+      { fieldId, label: 'Buyer note' },
+    );
+    assert.equal(
+      arranged.forms
+        ?.find((f) => f.surfaceId === surface('form'))
+        ?.fields.find((f) => f.fieldId === fieldId)?.upFront,
+      true,
+    );
+  }
+});
+
+test('the adopted form language accepts an optional field under More details and refuses a required or unrelated field there', () => {
+  const candidate = structuredClone(authored);
+  const party = (
+    candidate.surfaces as { surfaceId: string; form?: unknown }[]
+  ).find((s) => s.surfaceId.endsWith('.party_form'))!;
+  const field = {
+    fieldId: 'northstar.app:field.party_contact_summary',
+    label: 'Contact',
+    disclosure: 'more',
+  };
+  party.form = { kind: 'surfaceForm', schemaVersion: 'v6', fields: [field] };
+  assert.doesNotThrow(() => normalizeApplicationPackage(candidate));
+  field.fieldId = 'northstar.app:field.party_name';
+  assert.throws(
+    () => normalizeApplicationPackage(candidate),
+    (err: unknown) =>
+      JSON.stringify(err).includes('required field cannot wait'),
+  );
+  field.fieldId = 'northstar.app:field.location_name';
+  assert.throws(
+    () => normalizeApplicationPackage(candidate),
+    (err: unknown) => JSON.stringify(err).includes('visible selected field'),
+  );
+});
+
+test('an owner can publish screens for a previously live query-only field while keeping its original column', () => {
+  const change = patch({
+    kind: 'addField',
+    entity: 'northstar.app:entity.purchase_order',
+    field: { label: 'Person ordering', type: 'text' },
+  });
+  assert.equal(change.kind, 'addField');
+  const old = { ...change, legacy: true as const };
+  const form = (chain: CustomizationPatch[]) => {
+    const result = applyCustomizationPatches(authored, chain);
+    assert.equal(result.status, 'applied');
+    const normalized = normalizeApplicationPackage(result.authored);
+    return normalized as unknown as Parameters<typeof customizationTargets>[0];
+  };
+  assert.equal(customizationTargets(form([old])).forms?.length, 0);
+  const live = form([old, change]);
+  assert.equal(
+    live.fields.filter(
+      (field) =>
+        field.fieldId ===
+        'northstar.app:field.custom_purchase_order_person_ordering',
+    ).length,
+    1,
+  );
+  assert.equal(customizationTargets(live).forms?.length, 1);
+  assert.equal(
+    applyCustomizationPatches(authored, [old, change, change]).status,
+    'refused',
   );
 });

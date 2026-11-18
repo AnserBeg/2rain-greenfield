@@ -229,3 +229,36 @@ test('an arranged list becomes order, hide and relabel by field', () => {
   });
   assert.equal(parseCustomizationPatch(patch).status, 'parsed');
 });
+
+test('Customize reports activation on another page until the operation settles', async () => {
+  const service = fakeService([]);
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const activate = service.activate;
+  service.activate = async (id) => {
+    await gate;
+    return activate(id);
+  };
+  const approving = await renderCustomizeScreen(service, '/?customize', {
+    action: 'approve',
+    patchId,
+  });
+  assert.match(approving.html, /Activating your change…/u);
+  const work = renderCustomizeScreen(service, '/?customize', {
+    action: 'activate',
+    patchId,
+  });
+  try {
+    const overview = await renderCustomizeScreen(service, '/?customize', null);
+    assert.match(overview.html, /Activation is still running/u);
+  } finally {
+    finish();
+    await work;
+  }
+  assert.doesNotMatch(
+    (await renderCustomizeScreen(service, '/?customize', null)).html,
+    /Activation is still running/u,
+  );
+});

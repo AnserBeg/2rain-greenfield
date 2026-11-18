@@ -1972,6 +1972,11 @@ export type SurfaceListRowAction = NonNullable<
 export const SurfaceFormSchema = z.strictObject({
   kind: z.literal('surfaceForm'),
   schemaVersion: v6NodeVersion,
+  fields: z
+    .array(editorField.pick({ fieldId: true, label: true, disclosure: true }))
+    .min(1)
+    .max(64)
+    .optional(),
   references: z
     .array(
       z.strictObject({

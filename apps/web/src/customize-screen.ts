@@ -20,8 +20,18 @@ interface CustomizationTargets {
     readonly label: string;
     readonly options: readonly string[];
   }[];
+  readonly forms?: readonly {
+    readonly surfaceId: string;
+    readonly label: string;
+    readonly fields: readonly {
+      readonly fieldId: string;
+      readonly label: string;
+      readonly upFront: boolean;
+    }[];
+  }[];
   readonly lists: readonly {
     readonly columns: readonly {
+      readonly hidden?: true;
       readonly fieldId: string;
       readonly label: string;
     }[];
@@ -54,6 +64,7 @@ interface ActivationOutcome {
   readonly releaseRoot: string;
 }
 
+import { SURFACE_CLIENT_SCRIPT } from './surface-client.js';
 import { escapeHtml } from './html.js';
 
 /** The page shape the app server writes; the stylesheet is the runtime's own. */
@@ -88,6 +99,8 @@ export interface CustomizeScreenService {
 }
 
 const FIELD_ROWS = 6;
+// Each demo service belongs to one tenant/environment in this server.
+const activating = new WeakMap<CustomizeScreenService, number>();
 let stylesheet = '';
 const FIELD_TYPES = [
   ['text', 'Text'],
@@ -110,6 +123,11 @@ export async function renderCustomizeScreen(
   const url = new URL(requestUrl, 'http://surface-runtime.local');
   try {
     if (!submission) {
+      if (activating.has(service))
+        return page(
+          'Activating',
+          '<h1>Activating your change</h1><p role="status">Activation is still running. This takes about a minute.</p><a href="/?customize">Check progress</a>',
+        );
       const arrange = url.searchParams.get('arrange');
       return arrange
         ? page('Arrange a list', await arrangeForm(service, arrange))
@@ -135,7 +153,14 @@ export async function renderCustomizeScreen(
         );
       }
       case 'activate': {
-        await service.activate(String(submission.patchId));
+        activating.set(service, (activating.get(service) ?? 0) + 1);
+        try {
+          await service.activate(String(submission.patchId));
+        } finally {
+          const remaining = activating.get(service)! - 1;
+          if (remaining) activating.set(service, remaining);
+          else activating.delete(service);
+        }
         return page(
           'Live',
           `<p class="eyebrow">Live</p><h1>The change is live</h1><p>Every page shows it from now on. No restart was needed.</p>${await liveLinks(service)}${backLink()}`,
@@ -201,6 +226,10 @@ async function overview(service: CustomizeScreenService): Promise<string> {
     fieldForm(targets),
     choiceForm(targets),
     arrangePicker(targets),
+    ...(targets.forms ?? []).map(
+      (form) =>
+        `<form method="post"><fieldset><legend>Show fields up front on ${escapeHtml(form.label)}</legend><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="arrangeLayout"><input type="hidden" name="surface" value="${escapeHtml(form.surfaceId)}"><input type="hidden" name="formLayout" value="1">${form.fields.map((f) => `<label><input type="checkbox" name="front:${escapeHtml(f.fieldId)}"${f.upFront ? ' checked' : ''}> ${escapeHtml(f.label)}</label>`).join(' ')}<button>Draft form arrangement</button></fieldset></form>`,
+    ),
   ].join('');
 }
 
@@ -263,7 +292,7 @@ async function arrangeForm(
   const rows = list.columns
     .map((column, index) => {
       const n = String(index + 1);
-      return `<tr><td><input type="hidden" name="column_${n}_field" value="${escapeHtml(column.fieldId)}"><input type="number" min="1" max="${String(list.columns.length)}" name="column_${n}_position" value="${n}" aria-label="Position of ${escapeHtml(column.label)}"></td><td><input name="column_${n}_label" value="${escapeHtml(column.label)}" aria-label="Heading for ${escapeHtml(column.label)}"></td><td><input type="checkbox" name="column_${n}_hide" aria-label="Hide ${escapeHtml(column.label)}"></td></tr>`;
+      return `<tr><td><input type="hidden" name="column_${n}_field" value="${escapeHtml(column.fieldId)}">${column.hidden ? `<input type="hidden" name="column_${n}_available" value="1">` : ''}<input type="number" min="1" max="${String(list.columns.length)}" name="column_${n}_position" value="${n}" aria-label="Position of ${escapeHtml(column.label)}"></td><td><input name="column_${n}_label" value="${escapeHtml(column.label)}" aria-label="Heading for ${escapeHtml(column.label)}"></td><td><input type="checkbox" name="column_${n}_hide"${column.hidden ? ' checked' : ''} aria-label="Hide ${escapeHtml(column.label)}"></td></tr>`;
     })
     .join('');
   return `<p class="eyebrow">Customize</p><h1>Arrange ${escapeHtml(list.label)}</h1><form method="post" data-customize-form="arrangeColumns"><table><thead><tr><th>Position</th><th>Heading</th><th>Hide</th></tr></thead><tbody>${rows}</tbody></table><input type="hidden" name="surface" value="${escapeHtml(list.surfaceId)}"><input type="hidden" name="columns" value="${String(list.columns.length)}"><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="arrangeLayout"><p><button type="submit">Draft this arrangement</button></p></form>${backLink()}`;
@@ -306,17 +335,26 @@ export function patchFromForm(form: CustomizeScreenSubmission): unknown {
         option: String(form.option ?? '').trim(),
       };
     case 'arrangeLayout': {
+      if (form.formLayout)
+        return {
+          kind: 'arrangeLayout',
+          surface: form.surface,
+          upFront: Object.keys(form)
+            .filter((name) => name.startsWith('front:') && form[name] === 'on')
+            .map((name) => name.slice(6)),
+        };
       const count = Number(form.columns ?? 0);
       const columns = Array.from({ length: count }, (_, index) => {
         const n = String(index + 1);
         return {
           field: String(form[`column_${n}_field`] ?? ''),
           hidden: form[`column_${n}_hide`] === 'on',
+          available: form[`column_${n}_available`] === '1',
           label: String(form[`column_${n}_label`] ?? '').trim(),
           position: Number(form[`column_${n}_position`] ?? index + 1),
           index,
         };
-      });
+      }).filter((column) => !(column.available && column.hidden));
       const ordered = columns
         .slice()
         .sort(
@@ -383,7 +421,7 @@ function describe(patch: Record<string, unknown>): string {
     case 'addChoice':
       return `New choice "${String(patch.option)}"`;
     case 'arrangeLayout':
-      return 'Arranged list columns';
+      return patch.upFront ? 'Arranged form fields' : 'Arranged list columns';
     default:
       return String(patch.kind);
   }
@@ -409,6 +447,12 @@ function button(
   label: string,
   fields: Readonly<Record<string, string>>,
 ): string {
+  const progress =
+    action === 'approve'
+      ? 'Building and verifying your change… this takes about a minute.'
+      : action === 'activate'
+        ? 'Activating your change… this takes about a minute.'
+        : '';
   return `<form method="post" data-customize-action="${action}">${Object.entries(
     fields,
   )
@@ -418,7 +462,7 @@ function button(
     )
     .join(
       '',
-    )}<input type="hidden" name="action" value="${action}"><button type="submit">${escapeHtml(label)}</button></form>`;
+    )}<input type="hidden" name="action" value="${action}"><button type="submit">${escapeHtml(label)}</button>${progress ? `<p role="status" hidden>${progress}</p>` : ''}</form>`;
 }
 
 function typeSelect(name: string, label: string, textOnly: boolean): string {
@@ -452,7 +496,7 @@ function page(
   statusCode = 200,
 ): CustomizeScreenResponse {
   return Object.freeze({
-    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · 2rain</title>${stylesheet}</head><body class="standalone"><main class="standalone__card" data-customize-screen ${attributes}>${body}</main></body></html>`,
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · 2rain</title>${stylesheet}</head><body class="standalone"><main class="standalone__card" data-customize-screen ${attributes}>${body}</main>${body.includes('role="status" hidden') ? `<script>${SURFACE_CLIENT_SCRIPT}</script>` : ''}</body></html>`,
     statusCode,
   });
 }
