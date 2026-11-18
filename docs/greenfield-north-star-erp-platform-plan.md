@@ -2006,6 +2006,8 @@ does not invent identifiers.
   write". A bounded bulk job (section 9.2.4) is approved once, as one plan.
   Approval on every write trades safety for an agent nobody uses at volume.
 
+**Implementation note (2026-11-18).** The panel can run one eligible O0 update of master or draft fields immediately. Undo restores the prior values at the revision returned by that write. Every create and every multi-step plan requires a yes.
+
 ### 9.5 Launch agent journeys
 
 At launch the agent must reliably:

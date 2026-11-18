@@ -87,6 +87,54 @@ test(
             tenantSlug,
           });
           try {
+            // The model has finished, and the draft is waiting on the release lock.
+            // Stop before releasing it; neither a candidate release nor a patch may appear.
+            const stopped = new AbortController();
+            const lock = await pool.connect();
+            const counts = async () =>
+              (
+                await pool.query(
+                  'SELECT (SELECT count(*) FROM platform.customization_patches) AS patches, (SELECT count(*) FROM platform.app_package_revisions) AS revisions',
+                )
+              ).rows;
+            const before = await counts();
+            let attempt: Promise<unknown>;
+            try {
+              await lock.query('BEGIN');
+              await lock.query(
+                'SELECT pg_advisory_xact_lock(hashtextextended($1,0))',
+                [
+                  `northstar.release-scope:${runtime.identity.tenantId}:${runtime.identity.environmentId}`,
+                ],
+              );
+              attempt = opened.service.draft(
+                equipment,
+                'conversationalAi',
+                stopped.signal,
+              );
+              const until = performance.now() + 90000;
+              for (;;) {
+                const wait = await pool.query(
+                  "SELECT 1 FROM pg_locks waiter JOIN pg_locks holder USING (locktype,database,classid,objid,objsubid) WHERE holder.pid=$1 AND holder.granted AND NOT waiter.granted AND waiter.locktype='advisory'",
+                  [
+                    (await lock.query('SELECT pg_backend_pid() AS pid')).rows[0]
+                      .pid,
+                  ],
+                );
+                if (wait.rowCount) break;
+                assert.ok(
+                  performance.now() < until,
+                  'draft never reached the held release lock',
+                );
+                await new Promise((resolve) => setTimeout(resolve, 100));
+              }
+              stopped.abort();
+            } finally {
+              await lock.query('ROLLBACK');
+              lock.release();
+            }
+            await assert.rejects(attempt!, /abort/iu);
+            assert.deepEqual(await counts(), before);
             const drafted = await opened.service.draft(
               equipment,
               'declarativeEditor',

@@ -185,7 +185,7 @@ test('the turn context names a declared screen and never an unknown one', async 
     recordId: '0d9c6f2e-3a1b-4c5d-8e7f-001122334455',
   });
   assert.match(known, /Screen: the person is on "Sales order detail"/u);
-  assert.match(known, /showing record 0d9c6f2e-3a1b-4c5d-8e7f-001122334455/u);
+  assert.doesNotMatch(known, /showing record|"this".*mean that record/u);
   const unknown = await session.turnContext({
     surfaceId: `${NS}:surface.made_up`,
     recordId: 'not-a-uuid',
@@ -214,16 +214,14 @@ test('a short name stands for exactly one id or for none', () => {
   );
 });
 
-test('the risk class comes from contract facts: O0 creates and updates are reversible, everything else needs a yes', async () => {
+test('the risk class comes from contract facts: only eligible O0 updates are reversible, everything else needs a yes', async () => {
   const { operationRisk } =
     await import('../../packages/operations-agent/src/risk.js');
   const catalog = pinnedCatalog(compiledAppView());
   const risk = (local: string) =>
     operationRisk(catalog, catalog.operation(local)!);
-  assert.deepEqual(risk('party_create').inverse, {
-    kind: 'archive',
-    operationId: `${NS}:operation.party_archive`,
-  });
+  assert.equal(risk('party_create').riskClass, 'needsYes');
+  assert.equal(risk('party_create').inverse, undefined);
   assert.deepEqual(risk('sales_order_update').inverse, {
     kind: 'restorePriorValues',
     operationId: `${NS}:operation.sales_order_update`,
@@ -262,6 +260,7 @@ function guardedSession(
 ) {
   const base = compiledAppView('manager');
   const state = {
+    company: 'c',
     release: { ...base.release },
     record: {
       recordId: PARTY,
@@ -275,12 +274,27 @@ function guardedSession(
     invoked: [] as string[],
     afterInvoke: () => {},
     denyReads: false,
+    onList: undefined as
+      | undefined
+      | ((
+          id: string,
+          list: {
+            parentScope?: unknown;
+            referenceScope?: unknown;
+            cursor?: string;
+          },
+        ) => unknown),
+    onView: () => {},
   };
   const session = new OperationsAgentSession({
     runtime: {
       entry: {
-        run: (_request: unknown, work: (v: unknown) => unknown) =>
-          Promise.resolve(work({ ...base, release: { ...state.release } })),
+        run: (_request: unknown, work: (v: unknown) => unknown) => {
+          state.onView();
+          return Promise.resolve(
+            work({ ...base, release: { ...state.release } }),
+          );
+        },
       },
       operationGateway: {
         previewTaskEligibility: (_view: unknown, ids: string[]) =>
@@ -304,25 +318,47 @@ function guardedSession(
       },
       queryGateway: {
         previewEligibility: () => Promise.resolve('eligible'),
-        invoke: (_view: unknown, request: { queryId: string }) =>
+        invoke: (
+          _view: unknown,
+          request: {
+            queryId: string;
+            arguments: {
+              list?: { parentScope?: unknown; referenceScope?: unknown };
+            };
+          },
+        ) =>
           state.denyReads
             ? Promise.reject(new Error('QUERY_PERMISSION_DENIED'))
-            : request.queryId.endsWith('.party_role_list')
-              ? Promise.resolve({
-                  outcome: 'exact',
-                  records: roles.map((kind, index) => ({
-                    recordId: `0d9c6f2e-3a1b-4c5d-8e7f-00000000000${String(index)}`,
-                    revision: 1,
-                    archived: false,
-                    values: { [`${NS}:field.party_role_kind`]: kind },
-                  })),
-                  listCoverage: { hasMore: false, nextCursor: null },
-                })
-              : Promise.resolve({ outcome: 'exact', records: [state.record] }),
+            : state.onList && request.arguments.list
+              ? Promise.resolve(
+                  state.onList(request.queryId, request.arguments.list),
+                )
+              : request.queryId.endsWith('.party_role_list')
+                ? Promise.resolve({
+                    outcome: 'exact',
+                    records: roles.map((kind, index) => ({
+                      recordId: `0d9c6f2e-3a1b-4c5d-8e7f-00000000000${String(index)}`,
+                      revision: 1,
+                      archived: false,
+                      values: { [`${NS}:field.party_role_kind`]: kind },
+                    })),
+                    listCoverage: { hasMore: false, nextCursor: null },
+                  })
+                : Promise.resolve({
+                    outcome: 'exact',
+                    records: [state.record],
+                    listCoverage: {
+                      ...request.arguments.list,
+                      hasMore: false,
+                      nextCursor: null,
+                    },
+                  }),
       },
     } as never,
     personHeaders: {},
-    companyId: 'c',
+    get companyId() {
+      return state.company;
+    },
     approve,
   });
   return { session, state };
@@ -347,6 +383,18 @@ async function plannedUpdate(
   assert.equal(typeof planId, 'string', JSON.stringify(planned.content));
   return planId!;
 }
+
+test('X9: execution refuses an approved plan if its company changes', async () => {
+  const { session, state } = guardedSession();
+  const planId = await plannedUpdate(session, [{ name: 'Changed name' }]);
+  state.company = 'other';
+  const result = await session.call('erp_execute', {
+    planId,
+    executionIdempotencyKey: 'other-company',
+  });
+  assert.match(JSON.stringify(result.content), /plan changed after approval/u);
+  assert.deepEqual(state.invoked, []);
+});
 
 test('A1: a plan made on one release never runs on another; the result asks for a replan', async () => {
   const { session, state } = guardedSession();
@@ -471,39 +519,9 @@ test('a replayed execute returns the receipt; values only from a read allowed no
   );
 });
 
-test('X6: without the host option a reversible change is asked like any plan', async () => {
-  const asked: string[] = [];
-  const base = compiledAppView('manager');
-  const session = new OperationsAgentSession({
-    runtime: {
-      entry: {
-        run: (_r: unknown, work: (v: unknown) => unknown) =>
-          Promise.resolve(work(base)),
-      },
-      operationGateway: {
-        previewTaskEligibility: () => Promise.resolve('eligible'),
-      },
-      queryGateway: { previewEligibility: () => Promise.resolve('eligible') },
-    } as never,
-    personHeaders: {},
-    companyId: 'c',
-    approve: (plan) => {
-      asked.push(plan.planId);
-      return Promise.resolve(false);
-    },
-  });
-  const planned = (
-    await session.call('erp_plan', {
-      intents: [
-        {
-          operationId: 'party_create',
-          values: { number: 'P-9', name: 'Asked first' },
-        },
-      ],
-    })
-  ).content as { approval: string };
-  assert.equal(asked.length, 1);
-  assert.equal(planned.approval, 'declined by the person');
+test('X6: a single reversible update still asks when the host has not enabled Undo', async () => {
+  const { session } = guardedSession();
+  await plannedUpdate(session, [{ name: 'Changed' }]);
   assert.deepEqual(
     session.approvals.map((entry) => [entry.by, entry.riskClass]),
     [['person', 'reversible']],
@@ -581,6 +599,11 @@ test('X12: a reference position refuses any unlooked-up value, a nested argument
     await reason({ supplier_party_id: ` ${PARTY.toUpperCase()}x` }),
     /did not come from a lookup/u,
   );
+  for (const queryId of ['sales_order_get', 'item_get'])
+    await session.call('erp_query', {
+      queryId,
+      arguments: { recordId: PARTY },
+    });
   const line = (
     await session.call('erp_plan', {
       intents: [
@@ -650,13 +673,36 @@ test('X5: a status or state change, a settings update, and a create its maker ca
       values: { ...state.record.values, ...values },
     };
     await session.call('erp_query', {
-      queryId: 'party_get',
+      queryId: pinnedCatalog(compiledAppView()).operation(
+        String(intent.operationId),
+      )!.readBackQueryId,
       arguments: { recordId: PARTY },
     });
     const planned = await session.call('erp_plan', { intents: [intent] });
     assert.equal(planned.isError, false, JSON.stringify(planned.content));
     return session.approvals.at(-1)?.riskClass;
   };
+  assert.equal(
+    await classOf({
+      operationId: 'legal_entity_update',
+      target: PARTY,
+      patch: { is_default: false },
+    }),
+    'needsYes',
+  );
+  assert.equal(
+    await classOf(
+      {
+        operationId: 'stock_count_update',
+        target: PARTY,
+        patch: { state: 'reviewed', reason_code: 'review edit' },
+      },
+      {
+        [`${NS}:field.stock_count_state`]: `${NS}:option.stock_count_state_reviewed`,
+      },
+    ),
+    'needsYes',
+  );
   // Archiving the company through its status field.
   assert.equal(
     await classOf({
@@ -712,7 +758,7 @@ test('X5: a status or state change, a settings update, and a create its maker ca
 test('X4: the lines a posting will read are bound to the yes; a line changed after it refuses the step', async () => {
   const { session, state } = guardedSession();
   await session.call('erp_query', {
-    queryId: 'party_get',
+    queryId: 'goods_receipt_get',
     arguments: { recordId: PARTY },
   });
   const planned = (
@@ -941,7 +987,7 @@ test('X7: Stop before a mutation step writes nothing more; the host verifies wha
   );
 });
 
-test('X8: Undo pins the written revision, refuses after later work, refuses a referenced record, and finishes a partial undo', async () => {
+test('X8: Undo compares the written revision, and a later successful write to another record expires Undo', async () => {
   // Pinned: an edit landing between Undo's reads is not overwritten.
   {
     const { session, state } = storeSession();
@@ -979,78 +1025,37 @@ test('X8: Undo pins the written revision, refuses after later work, refuses a re
       'Person',
     );
   }
-  // Later work in the conversation blocks Undo of an earlier change.
-  {
-    const { session } = storeSession();
-    await session.call('erp_query', {
-      queryId: 'party_get',
-      arguments: { recordId: PARTY },
-    });
-    const change = await runPlan(
-      session,
-      [
-        {
-          operationId: 'party_update',
-          target: PARTY,
-          patch: { name: 'Agent' },
-        },
-      ],
-      'a',
-    );
-    await runPlan(
-      session,
-      [{ operationId: 'party_archive', target: PARTY }],
-      'b',
-    );
-    const undone = await session.undo(change.planId);
-    assert.equal(undone.outcome, 'refused');
-  }
-  // A created record another active record names is not archived.
-  {
-    const { session, state } = storeSession();
-    const created = await runPlan(
-      session,
-      [{ operationId: 'party_create', values: { number: 'P-9', name: 'New' } }],
-      'a',
-    );
-    const madeId = (created.content.steps as { recordId: string }[])[0]!
-      .recordId;
-    state.rows.set('77777777-7777-4777-8777-777777777777', {
-      recordId: '77777777-7777-4777-8777-777777777777',
-      revision: 1,
-      archived: false,
-      values: {
-        [`${NS}:field.sales_order_number`]: 'SO-1',
-        [`${NS}:field.sales_order_customer_party_id`]: madeId,
+  const { session, state } = storeSession();
+  await session.call('erp_query', {
+    queryId: 'party_get',
+    arguments: { recordId: PARTY },
+  });
+  const edit = {
+    operationId: 'party_update',
+    target: PARTY,
+    patch: { name: 'Agent' },
+  };
+  const first = await runPlan(session, [edit], 'first');
+  const other = await runPlan(
+    session,
+    [
+      {
+        operationId: 'party_create',
+        values: { number: 'P-17', name: 'Other' },
       },
-    });
-    const undone = await session.undo(created.planId);
-    assert.equal(undone.outcome, 'refused');
-    assert.match((undone as { reason: string }).reason, /now uses/u);
-    assert.equal(state.rows.get(madeId)!.archived, false);
-  }
-  // A partial Undo keeps what it did and finishes only what is left.
-  {
-    const { session, state } = storeSession();
-    const created = await runPlan(
-      session,
-      [
-        { operationId: 'party_create', values: { number: 'P-8', name: 'One' } },
-        { operationId: 'party_create', values: { number: 'P-7', name: 'Two' } },
-      ],
-      'a',
-    );
-    state.failNext.add('party_archive');
-    const first = await session.undo(created.planId);
-    assert.equal(first.outcome, 'refused');
-    assert.match((first as { reason: string }).reason, /partway/u);
-    const second = await session.undo(created.planId);
-    assert.equal(second.outcome, 'undone', JSON.stringify(second));
-    const ids = (created.content.steps as { recordId: string }[]).map(
-      (s) => s.recordId,
-    );
-    assert.ok(ids.every((id) => state.rows.get(id)!.archived));
-  }
+    ],
+    'second',
+  );
+  assert.equal(session.approvals.at(-1)?.by, 'person');
+  assert.equal((await session.undo(first.planId)).outcome, 'refused');
+  assert.equal((await session.undo(other.planId)).outcome, 'refused');
+  assert.equal(
+    state.rows.get(PARTY)?.values[`${NS}:field.party_name`],
+    'Agent',
+  );
+  const multi = await runPlan(session, [edit, edit], 'third');
+  assert.equal(session.approvals.at(-1)?.by, 'person');
+  assert.equal((await session.undo(multi.planId)).outcome, 'refused');
 });
 
 // ---------------------------------------------- end review X11 (untrusted text)
@@ -1165,4 +1170,281 @@ test("X16: the card and the Did row speak the business's words: the record's rol
     JSON.stringify([card.reasons, step.effect]),
     /party|declared|operation/iu,
   );
+});
+
+test('4/5: a release snapshots only its declared child scopes; a receipt binds every page', async () => {
+  const { session, state } = guardedSession();
+  const lists: string[] = [];
+  let revision = 1;
+  state.onList = (query, list) => {
+    lists.push(local(query));
+    const page2 = Boolean(list.cursor);
+    const many = query.endsWith('.goods_receipt_line_list');
+    const records = many
+      ? Array.from({ length: page2 ? 1 : 100 }, (_, i) => ({
+          recordId: String(page2 ? 101 : i),
+          revision: page2 ? revision : 1,
+          values: {},
+        }))
+      : [];
+    return {
+      outcome: 'exact',
+      records,
+      listCoverage: {
+        ...list,
+        hasMore: many && !page2,
+        nextCursor: many && !page2 ? 'page2' : null,
+      },
+    };
+  };
+  const lookup = (queryId: string) =>
+    session.call('erp_query', { queryId, arguments: { recordId: PARTY } });
+  state.record.values[
+    `${NS}:derived_state_field.machine.purchase_order_lifecycle`
+  ] = `${NS}:state.purchase_order_draft`;
+  await lookup('purchase_order_get');
+  const release = await session.call('erp_plan', {
+    intents: [{ operationId: 'purchase_order_release', target: PARTY }],
+  });
+  assert.ok(
+    (release.content as { planId: string }).planId,
+    JSON.stringify(release.content),
+  );
+  assert.deepEqual(lists, [
+    'purchase_order_line_list',
+    'purchase_order_approval_list',
+  ]);
+  await lookup('goods_receipt_get');
+  const post = await session.call('erp_plan', {
+    intents: [{ operationId: 'goods_receipt_post', target: PARTY }],
+  });
+  assert.ok((post.content as { planId: string }).planId);
+  revision++;
+  const result = await session.call('erp_execute', {
+    planId: (post.content as { planId: string }).planId,
+    executionIdempotencyKey: 'page2',
+  });
+  assert.match(JSON.stringify(result.content), /lines changed/u);
+  assert.deepEqual(state.invoked, []);
+});
+
+test('7: a count line reads its parent before deciding whether it may run', async () => {
+  const { session, state } = guardedSession();
+  await session.call('erp_query', {
+    queryId: 'stock_count_line_get',
+    arguments: { recordId: PARTY },
+  });
+  Object.assign(state.record, {
+    relationLabels: {
+      [`${NS}:relation.stock_count_line_session`]: { recordId: PARTY },
+    },
+  });
+  for (const [phase, risk] of [
+    ['draft', 'reversible'],
+    ['reviewed', 'needsYes'],
+  ]) {
+    state.record.values[`${NS}:field.stock_count_state`] =
+      `${NS}:option.stock_count_state_${phase}`;
+    await session.call('erp_plan', {
+      intents: [
+        {
+          operationId: 'stock_count_line_update',
+          target: PARTY,
+          patch: { counted_quantity: '12' },
+        },
+      ],
+    });
+    assert.equal(session.approvals.at(-1)?.riskClass, risk);
+  }
+});
+
+test('8/10/14: Stop at request acquisition prevents invocation, expires an unused yes, and an inverse requires a receipt', async () => {
+  const { session, state } = guardedSession();
+  const id = await plannedUpdate(session, [{ name: 'First' }]);
+  const stop = new AbortController();
+  let acquisitions = 0;
+  state.onView = () => {
+    if (++acquisitions === 2) stop.abort();
+  };
+  await session.call(
+    'erp_execute',
+    { planId: id, executionIdempotencyKey: 'stop' },
+    { signal: stop.signal },
+  );
+  assert.deepEqual(state.invoked, []);
+  const pending = new AbortController();
+  const plan = (
+    await session.call(
+      'erp_plan',
+      { intents: [{ operationId: 'party_archive', target: PARTY }] },
+      { signal: pending.signal },
+    )
+  ).content as { planId: string };
+  pending.abort();
+  assert.equal(
+    (
+      await session.call('erp_execute', {
+        planId: plan.planId,
+        executionIdempotencyKey: 'later',
+      })
+    ).isError,
+    true,
+  );
+  assert.deepEqual(state.invoked, []);
+  const changed = await plannedUpdate(session, [{ name: 'Before stop' }]);
+  const previous = new AbortController();
+  await session.call(
+    'erp_execute',
+    { planId: changed, executionIdempotencyKey: 'w' },
+    { signal: previous.signal },
+  );
+  previous.abort();
+  let n = 0;
+  state.onView = () => {
+    if (++n === 2)
+      state.release = { ...state.release, releaseId: 'changed-release' };
+  };
+  const refused = await session.undo(changed);
+  assert.equal(refused.outcome, 'refused');
+  assert.equal(session.latestChange()?.undone, false);
+  const undone = await session.undo(changed, new AbortController().signal);
+  assert.equal(undone.outcome, 'undone');
+});
+
+test('19/20/21: references are typed, codes are literal, and invalid arguments cannot reach approval', async () => {
+  const { session, state } = guardedSession();
+  const lookup = (queryId: string) =>
+    session.call('erp_query', { queryId, arguments: { recordId: PARTY } });
+  const plan = async (...intents: unknown[]) =>
+    (await session.call('erp_plan', { intents })).content;
+  await lookup('item_get');
+  const update = {
+    operationId: 'item_update',
+    target: PARTY,
+    patch: { preferred_location_id: PARTY },
+  };
+  assert.match(JSON.stringify(await plan(update)), /lookup.*location/u);
+  const make = {
+    operationId: 'item_create',
+    values: { name: 'A', sku: 'A', base_unit: 'EA' },
+  };
+  assert.match(
+    JSON.stringify(
+      await plan(make, {
+        ...update,
+        patch: { preferred_location_id: { fromStep: 1 } },
+      }),
+    ),
+    /lookup.*location/u,
+  );
+  state.record.values[`${NS}:field.inventory_transaction_actor_id`] = PARTY;
+  state.record.values[`${NS}:field.inventory_transaction_state`] =
+    `${NS}:option.inventory_transaction_state_draft`;
+  await lookup('inventory_transaction_get');
+  assert.match(JSON.stringify(await plan(update)), /lookup.*location/u);
+  const actor = await plan({
+    operationId: 'inventory_transaction_update',
+    target: PARTY,
+    patch: { actor_id: `actor/${PARTY}` },
+  });
+  assert.ok((actor as { planId: string }).planId, JSON.stringify(actor));
+  await lookup('party_get');
+  const po = (currency: string) =>
+    plan({
+      operationId: 'purchase_order_create',
+      values: {
+        supplier_party_id: PARTY,
+        order_date: '2026-11-18T00:00:00.000Z',
+        currency,
+      },
+    });
+  session.noteRequest('Create a PO for ABC Plastics');
+  for (const value of ['ABC', 'northstar.app:option.other_cad'])
+    assert.match(JSON.stringify(await po(value)), /not a currency/u);
+  const before = session.approvals.length;
+  await lookup('purchase_order_approval_get');
+  assert.match(
+    JSON.stringify(
+      await plan(make, {
+        operationId: 'purchase_order_approval_approve',
+        target: PARTY,
+        arguments: { reason: 42 },
+      }),
+    ),
+    /reason of 1-1000/u,
+  );
+  assert.equal(session.approvals.length, before);
+});
+
+test('26: a declined role write cannot turn a committed contact into a customer receipt', async () => {
+  const { session, state } = storeSession();
+  state.failNext.add('party_role_create');
+  await runPlan(
+    session,
+    [
+      {
+        operationId: 'party_create',
+        values: { number: 'P-77', name: 'New contact' },
+      },
+      {
+        operationId: 'party_role_create',
+        relations: { party: { fromStep: 1 } },
+        values: { kind: 'customer', status: 'active' },
+      },
+    ],
+    'role',
+  );
+  assert.match(session.latestChange()!.summary, /created record New contact/u);
+  assert.equal(session.latestChange()!.undoable, false);
+});
+
+test('5: a capability on a newly created order binds only the approved line receipts', async () => {
+  for (const extra of [false, true]) {
+    const { session, state } = guardedSession();
+    for (const queryId of ['party_get', 'item_get'])
+      await session.call('erp_query', {
+        queryId,
+        arguments: { recordId: PARTY },
+      });
+    state.onList = (query, list) => ({
+      outcome: 'exact',
+      records: query.endsWith('.purchase_order_line_list')
+        ? [
+            { recordId: PARTY, revision: 3 },
+            ...(extra ? [{ recordId: 'foreign', revision: 1 }] : []),
+          ]
+        : [],
+      listCoverage: { ...list, hasMore: false, nextCursor: null },
+    });
+    const run = await runPlan(
+      session,
+      [
+        {
+          operationId: 'purchase_order_create',
+          values: {
+            supplier_party_id: PARTY,
+            currency: 'CAD',
+            order_date: '2026-11-18T00:00:00.000Z',
+          },
+        },
+        {
+          operationId: 'purchase_order_line_create',
+          values: {
+            item_id: PARTY,
+            line_number: '1',
+            ordered_quantity: '1',
+            unit_price: '1',
+          },
+          relations: { order: { fromStep: 1 } },
+        },
+        { operationId: 'purchase_order_release', target: { fromStep: 1 } },
+      ],
+      'new-order',
+    );
+    assert.equal(
+      state.invoked.includes(`${NS}:operation.purchase_order_release`),
+      !extra,
+      JSON.stringify(run.content),
+    );
+  }
 });
