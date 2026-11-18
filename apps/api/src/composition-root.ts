@@ -182,8 +182,7 @@ export async function startComposedApplication(
       // Loopback-only dev and test server: each response reports its
       // database work as `Server-Timing` (SPEED-1).
       {
-        readSnapshot: (work, snapshotOptions) =>
-          runtime.readSnapshot(work, snapshotOptions),
+        readSnapshot: (work) => runtime.readSnapshot(work),
         requestWork: createRequestWorkProbe(),
       },
     );

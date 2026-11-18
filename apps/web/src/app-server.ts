@@ -30,7 +30,6 @@ import {
   submitSurfaceRuntimeFragment,
   submitSurfaceRuntimeIntent,
   SURFACE_STYLESHEET,
-  taskRecoveryNotice,
   type SurfaceRuntimeGateways,
   type SurfaceRuntimeResponse,
 } from './surface-runtime.js';
@@ -50,12 +49,12 @@ export interface SurfaceRuntimeServerOptions {
   /**
    * SPEED-1: a page read (a GET) runs all its reads in one read snapshot,
    * ended by `finishReads` or when the page is assembled; a policy change
-   * while it was held discards the page. Absent, each read is a transaction
-   * of its own.
+   * while it was held discards the page. A POST, a task's steps included,
+   * never reads in one (ADR-0071). Absent, each read is a transaction of its
+   * own.
    */
   readonly readSnapshot?: <T>(
     work: (finishReads: () => Promise<void>) => Promise<T>,
-    options?: { readonly retry?: boolean },
   ) => Promise<T>;
   readonly requestWork?: RequestWorkProbe;
 }
@@ -251,35 +250,12 @@ async function handleRequest(
     }
     const result = gateways
       ? submission
-        ? readSnapshot && taskStep(submission)
-          ? // A task's steps read in one snapshot too. Confirm's invocation
-            // runs outside it and decides live (the provider's invoke). A
-            // policy change during the step is never repeated: the step's
-            // page is sent again by a fresh GET (SPEED-1 S2).
-            await readSnapshot(
-              () =>
-                entry.run({ headers: request.headers }, (view) =>
-                  submitSurfaceRuntimeIntent(
-                    view,
-                    url.href,
-                    submission,
-                    gateways,
-                  ),
-                ),
-              { retry: false },
-            ).catch((error: unknown) => {
-              if (!policyChangedDuringStep(error)) throw error;
-              // A Confirm (or its retry) may have committed part of its
-              // work: the session's own retry is offered, nothing more.
-              return (submission.taskStage === 'confirm' ||
-                submission.taskStage === 'retry') &&
-                typeof submission.taskToken === 'string'
-                ? taskRecoveryNotice(url.href, submission)
-                : policyChangedRedirect(url);
-            })
-          : await entry.run({ headers: request.headers }, (view) =>
-              submitSurfaceRuntimeIntent(view, url.href, submission, gateways),
-            )
+        ? // Every POST, a task's steps included, reads live per read: a read
+          // snapshot is a GET's alone (ADR-0071). A step's second read of its
+          // record decides again, and a denial there is recorded.
+          await entry.run({ headers: request.headers }, (view) =>
+            submitSurfaceRuntimeIntent(view, url.href, submission, gateways),
+          )
         : readSnapshot
           ? await readSnapshot((finishReads) =>
               entry.run({ headers: request.headers }, (view) =>
@@ -342,45 +318,6 @@ export function runtimeViewRefusalMessage(
     code: 'REQUEST_RUNTIME_VIEW_REFUSED' as const,
     subject: error.code,
   };
-}
-
-/**
- * The provider's `ReadSnapshotPolicyChangedError`, known by name: the web
- * layer never imports the provider.
- */
-function policyChangedDuringStep(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    error.name === 'ReadSnapshotPolicyChangedError' &&
-    (error as { code?: unknown }).code === 'READ_SNAPSHOT_POLICY_CHANGED'
-  );
-}
-
-/**
- * The step's page again, under the policy now current. Whatever the step
- * committed stays committed (its receipt is the invocation's own); the
- * protected page is assembled afresh, or refused, by the GET.
- */
-function policyChangedRedirect(url: URL): SurfaceRuntimeResponse {
-  const page = new URL(url.href);
-  for (const name of [...page.searchParams.keys()])
-    if (name.toLowerCase().includes('task')) page.searchParams.delete(name);
-  return {
-    html: '',
-    location: `${page.pathname}${page.search}`,
-    statusCode: 303,
-  };
-}
-
-/**
- * A composition task's step: open, fill, Review or Confirm. Every other POST
- * (a form's save, a draft editor) keeps a transaction per read.
- */
-function taskStep(submission: Readonly<Record<string, string>>): boolean {
-  return (
-    typeof submission.compositionAction === 'string' &&
-    submission.compositionAction !== ''
-  );
 }
 
 function sameOriginRequest(request: IncomingMessage): boolean {

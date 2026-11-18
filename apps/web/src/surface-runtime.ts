@@ -380,6 +380,8 @@ export async function renderSurfaceRuntimeWithData(
     }
     const scopeParameterId =
       binding.query.legalEntityScope?.operand.parameterId;
+    // Today (the landing launcher) leaves out a queue the person may not
+    // open; another launcher keeps its tile, uncounted. Neither reads it.
     const tiles = await launcherTiles(
       view,
       launcher,
@@ -387,6 +389,9 @@ export async function renderSurfaceRuntimeWithData(
       company,
       gateways.queryGateway,
       gateways.clock?.() ?? new Date(),
+      null,
+      landingSurface(selection.navigation, selection.surfaces)?.surfaceId ===
+        selection.selected.surfaceId,
     );
     return rendered(() =>
       renderSelectedSurface(
@@ -1050,40 +1055,57 @@ export async function submitSurfaceRuntimeIntent(
       ),
       new URL(requestUrl, 'http://surface-runtime.local'),
     );
-    return submitCompositionAction(
+    // The step's page is rendered after the step's reads and writes, with
+    // the sidebar's queue counts read last (SPEED-1): after a Confirm they
+    // count what it committed.
+    const renderStep = (
+      html: string,
+      data: Parameters<Parameters<typeof submitCompositionAction>[5]>[1],
+      statusCode: number,
+    ) => {
+      return data
+        ? renderSelectedSurface(
+            view,
+            selection,
+            {
+              status: 'READY',
+              records: [data.record],
+              composition: data,
+              compositionTask: html,
+            },
+            null,
+            binding.operations,
+            statusCode,
+            data.scope ? [data.scope] : [],
+            workspaceContext,
+          )
+        : {
+            statusCode,
+            html: shellDocument(
+              view,
+              selection.surfaces,
+              selection.navigation,
+              selection.selected,
+              html,
+            ),
+          };
+    };
+    const step: { render?: () => ReturnType<typeof renderStep> } = {};
+    const deferred = Object.freeze({ html: '', statusCode: 0 });
+    const answered = await submitCompositionAction(
       view,
       selection.selected,
       requestUrl,
       submission,
       gateways,
-      (html, data, statusCode) =>
-        data
-          ? renderSelectedSurface(
-              view,
-              selection,
-              {
-                status: 'READY',
-                records: [data.record],
-                composition: data,
-                compositionTask: html,
-              },
-              null,
-              binding.operations,
-              statusCode,
-              data.scope ? [data.scope] : [],
-              workspaceContext,
-            )
-          : {
-              statusCode,
-              html: shellDocument(
-                view,
-                selection.surfaces,
-                selection.navigation,
-                selection.selected,
-                html,
-              ),
-            },
+      (html, data, statusCode) => {
+        step.render = () => renderStep(html, data, statusCode);
+        return deferred;
+      },
     );
+    if (answered !== deferred || !step.render) return answered;
+    await loadPostedQueueCounts(view, selection, binding, requestUrl, gateways);
+    return step.render();
   }
   if (selection.selected.documentEditor && submission.draftSession) {
     const url = new URL(requestUrl, 'http://surface-runtime.local');
@@ -1101,6 +1123,13 @@ export async function submitSurfaceRuntimeIntent(
         submission,
       );
       if (!editor) return operationDiagnostic('OPERATION_UNSUPPORTED', 422);
+      await loadPostedQueueCounts(
+        view,
+        selection,
+        binding,
+        requestUrl,
+        gateways,
+      );
       const context = await loadWorkspaceContextBar(
         view,
         selection,
@@ -1331,8 +1360,11 @@ function renderSelectedSurface(
 
   // The launcher page already read its tiles' counts; the sidebar's queues
   // show them rather than asking again.
+  // Only the landing launcher's own page (Today) answers for its queues; the
+  // Warehouse's tiles are other queues (SPEED-1).
   const queueCounts =
-    data.status === 'LAUNCHER_READY'
+    data.status === 'LAUNCHER_READY' &&
+    landingSurface(navigation, surfaces)?.surfaceId === selected.surfaceId
       ? new Map(data.launcher.tiles.map((tile) => [tile.tileId, tile.count]))
       : null;
 
@@ -2217,29 +2249,6 @@ export function renderApplicationDiagnostic(
   });
 }
 
-/**
- * SPEED-1 (fix read 3): a task's Confirm or retry stopped by a policy change
- * after some of its steps may have committed. Nothing of the record is shown
- * (the page it was assembled under is no longer current); the notice names
- * the uncertainty and offers the session's own retry, which reuses its inputs
- * and request keys and is bound to the session's actor.
- */
-export function taskRecoveryNotice(
-  requestUrl: string,
-  submission: Readonly<Record<string, string>>,
-): SurfaceRuntimeResponse {
-  const url = new URL(requestUrl, 'http://surface-runtime.local');
-  const ref: SurfaceMessageRef = { code: 'COMPOSITION_UNCERTAIN' };
-  const keep = (name: string) =>
-    typeof submission[name] === 'string'
-      ? `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(submission[name])}">`
-      : '';
-  return Object.freeze({
-    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(surfaceMessage(ref.code).sentence)} · 2rain</title><link rel="stylesheet" href="${FONT_STYLESHEET_HREF}"><link rel="stylesheet" href="${SURFACE_STYLESHEET.href}"></head><body class="standalone"><main class="standalone__card" role="alert" data-task-recovery ${messageAttributes(ref)}>${messageBody(ref, 'Task', 'h1')}<form method="post" action="${escapeHtml(url.pathname + url.search)}">${keep('taskToken')}${keep('compositionAction')}<button name="taskStage" value="retry">Retry same request</button></form></main></body></html>`,
-    statusCode: 409,
-  });
-}
-
 function diagnosticDocument(
   view: RuntimeViewContract.RequestRuntimeView,
   ref: SurfaceMessageRef,
@@ -2359,6 +2368,9 @@ function renderWorkQueues(
         (candidate) => candidate.surfaceId === tile.surface,
       );
       if (!surface) return '';
+      // Read counts list the queues the person may open (SPEED-1): one left
+      // out is not shown.
+      if (counts && !counts.has(tile.tileId)) return '';
       const href = scopedSurfaceHref(view, surface, workspaceContext, {
         ...(tile.view ? { view: tile.view } : {}),
       });
@@ -2822,7 +2834,9 @@ export const SURFACE_STYLESHEET = Object.freeze({
  * reads (inside its read snapshot) and under current policy, keyed by tile.
  * LOOK-1's `renderWorkQueues` shows them; the launcher page shows its own
  * tiles' counts instead (the same reads, answered once). A count that could
- * not be read is `null` and shows no chip, never a guess.
+ * not be read is `null` and shows no chip, never a guess. The map lists only
+ * the queues the person may open: a tile current policy would refuse, asked
+ * without reading or recording a denial, is absent and not shown.
  */
 const QUEUE_COUNT_LIMIT = 3;
 
@@ -2844,24 +2858,56 @@ async function loadQueueCounts(
   // day's queues. Without one, a page shows none.
   const launcher = landingSurface(navigation, surfaces)?.launcher;
   if (!launcher) return;
-  const first = [...launcher.tiles]
-    .sort(
-      (left, right) =>
-        left.orderKey - right.orderKey ||
-        (left.tileId < right.tileId ? -1 : left.tileId > right.tileId ? 1 : 0),
-    )
-    .slice(0, QUEUE_COUNT_LIMIT);
+  const counted = new Set(
+    [...launcher.tiles]
+      .sort(
+        (left, right) =>
+          left.orderKey - right.orderKey ||
+          (left.tileId < right.tileId
+            ? -1
+            : left.tileId > right.tileId
+              ? 1
+              : 0),
+      )
+      .slice(0, QUEUE_COUNT_LIMIT)
+      .map((tile) => tile.tileId),
+  );
+  // Every tile is checked for eligibility (without a read or a denial); the
+  // first three are counted. A tile left out is a queue not shown.
   const tiles = await launcherTiles(
     view,
-    { ...launcher, tiles: first },
+    launcher,
     surfaces,
     company,
     queryGateway,
     now,
+    counted,
   );
   loadedQueueCounts.set(
     view,
     new Map(tiles.map((tile) => [tile.tileId, tile.count])),
+  );
+}
+
+/** The queue counts of a posted step's page, in the company its URL names. */
+async function loadPostedQueueCounts(
+  view: RuntimeViewContract.RequestRuntimeView,
+  selection: SelectedSurface,
+  binding: CompiledSurfaceDataBinding,
+  requestUrl: string,
+  gateways: SurfaceRuntimeGateways,
+): Promise<void> {
+  const scope = legalEntitySelectionForSurface(
+    binding,
+    new URL(requestUrl, 'http://surface-runtime.local'),
+  );
+  await loadQueueCounts(
+    view,
+    selection.navigation,
+    selection.surfaces,
+    gateways.queryGateway,
+    scope.length === 1 ? scope[0]! : null,
+    gateways.clock?.() ?? new Date(),
   );
 }
 
