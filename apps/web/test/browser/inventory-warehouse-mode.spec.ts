@@ -200,7 +200,7 @@ test('the period lock closes a period and reopens it, each reviewed and confirme
   await pick(page, 'Line 1 product', 'OFF-100', 'Field notebook');
   await pick(page, 'Line 1 to location', 'Calgary', 'Calgary warehouse');
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('1');
-  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page).toHaveURL(/inventory_transaction_detail/u);
   const documentUrl = page.url();
   await post(page);
@@ -270,6 +270,9 @@ async function openInventory(page: Page, destination: string) {
   // A group already open on this page stays open; clicking it would close it.
   if (!(await link.isVisible()))
     await inventory.getByText('Stock', { exact: true }).click();
+  // An occasional destination waits under the group's Other (LOOK-1 round 2).
+  if (!(await link.isVisible()))
+    await inventory.locator('.navigation-more > summary').first().click();
   await link.click();
 }
 

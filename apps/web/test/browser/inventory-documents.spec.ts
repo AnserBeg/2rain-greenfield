@@ -190,6 +190,9 @@ async function openNew(page: Page) {
   // A group already open on this page stays open; clicking it would close it.
   if (!(await transactions.isVisible()))
     await inventory.getByText('Stock', { exact: true }).click();
+  // An occasional destination waits under the group's Other (LOOK-1 round 2).
+  if (!(await transactions.isVisible()))
+    await inventory.locator('.navigation-more > summary').first().click();
   await transactions.click();
   await expect(
     page.getByRole('heading', { level: 1, name: 'Inventory transactions' }),
@@ -247,7 +250,7 @@ interface Saved {
  * of its own.
  */
 async function saveDraft(page: Page): Promise<Saved> {
-  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page).toHaveURL(/inventory_transaction_detail/u);
   const title = page.getByRole('heading', { level: 1, name: /^STK-\d{6}$/u });
   await expect(title).toBeVisible();

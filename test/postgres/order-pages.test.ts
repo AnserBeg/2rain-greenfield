@@ -293,7 +293,7 @@ test(
         (truck.started.html.match(/data-task-row="/gu) ?? []).length,
         3,
       );
-      assert.match(truck.done.html, /Receive lines with actual cost: done/u);
+      assert.match(truck.done.html, /Receive: done/u);
       // One receipt of this order, posted, with exactly the two lines entered.
       const receipts = (
         await stored(fixture, 'goods_receipt', {

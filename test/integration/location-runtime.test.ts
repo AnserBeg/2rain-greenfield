@@ -120,7 +120,9 @@ test('Location serves one tenant-scoped location DTO to query, agent, surface, a
   assert.equal(surface.statusCode, 200);
   assert.match(surface.html, /North Warehouse/);
   assert.match(surface.html, /LOC-100/);
-  assert.match(surface.html, /northstar\.location:option\.warehouse/);
+  // The type reads as its label, never its option id (LOOK-1 round 2).
+  assert.match(surface.html, /<dd>Warehouse<\/dd>/);
+  assert.doesNotMatch(surface.html, /northstar\.location:option\.warehouse/);
   assert.doesNotMatch(surface.html, /north_star_module|storageClass|physical/i);
 
   const tenantBRead = await queryGateway.invoke(viewB, {

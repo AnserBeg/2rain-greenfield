@@ -1003,7 +1003,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
       },
       {
         datasetId: shipments,
-        presentation: { selection: 'none', compact: 'scrollTable' },
+        presentation: { rail: true, selection: 'none', compact: 'scrollTable' },
         label: 'Shipments and packing',
         orderKey: 30,
         query: q('shipment_list'),
@@ -1033,7 +1033,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
       {
         // Receivables (owner ruling C): the order's invoices and balances.
         datasetId: invoices,
-        presentation: { selection: 'none', compact: 'scrollTable' },
+        presentation: { rail: true, selection: 'none', compact: 'scrollTable' },
         label: 'Invoices',
         orderKey: 40,
         query: q('customer_invoice_list'),
@@ -1368,7 +1368,7 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         // Every shipped quantity not yet invoiced, at the order's own prices,
         // discounts and frozen rates; the first invoice carries the charges.
         actionId: id('action', 'invoice_shipped'),
-        label: 'Invoice shipped quantities',
+        label: 'Invoice',
         description:
           'Invoices every shipped quantity not yet invoiced at this order’s prices and tax rates. The first invoice also carries the freight and other fee.',
         orderKey: 35,

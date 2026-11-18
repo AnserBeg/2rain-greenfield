@@ -23,8 +23,8 @@ table{font:inherit;color:inherit;border-collapse:collapse}
 button,input,select,textarea{font:inherit;color:inherit}
 a{color:var(--accent-text);text-decoration:none}
 a:hover{text-decoration:underline;text-underline-offset:2px}
-a:not(.skip-link):not(.sidebar a):focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:not(.navigation-group > summary):focus-visible,[tabindex]:not(a):focus-visible{outline:2px solid var(--focus-ring-surface);outline-offset:2px}
-.sidebar a:focus-visible,.navigation-group > summary:focus-visible{outline:2px solid var(--focus-ring-rail);outline-offset:2px}
+a:not(.skip-link):not(.sidebar a):focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:not(.navigation-group > summary):not(.navigation-more > summary):focus-visible,[tabindex]:not(a):focus-visible{outline:2px solid var(--focus-ring-surface);outline-offset:2px}
+.sidebar a:focus-visible,.navigation-group > summary:focus-visible,.navigation-more > summary:focus-visible{outline:2px solid var(--focus-ring-rail);outline-offset:2px}
 .list-page-link:focus-visible{outline:2px solid var(--focus-ring-surface);outline-offset:2px}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 code,.surface-id,.diagnostic-release,.mono{font-family:var(--f-mono);font-size:.92em;letter-spacing:-.01em}
@@ -45,7 +45,7 @@ th,td,dd,output,.cell-numeric,code{font-variant-numeric:tabular-nums}
 .brand small{font-size:11px;color:var(--muted)}
 .sidebar nav ul{display:grid;gap:1px;margin:0;padding:0;list-style:none}
 .work-queues{padding-bottom:6px;border-bottom:1px solid var(--rule)}
-.sidebar a,.navigation-group>summary{display:flex;align-items:center;gap:9px;min-height:var(--nav-h);padding:4px 8px;border:1px solid transparent;border-radius:4px;color:var(--ink-2);font-size:13px;font-weight:400;line-height:1.25;text-decoration:none;cursor:pointer;list-style:none}
+.sidebar a,.navigation-group>summary,.navigation-more>summary{display:flex;align-items:center;gap:9px;min-height:var(--nav-h);padding:4px 8px;border:1px solid transparent;border-radius:4px;color:var(--ink-2);font-size:13px;font-weight:400;line-height:1.25;text-decoration:none;cursor:pointer;list-style:none}
 .sidebar a:hover{background:var(--hover);text-decoration:none}
 .sidebar a[aria-current=page]{background:var(--sheet);border-color:var(--rule);color:var(--ink);font-weight:500}
 .nav-icon{display:grid;place-items:center;flex:none;width:16px;height:16px;color:var(--muted)}
@@ -63,6 +63,11 @@ th,td,dd,output,.cell-numeric,code{font-variant-numeric:tabular-nums}
 .navigation-children .navigation-group>summary .nav-icon,.navigation-children .navigation-group>summary .nav-text small{display:none}
 .nav-text{display:grid;min-width:0}
 .navigation-children{display:grid;gap:1px;margin:0!important;padding:0!important}
+/* A group's occasional destinations wait behind its own quiet More. */
+.navigation-more>summary{color:var(--muted)}
+.navigation-more>summary::-webkit-details-marker{display:none}
+.navigation-more>summary:hover{background:var(--hover)}
+.navigation-more[open]>summary{color:var(--ink-2)}
 .side-foot{margin-top:auto;display:grid;gap:8px;padding:10px 6px 0;border-top:1px solid var(--rule)}
 .side-foot[data-shell-region]{grid-template-columns:auto minmax(0,1fr);align-items:center;gap:6px 9px}
 .side-foot__who{display:grid;line-height:1.25;font-size:12px;color:var(--ink)}
@@ -113,15 +118,15 @@ main{width:100%;max-width:var(--page-max);padding:var(--gap) var(--gutter) 56px}
 /* ---------- status badges: one shape per kind, so they read apart without colour ---------- */
 .surface-status span,.status-pill{display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 8px;border:1px solid var(--rule-2);border-radius:999px;background:transparent;color:var(--muted);font-size:11px;font-weight:500;line-height:1;white-space:nowrap}
 .surface-status span::before,.status-pill::before{content:"";flex:none;width:7px;height:7px;border:1.5px solid currentColor;border-radius:50%}
-.surface-status [data-status-role],.status-pill[data-status-role]{border-color:transparent}
-.surface-status [data-status-role=inProgress],.status-pill[data-status-role=inProgress]{background:var(--status-inprogress-ground);color:var(--status-inprogress-ink)}
-.surface-status [data-status-role=inProgress]::before,.status-pill[data-status-role=inProgress]::before{background:linear-gradient(90deg,currentColor 50%,transparent 50%)}
-.surface-status [data-status-role=success],.status-pill[data-status-role=success]{background:var(--status-success-ground);color:var(--status-success-ink)}
-.surface-status [data-status-role=success]::before,.status-pill[data-status-role=success]::before{width:4px;height:8px;border:solid currentColor;border-width:0 1.7px 1.7px 0;border-radius:0;transform:translate(1px,-1px) rotate(45deg);margin-right:1px}
-.surface-status [data-status-role=attention],.status-pill[data-status-role=attention]{background:var(--status-attention-ground);color:var(--status-attention-ink)}
-.surface-status [data-status-role=attention]::before,.status-pill[data-status-role=attention]::before{border:0;background:currentColor}
-.surface-status [data-status-role=blocked],.status-pill[data-status-role=blocked]{background:var(--status-blocked-ground);color:var(--status-blocked-ink)}
-.surface-status [data-status-role=blocked]::before,.status-pill[data-status-role=blocked]::before{border:0;border-radius:1.5px;background:currentColor}
+.surface-status [data-status-role],.status-pill[data-status-role],.composition-business-status[data-status-role]{border-color:transparent}
+.surface-status [data-status-role=inProgress],.status-pill[data-status-role=inProgress],.composition-business-status[data-status-role=inProgress]{background:var(--status-inprogress-ground);color:var(--status-inprogress-ink)}
+.surface-status [data-status-role=inProgress]::before,.status-pill[data-status-role=inProgress]::before,.composition-business-status[data-status-role=inProgress]::before{background:linear-gradient(90deg,currentColor 50%,transparent 50%)}
+.surface-status [data-status-role=success],.status-pill[data-status-role=success],.composition-business-status[data-status-role=success]{background:var(--status-success-ground);color:var(--status-success-ink)}
+.surface-status [data-status-role=success]::before,.status-pill[data-status-role=success]::before,.composition-business-status[data-status-role=success]::before{width:4px;height:8px;border:solid currentColor;border-width:0 1.7px 1.7px 0;border-radius:0;transform:translate(1px,-1px) rotate(45deg);margin-right:1px}
+.surface-status [data-status-role=attention],.status-pill[data-status-role=attention],.composition-business-status[data-status-role=attention]{background:var(--status-attention-ground);color:var(--status-attention-ink)}
+.surface-status [data-status-role=attention]::before,.status-pill[data-status-role=attention]::before,.composition-business-status[data-status-role=attention]::before{border:0;background:currentColor}
+.surface-status [data-status-role=blocked],.status-pill[data-status-role=blocked],.composition-business-status[data-status-role=blocked]{background:var(--status-blocked-ground);color:var(--status-blocked-ink)}
+.surface-status [data-status-role=blocked]::before,.status-pill[data-status-role=blocked]::before,.composition-business-status[data-status-role=blocked]::before{border:0;border-radius:1.5px;background:currentColor}
 
 /* ---------- buttons: one primary per screen; everything else secondary or ghost ---------- */
 button,.button,.primary-action,.secondary-action,.list-page-link{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:var(--ctl-h);padding:0 12px;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);color:var(--ink);font-size:13px;font-weight:500;line-height:1.2;white-space:nowrap;text-decoration:none;cursor:pointer}
@@ -210,6 +215,9 @@ button:disabled{opacity:.55;cursor:not-allowed}
 .bulk-bar{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px var(--pad-x);border:1px solid var(--rule);border-radius:4px;background:var(--sheet)}
 .bulk-bar p{margin-top:2px;color:var(--muted);font-size:12px}
 .bulk-ready{display:none}
+/* The bar shows only once a row is chosen: no instructions before (LOOK-1). */
+.bulk-bar{display:none}
+body:has(.record-selector__input:checked) .bulk-bar{display:flex}
 body:has(.record-selector__input:checked) .bulk-empty{display:none}
 body:has(.record-selector__input:checked) .bulk-ready{display:inline-flex}
 
@@ -327,6 +335,12 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .launcher-scan__field input{min-height:44px;padding:0 12px;font-family:var(--f-mono);font-size:14px}
 .launcher-scan__message{margin-top:10px}
 .launcher-action button{min-height:44px}
+/* The find box's button sits beside it, at the input's line (LOOK-1 round 2). */
+@media(min-width:801px){
+.surface-grid:has(.launcher-scan):has(.launcher-action) .launcher-scan{grid-column:1/12}
+.surface-grid:has(.launcher-scan):has(.launcher-action) .launcher-action{grid-column:12/13;align-self:end;margin-bottom:calc(var(--row-y) + 9px)}
+.surface-grid:has(.launcher-scan):has(.launcher-action) .launcher-action button{width:100%}
+}
 
 /* ---------- composition (documents) ---------- */
 .composition-header{display:contents}
@@ -436,6 +450,55 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .data-panel [data-message] p{margin:3px 0 0;font-size:12px}
 .composition-collection details>summary{color:var(--muted);font-size:12px;cursor:pointer}
 .composition-section-links summary{display:flex;align-items:center;min-height:var(--ctl-h);cursor:pointer}
+
+/* ---------- the record's right rail (LOOK-1 round 2) ----------
+   Linked documents declared for the rail sit beside the sheet: on a wide
+   screen the page is two columns, the title and the stepper span both, and
+   the rail's sections fill the right column from the top (dense flow). */
+@media(min-width:1181px){
+.surface-grid:has(.composition-rail){grid-template-columns:minmax(0,1fr) var(--rail-w);grid-auto-flow:row dense;align-items:start;row-gap:0}
+.surface-grid:has(.composition-rail)>.surface-slot>*,.surface-grid:has(.composition-rail) .composition-header>*{grid-column:1;margin-bottom:var(--gap)}
+.surface-grid:has(.composition-rail) :is(.composition-title,.record-breadcrumb,.composition-alert,.composition-progression,.composition-record-actions,.composition-back){grid-column:1/-1}
+/* The rail is one column: it spans the sheet's rows, whose gap is each
+   item's margin, so the rows it spans past the sheet's last add nothing. */
+.surface-grid:has(.composition-rail) .composition-rail{grid-column:2;grid-row:span 12}
+/* Beside the rail the sheet is narrower: its tables keep every column in
+   view with tighter cells and headers that may wrap. */
+.surface-grid:has(.composition-rail) .composition-collection .data-table-wrap :is(th,td){padding-inline:8px}
+.surface-grid:has(.composition-rail) .composition-collection .data-table-wrap th{white-space:normal}
+}
+/* A form's other fields wait behind More details; the summary names them
+   quietly, on one line (LOOK-1 round 2). */
+.draft-more>summary{display:flex;align-items:baseline;gap:8px;min-width:0;padding:4px 0;color:var(--ink-2);font-size:13px;font-weight:500;cursor:pointer}
+.draft-more>summary>.draft-more__names{min-width:0;overflow:hidden;color:var(--muted);font-size:12px;font-weight:400;white-space:nowrap;text-overflow:ellipsis}
+.draft-more>summary::-webkit-details-marker{display:none}
+.draft-more>summary::before{content:"›";flex:none;color:var(--muted);transition:transform var(--motion-duration) var(--motion-easing)}
+.draft-more[open]>summary::before{transform:rotate(90deg)}
+.draft-more[open]>summary{margin-bottom:10px}
+.composition-rail{grid-column:1/-1;display:grid;gap:var(--gap);align-content:start;min-width:0}
+[data-composition-rail]{padding:calc(var(--row-y) + 4px) var(--pad-x) calc(var(--row-y) + 6px)}
+[data-composition-rail]>.data-table-wrap{margin:8px calc(-1 * var(--pad-x)) calc(-1 * (var(--row-y) + 6px));border-top:1px solid var(--rule)}
+[data-composition-rail] .composition-collection-heading details{display:none}
+/* In the rail a row reads as a card: its name, then label and value pairs. */
+[data-composition-rail] table,[data-composition-rail] tbody{display:block}
+[data-composition-rail] thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+[data-composition-rail] tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:9px var(--pad-x);border-bottom:1px solid var(--rule)}
+[data-composition-rail] tr:last-child{border-bottom:0}
+[data-composition-rail] td{display:block;padding:0!important;border:0!important;white-space:normal!important;font-size:12px;background:transparent!important}
+[data-composition-rail] td:first-child{grid-column:1/-1;font-family:var(--f-mono);font-size:12px;color:var(--accent-text)}
+[data-composition-rail] td:not(:first-child)::before{content:attr(data-column-label) " ";color:var(--muted)}
+[data-composition-rail] td[data-cell-role=actions]::before{content:none}
+[data-composition-rail][data-resolution=empty]{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+/* An empty section is one quiet line beside its heading. */
+.composition-collection[data-resolution=empty] :is([data-message-detail],[data-message-next-action]),.data-panel[data-composition-dataset][data-resolution=empty] :is([data-message-detail],[data-message-next-action]){display:none}
+/* Identity and revision stay reachable, out of the reading path. */
+.composition-technical{grid-column:1/-1;order:90;padding:0;border:0;background:transparent}
+.composition-technical>summary{display:inline-flex;min-height:24px;color:var(--faint);font-size:11px;font-weight:400;cursor:pointer}
+.composition-technical[open]{padding:10px var(--pad-x);border:1px solid var(--rule);background:var(--sheet)}
+.composition-record-actions .command-bar>*{width:100%;justify-content:flex-start}
+.composition-record-actions .primary-action{background:var(--sheet);border-color:var(--rule-2);color:var(--ink)}
+.composition-record-actions .command-bar form{display:block;width:100%}
+.composition-record-actions .command-bar form button,.composition-record-actions .action-overflow summary{width:100%;justify-content:flex-start}
 
 /* ---------- task dialog: the dialog with its impact line ---------- */
 .composition-task-resume{grid-column:1/-1;display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:10px var(--pad-x);border:1px solid var(--rule);border-radius:4px;background:var(--sheet)}
@@ -549,7 +612,7 @@ main{padding:14px max(16px,env(safe-area-inset-left,0px)) 40px}
 .navigation-group:not([open])::details-content{content-visibility:hidden}
 .navigation-tree>li>.navigation-group>summary,.navigation-children .navigation-group>summary{min-height:44px;margin-top:0;padding:4px 8px;color:var(--ink-2);font-size:13px;font-weight:500;cursor:pointer}
 .navigation-group>summary .nav-arrow{display:block}
-.sidebar a,.navigation-children a{min-height:44px}
+.sidebar a,.navigation-children a,.navigation-more>summary{min-height:44px}
 }
 
 /* ---------- 800px and below: the compact projection ---------- */

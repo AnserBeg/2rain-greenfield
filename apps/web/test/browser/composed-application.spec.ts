@@ -407,6 +407,7 @@ composedTest.describe('focus ring coverage', () => {
       assert.ok(result.measurementsRead > 0);
       assert.deepEqual(result.violations, [
         'FOCUS_RING_CONTRAST:.navigation-group > summary:focus-visible',
+        'FOCUS_RING_CONTRAST:.navigation-more > summary:focus-visible',
         'FOCUS_RING_CONTRAST:.sidebar a:focus-visible',
       ]);
     },
@@ -573,6 +574,7 @@ composedTest.describe('focus ring coverage', () => {
       );
       assert.deepEqual(result.violations, [
         'FOCUS_RING_CONTRAST:.navigation-group > summary:focus-visible',
+        'FOCUS_RING_CONTRAST:.navigation-more > summary:focus-visible',
         'FOCUS_RING_CONTRAST:.sidebar a:focus-visible',
       ]);
     },
@@ -1023,6 +1025,9 @@ async function inventoryNavigationJourney(
   // bills (PAYABLES) beside its orders, Inventory Catalog's Buying worklist and
   // Stock by item (REPLENISHMENT) and Catalog its tax codes (ruling B) and
   // price lists (SALES-EXTRAS) beside its items.
+  // LOOK-1 round 2: Today heads the work queues, so Stock does not repeat
+  // it; Stock lists its day-to-day destinations and keeps the occasional ones
+  // under its own Other; Companies are Contacts and Inventory value is Stock.
   await expect(navigation.locator('a > span:nth-child(2)')).toHaveText([
     'Counter sales',
     'Invoices',
@@ -1032,19 +1037,18 @@ async function inventoryNavigationJourney(
     'Purchase orders',
     'Purchasing settings',
     'Bills',
-    'Stock movements',
-    'Period locks',
-    'Today',
-    'Inventory transactions',
+    'Inventory value',
     'Warehouse',
     'Buying worklist',
     'Stock by item',
-    'Companies',
     'Stock by location',
+    'Stock movements',
+    'Period locks',
+    'Inventory transactions',
     'Stock counts',
+    'Companies',
     'Customers and suppliers',
     'Contact roles',
-    'Inventory value',
     'Items',
     'Price lists',
     'Tax codes',
@@ -1111,15 +1115,14 @@ async function inventoryNavigationJourney(
   await inventoryNavigation.getByText('Stock', { exact: true }).click();
   await expect(inventoryNavigation.locator('a > span:nth-child(2)')).toHaveText(
     [
-      'Stock movements',
-      'Period locks',
-      'Today',
-      'Inventory transactions',
+      'Inventory value',
       'Warehouse',
       'Buying worklist',
       'Stock by item',
-      'Companies',
       'Stock by location',
+      'Stock movements',
+      'Period locks',
+      'Inventory transactions',
       'Stock counts',
     ],
   );
@@ -1156,7 +1159,8 @@ async function inventoryNavigationJourney(
     '[data-platform-slot="list:bulkActions"] [data-bulk-selection-form]',
   );
   const firstSelector = firstResponsiveRow.getByRole('checkbox');
-  await expect(bulkBar.getByText('Select records to begin')).toBeVisible();
+  // No instructions before a choice (LOOK-1): the bar appears with one.
+  await expect(bulkBar).toBeHidden();
   await expect(bulkBar.getByText('Selection ready')).toBeHidden();
   await firstSelector.check();
   await expect(bulkBar.getByText('Selection ready')).toBeVisible();
@@ -1189,7 +1193,6 @@ async function inventoryNavigationJourney(
   for (const destination of [
     'Stock movements',
     'Period locks',
-    'Today',
     'Inventory transactions',
     'Warehouse',
     // REPLENISHMENT: Catalog's items, read in the company like the rest.
@@ -1197,9 +1200,14 @@ async function inventoryNavigationJourney(
     'Stock by item',
     'Stock counts',
   ]) {
-    await inventoryNavigation
-      .getByRole('link', { name: destination, exact: true })
-      .click();
+    const link = inventoryNavigation.getByRole('link', {
+      name: destination,
+      exact: true,
+    });
+    // An occasional destination waits under Stock's Other (LOOK-1 round 2).
+    if (!(await link.isVisible()))
+      await inventoryNavigation.locator('.navigation-more > summary').click();
+    await link.click();
     await expect(
       page.getByRole('heading', { level: 1, name: destination }),
     ).toBeVisible();
@@ -1701,9 +1709,16 @@ async function scopedInventoryJourney(
       has: page.locator(':scope > summary').getByText('Stock', { exact: true }),
     });
   await scopedInventoryNavigation.getByText('Stock', { exact: true }).click();
-  await scopedInventoryNavigation
-    .getByRole('link', { name: 'Inventory transactions', exact: true })
-    .click();
+  const transactionsLink = scopedInventoryNavigation.getByRole('link', {
+    name: 'Inventory transactions',
+    exact: true,
+  });
+  // An occasional destination waits under the group's Other (LOOK-1 round 2).
+  if (!(await transactionsLink.isVisible()))
+    await scopedInventoryNavigation
+      .locator('.navigation-more > summary')
+      .click();
+  await transactionsLink.click();
   expect(
     new URL(page.url()).searchParams.get(
       inventoryScopeParameters.transactionList,
@@ -1731,11 +1746,13 @@ async function scopedInventoryJourney(
   expect(new URL(page.url()).searchParams.get('record')).toBe(
     browserTransactionId,
   );
+  // The record's identity is on its page, in its quiet technical details
+  // (LOOK-1 round 2).
   await expect(
     page.locator('main code', {
       hasText: `${browserTransactionId.slice(0, 8)}…${browserTransactionId.slice(-4)}`,
     }),
-  ).toBeVisible();
+  ).toBeAttached();
   await expect(page.locator('form.capability-command')).toHaveCount(0);
   // THE THIRD INVERSION, and it is the one ADR-0054 predicted rather than found.
   //
@@ -1783,11 +1800,13 @@ async function scopedInventoryJourney(
     );
   }
   await page.goto(inventoryTransactionDetailUrl);
+  // The record's identity is on its page, in its quiet technical details
+  // (LOOK-1 round 2).
   await expect(
     page.locator('main code', {
       hasText: `${browserTransactionId.slice(0, 8)}…${browserTransactionId.slice(-4)}`,
     }),
-  ).toBeVisible();
+  ).toBeAttached();
   const inventoryTransactionFormUrl = scopedSurfaceUrl(
     baseUrl,
     'inventory_transaction_form',
@@ -2218,7 +2237,7 @@ async function createScopedStockDocument(
     'Calgary warehouse',
   );
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('1');
-  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page).toHaveURL(/inventory_transaction_detail/u);
   // Saved, not refused. The save opens the document's own page, whose
   // sections render: its line, and Posted movements stating its declared
@@ -2427,7 +2446,7 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
     ).toBeVisible();
     await expect(editPage.locator('form#draft-editor-form')).toHaveCount(1);
     await expect(
-      editPage.getByRole('button', { name: 'Save draft', exact: true }),
+      editPage.getByRole('button', { name: 'Save', exact: true }),
     ).toBeVisible();
 
     // The line's own operation-addressed edit form, captured while the
@@ -2515,9 +2534,7 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
 
     // The editor opened before posting is a second UI boundary: its Save
     // draft is refused against the posted document rather than applied.
-    await editPage
-      .getByRole('button', { name: 'Save draft', exact: true })
-      .click();
+    await editPage.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(
       editPage.locator('[data-diagnostic-code="DRAFT_EDITOR_LOCKED"]'),
     ).toHaveCount(1);

@@ -149,10 +149,15 @@ function addRecordType(
   const id = (kind: string, suffix = '') =>
     `${namespace}:${kind}.${local}${suffix}`;
   const entityId = id('entity');
+  // The one menu group every record type a tenant adds is listed under
+  // (LOOK-1 round 2): declared by the expansion, never guessed from ids. Its
+  // local id has a hyphen, which no record type's slug can produce.
+  const groupId = `${namespace}:module.${TENANT_LOCAL_PREFIX}record-types`;
   if (
     list(authored, 'entities').some((entity) => entity.entityId === entityId) ||
     list(authored, 'modules').some(
       (module) =>
+        module.moduleId !== groupId &&
         String(module.label).toLowerCase() === label.trim().toLowerCase(),
     )
   ) {
@@ -191,6 +196,20 @@ function addRecordType(
     targetId,
   });
 
+  if (!list(authored, 'modules').some((module) => module.moduleId === groupId))
+    push(authored, 'modules', {
+      composition: {
+        kind: 'compositionSeam',
+        schemaVersion: version,
+        status: 'unsupported',
+      },
+      kind: 'moduleDefinition',
+      label: 'Custom',
+      moduleId: groupId,
+      orderKey,
+      ownerPackageId: packageId,
+      schemaVersion: version,
+    });
   push(authored, 'modules', {
     composition: {
       kind: 'compositionSeam',
@@ -200,7 +219,7 @@ function addRecordType(
     kind: 'moduleDefinition',
     label: label.trim(),
     moduleId,
-    orderKey,
+    orderKey: orderKey + 5,
     ownerPackageId: packageId,
     schemaVersion: version,
   });
@@ -341,6 +360,8 @@ function addRecordType(
     surfaceRole,
     workspace: {
       membership: surfaceRole === 'list' ? 'operational' : 'contextual',
+      // Listed in the Custom group, not a group of its own (LOOK-1 round 2).
+      ...(surfaceRole === 'list' ? { navigationModuleId: groupId } : {}),
     },
     ...(surfaceRole === 'list'
       ? {

@@ -77,7 +77,7 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
     const invoiceTask = () =>
       // The order's next step is one button (LOOP-1).
       page.getByRole('button', {
-        name: /^(?:Next action: )?Invoice shipped quantities$/u,
+        name: /^(?:Next action: )?Invoice$/u,
       });
 
     await page.goto(orderUrl);
@@ -87,7 +87,7 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
 
     // Invoice the shipped 2 EA: 2 × 12.50, untaxed, no charges.
     await invoiceTask().click();
-    await finish('Invoice shipped quantities');
+    await finish('Invoice');
     await page.goto(orderUrl);
     const invoices = dataset('order_invoices').locator('tbody tr');
     await expect(invoices).toHaveCount(1);
@@ -182,6 +182,8 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
     await capture(page, testInfo, 'invoice-settled-in-part');
 
     // The printable invoice (ruling G): its line and every figure.
+    // The print link is in Record actions (LOOK-1 round 2).
+    await openRecordActions(page);
     await page.getByRole('link', { name: 'Print invoice' }).click();
     const totals = page.locator('.print-totals');
     for (const [label, value] of [
@@ -204,7 +206,7 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
     await page.goto(orderUrl);
     await reserveAndShip(null, '1');
     await invoiceTask().click();
-    await finish('Invoice shipped quantities');
+    await finish('Invoice');
     await page.goto(orderUrl);
     await expect(invoices).toHaveCount(2);
     const second = invoices.filter({ hasText: '12.5' });
@@ -301,4 +303,11 @@ async function fixture(run: (url: string) => Promise<void>) {
     child.kill('SIGTERM');
     await exited;
   }
+}
+
+/** Opens the document's Record actions menu (LOOK-1 round 2), if closed. */
+async function openRecordActions(target: Page): Promise<void> {
+  const menu = target.locator('details.composition-record-actions');
+  if ((await menu.count()) && (await menu.getAttribute('open')) === null)
+    await menu.locator(':scope > summary').click();
 }

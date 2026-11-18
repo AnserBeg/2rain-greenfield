@@ -72,6 +72,13 @@ test('inventory shipment relief and order/invoice margin remain at shipment cost
         ).toContainText('CAD 40.00');
       else await expect(details).toContainText('CAD 60.00');
     }
+    // The print link is in Record actions (LOOK-1 round 2).
+    const recordActions = page.locator('details.composition-record-actions');
+    if (
+      (await recordActions.count()) &&
+      (await recordActions.getAttribute('open')) === null
+    )
+      await recordActions.locator(':scope > summary').click();
     await page
       .getByRole('link', { name: 'Print invoice', exact: true })
       .click();

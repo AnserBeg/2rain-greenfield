@@ -195,8 +195,15 @@ test('Equipment drafts deterministically into a new table and a plain diff namin
     .map((change) => change.subjectId);
   assert.ok(subjects.length > 0);
   for (const subject of subjects) {
+    // Besides its own constructs, the first record type adds the one Custom
+    // menu group every record type is listed under (LOOK-1 round 2).
+    if (subject === 'northstar.app:module.custom_record-types') continue;
     assert.match(subject, /:[a-z_-]+\.custom_equipment/u, subject);
   }
+  assert.ok(
+    subjects.includes('northstar.app:module.custom_record-types'),
+    'the first record type declares the Custom group',
+  );
   assert.ok(
     step.diff.changes.every(
       (change) =>

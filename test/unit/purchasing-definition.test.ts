@@ -2092,6 +2092,9 @@ test('PURCHASING-PARITY: an order line shows what is still to arrive, and its op
       ['purchasing_billed', 'billed'],
       ['purchasing_to_bill', 'to_bill'],
       ['purchasing_match', 'match_status'],
+      // One lines table (LOOK-1 round 2): each line's amount and tax too.
+      ['purchasing_amount', 'line_amount'],
+      ['purchasing_tax', 'line_tax'],
     ],
   );
   // Offered on a released order's line with something still open; the new

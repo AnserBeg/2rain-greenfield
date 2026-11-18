@@ -6012,7 +6012,7 @@ test('order entry F3: read loss between partial-save submissions redacts acknowl
     assert.doesNotMatch(first.html, /DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD/);
     if (pending === 'cleared') {
       assert.match(first.html, /1 save operations committed/);
-      assert.match(first.html, />Save draft<\/button>/);
+      assert.match(first.html, />Save<\/button>/);
     } else {
       assert.match(first.html, /data-save-progress/);
       assert.match(first.html, />Retry save<\/button>/);
@@ -6459,7 +6459,7 @@ test('order entry values: exact decimals, bounded before any write, choice set a
         const header = refused.slots!.keyFacts!;
         assert.match(
           header,
-          /<label class="form-field__label" for="([^"]+)">Order date \(UTC\) \*<\/label><input(?=[^>]*\sid="\1")(?=[^>]*\saria-describedby="\1-error")/,
+          /<label class="form-field__label" for="([^"]+)">Order date \*<\/label><input(?=[^>]*\sid="\1")(?=[^>]*\saria-describedby="\1-error")/,
         );
         assert.match(header, /<small class="field-error" id="[^"]+-error">/);
         assert.doesNotMatch(
@@ -10737,10 +10737,7 @@ test('ORDER-PARITY: a truck receipt receives several lines in one receipt, fille
     page.html,
     new RegExp(`data-next-action="${regexpText(action)}"`, 'u'),
   );
-  assert.match(
-    page.html,
-    /aria-label="Next action: Receive lines with actual cost"/u,
-  );
+  assert.match(page.html, /aria-label="Next action: Receive"/u);
 
   const start = await submitSurfaceRuntimeIntent(
     f.view,
@@ -10845,7 +10842,7 @@ test('ORDER-PARITY: a truck receipt receives several lines in one receipt, fille
   assert.match(failed.html, /COMPOSITION_UNCERTAIN/u);
   f.executor.failAt = 0;
   const done = await post({ taskStage: 'retry' });
-  assert.match(done.html, /Receive lines with actual cost: done/u);
+  assert.match(done.html, /Receive: done/u);
   const calls = f.executor.calls;
   assert.deepEqual(
     calls.map((call) => call.definition.operationId),
@@ -11347,10 +11344,7 @@ test('ORDER-PARITY: an order page names the lines it is short and shows where it
       'u',
     ),
   );
-  assert.match(
-    confirmed.html,
-    /aria-label="Next action: Invoice shipped quantities"/u,
-  );
+  assert.match(confirmed.html, /aria-label="Next action: Invoice"/u);
   // A cancelled order stopped at every step, with nothing next -- even with
   // figures that would otherwise offer a step.
   const cancelled = seedOrder('cancelled');
@@ -11723,7 +11717,7 @@ test('PAYABLES: the order lists its bills and offers billing only while the orde
     assert.equal(
       html.includes(`value="${ns}:action.bill_received"`),
       offered,
-      `Bill received quantities with ${String(toBill)} to bill`,
+      `Bill with ${String(toBill)} to bill`,
     );
     // Its progression's Billing step needs attention exactly then; a
     // released order is otherwise billing as it receives.
@@ -11735,7 +11729,9 @@ test('PAYABLES: the order lists its bills and offers billing only while the orde
         'complete',
         'complete',
         'current',
-        offered ? 'attention' : 'current',
+        // Exactly one current step (LOOK-1 round 2): a later reached step
+        // that needs nothing waits as upcoming.
+        offered ? 'attention' : 'upcoming',
         'upcoming',
       ],
       `the order's progression with ${String(toBill)} to bill`,

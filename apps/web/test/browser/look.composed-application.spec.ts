@@ -21,11 +21,11 @@ import {
  * (`docs/design/ledger-final.html`) rendered by the generator from the
  * distributor seed -- Today, a purchase order with its next step, the receive
  * dialog, stock by item, a sales order, a record type a tenant adds through
- * Customize (Equipment: draft, approve, activate) and the new purchase order
- * form -- each at 1440 and 390 wide, light and dark. Every screen must show
- * the Ledger's generic parts and no raw code. When LOOK_EVIDENCE_OUT names a
- * directory the screenshots are written there (the committed evidence);
- * otherwise beside the test's results.
+ * Customize (Equipment: draft, approve, activate, then one record's page) and
+ * the new purchase order form -- each at 1440 and 390 wide, light and dark.
+ * Every screen must show the Ledger's generic parts and no raw code. When
+ * LOOK_EVIDENCE_OUT names a directory the screenshots are written there (the
+ * committed evidence); otherwise beside the test's results.
  */
 const SCREENS = [
   'home',
@@ -120,6 +120,12 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
                   page.locator('[data-composition-task]'),
                 ).toBeVisible();
               }
+              // The record's menu entry -- Custom › Equipment -- in view.
+              if (screen === 'record' && viewport.width > 900)
+                await page
+                  .getByRole('navigation', { name: 'Release navigation' })
+                  .getByRole('link', { name: 'Equipment', exact: true })
+                  .scrollIntoViewIfNeeded();
               // The picture first, so a red still leaves the evidence.
               await page.screenshot({
                 path: `${out}/app-${screen}-${String(viewport.width)}-${scheme}.png`,
@@ -127,14 +133,10 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
               });
               await requireLedgerParts(page, screen, viewport.width);
               const text = await page.locator('body').innerText();
-              // The order's two date-time inputs keep "(UTC)" (ruling).
+              // The order date is a date (round 2): no "(UTC)" anywhere.
+              expect.soft(rawCodes(text), `${screen} raw codes`).toEqual([]);
               expect
-                .soft(
-                  rawCodes(text).filter(
-                    (code) => !(screen === 'new-po' && code === '(UTC)'),
-                  ),
-                  `${screen} raw codes`,
-                )
+                .soft(machineText(text), `${screen} canonical ids or instants`)
                 .toEqual([]);
               expect
                 .soft(
@@ -153,6 +155,18 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
     LINEAGE_INSTALL_VOLUME,
   );
 });
+
+/**
+ * Text only a machine writes (round 2): a canonical id such as an option's,
+ * or a raw instant -- what a value shown by its field kind never is.
+ */
+function machineText(text: string): readonly string[] {
+  return [
+    ...text.matchAll(
+      /\b[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+:[a-z]+\.[a-z0-9_-]+|\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/gu,
+    ),
+  ].map((match) => match[0]);
+}
 
 /** The Ledger's generic parts each screen must show. */
 async function requireLedgerParts(
@@ -183,7 +197,7 @@ async function requireLedgerParts(
       '.composition-header-facts',
       '.line-progress',
     ],
-    record: ['main h1', '[data-platform-slot]'],
+    record: ['main h1', '[data-platform-slot="record:keyFacts"]'],
     'new-po': [
       '[data-document-editor]',
       '.draft-lines',
@@ -242,5 +256,42 @@ async function addEquipment(page: Page, base: string): Promise<string> {
   );
   await page.getByRole('link', { name: 'Open Equipment' }).click();
   await expect(page.locator('main')).toContainText('Equipment');
+  const list = page.url();
+  // The record type is listed under the Custom group its customization
+  // declares, by its own name (round 2).
+  await expect(
+    page
+      .getByRole('navigation', { name: 'Release navigation' })
+      .locator('details.navigation-group')
+      .filter({
+        has: page.locator(':scope > summary .nav-group-label', {
+          hasText: /^Custom$/u,
+        }),
+      })
+      .getByRole('link', { name: 'Equipment', exact: true }),
+  ).toBeAttached();
+  // One piece of equipment, entered as an office person would (round 2):
+  // its record page is the screen.
+  await page.getByRole('link', { name: 'New', exact: true }).click();
+  await page.getByLabel('Name', { exact: true }).fill('Forklift FL-07');
+  await page
+    .getByLabel('Serial number', { exact: true })
+    .fill('TY-8FGU25-40117');
+  await page.getByLabel('Purchase date', { exact: true }).fill('2025-03-14');
+  await page
+    .getByRole('combobox', { exact: true, name: 'Status' })
+    .selectOption({ label: 'In service' });
+  await page
+    .locator('[data-platform-slot="record:commandBar"]')
+    .getByRole('button', { name: 'Save' })
+    .click();
+  await expect(page.getByRole('status')).toContainText('complete');
+  await page.goto(list);
+  await page
+    .locator('tbody tr')
+    .first()
+    .getByRole('link', { name: 'Forklift FL-07' })
+    .click();
+  await expect(page.locator('main h1')).toContainText('Forklift FL-07');
   return page.url();
 }

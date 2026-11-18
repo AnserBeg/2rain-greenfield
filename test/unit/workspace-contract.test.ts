@@ -874,7 +874,7 @@ test('PAYABLES: the purchase order lists its bills and offers billing only when 
   const action = (value: Composition, local: string) =>
     value.actions.find((entry) => entry.actionId === `${ns}:action.${local}`)!;
   const billing = action(order, 'bill_received');
-  assert.equal(billing.label, 'Bill received quantities');
+  assert.equal(billing.label, 'Bill');
   // Offered while the order states received quantity not yet billed and a
   // total -- the read model counts each line's own positive part, as the
   // post bills.
@@ -1413,7 +1413,9 @@ test('INVENTORY-PARITY: a stock document is entered like an order, with a choice
     normalizeApplicationPackage(structuredClone(source)),
   );
   // The shipped declaration: the form and the record page carry the editor,
-  // the List is an operational destination of its own, named for documents.
+  // the List is a navigation destination of its own, named for documents --
+  // an occasional one, under Stock's Other (LOOK-1 round 2; membership is
+  // placement only, ADR-0030).
   assert.deepEqual(
     surface(source, 'inventory_transaction_detail').documentEditor,
     editor(source),
@@ -1424,7 +1426,7 @@ test('INVENTORY-PARITY: a stock document is entered like an order, with a choice
   );
   assert.equal(
     surface(source, 'inventory_transaction_list').workspace.membership,
-    'operational',
+    'setup',
   );
   assert.equal(
     surface(source, 'inventory_transaction_list').workspace.entry

@@ -430,17 +430,28 @@ test('compiled navigation stays flat within budget and groups mounted modules be
     (entry) => entry.navigationId === 'northstar.app:module.inventory',
   );
   assert.ok(inventory);
+  // LOOK-1 round 2: Inventory value is listed with Stock and Companies with
+  // Contacts, each by its declared navigation module.
   assert.deepEqual(navigationSurfaceIds([inventory]), [
     'northstar.app:surface.inventory_movement_list',
     'northstar.app:surface.inventory_period_lock_list',
     'northstar.app:surface.inventory_today',
     'northstar.app:surface.inventory_transaction_list',
+    'northstar.app:surface.inventory_value_list',
     'northstar.app:surface.inventory_warehouse',
     'northstar.app:surface.item_buying_list',
     'northstar.app:surface.item_stock_list',
-    'northstar.app:surface.legal_entity_list',
     'northstar.app:surface.posted_stock_balance_list',
     'northstar.app:surface.stock_count_list',
+  ]);
+  const contacts = grouped.entries.find(
+    (entry) => entry.navigationId === 'northstar.app:module.party',
+  );
+  assert.ok(contacts);
+  assert.deepEqual(navigationSurfaceIds([contacts]), [
+    'northstar.app:surface.legal_entity_list',
+    'northstar.app:surface.party_list',
+    'northstar.app:surface.party_role_list',
   ]);
   // Counter sales (SALES-EXTRAS) is a worklist beside Sales orders, listed
   // in Sales with the invoices (INTEGRATION, decision I-M8(a)).
