@@ -1,6 +1,6 @@
 # LOOK-1 — every screen in the Ledger look the owner chose
 
-Status: in progress. Mechanical (no Critical path). Base `08260fc2`. Stops, each ruled 2026-11-17: line progress carrier
+Status: frozen at `b89acf31` (CI green at `399de34d`, run 44262425699). Mechanical (no Critical path). Base `08260fc2`. Stops, each ruled 2026-11-17: line progress carrier
 (option A), icon carrier (option A); plain names for the setup lists required (slice 4). Queue counts on every page: SPEED-1.
 
 ## Claims
@@ -20,36 +20,28 @@ Status: in progress. Mechanical (no Critical path). Base `08260fc2`. Stops, each
 
 ## Decisions (one line each)
 
-- Specs live in `apps/web/test/browser/` (the charter's `test/browser/**`).
-- Stylesheet moved out of `surface-runtime.ts` into `ledger-styles.ts`; `styles` and `surfaceRuntimeStyles()` stay the
-  seam SPEED-1's asset route serves. No inline `style=` added (SPEED-1's sidebar rule wins on merge).
-- Fonts: IBM Plex first in each stack, system fallbacks until SPEED-1 slice 5 serves them same-origin.
-- Desktop groups stay `<details>` (every nav test contract holds) with `::details-content{content-visibility:visible}`.
-- The diagnostic code stays visible on diagnostics (its detail asks the reader to pass it on); hidden elsewhere.
-- Next-step sentence: "{open} of {total} {item} still open." / "{units} units still open on {lines} lines." from the
-  next Task's `rows` and per-row `fillFrom`; any other next step: "{title} is {status}."; detail "Step n of m · {step}".
-- Status kind of a document: the role its own List's status column declares for that state; none → neutral.
-- Phone touch targets stay ≥ 44px (ux-grammar), not the mockup's 36px.
-- Launcher tiles: four a row, two below 1000px (the WAREHOUSE-MODE contract test moved with them).
-- Re-baselines (ADR-0066): the progress and icon keys and their declarations; the plain names: `dev:reset`.
-- `icon` is a refined string over the closed set, not an enum axis: render-only names add no language-coverage obligations.
-- The header keeps its facts in its markup (pinned by specs) and is `display:contents`; CSS `order` lays them after the stepper.
-- The top bar's search is a text box: the page's own search stays the first searchbox for every journey.
-- Plain names (labels only, ids unchanged): Customers and suppliers (group Contacts), Contact roles, Companies, Period locks,
-  Stock movements, Stock by location, Stock counts, Items, Tax codes, Price lists, Locations.
-- The proof's screenshots come from CI (`look-evidence-<sha>` artifact of the composed browser job; owner rule 2026-11-18).
+- Specs in `apps/web/test/browser/`; styles in `ledger-styles.ts` behind SPEED-1's `surfaceRuntimeStyles()` seam; no `style=`.
+- Desktop groups stay `<details>` with `::details-content{content-visibility:visible}`, so every nav contract holds.
+- Next step: "{open} of {total} {item} still open." / "{units} units still open on {lines} lines." from the next
+  Task's `rows` and per-row `fillFrom`, else "{title} is {status}."; detail "Step n of m · {step}".
+- Phone targets stay ≥ 44px (ux-grammar); tiles four a row, two below 1000px; the diagnostic code stays on diagnostics.
+- The header keeps its facts in its markup (specs pin it), `display:contents`, laid after the stepper by CSS `order`.
+- The top bar's search is a text box; the record's other commands drop down at the header's right.
+- `icon` and `presentation.progress` add language axes; the coverage decisions are re-derived for them.
+- Plain names (labels only): Contacts (group), Customers and suppliers, Contact roles, Companies, Period locks, Stock
+  movements, Stock by location, Stock counts, Items, Tax codes, Price lists, Locations. Re-baselines: `dev:reset`.
+- The proof's screenshots come from CI (`look-evidence-<sha>`, composed browser job; owner rule 2026-11-18).
 
 ## Slices
 
-1. Tokens and type — `0f54907e`.
-2. Shell — queues, groups, icons, menu, search, demo strip in the sidebar footer — `f01f6e2c`.
-3. Record page — header, stepper, next-step card, facts, line progress, totals — `f01f6e2c`, `44ab99ea`.
-4. Lists, forms, empty states, plain names — `db33d246`, `e48ceb75`.
-5. The proof — `apps/web/test/browser/look.composed-application.spec.ts`; mockup shots in `docs/execution/evidence/look-1/`.
+1 tokens `0f54907e` · 2 shell and 3 record page `f01f6e2c`, `44ab99ea` · 4 lists, forms, plain names `db33d246`,
+`e48ceb75` · 5 proof `apps/web/test/browser/look.composed-application.spec.ts`, shots in `docs/execution/evidence/look-1/`.
 
 ## Gates
 
-CI on PR #70. Local: format, typecheck, the unit tests named above, `check:app-release`.
+CI run 44262425699 green at `399de34d` (every job, the proof included); `b89acf31` adds one CSS selector. Local: format,
+lint, the touched unit tests, the web contract file, `check:app-release`. Screenshots: `docs/execution/evidence/look-1/`
+(`app-*` from the proof on CI, `mock-*` from the mockup), 7 screens × 1440/390 × light/dark.
 
 ## Test it yourself
 
@@ -60,11 +52,29 @@ button; a purchase order shows its stepper, the next step sentence and button, e
 ## Filed
 
 - Stepper captions (date each step was entered; "204 of 210 in") have no source.
-- To invoice queue: the sales order List holds its eight views (the language's maximum) and has no shipped-not-invoiced
-  figure; the queue waits for one.
-- Tenant record types use the structural icon until the customization patch kinds learn the `icon` key.
-- Tenant record types have no line datasets yet, so `presentation.progress` does not touch the patch kinds.
+- To invoice queue: the sales order List holds eight views (the maximum) and no shipped-not-invoiced figure.
+- Tenant record types: structural icons until the patch kinds learn `icon`; no line datasets, so no progress yet.
 - Totals show no currency code: no declared currency column for the totals block.
-- The assistant panel (AGENT-3, PR #58) is not on main yet; its markup gets the Ledger classes when it lands.
-- Right rail on record pages (mockup: linked documents, activity): the language has no carrier placing a composition
-  dataset in the shell's right rail; a language change (orchestrator ruling 2026-11-18: file, merge without).
+- PO and SO badges render neutral: the record's state value does not yet match its List's declared status roles.
+- The assistant panel (AGENT-3) gets the Ledger classes in a follow-up after it lands.
+- Right rail (linked documents, activity): no carrier places a dataset in the shell's rail; a language change.
+
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1", "packet": "LOOK-1",
+  "base": "28dbc55a0d02e6b6c0fa9529f5d404545f1eb5b0", "head": "b89acf31dee681793484c9261c02c74c390ba252",
+  "changedPaths": [
+    ".github/workflows/ci.yml", "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts", "apps/web/src/design-tokens.ts", "apps/web/src/ledger-styles.ts",
+    "apps/web/src/surface-composition.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts", "apps/web/test/browser/composed-application.spec.ts", "apps/web/test/browser/declared-list.spec.ts", "apps/web/test/browser/inventory-catalog-aliases.spec.ts",
+    "apps/web/test/browser/inventory-locations.spec.ts", "apps/web/test/browser/inventory-replenishment.spec.ts", "apps/web/test/browser/inventory-warehouse-mode.spec.ts", "apps/web/test/browser/item-stock.spec.ts", "apps/web/test/browser/look.composed-application.spec.ts", "apps/web/test/browser/meta-sales.spec.ts",
+    "apps/web/test/browser/surface-grammar.spec.ts", "apps/web/test/browser/table-behavior.spec.ts", "apps/web/test/surface-runtime-contract.test.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-composition.ts",
+    "packages/compiler/src/projections.ts", "packages/domain/src/app/builder.ts", "packages/domain/src/app/today.ts", "packages/domain/src/purchasing/workspace.ts", "packages/domain/src/sales/workspace.ts", "test/architecture/surface-grammar-conformance.test.ts",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/assert-composed-inventory.ts", "test/integration/surface-data-binding.test.ts", "test/postgres/locations.test.ts", "test/unit/canonical-model/surface-composition.test.ts", "test/unit/canonical-model/surface-launcher.test.ts",
+    "test/unit/purchasing-definition.test.ts", "test/unit/sales-definition.test.ts", "test/unit/web-surface-hex-literal-ratchet.test.ts", "test/unit/web-surface-hex-literal.baseline.ts"
+  ],
+  "symbols": [
+    {"path": "apps/web/src/ledger-styles.ts", "name": "LEDGER_STYLES"}, {"path": "apps/web/src/design-tokens.ts", "name": "DESIGN_TOKENS"},
+    {"path": "packages/canonical-model/src/schemas.ts", "name": "NavigationIconSchema"}, {"path": "packages/domain/src/app/builder.ts", "name": "composedDestinationIcon"}
+  ]
+}
+```
