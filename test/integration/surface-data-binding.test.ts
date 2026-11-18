@@ -338,11 +338,11 @@ test('SPEED-1: a page finishes its reads before it renders; a policy change then
     },
   });
   const baseUrl = await listen(server);
-  try {
-    const step = await fetch(`${baseUrl}${listUrl}&taskToken=t`, {
+  const post = (taskStage: string) =>
+    fetch(`${baseUrl}${listUrl}&taskToken=t`, {
       body: new URLSearchParams({
         compositionAction: 'northstar.fixture:action.x',
-        taskStage: 'confirm',
+        taskStage,
         taskToken: 't',
       }).toString(),
       headers: {
@@ -352,8 +352,18 @@ test('SPEED-1: a page finishes its reads before it renders; a policy change then
       method: 'POST',
       redirect: 'manual',
     });
-    assert.equal(step.status, 303);
-    assert.equal(step.headers.get('location'), listUrl.replace('%3A', '%3A'));
+  try {
+    // A Review commits nothing: the page is sent again by GET.
+    const review = await post('prepare');
+    assert.equal(review.status, 303);
+    assert.equal(review.headers.get('location'), listUrl);
+    // A Confirm may have committed: only the session's own retry is offered.
+    const confirm = await post('confirm');
+    assert.equal(confirm.status, 409);
+    const notice = await confirm.text();
+    assert.match(notice, /data-task-recovery/u);
+    assert.match(notice, /name="taskToken" value="t"/u);
+    assert.match(notice, /name="taskStage" value="retry"/u);
   } finally {
     await close(server);
   }
