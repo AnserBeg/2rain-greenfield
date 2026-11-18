@@ -354,8 +354,8 @@ export function orderEntrySurfaces(
       headerLabel: 'Order details',
       linesLabel: 'Order lines',
       saveDescription: sales
-        ? 'Save commits the header and each line in sequence. Drafts do not change stock. Confirm is a separate action, offered once the order has a complete ship-to address (street, city, postal code and country).'
-        : 'Save commits the header and each line in sequence. Drafts do not change stock. Place order is a separate action.',
+        ? 'Saving keeps the order as a draft; stock does not change. Confirm it when it has a full ship-to address (street, city, postal code and country).'
+        : 'Saving keeps the order as a draft; stock does not change. Place the order when it is ready.',
       saveMode: 'sequential',
       headerFormSurfaceId: id('surface', `${local}_form`),
       recordSurfaceId: id('surface', `${local}_detail`),
@@ -373,33 +373,19 @@ export function orderEntrySurfaces(
               'Customer',
               counterparty('customer'),
             ),
-            // Customer defaults (owner ruling E): choosing a customer resets
-            // each of these to that customer's value, then they are the
-            // order's to change.
-            field(`${local}_salesperson_party_id`, 'Salesperson', {
-              ...salesperson,
-              ...fromCustomer('party_default_salesperson_party_id'),
+            // Today (LOOP-1): a date, read as such; the user may change it.
+            field(`${local}_order_date`, 'Order date', {
+              defaultDaysFromToday: 0,
             }),
-            field(`${local}_order_date`, 'Order date'),
             // A new order asks for delivery three weeks out, as the reference
             // does; the user changes it before saving.
             field(`${local}_requested_date`, 'Requested date', {
               defaultDaysFromToday: 21,
             }),
+            // The order's currency, from the customer, before the ship-to.
             field(`${local}_currency`, 'Currency', {
               ...currency,
               ...fromCustomer('party_default_currency'),
-            }),
-            field(
-              `${local}_payment_terms`,
-              'Payment terms',
-              fromCustomer('party_payment_terms'),
-            ),
-            // The order's tax code (ruling B): the customer's, then each new
-            // line and charge starts from it.
-            field(`${local}_tax_code_id`, 'Tax code', {
-              ...taxCode,
-              ...fromCustomer('party_default_tax_code_id'),
             }),
             // The ship-to address is chosen from that customer's own book; the
             // order keeps its own copy of the lines, filled from the choice.
@@ -432,6 +418,26 @@ export function orderEntrySurfaces(
               'Country',
               fromAddress('country'),
             ),
+            // The fields the job needs lead (LOOP-1): customer, dates and
+            // where it goes; then who sells it, the money terms and charges.
+            // Customer defaults (owner ruling E): choosing a customer resets
+            // each of these to that customer's value, then they are the
+            // order's to change.
+            field(`${local}_salesperson_party_id`, 'Salesperson', {
+              ...salesperson,
+              ...fromCustomer('party_default_salesperson_party_id'),
+            }),
+            field(
+              `${local}_payment_terms`,
+              'Payment terms',
+              fromCustomer('party_payment_terms'),
+            ),
+            // The order's tax code (ruling B): the customer's, then each new
+            // line and charge starts from it.
+            field(`${local}_tax_code_id`, 'Tax code', {
+              ...taxCode,
+              ...fromCustomer('party_default_tax_code_id'),
+            }),
             // Two charges, each taxed by its own code (ruling B).
             field(`${local}_freight_amount`, 'Freight'),
             field(`${local}_freight_tax_code_id`, 'Freight tax code', {
@@ -463,12 +469,17 @@ export function orderEntrySurfaces(
               'Vendor',
               counterparty('supplier'),
             ),
-            field(`${local}_order_date`, 'Order date'),
+            // Today (LOOP-1): a date, read as such; the user may change it.
+            field(`${local}_order_date`, 'Order date', {
+              defaultDaysFromToday: 0,
+            }),
+            // The fields the job needs lead (LOOP-1): vendor, order date,
+            // where the goods arrive; then the dates, terms and charges.
+            field(`${local}_receiving_location_id`, 'Receive into', location),
             // Two weeks out, as the reference defaults it.
             field(`${local}_${date}`, 'Expected date', {
               defaultDaysFromToday: 14,
             }),
-            field(`${local}_receiving_location_id`, 'Receive into', location),
             field(`${local}_currency`, 'Currency', {
               ...currency,
               ...fromVendor('party_default_currency'),
@@ -633,7 +644,7 @@ export function orderEntrySurfaces(
       headerLabel: 'Stock document',
       linesLabel: 'Lines',
       saveDescription:
-        'Save commits the header and each line. A draft does not change stock; Post is a separate, confirmed action.',
+        'Saving keeps the document as a draft; stock does not change until you post it.',
       saveMode: 'sequential',
       headerFormSurfaceId: id('surface', 'inventory_transaction_form'),
       recordSurfaceId: id('surface', 'inventory_transaction_detail'),

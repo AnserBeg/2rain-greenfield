@@ -44,7 +44,7 @@ const compositionMessage = (
   code: Extract<SurfaceMessageCode, `COMPOSITION_${string}`>,
   role: 'alert' | 'status' | null = null,
 ) =>
-  `<div ${role ? `role="${role}"` : ''} ${messageAttributes({ code })}>${messageBody({ code }, 'Workspace', 'h2')}</div>`;
+  `<div ${role ? `role="${role}"` : ''} ${messageAttributes({ code })}>${messageBody({ code }, '', 'h2')}</div>`;
 /**
  * A section that did not load. One company's rows on a record every company
  * shares say which choice is missing; any other failure stays the section
@@ -255,6 +255,19 @@ export function displayFieldValue(
       dateStyle: 'medium',
       timeZone: 'UTC',
     }).format(new Date(`${result}T00:00:00Z`));
+  // A date-only value -- an instant at midnight UTC, as an order's, expected
+  // or requested date is -- reads as its plain date, from its UTC date
+  // components so nothing shifts (LOOP-1, orchestrator ruling); a real time
+  // of day keeps its time and "UTC".
+  if (
+    field?.kind === 'dateTimeFieldType' &&
+    Number.isFinite(Date.parse(result)) &&
+    new Date(result).getTime() % 86_400_000 === 0
+  )
+    return new Intl.DateTimeFormat('en', {
+      dateStyle: 'medium',
+      timeZone: 'UTC',
+    }).format(new Date(result));
   if (
     field?.kind === 'dateTimeFieldType' &&
     Number.isFinite(Date.parse(result))
@@ -795,6 +808,7 @@ export function renderCompositionProgression(
         (value) => value.actionId === entry.action,
       );
       if (action && applicable(action, data)) {
+        nextActions.set(data, action.actionId);
         next = `<div class="composition-progression-next" data-next-action="${h(action.actionId)}"><div><p class="eyebrow">Next action</p><strong>${h(action.label)}</strong><p>${h(action.description)}</p></div>${actionLink(action, data, view, `Next action: ${action.label}`)}</div>`;
         break;
       }
@@ -808,6 +822,9 @@ export function renderCompositionProgression(
   }
   return `<section class="panel composition-progression" aria-labelledby="composition-progression-heading" data-composition-progression><header><p class="eyebrow">Record progression</p><h2 id="composition-progression-heading">${h(progression.title)}</h2></header><ol class="composition-progression-steps">${steps}</ol>${next}</section>`;
 }
+
+/** The action each rendered record offers as its next step, if any. */
+const nextActions = new WeakMap<CompositionData, string>();
 
 function selectionUrl(
   data: CompositionData,
@@ -1172,9 +1189,14 @@ export function renderCompositionActions(
         : null;
     // Record-level tasks (no dataset to select from) are offered together,
     // beside the context they change, such as a customer's order defaults.
+    // The progression's next action is offered there alone: one button
+    // for the next step, never two (LOOP-1).
     const recordTasks = ordered(surface.composition!.actions).filter(
       (value) =>
-        !value.presentation && !value.datasetId && applicable(value, data),
+        !value.presentation &&
+        !value.datasetId &&
+        applicable(value, data) &&
+        nextActions.get(data) !== value.actionId,
     );
     const controls = actions.length
       ? actionLink(actions[0]!, data, view) +
@@ -1800,11 +1822,14 @@ export async function submitCompositionAction(
         ),
       ]),
     ) as Record<string, Record<string, string>>;
-  // Rows the reviewed plan includes, with what each run will write.
-  const previewRows = () => {
+  // Rows the reviewed plan includes, with what each run will write. After the
+  // work is done the figures read before it (Received 0) are no longer true,
+  // so the result shows only what was written (LOOP-1).
+  const previewRows = (figures = true) => {
     const prepared = current.prepared;
     if (!taskRowsDeclared || !prepared || !rowsDataset) return '';
-    const { primary, quantities } = rowColumns();
+    const { primary } = rowColumns();
+    const quantities = figures ? rowColumns().quantities : [];
     return `<div class="data-table-wrap composition-task-rows-review"><table><caption>${h(`${rowsDataset.definition.label} (${String(prepared.rows.length)})`)}</caption><thead><tr><th scope="col">${h(primary?.label ?? '')}</th>${quantities.map((column) => `<th scope="col" class="composition-quantity">${h(column.label)}</th>`).join('')}${perRowInputs.map((input) => `<th scope="col">${h(input.label)}</th>`).join('')}</tr></thead><tbody>${prepared.rows
       .map((rowId) => {
         const row = frozenRow(rowId);
@@ -1812,13 +1837,13 @@ export async function submitCompositionAction(
       })
       .join('')}</tbody></table></div>`;
   };
-  const previewInputs = () =>
+  const previewInputs = (figures = true) =>
     current.action.presentation?.task && current.prepared?.presentation
       ? renderTaskConfirmation(
           current.action.presentation.task,
           current.prepared.presentation,
         )
-      : `<dl class="composition-reviewed-inputs">${headerInputs.map((input) => `<div><dt>${h(input.label)}</dt><dd>${h(shownInput(input, displayInputs[input.inputId] ?? ''))}</dd></div>`).join('')}</dl>${previewRows()}`;
+      : `<dl class="composition-reviewed-inputs">${headerInputs.map((input) => `<div><dt>${h(input.label)}</dt><dd>${h(shownInput(input, displayInputs[input.inputId] ?? ''))}</dd></div>`).join('')}</dl>${previewRows(figures)}`;
   const hidden = `<input type="hidden" name="taskToken" value="${h(token!)}"><input type="hidden" name="compositionAction" value="${h(current.action.actionId)}">`;
   if (current.busy)
     return taskDocument(
@@ -2202,7 +2227,7 @@ export async function submitCompositionAction(
           // Every step committed and was read back: the business result is
           // what was reviewed and confirmed. The generic status and receipt stay
           // below it, and a withheld or uncertain outcome never reaches here.
-          `<section class="composition-task-result" data-task-result role="status" aria-label="Result"><h3>${h(current.action.label)}: done</h3>${previewInputs()}</section><p>Closing this task does not undo submitted work.</p><details class="composition-task-support"><summary>Status and recovery receipt</summary>${compositionMessage('COMPOSITION_COMPLETE')}${current.receipt ? `<pre>${h(current.receipt)}</pre>` : ''}</details>${back}`,
+          `<section class="composition-task-result" data-task-result role="status" aria-label="Result"><h3>${h(current.action.label)}: done</h3>${previewInputs(false)}</section><p>Closing this task does not undo submitted work.</p><details class="composition-task-support"><summary>Status and recovery receipt</summary>${compositionMessage('COMPOSITION_COMPLETE')}${current.receipt ? `<pre>${h(current.receipt)}</pre>` : ''}</details>${back}`,
       );
     } catch (failure) {
       const ref = operationMessageRef(failure);
@@ -2329,7 +2354,7 @@ export async function submitCompositionAction(
     const reviewLabel =
       current.action.presentation?.task?.confirmation.reviewLabel ??
       `Review ${current.action.label}`;
-    return `${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}">${hidden}${taskRowsDeclared?.fillLabel ? '<button type="submit" class="sr-only" name="taskStage" value="prepare" tabindex="-1" aria-hidden="true" data-task-default></button>' : ''}${controls.join('')}${rows}<p class="composition-task-consequence">${h(current.action.description)}</p><footer class="composition-task-footer"><button name="taskStage" value="prepare">${h(reviewLabel)}</button></footer></form>${back}`;
+    return `${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}" novalidate>${hidden}${taskRowsDeclared?.fillLabel ? '<button type="submit" class="sr-only" name="taskStage" value="prepare" tabindex="-1" aria-hidden="true" data-task-default></button>' : ''}${controls.join('')}${rows}<p class="composition-task-consequence">${h(current.action.description)}</p><footer class="composition-task-footer"><button name="taskStage" value="prepare">${h(reviewLabel)}</button></footer></form>${back}`;
   });
 }
 

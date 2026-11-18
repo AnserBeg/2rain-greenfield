@@ -65,7 +65,12 @@ test('Buyer submits, Manager rejects and approves, then Buyer places and stages 
       .click();
     const orderUrl = page.url();
     const act = async (label: string) => {
-      await page.getByRole('button', { name: label, exact: true }).click();
+      // The record's next step is one button, named "Next action: …" (LOOP-1).
+      await page
+        .getByRole('button', {
+          name: new RegExp(`^(?:Next action: )?${label}$`, 'u'),
+        })
+        .click();
       const dialog = page.getByRole('dialog');
       await dialog
         .getByRole('button', { name: `Review ${label}`, exact: true })
@@ -114,7 +119,7 @@ test('Buyer submits, Manager rejects and approves, then Buyer places and stages 
     };
     await expect(page.getByLabel('Acting as')).toHaveValue('buyer');
     await expect(
-      page.getByRole('button', { name: 'Place order', exact: true }),
+      page.getByRole('button', { name: /^(?:Next action: )?Place order$/u }),
     ).toHaveCount(0);
     await act('Submit for approval');
     await openRequest();
@@ -149,7 +154,7 @@ test('Buyer submits, Manager rejects and approves, then Buyer places and stages 
     await page.goto(orderUrl);
     await switchPerson('buyer');
     await page
-      .getByRole('button', { name: 'Place order', exact: true })
+      .getByRole('button', { name: /^(?:Next action: )?Place order$/u })
       .click();
     await page
       .getByLabel('Supplier reference', { exact: true })

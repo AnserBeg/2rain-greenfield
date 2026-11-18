@@ -36,8 +36,7 @@ test('a received purchase order is billed, paid in part and credited for the res
     };
     const billTask = () =>
       page.getByRole('button', {
-        name: 'Bill received quantities',
-        exact: true,
+        name: /^(?:Next action: )?Bill received quantities$/u,
       });
 
     // Purchasing lists its bills beside its orders.

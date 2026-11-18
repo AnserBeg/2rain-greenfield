@@ -45,7 +45,9 @@ export function messageBody(
     message.nextAction === null
       ? ''
       : `<p data-message-next-action>${escapeHtml(message.nextAction)}</p>`;
-  return `<p class="eyebrow">${escapeHtml(eyebrow)}</p><${headingTag} data-message-sentence>${escapeHtml(message.sentence)}</${headingTag}><p data-message-detail>${escapeHtml(message.detail)}</p>${nextAction}${subject}<code data-message-code>${escapeHtml(ref.code)}</code>`;
+  // The code stays in the page for support and the gates, never in the text a
+  // person reads (LOOP-1): plain words only.
+  return `${eyebrow ? `<p class="eyebrow">${escapeHtml(eyebrow)}</p>` : ''}<${headingTag} data-message-sentence>${escapeHtml(message.sentence)}</${headingTag}><p data-message-detail>${escapeHtml(message.detail)}</p>${nextAction}${subject}<code data-message-code hidden>${escapeHtml(ref.code)}</code>`;
 }
 
 /**

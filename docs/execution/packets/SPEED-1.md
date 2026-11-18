@@ -39,16 +39,16 @@ security path, no file of the `AGENTS.md` §4 Critical set; slices 2-4 get the o
 
 | page (warm) | slice 1 baseline tx / st / policy / repeats | after 2-3 tx / st | after 2-4 tx / st / policy / repeats |
 | --- | --- | --- | --- |
-| home (two hops) | 51 / 410 / 41 / 32 | 4 / 58 | 4 / 38 / 6 / 0 |
+| home (two hops; Today tiles after LOOP-1 slice 5) | 51 / 410 / 41 / 32 (65 / 522 with tiles) | 4 / 58 | 4 / 42 / 6 / 0 |
 | purchase order list | 107 / 896 / 84 / 108 | 2 / 85 | 2 / 32 / 3 / 0 |
 | purchase order detail | 169 / 1384 / 135 / 153 | 2 / 109 | 2 / 33 / 3 / 0 |
 | new purchase order | 29 / 242 / 22 / 23 | 2 / 32 | 2 / 18 / 3 / 0 |
 | stock by item | 76 / 586 / 67 / 62 | 2 / 43 | 2 / 23 / 3 / 0 |
-| sales order detail | 259 / 2139 / 207 / 236 | 2 / 186 | 2 / 56 / 3 / 5 |
+| sales order detail | 259 / 2139 / 207 / 236 (269 / 2209 after LOOP-1 slice 3) | 2 / 186 | 2 / 56 / 3 / 5 |
 | task open / review | 393 / 205 transactions | unchanged | 2 / 36 / 3 / 0 each |
 | task Confirm | 217 / 1879 / 169 / 204 | unchanged | 16 / 248 / 14 / 15 |
 
-Warm catalog parses after 2-4: operation catalog, query catalog, surface manifest 0 on every page; surface bindings 69-102.
+Warm catalog parses after 2-4: operation catalog, query catalog, surface manifest 0 on every page; surface bindings 49-100.
 
 Confirm's 16 transactions (the PO receive task): 1 snapshot of the step's reads (12 statements); 7 live re-authorizations (5
 statements + 2 RESETs each); 2 idempotent accepted mutations through the trust service (23 and 22: advisory lock, idempotency

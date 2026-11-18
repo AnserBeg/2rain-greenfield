@@ -102,8 +102,8 @@ test('an item keeps its reorder levels, Stock by item names what is short and th
     const inventory = navigation
       .locator('.navigation-tree > li')
       .getByRole('group')
-      .filter({ hasText: 'Inventory' });
-    await open(inventory, 'Inventory', 'Stock by item');
+      .filter({ hasText: 'Stock' });
+    await open(inventory, 'Stock', 'Stock by item');
     await expect(
       page.getByRole('heading', { level: 1, name: 'Stock by item' }),
     ).toBeVisible();
@@ -149,7 +149,7 @@ test('an item keeps its reorder levels, Stock by item names what is short and th
     ).toHaveCount(0);
 
     // Inventory -> Buying worklist: what is due, back up to its level.
-    await open(inventory, 'Inventory', 'Buying worklist');
+    await open(inventory, 'Stock', 'Buying worklist');
     await expect(
       page.getByRole('heading', { level: 1, name: 'Buying worklist' }),
     ).toBeVisible();
