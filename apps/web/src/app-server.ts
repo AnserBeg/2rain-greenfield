@@ -35,6 +35,24 @@ import {
 
 export type { SurfaceRuntimeApplicationExtension } from './surface-runtime.js';
 
+/**
+ * Dev and test only (SPEED-1): each request handled inside a fresh work meter,
+ * whose counts the response carries as `Server-Timing`. Composed by the local
+ * composition root; absent, nothing is measured and no header is sent.
+ */
+export interface RequestWorkProbe {
+  measure<T>(handle: (serverTiming: () => string) => Promise<T>): Promise<T>;
+}
+
+export interface SurfaceRuntimeServerOptions {
+  readonly requestWork?: RequestWorkProbe;
+  /** The assistant panel (AGENT-3, local demo only); absent, no panel. */
+  readonly assistant?: AssistantMount;
+}
+
+/** Each measured response's `Server-Timing` value, read as it is written. */
+const serverTimings = new WeakMap<ServerResponse, () => string>();
+
 /** HTTP composition owns transport only; the issued view owns definition. */
 export function createSurfaceRuntimeServer(
   entry: AuthenticatedRequestRuntimeEntryAdapter,
@@ -42,19 +60,26 @@ export function createSurfaceRuntimeServer(
   demoActors?: readonly { key: 'buyer' | 'manager'; label: string }[] | null,
   /** The Customize screen at `/?customize`; absent, the page is not served. */
   customize?: () => Promise<CustomizeScreenService>,
-  /** The assistant panel (AGENT-3, local demo only); absent, no panel. */
-  assistant?: AssistantMount,
+  options: SurfaceRuntimeServerOptions = {},
 ): Server {
   return createServer((request, response) => {
-    void handleRequest(
-      entry,
-      gateways,
-      request,
-      response,
-      demoActors,
-      customize,
-      gateways ? assistant : undefined,
-    );
+    const handle = () =>
+      handleRequest(
+        entry,
+        gateways,
+        request,
+        response,
+        demoActors,
+        customize,
+        gateways ? options.assistant : undefined,
+      );
+    const probe = options.requestWork;
+    void (probe
+      ? probe.measure((serverTiming) => {
+          serverTimings.set(response, serverTiming);
+          return handle();
+        })
+      : handle());
   });
 }
 
@@ -318,6 +343,8 @@ function writeHtml(
   result: SurfaceRuntimeResponse,
 ): void {
   response.statusCode = result.statusCode;
+  const serverTiming = serverTimings.get(response);
+  if (serverTiming) response.setHeader('server-timing', serverTiming());
   if (result.location) response.setHeader('location', result.location);
   if (result.download) {
     response.setHeader('content-type', result.download.contentType);

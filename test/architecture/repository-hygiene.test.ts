@@ -46,6 +46,7 @@ const suiteDefinitions = [
       'test/unit/observability.test.ts',
       'test/unit/party-definition.test.ts',
       'test/unit/purchasing-definition.test.ts',
+      'test/unit/request-work-meter.test.ts',
       'test/unit/sales-definition.test.ts',
       'test/unit/web-surface-hex-literal-ratchet.test.ts',
       'test/unit/workspace-contract.test.ts',
@@ -88,6 +89,7 @@ const suiteDefinitions = [
       'test/integration/module-storage-transition.test.ts',
       'test/integration/observability-ci-contract.test.ts',
       'test/integration/party-runtime.test.ts',
+      'test/integration/pinned-catalog-memo.test.ts',
       'test/integration/security-scan-contract.test.ts',
       'test/integration/semantic-gateways.test.ts',
       'test/integration/semantic-query-legal-entity-scope.test.ts',
@@ -210,9 +212,12 @@ const suiteDefinitions = [
     script: 'test:postgres:composed',
   },
   {
+    // SPEED-1: the page budget serves the composed application beside the
+    // commercial workflows.
     discoveryPattern:
-      'test/postgres/**/@(commercial-totals|expected-receipts|payables|purchase-approvals|purchase-order-ending|receiving-authorization).test.ts',
+      '{test/postgres/**/@(commercial-totals|expected-receipts|payables|purchase-approvals|purchase-order-ending|receiving-authorization).test.ts,test/performance/page-budget.test.ts}',
     expectedFiles: [
+      'test/performance/page-budget.test.ts',
       'test/postgres/commercial-totals.test.ts',
       'test/postgres/expected-receipts.test.ts',
       'test/postgres/payables.test.ts',

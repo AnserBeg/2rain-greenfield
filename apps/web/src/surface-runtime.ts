@@ -77,6 +77,7 @@ import {
   formFieldIds,
   readCompiledSurfaceManifest,
   readCompiledSurfaceDataBinding,
+  surfaceSourceEntityId,
   SurfaceProjectionError,
   type CompiledNavigationEntry,
   type CompiledNavigationTree,
@@ -95,7 +96,7 @@ export function withLocalDemoIdentity(
   selected: 'buyer' | 'manager',
 ): SurfaceRuntimeResponse {
   if (!actors) return response;
-  const bar = `<aside aria-label="Local demo identity"><form method="post"><label>Acting as <select name="localDemoActAs" aria-label="Acting as">${actors.map((actor) => `<option value="${actor.key}"${actor.key === selected ? ' selected' : ''}>${escapeHtml(actor.label)}</option>`).join('')}</select></label><button type="submit">Switch person</button><span>Local demo</span></form></aside>`;
+  const bar = `<aside class="demo-identity" aria-label="Local demo identity"><form method="post"><label>Acting as <select name="localDemoActAs" aria-label="Acting as">${actors.map((actor) => `<option value="${actor.key}"${actor.key === selected ? ' selected' : ''}>${escapeHtml(actor.label)}</option>`).join('')}</select></label><button type="submit">Switch person</button><span>Local demo</span></form></aside>`;
   return { ...response, html: response.html.replace('<body>', `<body>${bar}`) };
 }
 
@@ -1276,6 +1277,33 @@ function renderSelectedSurface(
   });
 }
 
+/**
+ * Where a person lands with no page asked for (LOOP-1): the first launcher in
+ * navigation order -- a page of the day's work with its counts, never an
+ * empty list -- else navigation's first destination, else the first surface.
+ */
+function landingSurface(
+  navigation: CompiledNavigationTree | null,
+  surfaces: readonly CompiledSurfaceDefinition[],
+): CompiledSurfaceDefinition | undefined {
+  const destinations: CompiledSurfaceDefinition[] = [];
+  const visit = (entry: CompiledNavigationEntry): void => {
+    if (entry.kind === 'navigationGroup') entry.children.forEach(visit);
+    else {
+      const surface = surfaces.find(
+        (candidate) => candidate.surfaceId === entry.surfaceId,
+      );
+      if (surface) destinations.push(surface);
+    }
+  };
+  navigation?.entries.forEach(visit);
+  return (
+    destinations.find((surface) => surface.launcher) ??
+    destinations[0] ??
+    surfaces[0]
+  );
+}
+
 function selectSurface(
   view: RuntimeViewContract.RequestRuntimeView,
   requestUrl: string,
@@ -1313,7 +1341,7 @@ function selectSurface(
   ).searchParams.get('surface');
   const selected = requestedSurfaceId
     ? surfaces.find((surface) => surface.surfaceId === requestedSurfaceId)
-    : surfaces[0];
+    : landingSurface(navigation, surfaces);
   if (!selected) {
     return Object.freeze({
       html: shellDocument(
@@ -2208,10 +2236,35 @@ function navigationItem(
       const surface = surfaceForNavigation(surfaces, entry.children[0]);
       return `<li class="navigation-node navigation-node--direct">${navigationLink(view, surface, selected, entry.label, workspaceContext, surfaces)}</li>`;
     }
-    return `<li class="navigation-node navigation-node--group"><details class="navigation-group"${current ? ' data-current="true"' : ''}><summary><span class="nav-icon" aria-hidden="true">${escapeHtml(entry.label.slice(0, 1).toUpperCase())}</span><span class="nav-text"><span class="nav-group-label">${escapeHtml(entry.label)}</span>${destination && destination !== entry.label ? `<small>${escapeHtml(destination)}</small>` : ''}</span><span class="nav-arrow" aria-hidden="true">›</span></summary><ul class="navigation-children">${entry.children.map((child) => navigationItem(view, child, surfaces, selected, workspaceContext)).join('')}</ul></details></li>`;
+    return `<li class="navigation-node navigation-node--group"><details class="navigation-group"${current ? ' data-current="true"' : ''}><summary><span class="nav-icon" aria-hidden="true">${NAVIGATION_ICONS.group}</span><span class="nav-text"><span class="nav-group-label">${escapeHtml(entry.label)}</span>${destination && destination !== entry.label ? `<small>${escapeHtml(destination)}</small>` : ''}</span><span class="nav-arrow" aria-hidden="true">›</span></summary><ul class="navigation-children">${entry.children.map((child) => navigationItem(view, child, surfaces, selected, workspaceContext)).join('')}</ul></details></li>`;
   }
   const surface = surfaceForNavigation(surfaces, entry);
   return `<li class="navigation-node navigation-node--surface">${navigationLink(view, surface, selected, navigationLabel(surface), workspaceContext, surfaces)}</li>`;
+}
+
+/**
+ * Real icons instead of a destination's first letter (LOOP-1), chosen by what
+ * the destination is -- a group, a launcher of the day's work, a List, or a
+ * page -- never by which module or entity it is: inline SVG, no dependency.
+ */
+const svgIcon = (paths: string) =>
+  `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false">${paths}</svg>`;
+const NAVIGATION_ICONS = Object.freeze({
+  group: svgIcon('<path d="M3 7h7l2 2h9v10H3z"/>'),
+  launcher: svgIcon(
+    '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+  ),
+  list: svgIcon(
+    '<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>',
+  ),
+  page: svgIcon('<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/>'),
+});
+function navigationIcon(surface: CompiledSurfaceDefinition): string {
+  return surface.launcher
+    ? NAVIGATION_ICONS.launcher
+    : surface.surfaceRole === 'list'
+      ? NAVIGATION_ICONS.list
+      : NAVIGATION_ICONS.page;
 }
 
 function navigationLink(
@@ -2244,7 +2297,7 @@ function navigationLink(
       // never guesses a parameter id when the pinned artifact is malformed.
     }
   }
-  return `<a href="/?${parameters.toString()}"${current ? ' aria-current="page"' : ''}><span class="nav-icon" aria-hidden="true">${escapeHtml(label.slice(0, 1).toUpperCase())}</span><span>${escapeHtml(label)}</span><span class="nav-arrow" aria-hidden="true">›</span></a>`;
+  return `<a href="/?${parameters.toString()}"${current ? ' aria-current="page"' : ''}><span class="nav-icon" aria-hidden="true">${navigationIcon(surface)}</span><span>${escapeHtml(label)}</span><span class="nav-arrow" aria-hidden="true">›</span></a>`;
 }
 
 function renderWorkspaceContextBar(context: WorkspaceContextBar): string {
@@ -2362,34 +2415,23 @@ function sharesSurfaceEntity(
   surfaces: readonly CompiledSurfaceDefinition[],
 ): boolean {
   if (navigation.surfaceRole !== 'list') return false;
-  try {
-    const entityId = readCompiledSurfaceDataBinding(view, selected).query
-      .sourceEntityId;
-    if (
-      readCompiledSurfaceDataBinding(view, navigation).query.sourceEntityId !==
-      entityId
-    )
-      return false;
-    if (selected.surfaceRole === 'list')
-      return navigation.surfaceId === selected.surfaceId;
-    const lists = surfaces.filter((candidate) => {
-      if (candidate.surfaceRole !== 'list') return false;
-      try {
-        return (
-          readCompiledSurfaceDataBinding(view, candidate).query
-            .sourceEntityId === entityId
-        );
-      } catch {
-        return false;
-      }
-    });
-    return (
-      lists.length <= 1 ||
-      recordWorkspaceOwners(view, surfaces, entityId).has(navigation.surfaceId)
-    );
-  } catch {
+  // A launcher is a destination of its own, not a page of the records its
+  // Task happens to read (LOOP-1: Today and Warehouse read stock movements).
+  if (selected.launcher) return false;
+  const entityId = surfaceSourceEntityId(view, selected);
+  if (entityId === null || surfaceSourceEntityId(view, navigation) !== entityId)
     return false;
-  }
+  if (selected.surfaceRole === 'list')
+    return navigation.surfaceId === selected.surfaceId;
+  const lists = surfaces.filter(
+    (candidate) =>
+      candidate.surfaceRole === 'list' &&
+      surfaceSourceEntityId(view, candidate) === entityId,
+  );
+  return (
+    lists.length <= 1 ||
+    recordWorkspaceOwners(view, surfaces, entityId).has(navigation.surfaceId)
+  );
 }
 
 const styles = `${DESIGN_TOKENS}
@@ -2417,6 +2459,11 @@ th,td,.fact-grid dd,.key-fact-grid dd,.record-fields dd,.task-decision output,.s
 .sidebar a:hover,.navigation-group>summary:hover{background:var(--surface-rail-raised);color:var(--ink-on-rail)}
 .sidebar a:focus-visible,.navigation-group>summary:focus-visible{outline:3px solid var(--focus-ring-rail);outline-offset:2px}
 .sidebar a[aria-current=page],.navigation-group[data-current=true]>summary{border-left-color:var(--brand);background:var(--surface-rail-raised);color:var(--ink-on-rail)}
+.demo-identity{display:flex;justify-content:flex-end;padding:var(--space-1) var(--space-4);border-bottom:1px solid var(--line);background:var(--surface-page);color:var(--ink-muted);font-size:var(--text-micro)}
+.demo-identity form{display:flex;align-items:center;gap:var(--space-2);margin:0}
+.demo-identity label{display:flex;align-items:center;gap:var(--space-1);font-weight:var(--weight-body)}
+.demo-identity select,.demo-identity button{min-height:0;padding:2px var(--space-2);font-size:var(--text-micro)}
+.demo-identity span{padding:0 var(--space-1);border:1px solid var(--line);border-radius:var(--radius-control)}
 .nav-icon{display:grid;place-items:center;width:24px;height:24px;border-radius:var(--radius-control);background:var(--line-on-rail);color:var(--ink-on-rail);font-size:var(--text-micro);font-weight:var(--weight-emphasis)}
 .sidebar a[aria-current=page] .nav-icon,.navigation-group[data-current=true]>summary .nav-icon{background:var(--brand);color:var(--ink-on-brand)}
 .nav-arrow{font-size:var(--text-section);color:var(--ink-on-rail-muted)}
@@ -2511,6 +2558,7 @@ main{width:min(1200px,100%);margin:0 auto;padding:var(--page-padding) var(--page
 .data-panel,.data-empty,.operation-feedback{grid-column:span 12}
 .surface-grid[data-surface-archetype=task]{max-width:768px;margin:0 auto}
 .task-decision-slot,.task-scan-input-slot,.task-primary-action-slot,.task-primary-action{grid-column:span 12}
+.launcher-tiles{grid-column:1/-1}
 .task-decision output{display:block;margin:var(--space-3) 0;font-family:var(--font-sans);font-size:var(--text-title);font-weight:var(--weight-emphasis)}
 .task-primary-action{display:flex;justify-content:flex-end}
 .task-primary-action button{min-width:192px;min-height:44px}
@@ -2760,6 +2808,7 @@ body{padding-bottom:72px}
 .composition-task-dialog{grid-column:1/-1;position:static;width:100%;max-width:44rem;box-sizing:border-box;margin:0 auto;padding:0;color:var(--ink);border:1px solid var(--line);border-radius:var(--radius-container);background:var(--surface-panel)}
 .composition-task-dialog:modal{position:fixed;margin:auto;max-height:calc(100dvh - 32px);width:calc(100vw - 32px);overflow-y:auto;overscroll-behavior:contain;box-shadow:var(--elevation-overlay)}
 .composition-task-dialog::backdrop{background:rgba(0,0,0,.45)}
+.composition-task-dialog:has(.composition-task-rows,.composition-task-rows-review){max-width:76rem}
 .composition-task-header{position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;gap:var(--space-3);padding:var(--space-4);border-bottom:1px solid var(--line);background:var(--surface-panel)}
 .composition-task-header p{margin:0 0 var(--space-1);font-size:var(--text-micro);color:var(--ink-muted)}
 .composition-task-header h2{margin:0 0 var(--space-1);font-size:var(--text-section)}

@@ -586,3 +586,86 @@ test('ruling C: receivables documents change only as drafts, post once through t
     ],
   );
 });
+
+test('LOOP-1: a sales line needs a price; a shipped, invoiced order offers the payment next; an invoice is never typed in', () => {
+  const authored = definition();
+  assert.notEqual(
+    authored.fields.find(
+      (field) =>
+        field.fieldId === 'northstar.sales:field.sales_order_line_unit_price',
+    ),
+    undefined,
+  );
+  assert.notEqual(
+    (
+      authored.fields.find(
+        (field) =>
+          field.fieldId === 'northstar.sales:field.sales_order_line_unit_price',
+      ) as unknown as { presence?: string }
+    ).presence,
+    'optional',
+    'a sales line is never saved without a unit price',
+  );
+  const composed = composedApplicationDefinition() as unknown as {
+    surfaces: Array<{
+      surfaceId: string;
+      slots: Array<{ slot: string }>;
+      composition?: {
+        actions: Array<{
+          actionId: string;
+          rows?: { datasetId: string };
+          inputs: Array<{ inputId: string; required: boolean }>;
+        }>;
+        presentation?: { progression?: { next: Array<{ action?: string }> } };
+      };
+    }>;
+  };
+  const surface = (local: string) =>
+    composed.surfaces.find(
+      (value) => value.surfaceId === `northstar.app:surface.${local}`,
+    )!;
+  const order = surface('sales_order_detail').composition!;
+  const payment = order.actions.find(
+    (action) => action.actionId === 'northstar.app:action.order_record_payment',
+  )!;
+  assert.equal(payment.rows?.datasetId, 'northstar.app:dataset.order_invoices');
+  assert.deepEqual(
+    payment.inputs.map((input) => [input.inputId, input.required]),
+    [
+      ['northstar.app:input.order_payment_method', true],
+      ['northstar.app:input.order_payment_reference', false],
+    ],
+  );
+  // Shipped quantity is invoiced first, the lines still open then ship
+  // (slice 3), and an invoiced order takes its payment.
+  assert.deepEqual(
+    order
+      .presentation!.progression!.next.map((entry) => entry.action)
+      .slice(-3),
+    [
+      'northstar.app:action.invoice_shipped',
+      'northstar.app:action.ship_lines',
+      'northstar.app:action.order_record_payment',
+    ],
+  );
+  const invoicePayment = surface(
+    'customer_invoice_detail',
+  ).composition!.actions.find(
+    (action) =>
+      action.actionId === 'northstar.app:action.invoice_record_payment',
+  )!;
+  assert.equal(
+    invoicePayment.inputs.find(
+      (input) => input.inputId === 'northstar.app:input.invoice_reference',
+    )?.required,
+    false,
+    'cash and EFT have no reference to give',
+  );
+  assert.equal(
+    surface('customer_invoice_form').slots.some(
+      (slot) => slot.slot === 'sections',
+    ),
+    false,
+    'the Invoices list offers no raw "New" form',
+  );
+});

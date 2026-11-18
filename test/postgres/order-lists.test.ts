@@ -233,7 +233,7 @@ test(
                 line_number: '1',
                 ordered_quantity: quantity,
                 unit_id: 'EA',
-                unit_price: null,
+                unit_price: '12.5',
               },
               { order: created.recordId },
             );

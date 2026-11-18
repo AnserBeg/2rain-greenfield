@@ -14,23 +14,24 @@ import { RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-pr
 import { PAYABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/payables-capability-executor';
 import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '@north-star/postgres-provider/purchase-order-approval-executor';
 import {
-  openCustomizationService,
-  type CustomizationServiceOptions,
-} from '@north-star/postgres-provider/customization-service';
-import { createSurfaceRuntimeServer } from '@north-star/web/app-server';
-import {
   AGENT_KEY_FILE_VARIABLE,
   anthropicModel,
   DEFAULT_ANTHROPIC_MODEL,
   loadModelKey,
   type ModelAdapter,
 } from '@north-star/operations-agent';
+import {
+  openCustomizationService,
+  type CustomizationServiceOptions,
+} from '@north-star/postgres-provider/customization-service';
+import { createRequestWorkProbe } from '@north-star/postgres-provider/request-work-meter';
+import { createSurfaceRuntimeServer } from '@north-star/web/app-server';
+import { COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/sales-section';
 
 import {
   createAssistantEndpoint,
   type AssistantEndpoint,
 } from './assistant-endpoint.js';
-import { COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/sales-section';
 
 import {
   composedApplicationSeed,
@@ -205,7 +206,12 @@ export async function startComposedApplication(
       },
       runtime.identityMode === 'LOCAL_DEMO' ? runtime.localDemoActors : null,
       runtime.identityMode === 'LOCAL_DEMO' ? customize : undefined,
-      assistant,
+      // Loopback-only dev and test server: each response reports its
+      // database work as `Server-Timing` (SPEED-1).
+      {
+        requestWork: createRequestWorkProbe(),
+        ...(assistant ? { assistant } : {}),
+      },
     );
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);

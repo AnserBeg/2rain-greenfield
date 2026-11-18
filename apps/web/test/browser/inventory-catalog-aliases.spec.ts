@@ -117,8 +117,8 @@ test('an item is found by its aliases, the stock Lists follow the company rule a
     const inventory = navigation
       .locator('.navigation-tree > li')
       .getByRole('group')
-      .filter({ hasText: 'Inventory' });
-    await open(inventory, 'Inventory', 'Stock by item');
+      .filter({ hasText: 'Stock' });
+    await open(inventory, 'Stock', 'Stock by item');
     await expect(
       page.getByRole('heading', { level: 1, name: 'Stock by item' }),
     ).toBeVisible();
@@ -139,7 +139,7 @@ test('an item is found by its aliases, the stock Lists follow the company rule a
     await expect(
       page.locator(`tr[data-record-id="${scenario.labels}"]`),
     ).toHaveCount(0);
-    await open(inventory, 'Inventory', 'Buying worklist');
+    await open(inventory, 'Stock', 'Buying worklist');
     expect(
       await cells(page, 'item_buying_list', scenario.pens, [
         'reorder_point',

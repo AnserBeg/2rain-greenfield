@@ -75,9 +75,9 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
       await page.goto(orderUrl);
     };
     const invoiceTask = () =>
+      // The order's next step is one button (LOOP-1).
       page.getByRole('button', {
-        name: 'Invoice shipped quantities',
-        exact: true,
+        name: /^(?:Next action: )?Invoice shipped quantities$/u,
       });
 
     await page.goto(orderUrl);
