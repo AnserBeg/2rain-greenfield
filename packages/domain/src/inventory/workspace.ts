@@ -238,3 +238,41 @@ export function inventoryDocumentWorkspace(
     actions: [],
   };
 }
+
+/** A stock preview uses the application's existing position and location reads. */
+export function stockImpact(
+  namespace: string,
+  item: Record<string, unknown>,
+  location: Record<string, unknown>,
+  quantity: Record<string, unknown>,
+  onHand: 'increase' | 'decrease' | 'unchanged',
+  reserved: 'increase' | 'decrease' | 'unchanged',
+): Record<string, unknown> {
+  const field = (name: string) => `${namespace}:field.${name}`;
+  const query = (local: string) => ({
+    kind: 'queryReference',
+    schemaVersion: 'v6',
+    targetId: `${namespace}:query.${local}`,
+  });
+  return {
+    query: query('item_stock_positions'),
+    fields: {
+      item: field('posted_stock_balance_item_id'),
+      location: field('posted_stock_balance_location_id'),
+      onHand: field('posted_stock_balance_posted_quantity'),
+      reserved: `${namespace}:metric.reserved`,
+      available: `${namespace}:metric.available`,
+    },
+    locationStatus: {
+      query: query('location_get'),
+      field: field('location_status'),
+      label: field('location_name'),
+      usable: `${namespace}:option.location_status_usable`,
+    },
+    item,
+    location,
+    quantity,
+    onHand,
+    reserved,
+  };
+}

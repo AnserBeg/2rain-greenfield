@@ -987,3 +987,40 @@ test('LOOK-1 round 3: the grand total reads with a declared currency column', ()
     /a totals currency is a declared column beside declared totals/u,
   );
 });
+
+test('INTERACT-1 stock impacts require current stock and location reads and declared input or row values', () => {
+  const purchase = composition(normalized, 'purchase_order_detail');
+  assert.equal(
+    action(purchase, 'receive_lines_known').stockImpacts[0].onHand,
+    'increase',
+  );
+  validateSurfaceCompositions(structuredClone(normalized) as never);
+  assert.match(
+    refused('purchase_order_detail', (value) => {
+      action(value, 'receive_lines_known').stockImpacts[0].fields.onHand = id(
+        'field',
+        'missing_quantity',
+      );
+    }),
+    /stock impacts require declared stock and location query results/u,
+  );
+  assert.match(
+    refused('purchase_order_detail', (value) => {
+      action(value, 'receive_lines_known').stockImpacts[0].quantity = {
+        source: 'input',
+        inputId: id('input', 'missing_quantity'),
+      };
+    }),
+    /stock impacts require declared task inputs/u,
+  );
+  assert.match(
+    refused('purchase_order_detail', (value) => {
+      action(value, 'receive_lines_known').stockImpacts[0].item = {
+        source: 'step',
+        stepId: id('step', 'not_run'),
+        field: 'recordId',
+      };
+    }),
+    /context binding requires a declared record or selected result/u,
+  );
+});

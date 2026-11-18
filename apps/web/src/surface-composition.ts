@@ -1112,7 +1112,7 @@ function compareDecimals(left: string, right: string): number {
   return delta > 0n ? 1 : delta < 0n ? -1 : 0;
 }
 
-/** The exact sum of non-negative decimal strings, never through a float. */
+/** The exact sum of decimal strings, never through a float. */
 function sumDecimals(values: readonly string[]): string {
   const scale = Math.max(
     0,
@@ -1122,10 +1122,11 @@ function sumDecimals(values: readonly string[]): string {
     const [whole, fraction = ''] = value.split('.');
     return sum + BigInt(`${whole}${fraction.padEnd(scale, '0')}`);
   }, 0n);
-  const text = total.toString().padStart(scale + 1, '0');
+  const negative = total < 0n;
+  const text = (negative ? -total : total).toString().padStart(scale + 1, '0');
   const integer = scale ? text.slice(0, -scale) : text;
   const decimals = scale ? text.slice(-scale).replace(/0+$/u, '') : '';
-  return decimals ? `${integer}.${decimals}` : integer;
+  return `${negative ? '-' : ''}${decimals ? `${integer}.${decimals}` : integer}`;
 }
 
 /** The action each rendered record offers as its next step, if any. */
@@ -1892,6 +1893,171 @@ interface TaskSession {
   busy: boolean;
   committedWithheld: boolean;
 }
+
+/** Advisory changes are calculated from current governed stock reads. */
+async function stockImpactRows(
+  view: RequestRuntimeView,
+  gateways: CompositionGateways,
+  session: TaskSession,
+  data: CompositionData,
+  inputs: Readonly<Record<string, string>>,
+  prepared: TaskSession['prepared'],
+): Promise<string> {
+  const impacts = session.action.stockImpacts;
+  if (!impacts || session.confirmed) return '';
+  const planned = new Map<
+    string,
+    {
+      onHand: string;
+      reserved: string;
+      available: string;
+      usable: boolean;
+      location: string;
+    }
+  >();
+  const sections: string[] = [];
+  const datasetId = session.action.rows?.datasetId ?? session.action.datasetId;
+  const child = data.children.find(
+    (value) => value.definition.datasetId === datasetId,
+  );
+  const rowIds = session.action.rows
+    ? (prepared?.rows ?? session.rowIds)
+    : [data.selected?.recordId ?? data.record.recordId];
+  try {
+    for (const rowId of rowIds) {
+      const row = child?.rows.find((value) => value.record.recordId === rowId);
+      const context =
+        row && datasetId ? withRow(data, datasetId, row.record) : data;
+      const values = {
+        ...inputs,
+        ...(prepared?.rowInputs[rowId] ?? session.rowInputs[rowId] ?? {}),
+      };
+      for (const impact of impacts) {
+        const item = resolveValue(impact.item, context, values, {}, {});
+        const location = resolveValue(impact.location, context, values, {}, {});
+        const quantity = resolveValue(impact.quantity, context, values, {}, {});
+        if (
+          typeof item !== 'string' ||
+          typeof location !== 'string' ||
+          !location ||
+          typeof quantity !== 'string' ||
+          !POSITIVE_DECIMAL.test(quantity)
+        )
+          continue;
+        const key = JSON.stringify([impact.query.targetId, item, location]);
+        let before = planned.get(key);
+        if (!before) {
+          const fields = impact.fields;
+          const filters = [
+            { fieldId: fields.item, value: item },
+            { fieldId: fields.location, value: location },
+          ];
+          const result = requireSharedListResult(
+            await query(view, gateways, impact.query.targetId, data.scope, {
+              includeArchived: false,
+              list: {
+                schemaVersion: SHARED_LIST_QUERY_VERSION,
+                cursor: null,
+                matchMode: 'substring',
+                pageSize: 2,
+                search: '',
+                sort: [],
+                relationLabels: [],
+                fieldFilters: filters,
+              },
+            }),
+          );
+          if (
+            result.listCoverage.hasMore ||
+            result.records.length > 1 ||
+            filters.some(
+              (filter) =>
+                !result.listCoverage.fieldFilters?.some(
+                  (echoed) =>
+                    echoed.fieldId === filter.fieldId &&
+                    echoed.value === filter.value,
+                ),
+            )
+          )
+            throw new Error('Stock preview requires one exact stock identity');
+          const stock = result.records[0];
+          if (
+            stock &&
+            (recordValue(stock, fields.item) !== item ||
+              recordValue(stock, fields.location) !== location)
+          )
+            throw new Error('Stock identity differs');
+          const status = await query(
+            view,
+            gateways,
+            impact.locationStatus.query.targetId,
+            data.scope,
+            { recordId: location, includeArchived: false },
+          );
+          const place = status.records[0];
+          if (
+            status.outcome !== 'exact' ||
+            status.records.length !== 1 ||
+            place?.recordId !== location
+          )
+            throw new Error('Location unavailable');
+          const figure = (field: string) => {
+            const value = stock ? recordValue(stock, field) : '0';
+            if (typeof value !== 'string' || !/^-?\d+(?:\.\d+)?$/u.test(value))
+              throw new Error('Stock figure unavailable');
+            return plainDecimal(value);
+          };
+          const name = recordValue(place, impact.locationStatus.label);
+          before = {
+            onHand: figure(fields.onHand),
+            reserved: figure(fields.reserved),
+            available: figure(fields.available),
+            usable:
+              recordValue(place, impact.locationStatus.field) ===
+              impact.locationStatus.usable,
+            location: String(name),
+          };
+        }
+        const delta = (direction: 'increase' | 'decrease' | 'unchanged') =>
+          direction === 'unchanged'
+            ? '0'
+            : `${direction === 'decrease' ? '-' : ''}${quantity}`;
+        const onHandDelta = delta(impact.onHand);
+        const reservedDelta = delta(impact.reserved);
+        const after = {
+          ...before,
+          onHand: sumDecimals([before.onHand, onHandDelta]),
+          reserved: sumDecimals([before.reserved, reservedDelta]),
+          available: before.usable
+            ? sumDecimals([
+                before.available,
+                onHandDelta,
+                delta(
+                  impact.reserved === 'increase'
+                    ? 'decrease'
+                    : impact.reserved === 'decrease'
+                      ? 'increase'
+                      : 'unchanged',
+                ),
+              ])
+            : '0',
+        };
+        planned.set(key, after);
+        const measures = [
+          ['onHand', 'On hand'],
+          ['reserved', 'Reserved'],
+          ['available', 'Available'],
+        ] as const;
+        sections.push(
+          `<section class="composition-impact-line"><h4>${h(row && child ? rowName(child.definition, row) : session.action.label)} · ${h(before.location)}</h4><dl>${measures.map(([measure, label]) => `<div data-stock-impact="${measure}"><dt>${label}</dt><dd><span data-impact-before>${h(before![measure])}</span> → <strong data-impact-after>${h(after[measure])}</strong></dd></div>`).join('')}</dl></section>`,
+        );
+      }
+    }
+  } catch {
+    return '<p role="status">Stock impact is unavailable. Refresh the order to try again.</p>';
+  }
+  return sections.join('');
+}
 /** Every run of the Task has committed and was read back. */
 const finished = (session: TaskSession) =>
   session.plan !== null && session.next === session.plan.length;
@@ -1923,6 +2089,7 @@ export async function submitCompositionAction(
   let renderData: CompositionData | null = null;
   let displayInputs: Record<string, string> = {};
   let displayChoices: Record<string, SemanticRecordDto[]> = {};
+  let impactRows = '';
   // Presentation is reloaded through governed reads at every response boundary.
   // Never refresh the frozen execution context, step inputs, keys or outcomes.
   const taskDocument = async (
@@ -1988,6 +2155,22 @@ export async function submitCompositionAction(
           }
         }
         renderData = fresh;
+        const defaults = { ...inputs };
+        for (const input of session.action.inputs)
+          if (!(input.inputId in defaults) && input.type === 'reference')
+            defaults[input.inputId] = referenceDefault(
+              input,
+              fresh,
+              displayChoices[input.inputId] ?? [],
+            );
+        impactRows = await stockImpactRows(
+          view,
+          gateways,
+          session,
+          fresh,
+          defaults,
+          preparation,
+        );
       } catch {
         // Receipts are gateway-issued recovery information, never cached business DTOs.
         const code = session.committedWithheld
@@ -2541,7 +2724,7 @@ export async function submitCompositionAction(
       else
         return taskDocument(
           () =>
-            `<section data-task-prepared>${previewInputs()}<p class="composition-task-consequence">${h(current.action.description)}</p><form class="composition-task-footer" method="post" action="${h(url)}">${hidden}<input type="hidden" name="preparedId" value="${h(prepared.id)}"><button class="secondary-action" name="taskStage" value="edit">Edit inputs</button><button name="taskStage" value="confirm">${h(confirmLabel())}</button></form></section>${back}`,
+            `<section data-task-prepared>${previewInputs()}${current.action.stockImpacts ? impactRows : `<p class="composition-task-consequence">${h(current.action.description)}</p>`}<form class="composition-task-footer" method="post" action="${h(url)}">${hidden}<input type="hidden" name="preparedId" value="${h(prepared.id)}"><button class="secondary-action" name="taskStage" value="edit">Edit inputs</button><button name="taskStage" value="confirm">${h(confirmLabel())}</button></form></section>${back}`,
           inputs,
           prepared,
         );
@@ -2827,7 +3010,7 @@ export async function submitCompositionAction(
       : (current.action.presentation?.task?.confirmation.reviewLabel ??
         `Review ${current.action.label}`);
     const liveReview = !direct && taskRowsDeclared?.fillLabel;
-    return `${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}" novalidate${liveReview ? ' data-task-live-review' : ''}>${hidden}${taskRowsDeclared?.fillLabel ? `<button type="submit" class="sr-only" name="taskStage" value="${stage}" tabindex="-1" aria-hidden="true" data-task-default></button>` : ''}${controls.join('')}${rows}<section class="composition-task-after" aria-label="After you post"><p class="eyebrow">After you post</p><p class="composition-task-consequence">${h(current.action.description)}</p></section><footer class="composition-task-footer"><a class="secondary-action" href="${h(url)}">Cancel</a><button name="taskStage" value="${stage}">${h(label)}</button></footer></form>${liveReview ? '<section data-task-inline-review hidden aria-label="Review and confirm"></section>' : ''}`;
+    return `${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}" novalidate${liveReview ? ' data-task-live-review' : ''}>${hidden}${taskRowsDeclared?.fillLabel ? `<button type="submit" class="sr-only" name="taskStage" value="${stage}" tabindex="-1" aria-hidden="true" data-task-default></button>` : ''}${controls.join('')}${rows}<section class="composition-task-after" aria-label="After you post"><p class="eyebrow">After you post</p>${current.action.stockImpacts ? impactRows : `<p class="composition-task-consequence">${h(current.action.description)}</p>`}</section><footer class="composition-task-footer"><a class="secondary-action" href="${h(url)}">Cancel</a><button name="taskStage" value="${stage}">${h(label)}</button></footer></form>${liveReview ? '<section data-task-inline-review hidden aria-label="Review and confirm"></section>' : ''}`;
   });
 }
 

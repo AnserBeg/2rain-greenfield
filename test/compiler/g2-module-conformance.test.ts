@@ -25,6 +25,7 @@ import {
   canonicalAuthoredProjection,
   canonicalize,
   normalizeApplicationPackage,
+  type SurfaceComposition,
 } from '../../packages/canonical-model/src/index.js';
 import {
   DEFAULT_COMPILER_LIMITS,
@@ -74,6 +75,42 @@ import {
 import { RECEIPT_AUTHORIZATION_DEPENDENCY_BINDINGS } from '../../packages/postgres-provider/src/current-policy.js';
 
 registerInventoryContractCases((name, run) => test(name, run));
+
+test('INTERACT-1 compiles declared stock impacts and refuses an unavailable stock field', () => {
+  const normalized = normalizeApplicationPackage(
+    composedApplicationDefinition(),
+  );
+  const compiled = mustCompile(inputNormalized(normalized));
+  const surfaces = projectionPayload<{
+    surfaces: Array<{ surfaceId: string; composition?: SurfaceComposition }>;
+  }>(compiled, PROJECTION_FAMILY_IDS.surfaceManifest).surfaces;
+  const purchase = surfaces.find(
+    (surface) =>
+      surface.surfaceId === 'northstar.app:surface.purchase_order_detail',
+  );
+  assert.equal(
+    purchase?.composition?.actions.find(
+      (action) =>
+        action.actionId === 'northstar.app:action.receive_lines_known',
+    )?.stockImpacts?.[0]?.onHand,
+    'increase',
+  );
+  const invalid = structuredClone(normalized);
+  const surface = invalid.surfaces.find(
+    (candidate) =>
+      candidate.surfaceId === 'northstar.app:surface.purchase_order_detail',
+  );
+  assert.ok(surface && 'composition' in surface && surface.composition);
+  const action = (surface.composition as SurfaceComposition).actions.find(
+    (candidate) =>
+      candidate.actionId === 'northstar.app:action.receive_lines_known',
+  );
+  assert.ok(action?.stockImpacts?.[0]);
+  const impact = action.stockImpacts[0];
+  impact.fields.onHand =
+    'northstar.app:field.missing_stock_quantity' as typeof impact.fields.onHand;
+  assert.equal(compileApplication(inputNormalized(invalid)).status, 'refused');
+});
 
 test('ordinary v1 and v2 parent/child definitions compile cleanly and twice identically', () => {
   const first = mustCompile(input(ordinaryModuleV1()));
