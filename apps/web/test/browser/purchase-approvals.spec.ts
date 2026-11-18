@@ -96,6 +96,10 @@ test('Buyer submits, Manager rejects and approves, then Buyer places and stages 
       );
     };
     const switchPerson = async (person: string) => {
+      // The person switch is in the avatar's menu (LOOK-1 round 3).
+      const account = page.locator('details.shell-account');
+      if ((await account.getAttribute('open')) === null)
+        await account.locator(':scope > summary').click();
       await page.getByLabel('Acting as', { exact: true }).selectOption(person);
       await page
         .getByRole('button', { name: 'Switch person', exact: true })

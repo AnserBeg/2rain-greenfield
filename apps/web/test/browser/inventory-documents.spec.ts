@@ -178,21 +178,13 @@ test('a transfer moves unreserved stock, and opening stock goes only where there
 
 /** Inventory -> Inventory transactions -> New, from the menu. */
 async function openNew(page: Page) {
-  const inventory = page
+  // An occasional destination waits under the menu's Settings (LOOK-1
+  // round 3), outside Stock's day-to-day group.
+  const transactions = page
     .getByRole('navigation', { name: 'Release navigation' })
-    .locator('.navigation-tree > li')
-    .getByRole('group')
-    .filter({ hasText: 'Stock' });
-  const transactions = inventory.getByRole('link', {
-    name: 'Inventory transactions',
-    exact: true,
-  });
-  // A group already open on this page stays open; clicking it would close it.
+    .getByRole('link', { name: 'Inventory transactions', exact: true });
   if (!(await transactions.isVisible()))
-    await inventory.getByText('Stock', { exact: true }).click();
-  // An occasional destination waits under the group's Other (LOOK-1 round 2).
-  if (!(await transactions.isVisible()))
-    await inventory.locator('.navigation-more > summary').first().click();
+    await page.locator('details.navigation-settings > summary').click();
   await transactions.click();
   await expect(
     page.getByRole('heading', { level: 1, name: 'Inventory transactions' }),
