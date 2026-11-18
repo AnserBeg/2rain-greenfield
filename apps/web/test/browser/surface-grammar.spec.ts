@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
+import { addTestStyle } from './test-style.js';
 import {
   STATUS_ROLES,
   SURFACE_ARCHETYPES,
@@ -320,9 +321,10 @@ test('redundant-encoding red: a hidden status role is observed while its sibling
   await page.goto(
     `${baseUrl}/?surface=${encodeURIComponent(builder.surfaceId)}`,
   );
-  await page.addStyleTag({
-    content: '[data-status-role=success]{display:none!important}',
-  });
+  await addTestStyle(
+    page,
+    '[data-status-role=success]{display:none!important}',
+  );
 
   const samples = await readStatusRoleSamples(page);
   const encoding = observeRedundantEncoding(samples);
@@ -343,9 +345,10 @@ test('redundant-encoding red: colour without the dot is observed as colour alone
   );
   // ADR-0035 §5 calls colour + dot + word non-negotiable. This removes exactly
   // the dot and leaves colour and word intact.
-  await page.addStyleTag({
-    content: '[data-status-role]::before{display:none!important}',
-  });
+  await addTestStyle(
+    page,
+    '[data-status-role]::before{display:none!important}',
+  );
 
   const encoding = observeRedundantEncoding(await readStatusRoleSamples(page));
   assert.equal(encoding.rolesRead, STATUS_ROLES.length);
@@ -370,10 +373,10 @@ test('token-routing red: an off-brand contrast-safe literal in a status selector
   // is the tree ADR-0035's doctrine forbids and the first round could not see:
   // no new hex literal, the tokens still declared and still well-formed, and
   // every colour gate satisfied by hardcoded values.
-  await page.addStyleTag({
-    content:
-      '[data-status-role=success]{color:hsl(150 70% 22%)!important;background:hsl(150 45% 93%)!important}',
-  });
+  await addTestStyle(
+    page,
+    '[data-status-role=success]{color:hsl(150 70% 22%)!important;background:hsl(150 45% 93%)!important}',
+  );
 
   const samples = await readStatusRoleSamples(page);
   const brand = await readBrandHue(page);
@@ -401,10 +404,10 @@ test('separability red: a status role moved into the rendered brand hue is obser
   );
   // b700 on b100 clears 4.5:1 comfortably, so the only thing this can trip is
   // the separability rule — the contrast gate stays green underneath it.
-  await page.addStyleTag({
-    content:
-      '[data-status-role=inProgress]{color:var(--b700)!important;background:var(--b100)!important}',
-  });
+  await addTestStyle(
+    page,
+    '[data-status-role=inProgress]{color:var(--b700)!important;background:var(--b100)!important}',
+  );
 
   const samples = await readStatusRoleSamples(page);
   const brand = await readBrandHue(page);
@@ -426,9 +429,7 @@ test('separability red: the band follows the brand token rather than a copied co
   );
   // Move the BRAND onto inProgress's indigo instead of moving a status role.
   // A hardcoded 199° comparator stays green here; a derived one cannot.
-  await page.addStyleTag({
-    content: ':root{--brand:var(--s-inprogress-ink)!important}',
-  });
+  await addTestStyle(page, ':root{--brand:var(--s-inprogress-ink)!important}');
 
   const samples = await readStatusRoleSamples(page);
   const brand = await readBrandHue(page);
@@ -452,9 +453,10 @@ test('opacity red: a non-opaque status ground is refused rather than measured as
   // `rgba(0,0,0,0)` truncated to three channels reads as pure black, which
   // "passes" against light text. Refusing it is the only honest answer without
   // compositing against the real underlying surface.
-  await page.addStyleTag({
-    content: '[data-status-role=blocked]{background:transparent!important}',
-  });
+  await addTestStyle(
+    page,
+    '[data-status-role=blocked]{background:transparent!important}',
+  );
 
   const observed = observeAccessibility(await readStatusRoleSamples(page), []);
   assert.equal(observed.contrastPairsRead, STATUS_ROLES.length);
@@ -502,10 +504,10 @@ test('reduced-motion red: a shimmer that survives the reduce query is observed',
     `${baseUrl}/?surface=${encodeURIComponent(builder.surfaceId)}`,
   );
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.addStyleTag({
-    content:
-      '.skeleton::after{display:block!important;animation:skeleton-sweep 2000ms linear infinite!important}',
-  });
+  await addTestStyle(
+    page,
+    '.skeleton::after{display:block!important;animation:skeleton-sweep 2000ms linear infinite!important}',
+  );
 
   const observed = observeReducedMotion(await readSkeletonMotion(page));
   assert.ok(observed.skeletonsRead > 0);
@@ -562,10 +564,10 @@ test('dark-mode red: one role left on its light values is observed', async ({
   // this restores exactly the light pair. Contrast stays green (7.07:1) and no
   // literal moves, which is what makes the partial-remap case invisible without
   // a per-role comparison.
-  await page.addStyleTag({
-    content:
-      '[data-status-role=success]{color:var(--s-success-ink)!important;background:var(--s-success-ground)!important}',
-  });
+  await addTestStyle(
+    page,
+    '[data-status-role=success]{color:var(--s-success-ink)!important;background:var(--s-success-ground)!important}',
+  );
 
   const dark = await readStatusRoleSamples(page);
   const light = await lightSchemeStatusRoleSamples(page, builder.surfaceId);
@@ -585,9 +587,7 @@ test('dark-mode red: the light-ground accent on a dark ground is observed below 
   );
   // ADR-0035 §10: naive inversion puts --b600 on a dark ground. This is that
   // inversion, executed, and the gate has to see it.
-  await page.addStyleTag({
-    content: '[data-status-role]{color:var(--b600)!important}',
-  });
+  await addTestStyle(page, '[data-status-role]{color:var(--b600)!important}');
 
   const observed = observeAccessibility(await readStatusRoleSamples(page), []);
   assert.equal(observed.contrastPairsRead, STATUS_ROLES.length);
@@ -927,10 +927,10 @@ test('alignment red: removing the compact override returns the cell to left whil
   // Same specificity as the shipped rule and later in order, so it wins — which
   // reproduces the pre-fix cascade exactly: the 0-2-2 card rule deciding the
   // cell and the 0-2-1 numeric override losing.
-  await page.addStyleTag({
-    content:
-      '@media(max-width:800px){.data-table-wrap tr[data-compact-card=true] td:has(.cell-numeric){text-align:left}}',
-  });
+  await addTestStyle(
+    page,
+    '@media(max-width:800px){.data-table-wrap tr[data-compact-card=true] td:has(.cell-numeric){text-align:left}}',
+  );
 
   const wide = await readNumericCellAlignment(page, 1280);
   const compact = await readNumericCellAlignment(page, 390);

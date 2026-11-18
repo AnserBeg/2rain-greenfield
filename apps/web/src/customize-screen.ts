@@ -101,10 +101,12 @@ export async function renderCustomizeScreen(
   service: CustomizeScreenService,
   requestUrl: string,
   submission: CustomizeScreenSubmission | null,
-  /** The runtime's stylesheet, handed in by the app server (always the same). */
-  styles = '',
+  /** The runtime stylesheet's route, handed in by the app server. */
+  stylesheetHref = '',
 ): Promise<CustomizeScreenResponse> {
-  stylesheet = styles;
+  stylesheet = stylesheetHref
+    ? `<link rel="stylesheet" href="${escapeHtml(stylesheetHref)}">`
+    : '';
   const url = new URL(requestUrl, 'http://surface-runtime.local');
   try {
     if (!submission) {
@@ -450,7 +452,7 @@ function page(
   statusCode = 200,
 ): CustomizeScreenResponse {
   return Object.freeze({
-    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · 2rain</title><style>${stylesheet}</style></head><body class="standalone"><main class="standalone__card" data-customize-screen ${attributes}>${body}</main></body></html>`,
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · 2rain</title>${stylesheet}</head><body class="standalone"><main class="standalone__card" data-customize-screen ${attributes}>${body}</main></body></html>`,
     statusCode,
   });
 }
