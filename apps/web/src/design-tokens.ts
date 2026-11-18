@@ -1,113 +1,101 @@
 /**
- * The single token-definition block for every web surface.
+ * The single token-definition block for every web surface: the Ledger look
+ * (owner ruling 2026-11-17, `docs/design/ledger-spec.md` §1, §3 and §4).
  *
- * ADR-0035 decides the brand ramp (hue 199°), the chosen neutrals, the status
- * roles with `inProgress` shifted to indigo, the typographic scale, the 4 px
- * density grid, the motion contract and the designed dark mode. This file is
- * the only place in `apps/web/src` where a colour literal may appear: every
- * other site reads a `var(--…)`, and
- * `test/unit/web-surface-hex-literal-ratchet.test.ts` observes that from source.
+ * The spec's names are the tokens: grounds (`--paper`, `--side`, `--sheet`,
+ * `--sunk`, `--hover`), inks (`--ink`, `--ink-2`, `--muted`, `--faint`), rules
+ * (`--rule`, `--rule-2`), one deep teal accent and three status families, each
+ * with a soft ground. Accent means "you can act / in motion"; success means
+ * "done"; they never share a meaning, so the in-progress status rides the
+ * accent family and the other three stay outside its hue.
  *
- * Two layers, deliberately:
- *   - **primitives** (`--b*`, `--n*`, `--s-*`) are the palette. Nothing outside
- *     this file names them.
- *   - **roles** (`--surface-*`, `--ink-*`, `--accent-*`, `--status-*`, …) are
- *     what the stylesheet consumes. Dark mode redefines roles only, never
- *     primitives, which is what makes it *designed* rather than inverted
- *     (ADR-0035 §10).
+ * This file is the only place in `apps/web/src` where a colour literal may
+ * appear: every other site reads a `var(--…)`, and
+ * `test/unit/web-surface-hex-literal-ratchet.test.ts` observes that from
+ * source. The `token-definition-block` sentinels below are read by the ratchet
+ * and by the architecture suite's contrast check. Keep every literal between
+ * them.
  *
- * The `token-definition-block` sentinels below are read by the ratchet. Keep
- * every literal between them.
+ * Dark is designed, never inverted (ADR-0035 §10): it redefines the spec's
+ * tokens under `prefers-color-scheme: dark` guarded by
+ * `:root:not([data-theme="light"])`, and again under `:root[data-theme="dark"]`.
+ * Density: `:root` holds compact; `:root[data-density="comfortable"]`
+ * overrides only the density tokens. Nothing sets either attribute yet.
  *
- * **The focus ring is context-scoped, and that is not a workaround.** ADR-0035
- * §2.2 measured every ground a ring actually lands on — eight, not the three
- * §2.1 assumed — and no single ramp step clears SC 1.4.11's 3:1 against both
- * `--n0` and the rail's `--b700` flyout. `--b500`, §2.1's answer, bottoms out
- * at 2.08:1 on that flyout. So the ring follows the rule §10 already sets for
- * `--accent`: `--focus-ring-surface` for panel/page/sunken, `--focus-ring-rail`
- * for the rail and its raised overlay, each moving up the ramp on dark ground.
- *
- * `--accent-tone` is the leftover. It holds §2's `--b500` "hover on 600" step,
- * which a filled action cannot use either: white on `--b500` is **3.32:1**,
- * below the 4.5:1 text floor plan §8.4 claims, and a 4.85 → 3.32 move breaks
- * §9's "hover shifts the ground 2–3 %, never jumps". The filled hover goes
- * *darker*, to `--accent-ground-hover`, and this role stays named and unused.
+ * The status role names (`--status-*-ink` / `--status-*-ground`) resolve to
+ * the spec's tokens, so dark mode moves them by moving the spec tokens.
  *
  * Prose names tokens, never literals — a hex in this comment would sit outside
- * the block below and fail the ratchet, which is how the first draft of this
- * paragraph was caught.
+ * the block below and fail the ratchet.
  */
 export const DESIGN_TOKENS = `
 /* token-definition-block:start */
 :root{
 color-scheme:light dark;
 
---b50:#F1F9FE;--b100:#DCF0FB;--b200:#BAE3F8;--b300:#89CFF0;--b400:#4FB4E3;
---b500:#2196CF;--b600:#1478AE;--b700:#0F5F8C;--b900:#0B3A55;
+--paper:#F5F5F2;--side:#EDEDE9;--sheet:#FFFFFF;--sunk:#F3F3EF;--hover:#E8E8E3;
+--ink:#17191C;--ink-2:#40454B;--muted:#6B7077;--faint:#A1A5AA;
+--rule:#E3E3DE;--rule-2:#CDCDC7;
+--accent:#0E6670;--accent-hover:#0A525A;--on-accent:#FFFFFF;
+--accent-soft:#E1EEF0;--accent-text:#0C5E67;
+--success:#2E7A2F;--success-soft:#E4F2E1;
+--attention:#8A5300;--attention-soft:#F9EED5;
+--blocked:#A3261B;--blocked-soft:#FAE8E5;
+--scrim:rgba(23,25,28,.38);
+--shadow-dlg:0 20px 50px rgba(23,25,28,.22),0 2px 8px rgba(23,25,28,.08);
+--shadow-bar:0 -6px 18px rgba(23,25,28,.06);
 
---n0:#FFFFFF;--n50:#F6F8FA;--n100:#EDF1F5;--n200:#DFE5EC;--n300:#C6D0DA;
---n400:#94A3B2;--n500:#6B7A89;--n600:#4E5C6A;--n700:#37444F;--n800:#232E37;
---n900:#141C23;
+--status-success-ink:var(--success);--status-success-ground:var(--success-soft);
+--status-attention-ink:var(--attention);--status-attention-ground:var(--attention-soft);
+--status-blocked-ink:var(--blocked);--status-blocked-ground:var(--blocked-soft);
+--status-inprogress-ink:var(--accent-text);--status-inprogress-ground:var(--accent-soft);
+--skeleton-base:var(--sunk);--skeleton-sheen:var(--sheet);
+--focus-ring-surface:var(--accent);--focus-ring-rail:var(--accent);
 
---s-success-ink:#0A5C43;--s-success-ground:#E3F5EE;
---s-attention-ink:#8A5200;--s-attention-ground:#FEF3E2;
---s-blocked-ink:#912018;--s-blocked-ground:#FEE9E7;
---s-inprogress-ink:#3730A3;--s-inprogress-ground:#EEF0FE;
+--f-ui:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+--f-doc:"IBM Plex Serif",Georgia,"Times New Roman",serif;
+--f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 
---surface-page:var(--n50);--surface-panel:var(--n0);--surface-sunken:var(--n100);
---surface-rail:var(--b900);--surface-rail-raised:var(--b700);
---ink:var(--n800);--ink-strong:var(--n900);--ink-muted:var(--n600);
---ink-on-accent:var(--n0);--ink-on-rail:var(--n0);--ink-on-rail-muted:var(--b200);
---line:var(--n200);--line-strong:var(--n300);--line-on-rail:var(--b700);
---brand:var(--b300);--ink-on-brand:var(--b900);
---focus-ring-surface:var(--b600);--focus-ring-rail:var(--b300);
---accent:var(--b600);--accent-ink:var(--b700);--accent-soft:var(--b50);
---accent-selected:var(--b100);--accent-edge:var(--b200);--accent-tone:var(--b500);
---accent-ground:var(--b600);--accent-ground-hover:var(--b700);
---accent-ground-pressed:var(--b900);
---status-success-ink:var(--s-success-ink);--status-success-ground:var(--s-success-ground);
---status-attention-ink:var(--s-attention-ink);--status-attention-ground:var(--s-attention-ground);
---status-blocked-ink:var(--s-blocked-ink);--status-blocked-ground:var(--s-blocked-ground);
---status-inprogress-ink:var(--s-inprogress-ink);--status-inprogress-ground:var(--s-inprogress-ground);
---skeleton-base:var(--n100);--skeleton-sheen:var(--n0);
+--row-y:8px;--ctl-h:30px;--nav-h:30px;--gap:18px;--pad-x:14px;--sheet-y:26px;--sheet-x:30px;
+--side-w:212px;--rail-w:300px;--page-max:1240px;--gutter:28px;
 
---font-sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
---font-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
---text-micro:10.5px;--text-code:11.5px;--text-body:12.5px;--text-base:13.5px;
---text-section:16px;--text-title:20px;
---weight-body:540;--weight-emphasis:650;
-
---space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;
---space-6:24px;--space-8:32px;--space-10:40px;--space-12:48px;
---row-height:34px;--row-header-height:28px;--page-padding:18px;
---radius-control:6px;--radius-container:8px;
-
---motion-duration:140ms;--motion-easing:ease;
+--motion-duration:120ms;--motion-easing:ease;
 --shimmer-duration:2000ms;
---elevation-overlay:0 12px 32px rgba(11,58,85,.24);
+}
+:root[data-density="comfortable"]{
+--row-y:12px;--ctl-h:36px;--nav-h:34px;--gap:26px;--pad-x:18px;--sheet-y:34px;--sheet-x:40px;
 }
 
 @media (prefers-color-scheme:dark){
-:root{
---surface-page:var(--n900);--surface-panel:var(--n800);--surface-sunken:var(--n700);
---surface-rail:var(--b900);--surface-rail-raised:var(--b700);
---ink:var(--n100);--ink-strong:var(--n0);--ink-muted:var(--n400);
---ink-on-accent:var(--n900);--ink-on-rail:var(--n0);--ink-on-rail-muted:var(--b200);
---line:var(--n700);--line-strong:var(--n600);--line-on-rail:var(--b700);
---brand:var(--b300);--ink-on-brand:var(--b900);
---focus-ring-surface:var(--b300);--focus-ring-rail:var(--b300);
---accent:var(--b400);--accent-ink:var(--b300);--accent-soft:#16303F;
---accent-selected:#123A4E;--accent-edge:var(--b700);--accent-tone:var(--b500);
---accent-ground:var(--b400);--accent-ground-hover:var(--b300);
---accent-ground-pressed:var(--b200);
---status-success-ink:#6FD9B4;--status-success-ground:#0B2E24;
---status-attention-ink:#F0BE68;--status-attention-ground:#33240A;
---status-blocked-ink:#F49B93;--status-blocked-ground:#3A1512;
---status-inprogress-ink:#A5A0F5;--status-inprogress-ground:#1F1B4D;
---skeleton-base:var(--n700);--skeleton-sheen:var(--n600);
---elevation-overlay:0 12px 32px rgba(0,0,0,.55);
+:root:not([data-theme="light"]){
+--paper:#131416;--side:#17181B;--sheet:#1B1D20;--sunk:#202226;--hover:#272A2E;
+--ink:#E8E8E4;--ink-2:#C3C5C8;--muted:#92969C;--faint:#666A70;
+--rule:#2B2E32;--rule-2:#3B3F44;
+--accent:#4FB0BB;--accent-hover:#68C0CA;--on-accent:#071A1D;
+--accent-soft:#12303A;--accent-text:#80CCD5;
+--success:#86CF84;--success-soft:#1A3119;
+--attention:#E2B25E;--attention-soft:#33280F;
+--blocked:#F1907F;--blocked-soft:#3A1D19;
+--scrim:rgba(0,0,0,.6);
+--shadow-dlg:0 20px 50px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.4);
+--shadow-bar:0 -6px 18px rgba(0,0,0,.35);
 }
 }
+:root[data-theme="dark"]{
+color-scheme:dark;
+--paper:#131416;--side:#17181B;--sheet:#1B1D20;--sunk:#202226;--hover:#272A2E;
+--ink:#E8E8E4;--ink-2:#C3C5C8;--muted:#92969C;--faint:#666A70;
+--rule:#2B2E32;--rule-2:#3B3F44;
+--accent:#4FB0BB;--accent-hover:#68C0CA;--on-accent:#071A1D;
+--accent-soft:#12303A;--accent-text:#80CCD5;
+--success:#86CF84;--success-soft:#1A3119;
+--attention:#E2B25E;--attention-soft:#33280F;
+--blocked:#F1907F;--blocked-soft:#3A1D19;
+--scrim:rgba(0,0,0,.6);
+--shadow-dlg:0 20px 50px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.4);
+--shadow-bar:0 -6px 18px rgba(0,0,0,.35);
+}
+:root[data-theme="light"]{color-scheme:light}
 /* token-definition-block:end */
 `;
 

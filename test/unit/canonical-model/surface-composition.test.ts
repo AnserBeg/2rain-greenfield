@@ -897,3 +897,68 @@ test('SALES-EXTRAS: a counter sale is one Task of up to twelve steps whose per-r
     false,
   );
 });
+
+test('LOOK-1: line progress names two quantity columns of its own dataset', () => {
+  const progress = (value: Json) =>
+    (value.children as Json[]).find(
+      (child) => child.datasetId === id('dataset', 'purchasing_lines'),
+    )!.presentation.progress as Json;
+  // Accepted as the purchase order declares it: received of ordered.
+  const model = structuredClone(normalized);
+  assert.deepEqual(progress(composition(model, 'purchase_order_detail')), {
+    total: id('column', 'purchasing_quantity'),
+    done: id('column', 'purchasing_received'),
+  });
+  validateSurfaceCompositions(model as never);
+  // A text column, a column of another dataset, and one column twice.
+  for (const mutate of [
+    (value: Json) => {
+      progress(value).done = id('column', 'purchasing_sku');
+    },
+    (value: Json) => {
+      progress(value).done = id('column', 'purchasing_priced_quantity');
+    },
+    (value: Json) => {
+      progress(value).done = progress(value).total;
+    },
+  ])
+    assert.match(
+      refused('purchase_order_detail', mutate),
+      /line progress names two of the dataset's quantity columns/u,
+    );
+  // The key is closed: an unknown member fails the schema.
+  const purchase = structuredClone(
+    composition(normalized, 'purchase_order_detail'),
+  );
+  progress(purchase).ratio = 'half';
+  assert.equal(SurfaceCompositionSchema.safeParse(purchase).success, false);
+});
+
+test('LOOK-1 round 2: the rail holds linked documents, never the lines with progress', () => {
+  const dataset = (value: Json, local: string) =>
+    (value.children as Json[]).find(
+      (child) => child.datasetId === id('dataset', local),
+    )!;
+  // Accepted as the purchase order declares it: receipts and bills beside.
+  const model = structuredClone(normalized);
+  const purchase = composition(model, 'purchase_order_detail');
+  assert.equal(
+    dataset(purchase, 'purchasing_receipts').presentation.rail,
+    true,
+  );
+  assert.equal(dataset(purchase, 'purchasing_bills').presentation.rail, true);
+  validateSurfaceCompositions(model as never);
+  // The lines, which show their progress, stay on the sheet.
+  assert.match(
+    refused('purchase_order_detail', (value) => {
+      dataset(value, 'purchasing_lines').presentation.rail = true;
+    }),
+    /a dataset with line progress stays on the sheet, not in the rail/u,
+  );
+  // The key is closed: only `true`.
+  const closed = structuredClone(
+    composition(normalized, 'purchase_order_detail'),
+  );
+  dataset(closed, 'purchasing_receipts').presentation.rail = 'left';
+  assert.equal(SurfaceCompositionSchema.safeParse(closed).success, false);
+});

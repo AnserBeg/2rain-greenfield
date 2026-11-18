@@ -655,7 +655,7 @@ const REAL_PATH_DRIVERS: Readonly<
       'catalog_advance',
       new URL(page.url()).searchParams.get('record')!,
     );
-    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
   },
   DRAFT_EDITOR_LOCKED: (page) =>
     page.goto(realPathUrls.get('DRAFT_EDITOR_LOCKED')!),

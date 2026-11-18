@@ -210,6 +210,12 @@ export function renderValueControl(context: RenderContext): string {
         : raw);
     return `<output id="${h(id)}" class="derived-value" data-derived-from="${h(presentation.referenceFieldId)}"${named}>${shown ? h(shown) : row.values[presentation.referenceFieldId] ? '<span class="derived-empty">—</span>' : '<span class="derived-empty">—</span>'}</output>`;
   }
+  if (input.kind === 'dateTimeFieldType' && field.dateOnly) {
+    // A calendar day (LOOK-1 round 2): stored as that day's midnight UTC,
+    // which the save plan restores from the bare date.
+    const current = text(value).slice(0, 10);
+    return `<input type="date"${shared} name="${h(name)}" value="${h(current)}">${error.html}`;
+  }
   if (input.kind === 'dateTimeFieldType') {
     // Kept deliberately: an explicit-UTC native picker with second precision,
     // whose value regains its `Z` when the save is planned. The shared carrier

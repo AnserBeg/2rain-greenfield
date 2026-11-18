@@ -407,6 +407,17 @@ jobs:
         uses: ./.github/actions/install-chromium
       - name: Run composed application browser tests
         run: corepack pnpm test:browser:composed
+        env:
+          # LOOK-1's proof writes the seven Ledger screens here.
+          LOOK_EVIDENCE_OUT: ${{ github.workspace }}/test-results/look-evidence
+      - name: Retain the Ledger screenshots (LOOK-1)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: look-evidence-${{ github.sha }}
+          path: test-results/look-evidence/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Retain composed application browser executed-file evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

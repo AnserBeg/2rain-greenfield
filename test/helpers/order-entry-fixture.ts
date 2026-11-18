@@ -1965,7 +1965,11 @@ async function seed(
       const company = await invoke('legal_entity_update', {
         recordId: scope,
         expectedRevision: await revision('legal_entity', scope),
-        patch: { [`${ns}:field.legal_entity_reorder_point_percent`]: '40' },
+        patch: {
+          [`${ns}:field.legal_entity_reorder_point_percent`]: '40',
+          // The fixture's company has a business's name (LOOK-1 round 2).
+          [`${ns}:field.legal_entity_name`]: 'Foothills Industrial Supply',
+        },
       });
       assert.equal(company.outcome, 'succeeded');
       const duplicate = await create(

@@ -30,6 +30,13 @@ export interface ComposedApplicationSeedRecord {
 
 export type ComposedApplicationSeedProfile = 'demo' | 'distributor';
 
+/**
+ * The distributor profile's company (LOOK-1 round 2): the provisioned default
+ * company renamed once the seed is in, so the workspace bar names a business
+ * rather than "Default legal entity". Its id never changes.
+ */
+export const DISTRIBUTOR_COMPANY_NAME = 'Foothills Industrial Supply';
+
 const warehouseOptionId = `${APPLICATION_IDS.namespace}:option.warehouse`;
 const storeOptionId = `${APPLICATION_IDS.namespace}:option.store`;
 

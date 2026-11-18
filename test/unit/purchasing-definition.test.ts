@@ -1359,14 +1359,7 @@ test('the composed application derives its modules from an ordered registry', ()
   assert.equal(composed.modules.length, COMPOSED_MODULE_NAMES.length);
   assert.deepEqual(
     composed.modules.map((module) => module.label),
-    [
-      'Sales',
-      'Purchasing',
-      'Stock',
-      'Customers and suppliers',
-      'Catalog',
-      'Location',
-    ],
+    ['Sales', 'Purchasing', 'Stock', 'Contacts', 'Catalog', 'Locations'],
   );
   // `orderKey` is derived from registry POSITION, which is what makes order the
   // only thing the registry has to declare.
@@ -1386,21 +1379,14 @@ test('Purchasing and Sales lead the business navigation within budget', () => {
   const composed = composedApplicationDefinition() as unknown as AuthoredShape;
   assert.deepEqual(
     composed.modules.map((module) => module.label),
-    [
-      'Sales',
-      'Purchasing',
-      'Stock',
-      'Customers and suppliers',
-      'Catalog',
-      'Location',
-    ],
+    ['Sales', 'Purchasing', 'Stock', 'Contacts', 'Catalog', 'Locations'],
   );
 
   const navigation = surfaceManifest(compile(composed)).navigation;
   assert.ok(navigation, 'the composed application emits no navigation tree');
   assert.deepEqual(
     navigation.entries.map((entry) => entry.label),
-    ['Sales', 'Purchasing', 'Stock', 'Customers and suppliers', 'More'],
+    ['Sales', 'Purchasing', 'Stock', 'Contacts', 'More'],
     'supporting masters belong under the compiled overflow group',
   );
 });
@@ -2106,6 +2092,9 @@ test('PURCHASING-PARITY: an order line shows what is still to arrive, and its op
       ['purchasing_billed', 'billed'],
       ['purchasing_to_bill', 'to_bill'],
       ['purchasing_match', 'match_status'],
+      // One lines table (LOOK-1 round 2): each line's amount and tax too.
+      ['purchasing_amount', 'line_amount'],
+      ['purchasing_tax', 'line_tax'],
     ],
   );
   // Offered on a released order's line with something still open; the new

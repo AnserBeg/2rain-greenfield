@@ -130,19 +130,21 @@ test('the Warehouse opens the floor work with its counts, and a scanned SKU or d
     fullPage: true,
   });
 
-  // Phone width: one tile a row, the page scrolls down, never sideways.
+  // Phone width: two tiles a row (the Ledger strip, LOOK-1), the page
+  // scrolls down, never sideways.
   await page.setViewportSize({ width: 390, height: 844 });
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
-  const [first, second] = await page
+  const [first, second, third] = await page
     .locator('a.launcher-tile')
     .evaluateAll((links) =>
-      links.slice(0, 2).map((link) => link.getBoundingClientRect().top),
+      links.slice(0, 3).map((link) => link.getBoundingClientRect().top),
     );
-  expect(second!).toBeGreaterThan(first!);
+  expect(second!).toBe(first!);
+  expect(third!).toBeGreaterThan(first!);
   await page.screenshot({
     path: testInfo.outputPath('warehouse-phone.png'),
     fullPage: true,
@@ -198,7 +200,7 @@ test('the period lock closes a period and reopens it, each reviewed and confirme
   await pick(page, 'Line 1 product', 'OFF-100', 'Field notebook');
   await pick(page, 'Line 1 to location', 'Calgary', 'Calgary warehouse');
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('1');
-  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page).toHaveURL(/inventory_transaction_detail/u);
   const documentUrl = page.url();
   await post(page);
@@ -238,9 +240,9 @@ async function openWarehouse(page: Page) {
 
 /** Inventory -> Inventory period lock -> the company's one lock. */
 async function openPeriodLock(page: Page) {
-  await openInventory(page, 'Inventory period lock');
+  await openInventory(page, 'Period locks');
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Inventory period lock' }),
+    page.getByRole('heading', { level: 1, name: 'Period locks' }),
   ).toBeVisible();
   await page
     .locator('[data-platform-slot="list:dataGrid"] a.record-link')
@@ -268,6 +270,9 @@ async function openInventory(page: Page, destination: string) {
   // A group already open on this page stays open; clicking it would close it.
   if (!(await link.isVisible()))
     await inventory.getByText('Stock', { exact: true }).click();
+  // An occasional destination waits under the group's Other (LOOK-1 round 2).
+  if (!(await link.isVisible()))
+    await inventory.locator('.navigation-more > summary').first().click();
   await link.click();
 }
 

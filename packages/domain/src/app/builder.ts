@@ -132,7 +132,72 @@ const MODULE_REGISTRY = Object.freeze([
  */
 const COMPOSED_MODULE_LABELS: Readonly<Record<string, string>> = Object.freeze({
   inventory: 'Stock',
-  party: 'Customers and suppliers',
+  party: 'Contacts',
+  // A one-destination group is shown as that destination: its plain name.
+  location: 'Locations',
+});
+
+/** Each menu group's icon (LOOK-1), from the language's closed icon set. */
+const COMPOSED_MODULE_ICONS: Readonly<Record<string, string>> = Object.freeze({
+  sales: 'tag',
+  purchasing: 'cart',
+  inventory: 'boxes',
+  party: 'users',
+  catalog: 'box',
+  location: 'location',
+});
+
+/**
+ * Each destination's icon and, where its generated name is a developer's
+ * ("Party role list", "Inventory period lock list"), the name an office
+ * person reads (LOOK-1, owner ruling). Ids never change; only labels.
+ */
+const COMPOSED_DESTINATIONS: Readonly<
+  Record<
+    string,
+    {
+      readonly icon: string;
+      readonly label?: string;
+      /**
+       * The menu group a destination is listed in when it is not its own
+       * module's (LOOK-1 round 2): placement only, the language's
+       * `navigationModuleId`.
+       */
+      readonly group?: string;
+      /**
+       * An occasional destination (LOOK-1 round 2): listed under its group's
+       * More with the group's settings. Membership is placement only and
+       * never authorization (ADR-0030).
+       */
+      readonly occasional?: true;
+    }
+  >
+> = Object.freeze({
+  sales_order_list: { icon: 'tag' },
+  customer_invoice_list: { icon: 'invoice' },
+  counter_sale_list: { icon: 'receipt' },
+  purchase_order_list: { icon: 'cart' },
+  expected_receipt_list: { icon: 'inbox' },
+  vendor_bill_list: { icon: 'invoice' },
+  purchase_order_approval_list: { icon: 'clipboard' },
+  purchasing_settings_list: { icon: 'settings' },
+  inventory_today: { icon: 'home' },
+  inventory_warehouse: { icon: 'building' },
+  item_stock_list: { icon: 'boxes' },
+  item_buying_list: { icon: 'alert' },
+  inventory_transaction_list: { icon: 'wrench', occasional: true },
+  posted_stock_balance_list: { icon: 'location', label: 'Stock by location' },
+  inventory_movement_list: { icon: 'transfer', label: 'Stock movements' },
+  stock_count_list: { icon: 'clipboard', label: 'Stock counts' },
+  inventory_period_lock_list: { icon: 'lock', label: 'Period locks' },
+  legal_entity_list: { icon: 'building', label: 'Companies', group: 'party' },
+  inventory_value_list: { icon: 'chart', group: 'inventory' },
+  party_list: { icon: 'users', label: 'Customers and suppliers' },
+  party_role_list: { icon: 'users', label: 'Contact roles' },
+  item_list: { icon: 'box', label: 'Items' },
+  tax_code_list: { icon: 'calculator', label: 'Tax codes' },
+  price_list_list: { icon: 'tag', label: 'Price lists' },
+  location_list: { icon: 'location', label: 'Locations' },
 });
 
 /** Record surfaces presented as documents with their own lines and actions. */
@@ -232,6 +297,9 @@ export function composedApplicationDefinition(): Record<string, unknown> {
       // The menu's plain names (LOOP-1): a group says what is in it.
       ...(COMPOSED_MODULE_LABELS[moduleName]
         ? { label: COMPOSED_MODULE_LABELS[moduleName] }
+        : {}),
+      ...(COMPOSED_MODULE_ICONS[moduleName]
+        ? { icon: COMPOSED_MODULE_ICONS[moduleName] }
         : {}),
       orderKey: (index + 1) * 10,
       ownerPackageId: packageId,
@@ -409,8 +477,69 @@ export function composedApplicationDefinition(): Record<string, unknown> {
       warehouseSurface(APPLICATION_NAMESPACE),
       // The landing page (LOOP-1): the day's work in the loop.
       todaySurface(APPLICATION_NAMESPACE),
-    ],
+    ].map(withDestinationPresentation),
   });
+}
+
+/** A composed destination's declared icon, by its surface's local id (LOOK-1). */
+export function composedDestinationIcon(local: string): string | undefined {
+  return Object.hasOwn(COMPOSED_DESTINATIONS, local)
+    ? COMPOSED_DESTINATIONS[local]?.icon
+    : undefined;
+}
+
+/** A composed destination's plain name, where it has one (LOOK-1). */
+export function composedDestinationLabel(local: string): string | undefined {
+  return Object.hasOwn(COMPOSED_DESTINATIONS, local)
+    ? COMPOSED_DESTINATIONS[local]?.label
+    : undefined;
+}
+
+/**
+ * A composed destination's placement (LOOK-1 round 2): the menu group it is
+ * listed in when not its own module's, and whether it is occasional.
+ */
+export function composedDestinationPlacement(local: string): {
+  readonly navigationModuleId?: string;
+  readonly occasional: boolean;
+} {
+  const destination = Object.hasOwn(COMPOSED_DESTINATIONS, local)
+    ? COMPOSED_DESTINATIONS[local]
+    : undefined;
+  return {
+    ...(destination?.group
+      ? {
+          navigationModuleId: `${APPLICATION_NAMESPACE}:module.${destination.group}`,
+        }
+      : {}),
+    occasional: destination?.occasional === true,
+  };
+}
+
+/** A navigation destination's declared icon and plain name (LOOK-1). */
+function withDestinationPresentation(
+  surface: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!isRecord(surface.workspace)) return surface;
+  const local = String(surface.surfaceId).split(':surface.')[1] ?? '';
+  const destination = Object.hasOwn(COMPOSED_DESTINATIONS, local)
+    ? COMPOSED_DESTINATIONS[local]
+    : undefined;
+  if (!destination) return surface;
+  return {
+    ...surface,
+    ...(destination.label ? { label: destination.label } : {}),
+    workspace: {
+      ...surface.workspace,
+      ...(destination.occasional ? { membership: 'setup' } : {}),
+      ...(destination.group
+        ? {
+            navigationModuleId: `${APPLICATION_NAMESPACE}:module.${destination.group}`,
+          }
+        : {}),
+      icon: destination.icon,
+    },
+  };
 }
 
 /** A worklist's List surface joins the composed surfaces beside its source. */

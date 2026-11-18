@@ -538,9 +538,7 @@ export async function placePurchaseOrder(card: LoopScorecard): Promise<void> {
     page.getByLabel('Line 1 unit cost', { exact: true }),
     f.unitCost,
   );
-  await card.click(
-    page.getByRole('button', { name: 'Save draft', exact: true }),
-  );
+  await card.click(page.getByRole('button', { name: 'Save', exact: true }));
   await expect(page).toHaveURL(/purchase_order_detail/u);
   await runTask(card, nextAction(page), 'Place order');
   await expect(status(page)).toHaveText(/Released/u);
@@ -551,7 +549,7 @@ export async function receiveInFull(card: LoopScorecard): Promise<void> {
   const { page } = card;
   const f = LOOP_FIXTURE;
   card.begin(LOOP_STEPS.receive);
-  await runTask(card, nextAction(page), 'Receive lines with actual cost', {
+  await runTask(card, nextAction(page), 'Receive', {
     async enter() {
       await card.click(
         page.getByRole('button', { name: 'Fill open quantities', exact: true }),
@@ -595,9 +593,7 @@ export async function createSale(card: LoopScorecard): Promise<void> {
   await pick(card, 'Customer', ...f.customer);
   await pick(card, 'Line 1 product', ...f.item);
   await card.fill(page.getByLabel('Line 1 quantity', { exact: true }), f.sold);
-  await card.click(
-    page.getByRole('button', { name: 'Save draft', exact: true }),
-  );
+  await card.click(page.getByRole('button', { name: 'Save', exact: true }));
   await expect(page).toHaveURL(/sales_order_detail/u);
   await card.click(nextAction(page));
   await expect(status(page)).toHaveText(/Released/u);
@@ -635,7 +631,7 @@ export async function invoiceAndPay(card: LoopScorecard): Promise<boolean> {
   const { page } = card;
   card.begin(LOOP_STEPS.invoiceAndPay);
   await expect(page).toHaveURL(/sales_order_detail/u);
-  await runTask(card, nextAction(page), 'Invoice shipped quantities');
+  await runTask(card, nextAction(page), 'Invoice');
   const balance = (await cell(page, 'order_invoices', 'Balance').innerText())
     .trim()
     .replaceAll(',', '');

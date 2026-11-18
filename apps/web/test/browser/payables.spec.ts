@@ -36,7 +36,7 @@ test('a received purchase order is billed, paid in part and credited for the res
     };
     const billTask = () =>
       page.getByRole('button', {
-        name: /^(?:Next action: )?Bill received quantities$/u,
+        name: /^(?:Next action: )?Bill$/u,
       });
 
     // Purchasing lists its bills beside its orders.
@@ -63,11 +63,13 @@ test('a received purchase order is billed, paid in part and credited for the res
     // Bill the two received units at the order's frozen cost, with the
     // supplier's own invoice number: 2 × 12.50 less 10% = 22.50, tax 1.13,
     // freight 25 (+1.25) and the fee of 10 on this first bill: 59.88.
+    // Billing is a document task in Record actions (LOOK-1 round 2).
+    await openRecordActions(page);
     await billTask().click();
     await page
       .getByLabel('Supplier invoice number', { exact: true })
       .fill('INV-5501');
-    await finish('Bill received quantities');
+    await finish('Bill');
     await page.goto(orderUrl);
     const bills = dataset('purchasing_bills').locator('tbody tr');
     await expect(bills).toHaveCount(1);
@@ -82,6 +84,7 @@ test('a received purchase order is billed, paid in part and credited for the res
       bills.first().locator('td[data-column-label="Supplier invoice"]'),
     ).toHaveText('INV-5501');
     // Everything received is billed, so the task is no longer offered.
+    await openRecordActions(page);
     await expect(billTask()).toHaveCount(0);
     // The line's three-way match (PY-G): 3 ordered, 2 received and 2 billed,
     // nothing left to bill.
@@ -198,6 +201,7 @@ test('a received purchase order is billed, paid in part and credited for the res
     await page.goto(billUrl);
 
     // The printable bill: every figure.
+    await openRecordActions(page);
     await page.getByRole('link', { name: 'Print vendor bill' }).click();
     const totals = page.locator('.print-totals');
     for (const [label, value] of [
@@ -330,4 +334,11 @@ async function fixture(
     const [code] = await exited;
     expect(code, output).toBe(0);
   }
+}
+
+/** Opens the document's Record actions menu (LOOK-1 round 2), if closed. */
+async function openRecordActions(target: Page): Promise<void> {
+  const menu = target.locator('details.composition-record-actions');
+  if ((await menu.count()) && (await menu.getAttribute('open')) === null)
+    await menu.locator(':scope > summary').click();
 }

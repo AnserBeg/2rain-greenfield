@@ -386,14 +386,11 @@ for (const javaScriptEnabled of [true, false]) {
           name: 'Open packing',
           exact: true,
         });
-        // Focus scrolls the local table; scroll the document clear of fixed shell navigation.
+        // At phone width the shell's navigation is a closed drawer (LOOK-1),
+        // so nothing fixed covers the link.
         await packingLink.focus();
-        await page.evaluate(() => window.scrollBy(0, 128));
-        const packingBounds = await packingLink.boundingBox();
-        const navBounds = await page.locator('.sidebar').boundingBox();
-        expect(packingBounds!.y + packingBounds!.height).toBeLessThan(
-          navBounds!.y,
-        );
+        await expect(page.locator('.sidebar')).toBeHidden();
+        await expect(packingLink).toBeInViewport();
         await packingLink.click();
         const packed = page.locator(
           '[data-composition-dataset$="dataset.packing_lines"]',

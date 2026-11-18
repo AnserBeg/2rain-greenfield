@@ -111,6 +111,14 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     const control = page.locator(
       `[name="value:northstar.app:field.${local}_${name}"], [name^="draft:"][name$=":field.${local}_${name}"]`,
     );
+    // A field behind More details is opened first (LOOK-1 round 2).
+    const more = page.locator('details.draft-more:not([open]) > summary');
+    if (
+      (await control.getAttribute('type')) !== 'hidden' &&
+      !(await control.isVisible()) &&
+      (await more.count()) > 0
+    )
+      await more.click();
     const tag = await control.evaluate((element) => element.tagName);
     if (tag === 'SELECT') await control.selectOption(value);
     // A draft-editor reference carries its record id in a hidden input; the
@@ -126,7 +134,10 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
       await control.fill(
         (await control.getAttribute('type')) === 'datetime-local'
           ? value.slice(0, 16)
-          : value,
+          : // A date-only entry takes the day (LOOK-1 round 2).
+            (await control.getAttribute('type')) === 'date'
+            ? value.slice(0, 10)
+            : value,
       );
   };
   const save = async () => {
@@ -140,7 +151,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
           .inputValue();
     await page
       .getByRole('button', {
-        name: (await editor.count()) ? 'Save draft' : 'Save',
+        name: (await editor.count()) ? 'Save' : 'Save',
         exact: true,
       })
       .click();
@@ -235,7 +246,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   staleUpdate.draftAction = 'save';
   await page.goto(orderFormUrl);
   await field('sales_order', 'notes', 'Edited while draft');
-  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   // An edit never changes the assigned number.
   await expect(page.locator('.composition-header h1')).toHaveText(orderNumber);
   expect(await snapshot()).toEqual(initialStock);
@@ -259,7 +270,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     [...scopeValues, scope.role_id],
   );
   await field('sales_order', 'notes', 'This denied value must not persist');
-  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(
     page.locator('[data-diagnostic-code="OPERATION_PERMISSION_DENIED"]'),
   ).toHaveCount(1);

@@ -100,9 +100,9 @@ async function serve(target: string, form?: Record<string, string>) {
   } satisfies Served;
 }
 
-/** The sidebar's queue counts: Today's first three tiles, each a number. */
+/** The sidebar's work queues: Today's first three tiles, each counted. */
 const QUEUE_COUNTS =
-  /<nav class="queue-counts"[^]*?To receive<\/span> <span class="queue-counts__count" data-queue-count="\d+">[^]*?To ship<\/span> <span class="queue-counts__count" data-queue-count="\d+">[^]*?Not yet paid<\/span> <span class="queue-counts__count" data-queue-count="\d+">/u;
+  /<nav class="work-queues"[^]*?today_receive"[^>]*>[^]*?<span>To receive<\/span><span class="queue-count">\d+<\/span>[^]*?today_ship"[^>]*>[^]*?<span>To ship<\/span><span class="queue-count">\d+<\/span>[^]*?today_get_paid"[^>]*>[^]*?<span>Not yet paid<\/span><span class="queue-count">\d+<\/span>/u;
 
 function hiddenValue(html: string, name: string): string | null {
   return (
@@ -307,7 +307,7 @@ async function taskStep(
     taskStage: 'confirm',
     preparedId: prepared,
   });
-  if (!/Receive lines with actual cost: done/u.test(done.html)) {
+  if (!/Receive: done/u.test(done.html)) {
     problems.push(`task: confirm: not done ${done.html.slice(-600)}`);
     return;
   }

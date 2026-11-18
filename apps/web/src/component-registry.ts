@@ -2,6 +2,7 @@ import {
   renderCompositionAlerts,
   renderCompositionFields,
   renderCompositionActions,
+  renderCompositionMenu,
   renderCompositionChildren,
   renderCompositionHeader,
   renderCompositionProgression,
@@ -648,7 +649,7 @@ function renderBulkActions(context: SurfaceComponentContext): string {
   const formId = bulkSelectionFormId(context.surface);
   return slotPanel(
     context,
-    `<form class="bulk-bar" id="${escapeHtml(formId)}" data-bulk-selection-form><div><strong class="bulk-empty">Select records to begin</strong><strong class="bulk-ready">Selection ready</strong><p>Choose one or more records to see the available actions.</p></div><button class="secondary-action bulk-ready" type="reset">Clear selection</button></form>`,
+    `<form class="bulk-bar" id="${escapeHtml(formId)}" data-bulk-selection-form><div><strong class="bulk-ready">Selection ready</strong></div><button class="secondary-action bulk-ready" type="reset">Clear selection</button></form>`,
     'bulk-actions-slot',
   );
 }
@@ -835,7 +836,11 @@ function renderTitleStatus(context: SurfaceComponentContext): string {
     };
     return slotPanel(
       context,
-      renderCompositionHeader(context.surface, composition) +
+      renderCompositionHeader(
+        context.surface,
+        composition,
+        compositionStatusRole(context, record),
+      ) +
         feedbackHtml(context.feedback) +
         renderCompositionAlerts(context.surface, composition) +
         renderCompositionProgression(
@@ -866,9 +871,40 @@ function renderTitleStatus(context: SurfaceComponentContext): string {
           : '';
   return slotPanel(
     context,
-    `<header class="surface-heading surface-heading--slot"><div><h1>${escapeHtml(title)}</h1></div>${status}</header>${feedbackHtml(context.feedback)}`,
+    `<header class="surface-heading surface-heading--slot"><div>${record && !form ? `<p class="eyebrow">${escapeHtml(entityLabel(context.surface))}</p>` : ''}<h1>${escapeHtml(title)}</h1></div>${status}</header>${feedbackHtml(context.feedback)}`,
     'title-status-slot',
   );
+}
+
+/**
+ * The status kind of a document's state (LOOK-1): the role its own List
+ * declares for that state -- a List over the same records whose status
+ * column reads the same field. A state no List names is neutral (null).
+ */
+function compositionStatusRole(
+  context: SurfaceComponentContext,
+  record: SemanticRecordDto,
+): string | null {
+  const header = context.surface.composition?.presentation?.header;
+  const field = context.surface.composition?.fields.find(
+    (column) => column.columnId === header?.status,
+  )?.field;
+  if (!field) return null;
+  // Read as the header reads it: the stored value, or the id a relation or
+  // derived state names (its label is what the badge shows).
+  const raw = Object.hasOwn(record.values, field)
+    ? record.values[field]
+    : (record.relationLabels?.[field]?.recordId ?? null);
+  if (raw === null || raw === undefined) return null;
+  // A state field belongs to one entity, so the List whose status column
+  // reads that same field is that entity's List.
+  for (const surface of context.surfaces ?? []) {
+    const role = surface.list?.columns
+      .find((column) => column.role === 'status' && column.field === field)
+      ?.statusRoles?.find((entry) => entry.value === raw)?.role;
+    if (role) return role;
+  }
+  return null;
 }
 
 function renderArchiveToggle(context: SurfaceComponentContext): string {
@@ -925,6 +961,15 @@ function renderCommandBar(context: SurfaceComponentContext): string {
   const compositionActions =
     context.data?.status === 'READY' && context.data.composition
       ? renderCompositionActions(
+          context.surface,
+          context.data.composition,
+          context.view,
+        )
+      : '';
+  // A document's other tasks and its print link (LOOK-1 round 2).
+  const menu =
+    context.data?.status === 'READY' && context.data.composition
+      ? renderCompositionMenu(
           context.surface,
           context.data.composition,
           context.view,
@@ -989,7 +1034,7 @@ function renderCommandBar(context: SurfaceComponentContext): string {
   // shows no empty disclosure.
   return slotPanel(
     context,
-    `${compositionActions}${context.surface.composition?.presentation?.recordActions === 'progressive' ? (actions ? `<details class="composition-record-actions"><summary>Record actions</summary><div class="command-bar" aria-label="Record commands">${actions}</div></details>` : '') : `<div class="command-bar" aria-label="Record commands">${actions}</div>`}`,
+    `${compositionActions}${context.surface.composition?.presentation?.recordActions === 'progressive' ? (actions || menu ? `<details class="composition-record-actions"><summary>Record actions</summary><div class="command-bar" aria-label="Record commands">${actions}${menu}</div></details>` : '') : `<div class="command-bar" aria-label="Record commands">${actions}${menu}</div>`}`,
     'command-bar-slot',
   );
 }
@@ -1103,6 +1148,19 @@ function renderKeyFacts(context: SurfaceComponentContext): string {
       'key-facts-slot',
     );
   }
+  // A record page whose title already names the record and its state keeps
+  // its identity and revision in quiet technical details (LOOK-1 round 2),
+  // as a document page does.
+  if (
+    record &&
+    context.surface.surfaceRole === 'record' &&
+    hasSurfaceSlot(context, 'titleStatus')
+  )
+    return slotPanel(
+      context,
+      `<details class="panel composition-technical key-facts-panel" data-data-state="exact" data-record-id="${escapeHtml(record.recordId)}"><summary>Technical details · record identity, activity and revision</summary><dl class="record-fields"><div><dt>Record</dt><dd><code>${escapeHtml(shortIdentity(record.recordId))}</code></dd></div><div><dt>State</dt><dd>${record.archived ? 'Archived' : 'Active'}</dd></div><div><dt>Revision</dt><dd>${String(record.revision)}</dd></div></dl></details>`,
+      'key-facts-slot',
+    );
   const compatibilityStatus =
     record && !hasSurfaceSlot(context, 'titleStatus')
       ? `<span class="status-pill" data-status-role="${record.archived ? 'attention' : 'success'}">${record.archived ? 'Archived' : 'Active'} · revision ${record.revision}</span>`
@@ -1138,7 +1196,7 @@ function renderSections(context: SurfaceComponentContext): string {
     return slotPanel(
       context,
       record
-        ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><h2>${escapeHtml(entityLabel(context.surface))} information</h2></div></div><details class="record-section-group" open><summary>${escapeHtml(entityLabel(context.surface))} fields</summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${renderValue(record.values[fieldId])}</dd></div>`).join('')}</dl></details></section>`
+        ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><h2>Details</h2></div></div><details class="record-section-group" open><summary>${escapeHtml(entityLabel(context.surface))} fields</summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`
         : dataDiagnostic('QUERY_NOT_FOUND'),
       'sections-slot',
     );
@@ -2377,6 +2435,22 @@ function renderInputValue(value: unknown): string {
     : escapeHtml(typeof value === 'string' ? value : JSON.stringify(value));
 }
 
+/**
+ * A generic record page's value as a person reads it (LOOK-1 round 2): a
+ * choice by its label, a date as a date, by the field's compiled kind --
+ * never an option id or a raw instant.
+ */
+function recordFieldValue(
+  context: SurfaceComponentContext,
+  record: SemanticRecordDto,
+  fieldId: string,
+): string {
+  const value = record.values[fieldId];
+  if (value === null || value === undefined || typeof value === 'number')
+    return renderValue(value);
+  return escapeHtml(displayFieldValue(context.view, record, fieldId, value));
+}
+
 function renderValue(value: unknown): string {
   if (value === null || value === undefined)
     return '<span class="muted">—</span>';
@@ -2401,6 +2475,22 @@ function diagnostic(ref: SurfaceMessageRef): string {
 
 // Declared List markup (canonical `surface.list`), rendered only from the
 // closed registry; list-declaration.ts holds the markup-free request state.
+/** The fields a List declares as figures: every one a number. */
+function numericListFields(list: SurfaceList): ReadonlySet<string> {
+  const fields = new Set<string>();
+  const progress = list.progress;
+  if (progress) {
+    Object.values(progress.outputs).forEach((field) => fields.add(field));
+    if (progress.supply)
+      Object.values(progress.supply.outputs).forEach((field) =>
+        fields.add(field),
+      );
+  }
+  list.figures?.sums.forEach((sum) => fields.add(sum.figureId));
+  list.figures?.totals?.forEach((total) => fields.add(total.figureId));
+  return fields;
+}
+
 function declaredStatusRole(
   column: DeclaredListColumn,
   record: SemanticRecordDto,
@@ -2579,11 +2669,18 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
   const sortState = new Map(
     state.sort.map((sort) => [sort.columnId, sort.direction]),
   );
+  // Numbers sit right-aligned in their own column (LOOK-1): money columns
+  // and the List's declared sums, totals, progress and supply figures.
+  const numeric = numericListFields(list);
+  const kind = (column: (typeof columns)[number]) =>
+    column.format === 'money' || numeric.has(column.field)
+      ? ' data-cell-kind="number"'
+      : '';
   const header = columns
     .map((column) => {
       const direction = sortState.get(column.columnId);
       if (!column.sortable)
-        return `<th scope="col">${escapeHtml(column.label)}</th>`;
+        return `<th scope="col"${kind(column)}>${escapeHtml(column.label)}</th>`;
       const nextDirection =
         direction === 'ascending' ? 'descending' : 'ascending';
       const href = `/?${declaredListParameters(state, base, {
@@ -2597,7 +2694,7 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
           : direction === 'descending'
             ? '↓'
             : '↕';
-      return `<th scope="col" aria-sort="${direction ?? 'none'}"><a class="list-sort" href="${escapeHtml(href)}" data-sort-column="${escapeHtml(column.columnId)}">${escapeHtml(column.label)} <span aria-hidden="true">${mark}</span><span class="sr-only">${direction ? `, sorted ${direction}; activate to sort ${nextDirection}` : ', activate to sort ascending'}</span></a></th>`;
+      return `<th scope="col"${kind(column)} aria-sort="${direction ?? 'none'}"><a class="list-sort" href="${escapeHtml(href)}" data-sort-column="${escapeHtml(column.columnId)}">${escapeHtml(column.label)} <span aria-hidden="true">${mark}</span><span class="sr-only">${direction ? `, sorted ${direction}; activate to sort ${nextDirection}` : ', activate to sort ascending'}</span></a></th>`;
     })
     .join('');
   const rowActions = (list.rowActions ?? []).length > 0;
@@ -2618,7 +2715,9 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
       const cells = columns
         .map((column) => {
           const text = declaredCellText(column, record, input.present);
-          const label = `data-column-label="${escapeHtml(column.label)}" data-column-priority="${String(column.priority)}" data-column-id="${escapeHtml(column.columnId)}"`;
+          // The label leads and the column id ends the cell's attributes, as
+          // readers of the List's markup expect; the kind sits between.
+          const label = `data-column-label="${escapeHtml(column.label)}"${kind(column)} data-column-priority="${String(column.priority)}" data-column-id="${escapeHtml(column.columnId)}"`;
           if (column.role === 'title') {
             const title = text ?? record.recordId.slice(0, 8);
             const href = input.detailHref(record);

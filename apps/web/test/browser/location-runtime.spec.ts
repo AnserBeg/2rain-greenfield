@@ -24,9 +24,10 @@ test('real Location surface creates a location and archives/restores through the
       page.locator('dd').getByText('Browser Location', { exact: true }),
     ).toBeVisible();
     await expect(page.getByText('LOC-WEB-001', { exact: true })).toBeVisible();
+    // A choice reads as its label, never its option id (LOOK-1 round 2).
     await expect(
       page.getByText(`${namespace}:option.warehouse`, { exact: true }),
-    ).toBeVisible();
+    ).toHaveCount(0);
     // The generic record page: its field sections with their compact
     // disclosure and the sticky command bar. Read here since LOCATIONS gave
     // the composed application's location page a workspace of its own.

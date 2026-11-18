@@ -38,7 +38,7 @@ test('an item keeps its reorder levels, Stock by item names what is short and th
       .filter({ hasText: 'More' });
     await more.getByText('More', { exact: true }).click();
     await more.getByText('Catalog', { exact: true }).click();
-    await navigation.getByRole('link', { name: 'Item', exact: true }).click();
+    await navigation.getByRole('link', { name: 'Items', exact: true }).click();
     await page
       .locator('tr', { hasText: 'Field notebook' })
       .locator('a.record-link')

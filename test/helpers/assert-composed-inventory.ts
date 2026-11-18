@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual } from 'node:util';
 
+import {
+  composedDestinationIcon,
+  composedDestinationLabel,
+  composedDestinationPlacement,
+} from '../../packages/domain/src/app/builder.js';
 import { declareLists } from '../../packages/domain/src/app/list-declarations.js';
 
 type Value = Readonly<Record<string, unknown>>;
@@ -51,15 +56,27 @@ function expectedInventoryWorkspace(namespace: string, surface: Value): Value {
   const document = local.replace(/_(list|detail|form)$/, '');
   const owner = LINE_OWNERS[document] ?? null;
   const list = surface.surfaceRole === 'list';
+  // A destination's placement (LOOK-1 round 2): an occasional one is listed
+  // under its group's Other; one may be listed in another module's group.
+  const placement = list ? composedDestinationPlacement(local) : null;
   const membership = list
-    ? document === 'posted_stock_balance' || document === STOCK_DOCUMENT
-      ? 'operational'
-      : owner
-        ? 'contextual'
-        : 'setup'
+    ? placement?.occasional
+      ? 'setup'
+      : document === 'posted_stock_balance' || document === STOCK_DOCUMENT
+        ? 'operational'
+        : owner
+          ? 'contextual'
+          : 'setup'
     : 'contextual';
+  // A navigation destination's declared icon (LOOK-1).
+  const icon =
+    membership === 'contextual' ? undefined : composedDestinationIcon(local);
   return {
     membership,
+    ...(placement?.navigationModuleId
+      ? { navigationModuleId: placement.navigationModuleId }
+      : {}),
+    ...(icon ? { icon } : {}),
     ...(owner ? { ownerSurfaceId: `${namespace}:surface.${owner}_list` } : {}),
     ...(owner ||
     document === 'posted_stock_balance' ||
@@ -369,11 +386,15 @@ export function assertComposedInventoryCollection(
         `composition altered protected slots for ${String(source.surfaceId)}`,
       );
     }
+    // A destination's plain name (LOOK-1) is the composed label.
+    const plainName = composedDestinationLabel(local);
     assert.deepEqual(
       protectedSurface,
       stockDocument && source.surfaceRole === 'list'
         ? { ...protectedSource, label: STOCK_DOCUMENT_LIST_LABEL }
-        : protectedSource,
+        : plainName
+          ? { ...protectedSource, label: plainName }
+          : protectedSource,
       `composition altered protected bindings for ${String(source.surfaceId)}`,
     );
     assert.deepEqual(
