@@ -81,6 +81,11 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
                 operationId: 'party_create',
                 values: { number: 'P-7701', name: 'Panel Test Customer' },
               },
+              {
+                operationId: 'party_role_create',
+                values: { kind: 'customer', status: 'active' },
+                relations: { party: { fromStep: 1 } },
+              },
             ],
           },
         },
@@ -173,15 +178,23 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
         await expect(reply(0).locator('table td').first()).toHaveText(
           'Lethbridge Millwork',
         );
-        await expect(reply(0)).toContainText('USD 0.00 used');
+        // X16: no spend line under a reply; the foot shows spend only once
+        // it is not zero (the scripted model costs nothing).
+        await expect(reply(0)).not.toContainText('USD');
+        await expect(panel.locator('[data-assistant-spend]')).toBeHidden();
         await expect(panel.locator('[data-assistant-status]')).toBeHidden();
 
         await say('Add customer P-7701, Panel Test Customer');
         await expect(reply(1)).toContainText('Done: I created customer');
         await expect(panel.locator('[data-assistant-plan]')).toHaveCount(0);
         const did = reply(1).locator('[data-assistant-did]');
-        await expect(did).toContainText('Did: created party P-7701');
-        const link = reply(1).locator('a', { hasText: 'Changed: P-7701' });
+        // X16: the record's role and name, never "party"; the Did row links
+        // the record and there is no separate "Changed" line.
+        await expect(did).toContainText(
+          'Did: created customer Panel Test Customer.',
+        );
+        await expect(reply(1)).not.toContainText('Changed:');
+        const link = did.locator('a', { hasText: 'Open' });
         const href = await link.getAttribute('href');
         expect(href).toContain('record=');
 
@@ -194,14 +207,15 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
 
         await say('Archive the first customer');
         const plan = panel.locator('[data-assistant-plan]');
-        await expect(plan).toContainText('archives one party record');
+        await expect(plan).toContainText(
+          /Archives this (customer|supplier|salesperson)/u,
+        );
+        await expect(plan).not.toContainText(/party/iu);
         // X9: the yes names the company the page proved.
         await expect(plan.locator('p.assistant-muted').first()).toHaveText(
           /^In \S.*\.$/u,
         );
-        await expect(plan).toContainText(
-          "Because the operation is declared to need the person's confirmation.",
-        );
+        await expect(plan).toContainText('This change needs your OK.');
         await expect(panel.locator('[data-assistant-status]')).toBeVisible();
         // LOOK-1: the panel in the Ledger look, wide and phone, light and
         // dark -- a reply's table, a change with Undo, a plan awaiting yes.
@@ -213,7 +227,7 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
         // record it made is archived, so its page no longer finds it.
         await did.locator('[data-assistant-undo]').click();
         await expect(did).toContainText(
-          'Undid: created party P-7701 (checked)',
+          'Undid: created customer Panel Test Customer (checked)',
         );
         await opened.reload();
         await expect(opened.locator('main')).toContainText('Record not found');

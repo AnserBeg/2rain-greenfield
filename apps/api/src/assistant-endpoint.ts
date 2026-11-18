@@ -491,6 +491,7 @@ export function createAssistantEndpoint(
     // back every write of this turn that the model did not verify.
     const checked = await conversation.session.verifyPending();
     const unverified = checked.filter((entry) => !entry.verified).length;
+    const answerLinks = await links(conversation, run.answer);
     // The typed handoff only (X11); the drafter gets the person's own words.
     if (run.handoff) {
       emit({ type: 'step', label: 'Drafting the change' });
@@ -500,8 +501,12 @@ export function createAssistantEndpoint(
         type: 'answer',
         ...drafted,
         stop: 'handoff',
-        links: await links(conversation, run.answer),
-        ...didThisTurn(conversation.session.latestChange(), changeBefore),
+        links: answerLinks,
+        ...didThisTurn(
+          conversation.session.latestChange(),
+          changeBefore,
+          answerLinks,
+        ),
         // The draft's own model calls count toward this turn and the cap.
         usd: run.usd + (conversation.meter.usd - beforeDraft),
         spentUsd: conversation.meter.usd,
@@ -517,8 +522,12 @@ export function createAssistantEndpoint(
             ? `Stopped. Nothing more will run; anything already done stays done${checked.length > 0 ? ` and was checked${unverified > 0 ? ` (${String(unverified)} check(s) did not confirm it; look at the records)` : ''}` : ''}.`
             : run.answer || '(no answer)',
       stop: run.stop,
-      links: await links(conversation, run.answer),
-      ...didThisTurn(conversation.session.latestChange(), changeBefore),
+      links: answerLinks,
+      ...didThisTurn(
+        conversation.session.latestChange(),
+        changeBefore,
+        answerLinks,
+      ),
       usd: run.usd,
       spentUsd: conversation.meter.usd,
     });
@@ -596,7 +605,9 @@ export function createAssistantEndpoint(
         // Exactly what the yes covers: the operation, the record it acts on
         // (as the host read it), and every bound input, arguments included.
         steps: plan.steps.map((step) => ({
-          text: `${step.operationLabel}: ${step.effect}`,
+          text: step.operationLabel
+            ? `${step.operationLabel}: ${step.effect}`
+            : `${step.effect.charAt(0).toUpperCase()}${step.effect.slice(1)}`,
           target: step.targetLabel
             ? `${step.targetLabel} (${step.target})`
             : step.target,
@@ -645,13 +656,24 @@ export function createAssistantEndpoint(
   }
 }
 
-/** "Did: ..." with Undo, when this turn made a change at once. */
+/**
+ * "Did: ..." with Undo, when this turn made a change at once, and a link to
+ * the record it wrote (the Did row carries it; no separate "Changed" line).
+ */
 function didThisTurn(
   change: { changeId: string; summary: string; undone: boolean } | null,
   before: string | null,
-): { did?: { changeId: string; summary: string } } {
+  links: readonly { href: string; wrote: boolean }[] = [],
+): { did?: { changeId: string; summary: string; href?: string } } {
+  const written = links.find((link) => link.wrote);
   return change && change.changeId !== before && !change.undone
-    ? { did: { changeId: change.changeId, summary: change.summary } }
+    ? {
+        did: {
+          changeId: change.changeId,
+          summary: change.summary,
+          ...(written ? { href: written.href } : {}),
+        },
+      }
     : {};
 }
 

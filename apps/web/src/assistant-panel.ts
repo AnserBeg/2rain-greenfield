@@ -44,6 +44,13 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
   const timer = root.querySelector('[data-assistant-elapsed]');
   const stop = root.querySelector('[data-assistant-stop]');
   const fresh = root.querySelector('[data-assistant-new]');
+  const spend = root.querySelector('[data-assistant-spend]');
+  // What the conversation has spent, in the panel's foot, once it is not zero.
+  const showSpend = (usd) => {
+    const amount = Number(usd) || 0;
+    spend.hidden = amount <= 0;
+    spend.textContent = amount <= 0 ? '' : amount < 0.01 ? 'This conversation has used less than USD 0.01.' : 'This conversation has used USD ' + amount.toFixed(2) + '.';
+  };
   const key = 'northstar-assistant-conversation';
   let conversation = sessionStorage.getItem(key) || null;
   let running = null;
@@ -158,7 +165,7 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     card.setAttribute('data-assistant-plan', event.planId);
     card.appendChild(element('p', 'This needs your yes before it runs:', 'assistant-heading'));
     if (event.company) card.appendChild(element('p', 'In ' + event.company + '.', 'assistant-muted'));
-    (event.reasons || []).forEach((reason) => card.appendChild(element('p', 'Because ' + reason + '.', 'assistant-muted')));
+    (event.reasons || []).forEach((reason) => card.appendChild(element('p', reason, 'assistant-muted')));
     const list = card.appendChild(element('ol'));
     event.steps.forEach((step) => {
       const item = list.appendChild(element('li', step.text));
@@ -184,8 +191,13 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
   // an answer, and again after a Stop or a page load (from ?assistant=latest).
   const showDid = (container, change) => {
     if (log.querySelector('[data-assistant-did="' + change.changeId + '"]')) return;
-    const did = container.appendChild(element('p', 'Did: ' + change.summary + ' ', 'assistant-did'));
+    const did = container.appendChild(element('p', 'Did: ' + change.summary + '. ', 'assistant-did'));
     did.setAttribute('data-assistant-did', change.changeId);
+    if (change.href) {
+      const open = did.appendChild(element('a', 'Open'));
+      open.href = change.href;
+      did.appendChild(document.createTextNode(' '));
+    }
     const undo = did.appendChild(element('button', 'Undo'));
     undo.type = 'button';
     undo.setAttribute('data-assistant-undo', '');
@@ -262,10 +274,12 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
           } else if (event.type === 'answer') {
             render(reply, event.text);
             reply.setAttribute('data-assistant-stop-reason', event.stop);
-            if (event.links && event.links.length) {
+            // Records the answer names; what this turn changed is on the Did row.
+            const named = (event.links || []).filter((link) => !link.wrote);
+            if (named.length) {
               const links = reply.appendChild(element('p', null, 'assistant-links'));
-              event.links.forEach((link) => {
-                const anchor = links.appendChild(element('a', (link.wrote ? 'Changed: ' : '') + link.label));
+              named.forEach((link) => {
+                const anchor = links.appendChild(element('a', link.label));
                 anchor.href = link.href;
               });
             }
@@ -277,7 +291,7 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
               open.href = '/?customize';
             }
             if (event.did) showDid(reply, event.did);
-            reply.appendChild(element('p', 'USD ' + Number(event.spentUsd).toFixed(2) + ' used in this conversation', 'assistant-muted'));
+            showSpend(event.spentUsd);
           } else if (event.type === 'error') {
             reply.appendChild(element('p', event.message, 'assistant-error'));
           }
@@ -344,6 +358,7 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     conversation = null;
     sessionStorage.removeItem(key);
     log.textContent = '';
+    showSpend(0);
   });
 })();`;
 
@@ -410,7 +425,7 @@ const TOGGLE = (placement: 'inline' | 'floating') =>
 /** Where the shell's top bar puts its account menu: the toggle sits before it. */
 const SHELL_ACCOUNT = '<details class="shell-account">';
 
-const PANEL_MARKUP = `<aside id="assistant-panel" class="assistant-panel" data-assistant-panel aria-label="Assistant" hidden><header><h2>Assistant</h2><button type="button" data-assistant-new>New conversation</button><button type="button" data-assistant-close aria-label="Close the assistant">Close</button></header><div class="assistant-log" data-assistant-log aria-live="polite"></div><div class="assistant-status" data-assistant-status role="status" hidden><span data-assistant-step>Working</span><span data-assistant-elapsed>0 s</span><button type="button" data-assistant-stop hidden>Stop</button></div><form data-assistant-form><label class="visually-hidden" for="assistant-input">Ask the assistant</label><textarea id="assistant-input" name="text" rows="2" placeholder="Ask or tell the assistant…"></textarea><button type="submit">Send</button></form></aside>`;
+const PANEL_MARKUP = `<aside id="assistant-panel" class="assistant-panel" data-assistant-panel aria-label="Assistant" hidden><header><h2>Assistant</h2><button type="button" data-assistant-new>New conversation</button><button type="button" data-assistant-close aria-label="Close the assistant">Close</button></header><div class="assistant-log" data-assistant-log aria-live="polite"></div><div class="assistant-status" data-assistant-status role="status" hidden><span data-assistant-step>Working</span><span data-assistant-elapsed>0 s</span><button type="button" data-assistant-stop hidden>Stop</button></div><form data-assistant-form><label class="visually-hidden" for="assistant-input">Ask the assistant</label><textarea id="assistant-input" name="text" rows="2" placeholder="Ask or tell the assistant…"></textarea><button type="submit">Send</button></form><p class="assistant-muted" data-assistant-spend hidden></p></aside>`;
 
 /**
  * The page with the panel added before `</body>`. Only a full page served
