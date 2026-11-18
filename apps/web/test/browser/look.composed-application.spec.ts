@@ -21,11 +21,11 @@ import {
  * (`docs/design/ledger-final.html`) rendered by the generator from the
  * distributor seed -- Today, a purchase order with its next step, the receive
  * dialog, stock by item, a sales order, a record type a tenant adds through
- * Customize (Equipment: draft, approve, activate) and the new purchase order
- * form -- each at 1440 and 390 wide, light and dark. Every screen must show
- * the Ledger's generic parts and no raw code. When LOOK_EVIDENCE_OUT names a
- * directory the screenshots are written there (the committed evidence);
- * otherwise beside the test's results.
+ * Customize (Equipment: draft, approve, activate, then one record's page) and
+ * the new purchase order form -- each at 1440 and 390 wide, light and dark.
+ * Every screen must show the Ledger's generic parts and no raw code. When
+ * LOOK_EVIDENCE_OUT names a directory the screenshots are written there (the
+ * committed evidence); otherwise beside the test's results.
  */
 const SCREENS = [
   'home',
@@ -127,15 +127,8 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
               });
               await requireLedgerParts(page, screen, viewport.width);
               const text = await page.locator('body').innerText();
-              // The order's two date-time inputs keep "(UTC)" (ruling).
-              expect
-                .soft(
-                  rawCodes(text).filter(
-                    (code) => !(screen === 'new-po' && code === '(UTC)'),
-                  ),
-                  `${screen} raw codes`,
-                )
-                .toEqual([]);
+              // The order date is a date (round 2): no "(UTC)" anywhere.
+              expect.soft(rawCodes(text), `${screen} raw codes`).toEqual([]);
               expect
                 .soft(
                   await page.evaluate(
@@ -183,7 +176,7 @@ async function requireLedgerParts(
       '.composition-header-facts',
       '.line-progress',
     ],
-    record: ['main h1', '[data-platform-slot]'],
+    record: ['main h1', '[data-platform-slot="record:keyFacts"]'],
     'new-po': [
       '[data-document-editor]',
       '.draft-lines',
@@ -242,5 +235,29 @@ async function addEquipment(page: Page, base: string): Promise<string> {
   );
   await page.getByRole('link', { name: 'Open Equipment' }).click();
   await expect(page.locator('main')).toContainText('Equipment');
+  const list = page.url();
+  // One piece of equipment, entered as an office person would (round 2):
+  // its record page is the screen.
+  await page.getByRole('link', { name: 'New', exact: true }).click();
+  await page.getByLabel('Name', { exact: true }).fill('Forklift FL-07');
+  await page
+    .getByLabel('Serial number', { exact: true })
+    .fill('TY-8FGU25-40117');
+  await page.getByLabel('Purchase date', { exact: true }).fill('2025-03-14');
+  await page
+    .getByRole('combobox', { exact: true, name: 'Status' })
+    .selectOption({ label: 'In service' });
+  await page
+    .locator('[data-platform-slot="record:commandBar"]')
+    .getByRole('button', { name: 'Save' })
+    .click();
+  await expect(page.getByRole('status')).toContainText('complete');
+  await page.goto(list);
+  await page
+    .locator('tbody tr')
+    .first()
+    .getByRole('link', { name: 'Forklift FL-07' })
+    .click();
+  await expect(page.locator('main h1')).toContainText('Forklift FL-07');
   return page.url();
 }

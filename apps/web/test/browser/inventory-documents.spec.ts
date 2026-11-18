@@ -190,6 +190,9 @@ async function openNew(page: Page) {
   // A group already open on this page stays open; clicking it would close it.
   if (!(await transactions.isVisible()))
     await inventory.getByText('Stock', { exact: true }).click();
+  // An occasional destination waits under the group's Other (LOOK-1 round 2).
+  if (!(await transactions.isVisible()))
+    await inventory.locator('.navigation-more > summary').first().click();
   await transactions.click();
   await expect(
     page.getByRole('heading', { level: 1, name: 'Inventory transactions' }),

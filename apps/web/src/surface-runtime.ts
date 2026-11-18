@@ -2254,7 +2254,11 @@ function shellDocument(
         <div class="brand"><span class="brand__mark" aria-hidden="true">${escapeHtml(initials(company ?? '2rain'))}</span><span><strong>${escapeHtml(company ?? '2rain')}</strong><small>${company ? '2rain' : 'Compiled workspace'}</small></span></div>
         ${launcher ? renderWorkQueues(view, launcher, surfaces, selected, workspaceContext, queueCounts) : ''}
         <nav aria-label="Release navigation">
-          <ul class="navigation-tree">${navigation.map((entry) => navigationItem(view, entry, surfaces, selected, workspaceContext)).join('')}</ul>
+          <ul class="navigation-tree">${sidebarNavigation(navigation, launcher)
+            .map((entry) =>
+              navigationItem(view, entry, surfaces, selected, workspaceContext),
+            )
+            .join('')}</ul>
         </nav>
         <div class="side-foot" data-shell-region="principal"><span class="principal__avatar" aria-hidden="true">${escapeHtml(initials('Signed in'))}</span><span class="side-foot__who"><strong>Signed in</strong><small>${escapeHtml(view.environmentId)}</small></span></div>
       </aside>
@@ -2386,6 +2390,9 @@ function navigationItem(
   workspaceContext: WorkspaceContextBar | null,
 ): string {
   if (entry.kind === 'navigationGroup') {
+    const isOccasional = (child: CompiledNavigationEntry): boolean =>
+      child.kind === 'navigationSurface' &&
+      surfaceForNavigation(surfaces, child).workspace?.membership === 'setup';
     const current = navigationEntryIsCurrent(view, entry, surfaces, selected);
     const destination = currentNavigationDestination(
       view,
@@ -2400,10 +2407,75 @@ function navigationItem(
       const surface = surfaceForNavigation(surfaces, entry.children[0]);
       return `<li class="navigation-node navigation-node--direct">${navigationLink(view, surface, selected, entry.label, workspaceContext, surfaces)}</li>`;
     }
-    return `<li class="navigation-node navigation-node--group"><details class="navigation-group"${current ? ' data-current="true"' : ''}><summary><span class="nav-icon" aria-hidden="true">${declaredIcon(entry.icon) ?? NAVIGATION_ICONS.group}</span><span class="nav-text"><span class="nav-group-label">${escapeHtml(entry.label)}</span>${destination && destination !== entry.label ? `<small>${escapeHtml(destination)}</small>` : ''}</span><span class="nav-arrow" aria-hidden="true">›</span></summary><ul class="navigation-children">${entry.children.map((child) => navigationItem(view, child, surfaces, selected, workspaceContext)).join('')}</ul></details></li>`;
+    // A group's occasional destinations -- its settings and records looked
+    // at now and then -- wait under its own "Other" when there are several
+    // and the group also lists day-to-day work (LOOK-1 round 2).
+    const occasional = entry.children.filter(isOccasional);
+    const daily = entry.children.filter((child) => !isOccasional(child));
+    const more = occasional.length > 1 && daily.length > 0 ? occasional : [];
+    const items = (more.length > 0 ? daily : entry.children)
+      .map((child) =>
+        navigationItem(view, child, surfaces, selected, workspaceContext),
+      )
+      .join('');
+    const moreOpen = more.some((child) =>
+      navigationEntryIsCurrent(view, child, surfaces, selected),
+    );
+    const moreItems =
+      more.length > 0
+        ? `<li class="navigation-node navigation-node--more"><details class="navigation-more"${moreOpen ? ' open' : ''}><summary><span class="nav-icon" aria-hidden="true">${NAVIGATION_ICONS.group}</span><span>Other</span></summary><ul class="navigation-children">${more.map((child) => navigationItem(view, child, surfaces, selected, workspaceContext)).join('')}</ul></details></li>`
+        : '';
+    return `<li class="navigation-node navigation-node--group"><details class="navigation-group"${current ? ' data-current="true"' : ''}><summary><span class="nav-icon" aria-hidden="true">${declaredIcon(entry.icon) ?? NAVIGATION_ICONS.group}</span><span class="nav-text"><span class="nav-group-label">${escapeHtml(entry.label)}</span>${destination && destination !== entry.label ? `<small>${escapeHtml(destination)}</small>` : ''}</span><span class="nav-arrow" aria-hidden="true">›</span></summary><ul class="navigation-children">${items}${moreItems}</ul></details></li>`;
   }
   const surface = surfaceForNavigation(surfaces, entry);
   return `<li class="navigation-node navigation-node--surface">${navigationLink(view, surface, selected, navigationLabel(surface), workspaceContext, surfaces)}</li>`;
+}
+
+/**
+ * Customization's record types: their module's local id carries the tenant
+ * prefix packages/customization declares (TENANT_LOCAL_PREFIX), read here as
+ * the Customize screen reads it.
+ */
+const CUSTOM_MODULE_MARKER = ':module.custom_';
+
+/**
+ * The sidebar's reading of the compiled tree (LOOK-1 round 2). The landing
+ * launcher heads the work queues, so its group does not repeat it; and the
+ * record types a customization added gather under one "Custom" group -- at
+ * the top level while the five-entry budget allows, else inside More.
+ */
+function sidebarNavigation(
+  entries: readonly CompiledNavigationEntry[],
+  launcher: CompiledSurfaceDefinition | null,
+): readonly CompiledNavigationEntry[] {
+  const custom: CompiledNavigationEntry[] = [];
+  const read = (
+    list: readonly CompiledNavigationEntry[],
+  ): CompiledNavigationEntry[] =>
+    list.flatMap((entry): CompiledNavigationEntry[] => {
+      if (entry.kind === 'navigationSurface')
+        return entry.surfaceId === launcher?.surfaceId ? [] : [entry];
+      if (entry.navigationId.includes(CUSTOM_MODULE_MARKER)) {
+        custom.push(entry);
+        return [];
+      }
+      const children = read(entry.children);
+      return children.length > 0 ? [{ ...entry, children }] : [];
+    });
+  const tree = read(entries);
+  if (custom.length === 0) return tree;
+  const group: CompiledNavigationEntry = {
+    children: custom,
+    kind: 'navigationGroup',
+    label: 'Custom',
+    navigationId: 'sidebar:navigation.custom',
+  };
+  if (tree.length < 5) return [...tree, group];
+  // Past the budget the compiler's More is last: the custom groups were in it.
+  const more = tree.at(-1)!;
+  return more.kind === 'navigationGroup'
+    ? [...tree.slice(0, -1), { ...more, children: [...more.children, group] }]
+    : [...tree, group];
 }
 
 /**

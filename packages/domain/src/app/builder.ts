@@ -153,7 +153,25 @@ const COMPOSED_MODULE_ICONS: Readonly<Record<string, string>> = Object.freeze({
  * person reads (LOOK-1, owner ruling). Ids never change; only labels.
  */
 const COMPOSED_DESTINATIONS: Readonly<
-  Record<string, { readonly icon: string; readonly label?: string }>
+  Record<
+    string,
+    {
+      readonly icon: string;
+      readonly label?: string;
+      /**
+       * The menu group a destination is listed in when it is not its own
+       * module's (LOOK-1 round 2): placement only, the language's
+       * `navigationModuleId`.
+       */
+      readonly group?: string;
+      /**
+       * An occasional destination (LOOK-1 round 2): listed under its group's
+       * More with the group's settings. Membership is placement only and
+       * never authorization (ADR-0030).
+       */
+      readonly occasional?: true;
+    }
+  >
 > = Object.freeze({
   sales_order_list: { icon: 'tag' },
   customer_invoice_list: { icon: 'invoice' },
@@ -167,13 +185,13 @@ const COMPOSED_DESTINATIONS: Readonly<
   inventory_warehouse: { icon: 'building' },
   item_stock_list: { icon: 'boxes' },
   item_buying_list: { icon: 'alert' },
-  inventory_transaction_list: { icon: 'wrench' },
+  inventory_transaction_list: { icon: 'wrench', occasional: true },
   posted_stock_balance_list: { icon: 'location', label: 'Stock by location' },
   inventory_movement_list: { icon: 'transfer', label: 'Stock movements' },
   stock_count_list: { icon: 'clipboard', label: 'Stock counts' },
   inventory_period_lock_list: { icon: 'lock', label: 'Period locks' },
-  legal_entity_list: { icon: 'building', label: 'Companies' },
-  inventory_value_list: { icon: 'chart' },
+  legal_entity_list: { icon: 'building', label: 'Companies', group: 'party' },
+  inventory_value_list: { icon: 'chart', group: 'inventory' },
   party_list: { icon: 'users', label: 'Customers and suppliers' },
   party_role_list: { icon: 'users', label: 'Contact roles' },
   item_list: { icon: 'box', label: 'Items' },
@@ -490,7 +508,16 @@ function withDestinationPresentation(
   return {
     ...surface,
     ...(destination.label ? { label: destination.label } : {}),
-    workspace: { ...surface.workspace, icon: destination.icon },
+    workspace: {
+      ...surface.workspace,
+      ...(destination.occasional ? { membership: 'setup' } : {}),
+      ...(destination.group
+        ? {
+            navigationModuleId: `${APPLICATION_NAMESPACE}:module.${destination.group}`,
+          }
+        : {}),
+      icon: destination.icon,
+    },
   };
 }
 

@@ -1023,6 +1023,9 @@ async function inventoryNavigationJourney(
   // bills (PAYABLES) beside its orders, Inventory Catalog's Buying worklist and
   // Stock by item (REPLENISHMENT) and Catalog its tax codes (ruling B) and
   // price lists (SALES-EXTRAS) beside its items.
+  // LOOK-1 round 2: Today heads the work queues, so Stock does not repeat
+  // it; Stock lists its day-to-day destinations and keeps the occasional ones
+  // under its own Other; Companies are Contacts and Inventory value is Stock.
   await expect(navigation.locator('a > span:nth-child(2)')).toHaveText([
     'Counter sales',
     'Invoices',
@@ -1032,19 +1035,18 @@ async function inventoryNavigationJourney(
     'Purchase orders',
     'Purchasing settings',
     'Bills',
-    'Stock movements',
-    'Period locks',
-    'Today',
-    'Inventory transactions',
+    'Inventory value',
     'Warehouse',
     'Buying worklist',
     'Stock by item',
-    'Companies',
     'Stock by location',
+    'Stock movements',
+    'Period locks',
+    'Inventory transactions',
     'Stock counts',
+    'Companies',
     'Customers and suppliers',
     'Contact roles',
-    'Inventory value',
     'Items',
     'Price lists',
     'Tax codes',
@@ -1111,15 +1113,14 @@ async function inventoryNavigationJourney(
   await inventoryNavigation.getByText('Stock', { exact: true }).click();
   await expect(inventoryNavigation.locator('a > span:nth-child(2)')).toHaveText(
     [
-      'Stock movements',
-      'Period locks',
-      'Today',
-      'Inventory transactions',
+      'Inventory value',
       'Warehouse',
       'Buying worklist',
       'Stock by item',
-      'Companies',
       'Stock by location',
+      'Stock movements',
+      'Period locks',
+      'Inventory transactions',
       'Stock counts',
     ],
   );
@@ -1190,7 +1191,6 @@ async function inventoryNavigationJourney(
   for (const destination of [
     'Stock movements',
     'Period locks',
-    'Today',
     'Inventory transactions',
     'Warehouse',
     // REPLENISHMENT: Catalog's items, read in the company like the rest.
@@ -1198,9 +1198,14 @@ async function inventoryNavigationJourney(
     'Stock by item',
     'Stock counts',
   ]) {
-    await inventoryNavigation
-      .getByRole('link', { name: destination, exact: true })
-      .click();
+    const link = inventoryNavigation.getByRole('link', {
+      name: destination,
+      exact: true,
+    });
+    // An occasional destination waits under Stock's Other (LOOK-1 round 2).
+    if (!(await link.isVisible()))
+      await inventoryNavigation.locator('.navigation-more > summary').click();
+    await link.click();
     await expect(
       page.getByRole('heading', { level: 1, name: destination }),
     ).toBeVisible();
@@ -1702,9 +1707,16 @@ async function scopedInventoryJourney(
       has: page.locator(':scope > summary').getByText('Stock', { exact: true }),
     });
   await scopedInventoryNavigation.getByText('Stock', { exact: true }).click();
-  await scopedInventoryNavigation
-    .getByRole('link', { name: 'Inventory transactions', exact: true })
-    .click();
+  const transactionsLink = scopedInventoryNavigation.getByRole('link', {
+    name: 'Inventory transactions',
+    exact: true,
+  });
+  // An occasional destination waits under the group's Other (LOOK-1 round 2).
+  if (!(await transactionsLink.isVisible()))
+    await scopedInventoryNavigation
+      .locator('.navigation-more > summary')
+      .click();
+  await transactionsLink.click();
   expect(
     new URL(page.url()).searchParams.get(
       inventoryScopeParameters.transactionList,

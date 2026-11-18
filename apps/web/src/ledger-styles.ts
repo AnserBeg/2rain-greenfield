@@ -23,8 +23,8 @@ table{font:inherit;color:inherit;border-collapse:collapse}
 button,input,select,textarea{font:inherit;color:inherit}
 a{color:var(--accent-text);text-decoration:none}
 a:hover{text-decoration:underline;text-underline-offset:2px}
-a:not(.skip-link):not(.sidebar a):focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:not(.navigation-group > summary):focus-visible,[tabindex]:not(a):focus-visible{outline:2px solid var(--focus-ring-surface);outline-offset:2px}
-.sidebar a:focus-visible,.navigation-group > summary:focus-visible{outline:2px solid var(--focus-ring-rail);outline-offset:2px}
+a:not(.skip-link):not(.sidebar a):focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:not(.navigation-group > summary):not(.navigation-more > summary):focus-visible,[tabindex]:not(a):focus-visible{outline:2px solid var(--focus-ring-surface);outline-offset:2px}
+.sidebar a:focus-visible,.navigation-group > summary:focus-visible,.navigation-more > summary:focus-visible{outline:2px solid var(--focus-ring-rail);outline-offset:2px}
 .list-page-link:focus-visible{outline:2px solid var(--focus-ring-surface);outline-offset:2px}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 code,.surface-id,.diagnostic-release,.mono{font-family:var(--f-mono);font-size:.92em;letter-spacing:-.01em}
@@ -45,7 +45,7 @@ th,td,dd,output,.cell-numeric,code{font-variant-numeric:tabular-nums}
 .brand small{font-size:11px;color:var(--muted)}
 .sidebar nav ul{display:grid;gap:1px;margin:0;padding:0;list-style:none}
 .work-queues{padding-bottom:6px;border-bottom:1px solid var(--rule)}
-.sidebar a,.navigation-group>summary{display:flex;align-items:center;gap:9px;min-height:var(--nav-h);padding:4px 8px;border:1px solid transparent;border-radius:4px;color:var(--ink-2);font-size:13px;font-weight:400;line-height:1.25;text-decoration:none;cursor:pointer;list-style:none}
+.sidebar a,.navigation-group>summary,.navigation-more>summary{display:flex;align-items:center;gap:9px;min-height:var(--nav-h);padding:4px 8px;border:1px solid transparent;border-radius:4px;color:var(--ink-2);font-size:13px;font-weight:400;line-height:1.25;text-decoration:none;cursor:pointer;list-style:none}
 .sidebar a:hover{background:var(--hover);text-decoration:none}
 .sidebar a[aria-current=page]{background:var(--sheet);border-color:var(--rule);color:var(--ink);font-weight:500}
 .nav-icon{display:grid;place-items:center;flex:none;width:16px;height:16px;color:var(--muted)}
@@ -63,6 +63,11 @@ th,td,dd,output,.cell-numeric,code{font-variant-numeric:tabular-nums}
 .navigation-children .navigation-group>summary .nav-icon,.navigation-children .navigation-group>summary .nav-text small{display:none}
 .nav-text{display:grid;min-width:0}
 .navigation-children{display:grid;gap:1px;margin:0!important;padding:0!important}
+/* A group's occasional destinations wait behind its own quiet More. */
+.navigation-more>summary{color:var(--muted)}
+.navigation-more>summary::-webkit-details-marker{display:none}
+.navigation-more>summary:hover{background:var(--hover)}
+.navigation-more[open]>summary{color:var(--ink-2)}
 .side-foot{margin-top:auto;display:grid;gap:8px;padding:10px 6px 0;border-top:1px solid var(--rule)}
 .side-foot[data-shell-region]{grid-template-columns:auto minmax(0,1fr);align-items:center;gap:6px 9px}
 .side-foot__who{display:grid;line-height:1.25;font-size:12px;color:var(--ink)}
@@ -330,6 +335,12 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .launcher-scan__field input{min-height:44px;padding:0 12px;font-family:var(--f-mono);font-size:14px}
 .launcher-scan__message{margin-top:10px}
 .launcher-action button{min-height:44px}
+/* The find box's button sits beside it, at the input's line (LOOK-1 round 2). */
+@media(min-width:801px){
+.surface-grid:has(.launcher-scan):has(.launcher-action) .launcher-scan{grid-column:1/12}
+.surface-grid:has(.launcher-scan):has(.launcher-action) .launcher-action{grid-column:12/13;align-self:end;margin-bottom:calc(var(--row-y) + 9px)}
+.surface-grid:has(.launcher-scan):has(.launcher-action) .launcher-action button{width:100%}
+}
 
 /* ---------- composition (documents) ---------- */
 .composition-header{display:contents}
@@ -586,7 +597,7 @@ main{padding:14px max(16px,env(safe-area-inset-left,0px)) 40px}
 .navigation-group:not([open])::details-content{content-visibility:hidden}
 .navigation-tree>li>.navigation-group>summary,.navigation-children .navigation-group>summary{min-height:44px;margin-top:0;padding:4px 8px;color:var(--ink-2);font-size:13px;font-weight:500;cursor:pointer}
 .navigation-group>summary .nav-arrow{display:block}
-.sidebar a,.navigation-children a{min-height:44px}
+.sidebar a,.navigation-children a,.navigation-more>summary{min-height:44px}
 }
 
 /* ---------- 800px and below: the compact projection ---------- */
