@@ -479,7 +479,7 @@ html:has([data-save-boundary]){scroll-padding-bottom:120px}
 /* Generic records place their declared secondary commands in the title row too. */
 .surface-grid:has(.record-section-group):has(.command-bar-slot>.command-bar>.action-overflow){grid-template-rows:[breadcrumb] auto [title] auto}
 .surface-grid:has(.record-section-group):has(.command-bar-slot>.command-bar>.action-overflow) .surface-heading--slot{grid-row:title;grid-column:1/8;margin-bottom:0;align-self:start}
-.surface-grid:has(.record-section-group) .command-bar-slot>.command-bar:has(>.action-overflow){grid-row:title;grid-column:8/-1;justify-content:flex-end;align-self:start;position:relative;bottom:auto}
+.surface-grid:has(.record-section-group) .command-bar-slot>.command-bar:has(>.action-overflow){grid-row:title;grid-column:8/-1;justify-content:flex-end;align-self:start}
 .surface-grid:has(.record-section-group) .command-bar>.action-overflow{margin-left:0}
 .composition-record-actions>summary{display:inline-flex;align-items:center;min-height:var(--ctl-h);padding:0 12px;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);color:var(--ink);font-size:13px;font-weight:500;cursor:pointer;list-style:none}
 .composition-record-actions>summary::-webkit-details-marker{display:none}
