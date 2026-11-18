@@ -241,6 +241,17 @@ export function validateSurfaceCompositions(
           )
             fail(surface.surfaceId, 'printed totals are declared columns');
         }
+        if (
+          print.currency !== undefined &&
+          (!print.totals?.length ||
+            !composition.fields.some(
+              (column) => column.columnId === print.currency,
+            ))
+        )
+          fail(
+            surface.surfaceId,
+            'a totals currency is a declared column beside declared totals',
+          );
       }
       // A block reads declared columns the header does not already show, each
       // in one block.

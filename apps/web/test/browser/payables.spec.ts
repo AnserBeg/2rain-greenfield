@@ -92,11 +92,12 @@ test('a received purchase order is billed, paid in part and credited for the res
     await expect(line.locator('td[data-column-label="Received"]')).toHaveText(
       '2',
     );
-    await expect(line.locator('td[data-column-label="Billed"]')).toHaveText(
-      '2',
+    // Billed and to bill are the line's supporting details (round 3).
+    await expect(line.locator('td[data-cell-role="detail"]')).toContainText(
+      'Billed 2',
     );
-    await expect(line.locator('td[data-column-label="To bill"]')).toHaveText(
-      '0',
+    await expect(line.locator('td[data-cell-role="detail"]')).toContainText(
+      'To bill 0',
     );
     await expect(line).toContainText('Matched');
     await capture(page, testInfo, 'order-billed');

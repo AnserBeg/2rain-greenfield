@@ -51,6 +51,7 @@ test('a purchase order takes its supplier defaults, is discounted and taxed per 
     ).toHaveText('5');
     // A line's tax code starts from the order's, with its rate frozen.
     await pick(page, 'Line 1 product', 'OFF-100', 'Field notebook');
+    await openLineMore(page, 1);
     await expect(combo(page, 'Line 1 tax code')).toHaveAttribute(
       'data-selected-label',
       'GST-AB',
@@ -64,7 +65,7 @@ test('a purchase order takes its supplier defaults, is discounted and taxed per 
     await openMoreDetails(page);
     await page.getByLabel('Freight', { exact: true }).fill('25');
     await capture(page, testInfo, 'purchase-pricing-editor');
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await expect(page).toHaveURL(/purchase_order_detail/u);
     const orderUrl = page.url();
     // 3 × 12.50 less 10% = 33.75; 5% = 1.6875 → 1.69; freight 25 + 1.25.
@@ -143,7 +144,9 @@ test('a partly received order shows what is still open, closes its remainder wit
       await pick(page, 'Vendor', 'Alpine', 'Alpine Office Supply');
       await pick(page, 'Line 1 product', 'OFF-100', 'Field notebook');
       await page.getByLabel('Line 1 quantity', { exact: true }).fill('5');
-      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await page
+        .getByRole('button', { name: 'Save draft', exact: true })
+        .click();
       await expect(page).toHaveURL(/purchase_order_detail/u);
       const orderUrl = page.url();
       await page
@@ -214,8 +217,9 @@ test('a partly received order shows what is still open, closes its remainder wit
       'RECEIPT_QUANTITY_OUT_OF_BOUNDS',
     );
     await page.goto(orderUrl);
+    // The badge names the stepper's current step (LOOK-1 round 3).
     await expect(page.locator('.composition-business-status')).toHaveText(
-      'Released',
+      'Receiving',
     );
     // The three still open are closed with a reason; ordered becomes received.
     await runTask('Close open remainder', async () => {
@@ -243,8 +247,10 @@ test('a partly received order shows what is still open, closes its remainder wit
     await page.goto(orderUrl);
     await command(page, 'Close');
     await expect(page.getByRole('status')).toContainText('Close complete');
+    // Closed with what arrived still to bill: the stepper's current step,
+    // which the badge names (LOOK-1 round 3), is Billing.
     await expect(page.locator('.composition-business-status')).toHaveText(
-      'Closed',
+      'Billing',
     );
 
     // An order with nothing received still cancels.
@@ -383,4 +389,13 @@ async function openMoreDetails(target: Page): Promise<void> {
   const more = target.locator('details.draft-more');
   if ((await more.count()) && (await more.getAttribute('open')) === null)
     await more.locator('summary').click();
+}
+
+/** Opens a line's More (LOOK-1 round 3): its discount and tax. */
+async function openLineMore(target: Page, line: number): Promise<void> {
+  const more = target.locator(
+    `details.draft-line-more:has(> summary[aria-label="More for line ${String(line)}"])`,
+  );
+  if ((await more.getAttribute('open')) === null)
+    await more.locator(':scope > summary').click();
 }

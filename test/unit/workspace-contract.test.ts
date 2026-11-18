@@ -1089,9 +1089,10 @@ test('PAYABLES (PY-G): each order line shows its three-way match from the purcha
       )
       .map((column) => [column.label, column.field, column.presentation?.role]),
     [
-      ['Billed', `${ns}:metric.billed`, 'quantity'],
-      ['To bill', `${ns}:metric.to_bill`, 'quantity'],
-      ['Match', `${ns}:metric.match_status`, 'secondary'],
+      // Shown on every line, as its supporting details (LOOK-1 round 3).
+      ['Billed', `${ns}:metric.billed`, 'detail'],
+      ['To bill', `${ns}:metric.to_bill`, 'detail'],
+      ['Match', `${ns}:metric.match_status`, 'detail'],
     ],
   );
   // Shown, never enforced: no action is conditioned on the match.

@@ -116,11 +116,9 @@ export function todaySurface(namespace: string): Record<string, unknown> {
     },
     module: ref('moduleReference', id('module', 'inventory')),
     schemaVersion: 'v6',
-    slots: [
-      slot('decision', 10),
-      slot('scanInput', 20),
-      slot('primaryAction', 30),
-    ],
+    // Searched from the top bar (LOOK-1 round 3): no find box of its own,
+    // which shows only to report a search that opened nothing.
+    slots: [slot('decision', 10), slot('scanInput', 20)],
     statusRoles: [],
     surfaceId: id('surface', 'inventory_today'),
     workspace: {
