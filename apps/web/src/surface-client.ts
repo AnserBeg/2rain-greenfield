@@ -21,47 +21,197 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
   }
 })();
 (() => {
-  const task = document.querySelector('dialog[data-composition-task]');
-  const resume = document.querySelector('[data-task-resume]');
-  if (!task || !resume || typeof task.showModal !== 'function') return;
-  const open = resume.querySelector('[data-task-open]');
-  const close = task.querySelector('[data-task-close]');
-  const initial = () => task.querySelector('[data-task-initial-focus]') || task.querySelector('input:not([type="hidden"]), select') || task.querySelector('[data-task-heading]');
-  // A resume control marked closed-only is offered only while the dialog is hidden.
-  const closedOnly = resume.hasAttribute('data-task-resume-closed-only');
-  const show = () => {
-    if (task.open) return;
-    task.showModal();
-    if (closedOnly) resume.hidden = true;
-    initial()?.focus();
-  };
-  task.removeAttribute('open');
-  resume.hidden = false;
-  close.hidden = false;
-  task.classList.add('task-dialog-enhanced');
-  open.addEventListener('click', show);
-  close.addEventListener('click', () => task.close());
-  task.addEventListener('keydown', (event) => {
-    if (event.key !== 'Tab') return;
-    const controls = [...task.querySelectorAll('button:not([disabled]):not([hidden]), a[href], input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]')].filter(control => control.getClientRects().length);
-    const index = controls.indexOf(document.activeElement);
-    if (controls.length && (index < 0 || (event.shiftKey ? index === 0 : index === controls.length - 1))) {
+  const enhanceTask = (root) => {
+    const task = root.querySelector('dialog[data-composition-task]');
+    const resume = root.querySelector('[data-task-resume]');
+    if (!task || !resume || typeof task.showModal !== 'function') return;
+    const open = resume.querySelector('[data-task-open]');
+    const close = task.querySelector('[data-task-close]');
+    const initial = () => task.querySelector('[data-task-initial-focus]') || task.querySelector('input:not([type="hidden"]), select') || task.querySelector('[data-task-heading]');
+    // A resume control marked closed-only is offered only while the dialog is hidden.
+    const closedOnly = resume.hasAttribute('data-task-resume-closed-only');
+    const show = () => {
+      if (task.open) return;
+      task.showModal();
+      if (closedOnly) resume.hidden = true;
+      initial()?.focus();
+    };
+    task.removeAttribute('open');
+    resume.hidden = false;
+    close.hidden = false;
+    task.classList.add('task-dialog-enhanced');
+    open.addEventListener('click', show);
+    close.addEventListener('click', () => task.close());
+    task.addEventListener('keydown', (event) => {
+      if (event.key !== 'Tab') return;
+      const controls = [...task.querySelectorAll('button:not([disabled]):not([hidden]), a[href], input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]')].filter(control => control.getClientRects().length);
+      const index = controls.indexOf(document.activeElement);
+      if (controls.length && (index < 0 || (event.shiftKey ? index === 0 : index === controls.length - 1))) {
+        event.preventDefault();
+        controls[event.shiftKey ? controls.length - 1 : 0].focus();
+      }
+    });
+    task.addEventListener('close', () => {
+      resume.hidden = false;
+      open.focus();
+    });
+    // A draft-editor create is cancelled on the server, which writes nothing and
+    // returns focus to the originating field; Escape takes that same path.
+    const create = task.querySelector('[data-editor-create]');
+    if (create) task.addEventListener('cancel', (event) => {
       event.preventDefault();
-      controls[event.shiftKey ? controls.length - 1 : 0].focus();
+      create.querySelector('button[value="cancel"]')?.click();
+    });
+    show();
+  };
+  enhanceTask(document);
+  if (!document.getElementById('record-task-region') || typeof fetch !== 'function' || typeof DOMParser !== 'function' || typeof HTMLDialogElement === 'undefined' || typeof HTMLDialogElement.prototype.showModal !== 'function') return;
+
+  let submitting = false;
+  let pageFallback = false;
+  let previewTimer;
+  let previewGeneration = 0;
+  let previewRequest = Promise.resolve();
+  const sendTask = async (form, fields) => {
+    const body = new URLSearchParams();
+    for (const [name, value] of fields) if (typeof value === 'string') body.append(name, value);
+    const response = await fetch(form.action, {
+      method: 'POST', credentials: 'same-origin', redirect: 'error',
+      headers: { 'x-rain-fragment': 'task' }, body,
+    });
+    if (response.headers.get('x-rain-fragment') !== 'fragment') throw new Error('Task response unavailable');
+    const refresh = response.headers.get('x-rain-fragment-refresh');
+    const fallback = response.headers.get('x-rain-fragment-fallback') === 'page';
+    const rendered = new DOMParser().parseFromString(await response.text(), 'text/html');
+    return { refresh, fallback, rendered };
+  };
+
+  const scheduleReview = (form) => {
+    if (!form) return;
+    clearTimeout(previewTimer);
+    const generation = ++previewGeneration;
+    const region = form.parentElement.querySelector('[data-task-inline-review]');
+    const review = form.querySelector('footer button[value="prepare"]');
+    if (!region || !review) return;
+    region.hidden = true;
+    region.replaceChildren();
+    review.hidden = false;
+    if (!form.checkValidity()) return;
+    previewTimer = setTimeout(() => {
+      previewRequest = previewRequest.then(async () => {
+        if (submitting || generation !== previewGeneration || !form.isConnected) return;
+        try {
+          const { refresh, rendered } = await sendTask(form, new FormData(form, review));
+          if (generation !== previewGeneration || !form.isConnected) return;
+          if (refresh) {
+            const destination = new URL(refresh, location.href);
+            if (destination.origin === location.origin) location.assign(destination.href);
+            return;
+          }
+          const preview = rendered.querySelector('#record-task-region [data-task-prepared]');
+          if (preview) {
+            const errors = [...form.querySelectorAll('.field-error')];
+            const errorIds = new Set(errors.map(error => error.id).filter(Boolean));
+            for (const control of form.querySelectorAll('[aria-invalid], [aria-describedby]')) {
+              control.removeAttribute('aria-invalid');
+              const described = (control.getAttribute('aria-describedby') || '').split(/\s+/).filter(id => id && !errorIds.has(id));
+              if (described.length) control.setAttribute('aria-describedby', described.join(' '));
+              else control.removeAttribute('aria-describedby');
+            }
+            errors.forEach(error => error.remove());
+            form.parentElement.querySelector('[data-task-input-error]')?.remove();
+            preview.querySelector('button[value="edit"]')?.setAttribute('hidden', '');
+            region.replaceChildren(preview);
+            region.hidden = false;
+            review.hidden = true;
+          }
+        } catch {
+          // The ordinary Review control still offers this read.
+        }
+      });
+    }, 350);
+  };
+
+  document.addEventListener('input', (event) => {
+    if (event.target instanceof HTMLSelectElement) return;
+    scheduleReview(event.target.closest?.('form[data-task-live-review]'));
+  });
+  document.addEventListener('change', (event) => {
+    // Text controls already prepared on input; blur is not another edit.
+    if (!(event.target instanceof HTMLSelectElement)) return;
+    scheduleReview(event.target.closest?.('form[data-task-live-review]'));
+  });
+
+  document.addEventListener('submit', async (event) => {
+    const form = event.target;
+    if (pageFallback || !(form instanceof HTMLFormElement) || form.method !== 'post') return;
+    const source = new URL(form.action, location.href);
+    if (source.origin !== location.origin || source.pathname !== location.pathname) return;
+    const fields = new FormData(form, event.submitter);
+    if (!fields.has('compositionAction')) return;
+    event.preventDefault();
+    if (submitting) return;
+    submitting = true;
+    clearTimeout(previewTimer);
+    ++previewGeneration;
+    form.setAttribute('aria-busy', 'true');
+    // A stage response replaces the form. Hold its controls while it is in
+    // flight so a late replacement cannot discard edits made after submit.
+    const pendingRoot = form.closest('[data-composition-task]') || form;
+    const pendingControls = [...pendingRoot.querySelectorAll('button, input:not([type="hidden"]), select, textarea')].filter(control => !control.disabled);
+    const restoreControls = () => pendingControls.forEach(control => { control.disabled = false; });
+    pendingControls.forEach(control => { control.disabled = true; });
+    const error = document.querySelector('dialog[open] [data-task-transport-error]') || document.querySelector('#record-task-region [data-task-transport-error]');
+    if (error) error.hidden = true;
+    try {
+      await previewRequest;
+      const { refresh, fallback, rendered } = await sendTask(form, fields);
+      if (refresh) {
+        const destination = new URL(refresh, location.href);
+        if (destination.origin !== location.origin) throw new Error('Task refresh unavailable');
+        location.assign(destination.href);
+        return;
+      }
+      if (fallback) {
+        restoreControls();
+        pageFallback = true;
+        try {
+          form.requestSubmit(event.submitter || undefined);
+        } finally {
+          pageFallback = false;
+        }
+        return;
+      }
+      const replacement = rendered.getElementById('surface-content') || rendered.getElementById('record-task-region');
+      const original = replacement && document.getElementById(replacement.id);
+      if (!original) throw new Error('Task response unavailable');
+      const previous = document.querySelector('dialog[data-composition-task]');
+      if (previous) {
+        previous.close();
+        if (!original.contains(previous)) {
+          const resume = previous.previousElementSibling;
+          if (resume?.hasAttribute('data-task-resume')) resume.remove();
+          previous.remove();
+        }
+      }
+      original.replaceWith(replacement);
+      const queues = rendered.getElementById('shell-work-queues');
+      if (queues) document.getElementById('shell-work-queues')?.replaceWith(queues);
+      enhanceTask(replacement);
+      (replacement.querySelector('#record-task-region [data-task-result]') || replacement.querySelector('[data-task-recovery]'))?.focus();
+      scheduleReview(replacement.querySelector('form[data-task-live-review]'));
+    } catch {
+      // A missing response cannot say whether a write committed. Keep the
+      // task and its server-issued keys and let the person choose to retry.
+      if (error) error.hidden = false;
+    } finally {
+      restoreControls();
+      form.removeAttribute('aria-busy');
+      submitting = false;
     }
   });
-  task.addEventListener('close', () => {
-    resume.hidden = false;
-    open.focus();
-  });
-  // A draft-editor create is cancelled on the server, which writes nothing and
-  // returns focus to the originating field; Escape takes that same path.
-  const create = task.querySelector('[data-editor-create]');
-  if (create) task.addEventListener('cancel', (event) => {
-    event.preventDefault();
-    create.querySelector('button[value="cancel"]')?.click();
-  });
-  show();
+  document.body.setAttribute('data-task-stages-enhanced', '');
+  scheduleReview(document.querySelector('form[data-task-live-review]'));
 })();
 (() => {
   // ADR-0036 behaviour 7: draft-editor reference fields answered in place.

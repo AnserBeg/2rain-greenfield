@@ -1,3 +1,4 @@
+import { completeTask } from './complete-task.js';
 import { test, expect, type Page } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -40,8 +41,7 @@ test('a customer on credit hold or over its limit has no order confirmed; both p
         })
         .locator('dd');
     const finish = async (label: string) => {
-      await dialog.getByRole('button', { name: `Review ${label}` }).click();
-      await dialog.getByRole('button', { name: `Confirm ${label}` }).click();
+      await completeTask(dialog, label);
       await expect(page.getByRole('status').first()).toContainText(
         `${label}: done`,
       );

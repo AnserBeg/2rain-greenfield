@@ -1,3 +1,4 @@
+import { completeTask, returnToRecord, reviewTask } from './complete-task.js';
 import { test, expect, type Page } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -152,15 +153,15 @@ test('a partly received order shows what is still open, closes its remainder wit
       await page
         .getByRole('button', { name: /^(?:Next action: )?Place order$/u })
         .click();
-      await page
-        .getByRole('dialog')
-        .getByRole('button', { name: 'Review Place order', exact: true })
-        .click();
+      await reviewTask(
+        page.locator('[data-composition-task]'),
+        'Review Place order',
+      );
       await page
         .getByRole('dialog')
         .getByRole('button', { name: 'Confirm Place order', exact: true })
         .click();
-      await expect(page.locator('[data-composition-task]')).toContainText(
+      await expect(page.locator('[data-task-result]')).toContainText(
         'Place order: done',
       );
       await page.goto(orderUrl);
@@ -174,7 +175,6 @@ test('a partly received order shows what is still open, closes its remainder wit
         .filter({ hasText: 'Field notebook' });
     const cell = (label: string) =>
       row().locator(`td[data-column-label="${label}"]`);
-    const task = () => page.locator('[data-composition-task]');
     const runTask = async (
       label: string,
       fill: () => Promise<void>,
@@ -182,18 +182,11 @@ test('a partly received order shows what is still open, closes its remainder wit
       await row().getByRole('link', { name: 'Select', exact: true }).click();
       await page.getByRole('button', { name: label, exact: true }).click();
       await fill();
-      await page
-        .getByRole('button', { name: `Review ${label}`, exact: true })
-        .click();
-      await page
-        .getByRole('button', { name: `Confirm ${label}`, exact: true })
-        .click();
-      await expect(task().locator('[data-task-result]')).toContainText(
+      await completeTask(page.getByRole('dialog'), label);
+      await expect(page.locator('[data-task-result]')).toContainText(
         `${label}: done`,
       );
-      await page
-        .getByRole('link', { name: 'Back to order', exact: true })
-        .click();
+      await returnToRecord(page);
     };
 
     const orderUrl = await newOrder();

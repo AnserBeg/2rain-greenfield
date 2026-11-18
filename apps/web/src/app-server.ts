@@ -161,14 +161,43 @@ async function handleRequest(
     return;
   }
 
+  const submitTask = (
+    submission: Readonly<Record<string, string>>,
+    fragment: boolean,
+  ) => {
+    const submit = () =>
+      entry.run({ headers: request.headers }, (view) =>
+        submitSurfaceRuntimeIntent(
+          view,
+          url.href,
+          submission,
+          gateways!,
+          fragment ? 'task-fragment' : 'page',
+        ),
+      );
+    if (!readSnapshot) return submit();
+    // ADR-0071: the step's reads are checked at the response boundary.
+    // An invocation leaves that snapshot and checks policy live.
+    return readSnapshot(submit, { retry: false }).catch((error: unknown) => {
+      if (!policyChangedDuringStep(error)) throw error;
+      return ['confirm', 'apply', 'retry'].includes(
+        submission.taskStage ?? '',
+      ) && typeof submission.taskToken === 'string'
+        ? taskRecoveryNotice(url.href, submission, fragment)
+        : policyChangedRedirect(url);
+    });
+  };
+
   // A fragment is the owned script's same-origin POST: it must carry the custom
   // header (which a cross-site form cannot set) and prove its origin -- by
   // same-origin fetch metadata where the browser sends it, otherwise by an
   // Origin naming this server. Anything else is an ordinary request.
+  const fragmentRequest = request.headers[FRAGMENT_REQUEST_HEADER];
+  const taskFragment = fragmentRequest === 'task';
   const fragment =
     request.method === 'POST' &&
     gateways !== undefined &&
-    request.headers[FRAGMENT_REQUEST_HEADER] === '1';
+    (fragmentRequest === '1' || taskFragment);
   if (fragment) {
     const site = request.headers['sec-fetch-site'];
     response.setHeader(FRAGMENT_REQUEST_HEADER, 'fragment');
@@ -191,13 +220,30 @@ async function handleRequest(
     }
     try {
       const submission = await readFormSubmission(request);
+      if (taskFragment) {
+        if (!taskStep(submission)) {
+          fallback();
+          return;
+        }
+        const result = await submitTask(submission, true);
+        if (result.location) {
+          response.setHeader(
+            `${FRAGMENT_REQUEST_HEADER}-refresh`,
+            result.location,
+          );
+          writeHtml(response, { html: '', statusCode: 409 });
+        } else if (result.html === '' && result.statusCode === 409) fallback();
+        else writeHtml(response, result);
+        return;
+      }
       const result = await entry.run({ headers: request.headers }, (view) =>
         submitSurfaceRuntimeFragment(view, url.href, submission, gateways),
       );
       if (result.fallback) fallback();
       else writeHtml(response, result);
     } catch {
-      fallback();
+      if (taskFragment) writeHtml(response, { html: '', statusCode: 500 });
+      else fallback();
     }
     return;
   }
@@ -274,34 +320,8 @@ async function handleRequest(
     }
     const result = gateways
       ? submission
-        ? readSnapshot && taskStep(submission)
-          ? // A task's steps read in one snapshot too (ADR-0071, amended: a
-            // read-only request with the end-of-request epoch check, whatever
-            // its method). Confirm's invocation runs outside it and decides
-            // live (the provider's invoke). A policy change during the step
-            // is never repeated: the step's page is sent again by a fresh GET
-            // (SPEED-1 S2).
-            await readSnapshot(
-              () =>
-                entry.run({ headers: request.headers }, (view) =>
-                  submitSurfaceRuntimeIntent(
-                    view,
-                    url.href,
-                    submission,
-                    gateways,
-                  ),
-                ),
-              { retry: false },
-            ).catch((error: unknown) => {
-              if (!policyChangedDuringStep(error)) throw error;
-              // A Confirm (or its retry) may have committed part of its
-              // work: the session's own retry is offered, nothing more.
-              return (submission.taskStage === 'confirm' ||
-                submission.taskStage === 'retry') &&
-                typeof submission.taskToken === 'string'
-                ? taskRecoveryNotice(url.href, submission)
-                : policyChangedRedirect(url);
-            })
+        ? taskStep(submission)
+          ? await submitTask(submission, false)
           : await entry.run({ headers: request.headers }, (view) =>
               submitSurfaceRuntimeIntent(view, url.href, submission, gateways),
             )
