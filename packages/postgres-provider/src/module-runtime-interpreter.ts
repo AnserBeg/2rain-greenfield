@@ -79,6 +79,7 @@ import type { Pool, PoolClient, QueryResultRow } from 'pg';
 
 import {
   withTrustedRequestRead,
+  withTrustedRequestTransaction,
   type ReadSnapshotHandle,
   type SnapshotRoleSwitch,
 } from './request-context.js';
@@ -302,24 +303,67 @@ export class PostgresModuleRuntimeInterpreter
       SemanticAggregateQueryExecutionRequest | SemanticQueryExecutionRequest,
   ): Promise<SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope> {
     try {
-      return await withTrustedRequestRead(
+      // A company-scoped aggregate keeps a cached anchor (an advisory lock
+      // and an insert), so it is no pure read: it never joins a page's read
+      // snapshot and runs in its own transaction, as before (SPEED-1).
+      if (request.definition.queryType === 'aggregate')
+        return await withTrustedRequestTransaction(
+          this.pool,
+          request.context,
+          async (client) => {
+            const storage = await this.#loadPinnedStorageTarget(
+              client,
+              request,
+            );
+            return withModuleRuntimeRole(client, () =>
+              executeQueryOnClient(
+                client,
+                storage,
+                request,
+                this.observeAggregateCache,
+              ),
+            );
+          },
+        );
+      // The pinned storage target is read as the runtime login role (release
+      // artifacts); alone, the read then switches to the module role itself.
+      const loaded = await withTrustedRequestRead(
         this.pool,
         request.context,
         async (client, snapshot) => {
           const storage = await this.#loadPinnedStorageTarget(client, request);
+          if (snapshot) return { storage };
+          return {
+            result: await withModuleRuntimeRole(client, () =>
+              executeQueryOnClient(
+                client,
+                storage,
+                request,
+                this.observeAggregateCache,
+              ),
+            ),
+          };
+        },
+      );
+      if ('result' in loaded) return loaded.result;
+      // In a page's read snapshot the read runs as the module role the
+      // snapshot holds (verified once per snapshot), and an identical read --
+      // the same query, arguments, plans and company scope on the same
+      // release -- runs once: the snapshot cannot change between the two.
+      return await withTrustedRequestRead(
+        this.pool,
+        request.context,
+        async (client, snapshot) => {
           const execute = () =>
             executeQueryOnClient(
               client,
-              storage,
+              loaded.storage,
               request,
               this.observeAggregateCache,
               snapshot,
             );
+          // The snapshot finished in between: a read of its own, as alone.
           if (!snapshot) return withModuleRuntimeRole(client, execute);
-          // In a page's read snapshot the snapshot holds the module role,
-          // verified once per snapshot, and an identical read -- the same
-          // query, arguments, plans and company scope on the same release --
-          // runs once: the snapshot cannot change between the two.
           const key = identicalReadKey(request);
           return key === null ? execute() : snapshot.memo(key, execute);
         },
