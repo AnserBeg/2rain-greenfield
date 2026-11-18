@@ -5,6 +5,7 @@ import { expect, test } from '@playwright/test';
 import { createSurfaceRuntimeServer } from '../../src/app-server.js';
 import { readDemoCompiledFixture } from '../../src/demo-runtime.js';
 import { compiledFixturePath, demoEntry } from '../helpers.js';
+import { closeServer } from './close-server.js';
 
 let server: Server;
 let baseUrl: string;
@@ -23,9 +24,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => (error ? reject(error) : resolve()));
-  });
+  await closeServer(server);
 });
 
 test('signed-in shell follows compiled navigation and preserves the pinned release', async ({
