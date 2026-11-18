@@ -83,7 +83,7 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
         const top = await firstLine.evaluate(
           (row) => row.getBoundingClientRect().top,
         );
-        expect(top, 'sales order lines above the fold').toBeLessThan(800);
+        expect.soft(top, 'sales order lines above the fold').toBeLessThan(800);
 
         // A record type a tenant adds through Customize.
         await page.setViewportSize({ width: 1440, height: 900 });
@@ -120,19 +120,22 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
                   page.locator('[data-composition-task]'),
                 ).toBeVisible();
               }
-              await requireLedgerParts(page, screen, viewport.width);
-              const text = await page.locator('body').innerText();
-              expect(rawCodes(text), `${screen} raw codes`).toEqual([]);
-              expect(
-                await page.evaluate(
-                  () => document.documentElement.scrollWidth <= innerWidth,
-                ),
-                `${screen} scrolls sideways at ${String(viewport.width)}`,
-              ).toBe(true);
+              // The picture first, so a red still leaves the evidence.
               await page.screenshot({
                 path: `${out}/app-${screen}-${String(viewport.width)}-${scheme}.png`,
                 fullPage: screen !== 'receive',
               });
+              await requireLedgerParts(page, screen, viewport.width);
+              const text = await page.locator('body').innerText();
+              expect.soft(rawCodes(text), `${screen} raw codes`).toEqual([]);
+              expect
+                .soft(
+                  await page.evaluate(
+                    () => document.documentElement.scrollWidth <= innerWidth,
+                  ),
+                  `${screen} scrolls sideways at ${String(viewport.width)}`,
+                )
+                .toBe(true);
             }
           }
       } finally {
@@ -150,9 +153,9 @@ async function requireLedgerParts(
   width: number,
 ): Promise<void> {
   // The shell: the work queues lead the sidebar (a drawer on a phone).
-  await expect(page.locator('nav.work-queues a').first()).toBeAttached();
-  if (width > 900) await expect(page.locator('.sidebar')).toBeVisible();
-  else await expect(page.locator('.shell-menu > summary')).toBeVisible();
+  await expect.soft(page.locator('nav.work-queues a').first()).toBeAttached();
+  if (width > 900) await expect.soft(page.locator('.sidebar')).toBeVisible();
+  else await expect.soft(page.locator('.shell-menu > summary')).toBeVisible();
   const parts: Readonly<Record<Screen, readonly string[]>> = {
     home: ['.launcher-tiles .launcher-tile', '.launcher-scan'],
     po: [
@@ -180,10 +183,9 @@ async function requireLedgerParts(
     ],
   };
   for (const selector of parts[screen])
-    await expect(
-      page.locator(selector).first(),
-      `${screen} shows ${selector}`,
-    ).toBeAttached();
+    await expect
+      .soft(page.locator(selector).first(), `${screen} shows ${selector}`)
+      .toBeAttached();
 }
 
 async function menuDestination(
