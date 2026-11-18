@@ -28,7 +28,7 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
           // Sales confirms (ruling F) once a ship-to is complete; Purchasing releases.
           const boundary = await page
             .getByText(
-              /^Save commits the header and each line in sequence\. Drafts do not change stock\. (Confirm is a separate action, offered once the order has a complete ship-to address \(street, city, postal code and country\)|Place order is a separate action)\.$/u,
+              /^Saving keeps the order as a draft; stock does not change\. (Confirm it when it has a full ship-to address \(street, city, postal code and country\)|Place the order when it is ready)\.$/u,
             )
             .boundingBox();
           const save = await page
@@ -316,7 +316,7 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     await capture('sales-packing');
     await page.goto(purchaseUrl);
     await page
-      .getByRole('button', { name: 'Place order', exact: true })
+      .getByRole('button', { name: /^(?:Next action: )?Place order$/u })
       .click();
     await page
       .getByRole('dialog')
@@ -915,7 +915,12 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
           .click(),
       ),
     ).toBe(409);
-    await expect(page.getByText('DRAFT_EDITOR_CONFLICT')).toBeVisible();
+    // The code stays in the page for support, not in its text (LOOP-1).
+    await expect(
+      page.locator('[data-message-code]', {
+        hasText: 'DRAFT_EDITOR_CONFLICT',
+      }),
+    ).not.toHaveCount(0);
     await kept();
     await expect(product).toHaveAttribute(
       'data-selected-label',

@@ -128,11 +128,10 @@ export const SURFACE_MESSAGE_CATALOG = Object.freeze({
     subject: null,
   },
   COMPOSITION_CHILD_EMPTY: {
-    sentence: 'No child records',
-    detail:
-      'There are no matching records, or the required parent selection is empty.',
+    sentence: 'Nothing here yet',
+    detail: 'Records show here as soon as there are any.',
     nextAction:
-      'Select a parent record when this section depends on a selection.',
+      'Where this section follows a row you select above, select one to see its records.',
     consequence: 'advisory',
     placements: ['slot'],
     subject: null,

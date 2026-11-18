@@ -288,8 +288,8 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // WAREHOUSE-MODE's Warehouse, + VALUATION's Inventory value List, +
   // APPROVALS' approval requests and settings (five), + SALES-EXTRAS' price
   // list, its prices and customers (nine) and its Counter sales worklist
-  // (one; INTEGRATION, decision I-M8(a)).
-  assert.equal(groupedManifest.surfaces.length, 123);
+  // (one; INTEGRATION, decision I-M8(a)), + LOOP-1's Today launcher.
+  assert.equal(groupedManifest.surfaces.length, 124);
   assert.equal(
     groupedManifest.payloadSchemaVersion,
     COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION,
@@ -367,18 +367,21 @@ test('compiled navigation stays flat within budget and groups mounted modules be
             delete field.presentation?.tiers;
           }
         }
-      // LOOP-1's order payment pays each open invoice in per-row steps that
-      // read their own row's read-backs, as a counter sale does.
+      // LOOP-1's order payment and Ship work in per-row steps that read their
+      // own row's read-backs, as a counter sale does.
       if (counterSales && surface.composition) {
         surface.composition.actions = surface.composition.actions.filter(
           (action) =>
             !action.actionId.includes(':action.counter_sale_') &&
-            !action.actionId.endsWith(':action.order_record_payment'),
+            !action.actionId.endsWith(':action.order_record_payment') &&
+            !action.actionId.endsWith(':action.ship_lines'),
         );
         const progression = surface.composition.presentation?.progression;
         if (progression)
           progression.next = progression.next.filter(
-            (entry) => !entry.action?.endsWith(':action.order_record_payment'),
+            (entry) =>
+              !entry.action?.endsWith(':action.order_record_payment') &&
+              !entry.action?.endsWith(':action.ship_lines'),
           );
       }
     }
@@ -399,11 +402,11 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // Inventory value List. APPROVALS: approvals and settings join Purchasing.
   // SALES-EXTRAS: the Price lists join the masters, and Counter sales
   // joins Sales beside its orders (INTEGRATION, decision I-M8(a)).
-  assert.equal(navigationSurfaceIds(grouped.entries).length, 24);
+  assert.equal(navigationSurfaceIds(grouped.entries).length, 25);
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
-    ['Sales', 'Purchasing', 'Inventory', 'Party', 'More'],
+    ['Sales', 'Purchasing', 'Stock', 'Customers and suppliers', 'More'],
   );
   assert.deepEqual(compact.navigationEntryIds, [
     'northstar.app:module.sales',
@@ -430,6 +433,7 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   assert.deepEqual(navigationSurfaceIds([inventory]), [
     'northstar.app:surface.inventory_movement_list',
     'northstar.app:surface.inventory_period_lock_list',
+    'northstar.app:surface.inventory_today',
     'northstar.app:surface.inventory_transaction_list',
     'northstar.app:surface.inventory_warehouse',
     'northstar.app:surface.item_buying_list',

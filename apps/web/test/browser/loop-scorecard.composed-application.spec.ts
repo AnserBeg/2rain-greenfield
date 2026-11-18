@@ -4,7 +4,6 @@ import { startComposedApplication } from '../../../api/src/composition-root.js';
 import { withEphemeralPostgres } from '../../../../test/helpers/postgres.js';
 
 import {
-  DatabaseMeter,
   DatabaseStatistics,
   invoiceAndPay,
   LoopScorecard,
@@ -34,14 +33,10 @@ test('LOOP-1 scorecard: purchase order to stock to a shipped, invoiced and paid 
         seedProfile: 'distributor',
         tenantSlug: 'loop-scorecard-browser',
       });
-      // The database work of every request, counted at the application's
-      // PostgreSQL client, and the database's own count per step.
-      const meter = new DatabaseMeter();
+      // Each request's database work comes from the server's Server-Timing
+      // header; per step, the database's own count is read beside it.
       const statisticsClient = await pool.connect();
-      meter.ignored.add(statisticsClient);
-      meter.install();
       const card = new LoopScorecard(page, {
-        meter,
         statistics: new DatabaseStatistics(statisticsClient),
       });
       try {
@@ -73,7 +68,6 @@ test('LOOP-1 scorecard: purchase order to stock to a shipped, invoiced and paid 
           `Loop scorecard — ${new Date().toISOString().slice(0, 10)}`,
         );
         console.log(`LOOP_SCORECARD\n${table}`);
-        meter.uninstall();
         statisticsClient.release();
         await application.close();
       }

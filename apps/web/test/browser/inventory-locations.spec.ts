@@ -34,7 +34,7 @@ test('a quarantined location keeps its stock on hand but neither usable nor avai
       .locator('.navigation-tree > li')
       .getByRole('group');
     const more = groups.filter({ hasText: 'More' });
-    const inventory = groups.filter({ hasText: 'Inventory' });
+    const inventory = groups.filter({ hasText: 'Stock' });
 
     // More -> Location: every location with its type and inventory status.
     await open(more, 'More', 'Location');
@@ -71,7 +71,7 @@ test('a quarantined location keeps its stock on hand but neither usable nor avai
     // Inventory -> Stock by item: 10 on hand, 6 of them usable; nothing
     // reserved, so 6 available; 8 to ship: projected -2, a shortage the
     // quarantined 4 does not hide.
-    await open(inventory, 'Inventory', 'Stock by item');
+    await open(inventory, 'Stock', 'Stock by item');
     await expect(
       page.getByRole('heading', { level: 1, name: 'Stock by item' }),
     ).toBeVisible();
@@ -158,7 +158,7 @@ test('a quarantined location keeps its stock on hand but neither usable nor avai
     await expect(fact('Status reason')).toHaveText('Inspected and released');
 
     // Every figure follows: all 10 usable and available.
-    await open(inventory, 'Inventory', 'Stock by item');
+    await open(inventory, 'Stock', 'Stock by item');
     expect(
       await cells(page, 'item_stock_list', scenario.notebook, [
         'usable',
