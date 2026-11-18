@@ -2676,8 +2676,9 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
       const cells = columns
         .map((column) => {
           const text = declaredCellText(column, record, input.present);
-          // The kind leads, so the column id stays the cell's last attribute.
-          const label = `${kind(column).trimStart()}${kind(column) ? ' ' : ''}data-column-label="${escapeHtml(column.label)}" data-column-priority="${String(column.priority)}" data-column-id="${escapeHtml(column.columnId)}"`;
+          // The label leads and the column id ends the cell's attributes, as
+          // readers of the List's markup expect; the kind sits between.
+          const label = `data-column-label="${escapeHtml(column.label)}"${kind(column)} data-column-priority="${String(column.priority)}" data-column-id="${escapeHtml(column.columnId)}"`;
           if (column.role === 'title') {
             const title = text ?? record.recordId.slice(0, 8);
             const href = input.detailHref(record);
