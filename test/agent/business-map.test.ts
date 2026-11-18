@@ -576,3 +576,13 @@ test('X12: a reference position refuses any unlooked-up value, a nested argument
   ).content;
   assert.match(JSON.stringify(nested), /flat object of plain values/u);
 });
+
+test('X14: a list page never makes a record "this"; only a record page with its own get does', async () => {
+  const session = personSession('buyer', () => true, []);
+  const list = await session.turnContext({
+    surfaceId: `${NS}:surface.party_list`,
+    recordId: PARTY,
+  });
+  assert.match(list, /Screen: the person is on "[^"]+" \(list/u);
+  assert.doesNotMatch(list, /showing record|read just now/u);
+});

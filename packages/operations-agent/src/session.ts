@@ -1798,24 +1798,23 @@ function screenFacts(
   const entity = surface.dataSourceQueryId
     ? catalog.query(surface.dataSourceQueryId)?.sourceEntityId
     : undefined;
-  const record =
-    typeof screen.recordId === 'string' && uuidPattern.test(screen.recordId)
-      ? screen.recordId
-      : null;
+  // A record is "this" only on a record page whose own declared data
+  // source is a get: a list page ignores a `record` parameter, so a stale
+  // link there must not point the assistant at a record nobody sees.
   const getQuery =
-    entity && record
-      ? (catalog.queries.find(
+    surface.archetype === 'record'
+      ? catalog.queries.find(
           (query) =>
             query.queryId === surface.dataSourceQueryId &&
             query.queryType === 'get',
-        ) ??
-        catalog.queries.find(
-          (query) =>
-            query.sourceEntityId === entity &&
-            query.queryType === 'get' &&
-            localName(query.queryId) === `${localName(entity)}_get`,
-        ))
+        )
       : undefined;
+  const record =
+    getQuery &&
+    typeof screen.recordId === 'string' &&
+    uuidPattern.test(screen.recordId)
+      ? screen.recordId
+      : null;
   return {
     text: `Screen: the person is on "${surface.label ?? localName(surface.surfaceId)}" (${surface.archetype ?? 'page'}${entity ? `, ${localName(entity)}` : ''})${record ? `, showing record ${record}; "this", "it" and "here" mean that record` : ''}.`,
     recordId: record,
