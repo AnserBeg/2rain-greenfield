@@ -41,12 +41,14 @@ export type PageBudgetName = (typeof PAGE_BUDGET_NAMES)[number];
  */
 export const PAGE_BUDGETS: Readonly<Record<PageBudgetName, PageBudget>> =
   Object.freeze({
-    home: budget(51, 410, 41, 32),
+    // LOOP-1 slice 5: Today tiles read four list counts.
+    home: budget(65, 522, 53, 40),
     'purchase order list': budget(107, 896, 84, 108),
     'purchase order detail': budget(169, 1384, 135, 153),
     'new purchase order': budget(29, 242, 22, 23),
     'stock by item': budget(76, 586, 67, 62),
-    'sales order detail': budget(259, 2139, 207, 236),
+    // LOOP-1 slice 3: Ship and payment next actions evaluate rows.
+    'sales order detail': budget(269, 2209, 217, 246),
     'task: open': budget(393, 3237, 311, 417),
     'task: review': budget(205, 1692, 161, 190),
     'task: confirm': budget(217, 1879, 169, 204),
