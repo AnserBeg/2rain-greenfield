@@ -223,13 +223,16 @@ async function handleRequest(
           SURFACE_STYLESHEET.href,
         ),
       );
+      const customizePage = withLocalDemoIdentity(
+        result,
+        demoActors,
+        localDemoActor(request.headers.cookie),
+      );
+      // The assistant links here ("Review it on the Customize screen"); the
+      // panel comes along (end review X15).
       writeHtml(
         response,
-        withLocalDemoIdentity(
-          result,
-          demoActors,
-          localDemoActor(request.headers.cookie),
-        ),
+        assistant ? withAssistantPanel(customizePage) : customizePage,
       );
       return;
     }

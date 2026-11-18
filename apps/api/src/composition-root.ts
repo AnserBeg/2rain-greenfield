@@ -30,6 +30,7 @@ import { COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/
 
 import {
   createAssistantEndpoint,
+  loopbackAuthorities,
   type AssistantEndpoint,
 } from './assistant-endpoint.js';
 
@@ -155,6 +156,9 @@ export async function startComposedApplication(
   let seededRecords: readonly ComposedApplicationSeedReceipt[];
   let server: Server;
   let assistant: AssistantEndpoint | undefined;
+  // The Host values the assistant answers to, known once the server listens;
+  // nothing is accepted before then (end review X10).
+  let authorities: readonly string[] = [];
   try {
     seededRecords = await seedComposedApplication(
       runtime,
@@ -192,6 +196,7 @@ export async function startComposedApplication(
             companyId: COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId,
             businessCalendar: COMPOSED_APPLICATION_INVENTORY_SCOPE,
             model: options.assistantModel ?? keyFileAssistantModel(),
+            authorities: () => authorities,
             // The panel's handoff drafts through the Customize screen's
             // own lazily opened service: one service per server.
             customize,
@@ -238,6 +243,7 @@ export async function startComposedApplication(
     await runtime.close();
     throw new Error('composed application server has no TCP address');
   }
+  authorities = loopbackAuthorities(host, address.port);
   let closed = false;
   return Object.freeze({
     baseUrl: `http://${host}:${String(address.port)}`,

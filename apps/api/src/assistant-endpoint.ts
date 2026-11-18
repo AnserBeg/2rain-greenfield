@@ -61,6 +61,11 @@ export interface AssistantEndpointOptions {
   readonly prices?: ModelPrices;
   readonly capUsd?: number;
   /**
+   * The `Host` values this server answers to (its loopback host and port);
+   * absent, the Host is not checked (unit tests).
+   */
+  readonly authorities?: () => readonly string[] | null;
+  /**
    * The customization lane (CUSTOMIZE's service): a change to the
    * application is handed to its AI draft, shown as a plain diff, and never
    * approved or activated from here (plan §9.1). Absent, the panel says where
@@ -157,7 +162,10 @@ export function createAssistantEndpoint(
     async handle(request, response, url) {
       const action = url.searchParams.get('assistant');
       if (action === null) return false;
-      if (request.method !== 'POST' || !sameOrigin(request)) {
+      if (
+        request.method !== 'POST' ||
+        !sameOrigin(request, options.authorities?.() ?? null)
+      ) {
         response.statusCode = 403;
         response.end();
         return true;
@@ -625,8 +633,19 @@ function local(id: string): string {
   return dot >= 0 ? afterColon.slice(dot + 1) : afterColon;
 }
 
-function sameOrigin(request: IncomingMessage): boolean {
+function sameOrigin(
+  request: IncomingMessage,
+  authorities: readonly string[] | null,
+): boolean {
   if (request.headers['x-northstar-assistant'] !== '1') return false;
+  // End review X10: the request must name this server's own loopback
+  // authority before any fetch metadata or Origin is trusted; a rebound
+  // hostname carries "same-origin" for itself, not for us.
+  if (
+    authorities !== null &&
+    !authorities.includes(String(request.headers.host ?? '').toLowerCase())
+  )
+    return false;
   const site = request.headers['sec-fetch-site'];
   if (site === 'same-origin') return true;
   if (site !== undefined) return false;
@@ -670,4 +689,18 @@ async function readJson(
   } catch {
     return {};
   }
+}
+
+/** The Host header values a loopback server at `host:port` is reached by. */
+export function loopbackAuthorities(host: string, port: number): string[] {
+  const names = new Set([
+    host.toLowerCase(),
+    '127.0.0.1',
+    'localhost',
+    '[::1]',
+  ]);
+  if (host === '::1') names.add('[::1]');
+  return [...names]
+    .filter((name) => name !== '::1')
+    .map((name) => `${name}:${String(port)}`);
 }

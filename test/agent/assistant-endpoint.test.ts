@@ -10,6 +10,7 @@ import {
 } from '../../apps/web/src/assistant-panel.js';
 import {
   createAssistantEndpoint,
+  loopbackAuthorities,
   type CustomizeDrafter,
 } from '../../apps/api/src/assistant-endpoint.js';
 import {
@@ -18,6 +19,8 @@ import {
   type ScriptStep,
 } from '../../packages/operations-agent/src/index.js';
 import { createHash } from 'node:crypto';
+
+import { posixQuoted } from '../../apps/api/src/posix-quote.js';
 
 import { compiledAppView } from './compiled-view.js';
 
@@ -75,11 +78,14 @@ async function serve(
   log: string[],
   capUsd?: number,
   customize?: CustomizeDrafter,
+  authorities?: (port: number) => string[],
 ): Promise<{ url: string; server: Server }> {
+  let port = 0;
   const endpoint = createAssistantEndpoint({
     runtime: fakeRuntime(log) as never,
     companyId: 'company',
     model: () => Promise.resolve(model),
+    ...(authorities ? { authorities: () => authorities(port) } : {}),
     ...(capUsd !== undefined ? { capUsd } : {}),
     ...(customize ? { customize: () => Promise.resolve(customize) } : {}),
   });
@@ -94,6 +100,7 @@ async function serve(
   });
   await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
   const address = server.address() as { port: number };
+  port = address.port;
   return { url: `http://127.0.0.1:${String(address.port)}`, server };
 }
 
@@ -576,4 +583,87 @@ test('X2: only a whole, plain yes approves a plan typed into the panel', () => {
     'yes but only the first line',
   ])
     assert.ok(!ASSISTANT_AFFIRMATIVE.test(no.trim()), no);
+});
+
+test('X10: a request naming another host is refused before its same-origin metadata is trusted', async () => {
+  const { request: send } = await import('node:http');
+  const { url, server } = await serve(
+    scriptedModel([() => ({ text: 'hi' })]),
+    [],
+    undefined,
+    undefined,
+    (port) => loopbackAuthorities('127.0.0.1', port),
+  );
+  const port = Number(new URL(url).port);
+  const status = (host: string) =>
+    new Promise<number>((done, fail) => {
+      const outgoing = send(
+        {
+          host: '127.0.0.1',
+          port,
+          path: '/?assistant=ask',
+          method: 'POST',
+          headers: {
+            host,
+            'content-type': 'application/json',
+            'x-northstar-assistant': '1',
+            'sec-fetch-site': 'same-origin',
+            cookie: 'northstar-demo-actor=buyer',
+          },
+        },
+        (response) => {
+          response.resume();
+          done(response.statusCode ?? 0);
+        },
+      );
+      outgoing.on('error', fail);
+      outgoing.end(JSON.stringify({ text: 'hello' }));
+    });
+  try {
+    assert.equal(await status(`rebound.example:${String(port)}`), 403);
+    assert.equal(await status(`127.0.0.1:${String(port)}`), 200);
+    assert.equal(await status(`localhost:${String(port)}`), 200);
+  } finally {
+    server.close();
+  }
+});
+
+test('X15: the suggested customize command quotes the request as one shell word; the Customize page carries the panel', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const request = "Add $(touch /tmp/x) `id` field \\ it's";
+  const quoted = posixQuoted(request);
+  assert.equal(
+    execFileSync('bash', ['-c', `printf %s ${quoted}`], { encoding: 'utf8' }),
+    request,
+  );
+  const { createSurfaceRuntimeServer } =
+    await import('../../apps/web/src/app-server.js');
+  const page = createSurfaceRuntimeServer(
+    { run: (_r: unknown, work: (v: unknown) => unknown) => work({}) } as never,
+    {} as never,
+    null,
+    () =>
+      Promise.resolve({
+        status: () =>
+          Promise.resolve({
+            activeChain: [],
+            activeReleaseId: 'r',
+            activeReleaseRoot: 'a'.repeat(64),
+            patches: [],
+          }),
+        targets: () =>
+          Promise.resolve({ choiceFields: [], lists: [], recordTypes: [] }),
+      } as never),
+    { assistant: { handle: () => Promise.resolve(false) } },
+  );
+  await new Promise<void>((done) => page.listen(0, '127.0.0.1', done));
+  try {
+    const port = (page.address() as { port: number }).port;
+    const html = await (
+      await fetch(`http://127.0.0.1:${String(port)}/?customize`)
+    ).text();
+    assert.match(html, /data-assistant-panel/u);
+  } finally {
+    page.close();
+  }
 });
