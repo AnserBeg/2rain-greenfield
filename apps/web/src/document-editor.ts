@@ -2879,7 +2879,7 @@ async function editorResponse(
       : '';
     const commands = buffer.pending
       ? `<button form="draft-editor-form" name="draftAction" value="${buffer.pending.some((step) => step.grant && !step.done) ? 'confirm' : 'retry'}">${buffer.pending.some((step) => step.grant && !step.done) ? 'Confirm removal and save' : 'Retry save'}</button>`
-      : '<button form="draft-editor-form" name="draftAction" value="save">Save</button>';
+      : '<button form="draft-editor-form" name="draftAction" value="save">Save draft</button>';
     return {
       statusCode,
       html: '',

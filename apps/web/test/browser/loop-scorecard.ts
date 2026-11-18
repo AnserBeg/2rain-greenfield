@@ -538,7 +538,9 @@ export async function placePurchaseOrder(card: LoopScorecard): Promise<void> {
     page.getByLabel('Line 1 unit cost', { exact: true }),
     f.unitCost,
   );
-  await card.click(page.getByRole('button', { name: 'Save', exact: true }));
+  await card.click(
+    page.getByRole('button', { name: 'Save draft', exact: true }),
+  );
   await expect(page).toHaveURL(/purchase_order_detail/u);
   await runTask(card, nextAction(page), 'Place order');
   // The badge names the stepper's current step (LOOK-1 round 3).
@@ -594,7 +596,9 @@ export async function createSale(card: LoopScorecard): Promise<void> {
   await pick(card, 'Customer', ...f.customer);
   await pick(card, 'Line 1 product', ...f.item);
   await card.fill(page.getByLabel('Line 1 quantity', { exact: true }), f.sold);
-  await card.click(page.getByRole('button', { name: 'Save', exact: true }));
+  await card.click(
+    page.getByRole('button', { name: 'Save draft', exact: true }),
+  );
   await expect(page).toHaveURL(/sales_order_detail/u);
   await card.click(nextAction(page));
   // The badge names the stepper's current step (LOOK-1 round 3).

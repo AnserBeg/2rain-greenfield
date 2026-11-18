@@ -189,7 +189,7 @@ async function journey(
   await expect(page.getByLabel('Currency *')).toHaveValue('CAD');
   await pick('Line 1 product', 'OFF-100', 'Field notebook');
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('5');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page).toHaveURL(/purchase_order_detail/u);
   const orderNumber = (
     await page.locator('.composition-header h1').innerText()

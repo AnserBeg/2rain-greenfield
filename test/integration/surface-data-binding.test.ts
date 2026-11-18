@@ -6012,7 +6012,7 @@ test('order entry F3: read loss between partial-save submissions redacts acknowl
     assert.doesNotMatch(first.html, /DRAFT_EDITOR_PARTIAL_COMMIT_WITHHELD/);
     if (pending === 'cleared') {
       assert.match(first.html, /1 save operations committed/);
-      assert.match(first.html, />Save<\/button>/);
+      assert.match(first.html, />Save draft<\/button>/);
     } else {
       assert.match(first.html, /data-save-progress/);
       assert.match(first.html, />Retry save<\/button>/);

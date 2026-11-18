@@ -75,7 +75,7 @@ test('a sales line is priced from its customer’s price list, by quantity break
     await expect(unitPrice).toHaveValue('9.5');
     await expect(listPrice).toHaveText('9.5');
     await capture(page, testInfo, 'price-list-editor');
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await expect(page).toHaveURL(/sales_order_detail/u);
     const line = dataset('order_lines').locator('tbody tr').first();
     await expect(line.locator('td[data-column-label="Amount"]')).toHaveText(
@@ -93,7 +93,7 @@ test('a sales line is priced from its customer’s price list, by quantity break
     await page.getByLabel('Line 1 quantity', { exact: true }).press('Enter');
     await expect(unitPrice).toHaveValue('9');
     await expect(listPrice).toHaveText('8.75');
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await expect(page).toHaveURL(/sales_order_detail/u);
     await expect(line.locator('td[data-column-label="Amount"]')).toHaveText(
       '540.00',

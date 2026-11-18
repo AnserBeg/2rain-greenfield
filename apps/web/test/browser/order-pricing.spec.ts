@@ -52,7 +52,7 @@ test('an order is priced in its currency, discounted and taxed per line, with ch
     await openMoreDetails(page);
     await page.getByLabel('Freight', { exact: true }).fill('25');
     await capture(page, testInfo, 'pricing-editor');
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await expect(page).toHaveURL(/sales_order_detail/u);
     const orderUrl = page.url();
     // 3 × 12.50 less 10% = 33.75; 5% = 1.6875 → 1.69; freight 25 + 1.25.
@@ -71,7 +71,7 @@ test('an order is priced in its currency, discounted and taxed per line, with ch
     await page.locator('.composition-record-actions > summary').click();
     await page.getByRole('link', { name: 'Edit', exact: true }).click();
     await page.getByLabel('Currency *').selectOption('USD');
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await expect(page).toHaveURL(/sales_order_detail/u);
     // 3 × 9.25 less 10% = 24.975 → 24.98; 5% = 1.249 → 1.25.
     await expectPriced(page, {
@@ -88,7 +88,7 @@ test('an order is priced in its currency, discounted and taxed per line, with ch
     await page.locator('.composition-record-actions > summary').click();
     await page.getByRole('link', { name: 'Edit', exact: true }).click();
     await page.getByLabel('Line 1 unit price', { exact: true }).fill('10');
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await expect(page).toHaveURL(/sales_order_detail/u);
     await expectPriced(page, {
       amount: '27.00',

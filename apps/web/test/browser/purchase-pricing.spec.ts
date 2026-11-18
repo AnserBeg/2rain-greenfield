@@ -65,7 +65,7 @@ test('a purchase order takes its supplier defaults, is discounted and taxed per 
     await openMoreDetails(page);
     await page.getByLabel('Freight', { exact: true }).fill('25');
     await capture(page, testInfo, 'purchase-pricing-editor');
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await expect(page).toHaveURL(/purchase_order_detail/u);
     const orderUrl = page.url();
     // 3 × 12.50 less 10% = 33.75; 5% = 1.6875 → 1.69; freight 25 + 1.25.
@@ -144,7 +144,9 @@ test('a partly received order shows what is still open, closes its remainder wit
       await pick(page, 'Vendor', 'Alpine', 'Alpine Office Supply');
       await pick(page, 'Line 1 product', 'OFF-100', 'Field notebook');
       await page.getByLabel('Line 1 quantity', { exact: true }).fill('5');
-      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await page
+        .getByRole('button', { name: 'Save draft', exact: true })
+        .click();
       await expect(page).toHaveURL(/purchase_order_detail/u);
       const orderUrl = page.url();
       await page

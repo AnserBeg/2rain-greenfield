@@ -155,7 +155,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await pick('Line 1 product', 'OFF-100', 'Field notebook');
   await pick('Line 1 to location', 'Calgary', 'Calgary warehouse');
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('10');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page).toHaveURL(/inventory_transaction_detail/u);
   // Titled by the number the server gave it: a stock document's page
   // declares no header of its own.
@@ -188,7 +188,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   ).toHaveText('EA');
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('10');
   await page.getByLabel('Line 1 unit price', { exact: true }).fill('12.5');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page).toHaveURL(/sales_order_detail/u);
   const orderId = new URL(page.url()).searchParams.get('record')!;
   const orderLineId = (await page
@@ -360,7 +360,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await pick('Line 1 product', 'OFF-100', 'Field notebook');
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('2');
   await page.getByLabel('Line 1 unit price', { exact: true }).fill('12.5');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page).toHaveURL(/sales_order_detail/u);
   const closureOrderId = new URL(page.url()).searchParams.get('record')!;
   const closureLineId = (await page
