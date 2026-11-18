@@ -11,7 +11,6 @@ import {
 import {
   createAssistantEndpoint,
   loopbackAuthorities,
-  planDigest,
   ASSISTANT_CONVERSATION_LIMITS,
   type CustomizeDrafter,
 } from '../../apps/api/src/assistant-endpoint.js';
@@ -1067,6 +1066,7 @@ test("X9: the conversation works in the page's proved company, names it on the c
     undefined,
     undefined,
     {
+      mintId: () => RECORD,
       company: (page) => {
         pages.push(page);
         return Promise.resolve(companies[page.search] ?? null);
@@ -1142,6 +1142,9 @@ test("X9: the conversation works in the page's proved company, names it on the c
       });
       assert.equal(recovery.status, 409);
     }
+    assert.equal(alpha.plan?.planId, RECORD);
+    assert.equal(beta.plan?.planId, RECORD);
+    assert.deepEqual(beta.plan?.steps, alpha.plan?.steps);
     assert.notEqual(beta.plan?.digest, alpha.plan?.digest);
     // A page that settles on no company: nothing runs.
     const none = await ask('?surface=s', beta.id);
@@ -1157,11 +1160,6 @@ test('17: HTTP port 80 admits bare loopback names only at the default port', () 
   assert.ok(!loopbackAuthorities('127.0.0.1', 81).includes('localhost'));
   assert.ok(!loopbackAuthorities('localhost', 80).includes('example.test'));
 });
-test('X9: otherwise identical cards in two companies bind different digests', () => {
-  const card = { planId: 'same', summary: 'same', steps: [] };
-  assert.notEqual(planDigest(card, 'a'), planDigest(card, 'b'));
-});
-
 test('9/27: the endpoint checks every receipt on model failure and recovers both records in commit order', async () => {
   const log: string[] = [];
   const runtime = fakeRuntime(log);

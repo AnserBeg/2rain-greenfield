@@ -90,6 +90,8 @@ export interface AssistantEndpointOptions {
    * to make the change.
    */
   readonly customize?: () => Promise<CustomizeDrafter>;
+  /** Source of session plan and record IDs. Production uses random UUIDs. */
+  readonly mintId?: () => string;
   /** The clock conversations idle by; a test moves it. */
   readonly now?: () => number;
 }
@@ -218,6 +220,7 @@ export function createAssistantEndpoint(
         ...(options.businessCalendar
           ? { businessCalendar: options.businessCalendar }
           : {}),
+        ...(options.mintId ? { mintId: options.mintId } : {}),
         approve: (plan) => askThePerson(conversation, plan),
         // The panel offers Undo, so a reversible change runs at once here.
         autoApproveReversible: true,
@@ -828,7 +831,7 @@ function shownValue(value: unknown, option = false): string {
   return option ? local(text).replaceAll('_', ' ') : text;
 }
 
-export function planDigest(plan: PlanForApproval, companyId: string): string {
+function planDigest(plan: PlanForApproval, companyId: string): string {
   return createHash('sha256')
     .update(
       JSON.stringify({ companyId, planId: plan.planId, steps: plan.steps }),

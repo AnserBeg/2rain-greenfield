@@ -260,6 +260,7 @@ function guardedSession(
 ) {
   const base = compiledAppView('manager');
   const state = {
+    company: 'c',
     release: { ...base.release },
     record: {
       recordId: PARTY,
@@ -355,7 +356,9 @@ function guardedSession(
       },
     } as never,
     personHeaders: {},
-    companyId: 'c',
+    get companyId() {
+      return state.company;
+    },
     approve,
   });
   return { session, state };
@@ -380,6 +383,18 @@ async function plannedUpdate(
   assert.equal(typeof planId, 'string', JSON.stringify(planned.content));
   return planId!;
 }
+
+test('X9: execution refuses an approved plan if its company changes', async () => {
+  const { session, state } = guardedSession();
+  const planId = await plannedUpdate(session, [{ name: 'Changed name' }]);
+  state.company = 'other';
+  const result = await session.call('erp_execute', {
+    planId,
+    executionIdempotencyKey: 'other-company',
+  });
+  assert.match(JSON.stringify(result.content), /plan changed after approval/u);
+  assert.deepEqual(state.invoked, []);
+});
 
 test('A1: a plan made on one release never runs on another; the result asks for a replan', async () => {
   const { session, state } = guardedSession();
