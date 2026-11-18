@@ -58,6 +58,29 @@ const childFailure = (error: CompositionData['children'][number]['error']) =>
 type Column = SurfaceComposition['fields'][number];
 type Action = SurfaceComposition['actions'][number];
 type Value = Action['steps'][number]['bindings'][number]['value'];
+
+/** A review can be omitted only when every declared step is an ordinary,
+ * active operation that needs no human confirmation. */
+function taskCanApplyDirectly(
+  view: RequestRuntimeView,
+  action: Action,
+): boolean {
+  if (action.presentation?.task || action.steps.length === 0) return false;
+  const catalog = parsePinnedOperationCatalog(
+    view.projections.operation.payload,
+  );
+  return action.steps.every((step) => {
+    const operation = catalog.find(
+      (candidate) => candidate.operationId === step.operation.targetId,
+    );
+    return (
+      operation?.lifecycle === 'active' &&
+      operation.tier === 'o0' &&
+      operation.confirmation === 'none'
+    );
+  });
+}
+
 type Row = {
   record: SemanticRecordDto;
   cells: Readonly<Record<string, string>>;
@@ -1895,6 +1918,7 @@ export async function submitCompositionAction(
     html: string,
     data: CompositionData | null,
     statusCode: number,
+    outcome?: { readonly inline: boolean; readonly html: string },
   ) => CompositionResponse,
 ): Promise<CompositionResponse> {
   let renderData: CompositionData | null = null;
@@ -1906,6 +1930,7 @@ export async function submitCompositionAction(
     html: () => string,
     inputs = session?.inputs ?? {},
     preparation: TaskSession['prepared'] = null,
+    outcome?: () => string,
   ) => {
     renderData = null;
     displayInputs = { ...inputs };
@@ -2052,9 +2077,10 @@ export async function submitCompositionAction(
         .filter(Boolean)
         .join(' · ');
       return renderTask(
-        `<section class="composition-task-resume" data-task-resume hidden><div><strong>${h(session.action.label)}</strong><span>Closing dismisses the dialog; it does not cancel submitted work.</span></div><button type="button" data-task-open>${phase === 'result' || phase === 'recovery' ? 'View task outcome' : 'Continue task'}</button><a href="${h(renderData.url)}">Refresh record</a></section><dialog open id="composition-task" class="composition-task-dialog" data-composition-task data-task-fallback="${h(dialogPolicy.fallback)}" data-task-phase="${phase}" aria-labelledby="composition-task-heading"><header class="composition-task-header"><div><p>${h(title)}${context ? ` · ${h(context)}` : ''}</p><h2 id="composition-task-heading" data-task-heading tabindex="-1"${phase === 'entry' ? '' : ' data-task-initial-focus'}>${h(session.action.label)}</h2><span class="muted">${phase === 'entry' ? '1 · Enter details' : phase === 'review' ? '2 · Review and confirm' : phase === 'result' ? '3 · Result' : 'Outcome and recovery'}</span></div><button type="button" class="secondary-action" data-task-close hidden aria-label="Close task">×</button></header><div class="composition-task-body">${taskPolicy && phase === 'entry' ? renderTaskSummary(renderData, taskPolicy) : ''}${!taskPolicy && selection ? `<section class="composition-task-context" aria-label="Current selection">${selection}</section>` : ''}${html()}${taskPolicy && selection ? `<details class="composition-task-support"><summary>Supporting details</summary>${selection}</details>` : ''}</div></dialog>`,
+        `<section class="composition-task-resume" data-task-resume hidden><div><strong>${h(session.action.label)}</strong><span>Closing dismisses the dialog; it does not cancel submitted work.</span></div><button type="button" data-task-open>${phase === 'result' || phase === 'recovery' ? 'View task outcome' : 'Continue task'}</button><a href="${h(renderData.url)}">Refresh record</a></section><dialog open id="composition-task" class="composition-task-dialog" data-composition-task data-task-fallback="${h(dialogPolicy.fallback)}" data-task-phase="${phase}" aria-labelledby="composition-task-heading"><header class="composition-task-header"><div><p>${h(title)}${context ? ` · ${h(context)}` : ''}</p><h2 id="composition-task-heading" data-task-heading tabindex="-1"${phase === 'entry' ? '' : ' data-task-initial-focus'}>${h(session.action.label)}</h2><span class="muted">${phase === 'entry' ? '1 · Enter details' : phase === 'review' ? '2 · Review and confirm' : phase === 'result' ? '3 · Result' : 'Outcome and recovery'}</span></div><button type="button" class="secondary-action" data-task-close hidden aria-label="Close task">×</button></header><div class="composition-task-body">${taskTransportError}${taskPolicy && phase === 'entry' ? renderTaskSummary(renderData, taskPolicy) : ''}${!taskPolicy && selection ? `<section class="composition-task-context" aria-label="Current selection">${selection}</section>` : ''}${html()}${taskPolicy && selection ? `<details class="composition-task-support"><summary>Supporting details</summary>${selection}</details>` : ''}</div></dialog>`,
         renderData,
         200,
+        outcome ? { inline: true, html: outcome() } : undefined,
       );
     }
     return renderTask(
@@ -2069,6 +2095,11 @@ export async function submitCompositionAction(
       sessions.delete(key);
   let token = submission.taskToken;
   let session = token ? sessions.get(token) : undefined;
+  // Direct apply still starts from a form the server issued to this actor.
+  if (!token && submission.taskStage === 'apply')
+    return taskDocument(() =>
+      compositionMessage('COMPOSITION_TASK_UNAVAILABLE', 'alert'),
+    );
   if (
     token &&
     (!session ||
@@ -2169,6 +2200,9 @@ export async function submitCompositionAction(
     sessions.set(token, session);
   }
   const current = session;
+  const direct = taskCanApplyDirectly(view, current.action);
+  const apply =
+    submission.taskStage === 'apply' && direct && !current.confirmed;
   const url = current.data.url;
   const back = `<p><a href="${h(url)}">Back to order</a></p>`;
   // A multi-row Task: its rows as they were when it started, the inputs asked
@@ -2251,6 +2285,23 @@ export async function submitCompositionAction(
           current.prepared.presentation,
         )
       : `<dl class="composition-reviewed-inputs">${headerInputs.map((input) => `<div><dt>${h(input.label)}</dt><dd>${h(shownInput(input, displayInputs[input.inputId] ?? ''))}</dd></div>`).join('')}</dl>${previewRows(figures)}`;
+  const confirmLabel = () => {
+    const declared =
+      current.action.presentation?.task?.confirmation.confirmLabel;
+    if (declared) return declared;
+    const quantities = perRowInputs.filter(
+      (input) => input.type === 'quantity',
+    );
+    if (
+      taskRowsDeclared?.fillLabel &&
+      quantities.length === 1 &&
+      current.prepared
+    ) {
+      const quantity = quantities[0]!;
+      return `${current.action.label} ${plainDecimal(sumDecimals(current.prepared.rows.map((row) => current.prepared!.rowInputs[row]![quantity.inputId]!)))}`;
+    }
+    return `Confirm ${current.action.label}`;
+  };
   const hidden = `<input type="hidden" name="taskToken" value="${h(token!)}"><input type="hidden" name="compositionAction" value="${h(current.action.actionId)}">`;
   if (current.busy)
     return taskDocument(
@@ -2261,12 +2312,17 @@ export async function submitCompositionAction(
       () =>
         `${compositionMessage('COMPOSITION_COMMITTED_WITHHELD', 'status')}${back}`,
     );
+  if (submission.taskStage === 'apply' && !direct)
+    return taskDocument(() =>
+      compositionMessage('COMPOSITION_TASK_UNAVAILABLE', 'alert'),
+    );
   let error = '';
   // Problems with the entered values, named beside each input.
   const fieldErrors = new Map<string, string>();
   // Problems with a row's entered values, keyed by the row's own input.
   const rowErrors = new Map<string, string>();
   let rowsError = '';
+  let applyPrepared = false;
   if (
     submission.taskStage === 'fill' &&
     taskRowsDeclared?.fillLabel &&
@@ -2306,7 +2362,7 @@ export async function submitCompositionAction(
           current.rowInputs[rowId]![input.inputId] = value;
       }
   }
-  if (submission.taskStage === 'prepare' && !current.confirmed) {
+  if ((submission.taskStage === 'prepare' && !current.confirmed) || apply) {
     const generation = ++current.preparation;
     current.prepared = null;
     const collected: Record<string, string> = {};
@@ -2480,12 +2536,14 @@ export async function submitCompositionAction(
         ),
       });
       current.prepared = prepared;
-      return taskDocument(
-        () =>
-          `${previewInputs()}<p class="composition-task-consequence">${h(current.action.description)}</p><form class="composition-task-footer" method="post" action="${h(url)}">${hidden}<input type="hidden" name="preparedId" value="${h(prepared.id)}"><button class="secondary-action" name="taskStage" value="edit">Edit inputs</button><button name="taskStage" value="confirm">${h(current.action.presentation?.task?.confirmation.confirmLabel ?? `Confirm ${current.action.label}`)}</button></form>${back}`,
-        inputs,
-        prepared,
-      );
+      if (apply) applyPrepared = true;
+      else
+        return taskDocument(
+          () =>
+            `<section data-task-prepared>${previewInputs()}<p class="composition-task-consequence">${h(current.action.description)}</p><form class="composition-task-footer" method="post" action="${h(url)}">${hidden}<input type="hidden" name="preparedId" value="${h(prepared.id)}"><button class="secondary-action" name="taskStage" value="edit">Edit inputs</button><button name="taskStage" value="confirm">${h(confirmLabel())}</button></form></section>${back}`,
+          inputs,
+          prepared,
+        );
     }
   }
   if (
@@ -2496,6 +2554,7 @@ export async function submitCompositionAction(
       compositionMessage('COMPOSITION_TASK_UNAVAILABLE', 'alert'),
     );
   if (
+    applyPrepared ||
     submission.taskStage === 'confirm' ||
     (submission.taskStage === 'retry' && current.confirmed)
   ) {
@@ -2629,12 +2688,15 @@ export async function submitCompositionAction(
         else
           (current.rowResults[run.row] ??= {})[step.stepId] = result.readBack;
       }
+      // Only a wholly verified Task can put its outcome on the record.
+      const outcome = () =>
+        `<section class="composition-task-result" data-task-result role="status" aria-label="Result" tabindex="-1"><h3>${h(current.action.label)}: done</h3>${previewInputs(false)}</section><details class="composition-task-support"><summary>Status and recovery receipt</summary>${compositionMessage('COMPOSITION_COMPLETE')}${current.receipt ? `<pre>${h(current.receipt)}</pre>` : ''}</details>`;
       return taskDocument(
         () =>
-          // Every step committed and was read back: the business result is
-          // what was reviewed and confirmed. The generic status and receipt stay
-          // below it, and a withheld or uncertain outcome never reaches here.
-          `<section class="composition-task-result" data-task-result role="status" aria-label="Result"><h3>${h(current.action.label)}: done</h3>${previewInputs(false)}</section><p>Closing this task does not undo submitted work.</p><details class="composition-task-support"><summary>Status and recovery receipt</summary>${compositionMessage('COMPOSITION_COMPLETE')}${current.receipt ? `<pre>${h(current.receipt)}</pre>` : ''}</details>${back}`,
+          `${outcome()}<p>Closing this task does not undo submitted work.</p>${back}`,
+        current.inputs,
+        null,
+        outcome,
       );
     } catch (failure) {
       const ref = operationMessageRef(failure);
@@ -2758,12 +2820,18 @@ export async function submitCompositionAction(
         })
         .join('')}</tbody></table></div></fieldset>`;
     }
-    const reviewLabel =
-      current.action.presentation?.task?.confirmation.reviewLabel ??
-      `Review ${current.action.label}`;
-    return `${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}" novalidate>${hidden}${taskRowsDeclared?.fillLabel ? '<button type="submit" class="sr-only" name="taskStage" value="prepare" tabindex="-1" aria-hidden="true" data-task-default></button>' : ''}${controls.join('')}${rows}<section class="composition-task-after" aria-label="After you post"><p class="eyebrow">After you post</p><p class="composition-task-consequence">${h(current.action.description)}</p></section><footer class="composition-task-footer"><a class="secondary-action" href="${h(url)}">Cancel</a><button name="taskStage" value="prepare">${h(reviewLabel)}</button></footer></form>`;
+    const stage = direct ? 'apply' : 'prepare';
+    const label = direct
+      ? current.action.label
+      : (current.action.presentation?.task?.confirmation.reviewLabel ??
+        `Review ${current.action.label}`);
+    const liveReview = !direct;
+    return `${error ? `<div data-task-input-error>${compositionMessage('COMPOSITION_INPUT_INVALID', 'alert')}</div>` : ''}<form class="composition-inputs" method="post" action="${h(url)}" novalidate${liveReview ? ' data-task-live-review' : ''}>${hidden}${taskRowsDeclared?.fillLabel ? `<button type="submit" class="sr-only" name="taskStage" value="${stage}" tabindex="-1" aria-hidden="true" data-task-default></button>` : ''}${controls.join('')}${rows}<section class="composition-task-after" aria-label="After you post"><p class="eyebrow">After you post</p><p class="composition-task-consequence">${h(current.action.description)}</p></section><footer class="composition-task-footer"><a class="secondary-action" href="${h(url)}">Cancel</a><button name="taskStage" value="${stage}">${h(label)}</button></footer></form>${liveReview ? '<section data-task-inline-review hidden aria-label="Review and confirm"></section>' : ''}`;
   });
 }
+
+export const taskTransportError =
+  '<p role="alert" data-task-transport-error hidden>The task response is unavailable. You can retry this step or refresh the page.</p>';
 
 async function referenceChoices(
   view: RequestRuntimeView,

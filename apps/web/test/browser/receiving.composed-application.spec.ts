@@ -1,3 +1,4 @@
+import { completeTask, reviewTask } from './complete-task.js';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
@@ -205,10 +206,10 @@ async function journey(
   await page
     .getByRole('button', { name: /^(?:Next action: )?Place order$/u })
     .click();
-  await page
-    .getByRole('dialog')
-    .getByRole('button', { name: 'Review Place order', exact: true })
-    .click();
+  await reviewTask(
+    page.locator('[data-composition-task]'),
+    'Review Place order',
+  );
   await page
     .getByRole('dialog')
     .getByRole('button', { name: 'Confirm Place order', exact: true })
@@ -347,20 +348,7 @@ async function journey(
   await page
     .getByLabel('Reason', { exact: true })
     .fill('Correct ordered quantity to actual required quantity');
-  await page
-    .getByRole('dialog')
-    .getByRole('button', {
-      name: 'Review Request quantity amendment',
-      exact: true,
-    })
-    .click();
-  await page
-    .getByRole('dialog')
-    .getByRole('button', {
-      name: 'Confirm Request quantity amendment',
-      exact: true,
-    })
-    .click();
+  await completeTask(page.getByRole('dialog'), 'Request quantity amendment');
   await expect(page.getByRole('status').first()).toContainText(
     'Request quantity amendment: done',
   );
