@@ -519,3 +519,7 @@ function writeHtml(
       : gzipSync(result.html, { level: 6 }),
   );
 }
+export {
+  assistantCompany,
+  type AssistantCompany,
+} from './assistant-company.js';

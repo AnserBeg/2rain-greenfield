@@ -1400,7 +1400,7 @@ function renderSelectedSurface(
  * navigation order -- a page of the day's work with its counts, never an
  * empty list -- else navigation's first destination, else the first surface.
  */
-function landingSurface(
+export function landingSurface(
   navigation: CompiledNavigationTree | null,
   surfaces: readonly CompiledSurfaceDefinition[],
 ): CompiledSurfaceDefinition | undefined {

@@ -64,7 +64,15 @@ export interface AssistantEndpointOptions {
     ComposedApplicationRuntime,
     'entry' | 'operationGateway' | 'operationMediation' | 'queryGateway'
   >;
-  readonly companyId: string;
+  /**
+   * The company the person's page works in, proved through their workspace
+   * entry (end review X9); null when the page settles on none.
+   */
+  readonly company: (page: {
+    readonly cookie: string;
+    readonly surfaceId: string | null;
+    readonly search: string;
+  }) => Promise<{ readonly companyId: string; readonly label: string } | null>;
   readonly businessCalendar?: BusinessCalendar;
   /** The model, or a sentence saying why there is none. */
   readonly model: () => Promise<ModelAdapter | { unavailable: string }>;
@@ -110,6 +118,8 @@ interface PendingPlan {
 interface Conversation {
   readonly id: string;
   readonly principalId: string;
+  /** The company it works in, bound when it opened; another is another conversation. */
+  readonly company: { readonly companyId: string; readonly label: string };
   readonly cookie: string;
   readonly session: OperationsAgentSession;
   readonly meter: SpendMeter;
@@ -183,10 +193,15 @@ export function createAssistantEndpoint(
       Promise.resolve(view.principalId),
     );
 
-  const open = (request: IncomingMessage, principalId: string) => {
+  const open = (
+    request: IncomingMessage,
+    principalId: string,
+    company: Conversation['company'],
+  ) => {
     const conversation: Conversation = {
       id: randomUUID(),
       principalId,
+      company,
       cookie: String(request.headers.cookie ?? ''),
       meter: new SpendMeter(prices, capUsd),
       history: [],
@@ -197,7 +212,7 @@ export function createAssistantEndpoint(
       session: new OperationsAgentSession({
         runtime: options.runtime,
         personHeaders: { cookie: String(request.headers.cookie ?? '') },
-        companyId: options.companyId,
+        companyId: company.companyId,
         ...(options.businessCalendar
           ? { businessCalendar: options.businessCalendar }
           : {}),
@@ -325,12 +340,46 @@ export function createAssistantEndpoint(
         response.end();
         return true;
       }
-      if (!mine && !makeRoom(principalId)) {
+      const screen = screenOf(body.screen);
+      // The page's company, proved for this person now (X9). A conversation
+      // stays in the company it opened in: a page in another company starts
+      // a new one.
+      const company = await options
+        .company({
+          cookie: String(request.headers.cookie ?? ''),
+          surfaceId: screen?.surfaceId ?? null,
+          search:
+            typeof body.page === 'string' && body.page.length <= 2_000
+              ? body.page
+              : '',
+        })
+        .catch(() => null);
+      if (!company) {
+        response.statusCode = 200;
+        response.setHeader(
+          'content-type',
+          'application/x-ndjson; charset=utf-8',
+        );
+        response.end(
+          `${JSON.stringify({
+            type: 'answer',
+            text: 'I cannot tell which company this page is in. Open a page of the company you want me to work in, then ask again.',
+            stop: 'no-company',
+            links: [],
+            usd: 0,
+            spentUsd: mine?.meter.usd ?? 0,
+          })}\n`,
+        );
+        return true;
+      }
+      const same =
+        mine?.company.companyId === company.companyId ? mine : undefined;
+      if (!same && !makeRoom(principalId)) {
         response.statusCode = 429;
         response.end();
         return true;
       }
-      const conversation = mine ?? open(request, principalId);
+      const conversation = same ?? open(request, principalId, company);
       if (conversation.running) {
         response.statusCode = 409;
         response.end();
@@ -352,10 +401,15 @@ export function createAssistantEndpoint(
           conversation.pending?.decide(false);
         }
       });
-      emit({ type: 'conversation', id: conversation.id, capUsd });
+      emit({
+        type: 'conversation',
+        id: conversation.id,
+        capUsd,
+        company: conversation.company.label,
+      });
       const before = conversation.session.latestChange()?.changeId ?? null;
       try {
-        await runTurn(conversation, text, screenOf(body.screen), controller);
+        await runTurn(conversation, text, screen, controller);
         conversation.lastUsed = now();
       } catch (error) {
         // An error is an exit path too: what was written is still checked
@@ -510,7 +564,7 @@ export function createAssistantEndpoint(
     conversation: Conversation,
     plan: PlanForApproval,
   ): Promise<boolean> {
-    const digest = planDigest(plan);
+    const digest = planDigest(plan, conversation.company.companyId);
     return new Promise<boolean>((resolve) => {
       let settled = false;
       const timer = setTimeout(() => decide(false), DECISION_TIMEOUT_MS);
@@ -536,6 +590,8 @@ export function createAssistantEndpoint(
         type: 'plan',
         planId: plan.planId,
         digest,
+        // The company the yes acts in, by name (X9).
+        company: conversation.company.label,
         reasons: plan.reasons ?? [],
         // Exactly what the yes covers: the operation, the record it acts on
         // (as the host read it), and every bound input, arguments included.
@@ -568,11 +624,16 @@ export function createAssistantEndpoint(
       .run({ headers: { cookie: conversation.cookie } }, (view) =>
         Promise.resolve(detailSurfaces(view.projections)),
       )
-      .catch(() => new Map<string, string>());
+      .catch(() => new Map<string, DetailSurface>());
     return touched.flatMap((record) => {
       const surface = surfaces.get(record.entityId);
       if (!surface) return [];
-      const href = `/?surface=${encodeURIComponent(surface)}&record=${encodeURIComponent(record.recordId)}`;
+      // A company-owned record's page names the conversation's company.
+      const href = `/?surface=${encodeURIComponent(surface.surfaceId)}&record=${encodeURIComponent(record.recordId)}${
+        surface.companyParameter
+          ? `&${encodeURIComponent(surface.companyParameter)}=${encodeURIComponent(conversation.company.companyId)}`
+          : ''
+      }`;
       return [
         {
           href,
@@ -594,21 +655,31 @@ function didThisTurn(
     : {};
 }
 
+interface DetailSurface {
+  readonly surfaceId: string;
+  /** Its query's company parameter, when the record is company-owned. */
+  readonly companyParameter: string | null;
+}
+
 /** The record page of each record type: its `<type>_detail` surface. */
 function detailSurfaces(projections: {
   surface: { payload: unknown };
   query: { payload: unknown };
-}): Map<string, string> {
+}): Map<string, DetailSurface> {
   const queries = new Map(
     (
       (
         projections.query.payload as {
-          queries?: readonly { queryId: string; sourceEntityId: string }[];
+          queries?: readonly {
+            queryId: string;
+            sourceEntityId: string;
+            legalEntityScope?: { operand?: { parameterId?: string } } | null;
+          }[];
         }
       ).queries ?? []
-    ).map((query) => [query.queryId, query.sourceEntityId]),
+    ).map((query) => [query.queryId, query]),
   );
-  const out = new Map<string, string>();
+  const out = new Map<string, DetailSurface>();
   for (const surface of (
     projections.surface.payload as {
       surfaces?: readonly {
@@ -618,15 +689,19 @@ function detailSurfaces(projections: {
       }[];
     }
   ).surfaces ?? []) {
-    const entity = surface.dataSourceQueryId
+    const query = surface.dataSourceQueryId
       ? queries.get(surface.dataSourceQueryId)
       : undefined;
+    const entity = query?.sourceEntityId;
     if (
       entity &&
       surface.archetype === 'record' &&
       local(surface.surfaceId) === `${local(entity)}_detail`
     )
-      out.set(entity, surface.surfaceId);
+      out.set(entity, {
+        surfaceId: surface.surfaceId,
+        companyParameter: query.legalEntityScope?.operand?.parameterId ?? null,
+      });
   }
   return out;
 }
@@ -690,9 +765,11 @@ function shownValue(value: unknown): string {
     : text;
 }
 
-function planDigest(plan: PlanForApproval): string {
+function planDigest(plan: PlanForApproval, companyId: string): string {
   return createHash('sha256')
-    .update(JSON.stringify({ planId: plan.planId, steps: plan.steps }))
+    .update(
+      JSON.stringify({ companyId, planId: plan.planId, steps: plan.steps }),
+    )
     .digest('hex');
 }
 

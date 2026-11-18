@@ -1337,7 +1337,7 @@ export class OperationsAgentSession {
           };
       }
       const release = releaseOf(view);
-      const digest = planDigest(steps, release);
+      const digest = planDigest(steps, release, this.#options.companyId);
       // A plan is reversible only when every step is, and an undo of a step
       // made earlier in the same plan is covered by archiving what it made.
       const riskClass: RiskClass = steps.every(
@@ -1688,7 +1688,10 @@ export class OperationsAgentSession {
       throw new ToolInputError(
         'the person did not approve this plan; it cannot run',
       );
-    if (planDigest(plan.steps, plan.release) !== plan.digest)
+    if (
+      planDigest(plan.steps, plan.release, this.#options.companyId) !==
+      plan.digest
+    )
       throw new ToolInputError(
         'the plan changed after approval; it cannot run',
       );
@@ -2455,11 +2458,17 @@ function replanResult(
   };
 }
 
-function planDigest(steps: readonly PlanStep[], release: PlanRelease): string {
+/** What a yes binds: the release, the company it acts in, and every step. */
+function planDigest(
+  steps: readonly PlanStep[],
+  release: PlanRelease,
+  companyId: string,
+): string {
   return createHash('sha256')
     .update(
       JSON.stringify({
         release,
+        companyId,
         steps: steps.map((step) => ({
           step: step.step,
           operationId: step.operation.operationId,

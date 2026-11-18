@@ -25,7 +25,10 @@ import {
   type CustomizationServiceOptions,
 } from '@north-star/postgres-provider/customization-service';
 import { createRequestWorkProbe } from '@north-star/postgres-provider/request-work-meter';
-import { createSurfaceRuntimeServer } from '@north-star/web/app-server';
+import {
+  assistantCompany,
+  createSurfaceRuntimeServer,
+} from '@north-star/web/app-server';
 import { COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/sales-section';
 
 import {
@@ -194,7 +197,15 @@ export async function startComposedApplication(
       runtime.identityMode === 'LOCAL_DEMO'
         ? createAssistantEndpoint({
             runtime,
-            companyId: COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId,
+            // The page's company, proved through the person's workspace
+            // entry as the page proves it (end review X9).
+            company: ({ cookie, surfaceId, search }) =>
+              runtime.entry.run({ headers: { cookie } }, (view) =>
+                assistantCompany(view, runtime.queryGateway, {
+                  surfaceId,
+                  search,
+                }),
+              ),
             businessCalendar: COMPOSED_APPLICATION_INVENTORY_SCOPE,
             model: options.assistantModel ?? keyFileAssistantModel(),
             authorities: () => authorities,

@@ -91,13 +91,14 @@ async function serve(
 ): Promise<{ url: string; server: Server }> {
   let port = 0;
   const endpoint = createAssistantEndpoint({
-    ...extra,
     runtime: fakeRuntime(log) as never,
-    companyId: 'company',
+    company: () =>
+      Promise.resolve({ companyId: 'company', label: 'Foothills Supply' }),
     model: () => Promise.resolve(model),
     ...(authorities ? { authorities: () => authorities(port) } : {}),
     ...(capUsd !== undefined ? { capUsd } : {}),
     ...(customize ? { customize: () => Promise.resolve(customize) } : {}),
+    ...extra,
   });
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://local');
@@ -958,6 +959,124 @@ test('X13: idle conversations are dropped, and a person holds a bounded number',
     const kept = ids.at(-1)!;
     clock += ASSISTANT_CONVERSATION_LIMITS.idleMs + 1;
     assert.notEqual(await ask(kept), kept);
+  } finally {
+    server.close();
+  }
+});
+
+// ------------------------------------------------------ end review X9 (company)
+
+test("X9: the conversation works in the page's proved company, names it on the card, and another company is another conversation", async () => {
+  const pages: unknown[] = [];
+  const companies: Record<string, { companyId: string; label: string }> = {
+    '?surface=s&company=a': { companyId: 'company-a', label: 'Alpha Supply' },
+    '?surface=s&company=b': { companyId: 'company-b', label: 'Beta Supply' },
+  };
+  let calls = 0;
+  const planTurn: ScriptStep[] = [
+    () => {
+      calls += 1;
+      return {
+        toolCalls: [
+          {
+            name: 'erp_query',
+            input: { queryId: 'party_get', arguments: { recordId: RECORD } },
+          },
+        ],
+      };
+    },
+    () => ({
+      toolCalls: [
+        {
+          name: 'erp_plan',
+          input: {
+            intents: [
+              {
+                operationId: 'purchase_order_line_amend',
+                target: RECORD,
+                arguments: { quantity: '2', reason: 'Short shipped' },
+              },
+            ],
+          },
+        },
+      ],
+    }),
+    () => ({ text: 'Not done.' }),
+  ];
+  const { url, server } = await serve(
+    scriptedModel([...planTurn, ...planTurn]),
+    [],
+    undefined,
+    undefined,
+    undefined,
+    {
+      company: (page) => {
+        pages.push(page);
+        return Promise.resolve(companies[page.search] ?? null);
+      },
+    },
+  );
+  /** One ask; declines any plan; returns the conversation and the plan. */
+  const ask = async (page: string, conversation?: string) => {
+    const response = await fetch(`${url}/?assistant=ask`, {
+      method: 'POST',
+      headers: headers('buyer', url),
+      body: JSON.stringify({
+        text: 'amend it',
+        conversation,
+        page,
+        screen: { surfaceId: 's', recordId: null },
+      }),
+    });
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const seen: Record<string, unknown>[] = [];
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      for (const line of buffer.split('\n').slice(0, -1)) {
+        const event = JSON.parse(line) as Record<string, unknown>;
+        seen.push(event);
+        if (event.type === 'plan')
+          await fetch(`${url}/?assistant=decide`, {
+            method: 'POST',
+            headers: headers('buyer', url),
+            body: JSON.stringify({
+              conversation: seen.find((e) => e.type === 'conversation')?.id,
+              planId: event.planId,
+              digest: event.digest,
+              approve: false,
+            }),
+          });
+      }
+      buffer = buffer.slice(buffer.lastIndexOf('\n') + 1);
+    }
+    return {
+      id: seen.find((event) => event.type === 'conversation')?.id as
+        string | undefined,
+      plan: seen.find((event) => event.type === 'plan'),
+      answer: seen.find((event) => event.type === 'answer')!,
+    };
+  };
+  try {
+    const alpha = await ask('?surface=s&company=a');
+    assert.equal(alpha.plan?.company, 'Alpha Supply');
+    assert.deepEqual(pages[0], {
+      cookie: 'northstar-demo-actor=buyer',
+      surfaceId: 's',
+      search: '?surface=s&company=a',
+    });
+    // The same conversation id from a page in another company: a new one.
+    const beta = await ask('?surface=s&company=b', alpha.id);
+    assert.ok(beta.id && beta.id !== alpha.id);
+    assert.equal(beta.plan?.company, 'Beta Supply');
+    assert.notEqual(beta.plan?.digest, alpha.plan?.digest);
+    // A page that settles on no company: nothing runs.
+    const none = await ask('?surface=s', beta.id);
+    assert.equal(none.answer.stop, 'no-company');
+    assert.equal(calls, 2);
   } finally {
     server.close();
   }

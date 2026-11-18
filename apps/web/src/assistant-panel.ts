@@ -157,6 +157,7 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     const card = element('section', null, 'assistant-plan');
     card.setAttribute('data-assistant-plan', event.planId);
     card.appendChild(element('p', 'This needs your yes before it runs:', 'assistant-heading'));
+    if (event.company) card.appendChild(element('p', 'In ' + event.company + '.', 'assistant-muted'));
     (event.reasons || []).forEach((reason) => card.appendChild(element('p', 'Because ' + reason + '.', 'assistant-muted')));
     const list = card.appendChild(element('ol'));
     event.steps.forEach((step) => {
@@ -224,6 +225,8 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
         conversation,
         text,
         screen: params.get('surface') ? { surfaceId: params.get('surface'), recordId: params.get('record') } : null,
+        // The page's company is read from its own address and proved by the host.
+        page: location.search,
       }, controller.signal);
       if (!response.ok || !response.body) throw new Error('The assistant did not answer (' + response.status + ').');
       const reader = response.body.getReader();
