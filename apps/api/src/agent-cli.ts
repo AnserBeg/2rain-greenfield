@@ -12,6 +12,7 @@ import { createInterface } from 'node:readline/promises';
 import {
   anthropicModel,
   agentPreamble,
+  CUSTOMIZE_HANDOFF,
   DEFAULT_ANTHROPIC_MODEL,
   loadModelKey,
   OperationsAgentSession,
@@ -114,7 +115,12 @@ try {
     },
   });
   out('');
-  out(result.answer || '(no answer)');
+  const handoff = CUSTOMIZE_HANDOFF.exec(result.answer);
+  out(
+    handoff
+      ? `That is a change to the application. Draft it with: corepack pnpm customize ask ${JSON.stringify(request)}`
+      : result.answer || '(no answer)',
+  );
   out('');
   out(
     `${result.stop} · ${String(result.toolCalls)} tool calls · tokens in ${String(result.usage.inputTokens + result.usage.cacheReadTokens + result.usage.cacheWriteTokens)} (cached ${String(result.usage.cacheReadTokens)}) out ${String(result.usage.outputTokens)}`,

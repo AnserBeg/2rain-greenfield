@@ -35,7 +35,7 @@ import {
 
 import { BUSINESS_CALENDAR, COMPANY, withAgentWorlds } from './agent-world.js';
 import { snapshot } from './arrange.js';
-import { TASKS } from './tasks.js';
+import { attemptsFor, DEV_TASKS, type DevTask } from './dev-tasks.js';
 
 async function main(): Promise<void> {
   const { values: args } = parseArgs({
@@ -51,7 +51,10 @@ async function main(): Promise<void> {
       'price-source': { type: 'string' },
       'price-date': { type: 'string' },
       cap: { type: 'string', default: '20' },
-      tasks: { type: 'string', default: '1,2,3,4,5,6,7,8,9,10' },
+      // `ten`: the pre-registered ten, one attempt each; `dev`: the AGENT-3
+      // development set, three attempts per write task.
+      set: { type: 'string', default: 'ten' },
+      tasks: { type: 'string' },
       out: { type: 'string', default: 'docs/execution/evidence' },
       // `off` runs without the business map (the pre-AGENT-3 start).
       preamble: { type: 'string', default: 'on' },
@@ -75,7 +78,18 @@ async function main(): Promise<void> {
   if (!args['price-source'] || !args['price-date'])
     throw new Error('--price-source and --price-date are required');
   const cap = Number(args.cap);
-  const selected = new Set(String(args.tasks).split(',').map(Number));
+  const dev = args.set === 'dev';
+  const selected = new Set(
+    (
+      args.tasks ??
+      (dev ? DEV_TASKS : DEV_TASKS.slice(0, 10))
+        .map((task) => task.id)
+        .join(',')
+    )
+      .split(',')
+      .map(Number),
+  );
+  const attempts = (task: DevTask) => (dev ? attemptsFor(task) : 1);
   const date = new Date().toISOString().slice(0, 10);
   const stamp = new Date().toISOString().replaceAll(/[:.]/gu, '-');
   const outDirectory = resolve(String(args.out));
@@ -92,6 +106,8 @@ async function main(): Promise<void> {
 
   interface Row {
     task: number;
+    attempt: number;
+    kind: string;
     title: string;
     pass: boolean;
     reason: string;
@@ -112,174 +128,203 @@ async function main(): Promise<void> {
   const log = (line: string) => process.stdout.write(`${line}\n`);
 
   await withAgentWorlds('agent-eval', async (worlds) => {
-    for (const task of TASKS.filter((candidate) =>
+    for (const task of DEV_TASKS.filter((candidate) =>
       selected.has(candidate.id),
-    )) {
-      const record = join(
-        runDirectory,
-        `task-${String(task.id).padStart(2, '0')}.jsonl`,
-      );
-      // Appends are queued so lines land in call order; `at` is read when the
-      // event happens, not when its write runs.
-      let queue: Promise<void> = Promise.resolve();
-      const append = (entry: Record<string, unknown>): Promise<void> => {
-        const line = `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`;
-        queue = queue.then(() => appendFile(record, line));
-        return queue;
-      };
-      if (meter.exhausted()) {
-        rows.push({
-          task: task.id,
-          title: task.title,
-          pass: false,
-          reason: 'not run: spend cap reached',
-          stop: 'not-run',
-          toolCalls: 0,
-          approvals: 0,
-          tokensIn: 0,
-          cacheRead: 0,
-          cacheWrite: 0,
-          tokensOut: 0,
-          usd: 0,
-          seconds: 0,
-          calls: {},
-          answer: '',
-          record,
-        });
-        continue;
-      }
-      log(`task ${String(task.id)}: ${task.title}`);
-      const world = await worlds.fresh(`eval-${String(task.id)}`);
-      try {
-        const context = await task.arrange(world);
-        const before = await snapshot(world);
-        const request = task.request(context);
-        await append({
-          kind: 'task',
-          task: task.id,
-          request,
-          database: world.databaseName,
-          model: model.modelId,
-        });
-        const session = new OperationsAgentSession({
-          runtime: world.runtime,
-          personHeaders: { cookie: 'northstar-demo-actor=buyer' },
-          companyId: COMPANY,
-          businessCalendar: BUSINESS_CALENDAR,
-          approve: async (plan) => {
-            await append({
-              kind: 'approval',
-              granted: true,
-              by: 'harness',
-              planId: plan.planId,
-              steps: plan.steps.map((step) => step.operationId),
-            });
-            return true;
-          },
-        });
-        const calls: Record<string, number> = {};
-        const run = await runOperationsAgent({
-          model,
-          session,
-          request,
-          meter,
-          ...(args.preamble === 'off'
-            ? {}
-            : { preamble: await agentPreamble(session) }),
-          onEvent: (event) => {
-            if (event.kind === 'model')
-              void append({
-                kind: 'model',
-                messages: event.messages,
-                stop: event.stop,
-                tokensIn: event.usage.inputTokens,
-                cacheRead: event.usage.cacheReadTokens,
-                cacheWrite: event.usage.cacheWriteTokens,
-                tokensOut: event.usage.outputTokens,
-                usd: event.usd,
-              });
-            if (event.kind === 'tool') {
-              const name = callName(event.name, event.input);
-              calls[name] = (calls[name] ?? 0) + 1;
-            }
-            if (event.kind === 'tool')
-              void append({
-                kind: 'tool',
-                tool: event.name,
-                arguments: loggedArguments(event.input),
-              });
-            if (event.kind === 'result')
-              void append({
-                kind: 'tool-result',
-                tool: event.name,
-                status: event.isError ? 'refused' : 'ok',
-                result: event.content,
-              });
-          },
-        });
-        await queue;
-        const verdict = await task.check(world, context, before, run);
-        await append({
-          kind: 'verdict',
-          pass: verdict.pass,
-          reason: verdict.reason,
-          stop: run.stop,
-          answer: run.answer,
-          ...(run.error ? { error: run.error } : {}),
-        });
-        rows.push({
-          task: task.id,
-          title: task.title,
-          pass: verdict.pass,
-          reason: verdict.reason,
-          stop: run.stop,
-          toolCalls: run.toolCalls,
-          approvals: session.approvals.length,
-          tokensIn: run.usage.inputTokens,
-          cacheRead: run.usage.cacheReadTokens,
-          cacheWrite: run.usage.cacheWriteTokens,
-          tokensOut: run.usage.outputTokens,
-          usd: run.usd,
-          seconds: run.seconds,
-          calls,
-          answer: run.answer,
-          record,
-        });
-        log(
-          `  ${verdict.pass ? 'PASS' : 'FAIL'} ${verdict.reason} · ${String(run.toolCalls)} tool calls (${String(discoveryCalls(calls))} discovery) · ${run.seconds.toFixed(1)} s · $${run.usd.toFixed(4)} (total $${meter.usd.toFixed(4)})`,
+    ))
+      for (let attempt = 1; attempt <= attempts(task); attempt += 1) {
+        const record = join(
+          runDirectory,
+          `task-${String(task.id).padStart(2, '0')}${attempts(task) > 1 ? `-a${String(attempt)}` : ''}.jsonl`,
         );
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? `${error.name}: ${error.message}`
-            : String(error);
-        await append({ kind: 'harness-error', error: message });
-        rows.push({
-          task: task.id,
-          title: task.title,
-          pass: false,
-          reason: `harness error: ${message}`,
-          stop: 'harness-error',
-          toolCalls: 0,
-          approvals: 0,
-          tokensIn: 0,
-          cacheRead: 0,
-          cacheWrite: 0,
-          tokensOut: 0,
-          usd: 0,
-          seconds: 0,
-          calls: {},
-          answer: '',
-          record,
-        });
-        log(`  HARNESS ERROR ${message}`);
-      } finally {
-        await world.close();
+        // Appends are queued so lines land in call order; `at` is read when the
+        // event happens, not when its write runs.
+        let queue: Promise<void> = Promise.resolve();
+        const append = (entry: Record<string, unknown>): Promise<void> => {
+          const line = `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`;
+          queue = queue.then(() => appendFile(record, line));
+          return queue;
+        };
+        if (meter.exhausted()) {
+          rows.push({
+            task: task.id,
+            attempt,
+            kind: task.kind,
+            title: task.title,
+            pass: false,
+            reason: 'not run: spend cap reached',
+            stop: 'not-run',
+            toolCalls: 0,
+            approvals: 0,
+            tokensIn: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            tokensOut: 0,
+            usd: 0,
+            seconds: 0,
+            calls: {},
+            answer: '',
+            record,
+          });
+          continue;
+        }
+        log(
+          `task ${String(task.id)}${attempts(task) > 1 ? ` attempt ${String(attempt)}` : ''}: ${task.title}`,
+        );
+        const world = await worlds.fresh(
+          `eval-${String(task.id)}-${String(attempt)}`,
+        );
+        try {
+          const context = await task.arrange(world);
+          const before = await snapshot(world);
+          const request = task.request(context);
+          await append({
+            kind: 'task',
+            task: task.id,
+            request,
+            attempt,
+            actor: task.actor ?? 'buyer',
+            database: world.databaseName,
+            model: model.modelId,
+          });
+          const session = new OperationsAgentSession({
+            runtime: world.runtime,
+            personHeaders: {
+              cookie: `northstar-demo-actor=${task.actor ?? 'buyer'}`,
+            },
+            companyId: COMPANY,
+            businessCalendar: BUSINESS_CALENDAR,
+            approve: async (plan) => {
+              await append({
+                kind: 'approval',
+                granted: true,
+                by: 'harness',
+                planId: plan.planId,
+                steps: plan.steps.map((step) => step.operationId),
+              });
+              return true;
+            },
+          });
+          const calls: Record<string, number> = {};
+          const run = await runOperationsAgent({
+            model,
+            session,
+            request,
+            meter,
+            ...(args.preamble === 'off'
+              ? {}
+              : { preamble: await agentPreamble(session) }),
+            onEvent: (event) => {
+              if (event.kind === 'model')
+                void append({
+                  kind: 'model',
+                  messages: event.messages,
+                  stop: event.stop,
+                  tokensIn: event.usage.inputTokens,
+                  cacheRead: event.usage.cacheReadTokens,
+                  cacheWrite: event.usage.cacheWriteTokens,
+                  tokensOut: event.usage.outputTokens,
+                  usd: event.usd,
+                });
+              if (event.kind === 'tool') {
+                const name = callName(event.name, event.input);
+                calls[name] = (calls[name] ?? 0) + 1;
+              }
+              if (event.kind === 'tool')
+                void append({
+                  kind: 'tool',
+                  tool: event.name,
+                  arguments: loggedArguments(event.input),
+                });
+              if (event.kind === 'result')
+                void append({
+                  kind: 'tool-result',
+                  tool: event.name,
+                  status: event.isError ? 'refused' : 'ok',
+                  result: event.content,
+                });
+            },
+          });
+          await queue;
+          const verdict = await task.check(world, context, before, run);
+          await append({
+            kind: 'verdict',
+            pass: verdict.pass,
+            reason: verdict.reason,
+            stop: run.stop,
+            answer: run.answer,
+            ...(run.error ? { error: run.error } : {}),
+          });
+          rows.push({
+            task: task.id,
+            attempt,
+            kind: task.kind,
+            title: task.title,
+            pass: verdict.pass,
+            reason: verdict.reason,
+            stop: run.stop,
+            toolCalls: run.toolCalls,
+            approvals: session.approvals.length,
+            tokensIn: run.usage.inputTokens,
+            cacheRead: run.usage.cacheReadTokens,
+            cacheWrite: run.usage.cacheWriteTokens,
+            tokensOut: run.usage.outputTokens,
+            usd: run.usd,
+            seconds: run.seconds,
+            calls,
+            answer: run.answer,
+            record,
+          });
+          log(
+            `  ${verdict.pass ? 'PASS' : 'FAIL'} ${verdict.reason} · ${String(run.toolCalls)} tool calls (${String(discoveryCalls(calls))} discovery) · ${run.seconds.toFixed(1)} s · $${run.usd.toFixed(4)} (total $${meter.usd.toFixed(4)})`,
+          );
+        } catch (error) {
+          const message =
+            error instanceof Error
+              ? `${error.name}: ${error.message}`
+              : String(error);
+          await append({ kind: 'harness-error', error: message });
+          rows.push({
+            task: task.id,
+            attempt,
+            kind: task.kind,
+            title: task.title,
+            pass: false,
+            reason: `harness error: ${message}`,
+            stop: 'harness-error',
+            toolCalls: 0,
+            approvals: 0,
+            tokensIn: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            tokensOut: 0,
+            usd: 0,
+            seconds: 0,
+            calls: {},
+            answer: '',
+            record,
+          });
+          log(`  HARNESS ERROR ${message}`);
+        } finally {
+          await world.close();
+        }
       }
-    }
   });
 
   const passed = rows.filter((row) => row.pass).length;
+  const byTask = new Map<number, Row[]>();
+  for (const row of rows)
+    byTask.set(row.task, [...(byTask.get(row.task) ?? []), row]);
+  const everyTime = [...byTask.values()].filter((runs) =>
+    runs.every((row) => row.pass),
+  ).length;
+  const atLeastOnce = [...byTask.values()].filter((runs) =>
+    runs.some((row) => row.pass),
+  ).length;
+  const maxAttempts = Math.max(...rows.map((row) => row.attempt));
+  const perAttempt = Array.from({ length: maxAttempts }, (_, index) => {
+    const runs = rows.filter((row) => row.attempt === index + 1);
+    return `attempt ${String(index + 1)}: ${String(runs.filter((row) => row.pass).length)}/${String(runs.length)}`;
+  });
   const total = meter.usd;
   const relative = (path: string) => path.slice(outDirectory.length + 1);
   const cell = (text: string) =>
@@ -288,28 +333,28 @@ async function main(): Promise<void> {
   const report = [
     `# Agent eval — ${date}`,
     '',
-    `Model \`${model.modelId}\` (effort ${String(args.effort)}), acting as the demo buyer on channel AGENT, business map ${args.preamble === 'off' ? 'off' : 'on'}. One attempt per task, each on a fresh database; the harness granted every confirmation it was asked for and recorded it. Seconds are the agent run on a monotonic clock (arrangement excluded).`,
+    `Model \`${model.modelId}\` (effort ${String(args.effort)}), acting as the demo buyer (task 34: the manager) on channel AGENT, business map ${args.preamble === 'off' ? 'off' : 'on'}, task set ${dev ? 'dev (AGENT-3 development set; write, multi-step and customized tasks three attempts)' : 'ten (one attempt per task)'}. Each attempt on a fresh database; the harness granted every confirmation it was asked for and recorded it. Seconds are the agent run on a monotonic clock (arrangement excluded).`,
     `Prices (USD per million tokens) from ${String(args['price-source'])}, read ${String(args['price-date'])}: input ${String(prices.input)}, output ${String(prices.output)}, cache read ${String(prices.cacheRead)}, cache write ${String(prices.cacheWrite)}. Spend cap USD ${String(cap)}.`,
     '',
-    '| task | result | stop | tool calls | approvals | tokens in (uncached / cache read / cache write) | tokens out | USD | reason |',
-    '|---|---|---|---|---|---|---|---|---|',
+    '| task | kind | attempt | result | stop | tool calls | approvals | tokens in (uncached / cache read / cache write) | tokens out | USD | reason |',
+    '|---|---|---|---|---|---|---|---|---|---|---|',
     ...rows.map(
       (row) =>
-        `| ${String(row.task)}. ${row.title} | ${row.pass ? 'pass' : 'fail'} | ${row.stop} | ${String(row.toolCalls)} | ${String(row.approvals)} | ${String(row.tokensIn)} / ${String(row.cacheRead)} / ${String(row.cacheWrite)} | ${String(row.tokensOut)} | ${row.usd.toFixed(4)} | ${cell(row.reason)} |`,
+        `| ${String(row.task)}. ${row.title} | ${row.kind} | ${String(row.attempt)} | ${row.pass ? 'pass' : 'fail'} | ${row.stop} | ${String(row.toolCalls)} | ${String(row.approvals)} | ${String(row.tokensIn)} / ${String(row.cacheRead)} / ${String(row.cacheWrite)} | ${String(row.tokensOut)} | ${row.usd.toFixed(4)} | ${cell(row.reason)} |`,
     ),
     '',
-    `**Success rate:** ${String(passed)} of ${String(rows.length)}.`,
+    `**Success rate:** ${String(passed)} of ${String(rows.length)} runs.${maxAttempts > 1 ? ` **Tasks passing every time:** ${String(everyTime)} of ${String(byTask.size)}; **at least once:** ${String(atLeastOnce)} of ${String(byTask.size)}. **By attempt:** ${perAttempt.join(', ')}.` : ''}`,
     `**Median discovery calls per task** (every erp_discover call): ${String(median(ran.map((row) => discoveryCalls(row.calls))))}. **Median seconds per task:** ${median(ran.map((row) => row.seconds)).toFixed(1)}. **Median tool calls per task:** ${String(median(ran.map((row) => row.toolCalls)))}.`,
     `**Total spend:** USD ${total.toFixed(4)}.`,
     `**Cost per completed task:** ${passed > 0 ? `USD ${(total / passed).toFixed(4)}` : 'undefined (no task passed)'}.`,
     '',
     '## Tool calls by tool and mode',
     '',
-    '| task | seconds | calls by tool and mode |',
-    '|---|---|---|',
+    '| task | attempt | seconds | calls by tool and mode |',
+    '|---|---|---|---|',
     ...rows.map(
       (row) =>
-        `| ${String(row.task)} | ${row.seconds.toFixed(1)} | ${Object.entries(
+        `| ${String(row.task)} | ${String(row.attempt)} | ${row.seconds.toFixed(1)} | ${Object.entries(
           row.calls,
         )
           .sort(([a], [b]) => a.localeCompare(b))
@@ -321,7 +366,7 @@ async function main(): Promise<void> {
     '',
     ...rows.map(
       (row) =>
-        `- **${String(row.task)}.** ${cell(row.answer || '(none)')} — run record \`${relative(row.record)}\``,
+        `- **${String(row.task)}${row.attempt > 1 ? ` (attempt ${String(row.attempt)})` : ''}.** ${cell(row.answer || '(none)')} — run record \`${relative(row.record)}\``,
     ),
     '',
   ].join('\n');

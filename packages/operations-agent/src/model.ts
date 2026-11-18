@@ -51,6 +51,10 @@ export interface ModelAdapter {
     readonly system: string;
     readonly tools: readonly ModelToolDefinition[];
     readonly conversation: readonly ConversationEntry[];
+    /** Aborts the call (the panel's Stop). */
+    readonly signal?: AbortSignal;
+    /** Reply text as it is generated, for a live panel. */
+    readonly onText?: (delta: string) => void;
   }): Promise<ModelTurn>;
 }
 

@@ -131,6 +131,7 @@ const suiteDefinitions = [
   {
     discoveryPattern: 'test/agent/**/*.test.ts',
     expectedFiles: [
+      'test/agent/assistant-endpoint.test.ts',
       'test/agent/business-map.test.ts',
       'test/agent/catalog-discovery.test.ts',
       'test/agent/location-discovery.test.ts',
@@ -175,6 +176,7 @@ const suiteDefinitions = [
       'test/postgres/stock-serializer.test.ts',
     ],
     expectedFiles: [
+      'test/postgres/agent-dev-tasks.test.ts',
       'test/postgres/agent-tasks.test.ts',
       'test/postgres/catalog-extras.test.ts',
       'test/postgres/catalog-runtime.test.ts',

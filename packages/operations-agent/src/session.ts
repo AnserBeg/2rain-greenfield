@@ -48,6 +48,7 @@ import {
   type BusinessCalendar,
 } from './business-context.js';
 import { businessMapStructure, renderBusinessMap } from './business-map.js';
+import { operationRisk, type OperationRisk, type RiskClass } from './risk.js';
 import type { OperationsAgentToolId } from './tools.js';
 
 export type AgentRuntime = Pick<
@@ -58,6 +59,8 @@ export type AgentRuntime = Pick<
 export interface PlanForApproval {
   readonly planId: string;
   readonly summary: string;
+  /** Why this plan needs the person's yes, one reason per kind of step. */
+  readonly reasons?: readonly string[];
   readonly steps: readonly {
     readonly step: number;
     readonly operationId: string;
@@ -87,6 +90,14 @@ export interface OperationsAgentSessionOptions {
   readonly maximumResultCharacters?: number;
 }
 
+/** A record the session read or wrote, for links in the panel. */
+export interface TouchedRecord {
+  readonly recordId: string;
+  readonly entityId: string;
+  readonly label: string | null;
+  readonly wrote: boolean;
+}
+
 /** The page the person is on, as the browser reports it: a claim, not a fact. */
 export interface AgentScreen {
   readonly surfaceId: string;
@@ -107,7 +118,28 @@ export interface ApprovalRecord {
   readonly planId: string;
   readonly approved: boolean;
   readonly steps: number;
+  /**
+   * Who approved: the person (their yes, or their Undo click), or the plan's
+   * risk class (a reversible in-app change runs at once). Never both.
+   */
+  readonly by: 'person' | 'riskClass';
+  readonly riskClass: RiskClass;
 }
+
+/** A change the agent made at once, and how Undo takes it back. */
+export interface AgentChange {
+  readonly changeId: string;
+  readonly summary: string;
+  readonly undone: boolean;
+}
+
+export type UndoOutcome =
+  | {
+      readonly outcome: 'undone';
+      readonly summary: string;
+      readonly verified: boolean;
+    }
+  | { readonly outcome: 'refused'; readonly reason: string };
 
 type StepRef = string | { readonly fromStep: number };
 
@@ -122,6 +154,9 @@ interface PlanStep {
   readonly relations?: Readonly<Record<string, ImmutableJsonValue>>;
   readonly patch?: Readonly<Record<string, ImmutableJsonValue>>;
   readonly arguments?: ImmutableJsonValue;
+  /** For an update of an existing record: the patched fields' values before. */
+  readonly prior?: Readonly<Record<string, ImmutableJsonValue>>;
+  readonly risk: OperationRisk;
 }
 
 interface StepResult {
@@ -145,6 +180,7 @@ interface StoredPlan {
   readonly steps: readonly PlanStep[];
   readonly release: PlanRelease;
   readonly digest: string;
+  readonly riskClass: RiskClass;
   status: 'approved' | 'declined' | 'executed' | 'failed';
   execution?: {
     readonly key: string;
@@ -182,6 +218,13 @@ export class OperationsAgentSession {
   readonly #usable = new Map<string, Map<string, boolean>>();
   readonly toolCalls: ToolCallRecord[] = [];
   readonly approvals: ApprovalRecord[] = [];
+  readonly #touched = new Map<string, TouchedRecord>();
+  readonly #undoPlans = new Set<string>();
+  /** Record ids the host returned to the model in this session. */
+  readonly #seenIds = new Set<string>();
+  /** Currency codes of records the host returned, and ones the person named. */
+  readonly #seenCurrencies = new Set<string>();
+  readonly #undone = new Set<string>();
 
   constructor(options: OperationsAgentSessionOptions) {
     this.#options = options;
@@ -207,6 +250,10 @@ export class OperationsAgentSession {
       if (!isRecord(input)) throw new ToolInputError('input must be an object');
       const content = await this.#dispatch(tool, input);
       outcome = { content: this.#bounded(content), isError: false };
+      // What the host showed the model is what a plan may name (slice 4):
+      // record ids and currencies from lookups, reads, writes and checks,
+      // never from a plan's echo of the model's own input.
+      if (tool !== 'erp_plan') this.#remember(outcome.content);
     } catch (error) {
       outcome = {
         content: {
@@ -371,13 +418,263 @@ export class OperationsAgentSession {
    * declares it; its record id is the page's claim until read.
    */
   turnContext(screen?: AgentScreen | null): Promise<string> {
-    return this.#run((view) => {
+    return this.#run(async (view) => {
       const facts = this.#facts(view);
       const lines = [`Context (JSON): ${JSON.stringify(facts)}`];
       const named = screen ? screenFacts(view, screen) : null;
-      if (named) lines.push(named);
-      return Promise.resolve(lines.join('\n'));
+      if (named) lines.push(named.text);
+      if (named?.recordId && named.getQueryId) {
+        // Read fresh, as the person, through the same gateway the page uses:
+        // the browser's record id is a claim, the read is the fact.
+        const record = await readRecord(
+          this.#options.runtime,
+          view,
+          pinnedCatalog(view),
+          named.getQueryId,
+          named.recordId,
+          this.#options.companyId,
+        ).catch(() => null);
+        if (record) {
+          this.#touch(named.entityId, record, false);
+          this.#remember(compactRecord(record));
+          lines.push(
+            `That record, read just now through ${localName(named.getQueryId)}: ${JSON.stringify(
+              this.#bounded(compactRecord(record), 4_000),
+            )}`,
+          );
+        } else
+          lines.push(
+            'That record could not be read for the person (not found, archived or not permitted); do not rely on it.',
+          );
+      }
+      return lines.join('\n');
     });
+  }
+
+  /**
+   * The person's words for this turn. Only the currency codes named in them
+   * are kept: a plan may use a currency the person named.
+   */
+  noteRequest(text: string): void {
+    for (const code of text.match(/\b[A-Z]{3}\b/gu) ?? [])
+      this.#seenCurrencies.add(code);
+    for (const [words, code] of CURRENCY_WORDS)
+      if (words.test(text)) this.#seenCurrencies.add(code);
+  }
+
+  #remember(content: ImmutableJsonValue, fieldId = ''): void {
+    if (typeof content === 'string') {
+      if (uuidPattern.test(content)) this.#seenIds.add(content.toLowerCase());
+      if (/_currency$/u.test(fieldId)) {
+        const code = currencyCode(content);
+        if (code) this.#seenCurrencies.add(code);
+      }
+      return;
+    }
+    if (Array.isArray(content)) {
+      for (const entry of content) this.#remember(entry, fieldId);
+      return;
+    }
+    if (isRecord(content))
+      for (const [key, value] of Object.entries(content))
+        this.#remember(value, key.includes(':') ? localName(key) : fieldId);
+  }
+
+  /**
+   * The two values the host refuses to take on the model's word (slice 4):
+   * a record reference no lookup in this session returned, and a currency
+   * that is neither the company default, a resolved record's, nor named by
+   * the person. It names the value; it says what to do instead.
+   */
+  #unsupportedValue(
+    view: RequestRuntimeView,
+    steps: readonly PlanStep[],
+  ): string | null {
+    const defaultCurrency = declaredCurrencyDefault(view).code;
+    for (const step of steps) {
+      const where = `step ${String(step.step)} (${localName(step.operation.operationId)})`;
+      const references: [string, ImmutableJsonValue][] = [
+        [
+          'target',
+          typeof step.recordId === 'string' && step.pinnedRevision !== null
+            ? step.recordId
+            : null,
+        ],
+        ...Object.entries(step.relations ?? {}),
+        ...Object.entries({ ...step.values, ...step.patch }),
+      ];
+      for (const [name, value] of references) {
+        if (typeof value !== 'string' || !uuidPattern.test(value)) continue;
+        // A reference is the target, a relation, or a field named `..._id`
+        // (`item_id`, `customer_party_id`): a free text field such as a
+        // reservation number may hold a fresh uuid the screens also mint.
+        if (
+          name !== 'target' &&
+          !(step.relations && name in step.relations) &&
+          !localName(name).endsWith('_id')
+        )
+          continue;
+        if (!this.#seenIds.has(value.toLowerCase()))
+          return `${where}: ${name === 'target' ? 'the target record' : localName(name)} ${value} did not come from a lookup in this conversation. Find the record with erp_discover resolve or a query, then plan with the id it returns.`;
+      }
+      for (const [fieldId, value] of Object.entries({
+        ...step.values,
+        ...step.patch,
+      })) {
+        if (
+          !/_currency$/u.test(localName(fieldId)) ||
+          typeof value !== 'string'
+        )
+          continue;
+        const code = currencyCode(value);
+        if (code && code !== defaultCurrency && !this.#seenCurrencies.has(code))
+          return `${where}: currency ${code} is not the company default${defaultCurrency ? ` (${defaultCurrency})` : ''}, the currency of a record you read, or one the person named. Use one of those, or ask the person.`;
+      }
+    }
+    return null;
+  }
+
+  /** The latest change the agent made at once in this session, if any. */
+  latestChange(): AgentChange | null {
+    const plan = [...this.#plans.values()]
+      .filter(
+        (candidate) =>
+          candidate.riskClass === 'reversible' &&
+          candidate.execution &&
+          !this.#undoPlans.has(candidate.planId),
+      )
+      .at(-1);
+    if (!plan?.execution) return null;
+    return {
+      changeId: plan.planId,
+      summary: changeSummary(plan),
+      undone: this.#undone.has(plan.planId),
+    };
+  }
+
+  /**
+   * Undo the latest change, named by its id (the person's Undo click): a
+   * planned, executed and verified operation of its own. It refuses, saying
+   * why, when a record changed after the agent's write or the change is not
+   * the latest one.
+   */
+  async undo(changeId: string): Promise<UndoOutcome> {
+    const latest = this.latestChange();
+    if (!latest || latest.changeId !== changeId)
+      return {
+        outcome: 'refused',
+        reason: 'Only the latest change of this conversation can be undone.',
+      };
+    if (latest.undone)
+      return { outcome: 'refused', reason: 'That change was already undone.' };
+    const plan = this.#plans.get(changeId)!;
+    const results = plan.execution!.results;
+    // The revision each record had right after the agent's last write to it.
+    const written = new Map<string, { revision: number; step: PlanStep }>();
+    for (const step of plan.steps) {
+      const result = results.find((entry) => entry.step === step.step);
+      if (result?.outcome === 'succeeded' && result.recordId)
+        written.set(result.recordId, {
+          revision: result.revision ?? 0,
+          step: written.get(result.recordId)?.step ?? step,
+        });
+    }
+    if (written.size === 0)
+      return { outcome: 'refused', reason: 'That change wrote nothing.' };
+    const changed = await this.#run(async (view) => {
+      const catalog = pinnedCatalog(view);
+      for (const [recordId, { revision, step }] of written) {
+        const record = await readRecord(
+          this.#options.runtime,
+          view,
+          catalog,
+          step.operation.readBackQueryId,
+          recordId,
+          this.#options.companyId,
+        );
+        if (!record)
+          return `${localName(step.entity).replaceAll('_', ' ')} ${recordId} can no longer be read.`;
+        if (record.revision !== revision)
+          return `${recordLabel(record) ?? localName(step.entity).replaceAll('_', ' ')} changed after the assistant's change (revision ${String(revision)} is now ${String(record.revision)}); undoing would overwrite that later change.`;
+      }
+      return null;
+    });
+    if (changed) return { outcome: 'refused', reason: changed };
+    // Reverse order: archive what was made, put back what was changed. A
+    // record made in this change is archived, not restored field by field.
+    const intents: ImmutableJsonValue[] = [];
+    const created = new Set(
+      plan.steps
+        .filter((step) => step.risk.inverse?.kind === 'archive')
+        .map((step) => results.find((r) => r.step === step.step)?.recordId),
+    );
+    for (const step of [...plan.steps].reverse()) {
+      const result = results.find((entry) => entry.step === step.step);
+      if (result?.outcome !== 'succeeded' || !result.recordId) continue;
+      const inverse = step.risk.inverse;
+      if (inverse?.kind === 'archive')
+        intents.push({
+          operationId: inverse.operationId,
+          target: result.recordId,
+        });
+      else if (
+        inverse?.kind === 'restorePriorValues' &&
+        step.prior &&
+        !created.has(result.recordId)
+      )
+        intents.push({
+          operationId: inverse.operationId,
+          target: result.recordId,
+          patch: step.prior,
+        });
+    }
+    const planned = (await this.#plan({ intents }, true)) as Record<
+      string,
+      ImmutableJsonValue
+    >;
+    if (typeof planned.planId !== 'string')
+      return {
+        outcome: 'refused',
+        reason: `Undo could not be planned: ${String(planned.reason ?? planned.error ?? 'refused')}`,
+      };
+    this.#undoPlans.add(planned.planId);
+    this.toolCalls.push({ tool: 'undo:plan', isError: false });
+    const executed = (await this.#execute({
+      planId: planned.planId,
+      executionIdempotencyKey: `undo-${changeId}`,
+    })) as Record<string, ImmutableJsonValue>;
+    if (executed.outcome !== 'executed')
+      return {
+        outcome: 'refused',
+        reason: `Undo stopped: ${JSON.stringify(executed.steps)}`,
+      };
+    this.#undone.add(changeId);
+    const verified = (await this.#verify({
+      operationSessionId: planned.planId,
+    })) as Record<string, ImmutableJsonValue>;
+    return {
+      outcome: 'undone',
+      summary: `Undid: ${latest.summary}`,
+      verified: verified.verified === true,
+    };
+  }
+
+  /** Records this session read or wrote, newest last; written ones marked. */
+  touchedRecords(): readonly TouchedRecord[] {
+    return [...this.#touched.values()];
+  }
+
+  #touch(entityId: string, record: SemanticRecordDto, wrote: boolean): void {
+    const existing = this.#touched.get(record.recordId);
+    this.#touched.delete(record.recordId);
+    this.#touched.set(record.recordId, {
+      recordId: record.recordId,
+      entityId,
+      label: recordLabel(record) ?? existing?.label ?? null,
+      wrote: wrote || (existing?.wrote ?? false),
+    });
+    while (this.#touched.size > 50)
+      this.#touched.delete(this.#touched.keys().next().value!);
   }
 
   // ---------------------------------------------------------------- discover
@@ -486,12 +783,12 @@ export class OperationsAgentSession {
           contracts: ids.map((id) => {
             const operation = catalog.operation(id);
             if (operation)
-              return usable.operations.has(id)
+              return usable.operations.has(operation.operationId)
                 ? operationContract(catalog, operation)
                 : { id, outcome: 'denied' };
             const query = catalog.query(id);
             if (query)
-              return usable.queries.has(id)
+              return usable.queries.has(query.queryId)
                 ? queryContract(catalog, query)
                 : { id, outcome: 'denied' };
             return { id, outcome: 'not-found' };
@@ -625,6 +922,8 @@ export class OperationsAgentSession {
           limit,
           catalog,
         );
+        for (const record of listed.records.slice(0, 10))
+          this.#touch(query.sourceEntityId, record, false);
         return {
           queryId,
           outcome: listed.records.length === 0 ? 'not-found' : 'exact',
@@ -645,6 +944,8 @@ export class OperationsAgentSession {
         queryId,
         arguments: withScope(query, argumentsForType, this.#options.companyId),
       });
+      for (const record of result.records.slice(0, 10))
+        this.#touch(query.sourceEntityId, record, false);
       return {
         queryId,
         outcome: result.outcome,
@@ -757,6 +1058,8 @@ export class OperationsAgentSession {
 
   #plan(
     input: Record<string, ImmutableJsonValue>,
+    /** Undo passes the person's click; the model's plans never do. */
+    personsUndo = false,
   ): Promise<ImmutableJsonValue> {
     if (
       input.requestedBulkMode !== undefined &&
@@ -809,12 +1112,42 @@ export class OperationsAgentSession {
             note: 'nothing was written; the plan was not created',
           };
       }
+      const unsupported = personsUndo
+        ? null
+        : this.#unsupportedValue(view, steps);
+      if (unsupported)
+        return {
+          outcome: 'refused',
+          reason: unsupported,
+          note: 'nothing was written; the plan was not created',
+        };
       const planId = this.#mint();
       const release = releaseOf(view);
       const digest = planDigest(steps, release);
+      // A plan is reversible only when every step is, and an undo of a step
+      // made earlier in the same plan is covered by archiving what it made.
+      const riskClass: RiskClass = steps.every(
+        (step) =>
+          step.risk.riskClass === 'reversible' &&
+          (step.risk.inverse?.kind !== 'restorePriorValues' ||
+            step.prior !== undefined ||
+            (typeof step.recordId !== 'string' &&
+              steps[step.recordId.fromStep - 1]?.risk.inverse?.kind ===
+                'archive')),
+      )
+        ? 'reversible'
+        : 'needsYes';
+      const reasons = [
+        ...new Set(
+          steps
+            .filter((step) => step.risk.riskClass !== 'reversible')
+            .map((step) => step.risk.reason),
+        ),
+      ];
       const presentation: PlanForApproval = {
         planId,
         summary: `${String(steps.length)} step(s)`,
+        ...(reasons.length > 0 ? { reasons } : {}),
         steps: steps.map((step) => ({
           step: step.step,
           operationId: step.operation.operationId,
@@ -831,20 +1164,33 @@ export class OperationsAgentSession {
           },
         })),
       };
-      const approved = await this.#options.approve(presentation);
-      this.approvals.push({ planId, approved, steps: steps.length });
+      const automatic = riskClass === 'reversible' && !personsUndo;
+      const approved =
+        automatic || personsUndo
+          ? true
+          : await this.#options.approve(presentation);
+      this.approvals.push({
+        planId,
+        approved,
+        steps: steps.length,
+        by: automatic ? 'riskClass' : 'person',
+        riskClass,
+      });
       this.#plans.set(planId, {
         planId,
         steps,
         release,
         digest,
+        riskClass,
         status: approved ? 'approved' : 'declined',
       });
       return {
         planId,
-        approval: approved
-          ? 'approved by the person'
-          : 'declined by the person',
+        approval: automatic
+          ? 'runs at once: a reversible in-app change (risk class reversible); the person can Undo it'
+          : approved
+            ? 'approved by the person'
+            : 'declined by the person',
         steps: presentation.steps.map((step, index) => ({
           ...step,
           precondition: checks[index] ?? null,
@@ -960,6 +1306,13 @@ export class OperationsAgentSession {
       step,
       operation,
       entity,
+      risk: settingState(operation, prefix, { ...values, ...patch })
+        ? ({
+            riskClass: 'needsYes',
+            reason:
+              "it sets a document's state past its first one (only its posting operation should)",
+          } satisfies OperationRisk)
+        : operationRisk(catalog, operation),
       ...(values ? { values } : {}),
       ...(relations ? { relations } : {}),
       ...(patch ? { patch } : {}),
@@ -1001,7 +1354,21 @@ export class OperationsAgentSession {
     );
     const check = `${describePredicate(operation.precondition)}: ${evaluation.outcome}`;
     return {
-      step: { ...base, recordId: target, pinnedRevision: record.revision },
+      step: {
+        ...base,
+        recordId: target,
+        pinnedRevision: record.revision,
+        ...(patch
+          ? {
+              prior: Object.fromEntries(
+                Object.keys(patch).map((fieldId) => [
+                  fieldId,
+                  record.values[fieldId] ?? null,
+                ]),
+              ),
+            }
+          : {}),
+      },
       check,
       ...(evaluation.outcome === 'refused'
         ? {
@@ -1028,7 +1395,29 @@ export class OperationsAgentSession {
         throw new ToolInputError(
           'this plan was already executed under another key; plan again to repeat it',
         );
-      return executionReport(plan);
+      // A replay returns the stored receipt (ids and outcomes). Business
+      // values come only from a read authorized now, as the person; a record
+      // they may no longer read is withheld, never served from memory.
+      return this.#run(async (view) => {
+        const catalog = pinnedCatalog(view);
+        const fresh = new Map<number, Record<string, ImmutableJsonValue>>();
+        for (const step of plan.steps) {
+          const result = plan.execution!.results.find(
+            (entry) => entry.step === step.step,
+          );
+          if (result?.outcome !== 'succeeded' || !result.recordId) continue;
+          const record = await readRecord(
+            this.#options.runtime,
+            view,
+            catalog,
+            step.operation.readBackQueryId,
+            result.recordId,
+            this.#options.companyId,
+          ).catch(() => null);
+          if (record) fresh.set(step.step, compactValues(record.values));
+        }
+        return executionReport(plan, fresh);
+      });
     }
     if (plan.status !== 'approved')
       throw new ToolInputError(
@@ -1137,11 +1526,13 @@ export class OperationsAgentSession {
           });
           continue;
         }
-        if (result.readBack)
+        if (result.readBack) {
           latestRevision.set(
             result.readBack.recordId,
             result.readBack.revision,
           );
+          this.#touch(step.entity, result.readBack, true);
+        }
         results.push({
           step: step.step,
           operationId: step.operation.operationId,
@@ -1208,6 +1599,7 @@ export class OperationsAgentSession {
           step.operation.readBackQueryId,
           result.recordId,
           this.#options.companyId,
+          effectKind(step.operation) === 'archiveRecordEffect',
         );
         const mismatches: string[] = [];
         if (!record) mismatches.push('the declared read-back finds no record');
@@ -1219,6 +1611,8 @@ export class OperationsAgentSession {
               effect: Record<string, unknown>;
             }
           ).effect;
+          if (effect.kind === 'archiveRecordEffect' && !record.archived)
+            mismatches.push('the record is not archived');
           if (
             effect.kind === 'transitionStateEffect' &&
             record.values[String(effect.stateFieldId)] !== effect.toStateId
@@ -1285,8 +1679,10 @@ export class OperationsAgentSession {
     });
   }
 
-  #bounded(content: ImmutableJsonValue): ImmutableJsonValue {
-    const limit = this.#options.maximumResultCharacters ?? 16_000;
+  #bounded(
+    content: ImmutableJsonValue,
+    limit = this.#options.maximumResultCharacters ?? 16_000,
+  ): ImmutableJsonValue {
     const text = JSON.stringify(content);
     if (text.length <= limit) return content;
     if (isRecord(content) && Array.isArray(content.records)) {
@@ -1312,7 +1708,12 @@ export class OperationsAgentSession {
 function screenFacts(
   view: RequestRuntimeView,
   screen: AgentScreen,
-): string | null {
+): {
+  text: string;
+  recordId: string | null;
+  entityId: string;
+  getQueryId: string | null;
+} | null {
   const surfaces =
     (
       view.projections.surface.payload as unknown as {
@@ -1336,7 +1737,98 @@ function screenFacts(
     typeof screen.recordId === 'string' && uuidPattern.test(screen.recordId)
       ? screen.recordId
       : null;
-  return `Screen: the person is on "${surface.label ?? localName(surface.surfaceId)}" (${surface.archetype ?? 'page'}${entity ? `, ${localName(entity)}` : ''})${record ? `, showing record ${record}; "this", "it" and "here" mean that record` : ''}.`;
+  const getQuery =
+    entity && record
+      ? (catalog.queries.find(
+          (query) =>
+            query.queryId === surface.dataSourceQueryId &&
+            query.queryType === 'get',
+        ) ??
+        catalog.queries.find(
+          (query) =>
+            query.sourceEntityId === entity &&
+            query.queryType === 'get' &&
+            localName(query.queryId) === `${localName(entity)}_get`,
+        ))
+      : undefined;
+  return {
+    text: `Screen: the person is on "${surface.label ?? localName(surface.surfaceId)}" (${surface.archetype ?? 'page'}${entity ? `, ${localName(entity)}` : ''})${record ? `, showing record ${record}; "this", "it" and "here" mean that record` : ''}.`,
+    recordId: record,
+    entityId: entity ?? '',
+    getQueryId: getQuery?.queryId ?? null,
+  };
+}
+
+/**
+ * Whether a write sets the record type's own state field (`<type>_state`, a
+ * choice) to anything but its first option, the state a record starts in.
+ */
+function settingState(
+  operation: RegisteredOperationDefinition,
+  prefix: string,
+  written: Readonly<Record<string, ImmutableJsonValue>>,
+): boolean {
+  const field = (operation.inputContract?.fields ?? []).find(
+    (candidate) =>
+      localName(candidate.fieldId) === `${prefix}_state` &&
+      candidate.enumOptionIds.length > 0,
+  );
+  if (!field || !(field.fieldId in written)) return false;
+  const value = written[field.fieldId];
+  return value !== null && value !== field.enumOptionIds[0];
+}
+
+const ISO_CURRENCY = /^[A-Z]{3}$/u;
+
+/** Currencies a person names in words rather than by code. */
+const CURRENCY_WORDS: readonly (readonly [RegExp, string])[] = [
+  [/\b(?:us|american) dollars?\b|\$us\b|\bus\$/iu, 'USD'],
+  [/\bcanadian dollars?\b|\bc\$/iu, 'CAD'],
+  [/\beuros?\b|€/iu, 'EUR'],
+];
+
+/** `CAD`, or an option id ending `_cad`, as a currency code. */
+function currencyCode(value: string): string | null {
+  if (ISO_CURRENCY.test(value)) return value;
+  const match = /_([a-z]{3})$/u.exec(localName(value));
+  return value.includes(':') && match ? match[1]!.toUpperCase() : null;
+}
+
+/** What an executed plan did, in short words, for "Did: ..." and Undo. */
+function changeSummary(plan: StoredPlan): string {
+  return plan.steps
+    .map((step) => {
+      const result = plan.execution?.results.find(
+        (entry) => entry.step === step.step,
+      );
+      const values = result?.values ?? {};
+      const label =
+        Object.entries(values).find(([fieldId, value]) =>
+          ['_number', '_name', '_sku', '_code'].some(
+            (suffix) =>
+              localName(fieldId).endsWith(suffix) && typeof value === 'string',
+          ),
+        )?.[1] ?? null;
+      const what = localName(step.entity).replaceAll('_', ' ');
+      const verb =
+        step.risk.inverse?.kind === 'archive' ? 'created' : 'changed';
+      return `${verb} ${what}${label ? ` ${String(label)}` : ''}`;
+    })
+    .join(', ');
+}
+
+/** A record's human name: its number, name, SKU or code, when it has one. */
+function recordLabel(record: SemanticRecordDto): string | null {
+  for (const suffix of ['_number', '_name', '_sku', '_code']) {
+    const entry = Object.entries(record.values).find(
+      ([fieldId, value]) =>
+        localName(fieldId).endsWith(suffix) &&
+        typeof value === 'string' &&
+        value !== '',
+    );
+    if (entry) return String(entry[1]);
+  }
+  return null;
 }
 
 const relationIdSets = new WeakMap<PinnedCatalog, readonly string[]>();
@@ -1359,7 +1851,14 @@ function relationIds(catalog: PinnedCatalog): readonly string[] {
   return ids;
 }
 
-function executionReport(plan: StoredPlan): ImmutableJsonValue {
+/**
+ * An execution's receipt. Values are the execution's own read-back, or, for a
+ * replay, `fresh` reads made now (a step missing from it shows no values).
+ */
+function executionReport(
+  plan: StoredPlan,
+  fresh?: ReadonlyMap<number, Record<string, ImmutableJsonValue>>,
+): ImmutableJsonValue {
   const results = plan.execution!.results;
   return {
     operationSessionId: plan.planId,
@@ -1370,7 +1869,13 @@ function executionReport(plan: StoredPlan): ImmutableJsonValue {
       outcome: result.outcome,
       ...(result.recordId ? { recordId: result.recordId } : {}),
       ...(result.error ? { error: result.error } : {}),
-      ...(result.values ? { values: result.values } : {}),
+      ...(fresh
+        ? fresh.has(result.step)
+          ? { values: fresh.get(result.step)! }
+          : {}
+        : result.values
+          ? { values: result.values }
+          : {}),
     })),
     next:
       plan.status === 'executed'
@@ -1386,13 +1891,19 @@ async function readRecord(
   queryId: string,
   recordId: string,
   companyId: string,
+  /** Archived records too: an archive's read-back finds what it archived. */
+  includeArchived = false,
 ): Promise<SemanticRecordDto | null> {
   const query = catalog.query(queryId);
   if (!query || query.queryType !== 'get') return null;
   const result = await runtime.queryGateway.invoke(view, {
     schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
     queryId,
-    arguments: withScope(query, { recordId }, companyId),
+    arguments: withScope(
+      query,
+      includeArchived ? { includeArchived: true, recordId } : { recordId },
+      companyId,
+    ),
   });
   return result.records[0] ?? null;
 }
@@ -1502,7 +2013,9 @@ function refValue(
       raw.fromStep < 1 ||
       raw.fromStep >= step
     )
-      throw new ToolInputError(`${where}: fromStep must name an earlier step`);
+      throw new ToolInputError(
+        `${where}: fromStep must name an earlier step (steps count from 1)`,
+      );
     return { fromStep: raw.fromStep };
   }
   throw new ToolInputError(`${where}: expected a record id or {"fromStep": n}`);

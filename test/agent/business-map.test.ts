@@ -212,6 +212,40 @@ test('a short name stands for exactly one id or for none', () => {
   );
 });
 
+test('the risk class comes from contract facts: O0 creates and updates are reversible, everything else needs a yes', async () => {
+  const { operationRisk } =
+    await import('../../packages/operations-agent/src/risk.js');
+  const catalog = pinnedCatalog(compiledAppView());
+  const risk = (local: string) =>
+    operationRisk(catalog, catalog.operation(local)!);
+  assert.deepEqual(risk('party_create').inverse, {
+    kind: 'archive',
+    operationId: `${NS}:operation.party_archive`,
+  });
+  assert.deepEqual(risk('sales_order_update').inverse, {
+    kind: 'restorePriorValues',
+    operationId: `${NS}:operation.sales_order_update`,
+  });
+  for (const local of [
+    'party_archive',
+    'party_restore',
+    'goods_receipt_post',
+    'shipment_post',
+    'customer_payment_post',
+    'purchase_order_release',
+    'purchase_order_draft_cancel',
+    // Its field is one reopen_period changes only with confirmation.
+    'advance_period_lock',
+  ])
+    assert.equal(risk(local).riskClass, 'needsYes', local);
+  // An unknown family is never reversible.
+  const strange = {
+    ...catalog.operation('party_create')!,
+    tier: 'o9',
+  } as never;
+  assert.equal(operationRisk(catalog, strange).riskClass, 'needsYes');
+});
+
 // ------------------------------------------------ plan guards (audit A1, A2)
 
 const PARTY = '0d9c6f2e-3a1b-4c5d-8e7f-001122334455';
@@ -232,6 +266,7 @@ function guardedSession() {
     },
     invoked: [] as string[],
     afterInvoke: () => {},
+    denyReads: false,
   };
   const session = new OperationsAgentSession({
     runtime: {
@@ -261,7 +296,9 @@ function guardedSession() {
       queryGateway: {
         previewEligibility: () => Promise.resolve('eligible'),
         invoke: () =>
-          Promise.resolve({ outcome: 'exact', records: [state.record] }),
+          state.denyReads
+            ? Promise.reject(new Error('QUERY_PERMISSION_DENIED'))
+            : Promise.resolve({ outcome: 'exact', records: [state.record] }),
       },
     } as never,
     personHeaders: {},
@@ -357,4 +394,59 @@ test('A2: verify compares a patched field; one that did not take is named', asyn
         `${NS}:field.party_contact_summary reads back differently`,
       ]);
   }
+});
+
+test('a contract asked for by its short name loads, as the map writes it', async () => {
+  const { session } = guardedSession();
+  const loaded = (
+    await session.call('erp_discover', {
+      mode: 'contracts',
+      canonicalIds: ['party_update', 'party_get'],
+    })
+  ).content as {
+    contracts: { operationId?: string; queryId?: string; outcome?: string }[];
+  };
+  assert.deepEqual(
+    loaded.contracts.map(
+      (entry) => entry.operationId ?? entry.queryId ?? entry.outcome,
+    ),
+    [`${NS}:operation.party_update`, `${NS}:query.party_get`],
+  );
+});
+
+test('a replayed execute returns the receipt; values only from a read allowed now', async () => {
+  const { session, state } = guardedSession();
+  const planId = await plannedUpdate(session, [{ contact_summary: 'New' }]);
+  const first = (
+    await session.call('erp_execute', { planId, executionIdempotencyKey: 'k' })
+  ).content as { steps: { values?: unknown; recordId?: string }[] };
+  assert.ok(first.steps[0]!.values, 'the execution shows its read-back');
+  // The person loses read access: a replay under the same key shows the
+  // receipt (record id, outcome) and no stored business values.
+  state.denyReads = true;
+  const replay = (
+    await session.call('erp_execute', { planId, executionIdempotencyKey: 'k' })
+  ).content as {
+    steps: { values?: unknown; recordId?: string; outcome: string }[];
+  };
+  assert.equal(replay.steps[0]!.recordId, PARTY);
+  assert.equal(replay.steps[0]!.outcome, 'succeeded');
+  assert.equal(replay.steps[0]!.values, undefined);
+  assert.doesNotMatch(JSON.stringify(replay), /New|P-2016/u);
+  // Allowed again: values come back from a fresh read, not from memory.
+  state.denyReads = false;
+  state.record = {
+    ...state.record,
+    values: {
+      ...state.record.values,
+      [`${NS}:field.party_contact_summary`]: 'Changed since',
+    },
+  };
+  const again = (
+    await session.call('erp_execute', { planId, executionIdempotencyKey: 'k' })
+  ).content as { steps: { values?: Record<string, string> }[] };
+  assert.equal(
+    again.steps[0]!.values?.[`${NS}:field.party_contact_summary`],
+    'Changed since',
+  );
 });

@@ -115,9 +115,18 @@ export async function withAgentWorlds<T>(
             databaseUrl: url(databaseName),
             tenantSlug: TENANT_SLUG,
           });
+          // A world is dropped when closed: the development set makes about
+          // seventy, and the container's volume holds only a few dozen.
           return Object.assign(
             worldOver(runtime, databaseName, url(databaseName), TENANT_SLUG),
-            { close: () => runtime.close() },
+            {
+              close: async () => {
+                await runtime.close();
+                await pool.query(
+                  `DROP DATABASE IF EXISTS ${databaseName} WITH (FORCE)`,
+                );
+              },
+            },
           );
         },
       });
