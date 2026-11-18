@@ -205,6 +205,16 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
           'Panel Test Customer',
         );
 
+        // Undo the create (the latest change made at once) before anything
+        // else runs (X8: a later write could depend on it), verified: the
+        // record it made is archived, so its page no longer finds it.
+        await did.locator('[data-assistant-undo]').click();
+        await expect(did).toContainText(
+          'Undid: created customer Panel Test Customer (checked)',
+        );
+        await opened.reload();
+        await expect(opened.locator('main')).toContainText('Record not found');
+
         await say('Archive the first customer');
         const plan = panel.locator('[data-assistant-plan]');
         await expect(plan).toContainText(
@@ -222,15 +232,6 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
         await shootAssistant(page);
         await plan.locator('[data-assistant-yes]').click();
         await expect(reply(2)).toContainText('Archived.');
-
-        // Undo the create (the latest change made at once), verified: the
-        // record it made is archived, so its page no longer finds it.
-        await did.locator('[data-assistant-undo]').click();
-        await expect(did).toContainText(
-          'Undid: created customer Panel Test Customer (checked)',
-        );
-        await opened.reload();
-        await expect(opened.locator('main')).toContainText('Record not found');
 
         // X2: words that are not a whole yes decline and are sent on.
         await say('Archive the second customer');
