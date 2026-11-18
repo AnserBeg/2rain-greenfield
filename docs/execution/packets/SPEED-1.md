@@ -29,12 +29,13 @@ security path, no file of the `AGENTS.md` §4 Critical set; slices 2-4 get the o
 9. Slice 6: `corepack pnpm build && corepack pnpm start` runs the app from `dist/` with plain Node (`start-production.mjs`, resolve
    hook `production-resolve.mjs`); `apps/api/src/measure-page.ts` times the PO detail the same way under tsx and compiled.
 
-10. Fix round (two reviews of `3ab5853a^1..69b7adc1`): an invocation runs outside any page snapshot, so every write-path decision
-    is live (S1); a task step under a policy change is sent again by GET, its commit intact (S2); moving a policy row bumps both
-    scopes (migration 0030, S3); a page reads one tenant and environment (`ReadSnapshotScopeError`, S4); an aggregate anchor is
-    written only under the live epoch (S5); denials are recorded after the reads (S6); the editor finishes outside its catch (S7);
-    a transaction of its own takes the page's turn, one connection per request (S8); a loading release is awaited outside the
-    snapshot (S9). Each has a test in `read-snapshot.test.ts` or `surface-data-binding.test.ts`.
+10. Fix round and fix read (`3ab5853a^1..69b7adc1`, then `071c7796..ab5ab5e2`): invocations and their routing run outside the
+    page's snapshot and turn, every write-path decision live (S1, read 4); a Confirm stopped by a policy change offers the
+    session's own retry (S2, read 3); moved policy rows bump both scopes in canonical order (0030, 0031); one scope per page
+    (S4); the anchor holds `lock_current_policy_epoch` (FOR SHARE) to commit (S5, read 2); denials commit on their own pool
+    before the answer, and an unrecorded one fails the page (read 1); the editor finishes outside its catch (S7); one
+    connection per request (S8, S9). Each test was shown red on the reverted code. 11. Queue counts: the home launcher's first
+    three tiles at the top of every page's sidebar, read in its snapshot (`queueCounts(counts)`, LOOK-1's markup).
 
 ## Decisions (one line each)
 
@@ -76,5 +77,4 @@ start` serves the same app compiled. `curl -sIL 'http://127.0.0.1:4174/?surface=
 
 ## Filed
 
-- Confirm's 9 write-path transactions (live re-authorizations, executor reads) stay; the one-statement batched count is filed.
-- Binding parses (49-100 a page) are per request view (LOOP-1's memo); the compiled start does not serve Customize.
+- Filed: one-statement batched queue counts; binding parses per request view (LOOP-1); Customize not on the compiled start.
