@@ -2079,9 +2079,7 @@ export async function submitCompositionAction(
         `<section class="composition-task-resume" data-task-resume hidden><div><strong>${h(session.action.label)}</strong><span>Closing dismisses the dialog; it does not cancel submitted work.</span></div><button type="button" data-task-open>${phase === 'result' || phase === 'recovery' ? 'View task outcome' : 'Continue task'}</button><a href="${h(renderData.url)}">Refresh record</a></section><dialog open id="composition-task" class="composition-task-dialog" data-composition-task data-task-fallback="${h(dialogPolicy.fallback)}" data-task-phase="${phase}" aria-labelledby="composition-task-heading"><header class="composition-task-header"><div><p>${h(title)}${context ? ` · ${h(context)}` : ''}</p><h2 id="composition-task-heading" data-task-heading tabindex="-1"${phase === 'entry' ? '' : ' data-task-initial-focus'}>${h(session.action.label)}</h2><span class="muted">${phase === 'entry' ? '1 · Enter details' : phase === 'review' ? '2 · Review and confirm' : phase === 'result' ? '3 · Result' : 'Outcome and recovery'}</span></div><button type="button" class="secondary-action" data-task-close hidden aria-label="Close task">×</button></header><div class="composition-task-body">${taskTransportError}${taskPolicy && phase === 'entry' ? renderTaskSummary(renderData, taskPolicy) : ''}${!taskPolicy && selection ? `<section class="composition-task-context" aria-label="Current selection">${selection}</section>` : ''}${html()}${taskPolicy && selection ? `<details class="composition-task-support"><summary>Supporting details</summary>${selection}</details>` : ''}</div></dialog>`,
         renderData,
         200,
-        outcome
-          ? { inline: Boolean(session.action.rows?.fillLabel), html: outcome() }
-          : undefined,
+        outcome ? { inline: true, html: outcome() } : undefined,
       );
     }
     return renderTask(
@@ -2826,8 +2824,8 @@ export async function submitCompositionAction(
       ? current.action.label
       : (current.action.presentation?.task?.confirmation.reviewLabel ??
         `Review ${current.action.label}`);
-    const liveReview = !direct && taskRowsDeclared?.fillLabel;
-    return `${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}" novalidate${liveReview ? ' data-task-live-review' : ''}>${hidden}${taskRowsDeclared?.fillLabel ? `<button type="submit" class="sr-only" name="taskStage" value="${stage}" tabindex="-1" aria-hidden="true" data-task-default></button>` : ''}${controls.join('')}${rows}<section class="composition-task-after" aria-label="After you post"><p class="eyebrow">After you post</p><p class="composition-task-consequence">${h(current.action.description)}</p></section><footer class="composition-task-footer"><a class="secondary-action" href="${h(url)}">Cancel</a><button name="taskStage" value="${stage}">${h(label)}</button></footer></form>${liveReview ? '<section data-task-inline-review hidden aria-label="Review and confirm"></section>' : ''}`;
+    const liveReview = !direct;
+    return `${error ? `<div data-task-input-error>${compositionMessage('COMPOSITION_INPUT_INVALID', 'alert')}</div>` : ''}<form class="composition-inputs" method="post" action="${h(url)}" novalidate${liveReview ? ' data-task-live-review' : ''}>${hidden}${taskRowsDeclared?.fillLabel ? `<button type="submit" class="sr-only" name="taskStage" value="${stage}" tabindex="-1" aria-hidden="true" data-task-default></button>` : ''}${controls.join('')}${rows}<section class="composition-task-after" aria-label="After you post"><p class="eyebrow">After you post</p><p class="composition-task-consequence">${h(current.action.description)}</p></section><footer class="composition-task-footer"><a class="secondary-action" href="${h(url)}">Cancel</a><button name="taskStage" value="${stage}">${h(label)}</button></footer></form>${liveReview ? '<section data-task-inline-review hidden aria-label="Review and confirm"></section>' : ''}`;
   });
 }
 

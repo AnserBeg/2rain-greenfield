@@ -1,3 +1,4 @@
+import { returnToRecord, reviewTask } from './complete-task.js';
 import { test, expect, type Page } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -194,18 +195,14 @@ test('an order page names its short lines and its progress, receives a truck of 
     await dialog
       .getByLabel('Reason', { exact: true })
       .fill('Delivered to the wrong dock');
-    await dialog
-      .getByRole('button', { name: 'Review Reverse receipt', exact: true })
-      .click();
+    await reviewTask(dialog, 'Review Reverse receipt');
     await dialog
       .getByRole('button', { name: 'Confirm Reverse receipt', exact: true })
       .click();
     await expect(page.getByRole('status').first()).toContainText(
       'Reverse receipt: done',
     );
-    await page
-      .getByRole('link', { name: 'Back to order', exact: true })
-      .click();
+    await returnToRecord(page);
     for (const line of scenario.delivered.lines)
       await expect(
         row('purchasing_lines', line).locator(

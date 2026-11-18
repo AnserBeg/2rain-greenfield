@@ -1,3 +1,4 @@
+import { returnToRecord, reviewTask } from './complete-task.js';
 import { test, expect } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -109,6 +110,7 @@ for (const javaScriptEnabled of [true, false]) {
         ).toBe(javaScriptEnabled);
         const entryToken = await task()
           .locator('[name=taskToken]')
+          .first()
           .inputValue();
         if (javaScriptEnabled) {
           await expect(
@@ -121,9 +123,9 @@ for (const javaScriptEnabled of [true, false]) {
           ).toBeFocused();
           await page.keyboard.press('Enter');
           await expect(task()).toBeVisible();
-          expect(await task().locator('[name=taskToken]').inputValue()).toBe(
-            entryToken,
-          );
+          expect(
+            await task().locator('[name=taskToken]').first().inputValue(),
+          ).toBe(entryToken);
         }
         await capture(
           'reserve-entry',
@@ -148,10 +150,7 @@ for (const javaScriptEnabled of [true, false]) {
           '71000000-0000-4000-8000-000000000021',
         );
         await page.getByLabel(/^Quantity to (?:reserve|ship)$/).fill('8');
-        await page
-          .getByRole('button', { name: 'Review reservation', exact: true })
-          .focus();
-        await page.keyboard.press('Enter');
+        await reviewTask(task(), 'Review reservation');
         await expect(
           page.getByRole('button', {
             name: 'Confirm reservation',
@@ -163,7 +162,15 @@ for (const javaScriptEnabled of [true, false]) {
           .locator('[name=preparedId]')
           .inputValue();
         if (javaScriptEnabled) {
-          await expect(task().locator('[data-task-heading]')).toBeFocused();
+          await expect(
+            page.getByLabel(/^Quantity to (?:reserve|ship)$/),
+          ).toBeFocused();
+          await expect(
+            page.getByLabel(/^Quantity to (?:reserve|ship)$/),
+          ).not.toHaveAttribute('aria-invalid', 'true');
+          await page
+            .getByRole('button', { name: 'Close task', exact: true })
+            .focus();
           await page.keyboard.press('Shift+Tab');
           expect(
             await page.evaluate(
@@ -186,17 +193,23 @@ for (const javaScriptEnabled of [true, false]) {
           expect(await task().locator('[name=preparedId]').inputValue()).toBe(
             preparedId,
           );
-          expect(await task().locator('[name=taskToken]').inputValue()).toBe(
-            entryToken,
-          );
+          expect(
+            await task().locator('[name=taskToken]').first().inputValue(),
+          ).toBe(entryToken);
         }
         // Forged confirmation is observed through the real route and unchanged visible stock.
-        await page
-          .getByRole('button', { name: 'Edit inputs', exact: true })
-          .click();
-        await page
-          .getByRole('button', { name: 'Review reservation', exact: true })
-          .click();
+        if (javaScriptEnabled) {
+          await page.getByLabel(/^Quantity to (?:reserve|ship)$/).fill('7');
+          await page.getByLabel(/^Quantity to (?:reserve|ship)$/).fill('8');
+        } else {
+          await page
+            .getByRole('button', { name: 'Edit inputs', exact: true })
+            .click();
+        }
+        await reviewTask(
+          page.locator('[data-composition-task]'),
+          'Review reservation',
+        );
         const replacementId = await task()
           .locator('[name=preparedId]')
           .inputValue();
@@ -229,23 +242,15 @@ for (const javaScriptEnabled of [true, false]) {
         await page
           .getByRole('button', { name: 'Confirm reservation', exact: true })
           .click();
-        await expect(task()).toContainText('complete');
+        await expect(page.locator('[data-task-result]')).toContainText(
+          ': done',
+        );
         if (javaScriptEnabled) {
-          await page.keyboard.press('Escape');
-          await expect(task()).not.toBeVisible();
-          await expect(
-            page.getByRole('button', {
-              name: 'View task outcome',
-              exact: true,
-            }),
-          ).toBeFocused();
+          await expect(task()).toHaveCount(0);
+          await expect(page.locator('[data-task-result]')).toBeFocused();
           await expect(reservations()).toContainText('Calgary warehouse');
-          await page.keyboard.press('Enter');
-          await expect(task()).toContainText('complete');
         }
-        await page
-          .getByRole('link', { name: 'Back to order', exact: true })
-          .click();
+        await returnToRecord(page);
         const totals = async (expected: string[]) => {
           for (const [index, label] of [
             'On hand',
@@ -269,12 +274,10 @@ for (const javaScriptEnabled of [true, false]) {
         await page
           .getByLabel('Tracking or BOL number', { exact: true })
           .fill('PUR-META-5');
-        await page
-          .getByRole('button', {
-            name: 'Review shipment',
-            exact: true,
-          })
-          .click();
+        await reviewTask(
+          page.locator('[data-composition-task]'),
+          'Review shipment',
+        );
         await capture(
           'ship-review',
           'Review ship 5 EA from explicit reservation; not confirmed',
@@ -285,10 +288,10 @@ for (const javaScriptEnabled of [true, false]) {
             exact: true,
           })
           .click();
-        await expect(task()).toContainText('complete');
-        await page
-          .getByRole('link', { name: 'Back to order', exact: true })
-          .click();
+        await expect(page.locator('[data-task-result]')).toContainText(
+          ': done',
+        );
+        await returnToRecord(page);
         await totals(['5', '3', '2']);
         await capture(
           'partially-shipped',
@@ -315,9 +318,10 @@ for (const javaScriptEnabled of [true, false]) {
           'partial-ship-entry',
           'Entry ship 2 EA; selected reservation remaining 3 EA; not dispatched',
         );
-        await page
-          .getByRole('button', { name: 'Review shipment', exact: true })
-          .click();
+        await reviewTask(
+          page.locator('[data-composition-task]'),
+          'Review shipment',
+        );
         await expect(
           task().locator('.composition-task-confirmation'),
         ).toContainText('Ship 2 EA');
@@ -331,30 +335,26 @@ for (const javaScriptEnabled of [true, false]) {
           'partial-ship-review',
           'Review ship 2 EA; selected reservation remaining 3 EA; not confirmed',
         );
-        await page
-          .getByRole('link', { name: 'Back to order', exact: true })
-          .click();
+        await returnToRecord(page);
         await totals(['5', '3', '2']);
         await page.locator('.composition-context-overflow summary').click();
         await page
           .getByRole('button', { name: 'Release remainder', exact: true })
           .click();
-        await page
-          .getByRole('button', {
-            name: 'Review release',
-            exact: true,
-          })
-          .click();
+        await reviewTask(
+          page.locator('[data-composition-task]'),
+          'Review release',
+        );
         await page
           .getByRole('button', {
             name: 'Confirm release',
             exact: true,
           })
           .click();
-        await expect(task()).toContainText('complete');
-        await page
-          .getByRole('link', { name: 'Back to order', exact: true })
-          .click();
+        await expect(page.locator('[data-task-result]')).toContainText(
+          ': done',
+        );
+        await returnToRecord(page);
         await totals(['5', '0', '5']);
         await capture(
           'remainder-released',
@@ -426,9 +426,7 @@ for (const javaScriptEnabled of [true, false]) {
             () => document.documentElement.scrollWidth <= innerWidth,
           ),
         ).toBe(true);
-        await page
-          .getByRole('link', { name: 'Back to order', exact: true })
-          .click();
+        await returnToRecord(page);
         expect(new URL(page.url()).searchParams.get('record')).toBe(orderId);
       });
     });

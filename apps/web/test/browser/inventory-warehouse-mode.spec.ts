@@ -1,3 +1,4 @@
+import { reviewTask } from './complete-task.js';
 import { test, expect, type Page } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -312,9 +313,7 @@ async function command(
 ) {
   await page.getByRole('button', { name: label, exact: true }).click();
   await page.getByLabel(`${input} (UTC)`, { exact: true }).fill(value);
-  await page
-    .getByRole('button', { name: `Review ${label}`, exact: true })
-    .click();
+  await reviewTask(page.locator('[data-composition-task]'), `Review ${label}`);
   await expect(page.locator('.composition-reviewed-inputs')).toContainText(
     `${value.length === 16 ? `${value}:00` : value}.000Z`,
   );

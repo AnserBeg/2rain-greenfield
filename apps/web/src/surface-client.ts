@@ -96,6 +96,16 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
           }
           const preview = rendered.querySelector('#record-task-region [data-task-prepared]');
           if (preview) {
+            const errors = [...form.querySelectorAll('.field-error')];
+            const errorIds = new Set(errors.map(error => error.id).filter(Boolean));
+            for (const control of form.querySelectorAll('[aria-invalid], [aria-describedby]')) {
+              control.removeAttribute('aria-invalid');
+              const described = (control.getAttribute('aria-describedby') || '').split(/\s+/).filter(id => id && !errorIds.has(id));
+              if (described.length) control.setAttribute('aria-describedby', described.join(' '));
+              else control.removeAttribute('aria-describedby');
+            }
+            errors.forEach(error => error.remove());
+            form.parentElement.querySelector('[data-task-input-error]')?.remove();
             preview.querySelector('button[value="edit"]')?.setAttribute('hidden', '');
             region.replaceChildren(preview);
             region.hidden = false;
@@ -109,9 +119,12 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
   };
 
   document.addEventListener('input', (event) => {
+    if (event.target instanceof HTMLSelectElement) return;
     scheduleReview(event.target.closest?.('form[data-task-live-review]'));
   });
   document.addEventListener('change', (event) => {
+    // Text controls already prepared on input; blur is not another edit.
+    if (!(event.target instanceof HTMLSelectElement)) return;
     scheduleReview(event.target.closest?.('form[data-task-live-review]'));
   });
 
@@ -175,6 +188,8 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
       submitting = false;
     }
   });
+  document.body.setAttribute('data-task-stages-enhanced', '');
+  scheduleReview(document.querySelector('form[data-task-live-review]'));
 })();
 (() => {
   // ADR-0036 behaviour 7: draft-editor reference fields answered in place.

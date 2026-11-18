@@ -9,6 +9,7 @@ import {
   type Request,
 } from '@playwright/test';
 import type pg from 'pg';
+import { reviewTask } from './complete-task.js';
 
 import { parseServerTiming } from '../../../../packages/postgres-provider/src/request-work-meter.js';
 
@@ -583,7 +584,6 @@ export async function receiveInFull(card: LoopScorecard): Promise<void> {
         f.unitCost,
       );
     },
-    inline: true,
     confirm: `Receive ${f.purchased}`,
   });
   await expect(cell(page, 'purchasing_lines', 'Received')).toHaveText(
@@ -641,7 +641,6 @@ export async function ship(card: LoopScorecard): Promise<void> {
     async enter() {
       await chooseReference(card, 'Ship from', f.location[1]);
     },
-    inline: true,
     confirm: `Ship ${f.sold}`,
   });
   await expect(cell(page, 'fulfillment_lines', 'Shipped')).toHaveText(f.sold);
@@ -787,7 +786,6 @@ async function runTask(
     readonly enter?: () => Promise<void>;
     readonly review?: string;
     readonly confirm?: string;
-    readonly inline?: boolean;
   } = {},
 ): Promise<void> {
   const { page } = card;
@@ -796,22 +794,19 @@ async function runTask(
   const dialog = page.locator('[data-composition-task]');
   await expect(dialog).toBeVisible();
   await stages.enter?.();
-  const review = dialog.getByRole('button', {
-    name: stages.review ?? `Review ${label}`,
-    exact: true,
-  });
-  if (!stages.inline && (await review.isVisible())) await card.click(review);
+  await reviewTask(dialog, stages.review ?? `Review ${label}`, (target) =>
+    card.click(target),
+  );
   await card.click(
     dialog.getByRole('button', {
       name: stages.confirm ?? `Confirm ${label}`,
       exact: true,
     }),
   );
-  if (stages.inline) {
-    await expect(
-      page.getByRole('status').filter({ hasText: `${label}: done` }),
-    ).toBeVisible();
-  } else {
+  await expect(page.locator('[data-task-result]')).toContainText(
+    `${label}: done`,
+  );
+  if (await dialog.count()) {
     await expect(dialog).toHaveAttribute('data-task-phase', 'result');
     // Back to the record, where the next step is offered.
     await card.click(dialog.getByRole('link', { name: /^Back to/u }));

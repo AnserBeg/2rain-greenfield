@@ -1,4 +1,4 @@
-import { completeTask } from './complete-task.js';
+import { completeTask, reviewTask } from './complete-task.js';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
@@ -206,10 +206,10 @@ async function journey(
   await page
     .getByRole('button', { name: /^(?:Next action: )?Place order$/u })
     .click();
-  await page
-    .getByRole('dialog')
-    .getByRole('button', { name: 'Review Place order', exact: true })
-    .click();
+  await reviewTask(
+    page.locator('[data-composition-task]'),
+    'Review Place order',
+  );
   await page
     .getByRole('dialog')
     .getByRole('button', { name: 'Confirm Place order', exact: true })

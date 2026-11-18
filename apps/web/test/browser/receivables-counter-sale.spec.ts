@@ -1,4 +1,5 @@
 import { completeTask } from './complete-task.js';
+import { LoopScorecard } from './loop-scorecard.js';
 import { test, expect, type Page } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -54,18 +55,27 @@ test('a counter sale confirms, ships, invoices and takes payment in one Task, an
     const action = page.getByRole('button', { name: label, exact: true });
     if (!(await action.isVisible()))
       await page.locator('.composition-record-actions > summary').click();
-    await action.click();
-    await expect(dialog.locator('[data-task-row]')).toHaveCount(2);
-    await dialog
-      .getByLabel('Ship from')
-      .selectOption({ label: 'Calgary warehouse' });
-    await dialog.getByLabel('Paid by').selectOption({ label: 'Cheque' });
-    await dialog.getByLabel('Reference (cheque number)').fill('CHQ-1042');
+    const card = new LoopScorecard(page);
+    card.begin('Counter sale posting');
+    const posting = card.interactionMark();
+    await card.click(action);
+    await expect(
+      dialog.locator('[data-task-rows] [data-task-row]'),
+    ).toHaveCount(2);
+    await card.choose(dialog.getByLabel('Ship from'), {
+      label: 'Calgary warehouse',
+    });
+    await card.choose(dialog.getByLabel('Paid by'), { label: 'Cheque' });
+    await card.fill(dialog.getByLabel('Reference (cheque number)'), 'CHQ-1042');
     await capture(page, testInfo, 'counter-sale-task');
-    await completeTask(dialog, label);
+    await completeTask(dialog, label, (target) => card.click(target));
     await expect(page.getByRole('status').first()).toContainText(
       `${label}: done`,
     );
+    await card.recordPosting(label, posting);
+    await card.end('done');
+    expect(card.postings[0]!.clicks).toBeLessThanOrEqual(4);
+    expect(card.postings[0]!.loads).toBeLessThanOrEqual(2);
 
     // The order is confirmed and marked; it shipped and is paid in full.
     await page.goto(orderPage.toString());

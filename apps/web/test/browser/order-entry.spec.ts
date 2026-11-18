@@ -1,3 +1,4 @@
+import { returnToRecord, reviewTask } from './complete-task.js';
 import { test, expect } from '@playwright/test';
 import type { Page, Request } from '@playwright/test';
 import { spawn } from 'node:child_process';
@@ -212,10 +213,11 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     await page
       .getByLabel('Stock location')
       .selectOption({ label: 'Calgary warehouse' });
-    await page
-      .getByRole('button', { name: 'Review reservation', exact: true })
-      .click();
-    const token = await task().locator('[name=taskToken]').inputValue();
+    await reviewTask(
+      page.locator('[data-composition-task]'),
+      'Review reservation',
+    );
+    const token = await task().locator('[name=taskToken]').first().inputValue();
     const prepared = await task().locator('[name=preparedId]').inputValue();
     const preparedUrl = page.url();
     const preparedReplay = await task()
@@ -249,7 +251,9 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     );
     expect(orderScope).toBeTruthy();
     expect(orderScope).not.toBe(second.companyId);
-    expect(await task().locator('[name=taskToken]').inputValue()).toBe(token);
+    expect(await task().locator('[name=taskToken]').first().inputValue()).toBe(
+      token,
+    );
     expect(await task().locator('[name=preparedId]').inputValue()).toBe(
       prepared,
     );
@@ -257,10 +261,8 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     await page
       .getByRole('button', { name: 'Confirm reservation', exact: true })
       .click();
-    await expect(task()).toContainText('complete');
-    await page
-      .getByRole('link', { name: 'Back to order', exact: true })
-      .click();
+    await expect(page.locator('[data-task-result]')).toContainText(': done');
+    await returnToRecord(page);
     await measure('reserved');
     await capture('sales-reserved');
     await reservations()
@@ -280,16 +282,15 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     await page
       .getByLabel('Tracking or BOL number', { exact: true })
       .fill('PUR-4422-19');
-    await page
-      .getByRole('button', { name: 'Review shipment', exact: true })
-      .click();
+    await reviewTask(
+      page.locator('[data-composition-task]'),
+      'Review shipment',
+    );
     await page
       .getByRole('button', { name: 'Confirm shipment', exact: true })
       .click();
-    await expect(task()).toContainText('complete');
-    await page
-      .getByRole('link', { name: 'Back to order', exact: true })
-      .click();
+    await expect(page.locator('[data-task-result]')).toContainText(': done');
+    await returnToRecord(page);
     await expect(page.getByText('PUR-4422-19').first()).toBeVisible();
     await measure('shipped');
     await capture('sales-partial-shipment');
@@ -297,16 +298,12 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     await page
       .getByRole('button', { name: 'Release remainder', exact: true })
       .click();
-    await page
-      .getByRole('button', { name: 'Review release', exact: true })
-      .click();
+    await reviewTask(page.locator('[data-composition-task]'), 'Review release');
     await page
       .getByRole('button', { name: 'Confirm release', exact: true })
       .click();
-    await expect(task()).toContainText('complete');
-    await page
-      .getByRole('link', { name: 'Back to order', exact: true })
-      .click();
+    await expect(page.locator('[data-task-result]')).toContainText(': done');
+    await returnToRecord(page);
     await measure('released');
     await capture('sales-remainder-released');
     await page.getByRole('link', { name: 'Open packing', exact: true }).click();
@@ -322,10 +319,10 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     await page
       .getByRole('button', { name: /^(?:Next action: )?Place order$/u })
       .click();
-    await page
-      .getByRole('dialog')
-      .getByRole('button', { name: 'Review Place order', exact: true })
-      .click();
+    await reviewTask(
+      page.locator('[data-composition-task]'),
+      'Review Place order',
+    );
     await page
       .getByRole('dialog')
       .getByRole('button', { name: 'Confirm Place order', exact: true })
@@ -358,12 +355,10 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
     await expect(
       page.getByRole('combobox', { name: 'Actual cost currency', exact: true }),
     ).toHaveValue('CAD');
-    await page
-      .getByRole('button', {
-        name: 'Review Receive this line',
-        exact: true,
-      })
-      .click();
+    await reviewTask(
+      page.locator('[data-composition-task]'),
+      'Review Receive this line',
+    );
     await capture('purchase-receive-review');
     await page
       .getByRole('button', {
@@ -371,13 +366,11 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
         exact: true,
       })
       .click();
-    await expect(task()).toContainText('complete');
+    await expect(page.locator('[data-task-result]')).toContainText(': done');
     await expect(task().locator('[data-task-result]')).toContainText(
       'Receive this line: done',
     );
-    await page
-      .getByRole('link', { name: 'Back to order', exact: true })
-      .click();
+    await returnToRecord(page);
     await measure('received');
     await capture('purchase-received');
     await measure('revoke_sales_read');
