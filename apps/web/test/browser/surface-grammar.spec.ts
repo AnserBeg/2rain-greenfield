@@ -34,6 +34,7 @@ import {
 } from '../../../../test/fixtures/g2/surface-grammar/definitions.js';
 import { createSurfaceRuntimeServer } from '../../src/app-server.js';
 import { demoEntry } from '../helpers.js';
+import { closeServer } from './close-server.js';
 
 type SurfaceArchetype = (typeof SURFACE_ARCHETYPES)[number];
 
@@ -111,10 +112,10 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await Promise.all([
-    close(server),
-    close(incompleteServer),
-    close(navigationBudgetServer),
-    close(invalidNavigationServer),
+    closeServer(server),
+    closeServer(incompleteServer),
+    closeServer(navigationBudgetServer),
+    closeServer(invalidNavigationServer),
   ]);
   rmSync(fixtureDirectory, { force: true, recursive: true });
 });
@@ -1134,12 +1135,6 @@ async function listen(target: Server): Promise<string> {
     throw new Error('surface grammar server did not bind a TCP address');
   }
   return `http://127.0.0.1:${address.port}`;
-}
-
-async function close(target: Server): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    target.close((error) => (error ? reject(error) : resolve()));
-  });
 }
 
 /**

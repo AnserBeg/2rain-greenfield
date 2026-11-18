@@ -26,6 +26,10 @@ const FULL_COMPILE_BUDGET_MILLISECONDS = 5_000;
 const FULL_COMPILE_SAMPLE_COUNT = 5;
 const FULL_COMPILE_PROCESS_ARGUMENT = '--full-compile-budget-process';
 const MINIMUM_CPU_IDLE_FRACTION = 0.9;
+// CI-only carve-out (lanes.md): an INDETERMINATE reading may be re-measured
+// in-job after a settle wait; the floor and the bound never move.
+const CI_MAXIMUM_MEASUREMENT_ATTEMPTS = 3;
+const CI_SETTLE_MILLISECONDS = 25_000;
 const CPU_AVAILABILITY_SAMPLE_MILLISECONDS = 300;
 const isFullCompileProcess = process.argv.includes(
   FULL_COMPILE_PROCESS_ARGUMENT,
@@ -394,7 +398,7 @@ if (isFullCompileProcess) {
 
 if (!isFullCompileProcess) {
   test('cold full compile stays within the numeric v0 maximum-field budget', async () => {
-    const measurement = await measureCompileBudget({
+    const measurement = await measureCompileBudgetWithSettleRetry({
       ...defaultOptions,
       collectSamples: () =>
         collectFreshProcessSamples(
@@ -426,7 +430,7 @@ if (!isFullCompileProcess) {
       0,
     );
     assert.ok(stagedOutputBytes <= DEFAULT_COMPILER_LIMITS.maximumOutputBytes);
-    const measurement = await measureCompileBudget({
+    const measurement = await measureCompileBudgetWithSettleRetry({
       ...defaultOptions,
       collectSamples: () =>
         collectFreshProcessSamples(
@@ -473,6 +477,71 @@ if (!isFullCompileProcess) {
     assert.throws(
       () => requireMeasuredWithinBudget(measurement),
       /COMPILE_BUDGET_INDETERMINATE/u,
+    );
+  });
+
+  test('CI re-measures only an indeterminate budget reading, up to three attempts', async () => {
+    const run = async (
+      idleReadings: readonly number[],
+      wallMilliseconds: number,
+    ) => {
+      let readIndex = 0;
+      let collected = 0;
+      let settled = 0;
+      const logs: string[] = [];
+      const measurement = await measureCompileBudgetWithSettleRetry(
+        {
+          ...defaultOptions,
+          collectSamples: async () => {
+            collected += 1;
+            return Array.from({ length: FULL_COMPILE_SAMPLE_COUNT }, (_, i) =>
+              controlledSample(i + 1, wallMilliseconds),
+            );
+          },
+          readCpuIdleFraction: async () => idleReadings[readIndex++]!,
+        },
+        {
+          maximumAttempts: 3,
+          settle: async () => {
+            settled += 1;
+          },
+          log: (line) => logs.push(line),
+        },
+      );
+      return { collected, logs, measurement, reads: readIndex, settled };
+    };
+    const low = MINIMUM_CPU_IDLE_FRACTION - 0.1;
+    const high = MINIMUM_CPU_IDLE_FRACTION + 0.05;
+
+    const recovered = await run([low, low, high], 1_000);
+    assert.equal(recovered.reads, 3);
+    assert.equal(recovered.settled, 2);
+    assert.equal(recovered.collected, 1);
+    assert.equal(
+      requireMeasuredWithinBudget(recovered.measurement).status,
+      'measured',
+    );
+    assert.equal(recovered.logs.length, 3);
+
+    const exhausted = await run([low, low, low, high], 1_000);
+    assert.equal(exhausted.reads, 3);
+    assert.equal(exhausted.settled, 2);
+    assert.equal(exhausted.collected, 0);
+    assert.throws(
+      () => requireMeasuredWithinBudget(exhausted.measurement),
+      /COMPILE_BUDGET_INDETERMINATE/u,
+    );
+
+    const over = await run(
+      [high, high, high],
+      FULL_COMPILE_BUDGET_MILLISECONDS + 100,
+    );
+    assert.equal(over.reads, 1);
+    assert.equal(over.settled, 0);
+    assert.equal(over.collected, 1);
+    assert.throws(
+      () => requireMeasuredWithinBudget(over.measurement),
+      /COMPILE_BUDGET_EXCEEDED/u,
     );
   });
 
@@ -596,6 +665,42 @@ function measureFirstInvocationInFreshProcess(
     });
     child.send({ normalizedDefinitionBytes } satisfies CompileProcessInput);
   });
+}
+
+async function measureCompileBudgetWithSettleRetry(
+  options: CompileBudgetOptions,
+  retry: {
+    readonly maximumAttempts: number;
+    readonly settle: () => Promise<void>;
+    readonly log: (line: string) => void;
+  } = {
+    maximumAttempts: process.env['CI'] ? CI_MAXIMUM_MEASUREMENT_ATTEMPTS : 1,
+    settle: () => delay(CI_SETTLE_MILLISECONDS),
+    log: (line) => process.stdout.write(line),
+  },
+): Promise<CompileBudgetMeasurement> {
+  let measurement = await measureCompileBudget(options);
+  for (let attempt = 1; ; attempt += 1) {
+    if (measurement.status === 'indeterminate') {
+      retry.log(
+        `compile-budget-attempt: attempt=${attempt}/${retry.maximumAttempts} status=indeterminate cpu_idle_pct=${(measurement.observedCpuIdleFraction * 100).toFixed(1)} required_pct=${(measurement.minimumCpuIdleFraction * 100).toFixed(1)}\n`,
+      );
+    } else {
+      retry.log(
+        `compile-budget-attempt: attempt=${attempt}/${retry.maximumAttempts} status=measured cpu_idle_pct=${(measurement.beforeCpuIdleFraction * 100).toFixed(1)} best_wall_ms=${measurement.bestSample.wallMilliseconds.toFixed(1)} best_cpu_ms=${measurement.bestSample.cpuMilliseconds.toFixed(1)}\n`,
+      );
+    }
+    // Only INDETERMINATE is re-measured; a measured result (including an
+    // over-budget one) is returned at once for the caller to judge.
+    if (
+      measurement.status !== 'indeterminate' ||
+      attempt >= retry.maximumAttempts
+    ) {
+      return measurement;
+    }
+    await retry.settle();
+    measurement = await measureCompileBudget(options);
+  }
 }
 
 async function measureCompileBudget(

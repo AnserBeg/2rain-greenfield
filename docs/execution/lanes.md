@@ -561,6 +561,8 @@ AGENTS.md §6 requires the matrix green at the integrated SHA; indeterminate is 
 measurement that did not happen. Ruled 2026-08-08, on a lane that asked rather than
 retrying — which was the right call.
 
+**CI carve-out — orchestrator, 2026-11-18, under the owner's standing accept-recommendations rule (CI-FLAKE-2).** In the GitHub CI job only, an INDETERMINATE reading may be re-measured in-job after a 25 s settle wait, up to 3 attempts in total, each attempt's idle and timing logged; three indeterminates fail exactly as before. Why: the no-retry rule exists because a local retry costs a full matrix (about 16 min) and lands on other lanes' turns; validity was never the issue — a measurement taken at 90% idle or more is valid whenever taken, and an in-job re-measure on a runner costs seconds and touches no one. The 90% floor, the 5,000 ms bound, the immediate fail on COMPILE_BUDGET_EXCEEDED and "may not freeze indeterminate" are unchanged; local matrix runs keep the no-retry rule below.
+
 **Do not retry into a loaded machine.** Report the idle figure and the runtime
 count, and let the orchestrator quiesce. Retrying is a coin flip on other people's
 turn boundaries, and each flip costs a full matrix.

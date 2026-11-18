@@ -520,10 +520,13 @@ td[data-cell-role=primary]>.composition-cell-secondary>span .composition-cell-la
 td[data-cell-role=primary]>.composition-cell-secondary{font-family:var(--f-mono);font-size:11px;color:var(--muted)}
 td[data-cell-role=primary]>.composition-cell-secondary>span+span::before{content:"· ";color:var(--faint)}
 .composition-cell-details{margin-top:4px}
-.composition-cell-details>summary{display:inline;color:var(--muted);font-size:11px;cursor:pointer}
+.composition-cell-details>summary{display:inline-flex;align-items:center;gap:4px;color:var(--muted);font-size:11px;font-weight:400;cursor:pointer;list-style:none}
+.composition-cell-details>summary::-webkit-details-marker{display:none}
+.composition-cell-details>summary::before{content:"›";transition:transform var(--motion-duration) var(--motion-easing)}
+.composition-cell-details[open]>summary::before{transform:rotate(90deg)}
 .composition-cell-details[open]>.composition-cell-secondary{margin-top:4px}
 [data-task-resume][hidden],body:has(dialog.composition-task-dialog[open]) [data-task-resume]{display:none!important}
-.composition-collection[data-resolution=empty]:not([data-composition-rail]){display:none!important}
+.composition-collection[data-resolution=empty]:not([data-composition-rail]),.data-panel[data-composition-dataset][data-resolution=empty]:not([data-composition-rail]){display:none!important}
 td[data-cell-role=actions] a:not([class]){color:var(--muted);font-size:12px}
 /* One document sheet (LOOK-1 round 3): the facts, the line datasets and the
    details join into one bordered sheet divided by rules. */

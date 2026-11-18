@@ -69,6 +69,7 @@ import {
   SURFACE_MESSAGE_CATALOG,
   type SurfaceMessageCode,
 } from '../../src/message-catalog.js';
+import { closeServer } from './close-server.js';
 
 const tenantId = 'a1000000-0000-4000-8000-000000000001';
 const environmentId = 'a2000000-0000-4000-8000-000000000002';
@@ -281,24 +282,14 @@ test('authored business labels survive while field prefixes follow canonical ent
     ).toBeVisible();
     await expect(page.locator('dt').getByText('Master name')).toHaveCount(0);
   } finally {
-    await new Promise<void>((resolve, reject) => {
-      labelServer.close((error) => (error ? reject(error) : resolve()));
-    });
+    await closeServer(labelServer);
   }
 });
 
 test.afterAll(async () => {
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => (error ? reject(error) : resolve()));
-  });
-  await new Promise<void>((resolve, reject) => {
-    fieldKindServer.close((error) => (error ? reject(error) : resolve()));
-  });
-  await new Promise<void>((resolve, reject) => {
-    adoptedFieldKindServer.close((error) =>
-      error ? reject(error) : resolve(),
-    );
-  });
+  await closeServer(server);
+  await closeServer(fieldKindServer);
+  await closeServer(adoptedFieldKindServer);
 });
 
 /**
@@ -1546,9 +1537,7 @@ test('compiler-valid one-slot Record surfaces do not synthesize mutation control
     await expect(page.getByRole('status')).toContainText('Archive complete');
     await expect(page.getByText('Archived · revision 2')).toBeVisible();
   } finally {
-    await new Promise<void>((resolve, reject) => {
-      legacyServer.close((error) => (error ? reject(error) : resolve()));
-    });
+    await closeServer(legacyServer);
   }
 });
 
@@ -1615,9 +1604,7 @@ test('a failed data slot stays inline while ready siblings render without JavaSc
     await expectClosedSlotStates(page);
   } finally {
     await context.close();
-    await new Promise<void>((resolve, reject) => {
-      failingServer.close((error) => (error ? reject(error) : resolve()));
-    });
+    await closeServer(failingServer);
   }
 });
 
@@ -1657,9 +1644,7 @@ test('an empty data slot is observably distinct from a failed slot', async ({
     ).toHaveCount(0);
     await expectClosedSlotStates(page);
   } finally {
-    await new Promise<void>((resolve, reject) => {
-      emptyServer.close((error) => (error ? reject(error) : resolve()));
-    });
+    await closeServer(emptyServer);
   }
 });
 
@@ -1727,9 +1712,7 @@ for (const unsupportedSlot of ['activity', 'childTables'] as const) {
       ]);
       await expect(page.getByRole('status')).toContainText('Create complete');
     } finally {
-      await new Promise<void>((resolve, reject) => {
-        slotServer.close((error) => (error ? reject(error) : resolve()));
-      });
+      await closeServer(slotServer);
     }
   });
 }
@@ -1827,9 +1810,7 @@ test('invalid binding, unsupported query, and unavailable runtime view remain di
       unsupportedServer,
       unavailableServer,
     ]) {
-      await new Promise<void>((resolve, reject) => {
-        target.close((error) => (error ? reject(error) : resolve()));
-      });
+      await closeServer(target);
     }
   }
 });
@@ -1941,9 +1922,7 @@ test('a record command bar renders every granted command as its own operable con
       [[commandOperationId('release')], [commandOperationId('cancel')]],
     );
   } finally {
-    await new Promise<void>((resolve, reject) => {
-      commandServer.close((error) => (error ? reject(error) : resolve()));
-    });
+    await closeServer(commandServer);
   }
 });
 
@@ -1984,9 +1963,7 @@ test('an intent rendered by one control still refuses a second operation by name
       page.locator('[data-message="INVALID_SURFACE_BINDING"]'),
     ).toBeVisible();
   } finally {
-    await new Promise<void>((resolve, reject) => {
-      duplicateServer.close((error) => (error ? reject(error) : resolve()));
-    });
+    await closeServer(duplicateServer);
   }
 });
 
@@ -2073,9 +2050,7 @@ test('a posted operation id outside the surface binding is refused', async ({
       [commandOperationId('release')],
     );
   } finally {
-    await new Promise<void>((resolve, reject) => {
-      authorityServer.close((error) => (error ? reject(error) : resolve()));
-    });
+    await closeServer(authorityServer);
   }
 });
 
