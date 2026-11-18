@@ -9,11 +9,11 @@ Slice 0 touches zero Critical paths. [PR #88](https://github.com/AnserBeg/2rain-
 ## Slices
 
 0. Spike — [test it yourself](../evidence/interact-1-spike.md#test-it-yourself).
-1. The task-stage draft and ADR amendment are committed locally. Integration is pending.
+1–5. All implementation drafts are committed locally; combined typecheck, focused language tests, release baseline generation and coverage derivation pass. Integration is pending.
 
 ## Gates
 
-- Spike `ce29b09e` passed every executing job, including both measured browser paths. Executed-file reachability is queued. [CI 44368685795](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44368685795)
+- Spike `ce29b09e` and refreshed `776a714f` passed full CI, including the measured browser paths and reachability. [CI 44368685795](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44368685795), [CI 44379658761](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44379658761).
 
 ```record-claim
 {
