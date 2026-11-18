@@ -379,8 +379,10 @@ async function seedComposedApplication(
       // The distributor profile names its company (LOOK-1 round 2): one
       // update of the provisioned default company at its first revision,
       // replayed by its key when the server restarts on the same database.
+      // Never fatal: a company someone renamed since keeps its name, and the
+      // server still starts.
       if (profile === 'distributor') {
-        const renamed = await runtime.operationGateway.invoke(
+        await runtime.operationGateway.invoke(
           view,
           {
             confirmationGrant: null,
@@ -398,9 +400,6 @@ async function seedComposedApplication(
           },
           runtime.operationMediation.issueInvocation(view, 'UI'),
         );
-        if (renamed.outcome !== 'succeeded') {
-          throw new Error('demo seed could not name the company');
-        }
       }
       return Object.freeze(receipts);
     },

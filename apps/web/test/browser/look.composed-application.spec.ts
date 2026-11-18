@@ -120,6 +120,12 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
                   page.locator('[data-composition-task]'),
                 ).toBeVisible();
               }
+              // The record's menu entry -- Custom › Equipment -- in view.
+              if (screen === 'record' && viewport.width > 900)
+                await page
+                  .getByRole('navigation', { name: 'Release navigation' })
+                  .getByRole('link', { name: 'Equipment', exact: true })
+                  .scrollIntoViewIfNeeded();
               // The picture first, so a red still leaves the evidence.
               await page.screenshot({
                 path: `${out}/app-${screen}-${String(viewport.width)}-${scheme}.png`,
