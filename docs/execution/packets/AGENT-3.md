@@ -28,7 +28,7 @@ development set's rules (tasks 11-34) are registered in `test/agent/dev-tasks.ts
 
 ## Decisions
 - Map: local names, fields without their type's prefix, `!` = needs confirmation, bound 60,000 characters (about 33,600); explicit
-  cache breakpoint on prompt + map, per-turn context in the user turn. Panel `assistant-panel.ts` (CSP-hash-pinned, text nodes only)
+  cache breakpoint on prompt + map, per-turn context in the user turn. Panel `assistant-panel.ts` (script CSP-hash-pinned, text nodes only; styles a content-hash stylesheet)
   + `assistant-endpoint.ts` at `/?assistant=ask|decide|stop|undo`; Customize screen's lazily opened service shared for the handoff.
 - Seam exception line in `ux-grammar` and the seam allow-list, as the Customize screen's. Slices 2-6 merge as one: shared files.
   Pin tripped: `meta-sales.spec.ts` counts the page's own scripts; the panel's is marked `data-assistant-script` and excluded.
@@ -67,7 +67,7 @@ tests run once locally (they found masters are not company-scoped, an archive's 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "AGENT-3",
-  "base": "c13f1308ef1c1be21abf8dfdb2f8a0ac19849765", "head": "92b643e1b1d2255ff95a320f1562434a838f6c63",
+  "base": "b7b8ba86520fa9294f6dfcdead2d4ab563f468e3", "head": "6f083d201dae35dc864ee1cbb95f211abf234c9e",
   "changedPaths": [
     ".agents/skills/ux-grammar/SKILL.md", "apps/api/src/agent-cli.ts", "apps/api/src/assistant-endpoint.ts", "apps/api/src/composition-root.ts", "apps/web/src/app-server.ts", "apps/web/src/assistant-panel.ts",
     "apps/web/test/browser/assistant-panel.composed-application.spec.ts", "apps/web/test/browser/meta-sales.spec.ts", "docs/execution/packets/AGENT-3.md", "package.json", "packages/dev-tooling/src/surface-runtime-seam.ts",
