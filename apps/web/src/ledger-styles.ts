@@ -462,6 +462,10 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 /* The rail is one column: it spans the sheet's rows, whose gap is each
    item's margin, so the rows it spans past the sheet's last add nothing. */
 .surface-grid:has(.composition-rail) .composition-rail{grid-column:2;grid-row:span 12}
+/* Beside the rail the sheet is narrower: its tables keep every column in
+   view with tighter cells and headers that may wrap. */
+.surface-grid:has(.composition-rail) .composition-collection .data-table-wrap :is(th,td){padding-inline:8px}
+.surface-grid:has(.composition-rail) .composition-collection .data-table-wrap th{white-space:normal}
 }
 /* A form's other fields wait behind More details; the summary names them
    quietly, on one line (LOOK-1 round 2). */
