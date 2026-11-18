@@ -78,7 +78,7 @@ test('inventory shipment relief and order/invoice margin remain at shipment cost
       (await recordActions.count()) &&
       (await recordActions.getAttribute('open')) === null
     )
-      await recordActions.locator('summary').click();
+      await recordActions.locator(':scope > summary').click();
     await page
       .getByRole('link', { name: 'Print invoice', exact: true })
       .click();

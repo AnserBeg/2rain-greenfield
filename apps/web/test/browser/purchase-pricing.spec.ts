@@ -68,19 +68,20 @@ test('a purchase order takes its supplier defaults, is discounted and taxed per 
     await expect(page).toHaveURL(/purchase_order_detail/u);
     const orderUrl = page.url();
     // 3 × 12.50 less 10% = 33.75; 5% = 1.6875 → 1.69; freight 25 + 1.25.
+    // One lines table (LOOK-1 round 2): the line's cost and amount are its
+    // own columns; its tax is one of the line's supporting details.
     const line = page
       .locator(
-        '[data-composition-dataset$="dataset.purchasing_priced_lines"] tbody tr',
+        '[data-composition-dataset$="dataset.purchasing_lines"] tbody tr',
       )
       .first();
     await expect(line.locator('td[data-column-label="Amount"]')).toHaveText(
       '33.75',
     );
-    await expect(line.locator('td[data-column-label="Tax"]')).toHaveText(
-      '1.69',
+    await expect(line.locator('td[data-column-label="Unit cost"]')).toHaveText(
+      '12.50',
     );
-    // A secondary column reads inside the line's product cell.
-    await expect(line).toContainText('Unit cost 12.50');
+    await expect(line).toContainText('Tax 1.69');
     const fact = (label: string) =>
       page
         .locator('.composition-header-facts div')

@@ -309,5 +309,5 @@ async function fixture(run: (url: string) => Promise<void>) {
 async function openRecordActions(target: Page): Promise<void> {
   const menu = target.locator('details.composition-record-actions');
   if ((await menu.count()) && (await menu.getAttribute('open')) === null)
-    await menu.locator('summary').click();
+    await menu.locator(':scope > summary').click();
 }
