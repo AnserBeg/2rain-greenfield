@@ -41,37 +41,52 @@ export const PAGE_BUDGET_NAMES = [
 export type PageBudgetName = (typeof PAGE_BUDGET_NAMES)[number];
 
 /**
- * Measured 2026-11-17 on CI at 801584cd/cc08817a (slice 1, before any change);
- * the sales order detail re-measured at d097ca9d after LOOP-1 slice 2 added
- * its record-payment action (+4 transactions), before the gate reached main.
+ * SPEED-1 slices 2-4 (2026-11-17): one read snapshot per page, request-scoped
+ * read decisions, no repeated work. Before: PO detail 169 transactions, 1,384
+ * statements, 135 policy reads, 153 repeats (CI 44185510253; the sales order
+ * detail 259 / 2,139 at d097ca9d after LOOP-1 slice 2). Catalog parse columns
+ * from LOOP-1's `catalogParseCount()`; a binding parse is at most one per
+ * surface the page binds (memoised per request view).
  */
 export const PAGE_BUDGETS: Readonly<Record<PageBudgetName, PageBudget>> =
   Object.freeze({
-    home: budget(51, 410, 41, 32),
-    'purchase order list': budget(107, 896, 84, 108),
-    'purchase order detail': budget(169, 1384, 135, 153),
-    'new purchase order': budget(29, 242, 22, 23),
-    'stock by item': budget(76, 586, 67, 62),
-    'sales order detail': budget(259, 2139, 207, 236),
-    'task: open': budget(393, 3237, 311, 417),
-    'task: review': budget(205, 1692, 161, 190),
-    'task: confirm': budget(217, 1879, 169, 204),
+    home: budget([4, 38, 6, 0], [0, 0, 0, 102]),
+    'purchase order list': budget([2, 32, 3, 0], [0, 0, 0, 91]),
+    'purchase order detail': budget([2, 33, 3, 0], [0, 0, 0, 94]),
+    'new purchase order': budget([2, 18, 3, 0], [0, 0, 0, 99]),
+    'stock by item': budget([2, 23, 3, 0], [0, 0, 0, 69]),
+    'sales order detail': budget([2, 56, 3, 5], [0, 0, 0, 98]),
+    'task: open': budget([2, 36, 3, 0], [0, 0, 0, 74]),
+    'task: review': budget([2, 36, 3, 0], [0, 0, 0, 74]),
+    'task: confirm': budget([16, 248, 14, 15], [0, 0, 0, 74]),
   });
 
+/**
+ * `work`: transactions, statements, policy reads, repeats. `parses`: the
+ * operation catalog, query catalog, surface manifest and surface bindings.
+ */
 function budget(
-  transactions: number,
-  statements: number,
-  authorization: number,
-  repeats: number,
+  [transactions, statements, authorization, repeats]: readonly [
+    number,
+    number,
+    number,
+    number,
+  ],
+  [
+    operationCatalogParses,
+    queryCatalogParses,
+    surfaceManifestParses,
+    surfaceBindingParses,
+  ]: readonly [number, number, number, number],
 ): PageBudget {
   return Object.freeze({
     authorization,
-    operationCatalogParses: null,
-    queryCatalogParses: null,
+    operationCatalogParses,
+    queryCatalogParses,
     repeats,
     statements,
-    surfaceBindingParses: null,
-    surfaceManifestParses: null,
+    surfaceBindingParses,
+    surfaceManifestParses,
     transactions,
   });
 }
