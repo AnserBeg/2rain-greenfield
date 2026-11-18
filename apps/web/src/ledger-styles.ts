@@ -616,6 +616,12 @@ td[data-cell-role=actions] a:not([class]){color:var(--muted);font-size:12px}
 .composition-task-after{display:grid;gap:4px;padding:10px 12px;border-radius:4px;background:var(--accent-soft)}
 .composition-task-after .eyebrow{margin:0;color:var(--accent-text)}
 .composition-task-after .composition-task-consequence{margin:0;padding:0;background:none}
+.composition-impact-line{padding:8px 0}
+.composition-impact-line + .composition-impact-line{border-top:1px solid var(--rule)}
+.composition-impact-line h4{margin:0 0 6px;font-size:12px}
+.composition-impact-line dl{margin:0}
+.composition-impact-line dl > div{display:flex;justify-content:space-between;gap:16px;padding:3px 0}
+.composition-impact-line dd{margin:0;font-variant-numeric:tabular-nums;white-space:nowrap}
 /* The Receive grid reads Item · Open · Receive · Unit cost (round 4): the
    line's other figures and its derived unit stay in the markup, out of view;
    the item keeps a readable width on one line. */
