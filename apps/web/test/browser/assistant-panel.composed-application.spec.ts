@@ -217,8 +217,11 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
 
         await say('Archive the first customer');
         const plan = panel.locator('[data-assistant-plan]');
+        // X16: P-1001, the first party listed, holds no role in the demo
+        // seed, so it is "this record", never "party" (a customer reads
+        // "this customer": test/agent/business-map.test.ts X16).
         await expect(plan).toContainText(
-          /Archives this (customer|supplier|salesperson)/u,
+          'Archives this record (it leaves the lists; nothing is deleted)',
         );
         await expect(plan).not.toContainText(/party/iu);
         // X9: the yes names the company the page proved.
