@@ -260,6 +260,8 @@ test('an order page names its short lines and its progress, receives a truck of 
           record: scenario.truck.recordId,
         }),
       );
+      // A document task waits in Record actions (LOOK-1 round 2).
+      await openRecordActions(noScript);
       await noScript
         .getByRole('button', {
           name: 'Receive without cost',
@@ -361,4 +363,11 @@ async function fixture(
     const [code] = await exited;
     expect(code, output).toBe(0);
   }
+}
+
+/** Opens the document's Record actions menu (LOOK-1 round 2), if closed. */
+async function openRecordActions(target: Page): Promise<void> {
+  const menu = target.locator('details.composition-record-actions');
+  if ((await menu.count()) && (await menu.getAttribute('open')) === null)
+    await menu.locator('summary').click();
 }

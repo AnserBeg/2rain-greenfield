@@ -264,11 +264,15 @@ test('authored business labels survive while field prefixes follow canonical ent
     await expect(
       breadcrumb.getByText('A/P & VAT audit', { exact: true }),
     ).toBeVisible();
+    // The record type's label names the page (its eyebrow) and its fields
+    // (LOOK-1 round 2: the section itself is "Details").
     await expect(
-      page.getByRole('heading', {
-        level: 2,
-        name: 'A/P & VAT audit information',
-      }),
+      page.locator('[data-platform-slot="record:titleStatus"] .eyebrow'),
+    ).toHaveText('A/P & VAT audit');
+    await expect(
+      page
+        .locator('[data-platform-slot="record:sections"] summary')
+        .getByText('A/P & VAT audit fields', { exact: true }),
     ).toBeVisible();
     await expect(
       page.locator('dt').getByText('Name', { exact: true }),
@@ -1911,8 +1915,10 @@ test('a record command bar renders every granted command as its own operable con
     // Press the SECOND control. Under the old dispatch this ran the first.
     await release.getByRole('button', { name: 'Release' }).click();
     await expect(page.getByRole('status')).toContainText('Release complete');
+    // The record's title states what ran (LOOK-1 round 2: the key facts are
+    // quiet technical details now).
     await expect(
-      page.locator('[data-platform-slot="record:keyFacts"]'),
+      page.locator('[data-platform-slot="record:titleStatus"]'),
     ).toContainText(`ran ${commandCapabilityId('release')}`);
     assert.deepEqual(
       capabilityExecutors.map((candidate) => candidate.executed),

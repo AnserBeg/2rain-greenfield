@@ -111,6 +111,14 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     const control = page.locator(
       `[name="value:northstar.app:field.${local}_${name}"], [name^="draft:"][name$=":field.${local}_${name}"]`,
     );
+    // A field behind More details is opened first (LOOK-1 round 2).
+    const more = page.locator('details.draft-more:not([open]) > summary');
+    if (
+      (await control.getAttribute('type')) !== 'hidden' &&
+      !(await control.isVisible()) &&
+      (await more.count()) > 0
+    )
+      await more.click();
     const tag = await control.evaluate((element) => element.tagName);
     if (tag === 'SELECT') await control.selectOption(value);
     // A draft-editor reference carries its record id in a hidden input; the

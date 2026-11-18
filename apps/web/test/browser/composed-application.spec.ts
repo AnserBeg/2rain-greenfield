@@ -1746,11 +1746,13 @@ async function scopedInventoryJourney(
   expect(new URL(page.url()).searchParams.get('record')).toBe(
     browserTransactionId,
   );
+  // The record's identity is on its page, in its quiet technical details
+  // (LOOK-1 round 2).
   await expect(
     page.locator('main code', {
       hasText: `${browserTransactionId.slice(0, 8)}…${browserTransactionId.slice(-4)}`,
     }),
-  ).toBeVisible();
+  ).toBeAttached();
   await expect(page.locator('form.capability-command')).toHaveCount(0);
   // THE THIRD INVERSION, and it is the one ADR-0054 predicted rather than found.
   //
@@ -1798,11 +1800,13 @@ async function scopedInventoryJourney(
     );
   }
   await page.goto(inventoryTransactionDetailUrl);
+  // The record's identity is on its page, in its quiet technical details
+  // (LOOK-1 round 2).
   await expect(
     page.locator('main code', {
       hasText: `${browserTransactionId.slice(0, 8)}…${browserTransactionId.slice(-4)}`,
     }),
-  ).toBeVisible();
+  ).toBeAttached();
   const inventoryTransactionFormUrl = scopedSurfaceUrl(
     baseUrl,
     'inventory_transaction_form',

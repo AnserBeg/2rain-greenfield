@@ -15,6 +15,8 @@ test('an order is priced in its currency, discounted and taxed per line, with ch
     await page.goto(url);
     await page.getByRole('link', { name: 'New', exact: true }).click();
     await pick(page, 'Customer', 'Alpine', 'Alpine Office Supply');
+    // Salesperson, terms and tax codes wait under More details (LOOK-1 round 2).
+    await openMoreDetails(page);
     await expect(combo(page, 'Tax code')).toHaveAttribute(
       'data-selected-label',
       'GST-AB',

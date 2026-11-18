@@ -182,6 +182,8 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
     await capture(page, testInfo, 'invoice-settled-in-part');
 
     // The printable invoice (ruling G): its line and every figure.
+    // The print link is in Record actions (LOOK-1 round 2).
+    await openRecordActions(page);
     await page.getByRole('link', { name: 'Print invoice' }).click();
     const totals = page.locator('.print-totals');
     for (const [label, value] of [
@@ -301,4 +303,11 @@ async function fixture(run: (url: string) => Promise<void>) {
     child.kill('SIGTERM');
     await exited;
   }
+}
+
+/** Opens the document's Record actions menu (LOOK-1 round 2), if closed. */
+async function openRecordActions(target: Page): Promise<void> {
+  const menu = target.locator('details.composition-record-actions');
+  if ((await menu.count()) && (await menu.getAttribute('open')) === null)
+    await menu.locator('summary').click();
 }

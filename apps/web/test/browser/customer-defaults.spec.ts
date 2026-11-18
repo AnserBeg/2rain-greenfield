@@ -135,6 +135,8 @@ test('a customer workspace sets order defaults and an address book that a new sa
     await page.goto(url);
     await page.getByRole('link', { name: 'New', exact: true }).click();
     await pick(page, 'Customer', 'Whitecourt', 'Whitecourt Forestry');
+    // Salesperson, terms and tax codes wait under More details (LOOK-1 round 2).
+    await openMoreDetails(page);
     await expect(combo(page, 'Salesperson')).toHaveAttribute(
       'data-selected-label',
       'Priya Natarajan',
@@ -213,6 +215,8 @@ test('without JavaScript, choosing a customer fills its defaults, and an incompl
       await page.goto(url);
       await page.getByRole('link', { name: 'New', exact: true }).click();
       await pick(page, 'Customer', 'Chestermere', 'Chestermere Dental Group');
+      // Salesperson, terms and tax codes wait under More details (LOOK-1 round 2).
+      await openMoreDetails(page);
       await expect(combo(page, 'Salesperson')).toHaveAttribute(
         'data-selected-label',
         'Jordan Blake',

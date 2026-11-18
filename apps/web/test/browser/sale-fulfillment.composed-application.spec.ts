@@ -327,7 +327,12 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   // A correction against an explicitly released reservation restores stock
   // and net shipped only; it does not silently restore reservation coverage.
   await page.goto(url('reservation', 'detail', reservationId));
-  await expect(page.getByText(/reservation_state_released/)).toBeVisible();
+  // Its state reads as its label, not its option id (LOOK-1 round 2).
+  await expect(
+    page
+      .locator('[data-platform-slot="record:sections"]')
+      .getByText('Released', { exact: true }),
+  ).toBeVisible();
 
   const reversal = await createShipment({
     kind: 'reversal',

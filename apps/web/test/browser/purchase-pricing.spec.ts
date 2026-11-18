@@ -32,6 +32,8 @@ test('a purchase order takes its supplier defaults, is discounted and taxed per 
     // Choosing the supplier sets its currency, terms and tax code; each
     // charge's tax code follows the order's, with its rate frozen.
     await pick(page, 'Vendor', 'Alpine', 'Alpine Office Supply');
+    // Terms and tax codes wait under More details (LOOK-1 round 2).
+    await openMoreDetails(page);
     await expect(page.getByLabel('Currency *')).toHaveValue('CAD');
     await expect(page.getByLabel('Payment terms')).toHaveValue(
       'northstar.app:option.purchase_order_payment_terms_net_30',

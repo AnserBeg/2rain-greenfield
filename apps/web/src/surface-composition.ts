@@ -250,11 +250,18 @@ export function displayFieldValue(
     /^-?\d+\.\d+$/.test(result)
   )
     return result.replace(/(\.\d*?[1-9])0+$|\.0+$/, '$1');
-  if (field?.kind === 'dateFieldType' && /^\d{4}-\d{2}-\d{2}$/.test(result))
+  // A date reads as its date, whether stored as the day or as that day's
+  // midnight instant (a tenant's date field, LOOK-1 round 2).
+  if (
+    field?.kind === 'dateFieldType' &&
+    /^\d{4}-\d{2}-\d{2}(?:T00:00(?::00(?:\.0+)?)?(?:Z|[+-]00:00)?)?$/.test(
+      result,
+    )
+  )
     return new Intl.DateTimeFormat('en', {
       dateStyle: 'medium',
       timeZone: 'UTC',
-    }).format(new Date(`${result}T00:00:00Z`));
+    }).format(new Date(`${result.slice(0, 10)}T00:00:00Z`));
   // A date-only value -- an instant at midnight UTC, as an order's, expected
   // or requested date is -- reads as its plain date, from its UTC date
   // components so nothing shifts (LOOP-1, orchestrator ruling); a real time

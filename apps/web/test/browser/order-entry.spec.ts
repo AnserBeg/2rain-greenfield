@@ -534,6 +534,8 @@ test('order editor pickers answer in place: focus, type, choose, create and retu
     // The customer's defaults land in place with it: salesperson, terms and
     // its default ship-to address, whose lines fill the order's own copy.
     expectedCurrency = 'CAD';
+    // Salesperson, terms and tax codes wait under More details (LOOK-1 round 2).
+    await openMoreDetails(page);
     await expect(
       page.getByRole('combobox', { name: 'Salesperson', exact: true }),
     ).toHaveAttribute('data-selected-label', 'Jordan Blake');
