@@ -69,6 +69,8 @@ export class LoopScorecard {
       const before = this.started.get(request);
       if (!before) return;
       this.started.delete(request);
+      // A fragment can change visible text without a document load.
+      this.carried = false;
       const work = parseServerTiming(
         response.headers()['server-timing'] ?? null,
       );
