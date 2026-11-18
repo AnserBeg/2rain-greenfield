@@ -237,9 +237,11 @@ async function handleRequest(
     }
     const result = gateways
       ? submission
-        ? readSnapshot && readOnlyTaskStep(submission)
-          ? // A task's open and Review read in one snapshot too; a policy
-            // change refuses the step rather than repeating it.
+        ? readSnapshot && taskStep(submission)
+          ? // A task's steps read in one snapshot too. Confirm's writes never
+            // join it: each ends the snapshot first and decides live in its
+            // own transaction. A policy change refuses the step rather than
+            // repeating it.
             await readSnapshot(
               () =>
                 entry.run({ headers: request.headers }, (view) =>
@@ -320,17 +322,13 @@ export function runtimeViewRefusalMessage(
 }
 
 /**
- * A composition task's open (no stage) or Review (`prepare`): it reads and
- * prepares, and writes nothing. Confirm, retry and every other POST keep a
- * transaction per read.
+ * A composition task's step: open, fill, Review or Confirm. Every other POST
+ * (a form's save, a draft editor) keeps a transaction per read.
  */
-function readOnlyTaskStep(
-  submission: Readonly<Record<string, string>>,
-): boolean {
+function taskStep(submission: Readonly<Record<string, string>>): boolean {
   return (
     typeof submission.compositionAction === 'string' &&
-    submission.compositionAction !== '' &&
-    (submission.taskStage === undefined || submission.taskStage === 'prepare')
+    submission.compositionAction !== ''
   );
 }
 
