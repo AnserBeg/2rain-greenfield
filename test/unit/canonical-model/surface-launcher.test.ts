@@ -9,6 +9,7 @@ import {
   normalizeApplicationPackage,
 } from '../../../packages/canonical-model/src/index.js';
 import { composedApplicationDefinition } from '../../../packages/domain/src/app/builder.js';
+import type { SurfaceDocumentEditor } from '../../../packages/canonical-model/src/schemas.js';
 
 type Json = Record<string, unknown>;
 interface Launcher {
@@ -36,6 +37,43 @@ function surfaceOf(app: ReturnType<typeof application>, surfaceId: string) {
 function launcherOf(app: ReturnType<typeof application>): Launcher {
   return surfaceOf(app, warehouse).launcher as Launcher;
 }
+
+test('INTERACT-1 picker details name readable prices and existing stock figures', () => {
+  const app = application();
+  normalizeApplicationPackage(app as never);
+  const editor = surfaceOf(app, id('surface', 'sales_order_form'))
+    .documentEditor as SurfaceDocumentEditor;
+  const product = editor.lineFields.find((field) => field.reference?.details)!;
+  assert.ok(
+    product.reference?.details?.values.some(
+      (value) => value.label === 'Available',
+    ),
+  );
+  assert.match(
+    refused((candidate) => {
+      const entry = surfaceOf(candidate, id('surface', 'sales_order_form'))
+        .documentEditor as SurfaceDocumentEditor;
+      const reference = entry.lineFields.find(
+        (field) => field.reference?.details,
+      )!.reference!;
+      reference.details!.listSurfaceId = id(
+        'surface',
+        'sales_order_list',
+      ) as NonNullable<typeof reference.details>['listSurfaceId'];
+    }),
+    /picker details require/u,
+  );
+  assert.match(
+    refused((candidate) => {
+      const entry = surfaceOf(candidate, id('surface', 'sales_order_form'))
+        .documentEditor as SurfaceDocumentEditor;
+      const detail = entry.lineFields.find((field) => field.reference?.details)!
+        .reference!.details!.values[0]!;
+      detail.fieldId = id('field', 'unread_price') as typeof detail.fieldId;
+    }),
+    /picker details require/u,
+  );
+});
 
 /** The refusal's reasons, or a failure when the declaration is accepted. */
 function refused(mutate: (app: ReturnType<typeof application>) => void) {

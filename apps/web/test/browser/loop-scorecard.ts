@@ -554,10 +554,9 @@ export async function receiveInFull(card: LoopScorecard): Promise<void> {
   card.begin(LOOP_STEPS.receive);
   await runTask(card, nextAction(page), 'Receive', {
     async enter() {
-      await card.fill(
+      await expect(
         page.getByLabel(/Actual received unit cost/u).first(),
-        f.unitCost,
-      );
+      ).toHaveValue(String(Number(f.unitCost)));
     },
     inline: true,
     confirm: `Receive ${f.purchased}`,

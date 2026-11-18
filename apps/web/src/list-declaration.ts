@@ -298,7 +298,7 @@ function progressArgument(
  * argument's own shape, band labels left out -- with a view's band as `keep`.
  * Inferred rather than annotated, so it stays a plain JSON argument value.
  */
-function figuresArgument(
+export function figuresArgument(
   list: SurfaceList,
   band: SurfaceList['views'][number]['band'],
 ) {

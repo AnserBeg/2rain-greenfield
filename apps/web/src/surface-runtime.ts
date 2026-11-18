@@ -803,10 +803,28 @@ async function declaredListData(
     });
   const viewCounts = async (withheld: WithheldFigures) => {
     const counts: Record<string, number> = {};
+    const manifest = readCompiledSurfaceManifest(view);
+    const launcher = landingSurface(
+      manifest.navigation,
+      manifest.surfaces,
+    )?.launcher;
+    const queues = queueCountsFor(view);
+    const unfiltered =
+      !state.search &&
+      !state.includeArchived &&
+      Object.keys(state.filterValues).length === 0;
     for (const listView of list.views) {
       // A view needing withheld figures is never counted without them: its
       // tab shows no count, and its own page refuses.
       if (!viewServes(list, withheld, listView.viewId)) continue;
+      const queue = unfiltered
+        ? launcher?.tiles.find((tile) => tile.view === listView.viewId)
+        : undefined;
+      const queueCount = queue ? queues?.get(queue.tileId) : undefined;
+      if (queueCount !== undefined) {
+        if (queueCount !== null) counts[listView.viewId] = queueCount;
+        continue;
+      }
       try {
         const counted = await read('count', state, withheld, listView.viewId);
         if (counted.listCoverage)

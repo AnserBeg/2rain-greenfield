@@ -131,7 +131,15 @@ export function referenceText(
       .join(' · ');
   return {
     label: pick(field.reference!.labelFieldIds) || record.recordId,
-    detail: pick(field.reference!.detailFieldIds ?? []),
+    detail: [
+      pick(field.reference!.detailFieldIds ?? []),
+      ...(field.reference!.details?.values ?? []).map(({ fieldId, label }) => {
+        const value = record.values[fieldId];
+        return `${label}: ${typeof value === 'string' ? (canonicalDecimal(value) ?? value) : '—'}`;
+      }),
+    ]
+      .filter(Boolean)
+      .join(' · '),
   };
 }
 

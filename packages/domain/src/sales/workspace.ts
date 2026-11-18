@@ -395,6 +395,15 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         required: true,
         query: q('location_list'),
         labelField: ref('fieldReference', field('location_name')),
+        defaultFrom: {
+          source: 'selected',
+          field: field('sales_order_line_item_id'),
+          query: q('item_get'),
+          valueField: ref(
+            'fieldReference',
+            field('item_preferred_location_id'),
+          ),
+        },
       },
       ...(paid
         ? [

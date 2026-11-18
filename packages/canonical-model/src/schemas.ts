@@ -1389,6 +1389,21 @@ const editorField = z.strictObject({
       labelFieldIds: z.array(CanonicalIdSchema).min(1).max(3),
       /** Secondary text shown under each result, such as SKU and base unit. */
       detailFieldIds: z.array(CanonicalIdSchema).min(1).max(3).optional(),
+      /** Supplementary values from an existing List, under current authority. */
+      details: z
+        .strictObject({
+          listSurfaceId: CanonicalIdSchema,
+          values: z
+            .array(
+              z.strictObject({
+                fieldId: CanonicalIdSchema,
+                label: LabelSchema,
+              }),
+            )
+            .min(1)
+            .max(4),
+        })
+        .optional(),
       /** Which records may be chosen (see `pickerEligibility`). */
       eligibility: pickerEligibility.optional(),
       /**
