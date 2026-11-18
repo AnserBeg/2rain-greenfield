@@ -1154,6 +1154,25 @@ export class OperationsAgentSession {
           note: 'nothing was written; the plan was not created',
         };
       const planId = this.#mint();
+      // A create runs at once only if the person may archive what it makes:
+      // otherwise its Undo would be refused (end review X5).
+      const usable = await this.#usableIds(view, catalog);
+      for (const [index, step] of steps.entries()) {
+        const inverse = step.risk.inverse;
+        if (
+          step.risk.riskClass === 'reversible' &&
+          inverse?.kind === 'archive' &&
+          !usable.operations.has(inverse.operationId)
+        )
+          steps[index] = {
+            ...step,
+            risk: {
+              riskClass: 'needsYes',
+              reason:
+                'you may not archive what it creates, so it could not be undone',
+            },
+          };
+      }
       const release = releaseOf(view);
       const digest = planDigest(steps, release);
       // A plan is reversible only when every step is, and an undo of a step
@@ -1369,13 +1388,15 @@ export class OperationsAgentSession {
       step,
       operation,
       entity,
-      risk: settingState(operation, prefix, { ...values, ...patch })
-        ? ({
-            riskClass: 'needsYes',
-            reason:
-              "it sets a document's state past its first one (only its posting operation should)",
-          } satisfies OperationRisk)
-        : operationRisk(catalog, operation),
+      // A create is judged here (nothing exists yet); an update is judged
+      // again below against the record it changes.
+      risk: writeRisk(
+        catalog,
+        operation,
+        prefix,
+        { ...values, ...patch },
+        null,
+      ),
       ...(values ? { values } : {}),
       ...(relations ? { relations } : {}),
       ...(patch ? { patch } : {}),
@@ -1419,6 +1440,13 @@ export class OperationsAgentSession {
     return {
       step: {
         ...base,
+        risk: writeRisk(
+          catalog,
+          operation,
+          prefix,
+          { ...values, ...patch },
+          record.values,
+        ),
         recordId: target,
         pinnedRevision: record.revision,
         targetLabel: recordLabel(record),
@@ -1824,22 +1852,45 @@ function screenFacts(
 }
 
 /**
- * Whether a write sets the record type's own state field (`<type>_state`, a
- * choice) to anything but its first option, the state a record starts in.
+ * The risk of a create or update given what it writes and, for an update,
+ * the record it changes (end review X5). On top of the operation's own
+ * class (`operationRisk`):
+ * - any written choice field named `..._state` or `..._status` is a state
+ *   write: it needs a yes whenever the value changes and either the old or
+ *   the new value is not the field's first option (for a create, whenever
+ *   the value is not the first option);
+ * - an update of a settings record (`..._settings`) needs a yes.
  */
-function settingState(
+function writeRisk(
+  catalog: PinnedCatalog,
   operation: RegisteredOperationDefinition,
   prefix: string,
   written: Readonly<Record<string, ImmutableJsonValue>>,
-): boolean {
-  const field = (operation.inputContract?.fields ?? []).find(
-    (candidate) =>
-      localName(candidate.fieldId) === `${prefix}_state` &&
-      candidate.enumOptionIds.length > 0,
-  );
-  if (!field || !(field.fieldId in written)) return false;
-  const value = written[field.fieldId];
-  return value !== null && value !== field.enumOptionIds[0];
+  current: Readonly<Record<string, ImmutableJsonValue>> | null,
+): OperationRisk {
+  const catalogRisk = operationRisk(catalog, operation);
+  if (catalogRisk.riskClass !== 'reversible') return catalogRisk;
+  for (const field of operation.inputContract?.fields ?? []) {
+    const name = localName(field.fieldId);
+    if (
+      !/_(?:state|status)$/u.test(name) ||
+      field.enumOptionIds.length === 0 ||
+      !(field.fieldId in written)
+    )
+      continue;
+    const next = written[field.fieldId] ?? null;
+    const first = field.enumOptionIds[0];
+    const before = current ? (current[field.fieldId] ?? null) : null;
+    const changes = current ? next !== before : next !== null;
+    if (changes && (next !== first || (current !== null && before !== first)))
+      return {
+        riskClass: 'needsYes',
+        reason: `it changes the record's ${name.replaceAll('_', ' ')}`,
+      };
+  }
+  if (current !== null && prefix.endsWith('_settings'))
+    return { riskClass: 'needsYes', reason: 'it changes a settings record' };
+  return catalogRisk;
 }
 
 const ISO_CURRENCY = /^[A-Z]{3}$/u;

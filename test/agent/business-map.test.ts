@@ -251,7 +251,7 @@ test('the risk class comes from contract facts: O0 creates and updates are rever
 const PARTY = '0d9c6f2e-3a1b-4c5d-8e7f-001122334455';
 
 /** A session over the compiled release whose release and record a test moves. */
-function guardedSession() {
+function guardedSession(deny: ReadonlySet<string> = new Set()) {
   const base = compiledAppView('manager');
   const state = {
     release: { ...base.release },
@@ -275,7 +275,8 @@ function guardedSession() {
           Promise.resolve(work({ ...base, release: { ...state.release } })),
       },
       operationGateway: {
-        previewTaskEligibility: () => Promise.resolve('eligible'),
+        previewTaskEligibility: (_view: unknown, ids: string[]) =>
+          Promise.resolve(deny.has(ids[0]!) ? 'denied' : 'eligible'),
         invoke: (_view: unknown, request: { operationId: string }) => {
           state.invoked.push(request.operationId);
           state.record = {
@@ -585,4 +586,77 @@ test('X14: a list page never makes a record "this"; only a record page with its 
   });
   assert.match(list, /Screen: the person is on "[^"]+" \(list/u);
   assert.doesNotMatch(list, /showing record|read just now/u);
+});
+
+// ------------------------------------------------ end review X5 (risk class)
+
+test('X5: a status or state change, a settings update, and a create its maker cannot archive all need a yes', async () => {
+  const classOf = async (
+    intent: Record<string, unknown>,
+    values: Record<string, string> = {},
+    deny: ReadonlySet<string> = new Set(),
+  ) => {
+    const { session, state } = guardedSession(deny);
+    state.record = {
+      ...state.record,
+      values: { ...state.record.values, ...values },
+    };
+    await session.call('erp_query', {
+      queryId: 'party_get',
+      arguments: { recordId: PARTY },
+    });
+    const planned = await session.call('erp_plan', { intents: [intent] });
+    assert.equal(planned.isError, false, JSON.stringify(planned.content));
+    return session.approvals.at(-1)?.riskClass;
+  };
+  // Archiving the company through its status field.
+  assert.equal(
+    await classOf({
+      operationId: 'legal_entity_update',
+      target: PARTY,
+      patch: { status: 'archived' },
+    }),
+    'needsYes',
+  );
+  // Sending a reviewed count back to draft.
+  assert.equal(
+    await classOf(
+      {
+        operationId: 'stock_count_update',
+        target: PARTY,
+        patch: { state: 'draft' },
+      },
+      {
+        [`${NS}:field.stock_count_state`]: `${NS}:option.stock_count_state_reviewed`,
+      },
+    ),
+    'needsYes',
+  );
+  // Switching purchase approvals off.
+  assert.equal(
+    await classOf({
+      operationId: 'purchasing_settings_update',
+      target: PARTY,
+      patch: { require_approval: false },
+    }),
+    'needsYes',
+  );
+  // A create the person could not archive again.
+  assert.equal(
+    await classOf(
+      { operationId: 'party_create', values: { number: 'P-9', name: 'N' } },
+      {},
+      new Set([`${NS}:operation.party_archive`]),
+    ),
+    'needsYes',
+  );
+  // A master field edit stays reversible (charter): Undo puts it back.
+  assert.equal(
+    await classOf({
+      operationId: 'party_update',
+      target: PARTY,
+      patch: { credit_hold: true },
+    }),
+    'reversible',
+  );
 });
