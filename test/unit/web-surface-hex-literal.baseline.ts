@@ -17,7 +17,7 @@
  * not the total happens to match.
  */
 export const WEB_SURFACE_HEX_LITERAL_BASELINE = Object.freeze({
-  occurrenceCount: 38,
+  occurrenceCount: 66,
   sourceRoot: 'apps/web/src',
   tokenBlock: Object.freeze({
     end: '/* token-definition-block:end */',

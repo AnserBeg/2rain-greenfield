@@ -835,7 +835,11 @@ function renderTitleStatus(context: SurfaceComponentContext): string {
     };
     return slotPanel(
       context,
-      renderCompositionHeader(context.surface, composition) +
+      renderCompositionHeader(
+        context.surface,
+        composition,
+        compositionStatusRole(context, record),
+      ) +
         feedbackHtml(context.feedback) +
         renderCompositionAlerts(context.surface, composition) +
         renderCompositionProgression(
@@ -869,6 +873,37 @@ function renderTitleStatus(context: SurfaceComponentContext): string {
     `<header class="surface-heading surface-heading--slot"><div><h1>${escapeHtml(title)}</h1></div>${status}</header>${feedbackHtml(context.feedback)}`,
     'title-status-slot',
   );
+}
+
+/**
+ * The status kind of a document's state (LOOK-1): the role its own List
+ * declares for that state -- a List over the same records whose status
+ * column reads the same field. A state no List names is neutral (null).
+ */
+function compositionStatusRole(
+  context: SurfaceComponentContext,
+  record: SemanticRecordDto,
+): string | null {
+  const header = context.surface.composition?.presentation?.header;
+  const field = context.surface.composition?.fields.find(
+    (column) => column.columnId === header?.status,
+  )?.field;
+  if (!field) return null;
+  // Read as the header reads it: the stored value, or the id a relation or
+  // derived state names (its label is what the badge shows).
+  const raw = Object.hasOwn(record.values, field)
+    ? record.values[field]
+    : (record.relationLabels?.[field]?.recordId ?? null);
+  if (raw === null || raw === undefined) return null;
+  // A state field belongs to one entity, so the List whose status column
+  // reads that same field is that entity's List.
+  for (const surface of context.surfaces ?? []) {
+    const role = surface.list?.columns
+      .find((column) => column.role === 'status' && column.field === field)
+      ?.statusRoles?.find((entry) => entry.value === raw)?.role;
+    if (role) return role;
+  }
+  return null;
 }
 
 function renderArchiveToggle(context: SurfaceComponentContext): string {
@@ -2401,6 +2436,22 @@ function diagnostic(ref: SurfaceMessageRef): string {
 
 // Declared List markup (canonical `surface.list`), rendered only from the
 // closed registry; list-declaration.ts holds the markup-free request state.
+/** The fields a List declares as figures: every one a number. */
+function numericListFields(list: SurfaceList): ReadonlySet<string> {
+  const fields = new Set<string>();
+  const progress = list.progress;
+  if (progress) {
+    Object.values(progress.outputs).forEach((field) => fields.add(field));
+    if (progress.supply)
+      Object.values(progress.supply.outputs).forEach((field) =>
+        fields.add(field),
+      );
+  }
+  list.figures?.sums.forEach((sum) => fields.add(sum.figureId));
+  list.figures?.totals?.forEach((total) => fields.add(total.figureId));
+  return fields;
+}
+
 function declaredStatusRole(
   column: DeclaredListColumn,
   record: SemanticRecordDto,
@@ -2579,11 +2630,18 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
   const sortState = new Map(
     state.sort.map((sort) => [sort.columnId, sort.direction]),
   );
+  // Numbers sit right-aligned in their own column (LOOK-1): money columns
+  // and the List's declared sums, totals, progress and supply figures.
+  const numeric = numericListFields(list);
+  const kind = (column: (typeof columns)[number]) =>
+    column.format === 'money' || numeric.has(column.field)
+      ? ' data-cell-kind="number"'
+      : '';
   const header = columns
     .map((column) => {
       const direction = sortState.get(column.columnId);
       if (!column.sortable)
-        return `<th scope="col">${escapeHtml(column.label)}</th>`;
+        return `<th scope="col"${kind(column)}>${escapeHtml(column.label)}</th>`;
       const nextDirection =
         direction === 'ascending' ? 'descending' : 'ascending';
       const href = `/?${declaredListParameters(state, base, {
@@ -2597,7 +2655,7 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
           : direction === 'descending'
             ? '↓'
             : '↕';
-      return `<th scope="col" aria-sort="${direction ?? 'none'}"><a class="list-sort" href="${escapeHtml(href)}" data-sort-column="${escapeHtml(column.columnId)}">${escapeHtml(column.label)} <span aria-hidden="true">${mark}</span><span class="sr-only">${direction ? `, sorted ${direction}; activate to sort ${nextDirection}` : ', activate to sort ascending'}</span></a></th>`;
+      return `<th scope="col"${kind(column)} aria-sort="${direction ?? 'none'}"><a class="list-sort" href="${escapeHtml(href)}" data-sort-column="${escapeHtml(column.columnId)}">${escapeHtml(column.label)} <span aria-hidden="true">${mark}</span><span class="sr-only">${direction ? `, sorted ${direction}; activate to sort ${nextDirection}` : ', activate to sort ascending'}</span></a></th>`;
     })
     .join('');
   const rowActions = (list.rowActions ?? []).length > 0;
@@ -2618,7 +2676,9 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
       const cells = columns
         .map((column) => {
           const text = declaredCellText(column, record, input.present);
-          const label = `data-column-label="${escapeHtml(column.label)}" data-column-priority="${String(column.priority)}" data-column-id="${escapeHtml(column.columnId)}"`;
+          // The label leads and the column id ends the cell's attributes, as
+          // readers of the List's markup expect; the kind sits between.
+          const label = `data-column-label="${escapeHtml(column.label)}"${kind(column)} data-column-priority="${String(column.priority)}" data-column-id="${escapeHtml(column.columnId)}"`;
           if (column.role === 'title') {
             const title = text ?? record.recordId.slice(0, 8);
             const href = input.detailHref(record);

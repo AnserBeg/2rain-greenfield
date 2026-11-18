@@ -170,28 +170,30 @@ Rules that follow:
   cognitive. `G3-P6a` is the first real test: mounting Inventory took the
   composed application to **eleven leaves under four top-level groups** — within
   budget precisely because ADR-0030's grouping is doing the work.
+- **Work queues (owner ruling 2026-11-17, Ledger):** the landing launcher's
+  declared tiles sit above the area groups in a fixed order, zero counts
+  shown. They open saved views; they are not navigation entries and do not
+  count toward the budget.
 - One global command palette (navigate + create + ask). One New button.
 - Draft vs published state is always visible (banner in customize mode).
 
 ## Status grammar
 
 One global color grammar: `success` (green), `attention` (amber), `blocked`
-(red), and `inProgress` (**indigo**). Modules may add states, but every rendered
-state must resolve to one of these closed semantic roles; they may never
+(red), and `inProgress` (**the accent's teal**). Modules may add states, but every
+rendered state must resolve to one of these closed semantic roles; they may never
 recolor meanings. Status colors resolve only from role tokens — a hex literal
 in surface code is a defect.
 
-**Brand and status hues must remain separable.** The brand hue is reserved. No
-status role may resolve to a token within it. Status is the most
-information-dense colour on screen and must never compete with identity.
-
-That rule is why `inProgress` reads *indigo* rather than *blue*: the brand is now
-baby blue ([ADR-0035](../../../docs/decisions/ADR-0035-token-layer-and-motion-contract.md)),
-so a blue `inProgress` would put the strongest signal on screen in direct
-competition with the identity colour. **The pinned contract is unaffected** — it
-records role *names* only, which are unchanged, and plan §8.5 names roles without
-binding hues. Indigo is a blue, so this narrows the prose rather than
-contradicting it.
+**Amended 2026-11-17 by owner ruling (the Ledger look, `docs/design/ledger-spec.md`
+§1-§3):** the baby-blue brand ramp, the indigo `inProgress` and ADR-0035's type
+sizes are superseded by the spec's tokens (pale paper, one deep teal accent, IBM
+Plex, 13px body). The accent means "you can act / in motion", so `inProgress`
+rides the accent family; `success`, `attention` and `blocked` must stay outside
+the accent hue (the browser gate derives the band from the rendered `--accent`).
+**The pinned contract is unaffected** — it records role *names* only. A spec
+"neutral" status (Draft, Not started) is a status with no role: outlined, hollow
+ring, no colour.
 
 **Every status renders colour + dot + word on a tinted ground. Never colour
 alone.** Three independent reasons, any one sufficient: colour-vision deficiency
@@ -422,7 +424,8 @@ One responsive web app serves every device. Mobile rendering is a
 deterministic platform transformation per archetype — never a per-screen or
 per-tenant design:
 
-- shell → bottom tab bar (max five, scan/task centered); right rail →
+- shell → a menu button that opens the sidebar as a drawer, a native
+  disclosure with no script (owner ruling 2026-11-17, Ledger); right rail →
   bottom sheet; command bar → sticky bottom action bar, primary action
   thumb-reachable;
 - list → priority-ranked cards derived from declared column priority;

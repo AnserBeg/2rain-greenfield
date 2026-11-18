@@ -369,6 +369,8 @@ test('sales leads compiled business navigation and fulfillment is registered beh
       schemaVersion: ADOPTED_LANGUAGE_VERSION,
       status: 'unsupported',
     },
+    // The menu group's declared icon (LOOK-1).
+    icon: 'tag',
     kind: 'moduleDefinition',
     label: 'Sales',
     moduleId: 'northstar.app:module.sales',

@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual } from 'node:util';
 
+import {
+  composedDestinationIcon,
+  composedDestinationLabel,
+} from '../../packages/domain/src/app/builder.js';
 import { declareLists } from '../../packages/domain/src/app/list-declarations.js';
 
 type Value = Readonly<Record<string, unknown>>;
@@ -58,8 +62,12 @@ function expectedInventoryWorkspace(namespace: string, surface: Value): Value {
         ? 'contextual'
         : 'setup'
     : 'contextual';
+  // A navigation destination's declared icon (LOOK-1).
+  const icon =
+    membership === 'contextual' ? undefined : composedDestinationIcon(local);
   return {
     membership,
+    ...(icon ? { icon } : {}),
     ...(owner ? { ownerSurfaceId: `${namespace}:surface.${owner}_list` } : {}),
     ...(owner ||
     document === 'posted_stock_balance' ||
@@ -369,11 +377,15 @@ export function assertComposedInventoryCollection(
         `composition altered protected slots for ${String(source.surfaceId)}`,
       );
     }
+    // A destination's plain name (LOOK-1) is the composed label.
+    const plainName = composedDestinationLabel(local);
     assert.deepEqual(
       protectedSurface,
       stockDocument && source.surfaceRole === 'list'
         ? { ...protectedSource, label: STOCK_DOCUMENT_LIST_LABEL }
-        : protectedSource,
+        : plainName
+          ? { ...protectedSource, label: plainName }
+          : protectedSource,
       `composition altered protected bindings for ${String(source.surfaceId)}`,
     );
     assert.deepEqual(

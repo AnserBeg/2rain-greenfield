@@ -883,7 +883,15 @@ export function purchasingWorkspace(
         // Read with what has arrived and what is still to arrive
         // (PURCHASING-PARITY), through the commercial purchase line query.
         query: q('commercial_purchase_order_lines'),
-        presentation: { selection: 'explicit', selectedActions: 'row' },
+        presentation: {
+          selection: 'explicit',
+          selectedActions: 'row',
+          // Each line's bar: received of ordered (LOOK-1).
+          progress: {
+            total: id('column', 'purchasing_quantity'),
+            done: id('column', 'purchasing_received'),
+          },
+        },
         parent: {
           relationId: id('relation', 'purchase_order_line_order'),
           value: record('recordId'),

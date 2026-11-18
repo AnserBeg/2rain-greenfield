@@ -37,9 +37,9 @@ test('a quarantined location keeps its stock on hand but neither usable nor avai
     const inventory = groups.filter({ hasText: 'Stock' });
 
     // More -> Location: every location with its type and inventory status.
-    await open(more, 'More', 'Location');
+    await open(more, 'More', 'Locations');
     await expect(
-      page.getByRole('heading', { level: 1, name: 'Location' }),
+      page.getByRole('heading', { level: 1, name: 'Locations' }),
     ).toBeVisible();
     expect(
       await cells(page, 'location_list', scenario.hold, [
@@ -89,7 +89,7 @@ test('a quarantined location keeps its stock on hand but neither usable nor avai
     await capture(page, testInfo, 'locations-stock');
 
     // The hold's page: its status in the header, and "Change status".
-    await open(more, 'More', 'Location');
+    await open(more, 'More', 'Locations');
     await page
       .locator(`tr[data-record-id="${scenario.hold}"]`)
       .locator('a.record-link')
@@ -168,7 +168,7 @@ test('a quarantined location keeps its stock on hand but neither usable nor avai
     ).toEqual(['10', '10', '2']);
 
     // Slice 2: a bin placed inside Calgary warehouse when it is created.
-    await open(more, 'More', 'Location');
+    await open(more, 'More', 'Locations');
     await page.getByRole('link', { name: 'New', exact: true }).click();
     await expect(
       page.getByRole('heading', { level: 1, name: 'New Location' }),
@@ -186,7 +186,7 @@ test('a quarantined location keeps its stock on hand but neither usable nor avai
     await page.getByRole('button', { name: 'Save' }).click();
     await expect(page.getByRole('status')).toContainText('Create complete');
     // The warehouse's page lists the bin inside it.
-    await open(more, 'More', 'Location');
+    await open(more, 'More', 'Locations');
     await page
       .locator(`tr[data-record-id="${scenario.warehouse}"]`)
       .locator('a.record-link')

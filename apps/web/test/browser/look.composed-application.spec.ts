@@ -1,0 +1,246 @@
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import { expect, test, type Page } from '@playwright/test';
+
+import { startComposedApplication } from '../../../api/src/composition-root.js';
+import {
+  LINEAGE_INSTALL_VOLUME,
+  withEphemeralPostgres,
+} from '../../../../test/helpers/postgres.js';
+
+import {
+  createSale,
+  LoopScorecard,
+  placePurchaseOrder,
+  rawCodes,
+} from './loop-scorecard.js';
+
+/**
+ * LOOK-1's proof: the seven screens of the Ledger mockup
+ * (`docs/design/ledger-final.html`) rendered by the generator from the
+ * distributor seed -- Today, a purchase order with its next step, the receive
+ * dialog, stock by item, a sales order, a record type a tenant adds through
+ * Customize (Equipment: draft, approve, activate) and the new purchase order
+ * form -- each at 1440 and 390 wide, light and dark. Every screen must show
+ * the Ledger's generic parts and no raw code. When LOOK_EVIDENCE_OUT names a
+ * directory the screenshots are written there (the committed evidence);
+ * otherwise beside the test's results.
+ */
+const SCREENS = [
+  'home',
+  'po',
+  'receive',
+  'stock',
+  'so',
+  'record',
+  'new-po',
+] as const;
+type Screen = (typeof SCREENS)[number];
+
+const VIEWPORTS = [
+  { width: 1440, height: 900 },
+  { width: 390, height: 844 },
+] as const;
+
+test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone, light and dark', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(1_500_000);
+  const out = process.env.LOOK_EVIDENCE_OUT
+    ? resolve(process.env.LOOK_EVIDENCE_OUT)
+    : testInfo.outputPath('look');
+  mkdirSync(out, { recursive: true });
+  await withEphemeralPostgres(
+    'look-browser',
+    async ({ connection }) => {
+      const application = await startComposedApplication({
+        databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+        port: 0,
+        seedProfile: 'distributor',
+        tenantSlug: 'look-browser',
+      });
+      try {
+        page.setDefaultTimeout(60_000);
+        await page.setViewportSize({ width: 1440, height: 900 });
+        const card = new LoopScorecard(page);
+        const base = application.baseUrl;
+
+        // The loop's documents, as the owner will make them.
+        await page.goto(base);
+        await placePurchaseOrder(card);
+        const purchaseOrder = page.url();
+        await createSale(card);
+        const salesOrder = page.url();
+
+        // LOOP-1's filed fold: a confirmed sales order's lines are on the
+        // first screen of a 1280×800 laptop.
+        await page.setViewportSize({ width: 1280, height: 800 });
+        await page.goto(salesOrder);
+        const firstLine = page
+          .locator('[data-composition-dataset] tbody tr')
+          .first();
+        const top = await firstLine.evaluate(
+          (row) => row.getBoundingClientRect().top,
+        );
+        expect.soft(top, 'sales order lines above the fold').toBeLessThan(800);
+
+        // A record type a tenant adds through Customize.
+        await page.setViewportSize({ width: 1440, height: 900 });
+        const equipment = await addEquipment(page, base);
+
+        const urls: Readonly<Record<Screen, string>> = {
+          home: `${base}/`,
+          po: purchaseOrder,
+          receive: purchaseOrder,
+          stock: await menuDestination(page, base, 'Stock by item'),
+          so: salesOrder,
+          record: equipment,
+          'new-po': await newPurchaseOrder(page, base),
+        };
+
+        for (const scheme of ['light', 'dark'] as const)
+          for (const viewport of VIEWPORTS) {
+            await page.emulateMedia({ colorScheme: scheme });
+            await page.setViewportSize(viewport);
+            for (const screen of SCREENS) {
+              await page.goto(urls[screen]);
+              if (screen === 'receive') {
+                await page
+                  .locator('.composition-progression-next')
+                  .getByRole('link')
+                  .or(
+                    page
+                      .locator('.composition-progression-next')
+                      .getByRole('button'),
+                  )
+                  .first()
+                  .click();
+                await expect(
+                  page.locator('[data-composition-task]'),
+                ).toBeVisible();
+              }
+              // The picture first, so a red still leaves the evidence.
+              await page.screenshot({
+                path: `${out}/app-${screen}-${String(viewport.width)}-${scheme}.png`,
+                fullPage: screen !== 'receive',
+              });
+              await requireLedgerParts(page, screen, viewport.width);
+              const text = await page.locator('body').innerText();
+              // The order's two date-time inputs keep "(UTC)" (ruling).
+              expect
+                .soft(
+                  rawCodes(text).filter(
+                    (code) => !(screen === 'new-po' && code === '(UTC)'),
+                  ),
+                  `${screen} raw codes`,
+                )
+                .toEqual([]);
+              expect
+                .soft(
+                  await page.evaluate(
+                    () => document.documentElement.scrollWidth <= innerWidth,
+                  ),
+                  `${screen} scrolls sideways at ${String(viewport.width)}`,
+                )
+                .toBe(true);
+            }
+          }
+      } finally {
+        await application.close();
+      }
+    },
+    LINEAGE_INSTALL_VOLUME,
+  );
+});
+
+/** The Ledger's generic parts each screen must show. */
+async function requireLedgerParts(
+  page: Page,
+  screen: Screen,
+  width: number,
+): Promise<void> {
+  // The shell: the work queues lead the sidebar (a drawer on a phone).
+  await expect.soft(page.locator('nav.work-queues a').first()).toBeAttached();
+  if (width > 900) await expect.soft(page.locator('.sidebar')).toBeVisible();
+  else await expect.soft(page.locator('.shell-menu > summary')).toBeVisible();
+  const parts: Readonly<Record<Screen, readonly string[]>> = {
+    home: ['.launcher-tiles .launcher-tile', '.launcher-scan'],
+    po: [
+      '.composition-header h1',
+      '.composition-business-status',
+      '.composition-progression-steps li',
+      '.composition-progression-next',
+      '.composition-header-facts',
+      '.line-progress',
+      '.composition-totals',
+    ],
+    receive: ['[data-composition-task] .composition-task-header'],
+    stock: ['.list-views', 'table thead th', 'tbody tr'],
+    so: [
+      '.composition-header h1',
+      '.composition-progression-next',
+      '.composition-header-facts',
+      '.line-progress',
+    ],
+    record: ['main h1', '[data-platform-slot]'],
+    'new-po': [
+      '[data-document-editor]',
+      '.draft-lines',
+      '[data-save-boundary]',
+    ],
+  };
+  for (const selector of parts[screen])
+    await expect
+      .soft(page.locator(selector).first(), `${screen} shows ${selector}`)
+      .toBeAttached();
+}
+
+async function menuDestination(
+  page: Page,
+  base: string,
+  name: string,
+): Promise<string> {
+  await page.goto(base);
+  await page
+    .getByRole('navigation', { name: 'Release navigation' })
+    .getByRole('link', { name, exact: true })
+    .click();
+  return page.url();
+}
+
+async function newPurchaseOrder(page: Page, base: string): Promise<string> {
+  await menuDestination(page, base, 'Purchase orders');
+  await page.getByRole('link', { name: 'New', exact: true }).click();
+  await expect(page.locator('[data-document-editor]')).toBeVisible();
+  return page.url();
+}
+
+/** Customize: describe Equipment, approve, activate; returns its List. */
+async function addEquipment(page: Page, base: string): Promise<string> {
+  await page.goto(`${base}/?customize`);
+  const form = page.locator('form[data-customize-form="addRecordType"]');
+  await form.locator('input[name="label"]').fill('Equipment');
+  await form.locator('input[name="field_2_label"]').fill('Serial number');
+  await form.locator('input[name="field_3_label"]').fill('Purchase date');
+  await form.locator('select[name="field_3_type"]').selectOption('date');
+  await form.locator('input[name="field_4_label"]').fill('Status');
+  await form.locator('select[name="field_4_type"]').selectOption('choice');
+  await form
+    .locator('input[name="field_4_options"]')
+    .fill('In service, Under repair, Retired');
+  await form.getByRole('button', { name: 'Draft this record type' }).click();
+  await expect(page.locator('[data-customize-result="drafted"]')).toBeVisible({
+    timeout: 180_000,
+  });
+  await page.getByRole('button', { name: 'Approve' }).click();
+  await page
+    .getByRole('button', { name: 'Activate now' })
+    .click({ timeout: 180_000 });
+  await expect(page.locator('[data-customize-result="activated"]')).toBeVisible(
+    { timeout: 180_000 },
+  );
+  await page.getByRole('link', { name: 'Open Equipment' }).click();
+  await expect(page.locator('main')).toContainText('Equipment');
+  return page.url();
+}
