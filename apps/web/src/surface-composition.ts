@@ -617,6 +617,40 @@ function holds(condition: Condition, data: CompositionData): boolean {
  * whose conditions hold, each judged as that row's `selected` values, in the
  * dataset's order. A dataset that failed to load offers none.
  */
+/** A multi-row Task's rows filled from their declared fill column. */
+function prefilledRows(
+  action: Action,
+  data: CompositionData,
+): Record<string, Record<string, string>> {
+  const filled: Record<string, Record<string, string>> = {};
+  const declared = action.rows;
+  const child = declared
+    ? data.children.find(
+        (value) => value.definition.datasetId === declared.datasetId,
+      )
+    : undefined;
+  if (!declared?.fillLabel || !child) return filled;
+  for (const row of taskRows(action, data))
+    for (const input of action.inputs) {
+      const fill = input.perRow?.fillFrom;
+      const column = fill
+        ? child.definition.columns.find(
+            (value) => value.columnId === fill.columnId,
+          )
+        : undefined;
+      if (!column) continue;
+      let value: ImmutableJsonValue = null;
+      try {
+        value = recordValue(row.record, column.field);
+      } catch {
+        /* An unstated figure fills nothing. */
+      }
+      if (typeof value === 'string' && POSITIVE_DECIMAL.test(value))
+        (filled[row.record.recordId] ??= {})[input.inputId] = value;
+    }
+  return filled;
+}
+
 function taskRows(action: Action, data: CompositionData): Row[] {
   const rows = action.rows;
   if (!rows) return [];
@@ -664,13 +698,14 @@ export function renderCompositionHeader(
   if (data.fieldsFailed)
     return compositionMessage('COMPOSITION_CHILD_FAILED', 'alert');
   const cell = (id: string) => h(data.fields.cells[id] ?? '—');
+  const step = badgeStep(surface, data);
   // The Ledger page header (LOOK-1): eyebrow, the record's number with its
   // status badge, then the subtitle. A state with no declared kind is the
   // neutral outlined badge.
   // The facts stay in the header's markup and are laid out after the
   // stepper (the header is `display:contents`; see ledger-styles.ts).
   // The eyebrow names the record's type: "Purchase order", not its page.
-  return `<header class="composition-header"><div class="composition-title"><p class="eyebrow">${h(surface.label.replace(/ detail$/iu, ''))}</p><div class="composition-heading"><h1>${cell(header.title)}</h1>${header.status ? `<span class="composition-business-status"${statusRole ? ` data-status-role="${h(statusRole)}"` : ''}>${cell(header.status)}</span>` : ''}</div><p class="composition-subtitle">${header.subtitle.map(cell).join(' · ')}</p></div>${renderCompositionFacts(surface, data)}</header>`;
+  return `<header class="composition-header"><div class="composition-title"><p class="eyebrow">${h(surface.label.replace(/ detail$/iu, ''))}</p><div class="composition-heading"><h1>${cell(header.title)}</h1>${header.status ? `<span class="composition-business-status"${statusRole ? ` data-status-role="${h(statusRole)}"` : ''}>${step ? h(step) : cell(header.status)}</span>` : ''}</div><p class="composition-subtitle">${header.subtitle.map(cell).join(' · ')}</p></div>${renderCompositionFacts(surface, data)}</header>`;
 }
 
 /**
@@ -781,6 +816,48 @@ const PROGRESSION_STATE_LABELS: Readonly<Record<ProgressionStepState, string>> =
  * its own accessible name, so it never doubles a control elsewhere on the
  * page; none is offered while a Task is open.
  */
+/**
+ * The progression's states with one current step (LOOK-1 round 2): a later
+ * step whose conditions also hold reads as upcoming until the earlier one
+ * is complete.
+ */
+function oneCurrentStep(
+  surface: CompiledSurfaceDefinition,
+  data: CompositionData,
+): ReturnType<typeof compositionProgressionStates> {
+  const reached = compositionProgressionStates(surface, data);
+  const firstCurrent = reached.findIndex(
+    (state) => state === 'current' || state === 'attention',
+  );
+  return reached.map((state, index) =>
+    state === 'current' && firstCurrent >= 0 && index > firstCurrent
+      ? ('upcoming' as const)
+      : state,
+  );
+}
+
+/**
+ * The step the record's badge names (LOOK-1 round 3): the stepper's current
+ * step, or its last once every step is complete -- so the badge and the
+ * stepper never disagree. Null without a declared progression, or when no
+ * step applies (the badge then reads the record's state).
+ */
+function badgeStep(
+  surface: CompiledSurfaceDefinition,
+  data: CompositionData,
+): string | null {
+  const progression = surface.composition?.presentation?.progression;
+  if (!progression || data.fieldsFailed) return null;
+  const states = oneCurrentStep(surface, data);
+  const current = states.findIndex(
+    (state) => state === 'current' || state === 'attention',
+  );
+  if (current >= 0) return progression.steps[current]!.label;
+  return states.every((state) => state === 'complete')
+    ? (progression.steps.at(-1)?.label ?? null)
+    : null;
+}
+
 export function renderCompositionProgression(
   surface: CompiledSurfaceDefinition,
   data: CompositionData,
@@ -790,17 +867,7 @@ export function renderCompositionProgression(
 ): string {
   const progression = surface.composition?.presentation?.progression;
   if (!progression || data.fieldsFailed) return '';
-  const reached = compositionProgressionStates(surface, data);
-  // One current step (LOOK-1 round 2): a later step whose conditions also
-  // hold reads as upcoming until the earlier one is complete.
-  const firstCurrent = reached.findIndex(
-    (state) => state === 'current' || state === 'attention',
-  );
-  const states = reached.map((state, index) =>
-    state === 'current' && firstCurrent >= 0 && index > firstCurrent
-      ? ('upcoming' as const)
-      : state,
-  );
+  const states = oneCurrentStep(surface, data);
   const documents = (datasetId: string, label: string) => {
     const child = data.children.find(
       (value) => value.definition.datasetId === datasetId,
@@ -823,13 +890,6 @@ export function renderCompositionProgression(
         '',
       )}${child.rows.length > shown.length ? `<li><a href="#${h(datasetId)}">${h(`${String(child.rows.length - shown.length)} more in ${child.definition.label}`)}</a></li>` : ''}</ul>`;
   };
-  const currentIndex = states.findIndex(
-    (state) => state === 'current' || state === 'attention',
-  );
-  const stepLine =
-    currentIndex >= 0
-      ? `Step ${String(currentIndex + 1)} of ${String(states.length)} · ${progression.steps[currentIndex]!.label}`
-      : null;
   const steps = progression.steps
     .map((step, index) => {
       const state = states[index]!;
@@ -854,17 +914,25 @@ export function renderCompositionProgression(
       );
       if (action && applicable(action, data)) {
         nextActions.set(data, action.actionId);
-        next = `<div class="composition-progression-next" data-next-action="${h(action.actionId)}"><div><p class="eyebrow">Next step</p><strong>${h(nextSentence(surface, action, data))}</strong>${stepLine ? `<p>${h(stepLine)}</p>` : ''}</div>${actionLink(action, data, view, `Next action: ${action.label}`, nextButtonText(surface, action, data))}</div>`;
+        next = `<div class="composition-progression-next" data-next-action="${h(action.actionId)}"><div><p class="eyebrow">Next step</p><strong>${h(nextSentence(surface, action, data))}</strong></div>${actionLink(action, data, view, `Next action: ${action.label}`, nextButtonText(surface, action, data))}</div>`;
         break;
       }
     } else {
       const control = operationControl(entry.operation.targetId, 'Next action');
       if (control) {
-        next = `<div class="composition-progression-next" data-next-operation="${h(entry.operation.targetId)}"><div><p class="eyebrow">Next step</p><strong>${h(recordSentence(surface, data))}</strong>${stepLine ? `<p>${h(stepLine)}</p>` : ''}</div>${control}</div>`;
+        next = `<div class="composition-progression-next" data-next-operation="${h(entry.operation.targetId)}"><div><p class="eyebrow">Next step</p><strong>${h(recordSentence(surface, data))}</strong></div>${control}</div>`;
         break;
       }
     }
   }
+  // At phone width the stepper's labels give way to this one line.
+  const currentIndex = states.findIndex(
+    (state) => state === 'current' || state === 'attention',
+  );
+  const stepLine =
+    currentIndex >= 0
+      ? `Step ${String(currentIndex + 1)} of ${String(states.length)} · ${progression.steps[currentIndex]!.label}`
+      : null;
   return `<section class="panel composition-progression" aria-labelledby="composition-progression-heading" data-composition-progression><header class="composition-progression-heading"><p class="eyebrow">Record progression</p><h2 id="composition-progression-heading">${h(progression.title)}</h2></header><ol class="composition-progression-steps">${steps}</ol>${stepLine ? `<p class="composition-progression-phone" aria-hidden="true">${h(stepLine)}</p>` : ''}${next}</section>`;
 }
 
@@ -1243,7 +1311,19 @@ function renderCompositionTotals(
   const label = (id: string) =>
     surface.composition!.fields.find((column) => column.columnId === id)
       ?.label ?? '';
-  return `<dl class="composition-totals">${print.totals.map((id) => `<div><dt>${h(label(id))}</dt><dd>${h(data.fields.cells[id] ?? '—')}</dd></div>`).join('')}</dl>`;
+  // A charge with nothing in it is not a line of the totals (round 3); the
+  // grand total always is.
+  const totals = print.totals;
+  const shown = totals.filter(
+    (id, index) =>
+      index === totals.length - 1 || (data.fields.cells[id] ?? '—') !== '—',
+  );
+  // The grand total names its declared currency: "Total CAD" (round 3).
+  const currency = print.currency
+    ? data.fields.cells[print.currency]
+    : undefined;
+  const last = totals.at(-1);
+  return `<dl class="composition-totals">${shown.map((id) => `<div><dt>${h(label(id))}${id === last && currency && currency !== '—' ? ` <span class="composition-totals__currency">${h(currency)}</span>` : ''}</dt><dd>${h(data.fields.cells[id] ?? '—')}</dd></div>`).join('')}</dl>`;
 }
 
 /** The URL of this record's printable document, preserving its scope. */
@@ -1353,11 +1433,19 @@ export function renderCompositionFields(
   const place = (columnId: string) =>
     surface.composition!.fields.find((column) => column.columnId === columnId)
       ?.orderKey ?? 0;
+  // Under a declared header a field with nothing in it is not listed
+  // (LOOK-1 round 3): Details says what the record holds.
+  const present = (columnId: string) => {
+    const value = data.fields.cells[columnId];
+    return !!value && value !== '—';
+  };
   const cards = [
-    ...fields.map((column) => ({
-      orderKey: column.orderKey,
-      html: `<div><dt>${h(column.label)}</dt><dd>${h(data.fields.cells[column.columnId] ?? '—')}</dd></div>`,
-    })),
+    ...fields
+      .filter((column) => !header || present(column.columnId))
+      .map((column) => ({
+        orderKey: column.orderKey,
+        html: `<div><dt>${h(column.label)}</dt><dd>${h(data.fields.cells[column.columnId] ?? '—')}</dd></div>`,
+      })),
     ...blocks.map((block) => {
       const lines = block.columns
         .map((id) => data.fields.cells[id])
@@ -1372,7 +1460,11 @@ export function renderCompositionFields(
   // Stored fields the header does not carry, read back as saved. Under a
   // declared header the label is already the page's identity, so it is not
   // repeated as this panel's heading.
-  return `<section class="panel" data-composition-fields><h2>${h(header ? 'Details' : surface.label)}</h2><dl class="record-fields">${cards.map((card) => card.html).join('')}</dl></section>`;
+  if (!cards.length) return '';
+  // The first facts show; the rest wait under More details (round 3).
+  const shown = header ? cards.slice(0, 8) : cards;
+  const rest = header ? cards.slice(8) : [];
+  return `<section class="panel" data-composition-fields><h2>${h(header ? 'Details' : surface.label)}</h2><dl class="record-fields">${shown.map((card) => card.html).join('')}</dl>${rest.length ? `<details class="draft-more composition-more-fields"><summary>More details</summary><dl class="record-fields">${rest.map((card) => card.html).join('')}</dl></details>` : ''}</section>`;
 }
 export function renderCompositionChildren(
   data: CompositionData,
@@ -1417,7 +1509,7 @@ export function renderCompositionChildren(
     })
     .join('');
   return rail.length > 0
-    ? `${children}<div class="composition-rail">${rail.join('')}</div>`
+    ? `${children}<section class="panel composition-rail" aria-labelledby="composition-rail-title"><h2 id="composition-rail-title" class="composition-rail__title">Linked documents</h2>${rail.join('')}</section>`
     : children;
 }
 
@@ -2051,7 +2143,10 @@ export async function submitCompositionAction(
       rowIds: Object.freeze(
         taskRows(action, data).map((row) => row.record.recordId),
       ),
-      rowInputs: {},
+      // Each row starts with what is still open (LOOK-1 round 3, ruling):
+      // the declared fill, applied as the Task opens; nothing is filled on
+      // a guess.
+      rowInputs: prefilledRows(action, data),
       results: {},
       rowResults: {},
       generated: {},
@@ -2652,7 +2747,7 @@ export async function submitCompositionAction(
     const reviewLabel =
       current.action.presentation?.task?.confirmation.reviewLabel ??
       `Review ${current.action.label}`;
-    return `${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}" novalidate>${hidden}${taskRowsDeclared?.fillLabel ? '<button type="submit" class="sr-only" name="taskStage" value="prepare" tabindex="-1" aria-hidden="true" data-task-default></button>' : ''}${controls.join('')}${rows}<p class="composition-task-consequence">${h(current.action.description)}</p><footer class="composition-task-footer"><button name="taskStage" value="prepare">${h(reviewLabel)}</button></footer></form>${back}`;
+    return `${error ? compositionMessage('COMPOSITION_INPUT_INVALID', 'alert') : ''}<form class="composition-inputs" method="post" action="${h(url)}" novalidate>${hidden}${taskRowsDeclared?.fillLabel ? '<button type="submit" class="sr-only" name="taskStage" value="prepare" tabindex="-1" aria-hidden="true" data-task-default></button>' : ''}${controls.join('')}${rows}<section class="composition-task-after" aria-label="After you post"><p class="eyebrow">After you post</p><p class="composition-task-consequence">${h(current.action.description)}</p></section><footer class="composition-task-footer"><a class="secondary-action" href="${h(url)}">Cancel</a><button name="taskStage" value="prepare">${h(reviewLabel)}</button></footer></form>`;
   });
 }
 

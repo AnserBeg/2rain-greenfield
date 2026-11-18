@@ -2816,39 +2816,60 @@ async function editorResponse(
     // One aligned row per line under shared column headings. Each control keeps
     // an accessible name of its own ("Line 2 quantity"), so the headings are a
     // visual aid, never the only label.
+    // A line's fields declared `disclosure: 'more'` wait in its own More
+    // cell (LOOK-1 round 3); each control keeps its own accessible name.
+    const lineMore = definition.lineFields.some(
+      (field) => field.disclosure === 'more',
+    );
+    const shownLineFields = definition.lineFields.filter(
+      (field) => field.disclosure !== 'more',
+    );
     const lineRows = await Promise.all(
       buffer.lines.map(async (line, index) => {
         const number = index + 1;
         if (line.removed)
-          return `<tr data-draft-line="${h(line.id)}" class="draft-line draft-line--removed"><td colspan="${definition.lineFields.length + 1}">Line ${number} · removed · pending governed archive</td></tr>`;
-        const cells = await Promise.all(
-          definition.lineFields.map(async (field, position) => {
-            const html = await control(
+          return `<tr data-draft-line="${h(line.id)}" class="draft-line draft-line--removed"><td colspan="${shownLineFields.length + (lineMore ? 2 : 1)}">Line ${number} · removed · pending governed archive</td></tr>`;
+        const rendered = await Promise.all(
+          definition.lineFields.map(async (field, position) => ({
+            field,
+            html: await control(
               definition.lineFormSurfaceId,
               line,
               field,
               index * 100 + position,
               frozen,
               `Line ${number} ${field.label.toLowerCase()}`,
-            );
-            return `<td data-label="${h(field.label)}" class="draft-line__cell draft-line__cell--${field.reference ? 'reference' : field.presentation?.kind === 'derived' ? 'derived' : 'value'}">${html}</td>`;
-          }),
+            ),
+          })),
         );
+        const cells = rendered
+          .filter(({ field }) => field.disclosure !== 'more')
+          .map(
+            ({ field, html }) =>
+              `<td data-label="${h(field.label)}" class="draft-line__cell draft-line__cell--${field.reference ? 'reference' : field.presentation?.kind === 'derived' ? 'derived' : 'value'}">${html}</td>`,
+          );
+        const moreFields = rendered.filter(
+          ({ field }) => field.disclosure === 'more',
+        );
+        const moreHtml = moreFields.map(({ html }) => html).join('');
+        const more = lineMore
+          ? `<td class="draft-line__cell draft-line__cell--more"><details class="draft-line-more"${moreHtml.includes('aria-invalid="true"') ? ' open' : ''}><summary aria-label="${h(`More for line ${String(number)}`)}">More</summary><div class="draft-line-more__fields">${moreFields.map(({ field, html }) => `<div class="draft-line-more__field"><span aria-hidden="true">${h(field.label)}</span>${html}</div>`).join('')}</div></details></td>`
+          : '';
         const remove = frozen
           ? ''
-          : `<button form="draft-editor-form" class="link-action draft-line__remove" name="draftAction" value="remove:${h(line.id)}" formnovalidate aria-label="Remove line ${number}">Remove</button>`;
-        return `<tr data-draft-line="${h(line.id)}" class="draft-line">${cells.join('')}<td class="draft-line__cell draft-line__cell--remove">${remove}</td></tr>`;
+          : `<button form="draft-editor-form" class="link-action draft-line__remove" name="draftAction" value="remove:${h(line.id)}" formnovalidate aria-label="Remove line ${number}">×</button>`;
+        return `<tr data-draft-line="${h(line.id)}" class="draft-line">${cells.join('')}${more}<td class="draft-line__cell draft-line__cell--remove">${remove}</td></tr>`;
       }),
     );
     const lines = [
-      `<table class="draft-lines form-fields"><thead><tr>${definition.lineFields
+      `<table class="draft-lines form-fields"><thead><tr>${shownLineFields
         .map(
           (field) =>
             `<th scope="col" class="draft-lines__heading draft-lines__heading--${field.reference ? 'reference' : field.presentation?.kind === 'derived' ? 'derived' : 'value'}">${h(field.label)}${field.presentation?.kind === 'derived' ? '' : required(definition.lineFormSurfaceId, field.fieldId)}</th>`,
         )
         .join(
           '',
-        )}<th scope="col" class="draft-lines__heading--remove"><span class="sr-only">Remove</span></th></tr></thead><tbody>${lineRows.join('')}</tbody></table>`,
+        )}${lineMore ? '<th scope="col" class="draft-lines__heading--more"><span class="sr-only">More</span></th>' : ''}<th scope="col" class="draft-lines__heading--remove"><span class="sr-only">Remove</span></th></tr></thead><tbody>${lineRows.join('')}</tbody></table>`,
     ];
     // A flow opened by a full-page submit renders in the page; one opened in
     // place by the script arrives as a fragment into the empty slot below.
@@ -2858,7 +2879,7 @@ async function editorResponse(
       : '';
     const commands = buffer.pending
       ? `<button form="draft-editor-form" name="draftAction" value="${buffer.pending.some((step) => step.grant && !step.done) ? 'confirm' : 'retry'}">${buffer.pending.some((step) => step.grant && !step.done) ? 'Confirm removal and save' : 'Retry save'}</button>`
-      : '<button form="draft-editor-form" name="draftAction" value="save">Save</button>';
+      : '<button form="draft-editor-form" name="draftAction" value="save">Save draft</button>';
     return {
       statusCode,
       html: '',

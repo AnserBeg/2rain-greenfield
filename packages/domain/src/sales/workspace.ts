@@ -568,6 +568,8 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
           id('column', 'order_tax'),
           id('column', 'order_total'),
         ],
+        // "Total CAD": the grand total reads with the order's currency.
+        currency: id('column', 'currency'),
       },
       // The ship-to lines read as one address, on screen and when printed.
       blocks: [
@@ -591,7 +593,8 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         title: 'Order to cash',
         steps: [
           {
-            label: 'Sales order',
+            // A draft, as the purchase order's first step is (LOOK-1 round 3).
+            label: 'Draft',
             current: [inState('draft')],
             complete: [notInState('draft'), notInState('cancelled')],
             stopped: [inState('cancelled')],

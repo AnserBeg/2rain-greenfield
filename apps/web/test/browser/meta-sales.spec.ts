@@ -88,8 +88,9 @@ for (const javaScriptEnabled of [true, false]) {
         // the lines, so their table starts lower, still on the first
         // 1280x800 screen.
         expect(lineTop!.y).toBeLessThan(800);
+        // The badge names the stepper's current step (LOOK-1 round 3).
         await expect(page.locator('.composition-header')).toContainText(
-          'Released',
+          'Fulfillment',
         );
         await lines()
           .getByRole('link', { name: 'Select', exact: true })

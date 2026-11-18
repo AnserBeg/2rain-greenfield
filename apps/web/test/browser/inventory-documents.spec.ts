@@ -242,7 +242,7 @@ interface Saved {
  * of its own.
  */
 async function saveDraft(page: Page): Promise<Saved> {
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page).toHaveURL(/inventory_transaction_detail/u);
   const title = page.getByRole('heading', { level: 1, name: /^STK-\d{6}$/u });
   await expect(title).toBeVisible();

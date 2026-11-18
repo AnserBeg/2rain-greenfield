@@ -2231,7 +2231,7 @@ async function createScopedStockDocument(
     'Calgary warehouse',
   );
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('1');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
   await expect(page).toHaveURL(/inventory_transaction_detail/u);
   // Saved, not refused. The save opens the document's own page, whose
   // sections render: its line, and Posted movements stating its declared
@@ -2440,7 +2440,7 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
     ).toBeVisible();
     await expect(editPage.locator('form#draft-editor-form')).toHaveCount(1);
     await expect(
-      editPage.getByRole('button', { name: 'Save', exact: true }),
+      editPage.getByRole('button', { name: 'Save draft', exact: true }),
     ).toBeVisible();
 
     // The line's own operation-addressed edit form, captured while the
@@ -2524,11 +2524,16 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
     expect(replay.status()).toBe(200);
     const replayHtml = await replay.text();
     expect(replayHtml).toContain('Post complete');
-    expect(replayHtml).toContain('Active · revision 2');
+    // The revision is the badge's screen-reader text (LOOK-1 round 3).
+    expect(replayHtml).toMatch(
+      /Active<span class="sr-only"> · revision 2<\/span>/u,
+    );
 
     // The editor opened before posting is a second UI boundary: its Save
     // draft is refused against the posted document rather than applied.
-    await editPage.getByRole('button', { name: 'Save', exact: true }).click();
+    await editPage
+      .getByRole('button', { name: 'Save draft', exact: true })
+      .click();
     await expect(
       editPage.locator('[data-diagnostic-code="DRAFT_EDITOR_LOCKED"]'),
     ).toHaveCount(1);

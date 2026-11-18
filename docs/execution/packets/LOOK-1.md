@@ -1,78 +1,75 @@
 # LOOK-1 — every screen in the Ledger look the owner chose
 
-Status: round 2 frozen at `e15cda79` (CI green, run 44288078657). Mechanical (no Critical path). Round 1 integrated at
-`5d07856a` (its full record: this file at `51b99470`). Round 2 base `51b99470`. Rulings 2026-11-18: `rail` key, per-field
-`disclosure: 'more'` and `dateOnly: true` approved; B11 option B (one primary "Save"); Custom group declared by the
-customization expansion, never read from ids (lease on `packages/customization/src/apply.ts` for that one change).
+Status: round 3 frozen at `bfae71f0` (CI green, run 44325476363). Mechanical (no Critical path). Round 3 answers Fable
+review 1 (`2rain-missions/look-1-fable-review-1.md`), merged in groups: (a) `fb3f95ee`, (b) `eed94293`, (c)–(e) together
+(ruled: they share render files; the deviation from one merge per group is accepted). Earlier rounds: round 2 `d0d3baf7`,
+round 1 `5d07856a` (their records: this file at `c3ab7ab1` and `51b99470`). Claim base: main `1156974b`, merged in.
 
-## Round 2 claims (round 1: tokens, shell, record parts, lists/forms, the proof `look.composed-application.spec.ts`)
+## Round 3 claims
 
-1. A (record pages): one PO lines table, totals under it; empty child sections say "None yet" quietly; no engineering
-   prose; long commands and print behind "Record actions"; next-step buttons carry the record's figure ("Receive 10");
-   exactly one current step; the document badge takes its declared colour (the CSS never coloured it); eyebrow
-   "Purchase order"; Details shows only fields not shown elsewhere; technical details quiet.
-2. Right rail: `presentation.rail` on a dataset (PO receipts, receipt lines, bills, approvals; SO shipments, invoices)
-   stacks it in one column beside the sheet; a dataset with line progress is refused the rail.
-3. B (forms): first fields, then "More details" (`disclosure: 'more'`; a required field is refused it); order dates are
-   `dateOnly: true` (a date input, no "(UTC)"; refused on a non-date-time field); one primary "Save".
-4. C: the proof enters an Equipment record (name, serial, date, status) and shows its page: eyebrow, title, the
-   lifecycle badge, one Details grid with values by field kind (a choice's label, a date as a date), identity in
-   technical details. Customization declares a "Custom" module (`custom_record-types`) and lists each record type
-   there through `navigationModuleId`; the group keeps its heading over a placed single destination, which keeps its
-   own name. Lists show no selection bar until a row is ticked.
-5. D: the sidebar does not repeat Today; Companies list under Contacts, Inventory value under Stock; a group's several
-   occasional destinations wait under its own "Other" (Stock: movements, period locks, inventory transactions, counts);
-   the distributor seed and order-entry fixture name the company "Foothills Industrial Supply" (ids unchanged); Today's
-   Open sits beside the find box.
+1. (a) Chrome: the top bar is the search and an initials avatar whose menu holds the principal, the demo's person
+   switch and Diagnostics; the sidebar's head is the page's company (the same Company links); queues and areas scroll
+   between a fixed head and a foot naming the person and role; one Settings disclosure holds the groups' occasional
+   destinations; a record's identity and revision live in its "…" or Record actions menu. Queue counts on every page
+   are SPEED-1's (PR #72), styled once. The proof refuses raw ids anywhere on the page.
+2. (b) Stock: optional List key `compact: 'scrollTable'` keeps a table scrolling in its panel on a phone; declared
+   Lists name themselves once, count plainly, keep a one-line toolbar, read zeros faint (`data-zero`), badge only
+   exceptions.
+3. (c) Record bodies: the badge names the stepper's current step from the declared progression (the SO's first step
+   is "Draft"); one Linked documents panel; one document sheet; Details lists what the record holds (eight, the rest
+   under More details); empty charge rows hidden; `print.currency` reads "Total CAD"; PO lines' three-way match in
+   their details; breadcrumbs area / List / record; Record actions is "…"; generic records: serif title, badge beside
+   it, revision for screen readers, Edit secondary, one Details heading.
+4. (d) Receive: rows start with what is open (the declared fill, at open); header fields three to a row; the declared
+   consequence as "After you post"; Cancel beside the one primary; the review step stays (contract). New PO: eyebrow and
+   serif title, neutral Draft badge, a line's discount and tax behind its More (`disclosure: 'more'` on line fields),
+   × to remove, one primary "Save draft" (ruling).
+5. (e) Today: no find box (searched from the top bar, on a phone too), tile icons, a centred line under the tiles.
 
 ## Decisions
 
-- "Other", not "More", for a group's occasional destinations: the compiler's top-level More keeps its one meaning.
-- Inventory transactions is `setup` membership: placement only, never authorization (ADR-0030).
-- The seed renames the provisioned company by one update at revision 1, replayed by its key on restart.
-- Customized release roots change (the expansion adds the Custom module): pre-tenant re-baseline, ADR-0066.
-- Today keeps tiles and the find box: no "To receive" table or activity query exists (the page budget forbids one per widget).
-- The proof also refuses canonical ids and raw instants on every screen.
-- Next-step buttons are the action's label plus the record's figure ("Receive 10", "Ship 4"); "Receive 10 remaining"
-  would need a per-action template, a language key not taken here.
+- The badge and stepper agree by construction: the badge reads the progression's current step, its last when all are
+  complete, the record's state when no step applies (cancelled). A closed PO with goods to bill reads "Billing".
+- ux-grammar wins: pager targets stay 44px; the save note keeps its row above Save (pinned layout).
+- PO lines keep Ordered and Received (line progress names two quantity columns) and Line (it names the receive input).
+- New optional keys: List `compact`, `print.currency`; each with compiler accept/refuse tests, coverage re-derived,
+  release re-baselined (pre-tenant, ADR-0066).
+- A sortable heading's screen-reader text is contained by its scrolling table (it widened the phone page).
 
 ## Gates
 
-CI run 44288078657 green at `e15cda79` (every job, the proof). Local: format, lint, scoped typecheck, touched unit tests, the
-web contract and integration files, `check:app-release`, coverage decisions re-derived. Shots: `docs/execution/evidence/look-1/`.
+CI run 44325476363 green at `bfae71f0` (every job, the proof). Local: format, lint, scoped typecheck, touched unit tests,
+the web contract and integration files, `check:app-release`. Shots: `docs/execution/evidence/look-1/` (56, from the run).
 
 ## Test it yourself
 
-`pnpm --filter @north-star/api dev:reset`, `pnpm dev`, <http://127.0.0.1:4174/>: the bar names Foothills Industrial
-Supply; open a purchase order: one lines table, "Receive N" button, linked records in the right column, other commands
-under Record actions; New purchase order: four fields then More details, a date-only order date, one Save; Customize an
-Equipment type, add one record: it is under Custom with labelled values.
+`pnpm --filter @north-star/api dev:reset`, `pnpm dev`: the avatar menu holds Switch person and Diagnostics; Stock by item
+on a phone scrolls sideways in its panel; a purchase order's badge reads its step, Linked documents sit right, "Total
+CAD" under the lines; Receive opens with the open quantities filled; New purchase order hides discount and tax per line.
 
 ## Filed
 
-- SO lines stay two tables: fulfillment and commercial read models are separate queries and read models do not nest.
-- Rail activity, stepper captions, "created by": no event source. Create-form running total: no declared draft formula.
-- `saveThen` (option A, "Save and place") for phase 3, with its partial-failure notes (save committed, place refused).
-- To invoice queue; totals' currency code. Tenant record pages: the badge is the lifecycle ("Active · revision 1", pinned by specs), not the record's own Status
-  choice (a patch declares no status role); activity has no source; the breadcrumb reads "Equipment / Equipment".
-- The assistant panel (AGENT-3) restyle follows once it lands.
+- Today's "To receive" rows: a row read on the landing page is SPEED-1's loader and page budget, not the look's.
+- "+ Purchase order / + Sales order" on Today: a launcher declares no create actions.
+- Parties block: grouping Vendor and Receive into would repeat the subtitle and a fact; no addresses exist.
+- Step dates, "placed … by", the date and location subtitle, activity, bell: no source.
+- Tenant record pages: the badge is the lifecycle; a patch declares no status role. Native date input kept.
+- Assistant panel restyle follows AGENT-3.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "LOOK-1",
-  "base": "51b99470d1b9e29af733943f979d2598967426b8", "head": "e15cda79c78e2a9f7288aa498aedc6c5a64b43b5",
+  "base": "1156974be082eca82ecb05135036c588502a8306", "head": "bfae71f09c22a6c84e50f1a20857a5729c4789aa",
   "changedPaths": [
-    "apps/api/src/composition-root.ts", "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts", "apps/web/src/document-editor.ts", "apps/web/src/editor-controls.ts", "apps/web/src/ledger-styles.ts", "apps/web/src/message-catalog.ts",
-    "apps/web/src/surface-composition.ts", "apps/web/src/surface-runtime.ts", "apps/web/test/browser/composed-application.spec.ts", "apps/web/test/browser/customer-defaults.spec.ts", "apps/web/test/browser/inventory-documents.spec.ts", "apps/web/test/browser/inventory-valuation.spec.ts", "apps/web/test/browser/inventory-warehouse-mode.spec.ts", "apps/web/test/browser/location-runtime.spec.ts",
-    "apps/web/test/browser/look.composed-application.spec.ts", "apps/web/test/browser/loop-scorecard.ts", "apps/web/test/browser/message-catalog.spec.ts", "apps/web/test/browser/order-entry.spec.ts", "apps/web/test/browser/order-pages.spec.ts", "apps/web/test/browser/order-pricing.spec.ts", "apps/web/test/browser/payables.spec.ts", "apps/web/test/browser/price-list-pricing.spec.ts",
-    "apps/web/test/browser/purchase-pricing.spec.ts", "apps/web/test/browser/receivables.spec.ts", "apps/web/test/browser/receiving.composed-application.spec.ts", "apps/web/test/browser/sale-fulfillment.composed-application.spec.ts", "apps/web/test/browser/sales-order.composed-application.spec.ts", "apps/web/test/browser/surface-data-binding.spec.ts", "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-composition.ts",
-    "packages/canonical-model/src/surface-workspace.ts", "packages/customization/src/apply.ts", "packages/domain/src/app/builder.ts", "packages/domain/src/app/order-entry.ts", "packages/domain/src/app/seed.ts", "packages/domain/src/purchasing/approval-workspace.ts", "packages/domain/src/purchasing/workspace.ts", "packages/domain/src/sales/workspace.ts",
-    "test/architecture/surface-grammar-conformance.test.ts", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/assert-composed-inventory.ts", "test/helpers/order-entry-fixture.ts", "test/integration/location-runtime.test.ts", "test/integration/surface-data-binding.test.ts", "test/performance/page-budget.test.ts", "test/postgres/inventory-posting.test.ts",
-    "test/postgres/order-pages.test.ts", "test/unit/canonical-model/surface-composition.test.ts", "test/unit/canonical-model/surface-launcher.test.ts", "test/unit/customization.test.ts", "test/unit/purchasing-definition.test.ts", "test/unit/workspace-contract.test.ts"
+    "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts", "apps/web/src/document-editor.ts", "apps/web/src/ledger-styles.ts", "apps/web/src/navigation-icons.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-launcher.ts",
+    "apps/web/src/surface-runtime.ts", "apps/web/test/browser/composed-application.spec.ts", "apps/web/test/browser/customer-defaults.spec.ts", "apps/web/test/browser/inventory-documents.spec.ts", "apps/web/test/browser/inventory-warehouse-mode.spec.ts", "apps/web/test/browser/look.composed-application.spec.ts", "apps/web/test/browser/loop-scorecard.ts", "apps/web/test/browser/message-catalog.spec.ts",
+    "apps/web/test/browser/meta-sales.spec.ts", "apps/web/test/browser/order-entry.spec.ts", "apps/web/test/browser/order-pages.spec.ts", "apps/web/test/browser/order-pricing.spec.ts", "apps/web/test/browser/payables.spec.ts", "apps/web/test/browser/price-list-pricing.spec.ts", "apps/web/test/browser/purchase-approvals.spec.ts", "apps/web/test/browser/purchase-pricing.spec.ts",
+    "apps/web/test/browser/receivables-counter-sale.spec.ts", "apps/web/test/browser/receiving.composed-application.spec.ts", "apps/web/test/browser/sale-fulfillment.composed-application.spec.ts", "apps/web/test/browser/sales-order.composed-application.spec.ts", "apps/web/test/browser/surface-data-binding.spec.ts", "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-composition.ts", "packages/domain/src/app/order-entry.ts",
+    "packages/domain/src/app/today.ts", "packages/domain/src/purchasing/workspace.ts", "packages/domain/src/sales/workspace.ts", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/integration/surface-data-binding.test.ts", "test/unit/canonical-model/surface-composition.test.ts", "test/unit/workspace-contract.test.ts"
   ],
   "symbols": [
-    {"path": "packages/domain/src/app/builder.ts", "name": "composedDestinationPlacement"}, {"path": "packages/domain/src/app/seed.ts", "name": "DISTRIBUTOR_COMPANY_NAME"},
-    {"path": "apps/web/src/surface-runtime.ts", "name": "sidebarNavigation"}, {"path": "apps/web/src/component-registry.ts", "name": "recordFieldValue"}
+    {"path": "apps/web/src/surface-composition.ts", "name": "badgeStep"}, {"path": "apps/web/src/surface-composition.ts", "name": "prefilledRows"},
+    {"path": "apps/web/src/navigation-icons.ts", "name": "declaredIcon"}, {"path": "apps/web/src/component-registry.ts", "name": "navigationGroupLabel"}
   ]
 }
 ```
