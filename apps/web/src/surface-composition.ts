@@ -2736,7 +2736,7 @@ export async function submitCompositionAction(
       else
         return taskDocument(
           () =>
-            `<section data-task-prepared><div data-task-review-summary${taskRowsDeclared ? ' data-task-row-review' : ''}>${previewInputs()}</div>${current.action.stockImpacts ? `<section class="composition-task-after" aria-label="After you post"><p class="eyebrow">After you post</p>${impactRows}</section>` : `<p class="composition-task-consequence">${h(current.action.description)}</p>`}<form class="composition-task-footer" method="post" action="${h(url)}">${hidden}<input type="hidden" name="preparedId" value="${h(prepared.id)}"><button class="secondary-action" name="taskStage" value="edit">Edit inputs</button><button name="taskStage" value="confirm">${h(confirmLabel())}</button></form></section>${back}`,
+            `<section data-task-prepared><div data-task-review-summary${taskRowsDeclared && current.action.stockImpacts ? ' data-task-row-review' : ''}>${previewInputs()}</div>${current.action.stockImpacts ? `<section class="composition-task-after" aria-label="After you post"><p class="eyebrow">After you post</p>${impactRows}</section>` : `<p class="composition-task-consequence">${h(current.action.description)}</p>`}<form class="composition-task-footer" method="post" action="${h(url)}">${hidden}<input type="hidden" name="preparedId" value="${h(prepared.id)}"><button class="secondary-action" name="taskStage" value="edit">Edit inputs</button><button name="taskStage" value="confirm">${h(confirmLabel())}</button></form></section>${back}`,
           inputs,
           prepared,
         );
