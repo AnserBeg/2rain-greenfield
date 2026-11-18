@@ -261,7 +261,7 @@ export async function renderSurfaceRuntimeWithData(
     });
   const legalEntitySelection = legalEntitySelectionForSurface(binding, url);
   const queryParameterValues = queryParameterValuesForSurface(binding, url);
-  const workspaceContext = await loadWorkspaceContextBar(
+  const pageContext = await loadWorkspaceContextBar(
     view,
     selection,
     binding,
@@ -270,6 +270,20 @@ export async function renderSurfaceRuntimeWithData(
     url,
     entry,
   );
+  // A page with no company of its own -- a record every company shares, a
+  // tenant's record type -- keeps the company the day's work is in (LOOK-1
+  // round 4): resolved by the landing launcher's declared entry, so the
+  // sidebar's head, its links and its queues stay in that company.
+  const landingContext =
+    pageContext || legalEntitySelection.length > 0 || entry
+      ? null
+      : await landingCompanyContext(
+          view,
+          selection,
+          gateways.queryGateway,
+          url,
+        );
+  const workspaceContext = pageContext ?? landingContext;
   // The sidebar's queue counts, read with the page's other reads (SPEED-1).
   await loadQueueCounts(
     view,
@@ -278,7 +292,7 @@ export async function renderSurfaceRuntimeWithData(
     gateways.queryGateway,
     legalEntitySelection.length === 1
       ? legalEntitySelection[0]!
-      : (entry?.selected ?? null),
+      : (entry?.selected ?? landingContext?.selectedRecordId ?? null),
     gateways.clock?.() ?? new Date(),
   );
   // A record every company shares reads its company-owned sections in the
@@ -1571,6 +1585,32 @@ function legalEntitySelectionForSurface(
 ): readonly string[] {
   const scope = binding.query.legalEntityScope;
   return scope ? url.searchParams.getAll(scope.operand.parameterId) : [];
+}
+
+/** The landing launcher's company, for a page that has none of its own. */
+async function landingCompanyContext(
+  view: RuntimeViewContract.RequestRuntimeView,
+  selection: SelectedSurface,
+  queryGateway: SemanticQueryGateway,
+  currentUrl: URL,
+): Promise<WorkspaceContextBar | null> {
+  const landing = landingSurface(selection.navigation, selection.surfaces);
+  if (!landing?.launcher || !landing.workspace?.entry) return null;
+  if (landing.surfaceId === selection.selected.surfaceId) return null;
+  const resolved = await resolveWorkspaceEntry(
+    view,
+    landing,
+    new URL(currentUrl),
+    queryGateway,
+  );
+  if (!resolved?.selected) return null;
+  return Object.freeze({
+    options: resolved.options,
+    parameterId: resolved.parameter,
+    preservedParameters: Object.freeze([]),
+    selectedRecordId: resolved.selected,
+    targetSurfaceId: landing.surfaceId,
+  });
 }
 
 async function loadWorkspaceContextBar(

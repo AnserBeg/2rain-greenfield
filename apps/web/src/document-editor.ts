@@ -2880,12 +2880,16 @@ async function editorResponse(
     const commands = buffer.pending
       ? `<button form="draft-editor-form" name="draftAction" value="${buffer.pending.some((step) => step.grant && !step.done) ? 'confirm' : 'retry'}">${buffer.pending.some((step) => step.grant && !step.done) ? 'Confirm removal and save' : 'Retry save'}</button>`
       : '<button form="draft-editor-form" name="draftAction" value="save">Save draft</button>';
+    const documentKind = recordSurface.label.replace(/ detail$/i, '');
     return {
       statusCode,
       html: '',
       ...(current ? { record: current } : {}),
       slots: {
-        titleStatus: `<header class="surface-heading surface-heading--slot"><h1>${current ? 'Edit' : 'New'} ${h(recordSurface.label.replace(/ detail$/i, ''))}</h1><span class="status-pill" data-status-role="inProgress">Draft</span></header>`,
+        // The Ledger form header (LOOK-1 round 4): the record type as the
+        // eyebrow, "New purchase order" in the document face, and the
+        // neutral Draft badge beside it.
+        titleStatus: `<header class="surface-heading surface-heading--slot"><div><p class="eyebrow">${h(documentKind)}</p><h1>${current ? 'Edit' : 'New'} ${h(documentKind.charAt(0).toLowerCase() + documentKind.slice(1))}</h1></div><span class="status-pill">Draft</span></header>`,
         keyFacts: `${createPanel}<div id="editor-create-slot" data-editor-create-slot></div><section class="panel"><div class="draft-live" id="draft-editor-live" role="status" aria-live="polite" data-editor-live>${buffer.notice}</div>${
           paused
             ? '<p class="draft-paused" role="status">This order is paused while you create a record. Nothing you entered has changed.</p>'

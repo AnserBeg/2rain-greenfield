@@ -129,7 +129,8 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
               // The picture first, so a red still leaves the evidence.
               await page.screenshot({
                 path: `${out}/app-${screen}-${String(viewport.width)}-${scheme}.png`,
-                fullPage: screen !== 'receive',
+                // The phone's Receive dialog is shown whole (round 4).
+                fullPage: screen !== 'receive' || viewport.width < 900,
               });
               await requireLedgerParts(page, screen, viewport.width);
               const text = await page.locator('body').innerText();

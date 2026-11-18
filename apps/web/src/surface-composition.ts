@@ -1244,7 +1244,7 @@ function renderPresentedChild(
       ? childFailure(child.error)
       : child.status === 'empty'
         ? compositionMessage('COMPOSITION_CHILD_EMPTY')
-        : `<div class="data-table-wrap"${definition.presentation?.compact ? ` data-compact="${h(definition.presentation.compact)}" tabindex="0" role="region" aria-label="${h(definition.label)} table; scroll for all columns"` : ''}><table><thead><tr>${displayed.map((column) => `<th scope="col" class="${column.presentation?.role === 'quantity' ? 'composition-quantity' : ''}">${h(column.label)}</th>${column === primary ? progressHeading : ''}`).join('')}${detail.length ? '<th scope="col">Details</th>' : ''}${definition.presentation?.selection !== 'none' || rowActions.length ? '<th scope="col">Actions</th>' : ''}</tr></thead><tbody>${child.rows
+        : `<div class="data-table-wrap"${definition.presentation?.compact ? ` data-compact="${h(definition.presentation.compact)}" tabindex="0" role="region" aria-label="${h(definition.label)} table; scroll for all columns"` : ''}><table><thead><tr>${displayed.map((column) => `<th scope="col" class="${column.presentation?.role === 'quantity' ? 'composition-quantity' : ''}">${h(column.label)}</th>${column === primary ? progressHeading : ''}`).join('')}${definition.presentation?.selection !== 'none' || rowActions.length ? '<th scope="col">Actions</th>' : ''}</tr></thead><tbody>${child.rows
             .map((row) => {
               const selected =
                 data.selections[definition.datasetId]?.recordId ===
@@ -1276,7 +1276,7 @@ function renderPresentedChild(
                         applicable(action, rowData),
                     )
                   : [];
-              return `<tr data-compact-card="true" data-presented-row="true" data-record-id="${h(row.record.recordId)}" ${selected ? 'data-selected="true"' : ''}>${displayed.map((column) => `<td data-column-label="${h(column.label)}" data-column-priority="${column.presentation?.priority ?? column.orderKey}" data-cell-role="${column.presentation?.role ?? 'value'}">${column === primary ? `<strong>${h(row.cells[column.columnId] ?? '—')}</strong><div class="composition-cell-secondary">${cells(row, secondary)}</div>` : h(row.cells[column.columnId] ?? '—')}</td>${column === primary ? progressCell(row) : ''}`).join('')}${detail.length ? `<td data-cell-role="detail" data-column-label="Details"><details><summary>Supporting details</summary><div class="composition-cell-secondary">${cells(row, detail)}</div></details></td>` : ''}${
+              return `<tr data-compact-card="true" data-presented-row="true" data-record-id="${h(row.record.recordId)}" ${selected ? 'data-selected="true"' : ''}>${displayed.map((column) => `<td data-column-label="${h(column.label)}" data-column-priority="${column.presentation?.priority ?? column.orderKey}" data-cell-role="${column.presentation?.role ?? 'value'}">${column === primary ? `<strong>${h(row.cells[column.columnId] ?? '—')}</strong><div class="composition-cell-secondary">${cells(row, secondary)}</div>${detail.length ? `<details class="composition-cell-details" data-cell-role="detail"><summary>Supporting details</summary><div class="composition-cell-secondary">${cells(row, detail)}</div></details>` : ''}` : h(row.cells[column.columnId] ?? '—')}</td>${column === primary ? progressCell(row) : ''}`).join('')}${
                 definition.presentation?.selection !== 'none' ||
                 rowActions.length
                   ? `<td data-cell-role="actions" data-column-label="Actions">${selectedActions.map((action) => actionLink(action, rowData, view)).join('')}${definition.presentation?.selection !== 'none' ? `<a href="${h(url.pathname + url.search + url.hash)}" ${active ? 'aria-current="true"' : ''}>${active ? 'Selected' : 'Select'}</a>` : ''}${rowActions
@@ -2188,6 +2188,19 @@ export async function submitCompositionAction(
     (input) => input.presentation?.kind !== 'derived',
   );
   const rowField = (inputId: string, rowId: string) => `${inputId}@${rowId}`;
+  // A Task that fills its rows from one declared column (what is still
+  // open) shows that column as its figure; the rest of the line's figures
+  // stay for readers but out of the grid's way, as does a derived per-row
+  // value (LOOK-1 round 4: Item · Open · Receive · Unit cost).
+  const fillColumns = new Set<string>(
+    current.action.inputs.flatMap((input) =>
+      input.perRow?.fillFrom ? [input.perRow.fillFrom.columnId] : [],
+    ),
+  );
+  const figureClass = (column: { columnId: string }) =>
+    fillColumns.size > 0 && !fillColumns.has(column.columnId)
+      ? ' composition-task-context'
+      : '';
   const rowColumns = () => {
     const columns = rowsDataset ? ordered(rowsDataset.definition.columns) : [];
     return {
@@ -2223,10 +2236,10 @@ export async function submitCompositionAction(
     if (!taskRowsDeclared || !prepared || !rowsDataset) return '';
     const { primary } = rowColumns();
     const quantities = figures ? rowColumns().quantities : [];
-    return `<div class="data-table-wrap composition-task-rows-review"><table><caption>${h(`${rowsDataset.definition.label} (${String(prepared.rows.length)})`)}</caption><thead><tr><th scope="col">${h(primary?.label ?? '')}</th>${quantities.map((column) => `<th scope="col" class="composition-quantity">${h(column.label)}</th>`).join('')}${perRowInputs.map((input) => `<th scope="col">${h(input.label)}</th>`).join('')}</tr></thead><tbody>${prepared.rows
+    return `<div class="data-table-wrap composition-task-rows-review"><table><caption>${h(`${rowsDataset.definition.label} (${String(prepared.rows.length)})`)}</caption><thead><tr><th scope="col">${h(primary?.label ?? '')}</th>${quantities.map((column) => `<th scope="col" class="composition-quantity${figureClass(column)}">${h(column.label)}</th>`).join('')}${perRowInputs.map((input) => `<th scope="col"${input.presentation?.kind === 'derived' ? ' class="composition-task-derived"' : ''}>${h(input.label)}</th>`).join('')}</tr></thead><tbody>${prepared.rows
       .map((rowId) => {
         const row = frozenRow(rowId);
-        return `<tr data-compact-card="true" data-task-row="${h(rowId)}"><td data-cell-role="primary" data-column-label="${h(primary?.label ?? '')}"><strong>${h(row ? rowName(rowsDataset.definition, row) : '—')}</strong></td>${quantities.map((column) => `<td data-cell-role="quantity" data-column-label="${h(column.label)}">${h(row?.cells[column.columnId] ?? '—')}</td>`).join('')}${perRowInputs.map((input) => `<td data-column-label="${h(input.label)}">${h(prepared.rowInputs[rowId]?.[input.inputId] || '—')}</td>`).join('')}</tr>`;
+        return `<tr data-compact-card="true" data-task-row="${h(rowId)}"><td data-cell-role="primary" data-column-label="${h(primary?.label ?? '')}"><strong>${h(row ? rowName(rowsDataset.definition, row) : '—')}</strong></td>${quantities.map((column) => `<td data-cell-role="quantity" class="${figureClass(column).trim()}" data-column-label="${h(column.label)}">${h(row?.cells[column.columnId] ?? '—')}</td>`).join('')}${perRowInputs.map((input) => `<td data-column-label="${h(input.label)}">${h(prepared.rowInputs[rowId]?.[input.inputId] || '—')}</td>`).join('')}</tr>`;
       })
       .join('')}</tbody></table></div>`;
   };
@@ -2710,7 +2723,7 @@ export async function submitCompositionAction(
       );
       const { primary, secondary, quantities } = rowColumns();
       const errorId = 'composition-task-rows-error';
-      rows = `<fieldset class="composition-task-rows" data-task-rows="${h(taskRowsDeclared.datasetId)}"${rowsError ? ` aria-describedby="${errorId}"` : ''}><legend>${h(rowsDataset.definition.label)}</legend>${taskRowsDeclared.fillLabel ? `<button type="submit" class="secondary-action" name="taskStage" value="fill" formnovalidate>${h(taskRowsDeclared.fillLabel)}</button>` : ''}${rowsError ? `<small class="field-error" id="${errorId}">${h(rowsError)}</small>` : ''}<div class="data-table-wrap"><table><thead><tr><th scope="col">${h(primary?.label ?? '')}</th>${quantities.map((column) => `<th scope="col" class="composition-quantity">${h(column.label)}</th>`).join('')}${perRowInputs.map((input) => `<th scope="col">${h(input.label)}</th>`).join('')}</tr></thead><tbody>${current.rowIds
+      rows = `<fieldset class="composition-task-rows" data-task-rows="${h(taskRowsDeclared.datasetId)}"${rowsError ? ` aria-describedby="${errorId}"` : ''}><legend>${h(rowsDataset.definition.label)}</legend>${taskRowsDeclared.fillLabel ? `<button type="submit" class="secondary-action" name="taskStage" value="fill" formnovalidate>${h(taskRowsDeclared.fillLabel)}</button>` : ''}${rowsError ? `<small class="field-error" id="${errorId}">${h(rowsError)}</small>` : ''}<div class="data-table-wrap"><table><thead><tr><th scope="col">${h(primary?.label ?? '')}</th>${quantities.map((column) => `<th scope="col" class="composition-quantity${figureClass(column)}">${h(column.label)}</th>`).join('')}${perRowInputs.map((input) => `<th scope="col"${input.presentation?.kind === 'derived' ? ' class="composition-task-derived"' : ''}>${h(input.label)}</th>`).join('')}</tr></thead><tbody>${current.rowIds
         .map((rowId) => {
           const cells =
             (
@@ -2721,7 +2734,7 @@ export async function submitCompositionAction(
           const context = secondary[0]
             ? `, ${secondary[0].label} ${cells[secondary[0].columnId] ?? '—'}`
             : '';
-          return `<tr data-compact-card="true" data-task-row="${h(rowId)}"><td data-cell-role="primary" data-column-label="${h(primary?.label ?? '')}"><strong>${h(name)}</strong>${secondary.length ? `<div class="composition-cell-secondary">${secondary.map((column) => `<span><span class="composition-cell-label">${h(column.label)}</span> ${h(cells[column.columnId] ?? '—')}</span>`).join('')}</div>` : ''}</td>${quantities.map((column) => `<td data-cell-role="quantity" data-column-label="${h(column.label)}">${h(cells[column.columnId] ?? '—')}</td>`).join('')}${perRowInputs
+          return `<tr data-compact-card="true" data-task-row="${h(rowId)}"><td data-cell-role="primary" data-column-label="${h(primary?.label ?? '')}"><strong>${h(name)}</strong>${secondary.length ? `<div class="composition-cell-secondary">${secondary.map((column) => `<span><span class="composition-cell-label">${h(column.label)}</span> ${h(cells[column.columnId] ?? '—')}</span>`).join('')}</div>` : ''}</td>${quantities.map((column) => `<td data-cell-role="quantity" class="${figureClass(column).trim()}" data-column-label="${h(column.label)}">${h(cells[column.columnId] ?? '—')}</td>`).join('')}${perRowInputs
             .map((input) => {
               const key = rowField(input.inputId, rowId);
               const problem = rowErrors.get(key);
@@ -2730,7 +2743,7 @@ export async function submitCompositionAction(
                 ? `<small class="field-error" id="${h(described)}">${h(problem)}</small>`
                 : '';
               if (input.presentation?.kind === 'derived')
-                return `<td data-column-label="${h(input.label)}"><output class="derived-value" data-derived-input>${h(cells[input.presentation.column.columnId] ?? '—')}</output>${message}</td>`;
+                return `<td class="composition-task-derived" data-column-label="${h(input.label)}"><output class="derived-value" data-derived-input>${h(cells[input.presentation.column.columnId] ?? '—')}</output>${message}</td>`;
               const bound =
                 input.type === 'text'
                   ? boundInputField(view, current.action, input.inputId)

@@ -841,10 +841,15 @@ function renderBreadcrumb(context: SurfaceComponentContext): string {
   const header = context.surface.composition?.presentation?.header;
   const composition =
     context.data?.status === 'READY' ? context.data.composition : undefined;
+  // A form's trail ends "New" or "Edit" (LOOK-1 round 4).
   const current = record
     ? ((header && composition?.fields.cells[header.title]) ??
       recordTitle(context, record))
-    : entityLabel(context.surface);
+    : context.surface.surfaceRole === 'form'
+      ? recordFrom(context.data)
+        ? 'Edit'
+        : 'New'
+      : entityLabel(context.surface);
   const group = list
     ? navigationGroupLabel(context.view, list.surfaceId)
     : null;

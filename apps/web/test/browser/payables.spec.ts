@@ -93,10 +93,10 @@ test('a received purchase order is billed, paid in part and credited for the res
       '2',
     );
     // Billed and to bill are the line's supporting details (round 3).
-    await expect(line.locator('td[data-cell-role="detail"]')).toContainText(
+    await expect(line.locator('[data-cell-role="detail"]')).toContainText(
       'Billed 2',
     );
-    await expect(line.locator('td[data-cell-role="detail"]')).toContainText(
+    await expect(line.locator('[data-cell-role="detail"]')).toContainText(
       'To bill 0',
     );
     await expect(line).toContainText('Matched');
