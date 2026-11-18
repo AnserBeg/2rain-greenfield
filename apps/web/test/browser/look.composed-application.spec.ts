@@ -132,6 +132,23 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
                 // The phone's Receive dialog is shown whole (round 4).
                 fullPage: screen !== 'receive' || viewport.width < 900,
               });
+              // The phone's Receive dialog scrolls inside itself: its end is
+              // a second picture (round 4).
+              if (screen === 'receive' && viewport.width < 900) {
+                await page
+                  .locator('dialog[data-composition-task]')
+                  .evaluate((dialog) => {
+                    for (const node of [
+                      dialog,
+                      ...dialog.querySelectorAll('*'),
+                    ])
+                      if (node.scrollHeight > node.clientHeight + 1)
+                        node.scrollTop = node.scrollHeight;
+                  });
+                await page.screenshot({
+                  path: `${out}/app-${screen}-${String(viewport.width)}-${scheme}-end.png`,
+                });
+              }
               await requireLedgerParts(page, screen, viewport.width);
               const text = await page.locator('body').innerText();
               // The order date is a date (round 2): no "(UTC)" anywhere.
