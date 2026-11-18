@@ -1,6 +1,6 @@
 # SPEED-1 — a record page in a few database trips, measured and held there
 
-Status: slice 1 integrated at `3ab5853a`; slices 2-4 on `packet/SPEED-1` (one integration, orchestrator ruling). Tier: request
+Status: slice 1 integrated at `3ab5853a`; slices 2-4 at `69b7adc1` (one integration, orchestrator ruling). Tier: request
 security path, no file of the `AGENTS.md` §4 Critical set; slices 2-4 get the orchestrator's two critical reviews. Base: `main`
 `74b3367f`. Stops: none. Charter: [SPEED-1-charter.md](SPEED-1-charter.md). ADR: [ADR-0071](../../decisions/ADR-0071-read-decisions-are-live-per-request-writes-per-call.md).
 
@@ -59,7 +59,7 @@ left to fold: the reopened snapshot sits between two writes. Pinned at 16; filed
 
 ## Gates
 
-- Slice 1: CI run 44201921559 green at `81c218b0` (PR #62). Slices 2-4: CI on PR #62. Local: format, typecheck, lint, unit tests
+- Slice 1: CI run 44201921559 green at `81c218b0` (PR #62). Slices 2-4: CI run 44225809436 green at `a6a6348f` (PR #67). Local: format, typecheck, lint, unit tests
   (meter, query catalog memo), architecture tests that read the changed files, `read-snapshot.test.ts` and `page-budget.test.ts`
   (orchestrator-approved local runs, one at a time under the test lock).
 
