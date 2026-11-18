@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   compositionRelationTargets,
   loadSurfaceComposition,
@@ -2099,7 +2100,7 @@ function renderConfirmationTransition(
     )
     .join('');
   return Object.freeze({
-    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm ${escapeHtml(operation.label)} · 2rain</title><style>${styles}</style></head><body class="standalone"><main class="standalone__card" data-confirmation-step="preview"><p class="eyebrow">Operation preview</p><h1>Confirm ${escapeHtml(operation.label)}</h1><p>Review this ${escapeHtml(surface.label)} operation before it is executed.</p>${operation.capabilityId ? `<section data-predicted-effects="registered-capability"><strong>Predicted effects</strong><p>The registered capability <code>${escapeHtml(operation.capabilityId)}</code> will validate this draft and append its declared business facts. The screen will wait for the committed result.</p></section>` : ''}<form method="post" action="${escapeHtml(action)}">${preserved}<input type="hidden" name="confirmationGrant" value="${escapeHtml(grant)}"><button type="submit">Confirm ${escapeHtml(operation.label)}</button></form></main></body></html>`,
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Confirm ${escapeHtml(operation.label)} · 2rain</title><link rel="stylesheet" href="${SURFACE_STYLESHEET.href}"></head><body class="standalone"><main class="standalone__card" data-confirmation-step="preview"><p class="eyebrow">Operation preview</p><h1>Confirm ${escapeHtml(operation.label)}</h1><p>Review this ${escapeHtml(surface.label)} operation before it is executed.</p>${operation.capabilityId ? `<section data-predicted-effects="registered-capability"><strong>Predicted effects</strong><p>The registered capability <code>${escapeHtml(operation.capabilityId)}</code> will validate this draft and append its declared business facts. The screen will wait for the committed result.</p></section>` : ''}<form method="post" action="${escapeHtml(action)}">${preserved}<input type="hidden" name="confirmationGrant" value="${escapeHtml(grant)}"><button type="submit">Confirm ${escapeHtml(operation.label)}</button></form></main></body></html>`,
     statusCode: 200,
   });
 }
@@ -2123,7 +2124,7 @@ function printDocumentPage(
   statusCode: number,
 ): SurfaceRuntimeResponse {
   return Object.freeze({
-    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · 2rain</title><style>${styles}</style></head><body class="standalone print-page"><main class="print-shell" data-release-id="${escapeHtml(view.release.releaseId)}" data-release-content-hash="${escapeHtml(view.release.contentHash)}" data-pointer-fence="${view.pointer.fence}">${body}</main></body></html>`,
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · 2rain</title><link rel="stylesheet" href="${SURFACE_STYLESHEET.href}"></head><body class="standalone print-page"><main class="print-shell" data-release-id="${escapeHtml(view.release.releaseId)}" data-release-content-hash="${escapeHtml(view.release.contentHash)}" data-pointer-fence="${view.pointer.fence}">${body}</main></body></html>`,
     statusCode,
   });
 }
@@ -2133,7 +2134,7 @@ export function renderApplicationDiagnostic(
   ref: SurfaceMessageRef,
 ): SurfaceRuntimeResponse {
   return Object.freeze({
-    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(surfaceMessage(ref.code).sentence)} · 2rain</title><style>${styles}</style></head><body class="standalone"><main class="standalone__card" role="alert" ${messageAttributes(ref)}>${messageBody(ref, 'Application diagnostic', 'h1')}</main></body></html>`,
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(surfaceMessage(ref.code).sentence)} · 2rain</title><link rel="stylesheet" href="${SURFACE_STYLESHEET.href}"></head><body class="standalone"><main class="standalone__card" role="alert" ${messageAttributes(ref)}>${messageBody(ref, 'Application diagnostic', 'h1')}</main></body></html>`,
     statusCode,
   });
 }
@@ -2142,7 +2143,7 @@ function diagnosticDocument(
   view: RuntimeViewContract.RequestRuntimeView,
   ref: SurfaceMessageRef,
 ): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(surfaceMessage(ref.code).sentence)} · 2rain</title><style>${styles}</style></head><body class="standalone"><main class="standalone__card" role="alert" ${messageAttributes(ref)}>${messageBody(ref, 'Pinned release diagnostic', 'h1')}<p class="diagnostic-release">Release ${escapeHtml(shortIdentity(view.release.releaseId))} · fence ${view.pointer.fence}</p></main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(surfaceMessage(ref.code).sentence)} · 2rain</title><link rel="stylesheet" href="${SURFACE_STYLESHEET.href}"></head><body class="standalone"><main class="standalone__card" role="alert" ${messageAttributes(ref)}>${messageBody(ref, 'Pinned release diagnostic', 'h1')}<p class="diagnostic-release">Release ${escapeHtml(shortIdentity(view.release.releaseId))} · fence ${view.pointer.fence}</p></main></body></html>`;
 }
 
 /**
@@ -2182,12 +2183,12 @@ function shellDocument(
     <meta name="color-scheme" content="light dark">
     <link rel="icon" href="data:,">
     <title>${escapeHtml(title)} · 2rain</title>
-    <style>${styles}</style>
+    <link rel="stylesheet" href="${SURFACE_STYLESHEET.href}">
   </head>
   <body>
     <a class="skip-link" href="#surface-content">Skip to content</a>
     <div class="app-shell" data-release-id="${escapeHtml(view.release.releaseId)}" data-release-content-hash="${escapeHtml(view.release.contentHash)}" data-pointer-fence="${view.pointer.fence}">
-      <aside class="sidebar" style="--compact-nav-count:${String(Math.min(navigation.length, 5))}">
+      <aside class="sidebar" data-compact-nav-count="${String(Math.min(navigation.length, 5))}">
         <div class="brand"><span class="brand__mark" aria-hidden="true">2</span><span><strong>2rain</strong><small>Compiled workspace</small></span></div>
         <nav aria-label="Release navigation">
           <p class="nav-label">Application</p>
@@ -2674,6 +2675,7 @@ body{padding-bottom:72px}
 .app-shell{display:block}
 .sidebar{position:fixed;z-index:4;top:auto;right:0;bottom:0;left:0;width:100%;height:auto;padding:var(--space-1);border-top:1px solid var(--line-on-rail);background:var(--surface-rail)}
 .brand,.release-card,.nav-label{display:none}
+.sidebar[data-compact-nav-count="1"]{--compact-nav-count:1}.sidebar[data-compact-nav-count="2"]{--compact-nav-count:2}.sidebar[data-compact-nav-count="3"]{--compact-nav-count:3}.sidebar[data-compact-nav-count="4"]{--compact-nav-count:4}.sidebar[data-compact-nav-count="5"]{--compact-nav-count:5}
 .sidebar .navigation-tree{display:grid;grid-template-columns:repeat(var(--compact-nav-count,4),minmax(0,1fr));gap:var(--space-1);margin:0;overflow:visible}
 .navigation-tree>li{min-width:0}
 .navigation-tree>li>a,.navigation-tree>li>.navigation-group>summary{display:flex;min-height:44px;justify-content:center;align-items:center;padding:var(--space-1);gap:var(--space-1);border-left:0;border-bottom:3px solid transparent;font-size:var(--text-micro);text-align:center}
@@ -2875,3 +2877,13 @@ body{padding-bottom:72px}
 export function surfaceRuntimeStyles(): string {
   return styles;
 }
+
+/**
+ * SPEED-1: the stylesheet is served once from a same-origin route named by its
+ * content hash (`app-server.ts`), so a page links it instead of carrying 58 KB,
+ * and the CSP admits `style-src 'self'` with no inline style.
+ */
+export const SURFACE_STYLESHEET = Object.freeze({
+  css: styles,
+  href: `/assets/surface-${createHash('sha256').update(styles).digest('hex').slice(0, 20)}.css`,
+});

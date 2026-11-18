@@ -54,6 +54,7 @@ export const reachabilityProducers = [
     'test/unit/query-catalog-memo.test.ts',
     'test/unit/request-work-meter.test.ts',
     'test/unit/sales-definition.test.ts',
+    'test/unit/surface-assets.test.ts',
     'test/unit/web-surface-hex-literal-ratchet.test.ts',
     'test/unit/workspace-contract.test.ts',
   ]),
