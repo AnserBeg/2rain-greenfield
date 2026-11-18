@@ -616,7 +616,7 @@ td[data-cell-role=actions] a:not([class]){color:var(--muted);font-size:12px}
 /* The Receive grid reads Item · Open · Receive · Unit cost (round 4): the
    line's other figures and its derived unit stay in the markup, out of view;
    the item keeps a readable width on one line. */
-.composition-task-rows :is(th,td).composition-task-context,.composition-task-rows :is(th,td).composition-task-derived,.composition-task-rows-review :is(th,td).composition-task-context,.composition-task-rows-review :is(th,td).composition-task-derived{display:none}
+.composition-task-rows :is(th,td).composition-task-context,.composition-task-rows :is(th,td).composition-task-derived,.composition-task-rows-review :is(th,td).composition-task-context,.composition-task-rows-review :is(th,td).composition-task-derived{display:none!important}
 .composition-task-rows td[data-cell-role=primary],.composition-task-rows th:first-child{min-width:220px}
 .composition-task-rows td[data-cell-role=primary] strong{white-space:nowrap}
 .composition-task-rows td[data-cell-role=primary] .composition-cell-secondary{flex-wrap:nowrap;white-space:nowrap}
