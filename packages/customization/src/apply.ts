@@ -550,6 +550,7 @@ function addField(
           field: fieldId,
           label: field.label.trim(),
           orderKey: nextOrder(fields),
+          showWhenEmpty: true,
         });
       }
       // A generic list (Party) already shows its selected fields. Declare

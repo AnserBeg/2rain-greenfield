@@ -5,6 +5,8 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 
 import type pg from 'pg';
+import { renderCompositionFields } from '../../apps/web/src/surface-composition.js';
+import type { CompiledSurfaceDefinition } from '../../apps/web/src/surface-contract.js';
 import { normalizeApplicationPackage } from '../../packages/canonical-model/src/index.js';
 
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
@@ -364,14 +366,7 @@ test('Purchase order binds the new field to both draft editors, Details and the 
         ),
       ) as {
         kind: string;
-        surfaces?: {
-          surfaceId: string;
-          fieldIds: string[];
-          documentEditor?: {
-            headerFields: { fieldId: string; disclosure?: string }[];
-          };
-          composition?: { fields: { field: string; label: string }[] };
-        }[];
+        surfaces?: CompiledSurfaceDefinition[];
         operations?: {
           operationId: string;
           inputContract: {
@@ -395,11 +390,24 @@ test('Purchase order binds the new field to both draft editors, Details and the 
       role,
     );
     assert.ok(surface.fieldIds.includes(fieldId), surface.surfaceId);
-    if (role === 'detail')
+    if (role === 'detail') {
+      const record = {
+        archived: false,
+        entityId: 'northstar.app:entity.purchase_order',
+        recordId: 'existing',
+        revision: 1,
+        values: {},
+      };
+      const details = renderCompositionFields(surface, {
+        fields: { record, cells: {} },
+        fieldsFailed: false,
+      });
+      assert.match(details, /<dt>Person ordering<\/dt><dd>—<\/dd>/u);
       assert.equal(
         surface.composition!.fields.find((f) => f.field === fieldId)?.label,
         'Person ordering',
       );
+    }
   }
   const ops = artifacts.find(
     (a) => a.kind === 'operationCatalogPayload',
@@ -529,6 +537,18 @@ test('the adopted form language accepts an optional field under More details and
   };
   party.form = { kind: 'surfaceForm', schemaVersion: 'v6', fields: [field] };
   assert.doesNotThrow(() => normalizeApplicationPackage(candidate));
+  const po = (
+    candidate.surfaces as {
+      surfaceId: string;
+      composition?: { fields: Record<string, unknown>[] };
+    }[]
+  ).find((s) => s.surfaceId.endsWith('.purchase_order_detail'))!;
+  const column = po.composition!.fields[0]!;
+  column.showWhenEmpty = true;
+  assert.doesNotThrow(() => normalizeApplicationPackage(candidate));
+  column.showWhenEmpty = false;
+  assert.throws(() => normalizeApplicationPackage(candidate));
+  delete column.showWhenEmpty;
   field.fieldId = 'northstar.app:field.party_name';
   assert.throws(
     () => normalizeApplicationPackage(candidate),

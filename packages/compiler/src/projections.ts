@@ -772,11 +772,16 @@ function surfaceManifestPayload(
           ),
       ),
     );
-  const editorFloor = original.surfaces.some(
-    (surface) =>
-      'form' in surface &&
-      (surface.form as SurfaceForm | undefined)?.fields !== undefined,
-  )
+  const recordFieldPresentation =
+    [...compositions.values()].some((value) =>
+      value?.fields.some((column) => column.showWhenEmpty),
+    ) ||
+    original.surfaces.some(
+      (surface) =>
+        'form' in surface &&
+        (surface.form as SurfaceForm | undefined)?.fields !== undefined,
+    );
+  const editorFloor = recordFieldPresentation
     ? 23
     : rankedDefaultsOrChainedTasks
       ? 22

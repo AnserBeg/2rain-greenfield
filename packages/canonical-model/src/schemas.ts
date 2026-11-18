@@ -1154,7 +1154,14 @@ export const SurfaceCompositionSchema = z.strictObject({
     .optional(),
   kind: z.literal('surfaceComposition'),
   schemaVersion: v6NodeVersion,
-  fields: z.array(compositionColumn).max(48),
+  fields: z
+    .array(
+      compositionColumn.extend({
+        /** Keep this record field discoverable before its first value is saved. */
+        showWhenEmpty: z.literal(true).optional(),
+      }),
+    )
+    .max(48),
   children: z.array(compositionDataset).max(12),
   actions: z.array(compositionAction).max(24),
 });
