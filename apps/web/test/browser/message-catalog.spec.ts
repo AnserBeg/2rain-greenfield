@@ -33,6 +33,7 @@ import {
 import { readCompiledSurfaceManifest } from '../../src/surface-contract.js';
 import { renderApplicationDiagnostic } from '../../src/surface-runtime.js';
 import { compiledFixturePath, demoEntry } from '../helpers.js';
+import { closeServer } from './close-server.js';
 
 /**
  * ADR-0048 §5. The claim is *the user read the registered sentence*, and before
@@ -622,9 +623,7 @@ test.afterAll(async () => {
   catalogFixture.kill('SIGTERM');
   await catalogFixtureExit;
   for (const server of servers) {
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => (error ? reject(error) : resolve()));
-    });
+    await closeServer(server);
   }
   for (const directory of temporaryDirectories) {
     rmSync(directory, { force: true, recursive: true });
