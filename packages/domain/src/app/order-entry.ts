@@ -394,8 +394,8 @@ export function orderEntrySurfaces(
       headerLabel: 'Order details',
       linesLabel: 'Order lines',
       saveDescription: sales
-        ? 'Save draft to keep editing. Save and place makes the order ready for fulfillment.'
-        : 'Save draft to keep editing. Save and place makes the order ready for receiving.',
+        ? 'Save draft keeps the order editable without changing stock. Place the order when it is ready for fulfillment.'
+        : 'Save draft keeps the order editable without changing stock. Place the order when it is ready for receiving.',
       saveMode: 'sequential',
       saveThen: {
         operationId: id('operation', `${local}_release`),
