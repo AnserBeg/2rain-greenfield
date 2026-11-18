@@ -15,8 +15,7 @@ AS $$ BEGIN
     ) VALUES (OLD.tenant_id, OLD.environment_id, 1)
     ON CONFLICT (tenant_id, environment_id)
     DO UPDATE SET policy_version = current_policy_epochs.policy_version + 1,
-                  updated_at = transaction_timestamp();
-  END IF;
+                  updated_at = transaction_timestamp(); END IF;
   IF TG_OP = 'INSERT' OR (
     TG_OP = 'UPDATE' AND (
       NEW.tenant_id IS DISTINCT FROM OLD.tenant_id OR
@@ -28,8 +27,7 @@ AS $$ BEGIN
     ) VALUES (NEW.tenant_id, NEW.environment_id, 1)
     ON CONFLICT (tenant_id, environment_id)
     DO UPDATE SET policy_version = current_policy_epochs.policy_version + 1,
-                  updated_at = transaction_timestamp();
-  END IF;
+                  updated_at = transaction_timestamp(); END IF;
   IF TG_OP = 'DELETE' THEN
     RETURN OLD; END IF;
   RETURN NEW; END $$;
