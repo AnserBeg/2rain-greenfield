@@ -11,7 +11,7 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 ## Slices and gates
 
 - 0: merged `b218bf03`, PR #88, all 16 jobs green in [CI 44393050211](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44393050211). [Measured spike](../evidence/interact-1-spike.md).
-- 1: PR #93. CI 44400146615 found a pending-form edit race and stale test stage/result assumptions; fixes are committed. Focused browser reproductions are running before the next full CI.
+- 1: PR #93. CI 44400146615 found a pending-form edit race and stale test stage/result assumptions; fixes pass focused reproductions (period lock, order entry, multi-line receipts, purchase pricing, task JS on/off). Fresh full CI follows the accepted main merge.
 - 2–5: separately preserved drafts; integration follows CI in order.
 
 ## Decisions
@@ -21,14 +21,15 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 - Explicit stage submissions hold task controls until replacement or recovery; live preparations retain generation checks.
 - Exact-minute browser fills canonicalize zero seconds without changing their instant (CI reproduction passed).
 - Read-only normal git metadata requires isolated metadata in `/tmp`, tracking only this worktree.
+- CUSTOMIZE-2 main merge preserves its progress indicator and custom-field presentation alongside the task transport.
 - Mid-packet checkpoint: no whole-app review trigger; no new correctness domain or fan-out.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "INTERACT-1",
-  "base": "8ba38fb9af241dc2ed3a82dc928b873b3c44e067",
-  "head": "4ac3a53886547c3a227591ed46df3f9eae67082c",
+  "base": "e61e90e2ffdca32cf92bf39f7c921ca5069b130f",
+  "head": "6493bc59947bc7a63291b6a1a821591f09f9f227",
   "changedPaths": [
     "apps/web/src/app-server.ts",
     "apps/web/src/surface-client.ts",
