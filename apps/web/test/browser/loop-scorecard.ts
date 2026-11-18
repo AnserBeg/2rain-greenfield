@@ -560,12 +560,14 @@ export async function placePurchaseOrder(card: LoopScorecard): Promise<void> {
     page.getByLabel('Line 1 unit cost', { exact: true }),
     f.unitCost,
   );
+  const posting = card.interactionMark();
   await card.click(
     page.getByRole('button', { name: 'Save and place', exact: true }),
   );
   await expect(page).toHaveURL(/purchase_order_detail/u);
   // The badge names the stepper's current step (LOOK-1 round 3).
   await expect(status(page)).toHaveText(/Receiving/u);
+  await card.recordPosting('Place purchase order', posting);
   await card.end('done');
 }
 
@@ -615,12 +617,14 @@ export async function createSale(card: LoopScorecard): Promise<void> {
   await pick(card, 'Customer', ...f.customer);
   await pick(card, 'Line 1 product', ...f.item);
   await card.fill(page.getByLabel('Line 1 quantity', { exact: true }), f.sold);
+  const posting = card.interactionMark();
   await card.click(
     page.getByRole('button', { name: 'Save and place', exact: true }),
   );
   await expect(page).toHaveURL(/sales_order_detail/u);
   // The badge names the stepper's current step (LOOK-1 round 3).
   await expect(status(page)).toHaveText(/Fulfillment/u);
+  await card.recordPosting('Place sales order', posting);
   await card.end('done');
 }
 
