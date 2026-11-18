@@ -7,7 +7,10 @@ import test from 'node:test';
 import type pg from 'pg';
 import { renderCompositionFields } from '../../apps/web/src/surface-composition.js';
 import type { CompiledSurfaceDefinition } from '../../apps/web/src/surface-contract.js';
-import { normalizeApplicationPackage } from '../../packages/canonical-model/src/index.js';
+import {
+  normalizeApplicationPackage,
+  type SurfaceList,
+} from '../../packages/canonical-model/src/index.js';
 
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import {
@@ -523,6 +526,90 @@ test('every offered record type exposes its field in layout choices, on the form
       true,
     );
   }
+});
+
+test('arranging a list can add any field of its entity and refuses a field of another entity', async () => {
+  const fieldId = 'northstar.app:field.item_standard_cost_usd';
+  const surfaceId = 'northstar.app:surface.item_list';
+  const targets = customizationTargets(
+    normalizeApplicationPackage(authored) as unknown as Parameters<
+      typeof customizationTargets
+    >[0],
+  );
+  assert.deepEqual(
+    targets.lists
+      .find((list) => list.surfaceId === surfaceId)
+      ?.columns.find((column) => column.fieldId === fieldId),
+    { fieldId, label: 'Standard cost (USD)', hidden: true },
+  );
+  const arrangement = patch({
+    kind: 'arrangeLayout',
+    surface: surfaceId,
+    order: [fieldId],
+  });
+  const result = await compileInSandbox(sandboxRequest([arrangement]));
+  assert.equal(result.status, 'compiled', JSON.stringify(result));
+  if (result.status !== 'compiled') return;
+  assert.match(result.steps[0]!.rendered.text, /Standard cost \(USD\)/u);
+
+  const base = structuredClone(authored);
+  const queries = base.queries as {
+    queryId: string;
+    selections: { field: { targetId: string } }[];
+  }[];
+  const query = queries.find(
+    (q) => q.queryId === 'northstar.app:query.item_list',
+  )!;
+  query.selections = query.selections.filter(
+    (s) => s.field.targetId !== fieldId,
+  );
+  const applied = applyCustomizationPatches(base, [arrangement]);
+  assert.equal(applied.status, 'applied');
+  if (applied.status !== 'applied') return;
+  const normalized = normalizeApplicationPackage(applied.authored);
+  assert.ok(
+    normalized.queries
+      .find((q) => q.queryId === query.queryId)!
+      .selections.some((s) => s.field.targetId === fieldId),
+  );
+  const refused = applyCustomizationPatches(authored, [
+    patch({
+      kind: 'arrangeLayout',
+      surface: surfaceId,
+      order: ['northstar.app:field.party_credit_limit'],
+    }),
+  ]);
+  assert.equal(refused.status, 'refused');
+  assert.equal(
+    refused.status === 'refused' && refused.code,
+    'CUSTOMIZE_FIELD_NOT_ON_LIST',
+  );
+});
+
+test('a generic Party list can be arranged through the same declared list runtime', () => {
+  const surfaceId = 'northstar.app:surface.party_list';
+  assert.ok(
+    customizationTargets(
+      normalizeApplicationPackage(authored) as unknown as Parameters<
+        typeof customizationTargets
+      >[0],
+    ).lists.some((list) => list.surfaceId === surfaceId),
+  );
+  const result = applyCustomizationPatches(authored, [
+    patch({
+      kind: 'arrangeLayout',
+      surface: surfaceId,
+      order: ['northstar.app:field.party_credit_limit'],
+    }),
+  ]);
+  assert.equal(result.status, 'applied');
+  if (result.status !== 'applied') return;
+  const model = normalizeApplicationPackage(result.authored);
+  const surface = model.surfaces.find((s) => s.surfaceId === surfaceId)!;
+  assert.equal(
+    'list' in surface && (surface.list as SurfaceList).columns[0]?.field,
+    'northstar.app:field.party_credit_limit',
+  );
 });
 
 test('the adopted form language accepts an optional field under More details and refuses a required or unrelated field there', () => {

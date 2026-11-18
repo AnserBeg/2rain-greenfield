@@ -110,12 +110,19 @@ export function customizationTargets(definition: {
     const query = definition.queries.find(
       (q) => q.queryId === (surface.dataSource as Json).targetId,
     );
-    const selected = new Set(
-      ((query?.selections ?? []) as Json[]).map(
-        (s) => (s.field as Json).targetId,
-      ),
-    );
-    const columns = ((surface.list as Json).columns as Json[])
+    const entityId = (query?.sourceEntity as Json | undefined)?.targetId;
+    const columns = (
+      ((surface.list as Json | undefined)?.columns ??
+        ((query?.selections ?? []) as Json[]).map((selection) => {
+          const fieldId = (selection.field as Json).targetId;
+          return {
+            field: fieldId,
+            label: definition.fields.find((field) => field.fieldId === fieldId)
+              ?.label,
+            orderKey: selection.orderKey,
+          };
+        })) as Json[]
+    )
       .slice()
       .sort((a, b) => Number(a.orderKey) - Number(b.orderKey))
       .map((c) => ({ fieldId: String(c.field), label: String(c.label) }));
@@ -124,8 +131,7 @@ export function customizationTargets(definition: {
       ...definition.fields
         .filter(
           (f) =>
-            isTenantId(String(f.fieldId)) &&
-            selected.has(f.fieldId) &&
+            (f.entity as Json).targetId === entityId &&
             !columns.some((c) => c.fieldId === f.fieldId),
         )
         .map((f) => ({
@@ -139,7 +145,6 @@ export function customizationTargets(definition: {
     .filter(
       (surface) =>
         surface.surfaceRole === 'list' &&
-        surface.list !== undefined &&
         eligible(
           queryEntity.get(String((surface.dataSource as Json).targetId)) ?? '',
         ),

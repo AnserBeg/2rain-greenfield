@@ -707,6 +707,58 @@ test(
           await opened.service.approve(draft.patchId);
           await opened.service.activate(draft.patchId);
           assert.equal((await page()).values[field], 'Morgan');
+          const arrangement = await opened.service.draft(
+            {
+              kind: 'arrangeLayout',
+              surface: 'northstar.app:surface.purchase_order_list',
+              order: [field, 'northstar.app:field.purchase_order_notes'],
+            },
+            'visualBuilder',
+          );
+          assert.equal(arrangement.status, 'drafted');
+          if (arrangement.status !== 'drafted') return;
+          await opened.service.approve(arrangement.patchId);
+          await opened.service.activate(arrangement.patchId);
+          const columns = () =>
+            app.runtime.entry.run(
+              { headers: { cookie: 'northstar-demo-actor=manager' } },
+              (view) => {
+                const manifest = view.projections.surface
+                  .payload as unknown as {
+                  surfaces: {
+                    surfaceId: string;
+                    list?: { columns: { field: string }[] };
+                  }[];
+                };
+                return manifest.surfaces
+                  .find(
+                    (s) =>
+                      s.surfaceId ===
+                      'northstar.app:surface.purchase_order_list',
+                  )!
+                  .list!.columns.map((c) => c.field);
+              },
+            );
+          assert.deepEqual((await columns()).slice(0, 2), [
+            field,
+            'northstar.app:field.purchase_order_notes',
+          ]);
+          const rows = await world.list(
+            'northstar.app:query.commercial_purchase_order_list',
+          );
+          assert.equal(
+            rows.find((row) => row.recordId === recordId)?.values[field],
+            'Morgan',
+          );
+          await opened.service.rollback();
+          assert.equal((await columns()).includes(field), false);
+          assert.equal(
+            (await columns()).includes(
+              'northstar.app:field.purchase_order_notes',
+            ),
+            false,
+          );
+          assert.equal((await page()).values[field], 'Morgan');
         } finally {
           await opened.close();
           await app.close();

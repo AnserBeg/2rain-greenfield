@@ -204,6 +204,69 @@ for (const target of ['purchase_order', 'party'] as const) {
           await expect(
             panel.getByText('Morgan Bell', { exact: true }),
           ).toBeVisible();
+          if (target === 'purchase_order') {
+            await page.goto(app.baseUrl + '/?customize');
+            const chooser = page.locator(
+              '[data-customize-form="arrangeLayout"]',
+            );
+            await chooser
+              .locator('[name="arrange"]')
+              .selectOption('northstar.app:surface.purchase_order_list');
+            await chooser
+              .getByRole('button', { name: 'Choose columns' })
+              .click();
+            const arrangement = page.locator(
+              '[data-customize-form="arrangeColumns"]',
+            );
+            for (const label of ['Person ordering', 'Notes']) {
+              await arrangement
+                .getByLabel('Hide ' + label, { exact: true })
+                .uncheck();
+            }
+            await arrangement
+              .getByRole('button', { name: 'Draft this arrangement' })
+              .click();
+            await page
+              .getByRole('button', { name: 'Approve', exact: true })
+              .click({ timeout: 180_000 });
+            await page
+              .getByRole('button', { name: 'Activate now' })
+              .click({ timeout: 180_000 });
+            await expect(
+              page.locator('[data-customize-result="activated"]'),
+            ).toBeVisible({ timeout: 180_000 });
+            await page.goto(surface('list'));
+            const grid = page.locator('[data-declared-list="true"]');
+            await expect(
+              grid.getByRole('columnheader', {
+                name: 'Person ordering',
+                exact: true,
+              }),
+            ).toBeVisible();
+            await expect(
+              grid.getByRole('columnheader', { name: 'Notes', exact: true }),
+            ).toBeVisible();
+            await expect(
+              grid.getByRole('cell', { name: 'Morgan Bell', exact: true }),
+            ).toBeVisible();
+            await page.goto(app.baseUrl + '/?customize');
+            await page
+              .getByRole('button', { name: 'Roll back the latest change' })
+              .click();
+            await expect(
+              page.locator('[data-customize-result="rolledBack"]'),
+            ).toBeVisible({ timeout: 180_000 });
+            await page.goto(surface('list'));
+            await expect(
+              page.getByRole('columnheader', {
+                name: 'Person ordering',
+                exact: true,
+              }),
+            ).toHaveCount(0);
+            await expect(
+              page.getByRole('columnheader', { name: 'Notes', exact: true }),
+            ).toHaveCount(0);
+          }
         } finally {
           await app.close();
         }

@@ -126,7 +126,7 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
     '- addRecordType {kind, label, fields:[{label, type, required?, options?}]}: a new kind of record with its own list, page and form. The first field is its name and must be type "text". type is one of text, number (whole number), date, yesNo, choice; a choice field lists options. At most 24 fields.',
     '- addField {kind, entity, field:{label, type, required?, options?}}: a new field on an existing record type. entity is one of the record type ids below.',
     '- addChoice {kind, enumField, option}: a new choice on a choice field. enumField is one of the choice field ids below.',
-    "- arrangeLayout {kind, surface, order?, hide?, relabel?}: reorder, hide or rename the columns of a list. surface is one of the list ids below; order, hide and relabel[].field use that list's column field ids.",
+    "- arrangeLayout {kind, surface, order?, hide?, relabel?}: add, reorder, hide or rename columns of a list. surface is one of the list ids below; order, hide and relabel[].field use that list's available field ids. Include an available hidden field in order to show it. At most 16 visible columns.",
     'If the request needs anything else (workflows, approvals, automations, calculations, permissions, reports, deleting things, changing how stock or money is computed), call the tool with {kind: "unsupported", missingCapability: "<a short name of what is missing>"}.',
     'Write labels the way the person would read them, with an initial capital. Do not invent ids.',
     '',
@@ -150,7 +150,10 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
     ...targets.lists.map(
       (list) =>
         `- ${list.surfaceId} — ${list.label}: ${list.columns
-          .map((column) => `${column.fieldId} "${column.label}"`)
+          .map(
+            (column) =>
+              `${column.fieldId} "${column.label}"${column.hidden ? ' (available, hidden)' : ''}`,
+          )
           .join(', ')}`,
     ),
   ].join('\n');

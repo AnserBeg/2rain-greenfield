@@ -778,24 +778,43 @@ function arrangeLayout(
   );
   const boundary = tierBoundary(entityId);
   if (boundary) return boundary;
-  const declared = surface.list as Json | undefined;
+  let declared = surface.list as Json | undefined;
   if (!declared) {
-    return unsupported(
-      'arrangeLayout.undeclaredList',
-      'This list has no declared columns to arrange.',
+    const fields = new Map(
+      list(authored, 'fields').map((field) => [field.fieldId, field]),
     );
+    declared = {
+      kind: 'surfaceList',
+      schemaVersion: version,
+      columns: (query!.selections as Json[]).map((selection, index) => ({
+        ...listColumn(
+          namespaceOf(authored),
+          localOf(entityId),
+          fields.get((selection.field as Json).targetId)!,
+          index,
+        ),
+        role: index === 0 ? 'title' : 'value',
+      })),
+      defaultSort: [],
+      filters: [],
+      views: [],
+      pageSize: Math.min(50, Number(query!.maximumResultCount)),
+    };
+    surface.list = declared;
   }
   const columns = declared.columns as Json[];
   const byField = new Map(
     columns.map((column) => [String(column.field), column]),
   );
-  // A selected custom field remains available after a prior layout hid it.
+  // Every field of the listed entity may become a column. Only fields used
+  // by this arrangement are added to the query, so earlier patches reproduce
+  // their original selections and release roots.
   const selected = new Set(
     (query!.selections as Json[]).map((s) => (s.field as Json).targetId),
   );
   for (const field of list(authored, 'fields')) {
     const id = String(field.fieldId);
-    if (isTenantId(id) && selected.has(id) && !byField.has(id))
+    if ((field.entity as Json).targetId === entityId && !byField.has(id))
       byField.set(
         id,
         listColumn(
@@ -833,6 +852,26 @@ function arrangeLayout(
       'CUSTOMIZE_FIELD_NOT_ON_LIST',
       `${String(surface.label)} must keep at least one column.`,
     );
+  }
+  for (const column of ordered) {
+    if (selected.has(column.field)) continue;
+    // Existing columns can also be derived outputs. Those already have a
+    // declared provider and never become stored-field selections.
+    if (!list(authored, 'fields').some((f) => f.fieldId === column.field))
+      continue;
+    const selections = query!.selections as Json[];
+    selections.push({
+      kind: 'querySelection',
+      schemaVersion: version,
+      selectionId: `${namespaceOf(authored)}:selection.custom_${localOf(String(query!.queryId))}_${localOf(String(column.field))}`,
+      field: {
+        kind: 'fieldReference',
+        schemaVersion: version,
+        targetId: column.field,
+      },
+      orderKey: nextOrder(selections),
+    });
+    selected.add(column.field);
   }
   const titleKept = ordered.some((column) => column.role === 'title');
   declared.columns = ordered.map((column, index) => ({
