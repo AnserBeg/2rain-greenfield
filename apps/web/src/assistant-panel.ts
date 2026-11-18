@@ -25,6 +25,13 @@ export interface AssistantMount {
   ): Promise<boolean>;
 }
 
+/**
+ * The only typed answers that approve a plan on screen: a whole, plain yes,
+ * with trailing punctuation at most. "Okay, don't ship it" is not one.
+ */
+export const ASSISTANT_AFFIRMATIVE =
+  /^(?:y|yes|yeah|yep|ok|okay|sure|go|go ahead|do it|confirm|approve|yes please|yes,? do it)[.!\s]*$/iu;
+
 export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
   const root = document.querySelector('[data-assistant-panel]');
   if (!root) return;
@@ -37,6 +44,13 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
   const timer = root.querySelector('[data-assistant-elapsed]');
   const stop = root.querySelector('[data-assistant-stop]');
   const fresh = root.querySelector('[data-assistant-new]');
+  const spend = root.querySelector('[data-assistant-spend]');
+  // What the conversation has spent, in the panel's foot, once it is not zero.
+  const showSpend = (usd) => {
+    const amount = Number(usd) || 0;
+    spend.hidden = amount <= 0;
+    spend.textContent = amount <= 0 ? '' : amount < 0.01 ? 'This conversation has used less than USD 0.01.' : 'This conversation has used USD ' + amount.toFixed(2) + '.';
+  };
   const key = 'northstar-assistant-conversation';
   let conversation = sessionStorage.getItem(key) || null;
   let running = null;
@@ -130,22 +144,32 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     }
   };
 
-  const decide = async (approve) => {
-    if (!pending) return;
-    const { planId, digest, card } = pending;
-    pending = null;
+  // A card settles once: its buttons go dead and never speak for another plan.
+  const settle = (card) => {
+    card.setAttribute('data-assistant-settled', '');
     card.querySelectorAll('button').forEach((button) => { button.disabled = true; });
-    await post('decide', { conversation, planId, digest, approve });
   };
+  // Each card answers only for its own conversation, plan and digest.
+  const decideCard = async (card, own, approve) => {
+    if (card.hasAttribute('data-assistant-settled')) return;
+    settle(card);
+    if (pending && pending.card === card) pending = null;
+    await post('decide', { conversation: own.conversation, planId: own.planId, digest: own.digest, approve });
+  };
+  const decide = (approve) => pending ? decideCard(pending.card, pending.own, approve) : undefined;
+  const affirmative = new RegExp(${JSON.stringify(ASSISTANT_AFFIRMATIVE.source)}, 'iu');
+  let queued = null;
 
   const planCard = (event) => {
     const card = element('section', null, 'assistant-plan');
     card.setAttribute('data-assistant-plan', event.planId);
     card.appendChild(element('p', 'This needs your yes before it runs:', 'assistant-heading'));
-    (event.reasons || []).forEach((reason) => card.appendChild(element('p', 'Because ' + reason + '.', 'assistant-muted')));
+    if (event.company) card.appendChild(element('p', 'In ' + event.company + '.', 'assistant-muted'));
+    (event.reasons || []).forEach((reason) => card.appendChild(element('p', reason, 'assistant-muted')));
     const list = card.appendChild(element('ol'));
     event.steps.forEach((step) => {
       const item = list.appendChild(element('li', step.text));
+      if (step.target) item.appendChild(element('div', 'On: ' + step.target, 'assistant-muted'));
       if (step.inputs) item.appendChild(element('div', step.inputs, 'assistant-muted'));
     });
     const yes = card.appendChild(element('button', 'Yes, do it'));
@@ -154,13 +178,47 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     const no = card.appendChild(element('button', 'No'));
     no.type = 'button';
     no.setAttribute('data-assistant-no', '');
-    yes.addEventListener('click', () => decide(true));
-    no.addEventListener('click', () => decide(false));
-    pending = { planId: event.planId, digest: event.digest, card };
+    const own = { conversation, planId: event.planId, digest: event.digest };
+    yes.addEventListener('click', () => decideCard(card, own, true));
+    no.addEventListener('click', () => decideCard(card, own, false));
+    pending = { own, card };
     form.querySelector('button[type=submit]').disabled = false;
     log.appendChild(card);
     scroll();
   };
+
+  // "Did: ..." with Undo for the conversation's latest change. Shown after
+  // an answer, and again after a Stop or a page load (from ?assistant=latest).
+  const showDid = (container, change) => {
+    if (log.querySelector('[data-assistant-did="' + change.changeId + '"]')) return;
+    const did = container.appendChild(element('p', 'Did: ' + change.summary + '. ', 'assistant-did'));
+    did.setAttribute('data-assistant-did', change.changeId);
+    if (change.href) {
+      const open = did.appendChild(element('a', 'Open'));
+      open.href = change.href;
+      did.appendChild(document.createTextNode(' '));
+    }
+    const undo = did.appendChild(element('button', 'Undo'));
+    undo.type = 'button';
+    undo.setAttribute('data-assistant-undo', '');
+    const owner = conversation;
+    undo.addEventListener('click', async () => {
+      undo.disabled = true;
+      const answer = await post('undo', { conversation: owner, changeId: change.changeId });
+      const result = await answer.json().catch(() => ({ text: 'Undo failed.' }));
+      did.appendChild(element('span', ' ' + result.text, result.outcome === 'undone' ? 'assistant-muted' : 'assistant-error'));
+      if (result.outcome !== 'undone') undo.disabled = false;
+    });
+    scroll();
+  };
+  const offerLatest = async (tries = 1) => {
+    if (!conversation) return;
+    const answer = await post('latest', { conversation }).catch(() => null);
+    const result = answer && answer.ok ? await answer.json().catch(() => null) : null;
+    if (result && result.did) showDid(log, result.did);
+    else if (result && result.running && tries < 10) setTimeout(() => offerLatest(tries + 1), 1000);
+  };
+  offerLatest();
 
   const ask = async (text) => {
     const mine = log.appendChild(element('div', text, 'assistant-me'));
@@ -179,6 +237,8 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
         conversation,
         text,
         screen: params.get('surface') ? { surfaceId: params.get('surface'), recordId: params.get('record') } : null,
+        // The page's company is read from its own address and proved by the host.
+        page: location.search,
       }, controller.signal);
       if (!response.ok || !response.body) throw new Error('The assistant did not answer (' + response.status + ').');
       const reader = response.body.getReader();
@@ -207,14 +267,19 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
             planCard(event);
           } else if (event.type === 'decided') {
             const card = log.querySelector('[data-assistant-plan="' + event.planId + '"]');
-            if (card) card.appendChild(element('p', event.approved ? 'You said yes.' : 'Not done.', 'assistant-muted'));
+            if (card) {
+              settle(card);
+              card.appendChild(element('p', event.approved ? 'You said yes.' : 'Not done.', 'assistant-muted'));
+            }
           } else if (event.type === 'answer') {
             render(reply, event.text);
             reply.setAttribute('data-assistant-stop-reason', event.stop);
-            if (event.links && event.links.length) {
+            // Records the answer names; what this turn changed is on the Did row.
+            const named = (event.links || []).filter((link) => !link.wrote);
+            if (named.length) {
               const links = reply.appendChild(element('p', null, 'assistant-links'));
-              event.links.forEach((link) => {
-                const anchor = links.appendChild(element('a', (link.wrote ? 'Changed: ' : '') + link.label));
+              named.forEach((link) => {
+                const anchor = links.appendChild(element('a', link.label));
                 anchor.href = link.href;
               });
             }
@@ -225,21 +290,8 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
               const open = draft.appendChild(element('a', 'Review it on the Customize screen'));
               open.href = '/?customize';
             }
-            if (event.did) {
-              const did = reply.appendChild(element('p', 'Did: ' + event.did.summary + ' ', 'assistant-did'));
-              did.setAttribute('data-assistant-did', event.did.changeId);
-              const undo = did.appendChild(element('button', 'Undo'));
-              undo.type = 'button';
-              undo.setAttribute('data-assistant-undo', '');
-              undo.addEventListener('click', async () => {
-                undo.disabled = true;
-                const answer = await post('undo', { conversation, changeId: event.did.changeId });
-                const result = await answer.json().catch(() => ({ text: 'Undo failed.' }));
-                did.appendChild(element('span', ' ' + result.text, result.outcome === 'undone' ? 'assistant-muted' : 'assistant-error'));
-                if (result.outcome !== 'undone') undo.disabled = false;
-              });
-            }
-            reply.appendChild(element('p', 'USD ' + Number(event.spentUsd).toFixed(2) + ' used in this conversation', 'assistant-muted'));
+            if (event.did) showDid(reply, event.did);
+            showSpend(event.spentUsd);
           } else if (event.type === 'error') {
             reply.appendChild(element('p', event.message, 'assistant-error'));
           }
@@ -247,12 +299,24 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
       }
     } catch (error) {
       if (!controller.signal.aborted) reply.appendChild(element('p', String(error && error.message || error), 'assistant-error'));
-      else reply.appendChild(element('p', 'Stopped.', 'assistant-muted'));
+      else {
+        reply.appendChild(element('p', 'Stopped.', 'assistant-muted'));
+        // What was written before the Stop is checked by the host and stays
+        // undoable; ask for it once the run has wound down.
+        setTimeout(() => offerLatest(), 1000);
+      }
     } finally {
       running = null;
       pending = null;
+      // A run that ended leaves no live card behind.
+      log.querySelectorAll('[data-assistant-plan]:not([data-assistant-settled])').forEach(settle);
       busy(false);
       scroll();
+    }
+    if (queued) {
+      const next = queued;
+      queued = null;
+      ask(next);
     }
   };
 
@@ -262,9 +326,16 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     if (!text) return;
     input.value = '';
     if (pending) {
-      // A typed answer to the plan on screen: yes runs exactly that plan.
-      log.appendChild(element('div', text, 'assistant-me'));
-      decide(/^(y|yes|yeah|yep|ok|okay|go|do it|confirm)\b/i.test(text));
+      // Only a whole, plain yes approves the plan on screen. Anything else
+      // ("okay, don't ship it", "yes but 5") declines it and is sent to the
+      // assistant as the next request once this run ends.
+      if (affirmative.test(text)) {
+        log.appendChild(element('div', text, 'assistant-me'));
+        decide(true);
+      } else {
+        queued = text;
+        decide(false);
+      }
       return;
     }
     if (running) return;
@@ -287,6 +358,7 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     conversation = null;
     sessionStorage.removeItem(key);
     log.textContent = '';
+    showSpend(0);
   });
 })();`;
 
@@ -353,7 +425,7 @@ const TOGGLE = (placement: 'inline' | 'floating') =>
 /** Where the shell's top bar puts its account menu: the toggle sits before it. */
 const SHELL_ACCOUNT = '<details class="shell-account">';
 
-const PANEL_MARKUP = `<aside id="assistant-panel" class="assistant-panel" data-assistant-panel aria-label="Assistant" hidden><header><h2>Assistant</h2><button type="button" data-assistant-new>New conversation</button><button type="button" data-assistant-close aria-label="Close the assistant">Close</button></header><div class="assistant-log" data-assistant-log aria-live="polite"></div><div class="assistant-status" data-assistant-status role="status" hidden><span data-assistant-step>Working</span><span data-assistant-elapsed>0 s</span><button type="button" data-assistant-stop hidden>Stop</button></div><form data-assistant-form><label class="visually-hidden" for="assistant-input">Ask the assistant</label><textarea id="assistant-input" name="text" rows="2" placeholder="Ask or tell the assistant…"></textarea><button type="submit">Send</button></form></aside>`;
+const PANEL_MARKUP = `<aside id="assistant-panel" class="assistant-panel" data-assistant-panel aria-label="Assistant" hidden><header><h2>Assistant</h2><button type="button" data-assistant-new>New conversation</button><button type="button" data-assistant-close aria-label="Close the assistant">Close</button></header><div class="assistant-log" data-assistant-log aria-live="polite"></div><div class="assistant-status" data-assistant-status role="status" hidden><span data-assistant-step>Working</span><span data-assistant-elapsed>0 s</span><button type="button" data-assistant-stop hidden>Stop</button></div><form data-assistant-form><label class="visually-hidden" for="assistant-input">Ask the assistant</label><textarea id="assistant-input" name="text" rows="2" placeholder="Ask or tell the assistant…"></textarea><button type="submit">Send</button></form><p class="assistant-muted" data-assistant-spend hidden></p></aside>`;
 
 /**
  * The page with the panel added before `</body>`. Only a full page served

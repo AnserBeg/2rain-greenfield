@@ -886,8 +886,23 @@ function validateSurfaceForms(model: VersionedNormalizedApplicationPackage) {
           ),
     );
     const seen = new Set<string>();
-    if (!surface.form.references && !surface.form.omit)
+    if (!surface.form.references && !surface.form.omit && !surface.form.fields)
       fail(id, 'a form declares references, fields it omits, or both');
+    const presented = new Set<string>();
+    for (const field of surface.form.fields ?? []) {
+      if (
+        !selected.has(field.fieldId) ||
+        presented.has(field.fieldId) ||
+        surface.form.omit?.includes(field.fieldId)
+      )
+        fail(id, 'a form presents each visible selected field only once');
+      if (
+        field.disclosure &&
+        fields.get(field.fieldId)?.presence === 'required'
+      )
+        fail(id, 'a required field cannot wait under More details');
+      presented.add(field.fieldId);
+    }
     for (const reference of surface.form.references ?? []) {
       if (seen.has(reference.field))
         fail(id, 'a form field is chosen by one reference');

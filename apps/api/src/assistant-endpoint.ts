@@ -18,7 +18,6 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import {
   agentPreamble,
-  CUSTOMIZE_HANDOFF,
   OperationsAgentSession,
   runOperationsAgent,
   SpendMeter,
@@ -49,17 +48,41 @@ export const ASSISTANT_DEFAULT_PRICES: ModelPrices = Object.freeze({
 /** How long a plan waits for the person's yes before it counts as a no. */
 const DECISION_TIMEOUT_MS = 10 * 60 * 1000;
 
+/**
+ * Conversations live in this process only, so they are bounded (end review
+ * X13): one idle this long is dropped, a person holds at most this many,
+ * and the process at most this many. A working one is never dropped.
+ */
+export const ASSISTANT_CONVERSATION_LIMITS = Object.freeze({
+  idleMs: 30 * 60 * 1000,
+  perPrincipal: 5,
+  total: 200,
+});
+
 export interface AssistantEndpointOptions {
   readonly runtime: Pick<
     ComposedApplicationRuntime,
     'entry' | 'operationGateway' | 'operationMediation' | 'queryGateway'
   >;
-  readonly companyId: string;
+  /**
+   * The company the person's page works in, proved through their workspace
+   * entry (end review X9); null when the page settles on none.
+   */
+  readonly company: (page: {
+    readonly cookie: string;
+    readonly surfaceId: string | null;
+    readonly search: string;
+  }) => Promise<{ readonly companyId: string; readonly label: string } | null>;
   readonly businessCalendar?: BusinessCalendar;
   /** The model, or a sentence saying why there is none. */
   readonly model: () => Promise<ModelAdapter | { unavailable: string }>;
   readonly prices?: ModelPrices;
   readonly capUsd?: number;
+  /**
+   * The `Host` values this server answers to (its loopback host and port);
+   * absent, the Host is not checked (unit tests).
+   */
+  readonly authorities?: () => readonly string[] | null;
   /**
    * The customization lane (CUSTOMIZE's service): a change to the
    * application is handed to its AI draft, shown as a plain diff, and never
@@ -67,12 +90,19 @@ export interface AssistantEndpointOptions {
    * to make the change.
    */
   readonly customize?: () => Promise<CustomizeDrafter>;
+  /** The clock conversations idle by; a test moves it. */
+  readonly now?: () => number;
 }
 
 /** The one call the panel makes into the customization lane. */
 export interface CustomizeDrafter {
+  /**
+   * `budget` is the asking conversation's meter and Stop: the draft's model
+   * calls are charged to the same cap and end on the same Stop (X13).
+   */
   draftFromRequest(
     request: string,
+    budget?: { readonly meter: SpendMeter; readonly signal?: AbortSignal },
   ): Promise<
     | { status: 'drafted'; renderedDiff: string; reused: boolean }
     | { status: string; message: string; missingCapability?: string }
@@ -88,10 +118,14 @@ interface PendingPlan {
 interface Conversation {
   readonly id: string;
   readonly principalId: string;
+  /** The company it works in, bound when it opened; another is another conversation. */
+  readonly company: { readonly companyId: string; readonly label: string };
   readonly cookie: string;
   readonly session: OperationsAgentSession;
   readonly meter: SpendMeter;
   history: readonly ConversationEntry[];
+  /** When the person last used it, on the endpoint's clock. */
+  lastUsed: number;
   running: AbortController | null;
   pending: PendingPlan | null;
   /** Where the current run's events go. */
@@ -115,30 +149,76 @@ export function createAssistantEndpoint(
   const conversations = new Map<string, Conversation>();
   const prices = options.prices ?? ASSISTANT_DEFAULT_PRICES;
   const capUsd = options.capUsd ?? ASSISTANT_CONVERSATION_CAP_USD;
+  const now = options.now ?? Date.now;
+  const limits = ASSISTANT_CONVERSATION_LIMITS;
+  const working = (conversation: Conversation) =>
+    conversation.running !== null || conversation.pending !== null;
+
+  /** Drops idle conversations; nothing working is ever dropped. */
+  const sweep = () => {
+    const cutoff = now() - limits.idleMs;
+    for (const [id, conversation] of conversations)
+      if (!working(conversation) && conversation.lastUsed < cutoff)
+        conversations.delete(id);
+  };
+
+  /**
+   * Room for one more conversation of this person: their oldest idle one is
+   * dropped at their bound, the process's oldest idle one at its bound.
+   * False when everything over a bound is working.
+   */
+  const makeRoom = (principalId: string): boolean => {
+    const oldestIdle = (of: (c: Conversation) => boolean) =>
+      [...conversations.values()]
+        .filter((c) => of(c) && !working(c))
+        .sort((a, b) => a.lastUsed - b.lastUsed)[0];
+    const count = (of: (c: Conversation) => boolean) =>
+      [...conversations.values()].filter(of).length;
+    const theirs = (c: Conversation) => c.principalId === principalId;
+    while (count(theirs) >= limits.perPrincipal) {
+      const victim = oldestIdle(theirs);
+      if (!victim) return false;
+      conversations.delete(victim.id);
+    }
+    while (conversations.size >= limits.total) {
+      const victim = oldestIdle(() => true);
+      if (!victim) return false;
+      conversations.delete(victim.id);
+    }
+    return true;
+  };
 
   const principalOf = (request: IncomingMessage) =>
     options.runtime.entry.run({ headers: request.headers }, (view) =>
       Promise.resolve(view.principalId),
     );
 
-  const open = (request: IncomingMessage, principalId: string) => {
+  const open = (
+    request: IncomingMessage,
+    principalId: string,
+    company: Conversation['company'],
+  ) => {
     const conversation: Conversation = {
       id: randomUUID(),
       principalId,
+      company,
       cookie: String(request.headers.cookie ?? ''),
       meter: new SpendMeter(prices, capUsd),
       history: [],
+      lastUsed: now(),
       running: null,
       pending: null,
       emit: () => undefined,
       session: new OperationsAgentSession({
         runtime: options.runtime,
         personHeaders: { cookie: String(request.headers.cookie ?? '') },
-        companyId: options.companyId,
+        companyId: company.companyId,
         ...(options.businessCalendar
           ? { businessCalendar: options.businessCalendar }
           : {}),
         approve: (plan) => askThePerson(conversation, plan),
+        // The panel offers Undo, so a reversible change runs at once here.
+        autoApproveReversible: true,
       }),
     };
     conversations.set(conversation.id, conversation);
@@ -155,11 +235,15 @@ export function createAssistantEndpoint(
     async handle(request, response, url) {
       const action = url.searchParams.get('assistant');
       if (action === null) return false;
-      if (request.method !== 'POST' || !sameOrigin(request)) {
+      if (
+        request.method !== 'POST' ||
+        !sameOrigin(request, options.authorities?.() ?? null)
+      ) {
         response.statusCode = 403;
         response.end();
         return true;
       }
+      sweep();
       const body = await readJson(request);
       let principalId: string;
       try {
@@ -176,6 +260,7 @@ export function createAssistantEndpoint(
       // A conversation is its starter's; anyone else gets a fresh one (ask)
       // or nothing (decide, stop).
       const mine = named?.principalId === principalId ? named : undefined;
+      if (mine) mine.lastUsed = now();
       if (action === 'decide') {
         const pending = mine?.pending;
         const bound =
@@ -201,7 +286,12 @@ export function createAssistantEndpoint(
           );
           return true;
         }
-        const undone = await mine.session.undo(body.changeId);
+        // Undo holds the conversation like a run: no ask or second Undo
+        // interleaves with it.
+        mine.running = new AbortController();
+        const undone = await mine.session.undo(body.changeId).finally(() => {
+          mine.running = null;
+        });
         response.statusCode = 200;
         response.end(
           JSON.stringify(
@@ -212,6 +302,23 @@ export function createAssistantEndpoint(
                 }
               : { outcome: 'refused', text: `Not undone: ${undone.reason}` },
           ),
+        );
+        return true;
+      }
+      if (action === 'latest') {
+        // The conversation's current undoable change, for a panel that
+        // reopened after a navigation or a Stop.
+        response.setHeader('content-type', 'application/json; charset=utf-8');
+        const change = mine?.session.latestChange();
+        response.statusCode = 200;
+        response.end(
+          JSON.stringify({
+            running: Boolean(mine?.running),
+            did:
+              change && !change.undone && !mine?.running
+                ? { changeId: change.changeId, summary: change.summary }
+                : null,
+          }),
         );
         return true;
       }
@@ -233,7 +340,46 @@ export function createAssistantEndpoint(
         response.end();
         return true;
       }
-      const conversation = mine ?? open(request, principalId);
+      const screen = screenOf(body.screen);
+      // The page's company, proved for this person now (X9). A conversation
+      // stays in the company it opened in: a page in another company starts
+      // a new one.
+      const company = await options
+        .company({
+          cookie: String(request.headers.cookie ?? ''),
+          surfaceId: screen?.surfaceId ?? null,
+          search:
+            typeof body.page === 'string' && body.page.length <= 2_000
+              ? body.page
+              : '',
+        })
+        .catch(() => null);
+      if (!company) {
+        response.statusCode = 200;
+        response.setHeader(
+          'content-type',
+          'application/x-ndjson; charset=utf-8',
+        );
+        response.end(
+          `${JSON.stringify({
+            type: 'answer',
+            text: 'I cannot tell which company this page is in. Open a page of the company you want me to work in, then ask again.',
+            stop: 'no-company',
+            links: [],
+            usd: 0,
+            spentUsd: mine?.meter.usd ?? 0,
+          })}\n`,
+        );
+        return true;
+      }
+      const same =
+        mine?.company.companyId === company.companyId ? mine : undefined;
+      if (!same && !makeRoom(principalId)) {
+        response.statusCode = 429;
+        response.end();
+        return true;
+      }
+      const conversation = same ?? open(request, principalId, company);
       if (conversation.running) {
         response.statusCode = 409;
         response.end();
@@ -255,14 +401,25 @@ export function createAssistantEndpoint(
           conversation.pending?.decide(false);
         }
       });
-      emit({ type: 'conversation', id: conversation.id, capUsd });
+      emit({
+        type: 'conversation',
+        id: conversation.id,
+        capUsd,
+        company: conversation.company.label,
+      });
+      const before = conversation.session.latestChange()?.changeId ?? null;
       try {
-        await runTurn(conversation, text, screenOf(body.screen), controller);
+        await runTurn(conversation, text, screen, controller);
+        conversation.lastUsed = now();
       } catch (error) {
+        // An error is an exit path too: what was written is still checked
+        // and still offered for Undo.
+        await conversation.session.verifyPending().catch(() => []);
         emit({
           type: 'error',
           message:
             error instanceof Error ? error.message : 'the assistant failed',
+          ...didThisTurn(conversation.session.latestChange(), before),
         });
       } finally {
         conversation.running = null;
@@ -306,6 +463,7 @@ export function createAssistantEndpoint(
     const changeBefore = conversation.session.latestChange()?.changeId ?? null;
     emit({ type: 'step', label: 'Reading the screen' });
     const preamble = await agentPreamble(conversation.session, screen);
+    let callText = '';
     const run = await runOperationsAgent({
       model,
       session: conversation.session,
@@ -317,21 +475,40 @@ export function createAssistantEndpoint(
       onEvent: (event) => {
         const label = stepLabel(event);
         if (label) emit({ type: 'step', label });
-        if (event.kind === 'delta') emit({ type: 'delta', text: event.text });
-        if (event.kind === 'text') emit({ type: 'text', text: event.text });
+        if (event.kind === 'thinking') callText = '';
+        if (event.kind === 'delta') callText += event.text;
+        // A typed answer (the handoff's JSON) is not shown as prose; the
+        // answer event says it in words.
+        const typed = callText.trimStart().startsWith('{');
+        if (event.kind === 'delta' && !typed)
+          emit({ type: 'delta', text: event.text });
+        if (event.kind === 'text' && !event.text.trimStart().startsWith('{'))
+          emit({ type: 'text', text: event.text });
       },
     });
     conversation.history = run.conversation;
-    const handoff =
-      run.stop === 'answered' ? CUSTOMIZE_HANDOFF.exec(run.answer) : null;
-    if (handoff) {
+    // Whatever cut the model off (Stop, a handoff, a cap), the host reads
+    // back every write of this turn that the model did not verify.
+    const checked = await conversation.session.verifyPending();
+    const unverified = checked.filter((entry) => !entry.verified).length;
+    const answerLinks = await links(conversation, run.answer);
+    // The typed handoff only (X11); the drafter gets the person's own words.
+    if (run.handoff) {
       emit({ type: 'step', label: 'Drafting the change' });
+      const beforeDraft = conversation.meter.usd;
+      const drafted = await handOff(conversation, text, controller.signal);
       emit({
         type: 'answer',
-        ...(await handOff(text)),
+        ...drafted,
         stop: 'handoff',
-        links: [],
-        usd: run.usd,
+        links: answerLinks,
+        ...didThisTurn(
+          conversation.session.latestChange(),
+          changeBefore,
+          answerLinks,
+        ),
+        // The draft's own model calls count toward this turn and the cap.
+        usd: run.usd + (conversation.meter.usd - beforeDraft),
         spentUsd: conversation.meter.usd,
       });
       return;
@@ -342,28 +519,41 @@ export function createAssistantEndpoint(
         run.stop === 'spend-cap'
           ? `This conversation reached its spending limit of USD ${capUsd.toFixed(2)}, so I stopped. Start a new conversation to keep going.`
           : run.stop === 'stopped'
-            ? 'Stopped. Nothing more will run; anything already done stays done.'
+            ? `Stopped. Nothing more will run; anything already done stays done${checked.length > 0 ? ` and was checked${unverified > 0 ? ` (${String(unverified)} check(s) did not confirm it; look at the records)` : ''}` : ''}.`
             : run.answer || '(no answer)',
       stop: run.stop,
-      links: await links(conversation, run.answer),
-      ...didThisTurn(conversation.session.latestChange(), changeBefore),
+      links: answerLinks,
+      ...didThisTurn(
+        conversation.session.latestChange(),
+        changeBefore,
+        answerLinks,
+      ),
       usd: run.usd,
       spentUsd: conversation.meter.usd,
     });
   }
 
-  /** The person's own words go to the customization lane's AI draft. */
+  /**
+   * The person's own words go to the customization lane's AI draft, charged
+   * to this conversation's cap and ended by its Stop (X13).
+   */
   async function handOff(
+    conversation: Conversation,
     request: string,
+    signal: AbortSignal,
   ): Promise<{ text: string; draft?: { diff: string } }> {
     if (!options.customize)
       return {
         text: 'That is a change to the application, not to your records. Make it on the Customize screen.',
       };
+    if (conversation.meter.exhausted())
+      return {
+        text: `That is a change to the application, and this conversation has used its spending limit of USD ${capUsd.toFixed(2)}, so it was not drafted. Make it on the Customize screen.`,
+      };
     try {
       const drafted = await (
         await options.customize()
-      ).draftFromRequest(request);
+      ).draftFromRequest(request, { meter: conversation.meter, signal });
       if (drafted.status === 'drafted' && 'renderedDiff' in drafted)
         return {
           text: `That is a change to the application. I drafted it${drafted.reused ? ' (the same draft already existed)' : ''}; nothing is live yet. Read the change below, then approve and activate it on the Customize screen.`,
@@ -383,7 +573,7 @@ export function createAssistantEndpoint(
     conversation: Conversation,
     plan: PlanForApproval,
   ): Promise<boolean> {
-    const digest = planDigest(plan);
+    const digest = planDigest(plan, conversation.company.companyId);
     return new Promise<boolean>((resolve) => {
       let settled = false;
       const timer = setTimeout(() => decide(false), DECISION_TIMEOUT_MS);
@@ -409,9 +599,18 @@ export function createAssistantEndpoint(
         type: 'plan',
         planId: plan.planId,
         digest,
+        // The company the yes acts in, by name (X9).
+        company: conversation.company.label,
         reasons: plan.reasons ?? [],
+        // Exactly what the yes covers: the operation, the record it acts on
+        // (as the host read it), and every bound input, arguments included.
         steps: plan.steps.map((step) => ({
-          text: `${step.effect}`,
+          text: step.operationLabel
+            ? `${step.operationLabel}: ${step.effect}`
+            : `${step.effect.charAt(0).toUpperCase()}${step.effect.slice(1)}`,
+          target: step.targetLabel
+            ? `${step.targetLabel} (${step.target})`
+            : step.target,
           inputs: plainInputs(step.inputs),
         })),
       });
@@ -436,11 +635,16 @@ export function createAssistantEndpoint(
       .run({ headers: { cookie: conversation.cookie } }, (view) =>
         Promise.resolve(detailSurfaces(view.projections)),
       )
-      .catch(() => new Map<string, string>());
+      .catch(() => new Map<string, DetailSurface>());
     return touched.flatMap((record) => {
       const surface = surfaces.get(record.entityId);
       if (!surface) return [];
-      const href = `/?surface=${encodeURIComponent(surface)}&record=${encodeURIComponent(record.recordId)}`;
+      // A company-owned record's page names the conversation's company.
+      const href = `/?surface=${encodeURIComponent(surface.surfaceId)}&record=${encodeURIComponent(record.recordId)}${
+        surface.companyParameter
+          ? `&${encodeURIComponent(surface.companyParameter)}=${encodeURIComponent(conversation.company.companyId)}`
+          : ''
+      }`;
       return [
         {
           href,
@@ -452,31 +656,52 @@ export function createAssistantEndpoint(
   }
 }
 
-/** "Did: ..." with Undo, when this turn made a change at once. */
+/**
+ * "Did: ..." with Undo, when this turn made a change at once, and a link to
+ * the record it wrote (the Did row carries it; no separate "Changed" line).
+ */
 function didThisTurn(
   change: { changeId: string; summary: string; undone: boolean } | null,
   before: string | null,
-): { did?: { changeId: string; summary: string } } {
+  links: readonly { href: string; wrote: boolean }[] = [],
+): { did?: { changeId: string; summary: string; href?: string } } {
+  const written = links.find((link) => link.wrote);
   return change && change.changeId !== before && !change.undone
-    ? { did: { changeId: change.changeId, summary: change.summary } }
+    ? {
+        did: {
+          changeId: change.changeId,
+          summary: change.summary,
+          ...(written ? { href: written.href } : {}),
+        },
+      }
     : {};
+}
+
+interface DetailSurface {
+  readonly surfaceId: string;
+  /** Its query's company parameter, when the record is company-owned. */
+  readonly companyParameter: string | null;
 }
 
 /** The record page of each record type: its `<type>_detail` surface. */
 function detailSurfaces(projections: {
   surface: { payload: unknown };
   query: { payload: unknown };
-}): Map<string, string> {
+}): Map<string, DetailSurface> {
   const queries = new Map(
     (
       (
         projections.query.payload as {
-          queries?: readonly { queryId: string; sourceEntityId: string }[];
+          queries?: readonly {
+            queryId: string;
+            sourceEntityId: string;
+            legalEntityScope?: { operand?: { parameterId?: string } } | null;
+          }[];
         }
       ).queries ?? []
-    ).map((query) => [query.queryId, query.sourceEntityId]),
+    ).map((query) => [query.queryId, query]),
   );
-  const out = new Map<string, string>();
+  const out = new Map<string, DetailSurface>();
   for (const surface of (
     projections.surface.payload as {
       surfaces?: readonly {
@@ -486,15 +711,19 @@ function detailSurfaces(projections: {
       }[];
     }
   ).surfaces ?? []) {
-    const entity = surface.dataSourceQueryId
+    const query = surface.dataSourceQueryId
       ? queries.get(surface.dataSourceQueryId)
       : undefined;
+    const entity = query?.sourceEntityId;
     if (
       entity &&
       surface.archetype === 'record' &&
       local(surface.surfaceId) === `${local(entity)}_detail`
     )
-      out.set(entity, surface.surfaceId);
+      out.set(entity, {
+        surfaceId: surface.surfaceId,
+        companyParameter: query.legalEntityScope?.operand?.parameterId ?? null,
+      });
   }
   return out;
 }
@@ -526,26 +755,43 @@ export function stepLabel(event: AgentEvent): string | null {
 
 function plainInputs(inputs: Readonly<Record<string, unknown>>): string {
   const parts: string[] = [];
-  for (const bag of ['values', 'patch', 'relations'] as const) {
+  for (const bag of ['values', 'patch', 'relations', 'arguments'] as const) {
     const values = inputs[bag];
-    if (typeof values !== 'object' || values === null) continue;
+    if (values === undefined || values === null) continue;
+    if (typeof values !== 'object' || Array.isArray(values)) {
+      parts.push(`${bag}: ${shownValue(values)}`);
+      continue;
+    }
     for (const [id, value] of Object.entries(values as object)) {
       if (value === null || value === undefined) continue;
-      const shown =
-        typeof value === 'object'
-          ? 'fromStep' in value
-            ? `the record step ${String((value as { fromStep: number }).fromStep)} makes`
-            : JSON.stringify(value)
-          : local(String(value));
-      parts.push(`${local(id).replaceAll('_', ' ')}: ${shown}`);
+      parts.push(`${local(id).replaceAll('_', ' ')}: ${shownValue(value)}`);
     }
   }
   return parts.join(' · ');
 }
 
-function planDigest(plan: PlanForApproval): string {
+/**
+ * A bound value as the person reads it. Only a declared identifier (an id
+ * with a namespace, `northstar.app:option.net_30`) is shortened; a number,
+ * a date or free text is shown exactly as bound (10.25 stays 10.25).
+ */
+function shownValue(value: unknown): string {
+  if (typeof value === 'object' && value !== null) {
+    if (!Array.isArray(value) && 'fromStep' in value)
+      return `the record step ${String((value as { fromStep: number }).fromStep)} makes`;
+    return JSON.stringify(value);
+  }
+  const text = String(value);
+  return /^[a-z][\w.-]*:[a-z_]+\.[\w-]+$/u.test(text)
+    ? local(text).replaceAll('_', ' ')
+    : text;
+}
+
+function planDigest(plan: PlanForApproval, companyId: string): string {
   return createHash('sha256')
-    .update(JSON.stringify({ planId: plan.planId, steps: plan.steps }))
+    .update(
+      JSON.stringify({ companyId, planId: plan.planId, steps: plan.steps }),
+    )
     .digest('hex');
 }
 
@@ -571,8 +817,19 @@ function local(id: string): string {
   return dot >= 0 ? afterColon.slice(dot + 1) : afterColon;
 }
 
-function sameOrigin(request: IncomingMessage): boolean {
+function sameOrigin(
+  request: IncomingMessage,
+  authorities: readonly string[] | null,
+): boolean {
   if (request.headers['x-northstar-assistant'] !== '1') return false;
+  // End review X10: the request must name this server's own loopback
+  // authority before any fetch metadata or Origin is trusted; a rebound
+  // hostname carries "same-origin" for itself, not for us.
+  if (
+    authorities !== null &&
+    !authorities.includes(String(request.headers.host ?? '').toLowerCase())
+  )
+    return false;
   const site = request.headers['sec-fetch-site'];
   if (site === 'same-origin') return true;
   if (site !== undefined) return false;
@@ -616,4 +873,18 @@ async function readJson(
   } catch {
     return {};
   }
+}
+
+/** The Host header values a loopback server at `host:port` is reached by. */
+export function loopbackAuthorities(host: string, port: number): string[] {
+  const names = new Set([
+    host.toLowerCase(),
+    '127.0.0.1',
+    'localhost',
+    '[::1]',
+  ]);
+  if (host === '::1') names.add('[::1]');
+  return [...names]
+    .filter((name) => name !== '::1')
+    .map((name) => `${name}:${String(port)}`);
 }

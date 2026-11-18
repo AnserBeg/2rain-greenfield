@@ -11,9 +11,10 @@ import {
 } from '../../../../packages/operations-agent/src/index.js';
 import { withEphemeralPostgres } from '../../../../test/helpers/postgres.js';
 
-/** The first record id an `erp_query` returned earlier in the conversation. */
-function firstQueriedRecord(
+/** The nth record id the first `erp_query` returned in the conversation. */
+function queriedRecord(
   conversation: readonly ConversationEntry[],
+  index = 0,
 ): string {
   for (const entry of conversation)
     if (entry.role === 'tool')
@@ -21,10 +22,29 @@ function firstQueriedRecord(
         const content = JSON.parse(result.content) as {
           records?: { recordId: string }[];
         };
-        if (content.records?.[0]) return content.records[0].recordId;
+        if (content.records?.[index]) return content.records[index].recordId;
       }
   throw new Error('no record was queried');
 }
+const firstQueriedRecord = (conversation: readonly ConversationEntry[]) =>
+  queriedRecord(conversation);
+
+const archivePlan =
+  (index: number) => (conversation: readonly ConversationEntry[]) => ({
+    toolCalls: [
+      {
+        name: 'erp_plan',
+        input: {
+          intents: [
+            {
+              operationId: 'party_archive',
+              target: queriedRecord(conversation, index),
+            },
+          ],
+        },
+      },
+    ],
+  });
 
 /**
  * The assistant panel (AGENT-3 slices 2 and 3) with the scripted model only:
@@ -60,6 +80,11 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
               {
                 operationId: 'party_create',
                 values: { number: 'P-7701', name: 'Panel Test Customer' },
+              },
+              {
+                operationId: 'party_role_create',
+                values: { kind: 'customer', status: 'active' },
+                relations: { party: { fromStep: 1 } },
               },
             ],
           },
@@ -118,6 +143,13 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
       ],
     }),
     () => ({ text: 'Archived.' }),
+    // Turn 4 (X2): a typed "Okay, don't ship it" declines the plan; the
+    // words go to the assistant as the next request.
+    archivePlan(1),
+    () => ({ text: 'Understood, nothing archived.' }),
+    () => ({ text: 'Noted: nothing will be shipped.' }),
+    // Turn 6 (X3): a card left by Stop goes dead.
+    archivePlan(2),
   ]);
   await withEphemeralPostgres(
     'assistant-panel-browser',
@@ -146,15 +178,23 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
         await expect(reply(0).locator('table td').first()).toHaveText(
           'Lethbridge Millwork',
         );
-        await expect(reply(0)).toContainText('USD 0.00 used');
+        // X16: no spend line under a reply; the foot shows spend only once
+        // it is not zero (the scripted model costs nothing).
+        await expect(reply(0)).not.toContainText('USD');
+        await expect(panel.locator('[data-assistant-spend]')).toBeHidden();
         await expect(panel.locator('[data-assistant-status]')).toBeHidden();
 
         await say('Add customer P-7701, Panel Test Customer');
         await expect(reply(1)).toContainText('Done: I created customer');
         await expect(panel.locator('[data-assistant-plan]')).toHaveCount(0);
         const did = reply(1).locator('[data-assistant-did]');
-        await expect(did).toContainText('Did: created party P-7701');
-        const link = reply(1).locator('a', { hasText: 'Changed: P-7701' });
+        // X16: the record's role and name, never "party"; the Did row links
+        // the record and there is no separate "Changed" line.
+        await expect(did).toContainText(
+          'Did: created customer Panel Test Customer.',
+        );
+        await expect(reply(1)).not.toContainText('Changed:');
+        const link = did.locator('a', { hasText: 'Open' });
         const href = await link.getAttribute('href');
         expect(href).toContain('record=');
 
@@ -165,12 +205,30 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
           'Panel Test Customer',
         );
 
+        // Undo the create (the latest change made at once) before anything
+        // else runs (X8: a later write could depend on it), verified: the
+        // record it made is archived, so its page no longer finds it.
+        await did.locator('[data-assistant-undo]').click();
+        await expect(did).toContainText(
+          'Undid: created customer Panel Test Customer (checked)',
+        );
+        await opened.reload();
+        await expect(opened.locator('main')).toContainText('Record not found');
+
         await say('Archive the first customer');
         const plan = panel.locator('[data-assistant-plan]');
-        await expect(plan).toContainText('archives one party record');
+        // X16: P-1001, the first party listed, holds no role in the demo
+        // seed, so it is "this record", never "party" (a customer reads
+        // "this customer": test/agent/business-map.test.ts X16).
         await expect(plan).toContainText(
-          "Because the operation is declared to need the person's confirmation.",
+          'Archives this record (it leaves the lists; nothing is deleted)',
         );
+        await expect(plan).not.toContainText(/party/iu);
+        // X9: the yes names the company the page proved.
+        await expect(plan.locator('p.assistant-muted').first()).toHaveText(
+          /^In \S.*\.$/u,
+        );
+        await expect(plan).toContainText('This change needs your OK.');
         await expect(panel.locator('[data-assistant-status]')).toBeVisible();
         // LOOK-1: the panel in the Ledger look, wide and phone, light and
         // dark -- a reply's table, a change with Undo, a plan awaiting yes.
@@ -178,14 +236,22 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
         await plan.locator('[data-assistant-yes]').click();
         await expect(reply(2)).toContainText('Archived.');
 
-        // Undo the create (the latest change made at once), verified: the
-        // record it made is archived, so its page no longer finds it.
-        await did.locator('[data-assistant-undo]').click();
-        await expect(did).toContainText(
-          'Undid: created party P-7701 (checked)',
-        );
-        await opened.reload();
-        await expect(opened.locator('main')).toContainText('Record not found');
+        // X2: words that are not a whole yes decline and are sent on.
+        await say('Archive the second customer');
+        const second = panel.locator('[data-assistant-plan]').nth(1);
+        await expect(second.locator('[data-assistant-yes]')).toBeEnabled();
+        await say("Okay, don't ship it");
+        await expect(second).toContainText('Not done.');
+        await expect(reply(4)).toContainText('Noted: nothing will be shipped.');
+
+        // X3: Stop while a card waits leaves that card dead, so it can never
+        // answer for a later plan.
+        await say('Archive the third customer');
+        const third = panel.locator('[data-assistant-plan]').nth(2);
+        await expect(third.locator('[data-assistant-yes]')).toBeEnabled();
+        await panel.locator('[data-assistant-stop]').click();
+        await expect(third.locator('[data-assistant-yes]')).toBeDisabled();
+        await expect(third.locator('[data-assistant-no]')).toBeDisabled();
       } finally {
         await application.close();
       }

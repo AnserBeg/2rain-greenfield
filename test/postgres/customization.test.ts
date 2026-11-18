@@ -6,7 +6,13 @@ import test from 'node:test';
 
 import type pg from 'pg';
 
-import { COMPOSED_APPLICATION_INVENTORY_SCOPE } from '../../apps/api/src/composition-root.js';
+import { OperationsAgentSession } from '../../packages/operations-agent/src/session.js';
+import { COMPANY, worldOver, seededId } from '../agent/agent-world.js';
+import {
+  COMPOSED_APPLICATION_INVENTORY_SCOPE,
+  openCustomizeService,
+  startComposedApplication,
+} from '../../apps/api/src/composition-root.js';
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import {
   createComposedApplicationRuntime,
@@ -615,3 +621,98 @@ async function pointerFence(pool: pg.Pool, tenantId: string): Promise<string> {
   );
   return `${result.rows[0]!.release_id}@${result.rows[0]!.fence}`;
 }
+
+test(
+  'a purchase order extension reads back on its page and returns after rollback with the value the assistant set',
+  { timeout: 600_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'customize-po',
+      async ({ connection }) => {
+        const options = {
+          databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+          tenantSlug: 'customize-po',
+        };
+        const app = await startComposedApplication({
+          ...options,
+          seedProfile: 'distributor',
+          port: 0,
+        });
+        const opened = await openCustomizeService(options);
+        try {
+          const world = worldOver(app.runtime, String(connection.database));
+          const draft = await opened.service.draft(
+            {
+              kind: 'addField',
+              entity: 'northstar.app:entity.purchase_order',
+              field: { label: 'Person ordering', type: 'text' },
+            },
+            'visualBuilder',
+          );
+          assert.equal(draft.status, 'drafted');
+          if (draft.status !== 'drafted') return;
+          await opened.service.approve(draft.patchId);
+          await opened.service.activate(draft.patchId);
+          const field =
+            'northstar.app:field.custom_purchase_order_person_ordering';
+          const recordId = randomUUID();
+          const created = await world.invoke('purchase_order_create', {
+            recordId,
+            legalEntityId: COMPANY,
+            relations: {},
+            values: {
+              'northstar.app:field.purchase_order_supplier_party_id': seededId(
+                'Cascade Fastener Works',
+              ),
+              'northstar.app:field.purchase_order_order_date':
+                '2026-11-18T00:00:00.000Z',
+              'northstar.app:field.purchase_order_currency': 'CAD',
+              [field]: 'Robin',
+            },
+          });
+          assert.equal(created.outcome, 'succeeded');
+          const page = () => world.read('commercial_purchase_order', recordId);
+          assert.equal((await page()).values[field], 'Robin');
+          const agent = new OperationsAgentSession({
+            runtime: app.runtime,
+            companyId: COMPANY,
+            personHeaders: { cookie: 'northstar-demo-actor=manager' },
+            approve: () => Promise.resolve(true),
+          });
+          const read = await agent.call('erp_query', {
+            queryId: 'purchase_order_get',
+            arguments: { recordId },
+            selection: [field],
+          });
+          assert.equal(read.isError, false);
+          assert.match(JSON.stringify(read.content), /Robin/u);
+          const plan = await agent.call('erp_plan', {
+            intents: [
+              {
+                operationId: 'purchase_order_update',
+                target: recordId,
+                patch: { [field]: 'Morgan' },
+              },
+            ],
+          });
+          assert.equal(plan.isError, false, JSON.stringify(plan.content));
+          const updated = await agent.call('erp_execute', {
+            planId: (plan.content as { planId: string }).planId,
+            executionIdempotencyKey: 'update-person',
+          });
+          assert.equal(updated.isError, false, JSON.stringify(updated.content));
+          assert.equal((await page()).values[field], 'Morgan');
+          await opened.service.rollback();
+          assert.equal(Object.hasOwn((await page()).values, field), false);
+          await opened.service.approve(draft.patchId);
+          await opened.service.activate(draft.patchId);
+          assert.equal((await page()).values[field], 'Morgan');
+        } finally {
+          await opened.close();
+          await app.close();
+        }
+      },
+      LINEAGE_INSTALL_VOLUME,
+    );
+  },
+);
