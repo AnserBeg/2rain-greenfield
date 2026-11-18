@@ -45,10 +45,12 @@ const suiteDefinitions = [
       'test/unit/module-provider-error-mappings.test.ts',
       'test/unit/observability.test.ts',
       'test/unit/party-definition.test.ts',
+      'test/unit/production-start.test.ts',
       'test/unit/purchasing-definition.test.ts',
       'test/unit/query-catalog-memo.test.ts',
       'test/unit/request-work-meter.test.ts',
       'test/unit/sales-definition.test.ts',
+      'test/unit/surface-assets.test.ts',
       'test/unit/web-surface-hex-literal-ratchet.test.ts',
       'test/unit/workspace-contract.test.ts',
     ],
@@ -206,7 +208,7 @@ const suiteDefinitions = [
       'test/postgres/tenant-isolation.test.ts',
       'test/postgres/trust-substrate.test.ts',
     ],
-    script: 'test:postgres',
+    scripts: ['test:postgres:1', 'test:postgres:2', 'test:postgres:3'],
   },
   {
     discoveryPattern: 'test/postgres/composed-application.test.ts',
@@ -345,8 +347,13 @@ test('suite commands exactly cover all independently discovered test files', () 
   const scripts = packageJson.scripts ?? {};
 
   for (const suite of suiteDefinitions) {
-    const command = scripts[suite.script];
-    assert.ok(command, `package.json is missing ${suite.script}`);
+    const scriptNames = 'scripts' in suite ? suite.scripts : [suite.script];
+    const command = scriptNames
+      .map((script) => {
+        assert.ok(scripts[script], `package.json is missing ${script}`);
+        return scripts[script];
+      })
+      .join(' ');
 
     const excludedFiles = new Set<string>(
       'excludedFiles' in suite ? suite.excludedFiles : [],
@@ -370,11 +377,14 @@ test('suite commands exactly cover all independently discovered test files', () 
         containsGlob(token.value) ? globSync(token.value) : [token.value],
       )
       .sort();
-    assert.ok(commandFiles.length > 0, `${suite.script} reaches no tests`);
+    assert.ok(
+      commandFiles.length > 0,
+      `${scriptNames.join(', ')} reaches no tests`,
+    );
     assert.deepEqual(
-      [...new Set(commandFiles)],
+      commandFiles,
       discoveredFiles,
-      `${suite.script} diverges from ${suite.discoveryPattern}`,
+      `${scriptNames.join(', ')} diverges from ${suite.discoveryPattern}`,
     );
   }
 });
@@ -736,7 +746,9 @@ test('CI runs every scaffold gate from a frozen install', () => {
     'corepack pnpm check:demo-release',
     'corepack pnpm test:contracts',
     'corepack pnpm check:schema',
-    'corepack pnpm test:postgres',
+    'corepack pnpm test:postgres:1',
+    'corepack pnpm test:postgres:2',
+    'corepack pnpm test:postgres:3',
     'corepack pnpm test:postgres:composed',
     'corepack pnpm test:postgres:commercial',
     'corepack pnpm test:postgres:sales',

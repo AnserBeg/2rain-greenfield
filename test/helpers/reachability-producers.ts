@@ -50,10 +50,12 @@ export const reachabilityProducers = [
     'test/unit/module-provider-error-mappings.test.ts',
     'test/unit/observability.test.ts',
     'test/unit/party-definition.test.ts',
+    'test/unit/production-start.test.ts',
     'test/unit/purchasing-definition.test.ts',
     'test/unit/query-catalog-memo.test.ts',
     'test/unit/request-work-meter.test.ts',
     'test/unit/sales-definition.test.ts',
+    'test/unit/surface-assets.test.ts',
     'test/unit/web-surface-hex-literal-ratchet.test.ts',
     'test/unit/workspace-contract.test.ts',
   ]),
@@ -96,11 +98,21 @@ export const reachabilityProducers = [
     ['test/surface-runtime-contract.test.ts'],
     'apps/web/package.json',
   ),
-  // The composed application's replay of every release runs in its own job,
-  // and so do the commercial document workflows, each under the same bound,
-  // so no job nears it.
-  nodeProducer('postgres', 'postgres', 'test:postgres', [
-    'test/postgres/**/!(commercial-totals|composed-application|counter-sale|customer-credit|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|replenishment|stock-serializer).test.ts',
+  nodeProducer('postgres-1', 'postgres', 'test:postgres:1', [
+    'test/postgres/customization-world.test.ts',
+    'test/postgres/document-numbering.test.ts',
+    'test/postgres/locations.test.ts',
+    'test/postgres/module-index-conformance.test.ts',
+  ]),
+  nodeProducer('postgres-2', 'postgres', 'test:postgres:2', [
+    'test/postgres/catalog-extras.test.ts',
+    'test/postgres/customization.test.ts',
+    'test/postgres/module-runtime.test.ts',
+    'test/postgres/module-storage-transition.test.ts',
+    'test/postgres/releases.test.ts',
+  ]),
+  nodeProducer('postgres-3', 'postgres', 'test:postgres:3', [
+    'test/postgres/{!(catalog-extras|commercial-totals|composed-application|counter-sale|customer-credit|customization|customization-world|document-numbering|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|locations|module-index-conformance|module-runtime|module-storage-transition|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|releases|replenishment|stock-serializer),*/**/*}.test.ts',
   ]),
   nodeProducer(
     'postgres-composed',
@@ -123,8 +135,6 @@ export const reachabilityProducers = [
       'test/performance/page-budget.test.ts',
     ],
   ),
-  // The sales-side workflows run in a job of their own as well (INTEGRATION:
-  // SALES-EXTRAS' three files took the commercial job near its bound).
   nodeProducer('postgres-sales', 'postgres-sales', 'test:postgres:sales', [
     'test/postgres/counter-sale.test.ts',
     'test/postgres/customer-credit.test.ts',

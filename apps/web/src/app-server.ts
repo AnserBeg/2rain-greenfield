@@ -1,4 +1,9 @@
 import { createServer } from 'node:http';
+import {
+  brotliCompressSync,
+  constants as zlibConstants,
+  gzipSync,
+} from 'node:zlib';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 
 import {
@@ -13,6 +18,7 @@ import {
   withAssistantPanel,
   type AssistantMount,
 } from './assistant-panel.js';
+import { staticAsset, type StaticAsset } from './surface-assets.js';
 import { localDemoActor } from '../../../packages/runtime/src/local-demo-actor.js';
 
 import {
@@ -28,7 +34,7 @@ import {
   renderSurfaceRuntimeWithData,
   submitSurfaceRuntimeFragment,
   submitSurfaceRuntimeIntent,
-  surfaceRuntimeStyles,
+  SURFACE_STYLESHEET,
   type SurfaceRuntimeGateways,
   type SurfaceRuntimeResponse,
 } from './surface-runtime.js';
@@ -73,6 +79,7 @@ export function createSurfaceRuntimeServer(
   options: SurfaceRuntimeServerOptions = {},
 ): Server {
   return createServer((request, response) => {
+    htmlEncodings.set(response, acceptedEncoding(request));
     const handle = () =>
       handleRequest(
         entry,
@@ -109,7 +116,7 @@ async function handleRequest(
     'content-security-policy',
     // `connect-src 'self'` admits only the owned script's same-origin fragment
     // POSTs (ADR-0036 behaviour 7); script, style and form rules are unchanged.
-    `default-src 'none'; script-src '${SURFACE_CLIENT_CSP_HASH}'${assistant ? ` '${ASSISTANT_PANEL_CSP_HASH}'` : ''}; style-src 'unsafe-inline'; img-src data:; connect-src ${gateways ? "'self'" : "'none'"}; base-uri 'none'; form-action ${gateways ? "'self'" : "'none'"}; frame-ancestors 'none'`,
+    `default-src 'none'; script-src '${SURFACE_CLIENT_CSP_HASH}'${assistant ? ` '${ASSISTANT_PANEL_CSP_HASH}'` : ''}; style-src 'self'; font-src 'self'; img-src data:; connect-src ${gateways ? "'self'" : "'none'"}; base-uri 'none'; form-action ${gateways ? "'self'" : "'none'"}; frame-ancestors 'none'`,
   );
   response.setHeader('x-content-type-options', 'nosniff');
 
@@ -128,6 +135,12 @@ async function handleRequest(
   }
 
   const url = new URL(request.url ?? '/', 'http://surface-runtime.local');
+  const asset =
+    request.method === 'GET' ? staticAsset(url.pathname) : undefined;
+  if (asset) {
+    writeStaticAsset(request, response, asset);
+    return;
+  }
   if (
     assistant &&
     url.pathname === '/' &&
@@ -206,7 +219,7 @@ async function handleRequest(
           await customize(),
           url.href,
           submission,
-          surfaceRuntimeStyles(),
+          SURFACE_STYLESHEET.href,
         ),
       );
       writeHtml(
@@ -388,6 +401,46 @@ async function readFormSubmission(
   );
 }
 
+/**
+ * SPEED-1: a static asset from its content-hash route (`surface-assets.ts`):
+ * a year, immutable, precompressed where that helps. It holds no personal or
+ * tenant data, so it may be cached anywhere.
+ */
+function writeStaticAsset(
+  request: IncomingMessage,
+  response: ServerResponse,
+  asset: StaticAsset,
+): void {
+  const accepted = acceptedEncoding(request);
+  const encoding = accepted && asset.encodings[accepted] ? accepted : null;
+  response.statusCode = 200;
+  response.setHeader('cache-control', 'public, max-age=31536000, immutable');
+  response.setHeader('content-type', asset.contentType);
+  response.setHeader('vary', 'accept-encoding');
+  if (encoding) response.setHeader('content-encoding', encoding);
+  response.end(encoding ? asset.encodings[encoding] : asset.body);
+}
+
+/** The best encoding the client accepts: brotli, then gzip, else none. */
+function acceptedEncoding(request: IncomingMessage): 'br' | 'gzip' | null {
+  const header = String(request.headers['accept-encoding'] ?? '');
+  const accepts = (name: string) =>
+    header
+      .split(',')
+      .map((part) => part.trim().split(';'))
+      .some(
+        ([token, ...parameters]) =>
+          token?.trim().toLowerCase() === name &&
+          !parameters.some((parameter) =>
+            /^\s*q\s*=\s*0(?:\.0*)?\s*$/u.test(parameter),
+          ),
+      );
+  return accepts('br') ? 'br' : accepts('gzip') ? 'gzip' : null;
+}
+
+/** Each response's negotiated encoding for its HTML, read as it is written. */
+const htmlEncodings = new WeakMap<ServerResponse, 'br' | 'gzip' | null>();
+
 function writeHtml(
   response: ServerResponse,
   result: SurfaceRuntimeResponse,
@@ -406,5 +459,20 @@ function writeHtml(
     return;
   }
   response.setHeader('content-type', 'text/html; charset=utf-8');
-  response.end(result.html);
+  // Personalized HTML stays `no-store`; it is compressed when the client
+  // accepts it (a fast brotli level: this runs on every page).
+  const encoding = htmlEncodings.get(response) ?? null;
+  if (!encoding || result.html.length < 1024) {
+    response.end(result.html);
+    return;
+  }
+  response.setHeader('vary', 'accept-encoding');
+  response.setHeader('content-encoding', encoding);
+  response.end(
+    encoding === 'br'
+      ? brotliCompressSync(result.html, {
+          params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 4 },
+        })
+      : gzipSync(result.html, { level: 6 }),
+  );
 }

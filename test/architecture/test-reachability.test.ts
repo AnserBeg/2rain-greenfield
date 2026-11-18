@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import {
   globSync,
   mkdtempSync,
@@ -7,7 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, matchesGlob, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
@@ -40,6 +41,7 @@ const workflowPath = '.github/workflows/ci.yml';
 const rootScriptCiAllowlist = {
   'check:boundaries':
     'transitively enforced by test/architecture/dependency-boundaries.test.ts',
+  'test:postgres': 'developer aggregate for the three CI PostgreSQL shards',
   test: 'developer aggregate for running the CI test commands locally',
 } as const;
 const nodeSelectionArguments =
@@ -369,7 +371,17 @@ test('declared unfiltered producers are wired to CI and their evidence paths', (
   );
 
   for (const producer of reachabilityProducers) {
-    const job = extractWorkflowJob(workflow, producer.ciJob);
+    let job = extractWorkflowJob(workflow, producer.ciJob);
+    if (producer.ciJob === 'postgres') {
+      const shard = producer.id.slice('postgres-'.length);
+      assert.match(job, /shard: \[1, 2, 3\]/u);
+      assert.ok(
+        job.includes(
+          `if: matrix.shard == ${shard}\n        run: ${producer.ciInvocation}\n`,
+        ),
+      );
+      job = job.replaceAll('${{ matrix.shard }}', shard);
+    }
     assert.ok(
       job.includes(producer.ciInvocation),
       `${producer.id} is absent from CI job ${producer.ciJob}`,
@@ -378,9 +390,22 @@ test('declared unfiltered producers are wired to CI and their evidence paths', (
       job.includes(producer.evidencePath),
       `${producer.id} evidence path is absent from CI job ${producer.ciJob}`,
     );
-    assert.match(job, /test\/helpers\/begin-reachability-run\.ts/u);
-
     const body = loadProducerImplementation(producer, rootScripts, webScripts);
+    if (producer.id === 'postgres-composed') {
+      // The leased suite prepares a fresh run from CI's token itself.
+      assert.match(body, /bash scripts\/run-suite\.sh postgres-composed -- /u);
+      assert.match(
+        readFileSync('scripts/run-suite.sh', 'utf8'),
+        /node --import tsx "\$REPOSITORY_ROOT\/test\/helpers\/prepare-reachability-evidence\.ts" "\$SUITE"/u,
+      );
+      assert.match(
+        readFileSync('test/helpers/prepare-reachability-evidence.ts', 'utf8'),
+        /ensureReachabilityRun\(\{ repositoryRoot \}\)/u,
+      );
+      assert.doesNotMatch(job, /^ {4}needs:/mu);
+    } else {
+      assert.match(job, /test\/helpers\/begin-reachability-run\.ts/u);
+    }
     if (producer.runner === 'node:test') {
       if (producer.implementation.kind === 'script') {
         assert.match(
@@ -412,6 +437,31 @@ test('declared unfiltered producers are wired to CI and their evidence paths', (
         `${producer.id} does not run its own config under its own id`,
       );
     }
+  }
+});
+
+test('every file selected by the former general PostgreSQL glob belongs to exactly one shard', () => {
+  const oldGeneralGlob =
+    'test/postgres/**/!(commercial-totals|composed-application|counter-sale|customer-credit|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|replenishment|stock-serializer).test.ts';
+  const shards = ['postgres-1', 'postgres-2', 'postgres-3'].map(
+    getReachabilityProducer,
+  );
+  const files = globSync(oldGeneralGlob);
+  assert.ok(files.length > 0);
+  // These paths share basenames with root files assigned to shards 1 and 2.
+  files.push(
+    'test/postgres/region/locations.test.ts',
+    'test/postgres/region/subregion/releases.test.ts',
+  );
+  for (const file of files) {
+    const owners = shards.filter(({ argv }) =>
+      argv.some((pattern) => matchesGlob(file, pattern)),
+    );
+    assert.equal(
+      owners.length,
+      1,
+      `${file} selected by: ${owners.map(({ id }) => id).join(', ')}`,
+    );
   }
 });
 
@@ -557,6 +607,39 @@ test('CI aggregates only after every evidence-producing job succeeds', () => {
   assert.match(job, /test\/helpers\/begin-reachability-run\.ts/u);
   assert.match(job, /actions\/download-artifact@[0-9a-f]{40}/u);
   assert.doesNotMatch(job, /if:\s*always\(\)/u);
+  assert.match(job, /CI_JOB_RESULTS: \$\{\{ toJSON\(needs\) \}\}/u);
+  assert.match(job, /run: node \.github\/scripts\/check-ci-results\.mjs/u);
+  assert.match(job, /^ {6}- security$/mu);
+  for (const [jobName, result, replay, accepted] of [
+    ['postgres', 'success', 'success', true],
+    ['postgres', 'skipped', 'success', false],
+    ['postgres', 'failure', 'success', false],
+    ['security', 'cancelled', 'success', false],
+    ['quality', 'skipped', 'success', false],
+    ['postgres-composed', 'failure', 'success', false],
+    ['postgres-composed', 'success', 'skipped', false],
+    ['postgres-composed', 'success', 'failure', false],
+  ] as const) {
+    const jobs = {
+      quality: { result: 'success' },
+      security: { result: 'success' },
+      postgres: { result: 'success' },
+      'postgres-composed': { result: 'success', outputs: { replay } },
+    };
+    jobs[jobName].result = result;
+    const run = spawnSync(
+      process.execPath,
+      ['.github/scripts/check-ci-results.mjs'],
+      {
+        env: { ...process.env, CI_JOB_RESULTS: JSON.stringify(jobs) },
+      },
+    );
+    assert.equal(
+      run.status === 0,
+      accepted,
+      `${jobName}=${result}, replay=${replay}`,
+    );
+  }
 });
 
 test('every root test/check script is CI-invoked or explicitly justified', () => {

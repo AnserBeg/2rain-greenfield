@@ -353,6 +353,12 @@ test('the panel is added to a full page only, with its script pinned by hash', (
     html: '<html><body><main>x</main></body></html>',
   });
   assert.match(page.html, /data-assistant-panel/u);
+  // No inline style: the styles are a content-hash stylesheet.
+  assert.doesNotMatch(page.html, /<style|style="/u);
+  assert.match(
+    page.html,
+    /<link rel="stylesheet" href="\/assets\/assistant-panel-[0-9a-f]+\.css">/u,
+  );
   assert.ok(
     page.html.includes(
       `<script data-assistant-script>${ASSISTANT_PANEL_SCRIPT}</script>`,

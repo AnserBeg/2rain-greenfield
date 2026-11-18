@@ -1,0 +1,23 @@
+name: Install Chromium
+description: Cache the Chromium binaries used by the installed Playwright version
+runs:
+  using: composite
+  steps:
+    - name: Read the installed Playwright version
+      id: playwright
+      shell: bash
+      run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+    - name: Cache Chromium
+      id: browsers
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-chromium-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
+    - name: Install system dependencies
+      if: steps.browsers.outputs.cache-hit == 'true'
+      shell: bash
+      run: corepack pnpm exec playwright install-deps chromium
+    - name: Install Chromium and its system dependencies
+      if: steps.browsers.outputs.cache-hit != 'true'
+      shell: bash
+      run: corepack pnpm exec playwright install --with-deps chromium

@@ -14,6 +14,8 @@
 import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
+import { registerStaticAsset } from './surface-assets.js';
+
 /** The transport seam the app server mounts: `/?assistant=...` requests. */
 export interface AssistantMount {
   handle(
@@ -320,6 +322,15 @@ const PANEL_STYLES = `
 @media (max-width:720px){.assistant-panel{width:100vw;border-left:0}}
 `;
 
+/** The panel's styles, served from a content-hash route (`style-src 'self'`). */
+export const ASSISTANT_PANEL_STYLESHEET_HREF = registerStaticAsset(
+  'assistant-panel',
+  'css',
+  'text/css; charset=utf-8',
+  Buffer.from(PANEL_STYLES, 'utf8'),
+  true,
+);
+
 const PANEL_MARKUP = `<button type="button" class="assistant-toggle" data-assistant-toggle aria-expanded="false" aria-controls="assistant-panel">Assistant</button><aside id="assistant-panel" class="assistant-panel" data-assistant-panel aria-label="Assistant" hidden><header><h2>Assistant</h2><button type="button" data-assistant-new>New conversation</button><button type="button" data-assistant-close aria-label="Close the assistant">Close</button></header><div class="assistant-log" data-assistant-log aria-live="polite"></div><div class="assistant-status" data-assistant-status role="status" hidden><span data-assistant-step>Working</span><span data-assistant-elapsed>0 s</span><button type="button" data-assistant-stop hidden>Stop</button></div><form data-assistant-form><label class="visually-hidden" for="assistant-input">Ask the assistant</label><textarea id="assistant-input" name="text" rows="2" placeholder="Ask or tell the assistant…"></textarea><button type="submit">Send</button></form></aside>`;
 
 /**
@@ -339,6 +350,6 @@ export function withAssistantPanel<
   const index = result.html.lastIndexOf('</body>');
   return {
     ...result,
-    html: `${result.html.slice(0, index)}<style>${PANEL_STYLES}</style>${PANEL_MARKUP}<script data-assistant-script>${ASSISTANT_PANEL_SCRIPT}</script>${result.html.slice(index)}`,
+    html: `${result.html.slice(0, index)}<link rel="stylesheet" href="${ASSISTANT_PANEL_STYLESHEET_HREF}">${PANEL_MARKUP}<script data-assistant-script>${ASSISTANT_PANEL_SCRIPT}</script>${result.html.slice(index)}`,
   };
 }
