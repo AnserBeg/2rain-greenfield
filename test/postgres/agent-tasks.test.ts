@@ -34,6 +34,7 @@ import {
   type AgentWorld,
 } from '../agent/agent-world.js';
 import { f, ids, NAMES, op, q, rel, snapshot } from '../agent/arrange.js';
+import { assistantCompany } from '../../apps/web/src/surface-runtime.js';
 import { readRecord } from '../agent/dev-tasks.js';
 import { referenceScript } from '../agent/reference-scripts.js';
 import { TASKS } from '../agent/tasks.js';
@@ -129,6 +130,50 @@ test(
             relations: { [rel('purchase_order_line_order')]: { fromStep: 1 } },
           },
         ];
+        const otherCompany = await world.invoke('legal_entity_create', {
+          recordId: '74000000-0000-4000-8000-000000009003',
+          values: {
+            [f('legal_entity_code')]: 'ASSIST-B',
+            [f('legal_entity_name')]: 'Assistant B',
+            [f('legal_entity_is_default')]: false,
+            [f('legal_entity_status')]:
+              'northstar.app:option.legal_entity_status_active',
+          },
+        });
+        assert.equal(otherCompany.outcome, 'succeeded');
+        const otherId = otherCompany.readBack!.recordId;
+        await world.runtime.entry.run(
+          { headers: { cookie: 'northstar-demo-actor=manager' } },
+          async (view) => {
+            const surfaceId = 'northstar.app:surface.customer_invoice_detail';
+            const page = (value: string) => ({
+              surfaceId,
+              search:
+                '?' +
+                new URLSearchParams({
+                  surface: surfaceId,
+                  'northstar.app:parameter.customer_invoice_get_legal_entity_scope':
+                    value,
+                }).toString(),
+            });
+            assert.deepEqual(
+              await assistantCompany(
+                view,
+                world.runtime.queryGateway,
+                page(otherId),
+              ),
+              { companyId: otherId, label: 'Assistant B' },
+            );
+            assert.equal(
+              await assistantCompany(
+                view,
+                world.runtime.queryGateway,
+                page('missing'),
+              ),
+              null,
+            );
+          },
+        );
         const before = await snapshot(world);
         // AGENT-3 slice 3: placing the order (an O1 capability) needs the
         // person's yes, so this plan is one that can be declined.
@@ -274,16 +319,9 @@ test(
           (verified.content as { verified: boolean }).verified,
           true,
         );
-        // A reversible in-app change (O0 creates) runs at once even for a
-        // person who would decline: the approval names the risk class, never
-        // the person.
         assert.deepEqual(
           approved.approvals.map((entry) => [entry.by, entry.riskClass]),
-          [['riskClass', 'reversible']],
-        );
-        assert.match(
-          JSON.stringify(approvedPlan.content),
-          /risk class reversible/u,
+          [['person', 'needsYes']],
         );
         const asked: string[] = [];
         const careful = new OperationsAgentSession({
@@ -306,31 +344,9 @@ test(
         );
         assert.match(asked.join(' '), /moves stock or money/u);
 
-        // Undo: the latest change, planned, executed and verified as the
-        // person's own operation, archives what the change created.
-        const change = approved.latestChange();
-        assert.equal(change?.changeId, id);
-        assert.match(change!.summary, /created purchase order PO-/u);
-        const undone = await approved.undo(id);
-        assert.deepEqual(
-          {
-            outcome: undone.outcome,
-            verified: (undone as { verified?: boolean }).verified,
-          },
-          { outcome: 'undone', verified: true },
-        );
-        const executed = approved.executedPlans()[0]!.results;
-        for (const [local, result] of [
-          ['purchase_order', executed[0]!],
-          ['purchase_order_line', executed[1]!],
-        ] as const)
-          assert.equal(
-            (await readRecord(world, local, result.recordId!, true)).archived,
-            true,
-            `${local} was not archived by Undo`,
-          );
-        assert.equal(approved.approvals.at(-1)?.by, 'person');
         assert.equal((await approved.undo(id)).outcome, 'refused');
+        for (const result of approved.executedPlans()[0]!.results)
+          assert.equal(result.outcome, 'succeeded');
 
         // Undo refuses, saying why, when the record changed after the
         // agent's write; and puts prior values back when it did not.

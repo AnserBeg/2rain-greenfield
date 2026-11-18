@@ -71,6 +71,8 @@ export interface ComposedApplicationServerOptions {
    * on first use and says plainly when there is none. The panel is served
    * only under the local demo identity.
    */
+  /** Scripted providers can exercise the same metered drafting service in CI. */
+  readonly draftingProvider?: () => Promise<ModelAdapter>;
   readonly assistantModel?: () => Promise<
     ModelAdapter | { unavailable: string }
   >;
@@ -218,7 +220,7 @@ export async function startComposedApplication(
                 draftFromRequest: (request, budget) =>
                   budget
                     ? DRAFT_BUDGET.run(budget, () =>
-                        service.draftFromRequest(request),
+                        service.draftFromRequest(request, budget.signal),
                       )
                     : service.draftFromRequest(request),
               };
@@ -357,7 +359,7 @@ export async function openComposedApplicationRuntime(
 export async function openCustomizeService(
   options: Pick<
     ComposedApplicationServerOptions,
-    'compiledApplication' | 'databaseUrl' | 'tenantSlug'
+    'compiledApplication' | 'databaseUrl' | 'tenantSlug' | 'draftingProvider'
   >,
 ) {
   const authoredPath = new URL(
@@ -384,13 +386,16 @@ export async function openCustomizeService(
     databaseUrl: options.databaseUrl,
     draftingModel: async () =>
       draftingModelFrom(
-        anthropicModel({
-          effort: 'medium',
-          key: await loadModelKey('anthropic'),
-          maxTokens: 8_000,
-          modelId:
-            process.env.NORTH_STAR_CUSTOMIZE_MODEL ?? DEFAULT_ANTHROPIC_MODEL,
-        }),
+        options.draftingProvider
+          ? await options.draftingProvider()
+          : anthropicModel({
+              effort: 'medium',
+              key: await loadModelKey('anthropic'),
+              maxTokens: 8_000,
+              modelId:
+                process.env.NORTH_STAR_CUSTOMIZE_MODEL ??
+                DEFAULT_ANTHROPIC_MODEL,
+            }),
       ),
     firstPartyAuthored,
     localDemoIdentity: true,

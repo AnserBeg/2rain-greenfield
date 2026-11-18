@@ -11,7 +11,6 @@ export {
 } from './session.js';
 export {
   asData,
-  customizeHandoff,
   OPERATIONS_AGENT_SYSTEM_PROMPT,
   OPERATIONS_AGENT_TOOLS,
   type ModelToolDefinition,

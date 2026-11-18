@@ -6,6 +6,7 @@ import {
   renderCompositionPrintDocument,
 } from './surface-composition.js';
 import {
+  workspaceList,
   resolveWorkspaceEntry,
   type WorkspaceEntry,
 } from './workspace-entry.js';
@@ -2942,11 +2943,58 @@ export async function assistantCompany(
   const own = page.surfaceId
     ? manifest.surfaces.find((surface) => surface.surfaceId === page.surfaceId)
     : undefined;
-  if (own) {
-    const settled = await settle(own);
-    if (settled !== undefined) return settled;
-  }
   const landing = landingSurface(manifest.navigation, manifest.surfaces);
+  if (page.surfaceId && !own) return null;
+  if (own) {
+    const query = registeredSemanticQueryFromPinnedView(
+      view,
+      own.dataSourceQueryId,
+    );
+    if (own.workspace?.entry) {
+      const entry = await resolveWorkspaceEntry(view, own, url(), queryGateway);
+      if (entry) {
+        const offered = entry.options.find(
+          (option) => option.recordId === entry.selected,
+        );
+        return !entry.invalid && offered
+          ? { companyId: offered.recordId, label: offered.label }
+          : null;
+      }
+    }
+    if (query?.legalEntityScope) {
+      const ids = url().searchParams.getAll(
+        query.legalEntityScope.operand.parameterId,
+      );
+      const companyId = ids[0];
+      const policy = landing?.workspace?.entry;
+      if (
+        ids.length !== 1 ||
+        !companyId ||
+        !policy ||
+        (await queryGateway.previewEligibility(
+          view,
+          query.queryId,
+          companyId,
+        )) !== 'eligible'
+      )
+        return null;
+      const companies = await workspaceList(
+        view,
+        queryGateway,
+        policy.companyQueryId,
+        null,
+      );
+      const row = companies.find(
+        (r) =>
+          r.recordId === companyId &&
+          r.values[policy.companyStateFieldId] === policy.activeStateId,
+      );
+      const label = row?.values[policy.companyNameFieldId];
+      return typeof label === 'string' && label.trim()
+        ? { companyId, label }
+        : null;
+    }
+  }
   if (!landing?.launcher || !landing.workspace?.entry) return null;
   return (await settle(landing)) ?? null;
 }
