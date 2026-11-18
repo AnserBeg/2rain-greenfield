@@ -1156,7 +1156,8 @@ async function inventoryNavigationJourney(
     '[data-platform-slot="list:bulkActions"] [data-bulk-selection-form]',
   );
   const firstSelector = firstResponsiveRow.getByRole('checkbox');
-  await expect(bulkBar.getByText('Select records to begin')).toBeVisible();
+  // No instructions before a choice (LOOK-1): the bar appears with one.
+  await expect(bulkBar).toBeHidden();
   await expect(bulkBar.getByText('Selection ready')).toBeHidden();
   await firstSelector.check();
   await expect(bulkBar.getByText('Selection ready')).toBeVisible();
@@ -2218,7 +2219,7 @@ async function createScopedStockDocument(
     'Calgary warehouse',
   );
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('1');
-  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page).toHaveURL(/inventory_transaction_detail/u);
   // Saved, not refused. The save opens the document's own page, whose
   // sections render: its line, and Posted movements stating its declared
@@ -2427,7 +2428,7 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
     ).toBeVisible();
     await expect(editPage.locator('form#draft-editor-form')).toHaveCount(1);
     await expect(
-      editPage.getByRole('button', { name: 'Save draft', exact: true }),
+      editPage.getByRole('button', { name: 'Save', exact: true }),
     ).toBeVisible();
 
     // The line's own operation-addressed edit form, captured while the
@@ -2515,9 +2516,7 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
 
     // The editor opened before posting is a second UI boundary: its Save
     // draft is refused against the posted document rather than applied.
-    await editPage
-      .getByRole('button', { name: 'Save draft', exact: true })
-      .click();
+    await editPage.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(
       editPage.locator('[data-diagnostic-code="DRAFT_EDITOR_LOCKED"]'),
     ).toHaveCount(1);

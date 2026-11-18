@@ -874,7 +874,7 @@ test('PAYABLES: the purchase order lists its bills and offers billing only when 
   const action = (value: Composition, local: string) =>
     value.actions.find((entry) => entry.actionId === `${ns}:action.${local}`)!;
   const billing = action(order, 'bill_received');
-  assert.equal(billing.label, 'Bill received quantities');
+  assert.equal(billing.label, 'Bill');
   // Offered while the order states received quantity not yet billed and a
   // total -- the read model counts each line's own positive part, as the
   // post bills.

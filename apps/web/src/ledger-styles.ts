@@ -113,15 +113,15 @@ main{width:100%;max-width:var(--page-max);padding:var(--gap) var(--gutter) 56px}
 /* ---------- status badges: one shape per kind, so they read apart without colour ---------- */
 .surface-status span,.status-pill{display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 8px;border:1px solid var(--rule-2);border-radius:999px;background:transparent;color:var(--muted);font-size:11px;font-weight:500;line-height:1;white-space:nowrap}
 .surface-status span::before,.status-pill::before{content:"";flex:none;width:7px;height:7px;border:1.5px solid currentColor;border-radius:50%}
-.surface-status [data-status-role],.status-pill[data-status-role]{border-color:transparent}
-.surface-status [data-status-role=inProgress],.status-pill[data-status-role=inProgress]{background:var(--status-inprogress-ground);color:var(--status-inprogress-ink)}
-.surface-status [data-status-role=inProgress]::before,.status-pill[data-status-role=inProgress]::before{background:linear-gradient(90deg,currentColor 50%,transparent 50%)}
-.surface-status [data-status-role=success],.status-pill[data-status-role=success]{background:var(--status-success-ground);color:var(--status-success-ink)}
-.surface-status [data-status-role=success]::before,.status-pill[data-status-role=success]::before{width:4px;height:8px;border:solid currentColor;border-width:0 1.7px 1.7px 0;border-radius:0;transform:translate(1px,-1px) rotate(45deg);margin-right:1px}
-.surface-status [data-status-role=attention],.status-pill[data-status-role=attention]{background:var(--status-attention-ground);color:var(--status-attention-ink)}
-.surface-status [data-status-role=attention]::before,.status-pill[data-status-role=attention]::before{border:0;background:currentColor}
-.surface-status [data-status-role=blocked],.status-pill[data-status-role=blocked]{background:var(--status-blocked-ground);color:var(--status-blocked-ink)}
-.surface-status [data-status-role=blocked]::before,.status-pill[data-status-role=blocked]::before{border:0;border-radius:1.5px;background:currentColor}
+.surface-status [data-status-role],.status-pill[data-status-role],.composition-business-status[data-status-role]{border-color:transparent}
+.surface-status [data-status-role=inProgress],.status-pill[data-status-role=inProgress],.composition-business-status[data-status-role=inProgress]{background:var(--status-inprogress-ground);color:var(--status-inprogress-ink)}
+.surface-status [data-status-role=inProgress]::before,.status-pill[data-status-role=inProgress]::before,.composition-business-status[data-status-role=inProgress]::before{background:linear-gradient(90deg,currentColor 50%,transparent 50%)}
+.surface-status [data-status-role=success],.status-pill[data-status-role=success],.composition-business-status[data-status-role=success]{background:var(--status-success-ground);color:var(--status-success-ink)}
+.surface-status [data-status-role=success]::before,.status-pill[data-status-role=success]::before,.composition-business-status[data-status-role=success]::before{width:4px;height:8px;border:solid currentColor;border-width:0 1.7px 1.7px 0;border-radius:0;transform:translate(1px,-1px) rotate(45deg);margin-right:1px}
+.surface-status [data-status-role=attention],.status-pill[data-status-role=attention],.composition-business-status[data-status-role=attention]{background:var(--status-attention-ground);color:var(--status-attention-ink)}
+.surface-status [data-status-role=attention]::before,.status-pill[data-status-role=attention]::before,.composition-business-status[data-status-role=attention]::before{border:0;background:currentColor}
+.surface-status [data-status-role=blocked],.status-pill[data-status-role=blocked],.composition-business-status[data-status-role=blocked]{background:var(--status-blocked-ground);color:var(--status-blocked-ink)}
+.surface-status [data-status-role=blocked]::before,.status-pill[data-status-role=blocked]::before,.composition-business-status[data-status-role=blocked]::before{border:0;border-radius:1.5px;background:currentColor}
 
 /* ---------- buttons: one primary per screen; everything else secondary or ghost ---------- */
 button,.button,.primary-action,.secondary-action,.list-page-link{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:var(--ctl-h);padding:0 12px;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);color:var(--ink);font-size:13px;font-weight:500;line-height:1.2;white-space:nowrap;text-decoration:none;cursor:pointer}
@@ -210,6 +210,9 @@ button:disabled{opacity:.55;cursor:not-allowed}
 .bulk-bar{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px var(--pad-x);border:1px solid var(--rule);border-radius:4px;background:var(--sheet)}
 .bulk-bar p{margin-top:2px;color:var(--muted);font-size:12px}
 .bulk-ready{display:none}
+/* The bar shows only once a row is chosen: no instructions before (LOOK-1). */
+.bulk-bar{display:none}
+body:has(.record-selector__input:checked) .bulk-bar{display:flex}
 body:has(.record-selector__input:checked) .bulk-empty{display:none}
 body:has(.record-selector__input:checked) .bulk-ready{display:inline-flex}
 
@@ -436,6 +439,40 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .data-panel [data-message] p{margin:3px 0 0;font-size:12px}
 .composition-collection details>summary{color:var(--muted);font-size:12px;cursor:pointer}
 .composition-section-links summary{display:flex;align-items:center;min-height:var(--ctl-h);cursor:pointer}
+
+/* ---------- the record's right rail (LOOK-1 round 2) ----------
+   Linked documents declared for the rail sit beside the sheet: on a wide
+   screen the page is two columns, the title and the stepper span both, and
+   the rail's sections fill the right column from the top (dense flow). */
+@media(min-width:1181px){
+.surface-grid:has([data-composition-rail]){grid-template-columns:minmax(0,1fr) var(--rail-w);grid-auto-flow:row dense;align-items:start}
+.surface-grid:has([data-composition-rail])>.surface-slot>*,.surface-grid:has([data-composition-rail]) .composition-header>*{grid-column:1}
+.surface-grid:has([data-composition-rail]) :is(.composition-title,.record-breadcrumb,.composition-alert,.composition-progression,.composition-record-actions,.composition-back){grid-column:1/-1}
+.surface-grid:has([data-composition-rail]) [data-composition-rail]{grid-column:2}
+}
+[data-composition-rail]{padding:calc(var(--row-y) + 4px) var(--pad-x) calc(var(--row-y) + 6px)}
+[data-composition-rail]>.data-table-wrap{margin:8px calc(-1 * var(--pad-x)) calc(-1 * (var(--row-y) + 6px));border-top:1px solid var(--rule)}
+[data-composition-rail] .composition-collection-heading details{display:none}
+/* In the rail a row reads as a card: its name, then label and value pairs. */
+[data-composition-rail] table,[data-composition-rail] tbody{display:block}
+[data-composition-rail] thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+[data-composition-rail] tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:9px var(--pad-x);border-bottom:1px solid var(--rule)}
+[data-composition-rail] tr:last-child{border-bottom:0}
+[data-composition-rail] td{display:block;padding:0!important;border:0!important;white-space:normal!important;font-size:12px;background:transparent!important}
+[data-composition-rail] td:first-child{grid-column:1/-1;font-family:var(--f-mono);font-size:12px;color:var(--accent-text)}
+[data-composition-rail] td:not(:first-child)::before{content:attr(data-column-label) " ";color:var(--muted)}
+[data-composition-rail] td[data-cell-role=actions]::before{content:none}
+[data-composition-rail][data-resolution=empty]{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+/* An empty section is one quiet line beside its heading. */
+.composition-collection[data-resolution=empty] :is([data-message-detail],[data-message-next-action]),.data-panel[data-composition-dataset][data-resolution=empty] :is([data-message-detail],[data-message-next-action]){display:none}
+/* Identity and revision stay reachable, out of the reading path. */
+.composition-technical{grid-column:1/-1;padding:0;border:0;background:transparent}
+.composition-technical>summary{display:inline-flex;min-height:24px;color:var(--faint);font-size:11px;font-weight:400;cursor:pointer}
+.composition-technical[open]{padding:10px var(--pad-x);border:1px solid var(--rule);background:var(--sheet)}
+.composition-record-actions .command-bar>*{width:100%;justify-content:flex-start}
+.composition-record-actions .primary-action{background:var(--sheet);border-color:var(--rule-2);color:var(--ink)}
+.composition-record-actions .command-bar form{display:block;width:100%}
+.composition-record-actions .command-bar form button,.composition-record-actions .action-overflow summary{width:100%;justify-content:flex-start}
 
 /* ---------- task dialog: the dialog with its impact line ---------- */
 .composition-task-resume{grid-column:1/-1;display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:10px var(--pad-x);border:1px solid var(--rule);border-radius:4px;background:var(--sheet)}

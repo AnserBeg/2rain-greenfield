@@ -166,12 +166,12 @@ test('a customer workspace sets order defaults and an address book that a new sa
     await expect(page.getByLabel('Street', { exact: true })).toHaveValue(
       '726 Industrial Way',
     );
-    await page.getByLabel('Order date (UTC) *').fill('2026-09-28T12:00');
+    await page.getByLabel('Order date *').fill('2026-09-28');
     await pick(page, 'Line 1 product', 'OFF-100', 'Field notebook');
     await page.getByLabel('Line 1 quantity', { exact: true }).fill('2');
     await page.getByLabel('Line 1 unit price', { exact: true }).fill('12.5');
     await capture(page, testInfo, 'order-defaults');
-    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page).toHaveURL(/sales_order_detail/u);
     const header = page.locator('.composition-header');
     for (const text of ['USD', 'Priya Natarajan', 'Net 45'])
@@ -183,6 +183,8 @@ test('a customer workspace sets order defaults and an address book that a new sa
     await page.getByRole('button', { name: 'Confirm', exact: true }).click();
     await expect(page.getByRole('status')).toContainText('Confirm complete');
     await page.goto(orderUrl);
+    // Print is in the Record actions menu (LOOK-1 round 2).
+    await page.locator('.composition-record-actions > summary').click();
     await page.getByRole('link', { name: 'Print sales order' }).click();
     const printed = page.locator('.print-block');
     await expect(printed.locator('h2')).toHaveText('Ship to');
@@ -224,13 +226,12 @@ test('without JavaScript, choosing a customer fills its defaults, and an incompl
         'Chestermere',
       );
       // The order's copy is its own: clearing the city here leaves the book.
+      await openMoreDetails(page);
       await page.getByLabel('City', { exact: true }).fill('');
-      await page.getByLabel('Order date (UTC) *').fill('2026-09-28T12:00');
+      await page.getByLabel('Order date *').fill('2026-09-28');
       await pick(page, 'Line 1 product', 'OFF-100', 'Field notebook');
       await page.getByLabel('Line 1 quantity', { exact: true }).fill('1');
-      await page
-        .getByRole('button', { name: 'Save draft', exact: true })
-        .click();
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
       await expect(page).toHaveURL(/sales_order_detail/u);
       const commands = () =>
         page
@@ -251,10 +252,9 @@ test('without JavaScript, choosing a customer fills its defaults, and an incompl
           url,
         ).toString(),
       );
+      await openMoreDetails(page);
       await page.getByLabel('City', { exact: true }).fill('Chestermere');
-      await page
-        .getByRole('button', { name: 'Save draft', exact: true })
-        .click();
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
       await expect(page).toHaveURL(/sales_order_detail/u);
       expect(await commands()).toContain('Confirm');
       await page.screenshot({
@@ -367,4 +367,11 @@ async function fixture(run: (url: string) => Promise<void>) {
     const [code] = await exited;
     expect(code, output).toBe(0);
   }
+}
+
+/** Opens the form's "More details" when it is closed (LOOK-1 round 2). */
+async function openMoreDetails(target: Page): Promise<void> {
+  const more = target.locator('details.draft-more');
+  if ((await more.count()) && (await more.getAttribute('open')) === null)
+    await more.locator('summary').click();
 }

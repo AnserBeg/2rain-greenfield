@@ -3350,8 +3350,8 @@ test('RECEIPT posts atomically, refuses over-receipt across locations, and prese
       /<td[^>]*data-column-label="Ordered"[^>]*>10<\/td>/u,
       'the selected order line retains its exact ordered quantity',
     );
-    assert.match(orderPage.html, /Receive with actual cost/u);
-    assert.match(orderPage.html, /Receive with cost explicitly absent/u);
+    assert.match(orderPage.html, /Receive this line/u);
+    assert.match(orderPage.html, /Receive this line without cost/u);
     assert.match(orderPage.html, /Connected receipts/u);
     const originalAfter = await database.adminPool.query(
       `SELECT ${quoted(receiptColumn(binding.receipt, 'goods_receipt_state'))} AS state FROM ${receiptTable(binding.receipt)} WHERE record_id=$1`,

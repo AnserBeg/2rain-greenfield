@@ -2,6 +2,7 @@ import {
   renderCompositionAlerts,
   renderCompositionFields,
   renderCompositionActions,
+  renderCompositionMenu,
   renderCompositionChildren,
   renderCompositionHeader,
   renderCompositionProgression,
@@ -648,7 +649,7 @@ function renderBulkActions(context: SurfaceComponentContext): string {
   const formId = bulkSelectionFormId(context.surface);
   return slotPanel(
     context,
-    `<form class="bulk-bar" id="${escapeHtml(formId)}" data-bulk-selection-form><div><strong class="bulk-empty">Select records to begin</strong><strong class="bulk-ready">Selection ready</strong><p>Choose one or more records to see the available actions.</p></div><button class="secondary-action bulk-ready" type="reset">Clear selection</button></form>`,
+    `<form class="bulk-bar" id="${escapeHtml(formId)}" data-bulk-selection-form><div><strong class="bulk-ready">Selection ready</strong></div><button class="secondary-action bulk-ready" type="reset">Clear selection</button></form>`,
     'bulk-actions-slot',
   );
 }
@@ -965,6 +966,15 @@ function renderCommandBar(context: SurfaceComponentContext): string {
           context.view,
         )
       : '';
+  // A document's other tasks and its print link (LOOK-1 round 2).
+  const menu =
+    context.data?.status === 'READY' && context.data.composition
+      ? renderCompositionMenu(
+          context.surface,
+          context.data.composition,
+          context.view,
+        )
+      : '';
   const record = recordFrom(context.data);
   if (context.surface.surfaceRole === 'form') {
     const admission = resolveFormAdmission(context, record);
@@ -1024,7 +1034,7 @@ function renderCommandBar(context: SurfaceComponentContext): string {
   // shows no empty disclosure.
   return slotPanel(
     context,
-    `${compositionActions}${context.surface.composition?.presentation?.recordActions === 'progressive' ? (actions ? `<details class="composition-record-actions"><summary>Record actions</summary><div class="command-bar" aria-label="Record commands">${actions}</div></details>` : '') : `<div class="command-bar" aria-label="Record commands">${actions}</div>`}`,
+    `${compositionActions}${context.surface.composition?.presentation?.recordActions === 'progressive' ? (actions || menu ? `<details class="composition-record-actions"><summary>Record actions</summary><div class="command-bar" aria-label="Record commands">${actions}${menu}</div></details>` : '') : `<div class="command-bar" aria-label="Record commands">${actions}${menu}</div>`}`,
     'command-bar-slot',
   );
 }

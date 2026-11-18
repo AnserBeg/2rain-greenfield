@@ -140,7 +140,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
           .inputValue();
     await page
       .getByRole('button', {
-        name: (await editor.count()) ? 'Save draft' : 'Save',
+        name: (await editor.count()) ? 'Save' : 'Save',
         exact: true,
       })
       .click();
@@ -235,7 +235,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   staleUpdate.draftAction = 'save';
   await page.goto(orderFormUrl);
   await field('sales_order', 'notes', 'Edited while draft');
-  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   // An edit never changes the assigned number.
   await expect(page.locator('.composition-header h1')).toHaveText(orderNumber);
   expect(await snapshot()).toEqual(initialStock);
@@ -259,7 +259,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     [...scopeValues, scope.role_id],
   );
   await field('sales_order', 'notes', 'This denied value must not persist');
-  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(
     page.locator('[data-diagnostic-code="OPERATION_PERMISSION_DENIED"]'),
   ).toHaveCount(1);

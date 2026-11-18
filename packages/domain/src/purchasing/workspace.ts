@@ -151,7 +151,6 @@ export function purchasingWorkspace(
   const lines = id('dataset', 'purchasing_lines');
   // What each line costs and the order's totals (ruling B extended to
   // purchasing), read through the commercial purchase order queries.
-  const pricedLines = id('dataset', 'purchasing_priced_lines');
   const metric = (name: string) => id('metric', name);
   const receipts = id('dataset', 'purchasing_receipts');
   // PAYABLES: the order's vendor bills and their balances.
@@ -162,9 +161,7 @@ export function purchasingWorkspace(
     const detail = `receipt_line_${suffix}`;
     return {
       actionId: id('action', `receive_${suffix}`),
-      label: known
-        ? 'Receive with actual cost'
-        : 'Receive with cost explicitly absent',
+      label: known ? 'Receive this line' : 'Receive this line without cost',
       description: known
         ? 'Post received quantity using the actual received cost and currency you enter.'
         : 'Post received quantity with actual cost explicitly recorded as absent. Order price is not received cost.',
@@ -343,9 +340,7 @@ export function purchasingWorkspace(
     });
     return {
       actionId: id('action', `receive_lines_${suffix}`),
-      label: known
-        ? 'Receive lines with actual cost'
-        : 'Receive lines with cost explicitly absent',
+      label: known ? 'Receive' : 'Receive without cost',
       description: known
         ? 'Posts one receipt for every line given a quantity, at the actual unit cost and currency you enter. A line left empty is not received.'
         : 'Posts one receipt for every line given a quantity, with actual cost explicitly recorded as absent. A line left empty is not received.',
@@ -621,17 +616,12 @@ export function purchasingWorkspace(
           id('column', 'purchasing_total'),
         ],
       },
-      context: {
-        label: 'Receiving',
-        description:
-          'Choose an order line to receive it. Actual cost is entered explicitly; draft editing and Release remain separate.',
-      },
       recordActions: 'progressive',
       technicalDetails: 'progressive',
       task: { mode: 'nativeDialog', fallback: 'page' },
       print: {
         label: 'Purchase order',
-        datasets: [pricedLines],
+        datasets: [lines],
         totals: [
           id('column', 'purchasing_subtotal'),
           id('column', 'purchasing_freight'),
@@ -787,96 +777,6 @@ export function purchasingWorkspace(
     ],
     children: [
       {
-        datasetId: pricedLines,
-        label: 'Priced lines',
-        orderKey: 5,
-        query: q('commercial_purchase_order_lines'),
-        presentation: { selection: 'none' },
-        parent: {
-          relationId: id('relation', 'purchase_order_line_order'),
-          value: record('recordId'),
-          ownership: 'parentScopedChild',
-        },
-        sort: [
-          {
-            fieldId: f('purchase_order_line_line_number'),
-            direction: 'ascending',
-          },
-        ],
-        columns: [
-          column(
-            'priced_line',
-            'Line',
-            10,
-            f('purchase_order_line_line_number'),
-            undefined,
-            'secondary',
-          ),
-          column(
-            'priced_item',
-            'Product',
-            20,
-            f('purchase_order_line_item_id'),
-            ['item_get', 'item_name'],
-            'primary',
-          ),
-          column(
-            'priced_quantity',
-            'Quantity',
-            30,
-            f('purchase_order_line_ordered_quantity'),
-            undefined,
-            'quantity',
-          ),
-          money(
-            column(
-              'priced_unit_cost',
-              'Unit cost',
-              40,
-              f('purchase_order_line_unit_price'),
-              undefined,
-              'secondary',
-            ),
-          ),
-          column(
-            'priced_discount',
-            'Discount %',
-            50,
-            f('purchase_order_line_discount_percent'),
-            undefined,
-            'detail',
-          ),
-          column(
-            'priced_tax_code',
-            'Tax code',
-            60,
-            f('purchase_order_line_tax_code_id'),
-            ['tax_code_get', 'tax_code_code'],
-            'detail',
-          ),
-          money(
-            column(
-              'priced_tax',
-              'Tax',
-              70,
-              metric('line_tax'),
-              undefined,
-              'quantity',
-            ),
-          ),
-          money(
-            column(
-              'priced_amount',
-              'Amount',
-              80,
-              metric('line_amount'),
-              undefined,
-              'quantity',
-            ),
-          ),
-        ],
-      },
-      {
         datasetId: lines,
         label: 'Order lines',
         orderKey: 10,
@@ -996,10 +896,41 @@ export function purchasingWorkspace(
               50,
               f('purchase_order_line_unit_price'),
               undefined,
-              'secondary',
+              'quantity',
             ),
             format: 'money' as const,
           },
+          // LOOK-1 round 2: one lines table -- what each line costs beside
+          // what has arrived; the totals block sits under it.
+          money(
+            column(
+              'amount',
+              'Amount',
+              60,
+              metric('line_amount'),
+              undefined,
+              'quantity',
+            ),
+          ),
+          column(
+            'discount',
+            'Discount %',
+            70,
+            f('purchase_order_line_discount_percent'),
+            undefined,
+            'detail',
+          ),
+          column(
+            'tax_code',
+            'Tax code',
+            71,
+            f('purchase_order_line_tax_code_id'),
+            ['tax_code_get', 'tax_code_code'],
+            'detail',
+          ),
+          money(
+            column('tax', 'Tax', 72, metric('line_tax'), undefined, 'detail'),
+          ),
         ],
       },
       {
@@ -1010,6 +941,8 @@ export function purchasingWorkspace(
         // Selectable (ORDER-PARITY): a selected receipt shows its lines and
         // what can still be reversed.
         presentation: {
+          // Beside the sheet, with the linked documents (LOOK-1).
+          rail: true,
           selection: 'explicit',
           selectedActions: 'row',
           compact: 'scrollTable',
@@ -1069,6 +1002,8 @@ export function purchasingWorkspace(
         orderKey: 30,
         query: q('receiving_receipt_lines'),
         presentation: {
+          // Beside the sheet, with the linked documents (LOOK-1).
+          rail: true,
           selection: 'none',
           compact: 'scrollTable',
           description:
@@ -1134,7 +1069,7 @@ export function purchasingWorkspace(
         label: 'Bills',
         orderKey: 40,
         query: q('vendor_bill_list'),
-        presentation: { selection: 'none', compact: 'scrollTable' },
+        presentation: { rail: true, selection: 'none', compact: 'scrollTable' },
         parent: {
           relationId: id('relation', 'vendor_bill_order'),
           value: record('recordId'),
@@ -1230,7 +1165,7 @@ export function purchasingWorkspace(
         // the order's own costs, discounts and frozen rates; the first live
         // bill carries the freight and other fee.
         actionId: id('action', 'bill_received'),
-        label: 'Bill received quantities',
+        label: 'Bill',
         description:
           'Bills every received quantity not yet billed at this order’s costs and tax rates. The first bill also carries the freight and other fee.',
         orderKey: 27,

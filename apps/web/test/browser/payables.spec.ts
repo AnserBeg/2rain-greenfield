@@ -36,7 +36,7 @@ test('a received purchase order is billed, paid in part and credited for the res
     };
     const billTask = () =>
       page.getByRole('button', {
-        name: /^(?:Next action: )?Bill received quantities$/u,
+        name: /^(?:Next action: )?Bill$/u,
       });
 
     // Purchasing lists its bills beside its orders.
@@ -67,7 +67,7 @@ test('a received purchase order is billed, paid in part and credited for the res
     await page
       .getByLabel('Supplier invoice number', { exact: true })
       .fill('INV-5501');
-    await finish('Bill received quantities');
+    await finish('Bill');
     await page.goto(orderUrl);
     const bills = dataset('purchasing_bills').locator('tbody tr');
     await expect(bills).toHaveCount(1);

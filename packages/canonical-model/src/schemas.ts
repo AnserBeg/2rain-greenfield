@@ -987,6 +987,13 @@ const compositionDataset = z.strictObject({
           done: CanonicalIdSchema,
         })
         .optional(),
+      /**
+       * The record's right rail (LOOK-1 round 2, ruled): a dataset of linked
+       * documents -- an order's receipts and bills -- shown beside the
+       * record's sheet rather than under it. Never a dataset with line
+       * progress. Optional v6 key; absence preserves historical bytes.
+       */
+      rail: z.literal(true).optional(),
     })
     .optional(),
   datasetId: CanonicalIdSchema,
@@ -1419,6 +1426,18 @@ const editorField = z.strictObject({
    * (ADR-0047 §7).
    */
   defaultNow: z.literal(true).optional(),
+  /**
+   * Shown behind the form's "More details" disclosure rather than among the
+   * fields the job needs first (LOOK-1 round 2, ruled). Never on a required
+   * field. Optional v6 key; absence preserves historical bytes.
+   */
+  disclosure: z.literal('more').optional(),
+  /**
+   * An instant entered as a calendar date and stored as that day's midnight
+   * UTC -- an order date (LOOK-1 round 2; LOOP-1's date-only ruling). Only on
+   * a date-time field. Optional v6 key.
+   */
+  dateOnly: z.literal(true).optional(),
 });
 export const SurfaceDocumentEditorSchema = z.strictObject({
   headerLabel: LabelSchema.optional(),

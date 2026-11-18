@@ -933,3 +933,32 @@ test('LOOK-1: line progress names two quantity columns of its own dataset', () =
   progress(purchase).ratio = 'half';
   assert.equal(SurfaceCompositionSchema.safeParse(purchase).success, false);
 });
+
+test('LOOK-1 round 2: the rail holds linked documents, never the lines with progress', () => {
+  const dataset = (value: Json, local: string) =>
+    (value.children as Json[]).find(
+      (child) => child.datasetId === id('dataset', local),
+    )!;
+  // Accepted as the purchase order declares it: receipts and bills beside.
+  const model = structuredClone(normalized);
+  const purchase = composition(model, 'purchase_order_detail');
+  assert.equal(
+    dataset(purchase, 'purchasing_receipts').presentation.rail,
+    true,
+  );
+  assert.equal(dataset(purchase, 'purchasing_bills').presentation.rail, true);
+  validateSurfaceCompositions(model as never);
+  // The lines, which show their progress, stay on the sheet.
+  assert.match(
+    refused('purchase_order_detail', (value) => {
+      dataset(value, 'purchasing_lines').presentation.rail = true;
+    }),
+    /a dataset with line progress stays on the sheet, not in the rail/u,
+  );
+  // The key is closed: only `true`.
+  const closed = structuredClone(
+    composition(normalized, 'purchase_order_detail'),
+  );
+  dataset(closed, 'purchasing_receipts').presentation.rail = 'left';
+  assert.equal(SurfaceCompositionSchema.safeParse(closed).success, false);
+});

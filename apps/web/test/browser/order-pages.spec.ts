@@ -107,14 +107,14 @@ test('an order page names its short lines and its progress, receives a truck of 
       }),
     );
     const next = progression.getByRole('button', {
-      name: 'Next action: Receive lines with actual cost',
+      name: 'Next action: Receive',
       exact: true,
     });
     await next.focus();
     await page.keyboard.press('Enter');
     const dialog = page.getByRole('dialog');
     await expect(
-      dialog.getByRole('heading', { name: 'Receive lines with actual cost' }),
+      dialog.getByRole('heading', { name: 'Receive' }),
     ).toBeVisible();
     const lineInput = (label: string, line: number) =>
       dialog.getByRole('textbox', {
@@ -145,7 +145,7 @@ test('an order page names its short lines and its progress, receives a truck of 
     );
     await dialog
       .getByRole('button', {
-        name: 'Review Receive lines with actual cost',
+        name: 'Review Receive',
         exact: true,
       })
       .click();
@@ -153,12 +153,12 @@ test('an order page names its short lines and its progress, receives a truck of 
     await expect(dialog.locator('[data-task-row]')).toHaveCount(2);
     await dialog
       .getByRole('button', {
-        name: 'Confirm Receive lines with actual cost',
+        name: 'Confirm Receive',
         exact: true,
       })
       .click();
     await expect(page.getByRole('status').first()).toContainText(
-      'Receive lines with actual cost: done',
+      'Receive: done',
     );
     await page
       .getByRole('link', { name: 'Back to order', exact: true })
@@ -262,7 +262,7 @@ test('an order page names its short lines and its progress, receives a truck of 
       );
       await noScript
         .getByRole('button', {
-          name: 'Receive lines with cost explicitly absent',
+          name: 'Receive without cost',
           exact: true,
         })
         .click();

@@ -130,9 +130,13 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   // Confirm needs a complete ship-to (ruling E). This customer has no address
   // book, so the order's own ship-to lines are typed after it is chosen.
   const fillShipTo = async () => {
+    await openMoreDetails(page);
     await page.getByLabel('Street', { exact: true }).fill('100 Industrial Way');
+    await openMoreDetails(page);
     await page.getByLabel('City', { exact: true }).fill('Calgary');
+    await openMoreDetails(page);
     await page.getByLabel('Postal code', { exact: true }).fill('T2P 0A1');
+    await openMoreDetails(page);
     await page.getByLabel('Country', { exact: true }).fill('Canada');
   };
   // Put stock on hand through the Inventory stock document and its registered
@@ -151,7 +155,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await pick('Line 1 product', 'OFF-100', 'Field notebook');
   await pick('Line 1 to location', 'Calgary', 'Calgary warehouse');
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('10');
-  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page).toHaveURL(/inventory_transaction_detail/u);
   // Titled by the number the server gave it: a stock document's page
   // declares no header of its own.
@@ -170,7 +174,8 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await save();
   await page.goto(url('sales_order', 'form'));
   // The order number is assigned by the server on first save.
-  await page.getByLabel('Order date (UTC) *').fill(instant.slice(0, 16));
+  await page.getByLabel('Order date *').fill(instant.slice(0, 10));
+  await openMoreDetails(page);
   await page.getByLabel('Requested date (UTC)').fill(instant.slice(0, 16));
   await page.getByLabel('Notes').fill('Partial shipment and correction');
   await pick('Customer', 'Alpine', 'Alpine Office Supply');
@@ -183,7 +188,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   ).toHaveText('EA');
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('10');
   await page.getByLabel('Line 1 unit price', { exact: true }).fill('12.5');
-  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page).toHaveURL(/sales_order_detail/u);
   const orderId = new URL(page.url()).searchParams.get('record')!;
   const orderLineId = (await page
@@ -341,7 +346,8 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   // A second, fully shipped order demonstrates explicit closure independently
   // of the cancelled-and-reversed order above.
   await page.goto(url('sales_order', 'form'));
-  await page.getByLabel('Order date (UTC) *').fill(instant.slice(0, 16));
+  await page.getByLabel('Order date *').fill(instant.slice(0, 10));
+  await openMoreDetails(page);
   await page.getByLabel('Requested date (UTC)').fill(instant.slice(0, 16));
   await pick('Customer', 'Alpine', 'Alpine Office Supply');
   await expect(page.getByLabel('Currency *')).toHaveValue('CAD');
@@ -349,7 +355,7 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   await pick('Line 1 product', 'OFF-100', 'Field notebook');
   await page.getByLabel('Line 1 quantity', { exact: true }).fill('2');
   await page.getByLabel('Line 1 unit price', { exact: true }).fill('12.5');
-  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page).toHaveURL(/sales_order_detail/u);
   const closureOrderId = new URL(page.url()).searchParams.get('record')!;
   const closureLineId = (await page
@@ -549,4 +555,11 @@ async function expectStockRow(page: Page, values: string[]) {
     await expect(row.locator(`td[data-column-label="${label}"]`)).toHaveText(
       values[index]!,
     );
+}
+
+/** Opens the form's "More details" when it is closed (LOOK-1 round 2). */
+async function openMoreDetails(target: Page): Promise<void> {
+  const more = target.locator('details.draft-more');
+  if ((await more.count()) && (await more.getAttribute('open')) === null)
+    await more.locator('summary').click();
 }

@@ -28,7 +28,7 @@ test('a purchase order takes its supplier defaults, is discounted and taxed per 
       .toISOString()
       .slice(0, 16);
     await expect(page.getByLabel('Expected date (UTC)')).toHaveValue(expected);
-    await page.getByLabel('Order date (UTC) *').fill('2026-09-28T12:00');
+    await page.getByLabel('Order date *').fill('2026-09-28');
     // Choosing the supplier sets its currency, terms and tax code; each
     // charge's tax code follows the order's, with its rate frozen.
     await pick(page, 'Vendor', 'Alpine', 'Alpine Office Supply');
@@ -59,9 +59,10 @@ test('a purchase order takes its supplier defaults, is discounted and taxed per 
     await page.getByLabel('Line 1 quantity', { exact: true }).fill('3');
     await page.getByLabel('Line 1 unit cost', { exact: true }).fill('12.5');
     await page.getByLabel('Line 1 discount %', { exact: true }).fill('10');
+    await openMoreDetails(page);
     await page.getByLabel('Freight', { exact: true }).fill('25');
     await capture(page, testInfo, 'purchase-pricing-editor');
-    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page).toHaveURL(/purchase_order_detail/u);
     const orderUrl = page.url();
     // 3 × 12.50 less 10% = 33.75; 5% = 1.6875 → 1.69; freight 25 + 1.25.
@@ -87,7 +88,8 @@ test('a purchase order takes its supplier defaults, is discounted and taxed per 
     await expect(fact('Payment terms')).toHaveText('Net 30');
     const detail = (label: string) =>
       page
-        .locator('[data-composition-fields] div')
+        // The totals block holds subtotal, charges, tax and total (LOOK-1).
+        .locator('[data-composition-fields] div, .composition-totals div')
         .filter({
           has: page.locator('dt', { hasText: new RegExp(`^${label}$`, 'u') }),
         })
@@ -99,6 +101,8 @@ test('a purchase order takes its supplier defaults, is discounted and taxed per 
 
     // The printed order carries the priced lines and the totals.
     await page.goto(orderUrl);
+    // Print is in the Record actions menu (LOOK-1 round 2).
+    await page.locator('.composition-record-actions > summary').click();
     await page.getByRole('link', { name: 'Print purchase order' }).click();
     const totals = page.locator('.print-totals');
     for (const [label, value] of [
@@ -132,13 +136,11 @@ test('a partly received order shows what is still open, closes its remainder wit
       await page.goto(url);
       await openPurchaseOrders(page);
       await page.getByRole('link', { name: 'New', exact: true }).click();
-      await page.getByLabel('Order date (UTC) *').fill('2026-09-28T12:00');
+      await page.getByLabel('Order date *').fill('2026-09-28');
       await pick(page, 'Vendor', 'Alpine', 'Alpine Office Supply');
       await pick(page, 'Line 1 product', 'OFF-100', 'Field notebook');
       await page.getByLabel('Line 1 quantity', { exact: true }).fill('5');
-      await page
-        .getByRole('button', { name: 'Save draft', exact: true })
-        .click();
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
       await expect(page).toHaveURL(/purchase_order_detail/u);
       const orderUrl = page.url();
       await page
@@ -193,7 +195,7 @@ test('a partly received order shows what is still open, closes its remainder wit
     await expect(cell('Received')).toHaveText('0');
     await expect(cell('Open')).toHaveText('5');
     // Two of five arrive.
-    await runTask('Receive with cost explicitly absent', async () => {
+    await runTask('Receive this line without cost', async () => {
       await page.getByLabel('Quantity to receive', { exact: true }).fill('2');
       await page
         .getByRole('combobox', { name: 'Receiving location', exact: true })
@@ -227,8 +229,8 @@ test('a partly received order shows what is still open, closes its remainder wit
     ).toHaveAttribute('aria-current', 'true');
     for (const label of [
       'Close open remainder',
-      'Receive with actual cost',
-      'Receive with cost explicitly absent',
+      'Receive this line',
+      'Receive this line without cost',
     ])
       await expect(
         page.getByRole('button', { name: label, exact: true }),
@@ -371,4 +373,11 @@ async function openPurchaseOrders(page: Page) {
   if (!(await orders.isVisible()))
     await navigation.getByText('Purchasing', { exact: true }).click();
   await orders.click();
+}
+
+/** Opens the form's "More details" when it is closed (LOOK-1 round 2). */
+async function openMoreDetails(target: Page): Promise<void> {
+  const more = target.locator('details.draft-more');
+  if ((await more.count()) && (await more.getAttribute('open')) === null)
+    await more.locator('summary').click();
 }

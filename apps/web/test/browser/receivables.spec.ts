@@ -77,7 +77,7 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
     const invoiceTask = () =>
       // The order's next step is one button (LOOP-1).
       page.getByRole('button', {
-        name: /^(?:Next action: )?Invoice shipped quantities$/u,
+        name: /^(?:Next action: )?Invoice$/u,
       });
 
     await page.goto(orderUrl);
@@ -87,7 +87,7 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
 
     // Invoice the shipped 2 EA: 2 × 12.50, untaxed, no charges.
     await invoiceTask().click();
-    await finish('Invoice shipped quantities');
+    await finish('Invoice');
     await page.goto(orderUrl);
     const invoices = dataset('order_invoices').locator('tbody tr');
     await expect(invoices).toHaveCount(1);
@@ -204,7 +204,7 @@ test('a shipped order is invoiced, paid in part, credited, printed and voided th
     await page.goto(orderUrl);
     await reserveAndShip(null, '1');
     await invoiceTask().click();
-    await finish('Invoice shipped quantities');
+    await finish('Invoice');
     await page.goto(orderUrl);
     await expect(invoices).toHaveCount(2);
     const second = invoices.filter({ hasText: '12.5' });

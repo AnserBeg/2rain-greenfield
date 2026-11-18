@@ -311,14 +311,24 @@ export function withApprovalWorkspace(
           ownership: 'reference',
         },
         sort: [],
-        columns: ['number', 'state', 'kind', 'reason', 'decision_reason'].map(
-          (name, i) => ({
-            columnId: id('column', `purchasing_approval_${name}`),
-            label: name.replaceAll('_', ' '),
-            orderKey: (i + 1) * 10,
-            field: id('field', `purchase_order_approval_${name}`),
-          }),
-        ),
+        // Beside the sheet with the order's linked documents (LOOK-1), each
+        // request named by its number.
+        presentation: { selection: 'none', rail: true },
+        columns: (
+          [
+            ['number', 'Number', 'primary'],
+            ['state', 'State', 'secondary'],
+            ['kind', 'Kind', 'secondary'],
+            ['reason', 'Reason', 'secondary'],
+            ['decision_reason', 'Decision reason', 'secondary'],
+          ] as const
+        ).map(([name, label, role], i) => ({
+          columnId: id('column', `purchasing_approval_${name}`),
+          label,
+          orderKey: (i + 1) * 10,
+          field: id('field', `purchase_order_approval_${name}`),
+          presentation: { role, priority: (i + 1) * 10 },
+        })),
       },
     ],
     actions: [

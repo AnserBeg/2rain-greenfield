@@ -27,7 +27,7 @@ test('an order is priced in its currency, discounted and taxed per line, with ch
     await expect(
       page.getByLabel('Freight tax rate %', { exact: true }),
     ).toHaveText('5');
-    await page.getByLabel('Order date (UTC) *').fill('2026-09-28T12:00');
+    await page.getByLabel('Order date *').fill('2026-09-28');
     // Choosing the product prices the line in the order's currency, takes the
     // order's tax code and freezes its rate.
     await pick(page, 'Line 1 product', 'OFF-100', 'Field notebook');
@@ -46,9 +46,10 @@ test('an order is priced in its currency, discounted and taxed per line, with ch
     ).toHaveText('5');
     await page.getByLabel('Line 1 quantity', { exact: true }).fill('3');
     await page.getByLabel('Line 1 discount %', { exact: true }).fill('10');
+    await openMoreDetails(page);
     await page.getByLabel('Freight', { exact: true }).fill('25');
     await capture(page, testInfo, 'pricing-editor');
-    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page).toHaveURL(/sales_order_detail/u);
     const orderUrl = page.url();
     // 3 × 12.50 less 10% = 33.75; 5% = 1.6875 → 1.69; freight 25 + 1.25.
@@ -67,7 +68,7 @@ test('an order is priced in its currency, discounted and taxed per line, with ch
     await page.locator('.composition-record-actions > summary').click();
     await page.getByRole('link', { name: 'Edit', exact: true }).click();
     await page.getByLabel('Currency *').selectOption('USD');
-    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page).toHaveURL(/sales_order_detail/u);
     // 3 × 9.25 less 10% = 24.975 → 24.98; 5% = 1.249 → 1.25.
     await expectPriced(page, {
@@ -84,7 +85,7 @@ test('an order is priced in its currency, discounted and taxed per line, with ch
     await page.locator('.composition-record-actions > summary').click();
     await page.getByRole('link', { name: 'Edit', exact: true }).click();
     await page.getByLabel('Line 1 unit price', { exact: true }).fill('10');
-    await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page).toHaveURL(/sales_order_detail/u);
     await expectPriced(page, {
       amount: '27.00',
@@ -98,6 +99,8 @@ test('an order is priced in its currency, discounted and taxed per line, with ch
 
     // The printed order carries the priced lines and the totals.
     await page.goto(orderUrl);
+    // Print is in the Record actions menu (LOOK-1 round 2).
+    await page.locator('.composition-record-actions > summary').click();
     await page.getByRole('link', { name: 'Print sales order' }).click();
     const totals = page.locator('.print-totals');
     for (const [label, value] of [
@@ -151,7 +154,8 @@ async function expectPriced(
   await expect(fact('Total')).toHaveText(expected.total);
   const detail = (label: string) =>
     page
-      .locator('[data-composition-fields] div')
+      // The totals block holds subtotal, charges, tax and total (LOOK-1).
+      .locator('[data-composition-fields] div, .composition-totals div')
       .filter({
         has: page.locator('dt', { hasText: new RegExp(`^${label}$`, 'u') }),
       })
@@ -248,4 +252,11 @@ async function fixture(run: (url: string) => Promise<void>) {
     const [code] = await exited;
     expect(code, output).toBe(0);
   }
+}
+
+/** Opens the form's "More details" when it is closed (LOOK-1 round 2). */
+async function openMoreDetails(target: Page): Promise<void> {
+  const more = target.locator('details.draft-more');
+  if ((await more.count()) && (await more.getAttribute('open')) === null)
+    await more.locator('summary').click();
 }
