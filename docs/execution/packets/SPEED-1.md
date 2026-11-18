@@ -1,6 +1,6 @@
 # SPEED-1 — a record page in a few database trips, measured and held there
 
-Status: slice 1 at `3ab5853a`; slices 2-4 at `69b7adc1` (one integration, orchestrator ruling); slices 5-6 at `1663ade6`; security fix round at `ab5ab5e2`. Tier: request
+Status: slice 1 at `3ab5853a`; slices 2-4 at `69b7adc1` (one integration, orchestrator ruling); slices 5-6 at `1663ade6`; security fix round at `ab5ab5e2`; fix read and queue counts at `e37c126e`. Tier: request
 security path, no file of the `AGENTS.md` §4 Critical set; slices 2-4 get the orchestrator's two critical reviews. Base: `main`
 `74b3367f`. Stops: none. Charter: [SPEED-1-charter.md](SPEED-1-charter.md). ADR: [ADR-0071](../../decisions/ADR-0071-read-decisions-are-live-per-request-writes-per-call.md).
 
@@ -28,20 +28,21 @@ security path, no file of the `AGENTS.md` §4 Critical set; slices 2-4 get the o
    font-src 'self'`; no rendered page carries an inline style; personalized HTML stays `no-store`, compressed when accepted.
 9. Slice 6: `corepack pnpm build && corepack pnpm start` runs the app from `dist/` with plain Node (`start-production.mjs`, resolve
    hook `production-resolve.mjs`); `apps/api/src/measure-page.ts` times the PO detail the same way under tsx and compiled.
-
-10. Fix round (two reviews of `3ab5853a^1..69b7adc1`): an invocation runs outside any page snapshot, so every write-path decision
-    is live (S1); a task step under a policy change is sent again by GET, its commit intact (S2); moving a policy row bumps both
-    scopes (migration 0030, S3); a page reads one tenant and environment (`ReadSnapshotScopeError`, S4); an aggregate anchor is
-    written only under the live epoch (S5); denials are recorded after the reads (S6); the editor finishes outside its catch (S7);
-    a transaction of its own takes the page's turn, one connection per request (S8); a loading release is awaited outside the
-    snapshot (S9). Each has a test in `read-snapshot.test.ts` or `surface-data-binding.test.ts`.
+10. Fix round and fix read (`3ab5853a^1..69b7adc1`, then `071c7796..ab5ab5e2`): invocations and their routing run outside the
+    page's snapshot and turn, every write-path decision live (S1, read 4); a Confirm stopped by a policy change offers the
+    session's own retry (S2, read 3); moved policy rows bump both scopes in canonical order (0030, 0031); one scope per page
+    (S4); the anchor holds `lock_current_policy_epoch` (FOR SHARE) to commit (S5, read 2); denials commit on their own pool
+    before the answer, and an unrecorded one fails the page (read 1); the editor finishes outside its catch (S7); one
+    connection per request (S8, S9); two opposite moves both commit (read 5, red 40P01). Each test red on the reverted code.
+11. Queue counts: Today's first three tiles counted in every page's snapshot, shown by LOOK-1's `renderWorkQueues`; a snapshot
+    sends an identical statement once (PO list repeats 2 -> 0, SO detail 5 -> 0); +5 statements a page, no transaction.
 
 ## Decisions (one line each)
 
 - Meter in the provider, injected into the web server as a probe; `apps/web` never imports the provider.
 - Budget fixture: `order_pages` (no seed profile has orders); a 303 workspace entry counts both hops; ceilings only move down.
 - Snapshot API: `withReadSnapshot` / `withTrustedRequestRead`; a page declares nothing: its reads join through the provider.
-- Bridges: `rolePool` meters pools; saved-filter reads join; the list count skip; migration 0030 (approved, Critical: unread).
+- Bridges: `rolePool` meters pools; saved-filter reads join; the list count skip; migrations 0030, 0031 (approved, Critical: unread).
 - A company-scoped aggregate writes its cached anchor, so it never joins. Not built: references by an `IN` list.
 - Slices 2-4 integrate together (orchestrator); the client script stays inline and hash-pinned (ADR-0036 §1).
 
@@ -50,11 +51,11 @@ security path, no file of the `AGENTS.md` §4 Critical set; slices 2-4 get the o
 | page (warm) | slice 1 baseline tx / st / policy / repeats | after 2-3 tx / st | after 2-4 tx / st / policy / repeats |
 | --- | --- | --- | --- |
 | home (two hops; Today tiles after LOOP-1 slice 5) | 51 / 410 / 41 / 32 (65 / 522 with tiles) | 4 / 58 | 4 / 42 / 6 / 0 |
-| purchase order list | 107 / 896 / 84 / 108 | 2 / 85 | 2 / 32 / 3 / 0 |
-| purchase order detail | 169 / 1384 / 135 / 153 | 2 / 109 | 2 / 33 / 3 / 0 |
-| new purchase order | 29 / 242 / 22 / 23 | 2 / 32 | 2 / 18 / 3 / 0 |
-| stock by item | 76 / 586 / 67 / 62 | 2 / 43 | 2 / 23 / 3 / 0 |
-| sales order detail | 259 / 2139 / 207 / 236 (269 / 2209 after LOOP-1 slice 3) | 2 / 186 | 2 / 56 / 3 / 5 |
+| purchase order list | 107 / 896 / 84 / 108 | 2 / 85 | 2 / 32 / 3 / 0; 2 / 35 / 3 / 0 with queues |
+| purchase order detail | 169 / 1384 / 135 / 153 | 2 / 109 | 2 / 33 / 3 / 0; 2 / 38 / 3 / 0 with queues |
+| new purchase order | 29 / 242 / 22 / 23 | 2 / 32 | 2 / 18 / 3 / 0; 2 / 23 / 3 / 0 with queues |
+| stock by item | 76 / 586 / 67 / 62 | 2 / 43 | 2 / 23 / 3 / 0; 2 / 28 / 3 / 0 with queues |
+| sales order detail | 259 / 2139 / 207 / 236 (269 / 2209 after LOOP-1 slice 3) | 2 / 186 | 2 / 56 / 3 / 5; 2 / 56 / 3 / 0 with queues |
 | task open / review | 393 / 205 transactions | unchanged | 2 / 36 / 3 / 0 each |
 | task Confirm | 217 / 1879 / 169 / 204 | unchanged | 16 / 248 / 14 / 15; 21 / 287 / 17 / 17 after fix S1 |
 
@@ -65,16 +66,15 @@ Confirm's 16 transactions: the step's snapshot, 7 live re-authorizations, 2 trus
 
 ## Gates
 
-- CI: slice 1 run 44201921559 (`81c218b0`), slices 2-4 run 44225809436 (`a6a6348f`), slices 5-6 run 44237933304 (`f840fee6`).
-  Local: format, typecheck, lint, unit tests, approved runs of `read-snapshot.test.ts` and `page-budget.test.ts` under the lock.
+- CI runs: slice 1 44201921559, 2-4 44225809436, 5-6 44237933304, fix read and queues 44305308130 (`86763ae3`).
+  Local: format, lint, unit tests, approved runs of `read-snapshot.test.ts` and `page-budget.test.ts` under the lock.
 
 ## Test it yourself
 
 `corepack pnpm dev`; open a purchase order; DevTools → Network → the document → Timing: `db-transactions` 2, `db-statements`
-about 30; the stylesheet and fonts load once from `/assets/…` and come from cache after. `corepack pnpm build && corepack pnpm
+about 38; the stylesheet and fonts load once from `/assets/…` and come from cache after. `corepack pnpm build && corepack pnpm
 start` serves the same app compiled. `curl -sIL 'http://127.0.0.1:4174/?surface=northstar.app%3Asurface.purchase_order_list' | grep -i server-timing`.
 
 ## Filed
 
-- Confirm's 9 write-path transactions (live re-authorizations, executor reads) stay; the one-statement batched count is filed.
-- Binding parses (49-100 a page) are per request view (LOOP-1's memo); the compiled start does not serve Customize.
+- Filed: one-statement batched queue counts; binding parses per request view (LOOP-1); Customize not on the compiled start.

@@ -270,6 +270,17 @@ export async function renderSurfaceRuntimeWithData(
     url,
     entry,
   );
+  // The sidebar's queue counts, read with the page's other reads (SPEED-1).
+  await loadQueueCounts(
+    view,
+    selection.navigation,
+    selection.surfaces,
+    gateways.queryGateway,
+    legalEntitySelection.length === 1
+      ? legalEntitySelection[0]!
+      : (entry?.selected ?? null),
+    gateways.clock?.() ?? new Date(),
+  );
   // A record every company shares reads its company-owned sections in the
   // company its entry settled on; its own record and commands stay unscoped.
   const compositionScope = binding.query.legalEntityScope
@@ -2204,6 +2215,29 @@ export function renderApplicationDiagnostic(
   });
 }
 
+/**
+ * SPEED-1 (fix read 3): a task's Confirm or retry stopped by a policy change
+ * after some of its steps may have committed. Nothing of the record is shown
+ * (the page it was assembled under is no longer current); the notice names
+ * the uncertainty and offers the session's own retry, which reuses its inputs
+ * and request keys and is bound to the session's actor.
+ */
+export function taskRecoveryNotice(
+  requestUrl: string,
+  submission: Readonly<Record<string, string>>,
+): SurfaceRuntimeResponse {
+  const url = new URL(requestUrl, 'http://surface-runtime.local');
+  const ref: SurfaceMessageRef = { code: 'COMPOSITION_UNCERTAIN' };
+  const keep = (name: string) =>
+    typeof submission[name] === 'string'
+      ? `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(submission[name])}">`
+      : '';
+  return Object.freeze({
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(surfaceMessage(ref.code).sentence)} · 2rain</title><link rel="stylesheet" href="${FONT_STYLESHEET_HREF}"><link rel="stylesheet" href="${SURFACE_STYLESHEET.href}"></head><body class="standalone"><main class="standalone__card" role="alert" data-task-recovery ${messageAttributes(ref)}>${messageBody(ref, 'Task', 'h1')}<form method="post" action="${escapeHtml(url.pathname + url.search)}">${keep('taskToken')}${keep('compositionAction')}<button name="taskStage" value="retry">Retry same request</button></form></main></body></html>`,
+    statusCode: 409,
+  });
+}
+
 function diagnosticDocument(
   view: RuntimeViewContract.RequestRuntimeView,
   ref: SurfaceMessageRef,
@@ -2260,7 +2294,7 @@ function shellDocument(
         <details class="shell-menu"><summary aria-label="Menu" aria-controls="shell-sidebar">${svgIcon('<path d="M4 7h16M4 12h16M4 17h16"/>')}</summary></details>
         ${workspaceContext ? renderWorkspaceContextBar(workspaceContext) : '<div class="brand"><span class="brand__mark" aria-hidden="true">2</span><span><strong>2rain</strong></span></div>'}
         <div class="sidebar-scroll">
-        ${launcher ? renderWorkQueues(view, launcher, surfaces, selected, workspaceContext, queueCounts) : ''}
+        ${launcher ? renderWorkQueues(view, launcher, surfaces, selected, workspaceContext, queueCounts ?? queueCountsFor(view)) : ''}
         <nav aria-label="Release navigation">${renderSidebarNavigation(view, sidebarNavigation(navigation, launcher), surfaces, selected, workspaceContext)}</nav>
         </div>
         <div class="side-foot" data-shell-region="principal"><span class="principal__avatar" aria-hidden="true">${escapeHtml(initials('Signed in'))}</span><span class="side-foot__who"><strong>Signed in</strong></span></div>
@@ -2696,3 +2730,59 @@ export const SURFACE_STYLESHEET = Object.freeze({
     true,
   ),
 });
+
+/**
+ * The work queues' counts on every page (SPEED-1, owner ruling (a)): the
+ * landing launcher's first three tiles -- Today's To receive, To ship and Not
+ * yet paid -- each its declared List view's count, read with the page's other
+ * reads (inside its read snapshot) and under current policy, keyed by tile.
+ * LOOK-1's `renderWorkQueues` shows them; the launcher page shows its own
+ * tiles' counts instead (the same reads, answered once). A count that could
+ * not be read is `null` and shows no chip, never a guess.
+ */
+const QUEUE_COUNT_LIMIT = 3;
+
+/** Each request view's queue counts, read once while the page reads. */
+const loadedQueueCounts = new WeakMap<
+  object,
+  ReadonlyMap<string, number | null>
+>();
+
+async function loadQueueCounts(
+  view: RuntimeViewContract.RequestRuntimeView,
+  navigation: CompiledNavigationTree | null,
+  surfaces: readonly CompiledSurfaceDefinition[],
+  queryGateway: SemanticQueryGateway,
+  company: string | null,
+  now: Date,
+): Promise<void> {
+  // The landing launcher (the first in navigation order: Today) declares the
+  // day's queues. Without one, a page shows none.
+  const launcher = landingSurface(navigation, surfaces)?.launcher;
+  if (!launcher) return;
+  const first = [...launcher.tiles]
+    .sort(
+      (left, right) =>
+        left.orderKey - right.orderKey ||
+        (left.tileId < right.tileId ? -1 : left.tileId > right.tileId ? 1 : 0),
+    )
+    .slice(0, QUEUE_COUNT_LIMIT);
+  const tiles = await launcherTiles(
+    view,
+    { ...launcher, tiles: first },
+    surfaces,
+    company,
+    queryGateway,
+    now,
+  );
+  loadedQueueCounts.set(
+    view,
+    new Map(tiles.map((tile) => [tile.tileId, tile.count])),
+  );
+}
+
+function queueCountsFor(
+  view: object,
+): ReadonlyMap<string, number | null> | null {
+  return loadedQueueCounts.get(view) ?? null;
+}
