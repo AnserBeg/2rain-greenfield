@@ -184,7 +184,15 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     event.steps.forEach((step) => {
       const item = list.appendChild(element('li', step.text));
       if (step.target) item.appendChild(element('div', 'On: ' + step.target, 'assistant-muted'));
-      if (step.inputs) item.appendChild(element('div', step.inputs, 'assistant-muted'));
+      for (const input of step.inputs || []) {
+        const row = item.appendChild(element('div', null, 'assistant-muted'));
+        row.appendChild(element('strong', input.field));
+        if (input.type === 'clear') row.appendChild(element('span', ' clears'));
+        else {
+          row.appendChild(element('span', ' (' + input.type + '): '));
+          row.appendChild(element('code', input.value));
+        }
+      }
     });
     const yes = card.appendChild(element('button', 'Yes, do it'));
     yes.type = 'button';

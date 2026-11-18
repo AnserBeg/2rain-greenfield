@@ -323,6 +323,7 @@ export function inventoryModuleDefinition(
         'Default entity',
         40,
         boolean(),
+        { requiresAssistantConfirmation: true },
       ),
       // Unset: the company has no rule, and an item that follows it has no
       // reorder point there.
@@ -335,7 +336,7 @@ export function inventoryModuleDefinition(
               'Reorder point % of reorder up to',
               50,
               decimal(),
-              { optional: true },
+              { optional: true, requiresAssistantConfirmation: true },
             ),
           ]
         : []),
@@ -1253,6 +1254,7 @@ function field(
     searchable?: boolean;
     /** A server-assigned document number: `PREFIX-000001`, one per tenant. */
     numberedAs?: string;
+    requiresAssistantConfirmation?: true;
   } = {},
 ): Record<string, unknown> {
   const local = entityId.slice(
@@ -1261,6 +1263,9 @@ function field(
   return {
     ...(options.businessKey
       ? { businessKey: 'tenantEnvironmentCaseInsensitiveUnique' }
+      : {}),
+    ...(options.requiresAssistantConfirmation
+      ? { requiresAssistantConfirmation: true }
       : {}),
     ...(options.numberedAs
       ? {

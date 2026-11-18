@@ -10,13 +10,15 @@ export function approvalAction(operation: string): ApprovalAction | undefined {
   };
   return actions[operation];
 }
-export function validateApprovalArguments(
-  operation: string,
-  args: unknown,
-): void {
+export function effectiveApprovalArguments<
+  T extends Readonly<Record<string, unknown>>,
+>(operation: string, args: T): T | (T & { supplierReference: null }) {
   const action = approvalAction(operation);
   if (!action) throw new Error('Unsupported approval operation');
   checkApprovalArguments(action, args);
+  return action === 'release' && args.supplierReference === undefined
+    ? { ...args, supplierReference: null }
+    : args;
 }
 export function checkApprovalArguments(
   action: ApprovalAction,

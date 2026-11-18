@@ -326,7 +326,39 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
                       type: 'plan',
                       planId: 'timed-out-card',
                       digest: 'd',
-                      steps: [],
+                      steps: [
+                        {
+                          text: 'Edit order',
+                          inputs: [
+                            {
+                              field: 'notes',
+                              type: 'text',
+                              value: '"Received · freight: 100"',
+                            },
+                          ],
+                        },
+                        {
+                          text: 'Edit order',
+                          inputs: [
+                            {
+                              field: 'notes',
+                              type: 'text',
+                              value: '"Received"',
+                            },
+                            { field: 'freight', type: 'decimal', value: '100' },
+                          ],
+                        },
+                        {
+                          text: 'Place order',
+                          inputs: [
+                            {
+                              field: 'supplier reference',
+                              type: 'clear',
+                              value: 'clears',
+                            },
+                          ],
+                        },
+                      ],
                     });
                     emit({
                       type: 'decided',
@@ -358,6 +390,20 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
         const timedOut = panel.locator(
           '[data-assistant-plan="timed-out-card"]',
         );
+        const steps = timedOut.locator('li');
+        await expect(steps.nth(0).locator('strong')).toHaveText(['notes']);
+        await expect(steps.nth(0).locator('code')).toHaveText(
+          '"Received · freight: 100"',
+        );
+        await expect(steps.nth(1).locator('strong')).toHaveText([
+          'notes',
+          'freight',
+        ]);
+        await expect(steps.nth(1).locator('code')).toHaveText([
+          '"Received"',
+          '100',
+        ]);
+        await expect(steps.nth(2)).toContainText('supplier reference clears');
         await expect(timedOut).toContainText('Not done.');
         const input = panel.locator('textarea');
         await input.fill('My next request');

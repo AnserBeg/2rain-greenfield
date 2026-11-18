@@ -79,6 +79,8 @@ function fakeRuntime(log: string[]) {
               revision: 1,
               archived: false,
               values: {
+                [`${NS}:derived_state_field.machine.purchase_order_lifecycle`]: `${NS}:state.purchase_order_draft`,
+                [`${NS}:field.purchase_order_supplier_reference`]: 'SUP-42',
                 [`${NS}:field.party_number`]: 'P-2016',
                 [`${NS}:field.party_name`]: 'Lethbridge Millwork',
                 [`${NS}:field.customer_invoice_state`]: `${NS}:option.customer_invoice_state_draft`,
@@ -514,8 +516,48 @@ test('a request to change the application goes to the customization draft, shown
   }
 });
 
-test('X1: the plan card names the operation, the record as the host read it, and every bound input as bound', async () => {
+type InputRow = { field: string; type: string; value: string };
+async function shownSteps(model: ModelAdapter) {
   let plan: Record<string, unknown> | undefined;
+  const { url, server } = await serve(model, []);
+  try {
+    const response = await fetch(`${url}/?assistant=ask`, {
+      method: 'POST',
+      headers: headers('buyer', url),
+      body: JSON.stringify({ text: 'amend it' }),
+    });
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let conversation = '';
+    while (!plan) {
+      const { value, done } = await reader.read();
+      assert.ok(!done, 'no plan was shown');
+      buffer += decoder.decode(value, { stream: true });
+      for (const line of buffer.split('\n').slice(0, -1)) {
+        const event = JSON.parse(line) as Record<string, unknown>;
+        if (event.type === 'conversation') conversation = event.id as string;
+        if (event.type === 'plan') plan = event;
+      }
+      buffer = buffer.slice(buffer.lastIndexOf('\n') + 1);
+    }
+    await fetch(`${url}/?assistant=decide`, {
+      method: 'POST',
+      headers: headers('buyer', url),
+      body: JSON.stringify({
+        conversation,
+        planId: plan.planId,
+        digest: plan.digest,
+        approve: false,
+      }),
+    });
+    while (!(await reader.read()).done);
+    return plan.steps as { text: string; target: string; inputs: InputRow[] }[];
+  } finally {
+    server.close();
+  }
+}
+test('X1: the plan card names the operation, the record as the host read it, and every bound input as bound', async () => {
   const model = scriptedModel([
     () => ({
       toolCalls: [
@@ -557,54 +599,89 @@ test('X1: the plan card names the operation, the record as the host read it, and
     }),
     () => ({ text: 'ok' }),
   ]);
-  const { url, server } = await serve(model, []);
-  try {
-    const response = await fetch(`${url}/?assistant=ask`, {
-      method: 'POST',
-      headers: headers('buyer', url),
-      body: JSON.stringify({ text: 'amend it' }),
-    });
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let conversation = '';
-    while (!plan) {
-      const { value, done } = await reader.read();
-      assert.ok(!done, 'no plan was shown');
-      buffer += decoder.decode(value, { stream: true });
-      for (const line of buffer.split('\n').slice(0, -1)) {
-        const event = JSON.parse(line) as Record<string, unknown>;
-        if (event.type === 'conversation') conversation = event.id as string;
-        if (event.type === 'plan') plan = event;
-      }
-      buffer = buffer.slice(buffer.lastIndexOf('\n') + 1);
-    }
-    const step = (
-      plan.steps as { text: string; target: string; inputs: string }[]
-    )[0]!;
-    assert.match(step.text, /^Request amendment: /u);
-    assert.match(step.target, /^P-2016 \(/u);
-    assert.match(step.inputs, /quantity: 10\.25/u);
-    assert.match(step.inputs, /reason: northstar\.app:option\.literal/u);
-    const rows = plan.steps as { inputs: string; text: string }[];
-    assert.match(rows[1]!.inputs, /status reason: clear/u);
-    assert.doesNotMatch(rows[1]!.inputs, /northstar\.app:option/u);
-    assert.match(rows[2]!.text, /Post customer invoice/u);
-    assert.match(rows[3]!.text, /Void customer invoice/u);
-    await fetch(`${url}/?assistant=decide`, {
-      method: 'POST',
-      headers: headers('buyer', url),
-      body: JSON.stringify({
-        conversation,
-        planId: plan.planId,
-        digest: plan.digest,
-        approve: false,
+  const [amend, location, post, cancel] = await shownSteps(model);
+  assert.match(amend!.text, /^Request amendment: /u);
+  assert.match(amend!.target, /^P-2016 \(/u);
+  assert.deepEqual(
+    amend!.inputs.map(({ field, value }) => [field, value]),
+    [
+      ['quantity', '"10.25"'],
+      ['reason', '"northstar.app:option.literal"'],
+    ],
+  );
+  assert.deepEqual(location!.inputs, [
+    { field: 'location status reason', type: 'clear', value: 'clears' },
+    {
+      field: 'location status',
+      type: 'choice',
+      value: 'location status usable',
+    },
+  ]);
+  assert.match(post!.text, /Post customer invoice/u);
+  assert.match(cancel!.text, /Void customer invoice/u);
+});
+
+const orderCard = (intents: Record<string, unknown>[]) =>
+  shownSteps(
+    scriptedModel([
+      () => ({
+        toolCalls: [
+          {
+            name: 'erp_query',
+            input: {
+              queryId: 'purchase_order_get',
+              arguments: { recordId: RECORD },
+            },
+          },
+        ],
       }),
-    });
-    while (!(await reader.read()).done);
-  } finally {
-    server.close();
-  }
+      () => ({ toolCalls: [{ name: 'erp_plan', input: { intents } }] }),
+      () => ({ text: 'Declined.' }),
+    ]),
+  );
+
+test('AGENT-5 1: a note that looks like a freight change stays one quoted field on the card', async () => {
+  const update = (patch: Record<string, string>) => ({
+    operationId: 'purchase_order_update',
+    target: RECORD,
+    patch,
+  });
+  const mimic = 'Received · purchase order freight amount: 100';
+  const escaped = 'He said "yes"\n<no>';
+  const [one, two, quoted] = await orderCard([
+    update({ notes: mimic }),
+    update({ notes: 'Received', freight_amount: '100' }),
+    update({ notes: escaped }),
+  ]);
+  assert.deepEqual(one!.inputs, [
+    {
+      field: 'purchase order notes',
+      type: 'text',
+      value: JSON.stringify(mimic),
+    },
+  ]);
+  assert.deepEqual(two!.inputs, [
+    { field: 'purchase order notes', type: 'text', value: '"Received"' },
+    { field: 'purchase order freight amount', type: 'decimal', value: '100' },
+  ]);
+  assert.equal(quoted!.inputs[0]!.value, JSON.stringify(escaped));
+});
+
+test('AGENT-5 2: placing an order shows the effective supplier reference clear', async () => {
+  const place = { operationId: 'purchase_order_release', target: RECORD };
+  const [omitted, explicit, supplied] = await orderCard([
+    place,
+    { ...place, arguments: { supplierReference: null } },
+    { ...place, arguments: { supplierReference: 'SUP-43' } },
+  ]);
+  const clear = [
+    { field: 'supplier reference', type: 'clear', value: 'clears' },
+  ];
+  assert.deepEqual(omitted!.inputs, clear);
+  assert.deepEqual(explicit!.inputs, clear);
+  assert.deepEqual(supplied!.inputs, [
+    { field: 'supplier reference', type: 'text', value: '"SUP-43"' },
+  ]);
 });
 
 test('X2: only a whole, plain yes approves a plan typed into the panel', () => {
