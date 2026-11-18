@@ -54,8 +54,9 @@ import {
   type BusinessWords,
 } from './business-words.js';
 import { operationRisk, type OperationRisk, type RiskClass } from './risk.js';
-import { capabilityChildren } from './capability-children.js';
-import { referenceTargets } from './record-references.js';
+import { capabilityChildren } from '../../domain/src/app/capability-children.js';
+import { referenceTargets } from '../../domain/src/app/record-references.js';
+import { PO_APPROVAL_CAPABILITY_ID } from '../../domain/src/purchasing/approvals.js';
 import { validateApprovalArguments } from '../../domain/src/purchasing/approval-arguments.js';
 import { asData, type OperationsAgentToolId } from './tools.js';
 
@@ -1477,8 +1478,7 @@ export class OperationsAgentSession {
       );
     if (
       operation.effect.kind === 'registeredCapabilityEffect' &&
-      operation.effect.capability.targetId ===
-        'northstar.purchasing:capability.order_approvals'
+      operation.effect.capability.targetId === PO_APPROVAL_CAPABILITY_ID
     )
       validateApprovalArguments(
         localName(operation.operationId),
