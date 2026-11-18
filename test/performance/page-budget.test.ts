@@ -100,6 +100,10 @@ async function serve(target: string, form?: Record<string, string>) {
   } satisfies Served;
 }
 
+/** The sidebar's queue counts: Today's first three tiles, each a number. */
+const QUEUE_COUNTS =
+  /<nav class="queue-counts"[^]*?To receive<\/span> <span class="queue-counts__count" data-queue-count="\d+">[^]*?To ship<\/span> <span class="queue-counts__count" data-queue-count="\d+">[^]*?Not yet paid<\/span> <span class="queue-counts__count" data-queue-count="\d+">/u;
+
 function hiddenValue(html: string, name: string): string | null {
   return (
     new RegExp(`name="${name}" value="([^"]+)"`, 'u').exec(html)?.[1] ?? null
@@ -138,7 +142,8 @@ test(
           // style-src 'self': a rendered page carries no inline style.
           if (/<style\b|\sstyle=/u.test(served.html))
             problems.push(`${name}: carries an inline style`);
-          const missing = markers.filter((marker) =>
+          // Every page carries the day's three queues, each counted.
+          const missing = [...markers, QUEUE_COUNTS].filter((marker) =>
             typeof marker === 'string'
               ? !served.html.includes(marker)
               : !marker.test(served.html),

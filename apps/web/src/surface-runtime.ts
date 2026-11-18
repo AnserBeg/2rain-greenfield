@@ -249,6 +249,7 @@ export async function renderSurfaceRuntimeWithData(
   // The sidebar's queue counts, read with the page's other reads (SPEED-1).
   await loadQueueCounts(
     view,
+    selection.navigation,
     selection.surfaces,
     gateways.queryGateway,
     legalEntitySelection.length === 1
@@ -2998,7 +2999,7 @@ export const SURFACE_STYLESHEET = Object.freeze({
 
 /**
  * The queue counts every page shows at the top of its sidebar (SPEED-1,
- * owner's look): the first launcher's first three tiles -- today To receive,
+ * owner's look): the landing launcher's first three tiles -- today To receive,
  * To ship and Not yet paid -- each its declared List view's count, read with
  * the page's other reads (inside its read snapshot) and under current policy.
  * A count that could not be read is `null`, never a guess.
@@ -3016,14 +3017,15 @@ const loadedQueueCounts = new WeakMap<object, readonly QueueCount[]>();
 
 async function loadQueueCounts(
   view: RuntimeViewContract.RequestRuntimeView,
+  navigation: CompiledNavigationTree | null,
   surfaces: readonly CompiledSurfaceDefinition[],
   queryGateway: SemanticQueryGateway,
   company: string | null,
   now: Date,
 ): Promise<void> {
-  // The release's first launcher (in manifest order: Today) declares the
+  // The landing launcher (the first in navigation order: Today) declares the
   // day's queues. Without one, a page shows none.
-  const launcher = surfaces.find((surface) => surface.launcher)?.launcher;
+  const launcher = landingSurface(navigation, surfaces)?.launcher;
   if (!launcher) return;
   const first = [...launcher.tiles]
     .sort(
