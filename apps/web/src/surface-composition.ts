@@ -1916,23 +1916,30 @@ async function stockImpactRows(
     }
   >();
   const sections: string[] = [];
-  const datasetId = session.action.rows?.datasetId ?? session.action.datasetId;
-  const child = data.children.find(
-    (value) => value.definition.datasetId === datasetId,
-  );
-  const rowIds = session.action.rows
-    ? (prepared?.rows ?? session.rowIds)
-    : [data.selected?.recordId ?? data.record.recordId];
   try {
-    for (const rowId of rowIds) {
-      const row = child?.rows.find((value) => value.record.recordId === rowId);
-      const context =
-        row && datasetId ? withRow(data, datasetId, row.record) : data;
-      const values = {
-        ...inputs,
-        ...(prepared?.rowInputs[rowId] ?? session.rowInputs[rowId] ?? {}),
-      };
-      for (const impact of impacts) {
+    for (const impact of impacts) {
+      const datasetId =
+        impact.datasetId ??
+        session.action.rows?.datasetId ??
+        session.action.datasetId;
+      const child = data.children.find(
+        (value) => value.definition.datasetId === datasetId,
+      );
+      const rowIds = impact.datasetId
+        ? (child?.rows.map((row) => row.record.recordId) ?? [])
+        : session.action.rows
+          ? (prepared?.rows ?? session.rowIds)
+          : [data.selected?.recordId ?? data.record.recordId];
+      for (const rowId of rowIds) {
+        const row = child?.rows.find(
+          (value) => value.record.recordId === rowId,
+        );
+        const context =
+          row && datasetId ? withRow(data, datasetId, row.record) : data;
+        const values = {
+          ...inputs,
+          ...(prepared?.rowInputs[rowId] ?? session.rowInputs[rowId] ?? {}),
+        };
         const item = resolveValue(impact.item, context, values, {}, {});
         const location = resolveValue(impact.location, context, values, {}, {});
         const quantity = resolveValue(impact.quantity, context, values, {}, {});
@@ -1941,7 +1948,7 @@ async function stockImpactRows(
           typeof location !== 'string' ||
           !location ||
           typeof quantity !== 'string' ||
-          !POSITIVE_DECIMAL.test(quantity)
+          !/^-?\d+(?:\.\d+)?$/u.test(quantity)
         )
           continue;
         const key = JSON.stringify([impact.query.targetId, item, location]);
@@ -2021,7 +2028,11 @@ async function stockImpactRows(
         const delta = (direction: 'increase' | 'decrease' | 'unchanged') =>
           direction === 'unchanged'
             ? '0'
-            : `${direction === 'decrease' ? '-' : ''}${quantity}`;
+            : direction === 'increase'
+              ? quantity
+              : quantity.startsWith('-')
+                ? quantity.slice(1)
+                : `-${quantity}`;
         const onHandDelta = delta(impact.onHand);
         const reservedDelta = delta(impact.reserved);
         const after = {
@@ -2056,7 +2067,9 @@ async function stockImpactRows(
   } catch {
     return '<p role="status">Stock impact is unavailable. Refresh the order to try again.</p>';
   }
-  return sections.join('');
+  return (
+    sections.join('') || '<p>Enter the line details to see stock impact.</p>'
+  );
 }
 /** Every run of the Task has committed and was read back. */
 const finished = (session: TaskSession) =>

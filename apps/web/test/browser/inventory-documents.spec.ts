@@ -66,7 +66,7 @@ test('an adjustment is entered like a document, numbered on save, and posted or 
       fullPage: true,
     });
     const damaged = await saveDraft(page);
-    await command(page, 'Post');
+    await command(page, 'Post', ['13', '11']);
     // The document's movement carries its reason; stock drops by two -- of
     // stock the fixture received today, which the default of now is after.
     expect(await postedMovements(page, damaged)).toEqual([
@@ -269,19 +269,37 @@ async function postedMovements(page: Page, saved: Saved) {
 }
 
 /** A confirmed command on the saved document. */
-async function command(page: Page, label: string) {
+async function command(
+  page: Page,
+  label: string,
+  expected?: readonly [string, string],
+) {
   const secondary = page.locator(
     '.composition-record-actions:not([open]) > summary',
   );
   if (await secondary.count()) await secondary.click();
   await page.getByRole('button', { name: label, exact: true }).click();
+  const dialog = page.getByRole('dialog');
   await expect(
-    page.getByRole('heading', { name: `Confirm ${label}`, exact: true }),
+    dialog.getByRole('heading', { name: label, exact: true }),
   ).toBeVisible();
-  await page
+  await expect(
+    dialog.locator('[data-stock-impact="onHand"]').first(),
+  ).toBeVisible();
+  if (expected) {
+    const impact = dialog.locator('[data-stock-impact="onHand"]').first();
+    await expect(impact.locator('[data-impact-before]')).toHaveText(
+      expected[0],
+    );
+    await expect(impact.locator('[data-impact-after]')).toHaveText(expected[1]);
+  }
+  await dialog
+    .getByRole('button', { name: `Review ${label}`, exact: true })
+    .click();
+  await dialog
     .getByRole('button', { name: `Confirm ${label}`, exact: true })
     .click();
-  await expect(page.getByRole('status')).toContainText(`${label} complete`);
+  await expect(dialog.getByRole('status')).toContainText(`${label}: done`);
 }
 
 /**
@@ -295,6 +313,7 @@ async function refused(page: Page, saved: Saved, code: string) {
   );
   if (await secondary.count()) await secondary.click();
   await page.getByRole('button', { name: 'Post', exact: true }).click();
+  await page.getByRole('button', { name: 'Review Post', exact: true }).click();
   await page.getByRole('button', { name: 'Confirm Post', exact: true }).click();
   await expect(page.locator('[data-message-subject]').first()).toHaveText(code);
   await page.goto(saved.url);

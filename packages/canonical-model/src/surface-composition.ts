@@ -818,6 +818,7 @@ export function validateSurfaceCompositions(
         const location = queries.get(impact.locationStatus.query.targetId);
         if (
           !action.steps.length ||
+          (impact.datasetId !== undefined && !children.has(impact.datasetId)) ||
           stock?.queryType !== 'list' ||
           location?.queryType !== 'get' ||
           !Object.values(impact.fields).every((field) =>
@@ -842,7 +843,10 @@ export function validateSurfaceCompositions(
                 'stock impacts require declared task inputs',
               );
           } else
-            contextValue(value, action.rows?.datasetId ?? action.datasetId);
+            contextValue(
+              value,
+              impact.datasetId ?? action.rows?.datasetId ?? action.datasetId,
+            );
         }
       }
       const task = action.presentation?.task;

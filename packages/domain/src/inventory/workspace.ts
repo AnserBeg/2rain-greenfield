@@ -1,7 +1,7 @@
 /**
  * Inventory documents shown with their own lines. Line tables stay reachable
  * inside the document they belong to, so ordinary navigation lists documents
- * rather than line tables. Read-only: no action is declared here.
+ * rather than line tables. Stock documents post through the shared Task.
  */
 export function inventoryDocumentWorkspace(
   namespace: string,
@@ -233,9 +233,122 @@ export function inventoryDocumentWorkspace(
   return {
     kind: 'surfaceComposition',
     schemaVersion: 'v6',
-    fields: [],
+    ...(document === 'inventory_transaction'
+      ? {
+          presentation: {
+            header: {
+              title: id('column', 'stock_document_number'),
+              subtitle: [],
+              facts: [id('column', 'stock_document_type')],
+              status: id('column', 'stock_document_state'),
+            },
+            recordActions: 'progressive',
+            technicalDetails: 'progressive',
+            task: { mode: 'nativeDialog', fallback: 'page' },
+          },
+        }
+      : {}),
+    fields:
+      document === 'inventory_transaction'
+        ? [
+            column(
+              'stock_document',
+              'number',
+              'Stock document',
+              10,
+              'inventory_transaction_number',
+            ),
+            column(
+              'stock_document',
+              'type',
+              'Type',
+              20,
+              'inventory_transaction_type',
+            ),
+            {
+              ...column(
+                'stock_document',
+                'state',
+                'Status',
+                30,
+                'inventory_transaction_state',
+              ),
+            },
+          ]
+        : [],
     children,
-    actions: [],
+    actions:
+      document === 'inventory_transaction'
+        ? (['adjustment', 'transfer'] as const).map((type, index) => {
+            const record = (field: string) => ({ source: 'record', field });
+            const selected = (local: string) => ({
+              source: 'selected',
+              field: f(`inventory_transaction_line_${local}`),
+            });
+            const equals = (field: string, value: string) => ({
+              value: record(f(field)),
+              operator: 'equals',
+              compare: id('option', value),
+            });
+            return {
+              actionId: id('action', `inventory_post_${type}`),
+              label: 'Post',
+              description:
+                'Posts every line of this stock document and records its movements.',
+              orderKey: 10 + index,
+              conditions: [
+                equals(
+                  'inventory_transaction_state',
+                  'inventory_transaction_state_draft',
+                ),
+                equals(
+                  'inventory_transaction_type',
+                  `inventory_transaction_type_${type}`,
+                ),
+              ],
+              inputs: [],
+              stockImpacts: [
+                stockImpact(
+                  namespace,
+                  selected('item_id'),
+                  selected('from_location_id'),
+                  selected('quantity'),
+                  type === 'transfer' ? 'decrease' : 'increase',
+                  'unchanged',
+                  id(
+                    'dataset',
+                    'inventory_transaction_inventory_transaction_line',
+                  ),
+                ),
+                stockImpact(
+                  namespace,
+                  selected('item_id'),
+                  selected('to_location_id'),
+                  selected('quantity'),
+                  'increase',
+                  'unchanged',
+                  id(
+                    'dataset',
+                    'inventory_transaction_inventory_transaction_line',
+                  ),
+                ),
+              ],
+              steps: [
+                {
+                  stepId: id('step', `inventory_post_${type}`),
+                  operation: ref(
+                    'operationReference',
+                    id('operation', 'inventory_transaction_post'),
+                  ),
+                  bindings: [
+                    { path: ['recordId'], value: record('recordId') },
+                    { path: ['expectedRevision'], value: record('revision') },
+                  ],
+                },
+              ],
+            };
+          })
+        : [],
   };
 }
 
@@ -247,6 +360,7 @@ export function stockImpact(
   quantity: Record<string, unknown>,
   onHand: 'increase' | 'decrease' | 'unchanged',
   reserved: 'increase' | 'decrease' | 'unchanged',
+  datasetId?: string,
 ): Record<string, unknown> {
   const field = (name: string) => `${namespace}:field.${name}`;
   const query = (local: string) => ({
@@ -255,6 +369,7 @@ export function stockImpact(
     targetId: `${namespace}:query.${local}`,
   });
   return {
+    ...(datasetId ? { datasetId } : {}),
     query: query('item_stock_positions'),
     fields: {
       item: field('posted_stock_balance_item_id'),

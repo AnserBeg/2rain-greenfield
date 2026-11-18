@@ -110,6 +110,34 @@ test('INTERACT-1 compiles declared stock impacts and refuses an unavailable stoc
   impact.fields.onHand =
     'northstar.app:field.missing_stock_quantity' as typeof impact.fields.onHand;
   assert.equal(compileApplication(inputNormalized(invalid)).status, 'refused');
+  const invalidRows = structuredClone(normalized);
+  const stockDocument = invalidRows.surfaces.find(
+    (candidate) =>
+      candidate.surfaceId ===
+      'northstar.app:surface.inventory_transaction_detail',
+  );
+  assert.ok(
+    stockDocument &&
+      'composition' in stockDocument &&
+      stockDocument.composition,
+  );
+  const posting = (
+    stockDocument.composition as SurfaceComposition
+  ).actions.find(
+    (candidate) =>
+      candidate.actionId === 'northstar.app:action.inventory_post_adjustment',
+  )!;
+  assert.equal(
+    posting.stockImpacts?.[0]?.datasetId,
+    'northstar.app:dataset.inventory_transaction_inventory_transaction_line',
+  );
+  const itemImpact = posting.stockImpacts![0]!;
+  itemImpact.datasetId =
+    'northstar.app:dataset.missing_stock_lines' as typeof itemImpact.datasetId;
+  assert.equal(
+    compileApplication(inputNormalized(invalidRows)).status,
+    'refused',
+  );
 });
 
 test('ordinary v1 and v2 parent/child definitions compile cleanly and twice identically', () => {
@@ -1871,6 +1899,17 @@ function composedApplicationWithoutSales(): Record<string, unknown> {
       String(query.queryId),
     ),
   );
+  // This partial fixture has no Sales reservation read model, so its stock
+  // previews cannot claim to read those absent query results.
+  for (const surface of definition.surfaces as Array<Record<string, unknown>>) {
+    const composition = surface.composition as SurfaceComposition | undefined;
+    for (const action of composition?.actions ?? []) {
+      if (
+        action.stockImpacts?.some((impact) => !kept.has(impact.query.targetId))
+      )
+        delete action.stockImpacts;
+    }
+  }
   const figured = (
     definition.surfaces as Array<Record<string, unknown>>
   ).filter((surface) => {

@@ -905,6 +905,8 @@ const compositionTaskValue = z.discriminatedUnion('source', [
   compositionTaskColumn.extend({ source: z.literal('column') }),
 ]);
 const compositionStockImpact = z.strictObject({
+  /** A document-wide posting may affect a child dataset without running per row. */
+  datasetId: CanonicalIdSchema.optional(),
   query: compositionReference('queryReference'),
   fields: z.strictObject({
     item: CanonicalIdSchema,

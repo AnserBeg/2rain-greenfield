@@ -1024,3 +1024,23 @@ test('INTERACT-1 stock impacts require current stock and location reads and decl
     /context binding requires a declared record or selected result/u,
   );
 });
+
+test('INTERACT-1 document-wide stock impacts name a declared child dataset', () => {
+  const inventory = composition(normalized, 'inventory_transaction_detail');
+  const post = action(inventory, 'inventory_post_adjustment');
+  assert.equal(post.stockImpacts.length, 2);
+  assert.equal(post.rows, undefined);
+  assert.equal(
+    post.stockImpacts[0].datasetId,
+    id('dataset', 'inventory_transaction_inventory_transaction_line'),
+  );
+  assert.match(
+    refused('inventory_transaction_detail', (value) => {
+      action(value, 'inventory_post_adjustment').stockImpacts[0].datasetId = id(
+        'dataset',
+        'missing_stock_lines',
+      );
+    }),
+    /stock impacts require declared stock and location query results/u,
+  );
+});
