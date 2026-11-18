@@ -1,3 +1,4 @@
+import { completeTask } from './complete-task.js';
 import { test, expect, type Page } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -61,8 +62,7 @@ test('a counter sale confirms, ships, invoices and takes payment in one Task, an
     await dialog.getByLabel('Paid by').selectOption({ label: 'Cheque' });
     await dialog.getByLabel('Reference (cheque number)').fill('CHQ-1042');
     await capture(page, testInfo, 'counter-sale-task');
-    await dialog.getByRole('button', { name: `Review ${label}` }).click();
-    await dialog.getByRole('button', { name: `Confirm ${label}` }).click();
+    await completeTask(dialog, label);
     await expect(page.getByRole('status').first()).toContainText(
       `${label}: done`,
     );

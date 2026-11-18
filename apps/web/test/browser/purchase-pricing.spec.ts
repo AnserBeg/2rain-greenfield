@@ -1,3 +1,4 @@
+import { completeTask } from './complete-task.js';
 import { test, expect, type Page } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -182,12 +183,7 @@ test('a partly received order shows what is still open, closes its remainder wit
       await row().getByRole('link', { name: 'Select', exact: true }).click();
       await page.getByRole('button', { name: label, exact: true }).click();
       await fill();
-      await page
-        .getByRole('button', { name: `Review ${label}`, exact: true })
-        .click();
-      await page
-        .getByRole('button', { name: `Confirm ${label}`, exact: true })
-        .click();
+      await completeTask(page.getByRole('dialog'), label);
       await expect(task().locator('[data-task-result]')).toContainText(
         `${label}: done`,
       );
