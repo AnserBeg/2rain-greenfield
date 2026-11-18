@@ -759,6 +759,7 @@ test('CI runs every scaffold gate from a frozen install', () => {
   assert.match(workflow, /^ {2}postgres:$/mu);
   assert.match(workflow, /^ {2}postgres-composed:$/mu);
   assert.match(workflow, /^ {2}postgres-commercial:$/mu);
+  assert.match(workflow, /^ {2}postgres-sales:$/mu);
   assert.match(workflow, /^ {2}postgres-inventory:$/mu);
   assert.match(workflow, /^ {2}browser:$/mu);
   assert.match(workflow, /^ {2}browser-operations:$/mu);

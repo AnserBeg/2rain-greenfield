@@ -128,7 +128,7 @@ export const reachabilityProducers = [
       'test/postgres/receiving-authorization.test.ts',
     ],
   ),
-  nodeProducer('postgres-sales', 'postgres-commercial', 'test:postgres:sales', [
+  nodeProducer('postgres-sales', 'postgres-sales', 'test:postgres:sales', [
     'test/postgres/counter-sale.test.ts',
     'test/postgres/customer-credit.test.ts',
     'test/postgres/fulfillment.test.ts',

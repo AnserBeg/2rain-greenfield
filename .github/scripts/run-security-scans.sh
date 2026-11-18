@@ -37,7 +37,6 @@ run_gitleaks() {
   docker run --rm \
     --user "$(id -u):$(id -g)" \
     "${docker_mounts[@]}" \
-    "$@" \
     --workdir "$repository_root" \
     "$gitleaks_image" \
     git \
@@ -47,17 +46,24 @@ run_gitleaks() {
     --config "$repository_root/.github/security/gitleaks.toml" \
     --report-format json \
     --report-path "$report" \
+    "$@" \
     "$target"
 }
 
-set +e
+git_options=()
 dependency_status=null
-if [[ "${1:-}" != --secrets-only ]]; then
-  corepack pnpm audit --audit-level=high --json >"$dependency_report" 2>"$dependency_stderr"
-  dependency_status=$?
+if [[ "${1:-}" == --secrets-only ]]; then
+  # Scan every incoming commit, including changes later reverted in the push.
+  [[ ${PROSE_COMMIT_RANGE:-} =~ ^[0-9a-f]{40}\.\.[0-9a-f]{40}$ ]]
+  git rev-list --count "$PROSE_COMMIT_RANGE"
+  git_options=(--log-opts="--full-history -m $PROSE_COMMIT_RANGE")
+else
+  dependency_status=0
+  corepack pnpm audit --audit-level=high --json >"$dependency_report" 2>"$dependency_stderr" || dependency_status=$?
 fi
 
-run_gitleaks "$repository_root" "$clean_report"
+set +e
+run_gitleaks "$repository_root" "$clean_report" "${git_options[@]}"
 clean_status=$?
 set -e
 
@@ -78,11 +84,9 @@ printf '%s%s\n' "$synthetic_prefix" "$synthetic_suffix" \
 git -C "$negative_fixture" add credential.txt
 git -C "$negative_fixture" commit --quiet --message 'plant synthetic secret fixture'
 
+docker_mounts+=(--volume "$negative_fixture:$negative_fixture:ro")
 set +e
-run_gitleaks \
-  "$negative_fixture" \
-  "$negative_report" \
-  --volume "$negative_fixture:$negative_fixture:ro"
+run_gitleaks "$negative_fixture" "$negative_report"
 negative_status=$?
 set -e
 

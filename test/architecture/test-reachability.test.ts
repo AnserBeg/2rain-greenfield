@@ -390,9 +390,22 @@ test('declared unfiltered producers are wired to CI and their evidence paths', (
       job.includes(producer.evidencePath),
       `${producer.id} evidence path is absent from CI job ${producer.ciJob}`,
     );
-    assert.match(job, /test\/helpers\/begin-reachability-run\.ts/u);
-
     const body = loadProducerImplementation(producer, rootScripts, webScripts);
+    if (producer.id === 'postgres-composed') {
+      // The leased suite prepares a fresh run from CI's token itself.
+      assert.match(body, /bash scripts\/run-suite\.sh postgres-composed -- /u);
+      assert.match(
+        readFileSync('scripts/run-suite.sh', 'utf8'),
+        /node --import tsx "\$REPOSITORY_ROOT\/test\/helpers\/prepare-reachability-evidence\.ts" "\$SUITE"/u,
+      );
+      assert.match(
+        readFileSync('test/helpers/prepare-reachability-evidence.ts', 'utf8'),
+        /ensureReachabilityRun\(\{ repositoryRoot \}\)/u,
+      );
+      assert.doesNotMatch(job, /^    needs:/mu);
+    } else {
+      assert.match(job, /test\/helpers\/begin-reachability-run\.ts/u);
+    }
     if (producer.runner === 'node:test') {
       if (producer.implementation.kind === 'script') {
         assert.match(
@@ -571,13 +584,16 @@ test('CI aggregates only after every evidence-producing job succeeds', () => {
   assert.doesNotMatch(job, /if:\s*always\(\)/u);
   assert.match(job, /CI_JOB_RESULTS: \$\{\{ toJSON\(needs\) \}\}/u);
   assert.match(job, /run: node \.github\/scripts\/check-ci-results\.mjs/u);
-  for (const [prose, result, accepted] of [
-    ['false', 'success', true],
-    ['false', 'skipped', false],
-    ['false', 'failure', false],
-    ['true', 'skipped', true],
-    ['true', 'failure', false],
-    ['', 'skipped', false],
+  for (const [prose, result, replay, accepted] of [
+    ['false', 'success', 'success', true],
+    ['false', 'skipped', 'success', false],
+    ['false', 'failure', 'success', false],
+    ['false', 'success', 'skipped', false],
+    ['false', 'success', 'failure', false],
+    ['true', 'skipped', 'skipped', true],
+    ['true', 'failure', 'skipped', false],
+    ['true', 'skipped', 'success', false],
+    ['', 'skipped', 'skipped', false],
   ] as const) {
     const run = spawnSync(
       process.execPath,
@@ -588,6 +604,10 @@ test('CI aggregates only after every evidence-producing job succeeds', () => {
           CI_JOB_RESULTS: JSON.stringify({
             changes: { result: 'success', outputs: { prose_only: prose } },
             quality: { result: 'success' },
+            'postgres-composed': {
+              result: 'success',
+              outputs: { replay },
+            },
             postgres: { result },
           }),
         },
@@ -596,7 +616,7 @@ test('CI aggregates only after every evidence-producing job succeeds', () => {
     assert.equal(
       run.status === 0,
       accepted,
-      `prose=${prose}, postgres=${result}`,
+      `prose=${prose}, postgres=${result}, replay=${replay}`,
     );
   }
 });
