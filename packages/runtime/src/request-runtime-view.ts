@@ -577,7 +577,13 @@ function requestRuntimeViewRefusalCode(
   return error.code as RequestRuntimeViewRefusalCode;
 }
 
-/** Every call reaches the live gateway again; no ALLOW is stored in the view. */
+/**
+ * Every call reaches the gateway again; no ALLOW is stored in the view.
+ * ADR-0071: live per request for reads, live per call for writes -- inside a
+ * page's read snapshot the gateway may decide a read from that snapshot's
+ * grants, and the page is discarded if the live policy moved meanwhile; an
+ * invocation's decision is always read live in its own transaction.
+ */
 export async function authorizeCurrentPolicy(
   gateway: CurrentPolicyGateway,
   view: RequestRuntimeView,

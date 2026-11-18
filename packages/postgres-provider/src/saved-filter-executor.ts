@@ -42,7 +42,7 @@ import {
   type SemanticRecordDto,
 } from '../../runtime/src/semantic-query-gateway.js';
 import type { RequestRuntimeView } from '../../runtime/src/request-runtime-view.js';
-import { withTrustedRequestTransaction } from './request-context.js';
+import { withTrustedRequestRead } from './request-context.js';
 import { PostgresTrustService } from './trust/postgres-trust-service.js';
 import type { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
 
@@ -207,7 +207,8 @@ export class PostgresSavedFilterExecutor
         unsupportedReason: 'saved-filter-query-unsupported',
       });
     }
-    return withTrustedRequestTransaction(
+    // A read: it joins a page's read snapshot (SPEED-1).
+    return withTrustedRequestRead(
       this.pool,
       request.context,
       async (client) => {

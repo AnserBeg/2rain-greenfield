@@ -40,6 +40,16 @@ export interface RequestWorkProbe {
 }
 
 export interface SurfaceRuntimeServerOptions {
+  /**
+   * SPEED-1: a page read (a GET) runs all its reads in one read snapshot,
+   * ended by `finishReads` or when the page is assembled; a policy change
+   * while it was held discards the page. Absent, each read is a transaction
+   * of its own.
+   */
+  readonly readSnapshot?: <T>(
+    work: (finishReads: () => Promise<void>) => Promise<T>,
+    options?: { readonly retry?: boolean },
+  ) => Promise<T>;
   readonly requestWork?: RequestWorkProbe;
 }
 
@@ -57,7 +67,15 @@ export function createSurfaceRuntimeServer(
 ): Server {
   return createServer((request, response) => {
     const handle = () =>
-      handleRequest(entry, gateways, request, response, demoActors, customize);
+      handleRequest(
+        entry,
+        gateways,
+        request,
+        response,
+        demoActors,
+        customize,
+        options.readSnapshot,
+      );
     const probe = options.requestWork;
     void (probe
       ? probe.measure((serverTiming) => {
@@ -75,6 +93,7 @@ async function handleRequest(
   response: ServerResponse,
   demoActors?: readonly { key: 'buyer' | 'manager'; label: string }[] | null,
   customize?: () => Promise<CustomizeScreenService>,
+  readSnapshot?: SurfaceRuntimeServerOptions['readSnapshot'],
 ): Promise<void> {
   response.setHeader('cache-control', 'no-store');
   response.setHeader(
@@ -217,11 +236,38 @@ async function handleRequest(
       return;
     }
     const result = gateways
-      ? await entry.run({ headers: request.headers }, (view) =>
-          submission
-            ? submitSurfaceRuntimeIntent(view, url.href, submission, gateways)
-            : renderSurfaceRuntimeWithData(view, url.href, gateways),
-        )
+      ? submission
+        ? readSnapshot && taskStep(submission)
+          ? // A task's steps read in one snapshot too. Confirm's writes never
+            // join it: each ends the snapshot first and decides live in its
+            // own transaction. A policy change refuses the step rather than
+            // repeating it.
+            await readSnapshot(
+              () =>
+                entry.run({ headers: request.headers }, (view) =>
+                  submitSurfaceRuntimeIntent(
+                    view,
+                    url.href,
+                    submission,
+                    gateways,
+                  ),
+                ),
+              { retry: false },
+            )
+          : await entry.run({ headers: request.headers }, (view) =>
+              submitSurfaceRuntimeIntent(view, url.href, submission, gateways),
+            )
+        : readSnapshot
+          ? await readSnapshot((finishReads) =>
+              entry.run({ headers: request.headers }, (view) =>
+                renderSurfaceRuntimeWithData(view, url.href, gateways, null, {
+                  finishReads,
+                }),
+              ),
+            )
+          : await entry.run({ headers: request.headers }, (view) =>
+              renderSurfaceRuntimeWithData(view, url.href, gateways),
+            )
       : await entry.run({ headers: request.headers }, (view) =>
           renderSurfaceRuntime(view, url.href),
         );
@@ -273,6 +319,17 @@ export function runtimeViewRefusalMessage(
     code: 'REQUEST_RUNTIME_VIEW_REFUSED' as const,
     subject: error.code,
   };
+}
+
+/**
+ * A composition task's step: open, fill, Review or Confirm. Every other POST
+ * (a form's save, a draft editor) keeps a transaction per read.
+ */
+function taskStep(submission: Readonly<Record<string, string>>): boolean {
+  return (
+    typeof submission.compositionAction === 'string' &&
+    submission.compositionAction !== ''
+  );
 }
 
 function sameOriginRequest(request: IncomingMessage): boolean {

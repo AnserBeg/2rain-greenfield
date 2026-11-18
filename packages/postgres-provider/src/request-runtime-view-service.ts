@@ -38,7 +38,10 @@ import {
 } from '@north-star/runtime/request-runtime-view';
 import type { Pool, PoolClient } from 'pg';
 
-import { withTrustedRequestTransaction } from './request-context.js';
+import {
+  withTrustedRequestRead,
+  withTrustedRequestTransaction,
+} from './request-context.js';
 
 export type RequestRuntimeViewLoadErrorCode =
   | 'ACTIVE_POINTER_MISSING'
@@ -323,7 +326,9 @@ export class PostgresRequestRuntimeViewService implements RequestRuntimeDefiniti
     context: TrustedRequestContext,
   ): Promise<LoadedRequestRuntimeDefinition> {
     assertTrustedRequestContext(context);
-    const authority = await this.#readPointerAuthority(context);
+    // The warm path is one pointer read, and it joins a page's read snapshot;
+    // a fill and its re-read stay transactions of their own.
+    const authority = await this.#readPointerAuthority(context, true);
     const key = cacheKey(authority);
     const cached = this.#cache.get(key);
     const highestInvalidatedFence = this.#invalidationFences.highestFence(
@@ -487,14 +492,18 @@ export class PostgresRequestRuntimeViewService implements RequestRuntimeDefiniti
 
   async #readPointerAuthority(
     context: TrustedRequestContext,
+    joinReadSnapshot = false,
   ): Promise<PointerAuthority> {
-    return withTrustedRequestTransaction(this.pool, context, async (client) => {
+    const read = async (client: PoolClient) => {
       const result = await client.query<PointerRow>(pointerAuthoritySql, [
         context.tenantId,
         context.environmentId,
       ]);
       return pointerAuthorityFromRows(context, result.rows);
-    });
+    };
+    return joinReadSnapshot
+      ? withTrustedRequestRead(this.pool, context, read)
+      : withTrustedRequestTransaction(this.pool, context, read);
   }
 }
 

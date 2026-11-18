@@ -5,6 +5,7 @@ import {
   parseServerTiming,
   type RequestWorkCounts,
 } from '../../packages/postgres-provider/src/request-work-meter.js';
+import { catalogParseCount } from '../../packages/runtime/src/catalog-parse-count.js';
 import { withOrderEntryFixture } from '../helpers/order-entry-fixture.js';
 import {
   PAGE_BUDGET_NAMES,
@@ -28,6 +29,10 @@ interface Scenario {
 interface Served {
   readonly counts: { -readonly [K in keyof RequestWorkCounts]: number } & {
     milliseconds: number;
+    operationCatalogParses: number;
+    queryCatalogParses: number;
+    surfaceBindingParses: number;
+    surfaceManifestParses: number;
   };
   readonly html: string;
   readonly location: string | null;
@@ -52,6 +57,9 @@ function pageUrl(
 }
 
 async function serve(target: string, form?: Record<string, string>) {
+  // The server runs in this process: its catalog parses are read around the
+  // request (LOOP-1's counter; requests here are sequential).
+  const parsedBefore = catalogParseCount();
   const response = await fetch(
     target,
     form
@@ -64,8 +72,19 @@ async function serve(target: string, form?: Record<string, string>) {
       : { redirect: 'manual' },
   );
   const html = await response.text();
-  const counts = parseServerTiming(response.headers.get('server-timing'));
-  assert.ok(counts, `${target} carried no Server-Timing work counts`);
+  const parsedAfter = catalogParseCount();
+  const work = parseServerTiming(response.headers.get('server-timing'));
+  assert.ok(work, `${target} carried no Server-Timing work counts`);
+  const counts = {
+    ...work,
+    operationCatalogParses:
+      parsedAfter.operationCatalog - parsedBefore.operationCatalog,
+    queryCatalogParses: parsedAfter.queryCatalog - parsedBefore.queryCatalog,
+    surfaceBindingParses:
+      parsedAfter.surfaceBinding - parsedBefore.surfaceBinding,
+    surfaceManifestParses:
+      parsedAfter.surfaceManifest - parsedBefore.surfaceManifest,
+  };
   return {
     counts,
     html,
@@ -208,6 +227,10 @@ const KEYS = [
   'statements',
   'authorization',
   'repeats',
+  'operationCatalogParses',
+  'queryCatalogParses',
+  'surfaceManifestParses',
+  'surfaceBindingParses',
 ] as const;
 type Counts = Served['counts'];
 
