@@ -163,11 +163,23 @@ interface PlanStep {
   readonly relations?: Readonly<Record<string, ImmutableJsonValue>>;
   readonly patch?: Readonly<Record<string, ImmutableJsonValue>>;
   readonly arguments?: ImmutableJsonValue;
+  /**
+   * For a registered capability on an existing record: the child lines it
+   * will read at execution (a receipt's lines), as ids and revisions. The
+   * yes binds them; execution re-reads them and refuses on any drift.
+   */
+  readonly children?: readonly ChildSnapshot[];
   /** The existing target's number or name, read by the host at planning. */
   readonly targetLabel?: string | null;
   /** For an update of an existing record: the patched fields' values before. */
   readonly prior?: Readonly<Record<string, ImmutableJsonValue>>;
   readonly risk: OperationRisk;
+}
+
+interface ChildSnapshot {
+  readonly queryId: string;
+  readonly relationId: string;
+  readonly rows: readonly (readonly [string, number])[];
 }
 
 interface StepResult {
@@ -196,6 +208,8 @@ interface StoredPlan {
   execution?: {
     readonly key: string;
     readonly results: readonly StepResult[];
+    /** When it ran, in this session's commit order. */
+    readonly sequence: number;
   };
 }
 
@@ -205,6 +219,28 @@ class ToolInputError extends Error {
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+/**
+ * Whether an `..._id` field names a record type of the release: its name
+ * less `_id` is a type, ends with one, or ends with a type's last word
+ * (`default_ship_to_address_id` and `party_address`).
+ */
+function namesRecordType(types: ReadonlySet<string>, fieldId: string): boolean {
+  const base = localName(fieldId).replace(/_id$/u, '');
+  const last = base.split('_').at(-1)!;
+  for (const type of types)
+    if (
+      base === type ||
+      base.endsWith(`_${type}`) ||
+      type === last ||
+      type.endsWith(`_${last}`)
+    )
+      return true;
+  return false;
+}
+
+/** A record id anywhere inside a text, in any case. */
+const embeddedUuid =
+  /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/iu;
 const hostOwnedKeys = new Set([
   'tenantId',
   'tenant',
@@ -231,11 +267,25 @@ export class OperationsAgentSession {
   readonly approvals: ApprovalRecord[] = [];
   readonly #touched = new Map<string, TouchedRecord>();
   readonly #undoPlans = new Set<string>();
-  /** Record ids the host returned to the model in this session. */
-  readonly #seenIds = new Set<string>();
-  /** Currency codes of records the host returned, and ones the person named. */
-  readonly #seenCurrencies = new Set<string>();
+  /**
+   * Record ids the host returned in this session, from typed positions only:
+   * a returned record's own id (with its record type), its `..._id`
+   * reference fields, and the records an execution wrote. Never an id the
+   * model typed and a result echoed back.
+   */
+  readonly #seenIds = new Map<string, string>();
+  /** Currency codes held by records the host returned. */
+  readonly #recordCurrencies = new Set<string>();
+  /** Currency codes the person named in the current request only. */
+  #requestCurrencies = new Set<string>();
   readonly #undone = new Set<string>();
+  /** Executions in commit order, and the plans the host has verified. */
+  #sequence = 0;
+  readonly #verified = new Set<string>();
+  /** The person's Stop for the current run: no mutation starts after it. */
+  #signal: AbortSignal | undefined;
+  /** For an Undo that stopped partway: the records it already put back. */
+  readonly #undoneRecords = new Map<string, Set<string>>();
 
   constructor(options: OperationsAgentSessionOptions) {
     this.#options = options;
@@ -255,16 +305,17 @@ export class OperationsAgentSession {
       }));
   }
 
-  async call(tool: string, input: unknown): Promise<ToolOutcome> {
+  async call(
+    tool: string,
+    input: unknown,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<ToolOutcome> {
+    this.#signal = options.signal;
     let outcome: ToolOutcome;
     try {
       if (!isRecord(input)) throw new ToolInputError('input must be an object');
       const content = await this.#dispatch(tool, input);
       outcome = { content: this.#bounded(content), isError: false };
-      // What the host showed the model is what a plan may name (slice 4):
-      // record ids and currencies from lookups, reads, writes and checks,
-      // never from a plan's echo of the model's own input.
-      if (tool !== 'erp_plan') this.#remember(outcome.content);
     } catch (error) {
       outcome = {
         content: {
@@ -447,7 +498,7 @@ export class OperationsAgentSession {
         ).catch(() => null);
         if (record) {
           this.#touch(named.entityId, record, false);
-          this.#remember(compactRecord(record));
+          this.#learn(named.entityId, [record]);
           lines.push(
             `That record, read just now through ${localName(named.getQueryId)}: ${JSON.stringify(
               this.#bounded(compactRecord(record), 4_000),
@@ -467,28 +518,29 @@ export class OperationsAgentSession {
    * are kept: a plan may use a currency the person named.
    */
   noteRequest(text: string): void {
+    // A currency named in an earlier request does not carry over.
+    this.#requestCurrencies = new Set();
     for (const code of text.match(/\b[A-Z]{3}\b/gu) ?? [])
-      this.#seenCurrencies.add(code);
+      this.#requestCurrencies.add(code);
     for (const [words, code] of CURRENCY_WORDS)
-      if (words.test(text)) this.#seenCurrencies.add(code);
+      if (words.test(text)) this.#requestCurrencies.add(code);
   }
 
-  #remember(content: ImmutableJsonValue, fieldId = ''): void {
-    if (typeof content === 'string') {
-      if (uuidPattern.test(content)) this.#seenIds.add(content.toLowerCase());
-      if (/_currency$/u.test(fieldId)) {
-        const code = currencyCode(content);
-        if (code) this.#seenCurrencies.add(code);
+  /** Learns the typed identities a successful read or write returned. */
+  #learn(entityId: string, records: readonly SemanticRecordDto[]): void {
+    for (const record of records) {
+      this.#seenIds.set(record.recordId.toLowerCase(), entityId);
+      for (const [fieldId, value] of Object.entries(record.values)) {
+        if (typeof value !== 'string' || value === '') continue;
+        const name = localName(fieldId);
+        if (name.endsWith('_id') && uuidPattern.test(value))
+          this.#seenIds.set(value.toLowerCase(), '');
+        if (name.endsWith('_currency')) {
+          const code = currencyCode(value);
+          if (code) this.#recordCurrencies.add(code);
+        }
       }
-      return;
     }
-    if (Array.isArray(content)) {
-      for (const entry of content) this.#remember(entry, fieldId);
-      return;
-    }
-    if (isRecord(content))
-      for (const [key, value] of Object.entries(content))
-        this.#remember(value, key.includes(':') ? localName(key) : fieldId);
   }
 
   /**
@@ -502,8 +554,21 @@ export class OperationsAgentSession {
     steps: readonly PlanStep[],
   ): string | null {
     const defaultCurrency = declaredCurrencyDefault(view).code;
+    const catalog = pinnedCatalog(view);
+    const types = new Set(
+      [
+        ...catalog.operations.map((operation) =>
+          catalog.operationEntity(operation),
+        ),
+        ...catalog.queries.map((query) => query.sourceEntityId),
+      ]
+        .filter(Boolean)
+        .map(localName),
+    );
     for (const step of steps) {
       const where = `step ${String(step.step)} (${localName(step.operation.operationId)})`;
+      // Every declared reference position, whatever the value looks like:
+      // the existing target, each relation, and each `..._id` field.
       const references: [string, ImmutableJsonValue][] = [
         [
           'target',
@@ -512,48 +577,76 @@ export class OperationsAgentSession {
             : null,
         ],
         ...Object.entries(step.relations ?? {}),
-        ...Object.entries({ ...step.values, ...step.patch }),
+        ...Object.entries({ ...step.values, ...step.patch }).filter(
+          ([fieldId]) => localName(fieldId).endsWith('_id'),
+        ),
       ];
       for (const [name, value] of references) {
-        if (typeof value !== 'string' || !uuidPattern.test(value)) continue;
-        // A reference is the target, a relation, or a field named `..._id`
-        // (`item_id`, `customer_party_id`): a free text field such as a
-        // reservation number may hold a fresh uuid the screens also mint.
+        if (value === null || value === undefined) continue;
+        if (isRecord(value) && typeof value.fromStep === 'number') continue;
+        const label = name === 'target' ? 'the target record' : localName(name);
+        if (typeof value !== 'string')
+          return `${where}: ${label} must be a record id, not ${JSON.stringify(value)}.`;
+        // An `..._id` field that names no record type of the release holds
+        // a code ("EA" for a unit, an actor): it is a reference only if it
+        // carries a record id in any form (padded, cased, wrapped). One that
+        // names a record type (`..._party_id`) always is.
         if (
           name !== 'target' &&
           !(step.relations && name in step.relations) &&
-          !localName(name).endsWith('_id')
+          !namesRecordType(types, name) &&
+          !embeddedUuid.test(value)
         )
           continue;
         if (!this.#seenIds.has(value.toLowerCase()))
-          return `${where}: ${name === 'target' ? 'the target record' : localName(name)} ${value} did not come from a lookup in this conversation. Find the record with erp_discover resolve or a query, then plan with the id it returns.`;
+          return `${where}: ${label} ${value} did not come from a lookup in this conversation. Find the record with erp_discover resolve or a query, then plan with the id it returns.`;
+      }
+      // Arguments are a flat object of plain values; anything else is a
+      // structure no operation here declares.
+      if (step.arguments !== undefined && step.arguments !== null) {
+        if (
+          !isRecord(step.arguments) ||
+          Object.values(step.arguments).some(
+            (value) => typeof value === 'object' && value !== null,
+          )
+        )
+          return `${where}: arguments must be a flat object of plain values; nested lists or objects are not supported.`;
       }
       for (const [fieldId, value] of Object.entries({
         ...step.values,
         ...step.patch,
       })) {
+        if (!/_currency$/u.test(localName(fieldId)) || value === null) continue;
+        const code = typeof value === 'string' ? currencyCode(value) : null;
+        if (!code)
+          return `${where}: ${localName(fieldId)} ${JSON.stringify(value)} is not a currency code such as CAD.`;
         if (
-          !/_currency$/u.test(localName(fieldId)) ||
-          typeof value !== 'string'
+          code !== defaultCurrency &&
+          !this.#recordCurrencies.has(code) &&
+          !this.#requestCurrencies.has(code)
         )
-          continue;
-        const code = currencyCode(value);
-        if (code && code !== defaultCurrency && !this.#seenCurrencies.has(code))
-          return `${where}: currency ${code} is not the company default${defaultCurrency ? ` (${defaultCurrency})` : ''}, the currency of a record you read, or one the person named. Use one of those, or ask the person.`;
+          return `${where}: currency ${code} is not the company default${defaultCurrency ? ` (${defaultCurrency})` : ''}, the currency of a record you read, or one the person named in this request. Use one of those, or ask the person.`;
       }
     }
     return null;
   }
 
-  /** The latest change the agent made at once in this session, if any. */
+  /**
+   * The latest change the agent made at once in this session, if any: the
+   * last reversible plan, in commit order, that actually wrote something,
+   * summarized from the steps that succeeded.
+   */
   latestChange(): AgentChange | null {
     const plan = [...this.#plans.values()]
       .filter(
         (candidate) =>
           candidate.riskClass === 'reversible' &&
-          candidate.execution &&
-          !this.#undoPlans.has(candidate.planId),
+          !this.#undoPlans.has(candidate.planId) &&
+          candidate.execution?.results.some(
+            (result) => result.outcome === 'succeeded',
+          ),
       )
+      .sort((a, b) => a.execution!.sequence - b.execution!.sequence)
       .at(-1);
     if (!plan?.execution) return null;
     return {
@@ -580,11 +673,30 @@ export class OperationsAgentSession {
       return { outcome: 'refused', reason: 'That change was already undone.' };
     const plan = this.#plans.get(changeId)!;
     const results = plan.execution!.results;
+    // Anything this session wrote after the change may depend on it.
+    const later = [...this.#plans.values()].find(
+      (other) =>
+        other.planId !== changeId &&
+        !this.#undoPlans.has(other.planId) &&
+        (other.execution?.sequence ?? 0) > plan.execution!.sequence &&
+        other.execution?.results.some((r) => r.outcome === 'succeeded'),
+    );
+    if (later)
+      return {
+        outcome: 'refused',
+        reason:
+          'Something else was done after this change in this conversation and may depend on it, so it cannot be undone here.',
+      };
+    const done = this.#undoneRecords.get(changeId) ?? new Set<string>();
     // The revision each record had right after the agent's last write to it.
     const written = new Map<string, { revision: number; step: PlanStep }>();
     for (const step of plan.steps) {
       const result = results.find((entry) => entry.step === step.step);
-      if (result?.outcome === 'succeeded' && result.recordId)
+      if (
+        result?.outcome === 'succeeded' &&
+        result.recordId &&
+        !done.has(result.recordId)
+      )
         written.set(result.recordId, {
           revision: result.revision ?? 0,
           step: written.get(result.recordId)?.step ?? step,
@@ -592,36 +704,38 @@ export class OperationsAgentSession {
     }
     if (written.size === 0)
       return { outcome: 'refused', reason: 'That change wrote nothing.' };
-    const changed = await this.#run(async (view) => {
-      const catalog = pinnedCatalog(view);
-      for (const [recordId, { revision, step }] of written) {
-        const record = await readRecord(
-          this.#options.runtime,
-          view,
-          catalog,
-          step.operation.readBackQueryId,
-          recordId,
-          this.#options.companyId,
-        );
-        if (!record)
-          return `${localName(step.entity).replaceAll('_', ' ')} ${recordId} can no longer be read.`;
-        if (record.revision !== revision)
-          return `${recordLabel(record) ?? localName(step.entity).replaceAll('_', ' ')} changed after the assistant's change (revision ${String(revision)} is now ${String(record.revision)}); undoing would overwrite that later change.`;
-      }
-      return null;
-    });
-    if (changed) return { outcome: 'refused', reason: changed };
-    // Reverse order: archive what was made, put back what was changed. A
-    // record made in this change is archived, not restored field by field.
-    const intents: ImmutableJsonValue[] = [];
     const created = new Set(
       plan.steps
         .filter((step) => step.risk.inverse?.kind === 'archive')
         .map((step) => results.find((r) => r.step === step.step)?.recordId),
     );
+    const blocked = await this.#run(async (view) => {
+      const catalog = pinnedCatalog(view);
+      for (const [recordId, { step }] of written) {
+        if (!created.has(recordId)) continue;
+        const user = await this.#referencedBy(
+          view,
+          catalog,
+          step.entity,
+          recordId,
+        );
+        if (user)
+          return `${user} now uses the ${localName(step.entity).replaceAll('_', ' ')} this change created, so archiving it would break that record.`;
+      }
+      return null;
+    });
+    if (blocked) return { outcome: 'refused', reason: blocked };
+    // Reverse order: archive what was made, put back what was changed. A
+    // record made in this change is archived, not restored field by field.
+    const intents: ImmutableJsonValue[] = [];
     for (const step of [...plan.steps].reverse()) {
       const result = results.find((entry) => entry.step === step.step);
-      if (result?.outcome !== 'succeeded' || !result.recordId) continue;
+      if (
+        result?.outcome !== 'succeeded' ||
+        !result.recordId ||
+        done.has(result.recordId)
+      )
+        continue;
       const inverse = step.risk.inverse;
       if (inverse?.kind === 'archive')
         intents.push({
@@ -639,7 +753,13 @@ export class OperationsAgentSession {
           patch: step.prior,
         });
     }
-    const planned = (await this.#plan({ intents }, true)) as Record<
+    // Each inverse is pinned to the revision the agent's write left, so the
+    // gateway's compare-and-write refuses it if anyone changed the record
+    // since; the check and the write are one.
+    const pins = new Map(
+      [...written].map(([recordId, entry]) => [recordId, entry.revision]),
+    );
+    const planned = (await this.#plan({ intents }, true, pins)) as Record<
       string,
       ImmutableJsonValue
     >;
@@ -650,24 +770,72 @@ export class OperationsAgentSession {
       };
     this.#undoPlans.add(planned.planId);
     this.toolCalls.push({ tool: 'undo:plan', isError: false });
-    const executed = (await this.#execute({
+    await this.#execute({
       planId: planned.planId,
-      executionIdempotencyKey: `undo-${changeId}`,
-    })) as Record<string, ImmutableJsonValue>;
-    if (executed.outcome !== 'executed')
-      return {
-        outcome: 'refused',
-        reason: `Undo stopped: ${JSON.stringify(executed.steps)}`,
-      };
-    this.#undone.add(changeId);
+      executionIdempotencyKey: `undo-${changeId}-${String(done.size)}`,
+    });
+    const undoPlan = this.#plans.get(planned.planId)!;
+    const undoResults = undoPlan.execution?.results ?? [];
+    for (const result of undoResults)
+      if (result.outcome === 'succeeded' && result.recordId)
+        done.add(result.recordId);
+    this.#undoneRecords.set(changeId, done);
     const verified = (await this.#verify({
       operationSessionId: planned.planId,
-    })) as Record<string, ImmutableJsonValue>;
+    }).catch(() => ({ verified: false }))) as Record<
+      string,
+      ImmutableJsonValue
+    >;
+    const failed = undoResults.find((result) => result.outcome !== 'succeeded');
+    if (failed)
+      return {
+        outcome: 'refused',
+        reason: `Undo stopped partway: ${String(done.size)} record(s) put back; the next one did not (${failed.error ?? failed.outcome}). Click Undo again to finish only what is left.`,
+      };
+    this.#undone.add(changeId);
     return {
       outcome: 'undone',
       summary: `Undid: ${latest.summary}`,
       verified: verified.verified === true,
     };
+  }
+
+  /**
+   * The first active record that names `recordId` in a reference field
+   * (`..._<type>_id`), as its number or name; null when none does.
+   */
+  async #referencedBy(
+    view: RequestRuntimeView,
+    catalog: PinnedCatalog,
+    entity: string,
+    recordId: string,
+  ): Promise<string | null> {
+    const type = localName(entity);
+    const word = type.split('_').at(-1)!;
+    for (const query of catalog.queries) {
+      if (
+        query.queryType !== 'list' ||
+        query.sourceEntityId === entity ||
+        localName(query.queryId) !== `${localName(query.sourceEntityId)}_list`
+      )
+        continue;
+      const field = query.selections.find((selection) => {
+        const name = localName(selection.fieldId);
+        return name.endsWith(`_${type}_id`) || name.endsWith(`_${word}_id`);
+      });
+      if (!field) continue;
+      const found = await this.#list(
+        view,
+        query,
+        { filters: [{ fieldId: field.fieldId, value: recordId }] },
+        1,
+        catalog,
+      ).catch(() => ({ records: [] as SemanticRecordDto[] }));
+      const row = found.records[0];
+      if (row)
+        return `${localName(query.sourceEntityId).replaceAll('_', ' ')} ${recordLabel(row) ?? row.recordId}`;
+    }
+    return null;
   }
 
   /** Records this session read or wrote, newest last; written ones marked. */
@@ -845,6 +1013,7 @@ export class OperationsAgentSession {
             queryId: query.queryId,
             arguments: withScope(query, { text }, this.#options.companyId),
           });
+          this.#learn(query.sourceEntityId, result.records.slice(0, limit));
           if (result.records.length > 0 || !list)
             return {
               mode,
@@ -856,6 +1025,7 @@ export class OperationsAgentSession {
             };
         }
         const listed = await this.#list(view, list!, { search: text }, 10);
+        this.#learn(list!.sourceEntityId, listed.records);
         return {
           mode,
           queryId: list!.queryId,
@@ -935,6 +1105,7 @@ export class OperationsAgentSession {
         );
         for (const record of listed.records.slice(0, 10))
           this.#touch(query.sourceEntityId, record, false);
+        this.#learn(query.sourceEntityId, listed.records);
         return {
           queryId,
           outcome: listed.records.length === 0 ? 'not-found' : 'exact',
@@ -957,6 +1128,8 @@ export class OperationsAgentSession {
       });
       for (const record of result.records.slice(0, 10))
         this.#touch(query.sourceEntityId, record, false);
+      if (result.outcome !== 'unsupported')
+        this.#learn(query.sourceEntityId, result.records.slice(0, limit));
       return {
         queryId,
         outcome: result.outcome,
@@ -1065,12 +1238,64 @@ export class OperationsAgentSession {
     };
   }
 
+  /**
+   * The child lines of a record a capability reads at execution: every
+   * record type whose create requires a relation to this one, listed under
+   * the parent through its own list query.
+   */
+  async #children(
+    view: RequestRuntimeView,
+    catalog: PinnedCatalog,
+    entity: string,
+    recordId: string,
+  ): Promise<readonly ChildSnapshot[]> {
+    const snapshots: ChildSnapshot[] = [];
+    const seen = new Set<string>();
+    for (const operation of catalog.operations) {
+      if (effectKind(operation) !== 'createRecordEffect') continue;
+      const child = catalog.operationEntity(operation);
+      for (const relation of operation.inputContract?.relationInputs ?? []) {
+        if (
+          !relation.required ||
+          relation.targetEntityId !== entity ||
+          seen.has(relation.relationId)
+        )
+          continue;
+        seen.add(relation.relationId);
+        const query = catalog.queries.find(
+          (candidate) =>
+            candidate.sourceEntityId === child &&
+            candidate.queryType === 'list' &&
+            localName(candidate.queryId) === `${localName(child)}_list`,
+        );
+        if (!query) continue;
+        const listed = await this.#list(
+          view,
+          query,
+          { parent: { relationId: relation.relationId, recordId } },
+          100,
+          catalog,
+        );
+        snapshots.push({
+          queryId: query.queryId,
+          relationId: relation.relationId,
+          rows: listed.records
+            .map((row) => [row.recordId, row.revision] as const)
+            .sort((a, b) => a[0].localeCompare(b[0])),
+        });
+      }
+    }
+    return snapshots;
+  }
+
   // -------------------------------------------------------------------- plan
 
   #plan(
     input: Record<string, ImmutableJsonValue>,
     /** Undo passes the person's click; the model's plans never do. */
     personsUndo = false,
+    /** Undo pins each record to the revision the agent's write left. */
+    pins?: ReadonlyMap<string, number>,
   ): Promise<ImmutableJsonValue> {
     if (
       input.requestedBulkMode !== undefined &&
@@ -1111,6 +1336,7 @@ export class OperationsAgentSession {
           operation,
           intent,
           step,
+          pins,
         );
         steps.push(built.step);
         checks.push(built.check);
@@ -1133,6 +1359,25 @@ export class OperationsAgentSession {
           note: 'nothing was written; the plan was not created',
         };
       const planId = this.#mint();
+      // A create runs at once only if the person may archive what it makes:
+      // otherwise its Undo would be refused (end review X5).
+      const usable = await this.#usableIds(view, catalog);
+      for (const [index, step] of steps.entries()) {
+        const inverse = step.risk.inverse;
+        if (
+          step.risk.riskClass === 'reversible' &&
+          inverse?.kind === 'archive' &&
+          !usable.operations.has(inverse.operationId)
+        )
+          steps[index] = {
+            ...step,
+            risk: {
+              riskClass: 'needsYes',
+              reason:
+                'you may not archive what it creates, so it could not be undone',
+            },
+          };
+      }
       const release = releaseOf(view);
       const digest = planDigest(steps, release);
       // A plan is reversible only when every step is, and an undo of a step
@@ -1231,6 +1476,7 @@ export class OperationsAgentSession {
     operation: RegisteredOperationDefinition,
     intent: Record<string, ImmutableJsonValue>,
     step: number,
+    pins?: ReadonlyMap<string, number>,
   ): Promise<{ step: PlanStep; check: ImmutableJsonValue; refused?: string }> {
     const where = `step ${String(step)} (${localName(operation.operationId)})`;
     const contract = operation.inputContract;
@@ -1241,6 +1487,19 @@ export class OperationsAgentSession {
     for (const key of ['values', 'relations', 'patch', 'arguments'])
       if (intent[key] !== undefined && intent[key] !== null && !keys.has(key))
         throw new ToolInputError(`${where}: this operation takes no ${key}`);
+    // Arguments are a flat object of plain values (a quantity, a reason);
+    // no operation here declares nested lists or objects.
+    if (
+      intent.arguments !== undefined &&
+      intent.arguments !== null &&
+      (!isRecord(intent.arguments) ||
+        Object.values(intent.arguments).some(
+          (value) => typeof value === 'object' && value !== null,
+        ))
+    )
+      throw new ToolInputError(
+        `${where}: arguments must be a flat object of plain values; nested lists or objects are not supported`,
+      );
     const fields = new Map(
       (contract?.fields ?? []).map((field) => [field.fieldId, field]),
     );
@@ -1272,6 +1531,15 @@ export class OperationsAgentSession {
           step,
           `${where} ${fieldId}`,
         );
+        // A currency is written as its code in capitals ("usd" -> "USD").
+        const written = out[fieldId];
+        if (
+          /_currency$/u.test(localName(fieldId)) &&
+          field.enumOptionIds.length === 0 &&
+          typeof written === 'string' &&
+          /^\s*[a-z]{3}\s*$/iu.test(written)
+        )
+          out[fieldId] = written.trim().toUpperCase();
       }
       return out;
     };
@@ -1326,13 +1594,15 @@ export class OperationsAgentSession {
       step,
       operation,
       entity,
-      risk: settingState(operation, prefix, { ...values, ...patch })
-        ? ({
-            riskClass: 'needsYes',
-            reason:
-              "it sets a document's state past its first one (only its posting operation should)",
-          } satisfies OperationRisk)
-        : operationRisk(catalog, operation),
+      // A create is judged here (nothing exists yet); an update is judged
+      // again below against the record it changes.
+      risk: writeRisk(
+        catalog,
+        operation,
+        prefix,
+        { ...values, ...patch },
+        null,
+      ),
       ...(values ? { values } : {}),
       ...(relations ? { relations } : {}),
       ...(patch ? { patch } : {}),
@@ -1376,8 +1646,20 @@ export class OperationsAgentSession {
     return {
       step: {
         ...base,
+        ...(effectKind(operation) === 'registeredCapabilityEffect'
+          ? { children: await this.#children(view, catalog, entity, target) }
+          : {}),
+        risk: writeRisk(
+          catalog,
+          operation,
+          prefix,
+          { ...values, ...patch },
+          record.values,
+        ),
         recordId: target,
-        pinnedRevision: record.revision,
+        // Undo pins the revision the agent's write left; otherwise the
+        // revision read now.
+        pinnedRevision: pins?.get(target) ?? record.revision,
         targetLabel: recordLabel(record),
         ...(patch
           ? {
@@ -1391,11 +1673,15 @@ export class OperationsAgentSession {
           : {}),
       },
       check,
-      ...(evaluation.outcome === 'refused'
+      ...(pins?.has(target) && pins.get(target) !== record.revision
         ? {
-            refused: `the declared precondition does not hold for this record (${describePredicate(operation.precondition)})`,
+            refused: `${recordLabel(record) ?? 'the record'} changed after the assistant's change (revision ${String(pins.get(target))} is now ${String(record.revision)}); undoing would overwrite that later change`,
           }
-        : {}),
+        : evaluation.outcome === 'refused'
+          ? {
+              refused: `the declared precondition does not hold for this record (${describePredicate(operation.precondition)})`,
+            }
+          : {}),
     };
   }
 
@@ -1456,6 +1742,19 @@ export class OperationsAgentSession {
     let stopped = false;
     let releaseChanged: PlanRelease | null = null;
     for (const step of plan.steps) {
+      if (!stopped && this.#signal?.aborted) {
+        // The person's Stop: nothing more is written after it.
+        stopped = true;
+        results.push({
+          step: step.step,
+          operationId: step.operation.operationId,
+          outcome: 'not-run',
+          recordId: null,
+          revision: null,
+          error: 'stopped by the person before this step; it did not run',
+        });
+        continue;
+      }
       if (stopped) {
         results.push({
           step: step.step,
@@ -1494,10 +1793,29 @@ export class OperationsAgentSession {
         // Checked in the same view the step runs in: a release that changed
         // between two steps stops the plan before the next one runs.
         let changedTo: PlanRelease | null = null;
-        const result = await this.#run((view) => {
+        let linesChanged: string | null = null;
+        const result = await this.#run(async (view) => {
           if (!sameRelease(releaseOf(view), plan.release)) {
             changedTo = releaseOf(view);
-            return Promise.resolve(null);
+            return null;
+          }
+          // End review X4: the lines the yes covered are re-read just before
+          // the capability runs; any drift refuses the step. The window that
+          // remains is between this read and the capability's own read in
+          // its transaction (not under the posting locks).
+          if (step.children && typeof step.recordId === 'string') {
+            const now = await this.#children(
+              view,
+              pinnedCatalog(view),
+              step.entity,
+              step.recordId,
+            );
+            if (JSON.stringify(now) !== JSON.stringify(step.children)) {
+              linesChanged = `its lines changed after the plan was approved (${step.children
+                .map((child) => localName(child.queryId))
+                .join(', ')}); it did not run. Plan again and ask the person.`;
+              return null;
+            }
           }
           return this.#options.runtime.operationGateway.invoke(
             view,
@@ -1521,7 +1839,7 @@ export class OperationsAgentSession {
             ),
           );
         });
-        if (changedTo || !result) {
+        if (changedTo || linesChanged || !result) {
           stopped = true;
           releaseChanged = changedTo;
           results.push({
@@ -1531,6 +1849,7 @@ export class OperationsAgentSession {
             recordId: null,
             revision: null,
             error:
+              linesChanged ??
               'the active release changed before this step; it did not run',
           });
           continue;
@@ -1553,6 +1872,7 @@ export class OperationsAgentSession {
             result.readBack.revision,
           );
           this.#touch(step.entity, result.readBack, true);
+          this.#learn(step.entity, [result.readBack]);
         }
         results.push({
           step: step.step,
@@ -1579,7 +1899,8 @@ export class OperationsAgentSession {
         });
       }
     }
-    plan.execution = { key, results };
+    this.#sequence += 1;
+    plan.execution = { key, results, sequence: this.#sequence };
     plan.status = stopped ? 'failed' : 'executed';
     if (releaseChanged) return replanResult(plan, releaseChanged, results);
     return executionReport(plan);
@@ -1690,6 +2011,7 @@ export class OperationsAgentSession {
           ...(record ? { observed: compactValues(record.values) } : {}),
         });
       }
+      this.#verified.add(planId);
       return {
         operationSessionId: planId,
         verified: checks.every(
@@ -1698,6 +2020,30 @@ export class OperationsAgentSession {
         steps: checks,
       };
     });
+  }
+
+  /**
+   * The host's own read-back of every plan that wrote something and was not
+   * verified (a Stop, a handoff or an error cut the model off before
+   * erp_verify). Verification never depends on the model or the connection.
+   */
+  async verifyPending(): Promise<
+    readonly { planId: string; verified: boolean }[]
+  > {
+    const checked: { planId: string; verified: boolean }[] = [];
+    for (const plan of this.#plans.values()) {
+      if (
+        !plan.execution ||
+        this.#verified.has(plan.planId) ||
+        !plan.execution.results.some((r) => r.outcome === 'succeeded')
+      )
+        continue;
+      const report = (await this.#verify({
+        operationSessionId: plan.planId,
+      }).catch(() => ({ verified: false }))) as { verified?: unknown };
+      checked.push({ planId: plan.planId, verified: report.verified === true });
+    }
+    return checked;
   }
 
   #bounded(
@@ -1754,24 +2100,23 @@ function screenFacts(
   const entity = surface.dataSourceQueryId
     ? catalog.query(surface.dataSourceQueryId)?.sourceEntityId
     : undefined;
-  const record =
-    typeof screen.recordId === 'string' && uuidPattern.test(screen.recordId)
-      ? screen.recordId
-      : null;
+  // A record is "this" only on a record page whose own declared data
+  // source is a get: a list page ignores a `record` parameter, so a stale
+  // link there must not point the assistant at a record nobody sees.
   const getQuery =
-    entity && record
-      ? (catalog.queries.find(
+    surface.archetype === 'record'
+      ? catalog.queries.find(
           (query) =>
             query.queryId === surface.dataSourceQueryId &&
             query.queryType === 'get',
-        ) ??
-        catalog.queries.find(
-          (query) =>
-            query.sourceEntityId === entity &&
-            query.queryType === 'get' &&
-            localName(query.queryId) === `${localName(entity)}_get`,
-        ))
+        )
       : undefined;
+  const record =
+    getQuery &&
+    typeof screen.recordId === 'string' &&
+    uuidPattern.test(screen.recordId)
+      ? screen.recordId
+      : null;
   return {
     text: `Screen: the person is on "${surface.label ?? localName(surface.surfaceId)}" (${surface.archetype ?? 'page'}${entity ? `, ${localName(entity)}` : ''})${record ? `, showing record ${record}; "this", "it" and "here" mean that record` : ''}.`,
     recordId: record,
@@ -1781,22 +2126,45 @@ function screenFacts(
 }
 
 /**
- * Whether a write sets the record type's own state field (`<type>_state`, a
- * choice) to anything but its first option, the state a record starts in.
+ * The risk of a create or update given what it writes and, for an update,
+ * the record it changes (end review X5). On top of the operation's own
+ * class (`operationRisk`):
+ * - any written choice field named `..._state` or `..._status` is a state
+ *   write: it needs a yes whenever the value changes and either the old or
+ *   the new value is not the field's first option (for a create, whenever
+ *   the value is not the first option);
+ * - an update of a settings record (`..._settings`) needs a yes.
  */
-function settingState(
+function writeRisk(
+  catalog: PinnedCatalog,
   operation: RegisteredOperationDefinition,
   prefix: string,
   written: Readonly<Record<string, ImmutableJsonValue>>,
-): boolean {
-  const field = (operation.inputContract?.fields ?? []).find(
-    (candidate) =>
-      localName(candidate.fieldId) === `${prefix}_state` &&
-      candidate.enumOptionIds.length > 0,
-  );
-  if (!field || !(field.fieldId in written)) return false;
-  const value = written[field.fieldId];
-  return value !== null && value !== field.enumOptionIds[0];
+  current: Readonly<Record<string, ImmutableJsonValue>> | null,
+): OperationRisk {
+  const catalogRisk = operationRisk(catalog, operation);
+  if (catalogRisk.riskClass !== 'reversible') return catalogRisk;
+  for (const field of operation.inputContract?.fields ?? []) {
+    const name = localName(field.fieldId);
+    if (
+      !/_(?:state|status)$/u.test(name) ||
+      field.enumOptionIds.length === 0 ||
+      !(field.fieldId in written)
+    )
+      continue;
+    const next = written[field.fieldId] ?? null;
+    const first = field.enumOptionIds[0];
+    const before = current ? (current[field.fieldId] ?? null) : null;
+    const changes = current ? next !== before : next !== null;
+    if (changes && (next !== first || (current !== null && before !== first)))
+      return {
+        riskClass: 'needsYes',
+        reason: `it changes the record's ${name.replaceAll('_', ' ')}`,
+      };
+  }
+  if (current !== null && prefix.endsWith('_settings'))
+    return { riskClass: 'needsYes', reason: 'it changes a settings record' };
+  return catalogRisk;
 }
 
 const ISO_CURRENCY = /^[A-Z]{3}$/u;
@@ -1817,7 +2185,13 @@ function currencyCode(value: string): string | null {
 
 /** What an executed plan did, in short words, for "Did: ..." and Undo. */
 function changeSummary(plan: StoredPlan): string {
+  // Only what succeeded, in the order it committed.
   return plan.steps
+    .filter(
+      (step) =>
+        plan.execution?.results.find((entry) => entry.step === step.step)
+          ?.outcome === 'succeeded',
+    )
     .map((step) => {
       const result = plan.execution?.results.find(
         (entry) => entry.step === step.step,
@@ -2137,6 +2511,7 @@ function planDigest(steps: readonly PlanStep[], release: PlanRelease): string {
           relations: step.relations ?? null,
           patch: step.patch ?? null,
           arguments: step.arguments ?? null,
+          children: step.children ?? null,
         })),
       }),
     )

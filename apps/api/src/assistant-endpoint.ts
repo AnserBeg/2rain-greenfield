@@ -203,7 +203,12 @@ export function createAssistantEndpoint(
           );
           return true;
         }
-        const undone = await mine.session.undo(body.changeId);
+        // Undo holds the conversation like a run: no ask or second Undo
+        // interleaves with it.
+        mine.running = new AbortController();
+        const undone = await mine.session.undo(body.changeId).finally(() => {
+          mine.running = null;
+        });
         response.statusCode = 200;
         response.end(
           JSON.stringify(
@@ -214,6 +219,23 @@ export function createAssistantEndpoint(
                 }
               : { outcome: 'refused', text: `Not undone: ${undone.reason}` },
           ),
+        );
+        return true;
+      }
+      if (action === 'latest') {
+        // The conversation's current undoable change, for a panel that
+        // reopened after a navigation or a Stop.
+        response.setHeader('content-type', 'application/json; charset=utf-8');
+        const change = mine?.session.latestChange();
+        response.statusCode = 200;
+        response.end(
+          JSON.stringify({
+            running: Boolean(mine?.running),
+            did:
+              change && !change.undone && !mine?.running
+                ? { changeId: change.changeId, summary: change.summary }
+                : null,
+          }),
         );
         return true;
       }
@@ -258,13 +280,18 @@ export function createAssistantEndpoint(
         }
       });
       emit({ type: 'conversation', id: conversation.id, capUsd });
+      const before = conversation.session.latestChange()?.changeId ?? null;
       try {
         await runTurn(conversation, text, screenOf(body.screen), controller);
       } catch (error) {
+        // An error is an exit path too: what was written is still checked
+        // and still offered for Undo.
+        await conversation.session.verifyPending().catch(() => []);
         emit({
           type: 'error',
           message:
             error instanceof Error ? error.message : 'the assistant failed',
+          ...didThisTurn(conversation.session.latestChange(), before),
         });
       } finally {
         conversation.running = null;
@@ -324,6 +351,10 @@ export function createAssistantEndpoint(
       },
     });
     conversation.history = run.conversation;
+    // Whatever cut the model off (Stop, a handoff, a cap), the host reads
+    // back every write of this turn that the model did not verify.
+    const checked = await conversation.session.verifyPending();
+    const unverified = checked.filter((entry) => !entry.verified).length;
     const handoff =
       run.stop === 'answered' ? CUSTOMIZE_HANDOFF.exec(run.answer) : null;
     if (handoff) {
@@ -332,7 +363,8 @@ export function createAssistantEndpoint(
         type: 'answer',
         ...(await handOff(text)),
         stop: 'handoff',
-        links: [],
+        links: await links(conversation, run.answer),
+        ...didThisTurn(conversation.session.latestChange(), changeBefore),
         usd: run.usd,
         spentUsd: conversation.meter.usd,
       });
@@ -344,7 +376,7 @@ export function createAssistantEndpoint(
         run.stop === 'spend-cap'
           ? `This conversation reached its spending limit of USD ${capUsd.toFixed(2)}, so I stopped. Start a new conversation to keep going.`
           : run.stop === 'stopped'
-            ? 'Stopped. Nothing more will run; anything already done stays done.'
+            ? `Stopped. Nothing more will run; anything already done stays done${checked.length > 0 ? ` and was checked${unverified > 0 ? ` (${String(unverified)} check(s) did not confirm it; look at the records)` : ''}` : ''}.`
             : run.answer || '(no answer)',
       stop: run.stop,
       links: await links(conversation, run.answer),

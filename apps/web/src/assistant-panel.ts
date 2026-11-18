@@ -179,6 +179,34 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     scroll();
   };
 
+  // "Did: ..." with Undo for the conversation's latest change. Shown after
+  // an answer, and again after a Stop or a page load (from ?assistant=latest).
+  const showDid = (container, change) => {
+    if (log.querySelector('[data-assistant-did="' + change.changeId + '"]')) return;
+    const did = container.appendChild(element('p', 'Did: ' + change.summary + ' ', 'assistant-did'));
+    did.setAttribute('data-assistant-did', change.changeId);
+    const undo = did.appendChild(element('button', 'Undo'));
+    undo.type = 'button';
+    undo.setAttribute('data-assistant-undo', '');
+    const owner = conversation;
+    undo.addEventListener('click', async () => {
+      undo.disabled = true;
+      const answer = await post('undo', { conversation: owner, changeId: change.changeId });
+      const result = await answer.json().catch(() => ({ text: 'Undo failed.' }));
+      did.appendChild(element('span', ' ' + result.text, result.outcome === 'undone' ? 'assistant-muted' : 'assistant-error'));
+      if (result.outcome !== 'undone') undo.disabled = false;
+    });
+    scroll();
+  };
+  const offerLatest = async (tries = 1) => {
+    if (!conversation) return;
+    const answer = await post('latest', { conversation }).catch(() => null);
+    const result = answer && answer.ok ? await answer.json().catch(() => null) : null;
+    if (result && result.did) showDid(log, result.did);
+    else if (result && result.running && tries < 10) setTimeout(() => offerLatest(tries + 1), 1000);
+  };
+  offerLatest();
+
   const ask = async (text) => {
     const mine = log.appendChild(element('div', text, 'assistant-me'));
     mine.setAttribute('data-assistant-said', '');
@@ -245,20 +273,7 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
               const open = draft.appendChild(element('a', 'Review it on the Customize screen'));
               open.href = '/?customize';
             }
-            if (event.did) {
-              const did = reply.appendChild(element('p', 'Did: ' + event.did.summary + ' ', 'assistant-did'));
-              did.setAttribute('data-assistant-did', event.did.changeId);
-              const undo = did.appendChild(element('button', 'Undo'));
-              undo.type = 'button';
-              undo.setAttribute('data-assistant-undo', '');
-              undo.addEventListener('click', async () => {
-                undo.disabled = true;
-                const answer = await post('undo', { conversation, changeId: event.did.changeId });
-                const result = await answer.json().catch(() => ({ text: 'Undo failed.' }));
-                did.appendChild(element('span', ' ' + result.text, result.outcome === 'undone' ? 'assistant-muted' : 'assistant-error'));
-                if (result.outcome !== 'undone') undo.disabled = false;
-              });
-            }
+            if (event.did) showDid(reply, event.did);
             reply.appendChild(element('p', 'USD ' + Number(event.spentUsd).toFixed(2) + ' used in this conversation', 'assistant-muted'));
           } else if (event.type === 'error') {
             reply.appendChild(element('p', event.message, 'assistant-error'));
@@ -267,7 +282,12 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
       }
     } catch (error) {
       if (!controller.signal.aborted) reply.appendChild(element('p', String(error && error.message || error), 'assistant-error'));
-      else reply.appendChild(element('p', 'Stopped.', 'assistant-muted'));
+      else {
+        reply.appendChild(element('p', 'Stopped.', 'assistant-muted'));
+        // What was written before the Stop is checked by the host and stays
+        // undoable; ask for it once the run has wound down.
+        setTimeout(() => offerLatest(), 1000);
+      }
     } finally {
       running = null;
       pending = null;
