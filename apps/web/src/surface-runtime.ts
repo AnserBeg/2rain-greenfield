@@ -2664,7 +2664,7 @@ function renderWorkspaceContextBar(context: WorkspaceContextBar): string {
             parameters.set('surface', context.targetSurfaceId);
             parameters.set(context.parameterId, option.recordId);
             const selected = option.recordId === context.selectedRecordId;
-            return `<a class="workspace-company" href="/?${parameters.toString()}" data-legal-entity-id="${escapeHtml(option.recordId)}"${selected ? ' aria-current="true"' : ''}>${escapeHtml(option.label)}</a>`;
+            return `<a class="workspace-company" title="${escapeHtml(option.label)}" href="/?${parameters.toString()}" data-legal-entity-id="${escapeHtml(option.recordId)}"${selected ? ' aria-current="true"' : ''}>${escapeHtml(option.label)}</a>`;
           })
           .join('')
   }</span></nav>`;

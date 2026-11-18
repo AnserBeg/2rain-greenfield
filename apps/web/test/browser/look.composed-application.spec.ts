@@ -29,6 +29,7 @@ import {
  */
 const SCREENS = [
   'home',
+  'po-list',
   'po',
   'receive',
   'stock',
@@ -91,6 +92,7 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
 
         const urls: Readonly<Record<Screen, string>> = {
           home: `${base}/`,
+          'po-list': await menuDestination(page, base, 'Purchase orders'),
           po: purchaseOrder,
           receive: purchaseOrder,
           stock: await menuDestination(page, base, 'Stock by item'),
@@ -99,6 +101,11 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
           'new-po': await newPurchaseOrder(page, base),
         };
 
+        for (const width of [1280, 1920]) {
+          await page.setViewportSize({ width, height: 900 });
+          await page.goto(purchaseOrder);
+          await requireAlignment(page, 'po');
+        }
         for (const scheme of ['light', 'dark'] as const)
           for (const viewport of VIEWPORTS) {
             await page.emulateMedia({ colorScheme: scheme });
@@ -150,6 +157,7 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
                 });
               }
               await requireLedgerParts(page, screen, viewport.width);
+              if (scheme === 'light') await requireAlignment(page, screen);
               const text = await page.locator('body').innerText();
               // The order date is a date (round 2): no "(UTC)" anywhere.
               expect.soft(rawCodes(text), `${screen} raw codes`).toEqual([]);
@@ -200,6 +208,7 @@ async function requireLedgerParts(
   const parts: Readonly<Record<Screen, readonly string[]>> = {
     // Searched from the top bar (round 3): no find box of its own.
     home: ['.launcher-tiles .launcher-tile', '.shell-search input'],
+    'po-list': ['[data-declared-list]', '.list-controls'],
     po: [
       '.composition-header h1',
       '.composition-business-status',
@@ -228,6 +237,213 @@ async function requireLedgerParts(
     await expect
       .soft(page.locator(selector).first(), `${screen} shows ${selector}`)
       .toBeAttached();
+}
+
+/** Measure the painted text and controls as well as their enclosing sheets. */
+async function requireAlignment(page: Page, screen: Screen): Promise<void> {
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+  const errors = await page.evaluate((screen) => {
+    const failures: string[] = [];
+    function near(name: string, actual: number, expected: number) {
+      if (Math.abs(actual - expected) > 1)
+        failures.push(`${name}: ${actual} vs ${expected}`);
+    }
+    function el(selector: string): HTMLElement {
+      const found = document.querySelector<HTMLElement>(selector);
+      if (!found) throw new Error(`${screen} missing ${selector}`);
+      return found;
+    }
+    const rect = (selector: string) => el(selector).getBoundingClientRect();
+    function ink(node: Element) {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      return range.getBoundingClientRect();
+    }
+    const grid = rect('main .surface-grid');
+    const area = rect('.workspace');
+    const wide = innerWidth > 900;
+    near('equal page gutters', grid.left - area.left, area.right - grid.right);
+    near('top bar search', rect('.shell-search').left, grid.left);
+    near('top bar account', rect('.shell-account').right, grid.right);
+    near('title', rect('main h1').left, grid.left);
+    const sheet = (selector: string) => {
+      const box = rect(selector);
+      near(selector + ' left', box.left, grid.left);
+      near(selector + ' right', box.right, grid.right);
+    };
+    if (screen === 'home') sheet('.launcher-tiles ul');
+    if (screen === 'stock' || screen === 'po-list') {
+      sheet('[data-declared-list]');
+      const firstCell = el('[data-declared-list] tbody td');
+      const cards =
+        getComputedStyle(el('[data-declared-list] thead')).position ===
+        'absolute';
+      near(
+        'search and first column',
+        rect('.list-controls input[type=search]').left,
+        cards ? firstCell.getBoundingClientRect().left : ink(firstCell).left,
+      );
+    }
+    if (['po', 'so', 'new-po', 'record', 'receive'].includes(screen)) {
+      near('breadcrumb', rect('.record-breadcrumb').left, grid.left);
+      near('eyebrow', rect('main .eyebrow').left, grid.left);
+    }
+    if (screen === 'new-po') {
+      for (const selector of [
+        '.panel:has([data-document-editor])',
+        '.draft-lines-panel',
+        '.panel:has([data-save-boundary])',
+      ])
+        sheet(selector);
+      near(
+        'form inset',
+        rect('[data-document-editor] legend').left,
+        rect('.draft-lines-panel h2').left,
+      );
+      near(
+        'first form cell',
+        rect('.draft-line .reference-search input').left,
+        rect('.draft-lines-panel h2').left,
+      );
+      const fields = [
+        ...document.querySelectorAll('.draft-header > .form-field'),
+      ].map((node) => node.getBoundingClientRect());
+      const perRow = fields.filter(
+        (field) => Math.abs(field.top - fields[0]!.top) < 1,
+      ).length;
+      for (let i = perRow; i < fields.length; i++) {
+        near('field column left', fields[i]!.left, fields[i % perRow]!.left);
+        near('field column right', fields[i]!.right, fields[i % perRow]!.right);
+      }
+    }
+    if (screen === 'record') {
+      sheet('.panel:has(.record-section-group)');
+      near(
+        'record facts and section',
+        rect('.record-section-group h2').left,
+        rect('.record-fields dt').left,
+      );
+    }
+    if (['po', 'so', 'receive'].includes(screen)) {
+      sheet('.composition-progression');
+      const facts = rect('.composition-facts');
+      const rail = rect('.composition-rail');
+      const lines = el('.composition-collection:has(.line-progress)');
+      const first = lines.querySelector('tbody td strong')!;
+      near('sheet left', facts.left, grid.left);
+      near('joined sheets', lines.getBoundingClientRect().right, facts.right);
+      near('rail right', rail.right, grid.right);
+      if (!wide) near('stacked rail left', rail.left, grid.left);
+      near(
+        'facts and section',
+        rect('.composition-header-facts dt').left,
+        lines.querySelector('h2')!.getBoundingClientRect().left,
+      );
+      near(
+        'facts and first cell',
+        rect('.composition-header-facts dt').left,
+        first.getBoundingClientRect().left,
+      );
+      near(
+        'details inset',
+        rect('[data-composition-fields] h2').left,
+        first.getBoundingClientRect().left,
+      );
+      near(
+        'header menu at eyebrow',
+        rect('.composition-record-actions > summary').top,
+        rect('.composition-title .eyebrow').top,
+      );
+      near(
+        'header menu right',
+        rect('.composition-record-actions > summary').right,
+        grid.right,
+      );
+      const row = document.querySelector(
+        '.composition-rail [data-resolution=empty]',
+      );
+      if (row) {
+        const label = row.querySelector('h2')!.getBoundingClientRect();
+        const pill = row
+          .querySelector(
+            '[data-message-sentence], .composition-message strong',
+          )!
+          .getBoundingClientRect();
+        near('rail insets', label.left - rail.left, rail.right - pill.right);
+      }
+      if (wide) {
+        near(
+          'progress baseline',
+          ink(el('.line-progress > span')).bottom,
+          ink(el('td[data-cell-role=quantity]')).bottom,
+        );
+        const amount = lines.querySelector('td[data-column-label="Amount"]');
+        if (amount)
+          near(
+            'amount and grand total',
+            ink(amount).right,
+            ink(lines.querySelector('.composition-totals div:last-child dd')!)
+              .right,
+          );
+      }
+    }
+    if (screen === 'receive') {
+      near(
+        'dialog fields',
+        rect('.composition-task-header h2').left,
+        rect('.composition-inputs').left,
+      );
+      near(
+        'dialog lines',
+        rect('.composition-task-rows legend').left,
+        rect('.composition-task-header h2').left,
+      );
+      near(
+        'dialog footer',
+        rect('.composition-task-footer button:last-child').right,
+        rect('.composition-inputs').right,
+      );
+    }
+    for (const table of document.querySelectorAll<HTMLTableElement>(
+      'main table',
+    )) {
+      const head = table.tHead?.rows[0];
+      const row = table.tBodies[0]?.rows[0];
+      if (!row || !head || !table.getBoundingClientRect().width) continue;
+      const cards = getComputedStyle(table.tHead!).position === 'absolute';
+      for (const cell of row.cells) {
+        const th = head.cells[cell.cellIndex];
+        if (!th || !cell.getBoundingClientRect().width) continue;
+        if (
+          !th.matches(
+            '[data-cell-kind=number],.composition-quantity,.composition-progress-heading',
+          )
+        )
+          continue;
+        near(
+          'numeric cell right alignment',
+          getComputedStyle(cell).textAlign === 'right' ? 1 : -1,
+          1,
+        );
+        if (cards || !th.getBoundingClientRect().width) continue;
+        const control = cell.querySelector('input');
+        const header =
+          th.querySelector('a')?.getBoundingClientRect() ?? ink(th);
+        near(
+          th.textContent + ' figures',
+          control?.getBoundingClientRect().right ?? ink(cell).right,
+          header.right,
+        );
+      }
+    }
+    return failures;
+  }, screen);
+  expect
+    .soft(
+      errors,
+      `${screen} alignment at ${String(page.viewportSize()?.width)}`,
+    )
+    .toEqual([]);
 }
 
 async function menuDestination(

@@ -2824,6 +2824,12 @@ async function editorResponse(
     const shownLineFields = definition.lineFields.filter(
       (field) => field.disclosure !== 'more',
     );
+    const figure = (fieldId: string) =>
+      DECIMAL_KINDS.includes(
+        shape(definition.lineFormSurfaceId).inputs.get(fieldId)?.kind ?? '',
+      )
+        ? ' data-cell-kind="number"'
+        : '';
     const lineRows = await Promise.all(
       buffer.lines.map(async (line, index) => {
         const number = index + 1;
@@ -2846,7 +2852,7 @@ async function editorResponse(
           .filter(({ field }) => field.disclosure !== 'more')
           .map(
             ({ field, html }) =>
-              `<td data-label="${h(field.label)}" class="draft-line__cell draft-line__cell--${field.reference ? 'reference' : field.presentation?.kind === 'derived' ? 'derived' : 'value'}">${html}</td>`,
+              `<td data-label="${h(field.label)}"${figure(field.fieldId)} class="draft-line__cell draft-line__cell--${field.reference ? 'reference' : field.presentation?.kind === 'derived' ? 'derived' : 'value'}">${html}</td>`,
           );
         const moreFields = rendered.filter(
           ({ field }) => field.disclosure === 'more',
@@ -2865,7 +2871,7 @@ async function editorResponse(
       `<table class="draft-lines form-fields"><thead><tr>${shownLineFields
         .map(
           (field) =>
-            `<th scope="col" class="draft-lines__heading draft-lines__heading--${field.reference ? 'reference' : field.presentation?.kind === 'derived' ? 'derived' : 'value'}">${h(field.label)}${field.presentation?.kind === 'derived' ? '' : required(definition.lineFormSurfaceId, field.fieldId)}</th>`,
+            `<th scope="col"${figure(field.fieldId)} class="draft-lines__heading draft-lines__heading--${field.reference ? 'reference' : field.presentation?.kind === 'derived' ? 'derived' : 'value'}">${h(field.label)}${field.presentation?.kind === 'derived' ? '' : required(definition.lineFormSurfaceId, field.fieldId)}</th>`,
         )
         .join(
           '',

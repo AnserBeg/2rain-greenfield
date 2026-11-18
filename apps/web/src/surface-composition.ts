@@ -1239,12 +1239,23 @@ function renderPresentedChild(
           `<span><span class="composition-cell-label">${h(column.label)}</span> ${h(row.cells[column.columnId] ?? '—')}</span>`,
       )
       .join('');
+  const hasActions =
+    definition.presentation?.selection !== 'none' || rowActions.length > 0;
+  // On a sheet with totals, keep the amounts at the end of the row. Its
+  // actions follow the product instead, preserving their links and forms.
+  const print = surface.composition?.presentation?.print;
+  const actionsAfter =
+    print?.totals?.length &&
+    print.datasets[0] === definition.datasetId &&
+    primary
+      ? primary
+      : displayed.at(-1);
   const body =
     child.status === 'failed'
       ? childFailure(child.error)
       : child.status === 'empty'
         ? compositionMessage('COMPOSITION_CHILD_EMPTY')
-        : `<div class="data-table-wrap"${definition.presentation?.compact ? ` data-compact="${h(definition.presentation.compact)}" tabindex="0" role="region" aria-label="${h(definition.label)} table; scroll for all columns"` : ''}><table><thead><tr>${displayed.map((column) => `<th scope="col" class="${column.presentation?.role === 'quantity' ? 'composition-quantity' : ''}">${h(column.label)}</th>${column === primary ? progressHeading : ''}`).join('')}${definition.presentation?.selection !== 'none' || rowActions.length ? '<th scope="col">Actions</th>' : ''}</tr></thead><tbody>${child.rows
+        : `<div class="data-table-wrap"${definition.presentation?.compact ? ` data-compact="${h(definition.presentation.compact)}" tabindex="0" role="region" aria-label="${h(definition.label)} table; scroll for all columns"` : ''}><table><thead><tr>${displayed.map((column) => `<th scope="col" class="${column.presentation?.role === 'quantity' ? 'composition-quantity' : ''}">${h(column.label)}</th>${column === actionsAfter && hasActions ? '<th scope="col">Actions</th>' : ''}${column === primary ? progressHeading : ''}`).join('')}</tr></thead><tbody>${child.rows
             .map((row) => {
               const selected =
                 data.selections[definition.datasetId]?.recordId ===
@@ -1276,15 +1287,13 @@ function renderPresentedChild(
                         applicable(action, rowData),
                     )
                   : [];
-              return `<tr data-compact-card="true" data-presented-row="true" data-record-id="${h(row.record.recordId)}" ${selected ? 'data-selected="true"' : ''}>${displayed.map((column) => `<td data-column-label="${h(column.label)}" data-column-priority="${column.presentation?.priority ?? column.orderKey}" data-cell-role="${column.presentation?.role ?? 'value'}">${column === primary ? `<strong>${h(row.cells[column.columnId] ?? '—')}</strong><div class="composition-cell-secondary">${cells(row, secondary)}</div>${detail.length ? `<details class="composition-cell-details" data-cell-role="detail"><summary>Supporting details</summary><div class="composition-cell-secondary">${cells(row, detail)}</div></details>` : ''}` : h(row.cells[column.columnId] ?? '—')}</td>${column === primary ? progressCell(row) : ''}`).join('')}${
-                definition.presentation?.selection !== 'none' ||
-                rowActions.length
-                  ? `<td data-cell-role="actions" data-column-label="Actions">${selectedActions.map((action) => actionLink(action, rowData, view)).join('')}${definition.presentation?.selection !== 'none' ? `<a href="${h(url.pathname + url.search + url.hash)}" ${active ? 'aria-current="true"' : ''}>${active ? 'Selected' : 'Select'}</a>` : ''}${rowActions
-                      .filter((action) => applicable(action, rowData))
-                      .map((action) => actionLink(action, rowData, view))
-                      .join('')}</td>`
-                  : ''
-              }</tr>`;
+              const actionCell = hasActions
+                ? `<td data-cell-role="actions" data-column-label="Actions">${selectedActions.map((action) => actionLink(action, rowData, view)).join('')}${definition.presentation?.selection !== 'none' ? `<a href="${h(url.pathname + url.search + url.hash)}" ${active ? 'aria-current="true"' : ''}>${active ? 'Selected' : 'Select'}</a>` : ''}${rowActions
+                    .filter((action) => applicable(action, rowData))
+                    .map((action) => actionLink(action, rowData, view))
+                    .join('')}</td>`
+                : '';
+              return `<tr data-compact-card="true" data-presented-row="true" data-record-id="${h(row.record.recordId)}" ${selected ? 'data-selected="true"' : ''}>${displayed.map((column) => `<td data-column-label="${h(column.label)}" data-column-priority="${column.presentation?.priority ?? column.orderKey}" data-cell-role="${column.presentation?.role ?? 'value'}">${column === primary ? `<strong>${h(row.cells[column.columnId] ?? '—')}</strong><div class="composition-cell-secondary">${cells(row, secondary)}</div>${detail.length ? `<details class="composition-cell-details" data-cell-role="detail"><summary>Supporting details</summary><div class="composition-cell-secondary">${cells(row, detail)}</div></details>` : ''}` : h(row.cells[column.columnId] ?? '—')}</td>${column === actionsAfter ? actionCell : ''}${column === primary ? progressCell(row) : ''}`).join('')}</tr>`;
             })
             .join('')}</tbody></table></div>`;
   return `<section id="${h(definition.datasetId)}" class="panel data-panel composition-collection" data-composition-dataset="${h(definition.datasetId)}" data-resolution="${child.status}"${definition.presentation?.rail ? ' data-composition-rail' : ''}><div class="composition-collection-heading"><h2>${h(definition.label)}</h2>${definition.presentation?.description ? `<details><summary>About these quantities</summary><p class="composition-description">${h(definition.presentation.description)}</p></details>` : ''}</div>${body}</section>`;
@@ -2723,7 +2732,13 @@ export async function submitCompositionAction(
       );
       const { primary, secondary, quantities } = rowColumns();
       const errorId = 'composition-task-rows-error';
-      rows = `<fieldset class="composition-task-rows" data-task-rows="${h(taskRowsDeclared.datasetId)}"${rowsError ? ` aria-describedby="${errorId}"` : ''}><legend>${h(rowsDataset.definition.label)}</legend>${taskRowsDeclared.fillLabel ? `<button type="submit" class="secondary-action" name="taskStage" value="fill" formnovalidate>${h(taskRowsDeclared.fillLabel)}</button>` : ''}${rowsError ? `<small class="field-error" id="${errorId}">${h(rowsError)}</small>` : ''}<div class="data-table-wrap"><table><thead><tr><th scope="col">${h(primary?.label ?? '')}</th>${quantities.map((column) => `<th scope="col" class="composition-quantity${figureClass(column)}">${h(column.label)}</th>`).join('')}${perRowInputs.map((input) => `<th scope="col"${input.presentation?.kind === 'derived' ? ' class="composition-task-derived"' : ''}>${h(input.label)}</th>`).join('')}</tr></thead><tbody>${current.rowIds
+      const numericRowInput = (input: (typeof perRowInputs)[number]) =>
+        input.type === 'quantity' ||
+        (input.type === 'text' &&
+          DECIMAL_KINDS.includes(
+            boundInputField(view, current.action, input.inputId)?.kind ?? '',
+          ));
+      rows = `<fieldset class="composition-task-rows" data-task-rows="${h(taskRowsDeclared.datasetId)}"${rowsError ? ` aria-describedby="${errorId}"` : ''}><legend>${h(rowsDataset.definition.label)}</legend>${taskRowsDeclared.fillLabel ? `<button type="submit" class="secondary-action" name="taskStage" value="fill" formnovalidate>${h(taskRowsDeclared.fillLabel)}</button>` : ''}${rowsError ? `<small class="field-error" id="${errorId}">${h(rowsError)}</small>` : ''}<div class="data-table-wrap"><table><thead><tr><th scope="col">${h(primary?.label ?? '')}</th>${quantities.map((column) => `<th scope="col" class="composition-quantity${figureClass(column)}">${h(column.label)}</th>`).join('')}${perRowInputs.map((input) => `<th scope="col"${input.presentation?.kind === 'derived' ? ' class="composition-task-derived"' : numericRowInput(input) ? ' data-cell-kind="number"' : ''}>${h(input.label)}</th>`).join('')}</tr></thead><tbody>${current.rowIds
         .map((rowId) => {
           const cells =
             (
@@ -2744,14 +2759,8 @@ export async function submitCompositionAction(
                 : '';
               if (input.presentation?.kind === 'derived')
                 return `<td class="composition-task-derived" data-column-label="${h(input.label)}"><output class="derived-value" data-derived-input>${h(cells[input.presentation.column.columnId] ?? '—')}</output>${message}</td>`;
-              const bound =
-                input.type === 'text'
-                  ? boundInputField(view, current.action, input.inputId)
-                  : null;
-              const numeric =
-                input.type === 'quantity' ||
-                (bound !== null && DECIMAL_KINDS.includes(bound.kind));
-              return `<td data-column-label="${h(input.label)}"><input name="${h(key)}" value="${h(current.rowInputs[rowId]?.[input.inputId] ?? '')}" aria-label="${h(`${input.label}, ${name}${context}`)}"${numeric ? ' inputmode="decimal" autocomplete="off"' : ''}${problem ? ` aria-invalid="true" aria-describedby="${h(described)}"${focus(problem) ? ' data-task-initial-focus autofocus' : ''}` : ''}>${message}</td>`;
+              const numeric = numericRowInput(input);
+              return `<td data-column-label="${h(input.label)}"${numeric ? ' data-cell-kind="number"' : ''}><input name="${h(key)}" value="${h(current.rowInputs[rowId]?.[input.inputId] ?? '')}" aria-label="${h(`${input.label}, ${name}${context}`)}"${numeric ? ' inputmode="decimal" autocomplete="off"' : ''}${problem ? ` aria-invalid="true" aria-describedby="${h(described)}"${focus(problem) ? ' data-task-initial-focus autofocus' : ''}` : ''}>${message}</td>`;
             })
             .join('')}</tr>`;
         })
