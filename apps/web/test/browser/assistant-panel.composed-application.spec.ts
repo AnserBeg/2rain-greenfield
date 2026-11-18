@@ -207,12 +207,20 @@ async function shootAssistant(page: Page): Promise<void> {
       [1440, 900],
       [390, 844],
     ] as const) {
-      await page.emulateMedia({ colorScheme: scheme });
+      // Reduced motion: no colour transition is caught half-way through
+      // the change of theme (LOOK-1).
+      await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
       await page.setViewportSize({ width, height });
+      await page.evaluate(
+        () =>
+          new Promise((done) =>
+            requestAnimationFrame(() => requestAnimationFrame(done)),
+          ),
+      );
       await page.screenshot({
         path: `${resolve(out)}/app-assistant-${String(width)}-${scheme}.png`,
       });
     }
-  await page.emulateMedia({ colorScheme: 'light' });
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: null });
   if (original) await page.setViewportSize(original);
 }
