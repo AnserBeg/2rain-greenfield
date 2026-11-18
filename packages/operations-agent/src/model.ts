@@ -55,6 +55,11 @@ export interface ModelAdapter {
     readonly signal?: AbortSignal;
     /** Reply text as it is generated, for a live panel. */
     readonly onText?: (delta: string) => void;
+    /**
+     * The most output (thinking included) this call may produce: what is
+     * left of the spend cap. The adapter uses the smaller of this and its own.
+     */
+    readonly maxOutputTokens?: number;
   }): Promise<ModelTurn>;
 }
 

@@ -22,13 +22,16 @@
  */
 import type { RegisteredOperationDefinition } from '../../runtime/src/semantic-operation-gateway.js';
 
-import { effectKind, localName, type PinnedCatalog } from './catalog.js';
+import { effectKind, type PinnedCatalog } from './catalog.js';
 
 export type RiskClass = 'reversible' | 'needsYes';
 
 export interface OperationRisk {
   readonly riskClass: RiskClass;
-  /** Why, in plain words, for the plan card and the record. */
+  /**
+   * Why, as one plain sentence the person reads on the plan card (X16); the
+   * approvals record keeps it too.
+   */
   readonly reason: string;
   /** The inverse for a reversible operation. */
   readonly inverse?:
@@ -45,18 +48,18 @@ export function operationRisk(
   if (tier !== 'o0' && tier !== 'o1')
     return {
       riskClass: 'needsYes',
-      reason: 'its operation family is not known',
+      reason: 'The assistant cannot tell what this does, so it needs your OK.',
     };
   if (tier === 'o1')
     return {
       riskClass: 'needsYes',
       reason:
-        'it runs a registered business capability that may move stock, post money or change a document for good',
+        "This moves stock or money, or settles a document's status for good, so it needs your OK.",
     };
   if (operation.confirmation !== 'none')
     return {
       riskClass: 'needsYes',
-      reason: "the operation is declared to need the person's confirmation",
+      reason: 'This change needs your OK.',
     };
   if (kind === 'createRecordEffect') {
     const entity = catalog.operationEntity(operation);
@@ -69,12 +72,12 @@ export function operationRisk(
     return archive
       ? {
           riskClass: 'reversible',
-          reason: `it creates a ${localName(entity).replaceAll('_', ' ')} record that Undo archives`,
+          reason: 'Undo takes back what this adds.',
           inverse: { kind: 'archive', operationId: archive.operationId },
         }
       : {
           riskClass: 'needsYes',
-          reason: 'the record it creates has no archive operation to undo it',
+          reason: 'What this adds cannot be taken back, so it needs your OK.',
         };
   }
   if (kind === 'updateRecordEffect') {
@@ -96,13 +99,12 @@ export function operationRisk(
     if (guarded)
       return {
         riskClass: 'needsYes',
-        reason:
-          "it changes a field that another operation changes only with the person's confirmation",
+        reason: 'This changes something that always needs your OK.',
       };
     return keys.includes('patch') && keys.includes('expectedRevision')
       ? {
           riskClass: 'reversible',
-          reason: 'it changes fields that Undo puts back',
+          reason: 'Undo puts the old values back.',
           inverse: {
             kind: 'restorePriorValues',
             operationId: operation.operationId,
@@ -110,18 +112,18 @@ export function operationRisk(
         }
       : {
           riskClass: 'needsYes',
-          reason: 'the change cannot be put back field by field',
+          reason: 'This change cannot be undone, so it needs your OK.',
         };
   }
   return {
     riskClass: 'needsYes',
     reason:
       kind === 'archiveRecordEffect'
-        ? 'it archives a record'
+        ? 'Archiving needs your OK.'
         : kind === 'restoreRecordEffect'
-          ? 'it restores an archived record'
+          ? 'Bringing back an archived record needs your OK.'
           : kind === 'transitionStateEffect'
-            ? "it changes a document's state"
-            : 'its effect is not one Undo can reverse',
+            ? "Changing a document's status needs your OK."
+            : 'This change cannot be undone, so it needs your OK.',
   };
 }

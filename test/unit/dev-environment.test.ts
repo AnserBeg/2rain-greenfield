@@ -431,7 +431,7 @@ function spawnDevEntryPoint(options: {
       `  run) sleep ${options.runSeconds}; : > "${marker}"; ` +
         `echo run-end >> "${log}"; exit 0 ;;`,
       `  stop) ${stop} ;;`,
-      '  exec) exit 1 ;;',
+      `  exec) echo "$*" >> "${log}"; exit 1 ;;`,
       '  *) exit 0 ;;',
       'esac',
     ].join('\n'),
@@ -444,6 +444,8 @@ function spawnDevEntryPoint(options: {
     {
       env: {
         ...process.env,
+        // Always exercise managed-container startup through the Docker stub.
+        DATABASE_URL: undefined,
         NORTH_STAR_DATABASE_PORT: '55999',
         NORTH_STAR_DEV_DATABASE_CONTAINER: 'stub-dev-db',
         PATH: `${root}:${process.env.PATH ?? ''}`,
@@ -475,6 +477,18 @@ async function waitForDockerVerb(
   }
   return existsSync(log) ? readFileSync(log, 'utf8') : '';
 }
+
+test('dev readiness probes TCP, which the socket-only initialization server cannot answer', async () => {
+  const dev = spawnDevEntryPoint({ runSeconds: '0', stopFails: false });
+  try {
+    const log = await waitForDockerVerb(dev.log, 'pg_isready');
+    assert.match(log, /exec stub-dev-db pg_isready --host 127\.0\.0\.1\b/u);
+  } finally {
+    dev.child.kill('SIGINT');
+    await dev.exit;
+    rmSync(dev.root, { force: true, recursive: true });
+  }
+});
 
 test('a signal while the container command is in flight leaves no container behind', async () => {
   // The window round 2 review identified: SIGTERM arrives while

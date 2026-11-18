@@ -25,13 +25,18 @@ import {
   type CustomizationServiceOptions,
 } from '@north-star/postgres-provider/customization-service';
 import { createRequestWorkProbe } from '@north-star/postgres-provider/request-work-meter';
-import { createSurfaceRuntimeServer } from '@north-star/web/app-server';
+import {
+  assistantCompany,
+  createSurfaceRuntimeServer,
+} from '@north-star/web/app-server';
 import { COMPOSED_APPLICATION_SURFACE_RUNTIME_EXTENSION } from '@north-star/web/sales-section';
 
 import {
   createAssistantEndpoint,
+  loopbackAuthorities,
   type AssistantEndpoint,
 } from './assistant-endpoint.js';
+import { budgetedDraftingModel, DRAFT_BUDGET } from './draft-budget.js';
 
 import {
   composedApplicationSeed,
@@ -155,6 +160,9 @@ export async function startComposedApplication(
   let seededRecords: readonly ComposedApplicationSeedReceipt[];
   let server: Server;
   let assistant: AssistantEndpoint | undefined;
+  // The Host values the assistant answers to, known once the server listens;
+  // nothing is accepted before then (end review X10).
+  let authorities: readonly string[] = [];
   try {
     seededRecords = await seedComposedApplication(
       runtime,
@@ -189,12 +197,32 @@ export async function startComposedApplication(
       runtime.identityMode === 'LOCAL_DEMO'
         ? createAssistantEndpoint({
             runtime,
-            companyId: COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId,
+            // The page's company, proved through the person's workspace
+            // entry as the page proves it (end review X9).
+            company: ({ cookie, surfaceId, search }) =>
+              runtime.entry.run({ headers: { cookie } }, (view) =>
+                assistantCompany(view, runtime.queryGateway, {
+                  surfaceId,
+                  search,
+                }),
+              ),
             businessCalendar: COMPOSED_APPLICATION_INVENTORY_SCOPE,
             model: options.assistantModel ?? keyFileAssistantModel(),
+            authorities: () => authorities,
             // The panel's handoff drafts through the Customize screen's
-            // own lazily opened service: one service per server.
-            customize,
+            // own lazily opened service: one service per server. A panel
+            // draft runs inside its conversation's budget (X13).
+            customize: async () => {
+              const service = await customize();
+              return {
+                draftFromRequest: (request, budget) =>
+                  budget
+                    ? DRAFT_BUDGET.run(budget, () =>
+                        service.draftFromRequest(request),
+                      )
+                    : service.draftFromRequest(request),
+              };
+            },
           })
         : undefined;
     server = createSurfaceRuntimeServer(
@@ -238,6 +266,7 @@ export async function startComposedApplication(
     await runtime.close();
     throw new Error('composed application server has no TCP address');
   }
+  authorities = loopbackAuthorities(host, address.port);
   let closed = false;
   return Object.freeze({
     baseUrl: `http://${host}:${String(address.port)}`,
@@ -378,10 +407,12 @@ export async function openCustomizeService(
  * type is narrowed to the agent's five, so the drafting tool is handed through.
  */
 function draftingModelFrom(
-  adapter: ModelAdapter,
+  provider: ModelAdapter,
 ): NonNullable<
   Awaited<ReturnType<NonNullable<CustomizationServiceOptions['draftingModel']>>>
 > {
+  // A draft the panel asked for is metered against its conversation (X13).
+  const adapter = budgetedDraftingModel(provider);
   return {
     modelId: adapter.modelId,
     next: (request) =>

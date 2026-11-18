@@ -214,7 +214,14 @@ async function main(): Promise<void> {
             meter,
             ...(args.preamble === 'off'
               ? {}
-              : { preamble: await agentPreamble(session) }),
+              : {
+                  preamble: await agentPreamble(
+                    session,
+                    'screen' in task && typeof task.screen === 'function'
+                      ? task.screen(context)
+                      : null,
+                  ),
+                }),
             onEvent: (event) => {
               if (event.kind === 'model')
                 void append({
