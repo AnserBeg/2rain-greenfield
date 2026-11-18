@@ -46,7 +46,11 @@ import {
 
 type Entity = StorageTargetPayloadV1['entities'][number];
 type Row = Record<string, unknown>;
-type Action = 'submit' | 'release' | 'amend' | 'approve' | 'reject';
+import {
+  approvalAction,
+  checkApprovalArguments,
+  type ApprovalAction as Action,
+} from '../../domain/src/purchasing/approval-arguments.js';
 interface Prepared {
   request: AuthorizationRequest;
   action: Action;
@@ -82,50 +86,18 @@ export function purchaseOrderApprovalInput(
   )
     invalid('Purchase-order approval requires an exact record and revision');
   const args = input.arguments ?? {};
-  if (!args || typeof args !== 'object' || Array.isArray(args))
-    invalid('Capability arguments must be an object');
-  const allowed =
-    action === 'release'
-      ? ['supplierReference']
-      : action === 'amend'
-        ? ['quantity', 'reason']
-        : action === 'approve' || action === 'reject'
-          ? ['reason']
-          : [];
-  if (Object.keys(args).some((key) => !allowed.includes(key)))
-    invalid('Unsupported purchase-order approval argument');
+  try {
+    checkApprovalArguments(action, args);
+  } catch (error) {
+    invalid(
+      error instanceof Error ? error.message : 'Invalid approval arguments',
+    );
+  }
   const parsed = {
-    ...args,
+    ...(args as Record<string, unknown>),
     recordId: input.recordId,
     expectedRevision: input.expectedRevision,
-  } as Record<string, unknown> & { recordId: string; expectedRevision: number };
-  if (
-    action === 'approve' ||
-    action === 'reject' ||
-    (action === 'amend' && 'quantity' in parsed)
-  ) {
-    if (
-      typeof parsed.reason !== 'string' ||
-      !parsed.reason.trim() ||
-      parsed.reason.length > 1000
-    )
-      invalid('A reason of 1-1000 characters is required');
-  }
-  if (
-    action === 'release' &&
-    parsed.supplierReference !== undefined &&
-    parsed.supplierReference !== null &&
-    (typeof parsed.supplierReference !== 'string' ||
-      parsed.supplierReference.length > 80)
-  )
-    invalid('Supplier reference must be at most 80 characters');
-  if (
-    action === 'amend' &&
-    'quantity' in parsed &&
-    (typeof parsed.quantity !== 'string' ||
-      !/^(?:0|[1-9]\d*)(?:\.\d{1,18})?$/u.test(parsed.quantity))
-  )
-    invalid('Ordered quantity must be a non-negative exact decimal');
+  };
   return parsed;
 }
 
@@ -167,14 +139,7 @@ class PurchaseOrderApprovalExecutor implements RegisteredCapabilityOperationExec
     request: AuthorizationRequest,
   ): Promise<RegisteredCapabilityOperationAuthorization> {
     const local = request.definition.operationId.split(':operation.')[1];
-    const actions: Record<string, Action> = {
-      purchase_order_submit: 'submit',
-      purchase_order_release: 'release',
-      purchase_order_line_amend: 'amend',
-      purchase_order_approval_approve: 'approve',
-      purchase_order_approval_reject: 'reject',
-    };
-    const action = actions[local ?? ''];
+    const action = approvalAction(local ?? '');
     const entity =
       action === 'amend'
         ? this.#binding.orderLine

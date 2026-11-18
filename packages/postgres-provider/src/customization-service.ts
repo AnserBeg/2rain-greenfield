@@ -276,7 +276,10 @@ export class PostgresCustomizationService {
    * same draft as every other channel. The model never sees records, only the
    * live release's customizable targets; it cannot record or activate.
    */
-  async draftFromRequest(request: string): Promise<DraftOutcome> {
+  async draftFromRequest(
+    request: string,
+    signal?: AbortSignal,
+  ): Promise<DraftOutcome> {
     if (!this.options.draftingModel) {
       return Object.freeze({
         code: 'CUSTOMIZE_AI_NOT_CONFIGURED',
@@ -301,7 +304,8 @@ export class PostgresCustomizationService {
       await this.targets(),
     );
     if (drafted.status === 'parsed') {
-      return this.draft(drafted.patch, 'conversationalAi');
+      signal?.throwIfAborted();
+      return this.draft(drafted.patch, 'conversationalAi', signal);
     }
     if (drafted.status === 'unsupported') {
       return Object.freeze({
@@ -335,6 +339,7 @@ export class PostgresCustomizationService {
   async draft(
     input: unknown,
     channel: AuthoringChannel,
+    signal?: AbortSignal,
   ): Promise<DraftOutcome> {
     const parsed = parseCustomizationPatch(input);
     if (parsed.status === 'invalid') {
@@ -421,6 +426,7 @@ export class PostgresCustomizationService {
       }
       let identity: PersistedReleaseIdentity;
       try {
+        signal?.throwIfAborted();
         identity = await ensurePersistedRelease(
           this.connection.runtimePool,
           context,
@@ -443,6 +449,7 @@ export class PostgresCustomizationService {
         this.connection.runtimePool,
         context,
         async (client) => {
+          signal?.throwIfAborted();
           await client.query(
             `INSERT INTO platform.customization_patches (
              tenant_id, environment_id, patch_id, patch_version, patch_kind,
@@ -474,6 +481,7 @@ export class PostgresCustomizationService {
               normalized.normalizationProfileVersion,
             ],
           );
+          signal?.throwIfAborted();
         },
       );
       return {
