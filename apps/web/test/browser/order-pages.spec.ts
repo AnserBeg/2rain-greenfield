@@ -83,7 +83,7 @@ test('an order page names its short lines and its progress, receives a truck of 
     ).toBeVisible();
     await expect(
       progression.locator('li[data-step-state="complete"]'),
-    ).toContainText('Sales order');
+    ).toContainText('Draft');
     await expect(
       progression.locator('li[aria-current="step"]').first(),
     ).toContainText('Fulfillment');

@@ -214,8 +214,9 @@ test('a partly received order shows what is still open, closes its remainder wit
       'RECEIPT_QUANTITY_OUT_OF_BOUNDS',
     );
     await page.goto(orderUrl);
+    // The badge names the stepper's current step (LOOK-1 round 3).
     await expect(page.locator('.composition-business-status')).toHaveText(
-      'Released',
+      'Receiving',
     );
     // The three still open are closed with a reason; ordered becomes received.
     await runTask('Close open remainder', async () => {

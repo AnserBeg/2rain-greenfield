@@ -591,7 +591,8 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         title: 'Order to cash',
         steps: [
           {
-            label: 'Sales order',
+            // A draft, as the purchase order's first step is (LOOK-1 round 3).
+            label: 'Draft',
             current: [inState('draft')],
             complete: [notInState('draft'), notInState('cancelled')],
             stopped: [inState('cancelled')],

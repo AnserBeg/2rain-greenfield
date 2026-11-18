@@ -160,7 +160,7 @@ test('the composed pages declare alerts, progression, multi-row Tasks and a rela
   );
   assert.deepEqual(
     (sales.presentation.progression.steps as Json[]).map((step) => step.label),
-    ['Sales order', 'Fulfillment', 'Invoicing', 'Closed'],
+    ['Draft', 'Fulfillment', 'Invoicing', 'Closed'],
   );
   const purchase = composition(normalized, 'purchase_order_detail');
   assert.deepEqual(

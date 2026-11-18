@@ -261,18 +261,20 @@ test('authored business labels survive while field prefixes follow canonical ent
     await expect(
       breadcrumb.getByText('VAT & R&D orders list', { exact: true }),
     ).toBeVisible();
-    await expect(
-      breadcrumb.getByText('A/P & VAT audit', { exact: true }),
-    ).toBeVisible();
-    // The record type's label names the page (its eyebrow) and its fields
-    // (LOOK-1 round 2: the section itself is "Details").
+    // The trail ends with the record itself (LOOK-1 round 3); the record
+    // type's label is the page's eyebrow, read below.
+    await expect(breadcrumb.locator('[aria-current="page"]')).not.toHaveText(
+      '',
+    );
+    // The record type's label names the page (its eyebrow); the section is
+    // "Details" (LOOK-1 rounds 2-3).
     await expect(
       page.locator('[data-platform-slot="record:titleStatus"] .eyebrow'),
     ).toHaveText('A/P & VAT audit');
     await expect(
       page
         .locator('[data-platform-slot="record:sections"] summary')
-        .getByText('A/P & VAT audit fields', { exact: true }),
+        .getByText('Details', { exact: true }),
     ).toBeVisible();
     await expect(
       page.locator('dt').getByText('Name', { exact: true }),

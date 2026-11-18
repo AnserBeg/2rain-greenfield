@@ -398,8 +398,11 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
   // Ruling F: a closed order may be reopened (nothing is invoiced yet); it
   // returns to the released state, confirmed like any consequential command.
   await command('Reopen');
+  // The badge names the stepper's current step (LOOK-1 round 3).
   await expect(
-    page.locator('.composition-header').getByText('Released', { exact: true }),
+    page
+      .locator('.composition-header')
+      .getByText('Fulfillment', { exact: true }),
   ).toBeVisible();
 
   console.log(

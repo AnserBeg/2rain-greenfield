@@ -225,7 +225,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
    normal outcome reads as text, so only exceptions are badges. */
 [data-declared-list]>.panel__heading h2{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
 .list-count{color:var(--muted);font-size:12px}
-.cell-zero{color:var(--faint)}
+td[data-zero]{color:var(--faint)}
 .data-table-wrap td .status-pill[data-status-role=success]{height:auto;padding:0;border:0;background:transparent;color:var(--muted);font-weight:400}
 .data-table-wrap td .status-pill[data-status-role=success]::before{content:none}
 [data-declared-list] td .record-link{font-family:var(--f-mono);font-size:12px;font-weight:400}
@@ -383,6 +383,11 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .record-breadcrumb{order:-3}
 .composition-alert,.composition-progression,.surface-grid>.operation-feedback{order:-1}
 .composition-heading{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+/* A record page's title (LOOK-1 round 3): the eyebrow, the record's name in
+   the document face, its state beside it. */
+.surface-heading--slot:has(.eyebrow){justify-content:flex-start;align-items:center;gap:12px}
+.surface-heading--slot:has(.eyebrow) h1{margin:0;font-family:var(--f-doc);font-size:28px;font-weight:500;line-height:1.1;letter-spacing:-.01em;overflow-wrap:anywhere}
+.surface-heading--slot:has(.eyebrow)>.status-pill{align-self:flex-end;margin-bottom:6px}
 .composition-heading h1{margin:0;font-family:var(--f-doc);font-size:28px;font-weight:500;line-height:1.1;letter-spacing:-.01em;overflow-wrap:anywhere}
 .composition-business-status{display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 8px;border:1px solid var(--rule-2);border-radius:999px;color:var(--muted);font-size:11px;font-weight:500;white-space:nowrap}
 .composition-business-status::before{content:"";width:7px;height:7px;border:1.5px solid currentColor;border-radius:50%}
@@ -453,7 +458,7 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .composition-record-actions{position:relative;grid-column:1/-1;order:-2;justify-self:end;align-self:end;margin-top:calc(-1 * var(--gap) - var(--ctl-h) - 2px);z-index:4}
 .composition-record-actions>summary{display:inline-flex;align-items:center;min-height:var(--ctl-h);padding:0 12px;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);color:var(--ink);font-size:13px;font-weight:500;cursor:pointer;list-style:none}
 .composition-record-actions>summary::-webkit-details-marker{display:none}
-.composition-record-actions>summary::after{content:"";width:6px;height:6px;margin:-3px 0 0 8px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}
+.composition-record-actions>summary{min-width:var(--ctl-h);justify-content:center;letter-spacing:.08em}
 .composition-record-actions[open]>.command-bar{position:absolute;right:0;top:calc(100% + 4px);display:grid;gap:6px;min-width:14rem;padding:8px;border:1px solid var(--rule);border-radius:6px;background:var(--sheet);box-shadow:var(--shadow-dlg)}
 .composition-local-actions{display:flex;flex-wrap:wrap;gap:8px}
 .composition-local-actions>div{flex:1 1 16rem}
@@ -479,6 +484,7 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .composition-collection[data-resolution=empty],.composition-collection[data-resolution=failed],.data-panel[data-composition-dataset][data-resolution=empty]{display:grid;grid-template-columns:minmax(10rem,auto) minmax(0,1fr);align-items:baseline;gap:4px 16px}
 .composition-collection[data-resolution=empty] [data-message],.data-panel[data-composition-dataset][data-resolution=empty] [data-message]{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;color:var(--muted);font-size:12px}
 .composition-collection[data-resolution=empty] [data-message] [data-message-sentence],.data-panel[data-composition-dataset][data-resolution=empty] [data-message] [data-message-sentence]{margin:0;color:var(--ink-2);font-size:12px;font-weight:500}
+.composition-collection[data-resolution=empty] .composition-collection-heading details{display:none}
 .composition-collection[data-resolution=empty] [data-message] p,.data-panel[data-composition-dataset][data-resolution=empty] [data-message] p{margin:0}
 .data-panel [data-message],.panel>[data-message]{color:var(--muted)}
 .data-panel [data-message] [data-message-sentence]{font-size:13px;font-weight:600;color:var(--ink)}
@@ -494,6 +500,17 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .surface-grid:has(.composition-rail){grid-template-columns:minmax(0,1fr) var(--rail-w);grid-auto-flow:row dense;align-items:start;row-gap:0}
 .surface-grid:has(.composition-rail)>.surface-slot>*,.surface-grid:has(.composition-rail) .composition-header>*{grid-column:1;margin-bottom:var(--gap)}
 .surface-grid:has(.composition-rail) :is(.composition-title,.record-breadcrumb,.composition-alert,.composition-progression,.composition-record-actions,.composition-back){grid-column:1/-1}
+/* Under a line's product its SKU and unit read as values (LOOK-1 round 3):
+   the labels are for screen readers, the values mono, dot-separated. */
+td[data-cell-role=primary] .composition-cell-secondary>span .composition-cell-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+td[data-cell-role=primary] .composition-cell-secondary{font-family:var(--f-mono);font-size:11px;color:var(--muted)}
+td[data-cell-role=primary] .composition-cell-secondary>span+span::before{content:"· ";color:var(--faint)}
+td[data-cell-role=actions] a:not([class]){color:var(--muted);font-size:12px}
+/* One document sheet (LOOK-1 round 3): the facts, the line datasets and the
+   details join into one bordered sheet divided by rules. */
+.surface-grid:has(.composition-rail) :is(.composition-facts,.composition-collection:not([data-composition-rail]),[data-composition-fields]){margin-bottom:0;border-radius:0;border-top-width:0}
+.surface-grid:has(.composition-rail) .composition-facts{border-top-width:1px;border-radius:4px 4px 0 0}
+.surface-grid:has(.composition-rail) [data-composition-fields]{border-radius:0 0 4px 4px;margin-bottom:var(--gap)}
 /* The rail is one column: it spans the sheet's rows, whose gap is each
    item's margin, so the rows it spans past the sheet's last add nothing. */
 .surface-grid:has(.composition-rail) .composition-rail{grid-column:2;grid-row:span 12}
@@ -510,7 +527,13 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .draft-more>summary::before{content:"›";flex:none;color:var(--muted);transition:transform var(--motion-duration) var(--motion-easing)}
 .draft-more[open]>summary::before{transform:rotate(90deg)}
 .draft-more[open]>summary{margin-bottom:10px}
-.composition-rail{grid-column:1/-1;display:grid;gap:var(--gap);align-content:start;min-width:0}
+.composition-rail{grid-column:1/-1;display:grid;gap:0;align-content:start;min-width:0;padding:0}
+.composition-rail__title{margin:0;padding:calc(var(--row-y) + 6px) var(--pad-x);border-bottom:1px solid var(--rule);font-size:13px}
+/* Inside the one Linked documents panel each dataset is a divided row. */
+.composition-rail>[data-composition-rail]{border:0;border-radius:0;border-bottom:1px solid var(--rule);background:transparent}
+.composition-rail>[data-composition-rail]:last-child{border-bottom:0}
+.composition-rail>[data-composition-rail] h2{font-size:12px;font-weight:500;color:var(--ink-2)}
+.composition-rail>[data-composition-rail][data-resolution=empty] [data-message-sentence],.composition-rail>[data-composition-rail][data-resolution=empty] .composition-message strong{display:inline-flex;align-items:center;height:20px;padding:0 8px;border:1px solid var(--rule-2);border-radius:999px;color:var(--muted);font-size:11px;font-weight:500}
 [data-composition-rail]{padding:calc(var(--row-y) + 4px) var(--pad-x) calc(var(--row-y) + 6px)}
 [data-composition-rail]>.data-table-wrap{margin:8px calc(-1 * var(--pad-x)) calc(-1 * (var(--row-y) + 6px));border-top:1px solid var(--rule)}
 [data-composition-rail] .composition-collection-heading details{display:none}

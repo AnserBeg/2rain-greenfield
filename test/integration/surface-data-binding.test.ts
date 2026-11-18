@@ -11954,10 +11954,11 @@ test('PAYABLES (PY-G): each order line shows its three-way match as the read mod
     'u',
   ).exec(orderPage.html)?.[0];
   assert.ok(section, 'the Order lines section renders');
+  // Billed and to bill are each line's supporting details (LOOK-1 round 3).
   for (const label of ['Billed', 'To bill'])
     assert.match(
       section,
-      new RegExp(`<th scope="col"[^>]*>${label}</th>`, 'u'),
+      new RegExp(`<span class="composition-cell-label">${label}</span>`, 'u'),
     );
   const row = (line: string) =>
     new RegExp(
@@ -11965,10 +11966,11 @@ test('PAYABLES (PY-G): each order line shows its three-way match as the read mod
       'u',
     ).exec(section)?.[1] ?? '';
   const cell = (line: string, label: string) =>
-    new RegExp(`<td data-column-label="${label}"[^>]*>([^<]*)</td>`, 'u').exec(
-      row(line),
-    )?.[1];
-  // The match reads beside the product, without opening details.
+    new RegExp(
+      `<span class="composition-cell-label">${label}</span> ([^<]*)</span>`,
+      'u',
+    ).exec(row(line))?.[1];
+  // The match reads in the line's details.
   const match = (line: string) =>
     /<span class="composition-cell-label">Match<\/span> ([^<]*)<\/span>/u.exec(
       row(line),
@@ -13606,14 +13608,15 @@ test('REPLENISHMENT: the item form chooses its preferred location from the locat
   assert.doesNotMatch(withheld.html, /Vancouver warehouse/u);
   f.deniedReads.delete(id('permission', 'location_read'));
   // An archived location is gone from the choice and from the page alike:
-  // the page still reads, the field "—"; the item keeps its id.
+  // the page still reads, the empty field unlisted (LOOK-1 round 3: Details
+  // lists what the record holds); the item keeps its id.
   f.executor.rows.set(vancouver, {
     ...f.executor.rows.get(vancouver)!,
     archived: true,
   });
   const gone = await itemPage();
   assert.match(gone.html, /<h1>Valve<\/h1>/u);
-  assert.equal(preferred(gone.html), '—');
+  assert.equal(preferred(gone.html), undefined);
   assert.match(
     select((await form(valve)).html) ?? '',
     new RegExp(`<option value="${vancouver}" selected>Unavailable \\(`, 'u'),

@@ -69,7 +69,9 @@ import {
 import {
   formFieldIds,
   readCompiledSurfaceDataBinding,
+  readCompiledSurfaceManifest,
   surfaceSourceEntityId,
+  type CompiledNavigationEntry,
 } from './surface-contract.js';
 import type {
   CompiledFieldOption,
@@ -798,12 +800,57 @@ function taskLookupFormId(surface: CompiledSurfaceDefinition): string {
   return `task-lookup-${surface.surfaceId}`;
 }
 
+/**
+ * The menu group a destination is listed under, by the compiled navigation
+ * tree: the innermost group holding it (LOOK-1 round 3).
+ */
+function navigationGroupLabel(
+  view: SurfaceComponentContext['view'],
+  surfaceId: string,
+): string | null {
+  let navigation;
+  try {
+    navigation = readCompiledSurfaceManifest(view).navigation;
+  } catch {
+    return null;
+  }
+  const find = (
+    entries: readonly CompiledNavigationEntry[],
+    group: string | null,
+  ): string | null => {
+    for (const entry of entries) {
+      if (entry.kind === 'navigationSurface') {
+        if (entry.surfaceId === surfaceId) return group;
+      } else {
+        const found = find(entry.children, entry.label);
+        if (found !== null) return found;
+      }
+    }
+    return null;
+  };
+  return navigation ? find(navigation.entries, null) : null;
+}
+
 function renderBreadcrumb(context: SurfaceComponentContext): string {
   const list = relatedSurface(context, 'list');
-  const label = entityLabel(context.surface);
+  const record =
+    context.surface.surfaceRole === 'record' ? recordFrom(context.data) : null;
+  // A record page ends its trail with the record itself -- its number or
+  // name -- after the area and the List (LOOK-1 round 3); a form names
+  // the kind of record it makes.
+  const header = context.surface.composition?.presentation?.header;
+  const composition =
+    context.data?.status === 'READY' ? context.data.composition : undefined;
+  const current = record
+    ? ((header && composition?.fields.cells[header.title]) ??
+      recordTitle(context, record))
+    : entityLabel(context.surface);
+  const group = list
+    ? navigationGroupLabel(context.view, list.surfaceId)
+    : null;
   return slotPanel(
     context,
-    `<nav class="record-breadcrumb" aria-label="Breadcrumb">${list ? `<a href="${escapeHtml(surfaceHref(list, undefined, false, context))}">${escapeHtml(list.label)}</a><span aria-hidden="true">/</span>` : ''}<span aria-current="page">${escapeHtml(label)}</span></nav>`,
+    `<nav class="record-breadcrumb" aria-label="Breadcrumb">${group ? `<span>${escapeHtml(group)}</span><span aria-hidden="true">/</span>` : ''}${list ? `<a href="${escapeHtml(surfaceHref(list, undefined, false, context))}">${escapeHtml(list.label)}</a><span aria-hidden="true">/</span>` : ''}<span aria-current="page">${escapeHtml(current)}</span></nav>`,
     'breadcrumb-slot',
   );
 }
@@ -865,7 +912,7 @@ function renderTitleStatus(context: SurfaceComponentContext): string {
     context.surface.statusRoles.length > 0
       ? declaredStatusRoles(context.surface)
       : record
-        ? `<span class="status-pill" data-status-role="${record.archived ? 'attention' : 'success'}">${record.archived ? 'Archived' : 'Active'} · revision ${record.revision}</span>`
+        ? `<span class="status-pill" data-status-role="${record.archived ? 'attention' : 'success'}">${record.archived ? 'Archived' : 'Active'}<span class="sr-only"> · revision ${record.revision}</span></span>`
         : form
           ? '<span class="status-pill" data-status-role="inProgress">Draft</span>'
           : '';
@@ -1023,7 +1070,7 @@ function renderCommandBar(context: SurfaceComponentContext): string {
     update &&
     documentEditable &&
     operationAvailableForRecord(update, record)
-      ? `<a class="primary-action" href="${escapeHtml(surfaceHref(form, record.recordId, false, context))}">Edit</a>`
+      ? `<a class="secondary-action" href="${escapeHtml(surfaceHref(form, record.recordId, false, context))}">Edit</a>`
       : '',
     form
       ? `<a class="secondary-action" href="${escapeHtml(surfaceHref(form, undefined, false, context))}">New</a>`
@@ -1044,7 +1091,7 @@ function renderCommandBar(context: SurfaceComponentContext): string {
   // shows no empty disclosure.
   return slotPanel(
     context,
-    `${compositionActions}${progressiveActions ? (actions || menu ? `<details class="composition-record-actions"><summary>Record actions</summary><div class="command-bar" aria-label="Record commands">${actions}${menu}${technical}</div></details>` : technical ? `<div class="command-bar" aria-label="Record commands"><details class="action-overflow"><summary aria-label="More actions">…</summary><div class="action-overflow__menu">${technical}</div></details></div>` : '') : `<div class="command-bar" aria-label="Record commands">${actions}${menu}</div>`}`,
+    `${compositionActions}${progressiveActions ? (actions || menu ? `<details class="composition-record-actions"><summary aria-label="Record actions">…</summary><div class="command-bar" aria-label="Record commands">${actions}${menu}${technical}</div></details>` : technical ? `<div class="command-bar" aria-label="Record commands"><details class="action-overflow"><summary aria-label="More actions">…</summary><div class="action-overflow__menu">${technical}</div></details></div>` : '') : `<div class="command-bar" aria-label="Record commands">${actions}${menu}</div>`}`,
     'command-bar-slot',
   );
 }
@@ -1194,7 +1241,7 @@ function renderSections(context: SurfaceComponentContext): string {
     return slotPanel(
       context,
       record
-        ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><h2>Details</h2></div></div><details class="record-section-group" open><summary>${escapeHtml(entityLabel(context.surface))} fields</summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`
+        ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}<section class="panel data-panel" data-data-state="exact"><details class="record-section-group" open><summary><h2>Details</h2></summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`
         : dataDiagnostic('QUERY_NOT_FOUND'),
       'sections-slot',
     );
@@ -2740,7 +2787,13 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
           const text = declaredCellText(column, record, input.present);
           // The label leads and the column id ends the cell's attributes, as
           // readers of the List's markup expect; the kind sits between.
-          const label = `data-column-label="${escapeHtml(column.label)}"${kind(column)} data-column-priority="${String(column.priority)}" data-column-id="${escapeHtml(column.columnId)}"`;
+          // A zero figure reads faint, so the figures that matter stand out
+          // (LOOK-1 round 3).
+          const zero =
+            text !== null &&
+            kind(column) !== '' &&
+            /^-?0(?:\.0+)?$/u.test(text);
+          const label = `data-column-label="${escapeHtml(column.label)}"${kind(column)}${zero ? ' data-zero' : ''} data-column-priority="${String(column.priority)}" data-column-id="${escapeHtml(column.columnId)}"`;
           if (column.role === 'title') {
             const title = text ?? record.recordId.slice(0, 8);
             const href = input.detailHref(record);
@@ -2756,13 +2809,8 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
           // What the row is short of now is marked, as the reference marks
           // an exception "!" (SUPPLY-WARNINGS).
           const short = shortMarked(list, column, record);
-          // A zero figure reads faint, so the figures that matter stand out
-          // (LOOK-1 round 3).
-          const zero =
-            text !== null &&
-            kind(column) !== '' &&
-            /^-?0(?:\.0+)?$/u.test(text);
-          return `<td ${label}>${text === null ? '<span class="muted">—</span>' : zero ? `<span class="cell-zero">${escapeHtml(text)}</span>` : escapeHtml(text)}${late === null ? '' : ` <span class="status-pill" data-status-role="attention" data-overdue-days="${String(late)}">${escapeHtml(`${String(late)} ${late === 1 ? 'day' : 'days'} late`)}</span>`}${short ? ' <span class="status-pill" data-status-role="blocked" data-short-mark="true"><span aria-hidden="true">!</span><span class="sr-only">Short of stock</span></span>' : ''}</td>`;
+
+          return `<td ${label}>${text === null ? '<span class="muted">—</span>' : escapeHtml(text)}${late === null ? '' : ` <span class="status-pill" data-status-role="attention" data-overdue-days="${String(late)}">${escapeHtml(`${String(late)} ${late === 1 ? 'day' : 'days'} late`)}</span>`}${short ? ' <span class="status-pill" data-status-role="blocked" data-short-mark="true"><span aria-hidden="true">!</span><span class="sr-only">Short of stock</span></span>' : ''}</td>`;
         })
         .join('');
       const title =
