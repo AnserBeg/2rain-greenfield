@@ -82,7 +82,7 @@ export function applyCustomizationPatches(
 ): CustomizationApplication {
   const authored = structuredClone(base) as Json;
   for (const [index, patch] of patches.entries()) {
-    const outcome = applyOne(authored, patch);
+    const outcome = applyOne(authored, patch, patches.slice(0, index));
     if (outcome) return Object.freeze({ ...outcome, patchIndex: index });
   }
   // A revision carrying a tenant patch is tenant-authored; the repository
@@ -126,12 +126,16 @@ export function isTenantId(id: string): boolean {
 type Outcome =
   Omit<CustomizationRefusal, 'patchIndex'> | UnsupportedCustomization;
 
-function applyOne(authored: Json, patch: CustomizationPatch): Outcome | null {
+function applyOne(
+  authored: Json,
+  patch: CustomizationPatch,
+  previous: readonly CustomizationPatch[],
+): Outcome | null {
   switch (patch.kind) {
     case 'addRecordType':
       return addRecordType(authored, patch.label, patch.fields);
     case 'addField':
-      return addField(authored, patch.entity, patch.field);
+      return addField(authored, patch, previous);
     case 'addChoice':
       return addChoice(authored, patch.enumField, patch.option);
     case 'arrangeLayout':
@@ -418,9 +422,11 @@ function addRecordType(
 
 function addField(
   authored: Json,
-  entityId: string,
-  field: CustomField,
+  patch: Extract<CustomizationPatch, { kind: 'addField' }>,
+  previous: readonly CustomizationPatch[],
 ): Outcome | null {
+  const { entity: entityId, field } = patch;
+  const legacy = 'legacy' in patch;
   const entity = list(authored, 'entities').find(
     (candidate) => candidate.entityId === entityId,
   );
@@ -441,7 +447,24 @@ function addField(
   const siblings = list(authored, 'fields').filter(
     (candidate) => (candidate.entity as Json).targetId === entityId,
   );
+  // Re-drafting the same formerly query-only field publishes its screens
+  // on a new revision, retaining its canonical id, column and saved values.
+  const prior = previous.findLast(
+    (p) =>
+      p.kind === 'addField' &&
+      p.entity === entityId &&
+      p.field.label === field.label,
+  );
+  const bindExisting =
+    !legacy &&
+    prior?.kind === 'addField' &&
+    'legacy' in prior &&
+    prior.field.type === field.type &&
+    JSON.stringify(prior.field.options) === JSON.stringify(field.options) &&
+    (!isTenantId(entityId) ||
+      Boolean(prior.field.required) === Boolean(field.required));
   if (
+    !bindExisting &&
     siblings.some(
       (candidate) =>
         candidate.fieldId === fieldId ||
@@ -454,24 +477,24 @@ function addField(
       `${String(entity.label)} already has a field called "${field.label.trim()}".`,
     );
   }
-  push(
-    authored,
-    'fields',
-    fieldDefinition(namespace, entityId, fieldLocal, {
-      ...field,
-      // A first-party record's existing create paths do not know the new
-      // field, so it can only be optional there.
-      ...(isTenantId(entityId) ? {} : { required: false }),
-      orderKey:
-        Math.max(
-          0,
-          ...siblings.map((candidate) => Number(candidate.orderKey)),
-        ) + 10,
-      searchable: false,
-    }),
-  );
+  if (!bindExisting)
+    push(
+      authored,
+      'fields',
+      fieldDefinition(namespace, entityId, fieldLocal, {
+        ...field,
+        // Other first-party callers can keep creating records without this field.
+        ...(isTenantId(entityId) ? {} : { required: false }),
+        orderKey:
+          Math.max(
+            0,
+            ...siblings.map((candidate) => Number(candidate.orderKey)),
+          ) + 10,
+        searchable: false,
+      }),
+    );
   // A tenant record type's own list shows the new field as a column.
-  if (isTenantId(entityId)) {
+  if (!bindExisting && isTenantId(entityId)) {
     for (const surface of list(authored, 'surfaces')) {
       const declared = surface.list as Json | undefined;
       if (
@@ -495,20 +518,87 @@ function addField(
       });
     }
   }
-  // The record's own plain get and list read the new field, so its page, its
-  // form, the agent and reporting all see it. Read-model clones are untouched.
+  const family = list(authored, 'surfaces').filter((surface) =>
+    ['form', 'detail', 'list'].some(
+      (role) =>
+        surface.surfaceId === `${namespace}:surface.${entityLocal}_${role}`,
+    ),
+  );
+  const surfaceQueries = new Set<string>();
+  if (!legacy) {
+    for (const surface of family) {
+      surfaceQueries.add(String((surface.dataSource as Json).targetId));
+      const presentation = {
+        fieldId,
+        label: field.label.trim(),
+        ...(isTenantId(entityId) ? {} : { disclosure: 'more' }),
+      };
+      const editor = surface.documentEditor as Json | undefined;
+      if (editor) (editor.headerFields as Json[]).push(presentation);
+      else if (surface.surfaceRole === 'form') {
+        const form = (surface.form ??= {
+          kind: 'surfaceForm',
+          schemaVersion: version,
+        }) as Json;
+        ((form.fields ??= []) as Json[]).push(presentation);
+      }
+      const composition = surface.composition as Json | undefined;
+      if (composition) {
+        const fields = composition.fields as Json[];
+        fields.push({
+          columnId: `${namespace}:column.${fieldLocal}`,
+          field: fieldId,
+          label: field.label.trim(),
+          orderKey: nextOrder(fields),
+          showWhenEmpty: true,
+        });
+      }
+      // A generic list (Party) already shows its selected fields. Declare
+      // those columns before offering additional ones through Arrange.
+      if (surface.surfaceRole === 'list' && !surface.list) {
+        const query = list(authored, 'queries').find(
+          (q) => q.queryId === (surface.dataSource as Json).targetId,
+        )!;
+        const columns = (query.selections as Json[])
+          .filter((selection) => (selection.field as Json).targetId !== fieldId)
+          .map((selection, index) => {
+            const id = (selection.field as Json).targetId;
+            const sibling = siblings.find((f) => f.fieldId === id)!;
+            return {
+              ...listColumn(namespace, entityLocal, sibling, index),
+              role: index === 0 ? 'title' : 'value',
+            };
+          });
+        surface.list = {
+          kind: 'surfaceList',
+          schemaVersion: version,
+          columns,
+          defaultSort: [],
+          filters: [],
+          views: [],
+          pageSize: 50,
+        };
+      }
+    }
+  }
   for (const query of list(authored, 'queries')) {
+    const plain =
+      String(query.queryId) ===
+      `${namespace}:query.${entityLocal}_${String(query.queryType)}`;
     if (
       query.tier !== 'q0' ||
       (query.sourceEntity as Json | undefined)?.targetId !== entityId ||
       !['get', 'list'].includes(String(query.queryType)) ||
-      !String(query.queryId).endsWith(
-        `.${entityLocal}_${String(query.queryType)}`,
-      )
-    ) {
+      (!plain && !surfaceQueries.has(String(query.queryId)))
+    )
       continue;
-    }
     const selections = query.selections as Json[];
+    if (
+      selections.some(
+        (selection) => (selection.field as Json).targetId === fieldId,
+      )
+    )
+      continue;
     selections.push({
       field: {
         kind: 'fieldReference',
@@ -522,10 +612,34 @@ function addField(
           ...selections.map((selection) => Number(selection.orderKey)),
         ) + 10,
       schemaVersion: version,
-      selectionId: `${namespace}:selection.${fieldLocal}_${String(query.queryType)}`,
+      selectionId: `${namespace}:selection.${fieldLocal}_${plain ? String(query.queryType) : localOf(String(query.queryId))}`,
     });
   }
   return null;
+}
+
+function nextOrder(entries: Json[]): number {
+  return Math.max(0, ...entries.map((entry) => Number(entry.orderKey))) + 10;
+}
+
+function listColumn(
+  namespace: string,
+  entityLocal: string,
+  field: Json,
+  index: number,
+): Json {
+  return {
+    columnId: `${namespace}:list_column.${entityLocal}_list_${localOf(String(field.fieldId))}`,
+    field: field.fieldId,
+    label: field.label,
+    orderKey: (index + 1) * 10,
+    priority: index,
+    role: 'value',
+    sortable: true,
+    ...((field.fieldType as Json).kind === 'dateFieldType'
+      ? { format: 'date' }
+      : {}),
+  };
 }
 
 function addChoice(
@@ -599,10 +713,61 @@ function arrangeLayout(
       `There is no screen ${patch.surface} to arrange.`,
     );
   }
+  if (patch.upFront) {
+    if (
+      surface.surfaceRole !== 'form' ||
+      patch.order ||
+      patch.hide ||
+      patch.relabel
+    )
+      return unsupported(
+        'arrangeLayout.upFront',
+        'Choose added fields to show up front on one form.',
+      );
+    const query = list(authored, 'queries').find(
+      (q) => q.queryId === (surface.dataSource as Json).targetId,
+    )!;
+    const entityId = String((query.sourceEntity as Json).targetId);
+    const boundary = tierBoundary(entityId);
+    if (boundary) return boundary;
+    const fieldsOf = (s: Json) =>
+      ((s.documentEditor as Json | undefined)?.headerFields ??
+        (s.form as Json | undefined)?.fields ??
+        []) as Json[];
+    const eligible = fieldsOf(surface).filter((f) =>
+      isTenantId(String(f.fieldId)),
+    );
+    const chosen = new Set(patch.upFront);
+    if (patch.upFront.some((id) => !eligible.some((f) => f.fieldId === id)))
+      return refusal(
+        'CUSTOMIZE_TARGET_NOT_FOUND',
+        'Choose a field added to this form.',
+      );
+    const required = new Set(
+      list(authored, 'fields')
+        .filter((f) => f.presence === 'required')
+        .map((f) => f.fieldId),
+    );
+    for (const candidate of list(authored, 'surfaces')) {
+      if (
+        candidate !== surface &&
+        (candidate.documentEditor as Json | undefined)?.headerFormSurfaceId !==
+          surface.surfaceId
+      )
+        continue;
+      for (const field of fieldsOf(candidate)) {
+        if (!eligible.some((f) => f.fieldId === field.fieldId)) continue;
+        if (chosen.has(String(field.fieldId)) || required.has(field.fieldId))
+          delete field.disclosure;
+        else field.disclosure = 'more';
+      }
+    }
+    return null;
+  }
   if (surface.surfaceRole !== 'list') {
     return unsupported(
       'arrangeLayout.recordPage',
-      'This version arranges the columns of a list; arranging a record page or a form is not supported yet.',
+      'This layout change arranges list columns. For a form, choose which added fields to show up front.',
     );
   }
   const query = list(authored, 'queries').find(
@@ -624,6 +789,23 @@ function arrangeLayout(
   const byField = new Map(
     columns.map((column) => [String(column.field), column]),
   );
+  // A selected custom field remains available after a prior layout hid it.
+  const selected = new Set(
+    (query!.selections as Json[]).map((s) => (s.field as Json).targetId),
+  );
+  for (const field of list(authored, 'fields')) {
+    const id = String(field.fieldId);
+    if (isTenantId(id) && selected.has(id) && !byField.has(id))
+      byField.set(
+        id,
+        listColumn(
+          namespaceOf(authored),
+          localOf(entityId),
+          field,
+          columns.length,
+        ),
+      );
+  }
   for (const fieldId of [
     ...(patch.order ?? []),
     ...(patch.hide ?? []),

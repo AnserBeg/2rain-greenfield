@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
 
 import { createSurfaceRuntimeServer } from '../../../../apps/web/src/app-server.js';
+import { closeServer } from '../../../../apps/web/test/browser/close-server.js';
 
 import { PARTY_IDS } from './definition.js';
 import {
@@ -123,7 +124,7 @@ async function main(): Promise<void> {
       `PARTY_BROWSER_READY ${JSON.stringify({ baseUrl, partyId })}\n`,
     );
     await shutdownSignal();
-    await close(server);
+    await closeServer(server);
   });
 }
 
@@ -149,11 +150,5 @@ async function shutdownSignal(): Promise<void> {
   await new Promise<void>((resolve) => {
     process.once('SIGINT', resolve);
     process.once('SIGTERM', resolve);
-  });
-}
-
-async function close(server: Server): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => (error ? reject(error) : resolve()));
   });
 }
