@@ -69,13 +69,30 @@ function compileChain(
     if (request.upgradeBaseRoot && result.status !== 'compiled') {
       const patchIndex =
         'patchIndex' in result ? result.patchIndex : length - 1;
+      const tenantPatch = request.chain[patchIndex]!;
+      let firstPartySubject: string | undefined;
+      if (tenantPatch.kind === 'addField') {
+        const collision = (
+          (request.base.fields ?? []) as Record<string, unknown>[]
+        ).find(
+          (field) =>
+            (field.entity as { targetId?: string } | undefined)?.targetId ===
+              tenantPatch.entity &&
+            String(field.label).toLowerCase() ===
+              tenantPatch.field.label.trim().toLowerCase(),
+        );
+        firstPartySubject = String(collision?.fieldId ?? tenantPatch.entity);
+      } else if (tenantPatch.kind === 'arrangeLayout') {
+        firstPartySubject = tenantPatch.surface;
+      }
       return {
         code: 'CUSTOMIZE_UPGRADE_CONFLICT',
         diagnostics: [
           {
             code: 'CUSTOMIZE_UPGRADE_CONFLICT',
             firstPartyBase: request.upgradeBaseRoot,
-            tenantPatch: request.chain[patchIndex],
+            firstPartySubject,
+            tenantPatch,
             patchIndex,
             reason: result.message,
             details: 'diagnostics' in result ? result.diagnostics : [],

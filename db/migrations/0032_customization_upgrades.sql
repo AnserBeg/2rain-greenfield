@@ -38,7 +38,7 @@ CREATE TABLE platform.customization_upgrades (
     AND convert_from(payload, 'UTF8')::jsonb ->> 'candidateReleaseId' = candidate_release_id::text
     AND convert_from(payload, 'UTF8')::jsonb ->> 'candidateRevisionId' = candidate_revision_id::text
     AND jsonb_typeof(convert_from(payload, 'UTF8')::jsonb -> 'patchIds') = 'array'
-    AND jsonb_array_length(convert_from(payload, 'UTF8')::jsonb -> 'patchIds') BETWEEN 1 AND 64
+    AND jsonb_array_length(convert_from(payload, 'UTF8')::jsonb -> 'patchIds') > 0
     AND source_release_id <> candidate_release_id
     AND base_release_id <> candidate_release_id
   ) IS TRUE)

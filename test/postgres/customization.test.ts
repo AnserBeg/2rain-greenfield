@@ -790,6 +790,10 @@ test(
           assert.equal(diagnostic.code, 'CUSTOMIZE_UPGRADE_CONFLICT');
           assert.match(
             JSON.stringify(diagnostic.issues),
+            /firstPartySubject.*northstar.app:field.item_sku/u,
+          );
+          assert.match(
+            JSON.stringify(diagnostic.issues),
             /firstPartyBase.*tenantPatch.*Shelf code/u,
           );
           assert.equal(
