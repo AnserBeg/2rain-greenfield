@@ -1070,6 +1070,12 @@ export const SurfaceCompositionSchema = z.strictObject({
            * and total; an invoice adds what is paid, credited and owed.
            */
           totals: z.array(CanonicalIdSchema).min(1).max(8).optional(),
+          /**
+           * The declared column holding the document's currency, read beside
+           * its grand total ("Total CAD", LOOK-1 round 3). Optional v6 key;
+           * absence preserves bytes.
+           */
+          currency: CanonicalIdSchema.optional(),
         })
         .optional(),
       /**

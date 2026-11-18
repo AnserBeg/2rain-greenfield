@@ -410,6 +410,7 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
 .composition-totals{display:grid;gap:5px;width:min(100%,300px);margin:12px 0 0 auto;font-size:13px}
 .composition-totals div{display:flex;justify-content:space-between;gap:16px}
 .composition-totals dt{color:var(--ink-2)}
+.composition-totals__currency{color:var(--muted);font-size:11px;font-weight:500}
 .composition-totals dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
 .composition-totals div:last-child{margin-top:4px;padding:8px 0 3px;border-top:1px solid var(--ink);border-bottom:3px double var(--ink);font-weight:600;font-size:14px}
 .line-progress{display:inline-flex;align-items:center;gap:10px;white-space:nowrap;color:var(--muted)}

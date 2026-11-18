@@ -962,3 +962,28 @@ test('LOOK-1 round 2: the rail holds linked documents, never the lines with prog
   dataset(closed, 'purchasing_receipts').presentation.rail = 'left';
   assert.equal(SurfaceCompositionSchema.safeParse(closed).success, false);
 });
+
+test('LOOK-1 round 3: the grand total reads with a declared currency column', () => {
+  // Accepted as the purchase order declares it: "Total CAD".
+  const model = structuredClone(normalized);
+  const purchase = composition(model, 'purchase_order_detail');
+  assert.equal(
+    purchase.presentation.print.currency,
+    id('column', 'purchasing_currency'),
+  );
+  validateSurfaceCompositions(model as never);
+  // A currency that is not one of the record's declared columns is refused.
+  assert.match(
+    refused('purchase_order_detail', (value) => {
+      value.presentation.print.currency = id('column', 'purchasing_missing');
+    }),
+    /a totals currency is a declared column beside declared totals/u,
+  );
+  // So is one with no totals to stand beside.
+  assert.match(
+    refused('purchase_order_detail', (value) => {
+      delete value.presentation.print.totals;
+    }),
+    /a totals currency is a declared column beside declared totals/u,
+  );
+});

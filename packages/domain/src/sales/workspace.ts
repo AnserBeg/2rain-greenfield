@@ -568,6 +568,8 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
           id('column', 'order_tax'),
           id('column', 'order_total'),
         ],
+        // "Total CAD": the grand total reads with the order's currency.
+        currency: id('column', 'currency'),
       },
       // The ship-to lines read as one address, on screen and when printed.
       blocks: [

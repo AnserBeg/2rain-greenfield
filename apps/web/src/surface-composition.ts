@@ -1318,7 +1318,12 @@ function renderCompositionTotals(
     (id, index) =>
       index === totals.length - 1 || (data.fields.cells[id] ?? '—') !== '—',
   );
-  return `<dl class="composition-totals">${shown.map((id) => `<div><dt>${h(label(id))}</dt><dd>${h(data.fields.cells[id] ?? '—')}</dd></div>`).join('')}</dl>`;
+  // The grand total names its declared currency: "Total CAD" (round 3).
+  const currency = print.currency
+    ? data.fields.cells[print.currency]
+    : undefined;
+  const last = totals.at(-1);
+  return `<dl class="composition-totals">${shown.map((id) => `<div><dt>${h(label(id))}${id === last && currency && currency !== '—' ? ` <span class="composition-totals__currency">${h(currency)}</span>` : ''}</dt><dd>${h(data.fields.cells[id] ?? '—')}</dd></div>`).join('')}</dl>`;
 }
 
 /** The URL of this record's printable document, preserving its scope. */

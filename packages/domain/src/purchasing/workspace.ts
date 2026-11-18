@@ -629,6 +629,8 @@ export function purchasingWorkspace(
           id('column', 'purchasing_tax'),
           id('column', 'purchasing_total'),
         ],
+        // "Total CAD": the grand total reads with the order's currency.
+        currency: id('column', 'purchasing_currency'),
         note: id('column', 'purchasing_notes'),
       },
       // Purchase to receipt: where this order stands and what to do next.
