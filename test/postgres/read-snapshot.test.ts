@@ -477,6 +477,118 @@ test('SPEED-1 security fixes: one scope per page, both scopes of a moved grant, 
           [tenantId, environmentId, membershipId],
         );
 
+        // Fix read 5 (S3): two opposite moves bump the two scopes' epochs in
+        // one canonical order, so neither holds one epoch while waiting for
+        // the other's. A third session holds the destination's epoch so the
+        // two moves queue: the first (B to A) waits for it, the second (A to
+        // B) behind; when it is released, both commit. Bumped OLD first, the
+        // first holds B and waits for A, which the second holds: 40P01.
+        const [scopeA, scopeB] = [environmentId, otherEnvironmentId].sort();
+        assert.equal(scopeA, environmentId, 'the seeded membership is in A');
+        await admin.query(
+          `INSERT INTO platform.current_policy_epochs (
+             tenant_id, environment_id, policy_version
+           ) VALUES ($1, $2, 1), ($1, $3, 1)
+           ON CONFLICT (tenant_id, environment_id) DO NOTHING`,
+          [tenantId, scopeA, scopeB],
+        );
+        const otherMembershipId = 'b5000000-0000-4000-8000-0000000000b5';
+        await admin.query(
+          `INSERT INTO platform.current_policy_memberships (
+             tenant_id, environment_id, membership_id, principal_id, role_id
+           ) VALUES ($1, $2, $3, 'b3000000-0000-4000-8000-0000000000b3', $4)`,
+          [tenantId, scopeB, otherMembershipId, roleId],
+        );
+        const [holder, first, second] = await Promise.all([
+          admin.connect(),
+          admin.connect(),
+          admin.connect(),
+        ]);
+        const waiting = async (client: pg.PoolClient) => {
+          const pid = (
+            await client.query<{ pid: number }>(
+              `SELECT pg_backend_pid() AS pid`,
+            )
+          ).rows[0]!.pid;
+          return async () => {
+            for (let attempt = 0; attempt < 400; attempt += 1) {
+              const row = await admin.query<{ w: string | null }>(
+                `SELECT wait_event_type AS w FROM pg_stat_activity WHERE pid = $1`,
+                [pid],
+              );
+              if (row.rows[0]?.w === 'Lock') return;
+              await new Promise((resolve) => setTimeout(resolve, 25));
+            }
+            throw new Error(`backend ${String(pid)} never waited`);
+          };
+        };
+        const move = (
+          client: pg.PoolClient,
+          membership: string,
+          from: string,
+          to: string,
+        ) =>
+          client.query(
+            `UPDATE platform.current_policy_memberships SET environment_id = $3
+              WHERE tenant_id = $1 AND environment_id = $2
+                AND membership_id = $4`,
+            [tenantId, from, to, membership],
+          );
+        const firstWaits = await waiting(first);
+        const secondWaits = await waiting(second);
+        try {
+          await holder.query('BEGIN');
+          await holder.query(
+            `SELECT 1 FROM platform.current_policy_epochs
+              WHERE tenant_id = $1 AND environment_id = $2 FOR UPDATE`,
+            [tenantId, scopeB],
+          );
+          await first.query('BEGIN');
+          await second.query('BEGIN');
+          const firstMove = move(first, otherMembershipId, scopeB, scopeA);
+          firstMove.catch(() => undefined);
+          await firstWaits();
+          const secondMove = move(second, membershipId, scopeA, scopeB);
+          secondMove.catch(() => undefined);
+          await secondWaits();
+          await holder.query('COMMIT');
+          const outcome = async (
+            client: pg.PoolClient,
+            statement: Promise<unknown>,
+          ) => {
+            try {
+              await statement;
+              await client.query('COMMIT');
+              return 'moved';
+            } catch (error) {
+              return String((error as { code?: string }).code);
+            }
+          };
+          assert.deepEqual(
+            [
+              await outcome(first, firstMove),
+              await outcome(second, secondMove),
+            ],
+            ['moved', 'moved'],
+          );
+        } finally {
+          for (const client of [holder, first, second]) {
+            await client.query('ROLLBACK').catch(() => undefined);
+            client.release();
+          }
+        }
+        // Back where they were.
+        await admin.query(
+          `UPDATE platform.current_policy_memberships SET environment_id = $2
+            WHERE tenant_id = $1 AND membership_id = $3`,
+          [tenantId, environmentId, membershipId],
+        );
+        await admin.query(
+          `DELETE FROM platform.current_policy_memberships
+            WHERE tenant_id = $1 AND membership_id = $2`,
+          [tenantId, otherMembershipId],
+        );
+
         // retry: false refuses at once.
         let tries = 0;
         await assert.rejects(
