@@ -18,14 +18,14 @@ Base `c2c12e7f`. No Critical path touched.
 
 ## Gates
 
-The unit regression failed on the original purchase order create form. PostgreSQL and both browser journeys run in GitHub CI.
+The unit regression failed on the original purchase order create form. Both browser journeys and the PostgreSQL rollback journey passed in CI. The refusal tests now expect the runtime to report its new supported floor.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-2",
   "base": "fe5079d39277ba6d0e39946c23158888a4fe8ce2",
-  "head": "c7b3ddd10f667d2d6eeacc15908b914c893c6337",
+  "head": "f86dc9bf91b4b69f8cf35bca78f58b79d69ee393",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
     "apps/web/src/document-editor.ts", "apps/web/src/surface-client.ts",
