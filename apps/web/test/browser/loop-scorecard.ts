@@ -548,10 +548,7 @@ export async function placePurchaseOrder(card: LoopScorecard): Promise<void> {
   await card.end('done');
 }
 
-export async function receiveInFull(
-  card: LoopScorecard,
-  stages: 'page' | 'fragment-spike' = 'page',
-): Promise<void> {
+export async function receiveInFull(card: LoopScorecard): Promise<void> {
   const { page } = card;
   const f = LOOP_FIXTURE;
   card.begin(LOOP_STEPS.receive);
@@ -562,8 +559,7 @@ export async function receiveInFull(
         f.unitCost,
       );
     },
-    stages,
-    prepareOnInput: true,
+    inline: true,
   });
   await expect(cell(page, 'purchasing_lines', 'Received')).toHaveText(
     f.purchased,
@@ -612,10 +608,7 @@ export async function createSale(card: LoopScorecard): Promise<void> {
  * Ship the confirmed order: its next action reserves and ships every line
  * with nothing reserved yet, from one location, on one shipment.
  */
-export async function ship(
-  card: LoopScorecard,
-  stages: 'page' | 'fragment-spike' = 'page',
-): Promise<void> {
+export async function ship(card: LoopScorecard): Promise<void> {
   const { page } = card;
   const f = LOOP_FIXTURE;
   card.begin(LOOP_STEPS.ship);
@@ -623,7 +616,7 @@ export async function ship(
     async enter() {
       await chooseReference(card, 'Ship from', f.location[1]);
     },
-    stages,
+    inline: true,
   });
   await expect(cell(page, 'fulfillment_lines', 'Shipped')).toHaveText(f.sold);
   await card.end('done');
@@ -768,12 +761,10 @@ async function runTask(
     readonly enter?: () => Promise<void>;
     readonly review?: string;
     readonly confirm?: string;
-    readonly stages?: 'page' | 'fragment-spike';
-    readonly prepareOnInput?: boolean;
+    readonly inline?: boolean;
   } = {},
 ): Promise<void> {
   const { page } = card;
-  if (stages.stages === 'fragment-spike') await installTaskStageSpike(page);
   await card.click(opener);
   const dialog = page.locator('[data-composition-task]');
   await expect(dialog).toBeVisible();
@@ -782,21 +773,14 @@ async function runTask(
     name: stages.review ?? `Review ${label}`,
     exact: true,
   });
-  if (await review.isVisible()) {
-    if (stages.stages === 'fragment-spike' && stages.prepareOnInput) {
-      // Test-only stand-in for a read-only preview after the input settles.
-      await review.evaluate((button: HTMLButtonElement) =>
-        button.form?.requestSubmit(button),
-      );
-    } else await card.click(review);
-  }
+  if (!stages.inline && (await review.isVisible())) await card.click(review);
   await card.click(
     dialog.getByRole('button', {
       name: stages.confirm ?? `Confirm ${label}`,
       exact: true,
     }),
   );
-  if (stages.stages === 'fragment-spike') {
+  if (stages.inline) {
     await expect(
       page.getByRole('status').filter({ hasText: `${label}: done` }),
     ).toBeVisible();
@@ -806,53 +790,6 @@ async function runTask(
     await card.click(dialog.getByRole('link', { name: /^Back to/u }));
   }
   await expect(dialog).toHaveCount(0);
-}
-
-/** Spike transport only. Carry the existing form to the real server and use its rendered answer. */
-async function installTaskStageSpike(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    document.addEventListener('submit', async (event) => {
-      const form = event.target;
-      if (!(form instanceof HTMLFormElement)) return;
-      const fields = new FormData(form, event.submitter);
-      if (!fields.has('compositionAction')) return;
-      event.preventDefault();
-      const body = new URLSearchParams();
-      for (const [name, value] of fields)
-        if (typeof value === 'string') body.append(name, value);
-      const response = await fetch(form.action, {
-        method: 'POST',
-        body,
-        credentials: 'same-origin',
-        redirect: 'error',
-      });
-      const rendered = new DOMParser().parseFromString(
-        await response.text(),
-        'text/html',
-      );
-      const task = rendered.querySelector<HTMLDialogElement>(
-        'dialog[data-composition-task]',
-      );
-      const pageContent = rendered.querySelector('#surface-content');
-      if (!response.ok || !task || !pageContent)
-        throw new Error(`Task stage returned HTTP ${response.status}`);
-      if (task.dataset.taskPhase === 'result') {
-        const outcome = task.querySelector('[role="status"]');
-        if (!outcome) throw new Error('Task result has no outcome');
-        pageContent.prepend(outcome);
-        task.remove();
-      }
-      const previous = document.querySelector<HTMLDialogElement>(
-        'dialog[data-composition-task]',
-      );
-      previous?.close();
-      document.querySelector('#surface-content')!.replaceWith(pageContent);
-      if (task.isConnected) {
-        task.removeAttribute('open');
-        task.showModal();
-      }
-    });
-  });
 }
 
 function nextAction(page: Page): Locator {

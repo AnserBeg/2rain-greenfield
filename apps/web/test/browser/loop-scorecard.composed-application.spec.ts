@@ -4,14 +4,10 @@ import { startComposedApplication } from '../../../api/src/composition-root.js';
 import { withEphemeralPostgres } from '../../../../test/helpers/postgres.js';
 
 import {
-  createSale,
   DatabaseStatistics,
   invoiceAndPay,
   LOOP_STEPS,
   LoopScorecard,
-  placePurchaseOrder,
-  receiveInFull,
-  ship,
   walkToShipped,
   writeScorecard,
 } from './loop-scorecard.js';
@@ -46,6 +42,16 @@ test('LOOP-1 scorecard: purchase order to stock to a shipped, invoiced and paid 
       });
       try {
         await walkToShipped(card, application.baseUrl);
+        const receipt = card.steps.find(
+          ({ name }) => name === LOOP_STEPS.receive,
+        );
+        const shipment = card.steps.find(
+          ({ name }) => name === LOOP_STEPS.ship,
+        );
+        expect(receipt?.clicks).toBe(2);
+        expect(receipt?.loads).toBeLessThanOrEqual(2);
+        expect(shipment?.clicks).toBeLessThanOrEqual(4);
+        expect(shipment?.loads).toBeLessThanOrEqual(2);
         // Slice 2: once invoiced, the order offers the payment as its next
         // action (until then it was recorded on the invoice's page).
         expect(
@@ -79,53 +85,3 @@ test('LOOP-1 scorecard: purchase order to stock to a shipped, invoiced and paid 
     },
   );
 });
-
-for (const stages of ['page', 'fragment-spike'] as const) {
-  test(`INTERACT-1 spike: count receiving and shipping through ${stages}`, async ({
-    page,
-  }) => {
-    test.setTimeout(180_000);
-    await withEphemeralPostgres(
-      `interact-spike-${stages}`,
-      async ({ connection }) => {
-        const application = await startComposedApplication({
-          databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
-          port: 0,
-          seedProfile: 'distributor',
-          tenantSlug: `interact-spike-${stages}`,
-        });
-        const card = new LoopScorecard(page);
-        try {
-          await page.goto(application.baseUrl);
-          await placePurchaseOrder(card);
-          await receiveInFull(card, stages);
-          await createSale(card);
-          await ship(card, stages);
-          const measures = card.steps
-            .filter((step) =>
-              [LOOP_STEPS.receive, LOOP_STEPS.ship].some(
-                (name) => name === step.name,
-              ),
-            )
-            .map(({ name, clicks, loads, typed, result }) => ({
-              name,
-              clicks,
-              loads,
-              typed,
-              result,
-            }));
-          console.log(`INTERACT_SPIKE ${stages} ${JSON.stringify(measures)}`);
-          if (stages === 'fragment-spike') {
-            expect(measures).toHaveLength(2);
-            expect(measures[0]?.clicks).toBe(2);
-            expect(measures[1]?.clicks).toBeLessThanOrEqual(4);
-            for (const step of measures)
-              expect(step.loads).toBeLessThanOrEqual(2);
-          }
-        } finally {
-          await application.close();
-        }
-      },
-    );
-  });
-}
