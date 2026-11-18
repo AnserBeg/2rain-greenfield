@@ -139,6 +139,8 @@ export function createAssistantEndpoint(
           ? { businessCalendar: options.businessCalendar }
           : {}),
         approve: (plan) => askThePerson(conversation, plan),
+        // The panel offers Undo, so a reversible change runs at once here.
+        autoApproveReversible: true,
       }),
     };
     conversations.set(conversation.id, conversation);
@@ -410,8 +412,13 @@ export function createAssistantEndpoint(
         planId: plan.planId,
         digest,
         reasons: plan.reasons ?? [],
+        // Exactly what the yes covers: the operation, the record it acts on
+        // (as the host read it), and every bound input, arguments included.
         steps: plan.steps.map((step) => ({
-          text: `${step.effect}`,
+          text: `${step.operationLabel}: ${step.effect}`,
+          target: step.targetLabel
+            ? `${step.targetLabel} (${step.target})`
+            : step.target,
           inputs: plainInputs(step.inputs),
         })),
       });
@@ -526,21 +533,36 @@ export function stepLabel(event: AgentEvent): string | null {
 
 function plainInputs(inputs: Readonly<Record<string, unknown>>): string {
   const parts: string[] = [];
-  for (const bag of ['values', 'patch', 'relations'] as const) {
+  for (const bag of ['values', 'patch', 'relations', 'arguments'] as const) {
     const values = inputs[bag];
-    if (typeof values !== 'object' || values === null) continue;
+    if (values === undefined || values === null) continue;
+    if (typeof values !== 'object' || Array.isArray(values)) {
+      parts.push(`${bag}: ${shownValue(values)}`);
+      continue;
+    }
     for (const [id, value] of Object.entries(values as object)) {
       if (value === null || value === undefined) continue;
-      const shown =
-        typeof value === 'object'
-          ? 'fromStep' in value
-            ? `the record step ${String((value as { fromStep: number }).fromStep)} makes`
-            : JSON.stringify(value)
-          : local(String(value));
-      parts.push(`${local(id).replaceAll('_', ' ')}: ${shown}`);
+      parts.push(`${local(id).replaceAll('_', ' ')}: ${shownValue(value)}`);
     }
   }
   return parts.join(' · ');
+}
+
+/**
+ * A bound value as the person reads it. Only a declared identifier (an id
+ * with a namespace, `northstar.app:option.net_30`) is shortened; a number,
+ * a date or free text is shown exactly as bound (10.25 stays 10.25).
+ */
+function shownValue(value: unknown): string {
+  if (typeof value === 'object' && value !== null) {
+    if (!Array.isArray(value) && 'fromStep' in value)
+      return `the record step ${String((value as { fromStep: number }).fromStep)} makes`;
+    return JSON.stringify(value);
+  }
+  const text = String(value);
+  return /^[a-z][\w.-]*:[a-z_]+\.[\w-]+$/u.test(text)
+    ? local(text).replaceAll('_', ' ')
+    : text;
 }
 
 function planDigest(plan: PlanForApproval): string {

@@ -25,6 +25,13 @@ export interface AssistantMount {
   ): Promise<boolean>;
 }
 
+/**
+ * The only typed answers that approve a plan on screen: a whole, plain yes,
+ * with trailing punctuation at most. "Okay, don't ship it" is not one.
+ */
+export const ASSISTANT_AFFIRMATIVE =
+  /^(?:y|yes|yeah|yep|ok|okay|sure|go|go ahead|do it|confirm|approve|yes please|yes,? do it)[.!\s]*$/iu;
+
 export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
   const root = document.querySelector('[data-assistant-panel]');
   if (!root) return;
@@ -130,13 +137,21 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     }
   };
 
-  const decide = async (approve) => {
-    if (!pending) return;
-    const { planId, digest, card } = pending;
-    pending = null;
+  // A card settles once: its buttons go dead and never speak for another plan.
+  const settle = (card) => {
+    card.setAttribute('data-assistant-settled', '');
     card.querySelectorAll('button').forEach((button) => { button.disabled = true; });
-    await post('decide', { conversation, planId, digest, approve });
   };
+  // Each card answers only for its own conversation, plan and digest.
+  const decideCard = async (card, own, approve) => {
+    if (card.hasAttribute('data-assistant-settled')) return;
+    settle(card);
+    if (pending && pending.card === card) pending = null;
+    await post('decide', { conversation: own.conversation, planId: own.planId, digest: own.digest, approve });
+  };
+  const decide = (approve) => pending ? decideCard(pending.card, pending.own, approve) : undefined;
+  const affirmative = new RegExp(${JSON.stringify(ASSISTANT_AFFIRMATIVE.source)}, 'iu');
+  let queued = null;
 
   const planCard = (event) => {
     const card = element('section', null, 'assistant-plan');
@@ -146,6 +161,7 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     const list = card.appendChild(element('ol'));
     event.steps.forEach((step) => {
       const item = list.appendChild(element('li', step.text));
+      if (step.target) item.appendChild(element('div', 'On: ' + step.target, 'assistant-muted'));
       if (step.inputs) item.appendChild(element('div', step.inputs, 'assistant-muted'));
     });
     const yes = card.appendChild(element('button', 'Yes, do it'));
@@ -154,9 +170,10 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     const no = card.appendChild(element('button', 'No'));
     no.type = 'button';
     no.setAttribute('data-assistant-no', '');
-    yes.addEventListener('click', () => decide(true));
-    no.addEventListener('click', () => decide(false));
-    pending = { planId: event.planId, digest: event.digest, card };
+    const own = { conversation, planId: event.planId, digest: event.digest };
+    yes.addEventListener('click', () => decideCard(card, own, true));
+    no.addEventListener('click', () => decideCard(card, own, false));
+    pending = { own, card };
     form.querySelector('button[type=submit]').disabled = false;
     log.appendChild(card);
     scroll();
@@ -207,7 +224,10 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
             planCard(event);
           } else if (event.type === 'decided') {
             const card = log.querySelector('[data-assistant-plan="' + event.planId + '"]');
-            if (card) card.appendChild(element('p', event.approved ? 'You said yes.' : 'Not done.', 'assistant-muted'));
+            if (card) {
+              settle(card);
+              card.appendChild(element('p', event.approved ? 'You said yes.' : 'Not done.', 'assistant-muted'));
+            }
           } else if (event.type === 'answer') {
             render(reply, event.text);
             reply.setAttribute('data-assistant-stop-reason', event.stop);
@@ -251,8 +271,15 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     } finally {
       running = null;
       pending = null;
+      // A run that ended leaves no live card behind.
+      log.querySelectorAll('[data-assistant-plan]:not([data-assistant-settled])').forEach(settle);
       busy(false);
       scroll();
+    }
+    if (queued) {
+      const next = queued;
+      queued = null;
+      ask(next);
     }
   };
 
@@ -262,9 +289,16 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     if (!text) return;
     input.value = '';
     if (pending) {
-      // A typed answer to the plan on screen: yes runs exactly that plan.
-      log.appendChild(element('div', text, 'assistant-me'));
-      decide(/^(y|yes|yeah|yep|ok|okay|go|do it|confirm)\b/i.test(text));
+      // Only a whole, plain yes approves the plan on screen. Anything else
+      // ("okay, don't ship it", "yes but 5") declines it and is sent to the
+      // assistant as the next request once this run ends.
+      if (affirmative.test(text)) {
+        log.appendChild(element('div', text, 'assistant-me'));
+        decide(true);
+      } else {
+        queued = text;
+        decide(false);
+      }
       return;
     }
     if (running) return;
