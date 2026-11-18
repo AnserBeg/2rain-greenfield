@@ -370,6 +370,18 @@ test('the panel is added to a full page only, with its script pinned by hash', (
     { statusCode: 500, html: '<html><body></body></html>' },
   ])
     assert.equal(withAssistantPanel(result), result);
+  // In the shell the toggle is a top-bar button before the account menu, so
+  // it never floats over a page's own controls; elsewhere it floats.
+  const shell = withAssistantPanel({
+    statusCode: 200,
+    html: '<html><body><header class="topbar"><details class="shell-account"></details></header></body></html>',
+  });
+  assert.match(
+    shell.html,
+    /assistant-toggle--inline[^>]*>Assistant<\/button><details class="shell-account">/u,
+  );
+  assert.doesNotMatch(shell.html, /assistant-toggle--floating/u);
+  assert.match(page.html, /assistant-toggle--floating/u);
   // Model text never becomes markup: the script writes text nodes only.
   assert.doesNotMatch(ASSISTANT_PANEL_SCRIPT, /innerHTML|insertAdjacentHTML/u);
 });

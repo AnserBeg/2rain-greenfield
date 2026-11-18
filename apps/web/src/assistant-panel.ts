@@ -293,8 +293,10 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
 export const ASSISTANT_PANEL_CSP_HASH = `sha256-${createHash('sha256').update(ASSISTANT_PANEL_SCRIPT).digest('base64')}`;
 
 const PANEL_STYLES = `
-.assistant-toggle{position:fixed;right:16px;bottom:16px;z-index:40;min-height:44px;padding:0 16px;border-radius:999px;border:1px solid var(--line-strong);background:var(--accent);color:var(--ink-on-accent);font:inherit;cursor:pointer}
-.assistant-panel{position:fixed;top:0;right:0;bottom:0;z-index:50;width:min(420px,100vw);display:flex;flex-direction:column;background:var(--surface-panel);color:var(--ink);border-left:1px solid var(--line);box-shadow:var(--elevation-overlay)}
+.assistant-toggle{min-height:44px;padding:0 14px;border-radius:999px;border:1px solid var(--line-strong);background:var(--accent);color:var(--ink-on-accent);font:inherit;cursor:pointer}
+.assistant-toggle--inline{margin-left:auto}
+.assistant-toggle--floating{position:fixed;right:16px;bottom:16px;z-index:40;min-height:44px}
+.assistant-panel{position:fixed;top:0;right:0;bottom:0;z-index:70;width:min(420px,100vw);display:flex;flex-direction:column;background:var(--surface-panel);color:var(--ink);border-left:1px solid var(--line);box-shadow:var(--elevation-overlay)}
 .assistant-panel[hidden]{display:none}
 .assistant-panel header{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line)}
 .assistant-panel header h2{margin:0;font-size:1rem;flex:1}
@@ -331,7 +333,13 @@ export const ASSISTANT_PANEL_STYLESHEET_HREF = registerStaticAsset(
   true,
 );
 
-const PANEL_MARKUP = `<button type="button" class="assistant-toggle" data-assistant-toggle aria-expanded="false" aria-controls="assistant-panel">Assistant</button><aside id="assistant-panel" class="assistant-panel" data-assistant-panel aria-label="Assistant" hidden><header><h2>Assistant</h2><button type="button" data-assistant-new>New conversation</button><button type="button" data-assistant-close aria-label="Close the assistant">Close</button></header><div class="assistant-log" data-assistant-log aria-live="polite"></div><div class="assistant-status" data-assistant-status role="status" hidden><span data-assistant-step>Working</span><span data-assistant-elapsed>0 s</span><button type="button" data-assistant-stop hidden>Stop</button></div><form data-assistant-form><label class="visually-hidden" for="assistant-input">Ask the assistant</label><textarea id="assistant-input" name="text" rows="2" placeholder="Ask or tell the assistant…"></textarea><button type="submit">Send</button></form></aside>`;
+const TOGGLE = (placement: 'inline' | 'floating') =>
+  `<button type="button" class="assistant-toggle assistant-toggle--${placement}" data-assistant-toggle aria-expanded="false" aria-controls="assistant-panel">Assistant</button>`;
+
+/** Where the shell's top bar puts its account menu: the toggle sits before it. */
+const SHELL_ACCOUNT = '<details class="shell-account">';
+
+const PANEL_MARKUP = `<aside id="assistant-panel" class="assistant-panel" data-assistant-panel aria-label="Assistant" hidden><header><h2>Assistant</h2><button type="button" data-assistant-new>New conversation</button><button type="button" data-assistant-close aria-label="Close the assistant">Close</button></header><div class="assistant-log" data-assistant-log aria-live="polite"></div><div class="assistant-status" data-assistant-status role="status" hidden><span data-assistant-step>Working</span><span data-assistant-elapsed>0 s</span><button type="button" data-assistant-stop hidden>Stop</button></div><form data-assistant-form><label class="visually-hidden" for="assistant-input">Ask the assistant</label><textarea id="assistant-input" name="text" rows="2" placeholder="Ask or tell the assistant…"></textarea><button type="submit">Send</button></form></aside>`;
 
 /**
  * The page with the panel added before `</body>`. Only a full page served
@@ -347,9 +355,16 @@ export function withAssistantPanel<
     result.html.includes('data-assistant-panel')
   )
     return result;
-  const index = result.html.lastIndexOf('</body>');
+  // In the shell the toggle is a top-bar button, so it never floats over a
+  // page's own controls (a sticky Save bar); a page without the shell gets a
+  // floating one.
+  const inShell = result.html.includes(SHELL_ACCOUNT);
+  const html = inShell
+    ? result.html.replace(SHELL_ACCOUNT, `${TOGGLE('inline')}${SHELL_ACCOUNT}`)
+    : result.html;
+  const index = html.lastIndexOf('</body>');
   return {
     ...result,
-    html: `${result.html.slice(0, index)}<link rel="stylesheet" href="${ASSISTANT_PANEL_STYLESHEET_HREF}">${PANEL_MARKUP}<script data-assistant-script>${ASSISTANT_PANEL_SCRIPT}</script>${result.html.slice(index)}`,
+    html: `${html.slice(0, index)}<link rel="stylesheet" href="${ASSISTANT_PANEL_STYLESHEET_HREF}">${inShell ? '' : TOGGLE('floating')}${PANEL_MARKUP}<script data-assistant-script>${ASSISTANT_PANEL_SCRIPT}</script>${html.slice(index)}`,
   };
 }
