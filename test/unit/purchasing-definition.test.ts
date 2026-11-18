@@ -1359,7 +1359,14 @@ test('the composed application derives its modules from an ordered registry', ()
   assert.equal(composed.modules.length, COMPOSED_MODULE_NAMES.length);
   assert.deepEqual(
     composed.modules.map((module) => module.label),
-    ['Sales', 'Purchasing', 'Inventory', 'Party', 'Catalog', 'Location'],
+    [
+      'Sales',
+      'Purchasing',
+      'Stock',
+      'Customers and suppliers',
+      'Catalog',
+      'Location',
+    ],
   );
   // `orderKey` is derived from registry POSITION, which is what makes order the
   // only thing the registry has to declare.
@@ -1379,14 +1386,21 @@ test('Purchasing and Sales lead the business navigation within budget', () => {
   const composed = composedApplicationDefinition() as unknown as AuthoredShape;
   assert.deepEqual(
     composed.modules.map((module) => module.label),
-    ['Sales', 'Purchasing', 'Inventory', 'Party', 'Catalog', 'Location'],
+    [
+      'Sales',
+      'Purchasing',
+      'Stock',
+      'Customers and suppliers',
+      'Catalog',
+      'Location',
+    ],
   );
 
   const navigation = surfaceManifest(compile(composed)).navigation;
   assert.ok(navigation, 'the composed application emits no navigation tree');
   assert.deepEqual(
     navigation.entries.map((entry) => entry.label),
-    ['Sales', 'Purchasing', 'Inventory', 'Party', 'More'],
+    ['Sales', 'Purchasing', 'Stock', 'Customers and suppliers', 'More'],
     'supporting masters belong under the compiled overflow group',
   );
 });

@@ -1,81 +1,80 @@
 # LOOP-1 — the purchase order → inventory → sales order loop completes and makes sense
 
-Status: slice 1 integrated at `02725446`; slice 2 at `0cad5e5f`; memo at `18155602`. Tier: Mechanical (no Critical path). Base: `main` `689b0117`. Stops: none.
-Charter: [LOOP-1-charter.md](LOOP-1-charter.md). Plan: [loop-ux-plan.md](../loop-ux-plan.md).
+Status: frozen; slices 1 `02725446`, 2 `0cad5e5f`, memo `18155602`, 3-5 `e20ff129`. Mechanical (no Critical path). Base `689b0117`
+(claim block: from main `c58e46e3`, slices 3-5). Stops, each ruled: missing total, create-screen trim, time zone, page budget.
 
 ## Claims
 
-1. The scorecard journey (`apps/web/test/browser/loop-scorecard.composed-application.spec.ts`, composed CI job) walks the loop on a
-   fresh `distributor` seed and asserts each finished step's end state: the order released, 10 received, 10 on hand, the sales
-   order released, 4 reserved, 4 shipped, the invoice's balance 0.00.
-2. Every count in the table is the journey's own (`LoopScorecard`): clicks, full page loads, typed fields, invented values, raw
-   codes (the charter's three patterns) and the plan's developer sentences, per step.
-3. Slice 2: a sales line is never saved without a unit price (field presence required; refused at save, any channel); once
-   invoiced, the order's next action pays each open invoice's whole balance through the invoice's own payment operations; the
-   payment reference is optional; the invoice form declares no `sections` slot, so the Invoices List offers no raw "New" and an
-   invoice no "Edit" (ruled). The scorecard asserts the payment is the order's next action.
-
-4. Memo: the pinned operation catalog and surface manifest are parsed once per content (frozen payloads only; published after
-   full validation; a refused one is never cached), a surface binding once per request view, an operation binding once per
-   pinned definition; navigation and related-surface lookups match through `surfaceSourceEntityId`. `catalogParseCount()`
-   (`packages/runtime/src/catalog-parse-count.ts`) counts each parse where it runs; the scorecard asserts a warm request parses
-   no operation catalog or manifest. No authorization, transaction or SQL change.
+1. The scorecard (composed CI job) walks PO → receive → stock → SO → ship → invoice → payment on a fresh `distributor` seed,
+   asserts each step's end state; counts clicks, loads, typed/invented values, raw codes, sentences, DB work per request.
+2. A sales line is never saved without its price; a shipped, invoiced order's next action pays each open invoice's whole
+   balance; the payment reference is optional; the invoice form keeps no `sections` slot (no raw "New"/"Edit").
+3. A warm request parses no operation catalog or surface manifest (`catalogParseCount()`, asserted by the scorecard); bindings
+   resolve once per request view; no authorization, transaction or SQL change.
+4. "Ship" reserves and ships the lines with nothing reserved in one rows Task (one location, one shipment); carrier and
+   tracking are optional; order dates default to today; the create screens lead with the job's fields.
+5. No catalog code or developer sentence in a page's text; date-only values read as plain dates; the server validates and a
+   refused save links to each field; the next action is one button; a Task's result shows only what was written.
+6. With no page asked for, a person lands on Today (to receive, to ship, not yet paid, to reorder, find by number); the menu
+   groups read Stock and Customers and suppliers; navigation icons are inline SVG; the demo strip is a quiet bar.
 
 ## Decisions (one line each)
 
-- The scorecard lives in `apps/web/test/browser/` (where every browser spec is; the charter's `test/browser/` does not exist).
-- Journey rule: start where the last step left off; use the menu and the page's own controls; type only what a required field or
-  the job needs; accept every default. The item is a distributor catalogue item (it has a list price, so the order is priced).
-- Database work per request is counted at the app's `pg` client in the test process (statements; a statement outside
-  BEGIN…COMMIT is its own transaction) and cross-checked per step against `pg_stat_database` after an 11 s settle (they agree
-  within 1%). The SHP / "Needs attention" tile is Invoicing's (`order_to_invoice` > 0), not Fulfillment's: a real state.
-- A step's first page is counted at the end of the step before, not twice. "Back to order" after a Task is counted (the next
-  step is offered only on the record, not in the Task's result).
-- The table is printed in the log (`LOOP_SCORECARD`) and written only where `LOOP_SCORECARD_OUT` points; the committed baseline
-  is the CI run's.
-- Developer sentences ("Save commits the header", "Draft staged.", "No child records", "required parent selection") are a
-  separate column, so "zero raw codes" means the charter's three patterns.
-- Slice 2 re-baseline (ADR-0066): the required price retypes a column (v1 transitions refuse); one-entry release; `dev:reset`
-  for any dev database (the 4174 demo too). The full-replay snapshot was regenerated on GitHub (evidence run 44182814394).
-- Slice 2 test bridges (ruled): unpriced sales lines priced in `test/postgres/fulfillment.test.ts`, `order-lists.test.ts`,
-  `packing-retrieval.test.ts` and `test/helpers/order-entry-fixture.ts`; `customer-credit.test.ts` keeps its unstated-total case
-  through an unstated tax rate (`CREDIT_EXPOSURE_UNSTATED` unchanged); pins moved: `g2-module-conformance` (price input required),
-  the surface-grammar debt baseline (95 → 97, the invoice form's missing sections slot) and the reader-22 floor test.
-- A draft invoice is corrected on its own page (Record actions → Post or Void, as before); a posted one is voided and re-invoiced
-  from the order. The invoice form never offers a hand-made invoice.
-- Not built: the plan's rule 2 repeat of receive-and-list on a tenant-added record type (charter slice 1 omits it); the
-  orchestrator rules.
+- Scorecard in `apps/web/test/browser/`; journey: start where the last step left off, menu and page controls, type only what
+  is needed, accept defaults, a priced item. DB columns: a client-side count with RESETs (~405 vs 148 BEGIN/COMMIT) until
+  SPEED-1's Server-Timing merged; from slices 3-5 they read that header (no second meter). Page budget: home and SO detail
+  re-pinned at measured work (ruled: Today's four counts; Ship and payment rows); SPEED-1 brings them down.
+- Rulings: confirm on a missing total filed (provider); whole-balance payment (part and defaults: phase 3); test bridges priced
+  unpriced lines (`customer-credit` keeps its case by an unstated tax rate); invoice form without sections; disclosure carrier
+  filed (LANGUAGE); plain dates, "(UTC)" kept on times of day, the tenant calendar zone (ADR-0018) filed for the renderer.
+- Re-baselines (ADR-0066): slice 2 (the price retypes a column) and slices 3-5 (one entry, as main carries it; AGENT-3's
+  compiled view reads it). Every dev database needs `dev:reset`. Snapshot regenerated by the evidence workflow (44182814394).
+- Next actions: invoice → ship → payment (ORDER-PARITY kept). Landing = the first launcher: Today is `inventory_today` in Stock.
 
-## Slices
+## Slices (clicks / loads / typed / invented; raw codes)
 
-1. The scorecard — baseline [2026-11-17-loop-scorecard.md](../evidence/2026-11-17-loop-scorecard.md) (CI run 44179517091): PO
-   create-and-place 11 clicks; sales side create → shipped 18; invoice and payment 9 through the invoice page; PO detail ~405
-   database transactions per load. The audit's row 1 and baseline row corrected; the plan's targets restated (≤ 8, ≤ 11).
-3. Memo — [after](../evidence/2026-11-17-loop-scorecard-memo.md) (CI run 44189274091; before = slice 2's run, another GitHub
-   runner, not one machine): PO detail wall ~1.7 s → ~0.59 s, CPU ~1.5 s → ~0.2 s; db counts unchanged; per warm request 0
-   operation / 0 manifest parses, ~94 bindings, 1 query catalog (per view; a cross-request memo of those is filed).
-2. The loop finishes — [after](../evidence/2026-11-17-loop-scorecard-slice-2.md) (CI run 44187720302): invoice and payment 8
-   clicks, 8 loads, 0 typed, 0 invented (was 9, 9, 2, 1), all from the order.
+1. [Baseline](../evidence/2026-11-17-loop-scorecard.md): PO 11/7/6/0, 3; sales side 18/14/8/2, 3; invoice and pay 9/9/2/1 via
+   the invoice page. Targets restated: PO ≤ 8, sales side ≤ 11.
+2. [After](../evidence/2026-11-17-loop-scorecard-slice-2.md): invoice and pay 8/8/0/0, from the order.
+3. Memo [after](../evidence/2026-11-17-loop-scorecard-memo.md): PO detail wall ~1.7 s → 0.59 s, CPU 1.5 s → 0.2 s (two GitHub
+   runners); 0 operation / 0 manifest parses per warm request.
+4. Slices 3-5 [after](../evidence/2026-11-18-loop-scorecard-slices-3-5.md): PO 11/7/5/0, 1; sales side 13/9/3/0, 1; invoice and
+   pay 8/8/0/0; developer sentences 0; create screens 17 (PO), 24 (SO) fields. Not met: PO ≤ 8, sales side ≤ 11 (phase 3).
 
 ## Gates
 
-- Memo: CI run 44189274091 green at `7401f53e`. Slice 2: CI run 44187720302 green at `da4aefa8`. Slice 1: CI run 44179517091 green at `7cf5f580` (the scorecard 3.7 min in the composed browser job). Local: format,
-  typecheck, lint; the journey run against a local dev server (`distributor` seed).
+CI green: 1 44179517091; 2 44187720302 (main 44193434122); memo 44189274091 (main 44200314898); 3-5 44214966721. Local: format,
+typecheck, lint, unit, compiler, integration, agent, contracts, check:app-release, check:language-coverage.
 
 ## Test it yourself
 
-`corepack pnpm dev`, open <http://127.0.0.1:4174/>: Purchasing → Purchase orders → New; pick Cascade Fastener Works, Calgary
-warehouse, FST-0120 (10 at 12.00), Save draft, Place order. Receive lines with actual cost → Fill open quantities, cost 12.00 →
-Review → Confirm. Inventory → Stock by item, search FST-0120 → On hand 10. Sales → Sales orders → New: Lethbridge Millwork,
-FST-0120 × 4 (priced 27.50 by default), Save draft, Confirm; select the line, Reserve stock (4, Calgary warehouse); select the
-reservation, Ship reserved stock (you must type a carrier and a tracking number); Invoice shipped quantities; then open the
-invoice and Record payment (amount and a reference typed). The counts are in the scorecard.
+`pnpm --filter @north-star/api dev:reset`, `pnpm dev`, <http://127.0.0.1:4174/>: you land on Today. Purchasing → Purchase
+orders → New: Cascade Fastener Works, Calgary warehouse, FST-0120 × 10 at 12.00, Save draft, Place order (next action).
+Receive → Fill open quantities, cost 12.00, Review, Confirm. Stock → Stock by item, FST-0120 → 10. Sales → Sales orders →
+New: Lethbridge Millwork, FST-0120 × 4 (27.50), Save draft, Confirm; Ship: Ship from Calgary warehouse, Fill, Review,
+Confirm; Invoice shipped quantities; Record payment — each the order's next action. Empty sections read plainly.
 
 ## Filed
 
-- Confirm refusing a missing total for every customer (the provider's confirm reads the total only under a credit limit): ruled
-  option 2, filed for the provider; the required price closes the observed harm.
-- The scorecard's db columns count the RESET after each transaction (PO detail ~405 here, 148 BEGIN/COMMIT pairs in SPEED-1's
-  statement log); SPEED-1's request meter (Server-Timing) replaces them once merged.
-- Cross-request memo of the query catalog (1 parse per request) and surface bindings (~94 per request): SPEED-1 or a follow-up.
-- Part payment and an amount defaulting to the balance on the order's payment: phase 3 (row-derived defaults).
+- Confirm refusing a missing total under no credit limit (provider); part payment and amount defaults (phase 3).
+- Disclosure carrier (LANGUAGE); times of day in the tenant zone (ADR-0018); cross-request memo of the query catalog and
+  bindings; the DB columns to SPEED-1's Server-Timing.
+- Plain destination names (Inventory movement, Legal entity, Party role, Posted stock); "Reserve stock" as a rows Task; Ship
+  offers nothing for a line already partly reserved (only "Ship reserved stock"); the plan's rule 2 tenant-type repeat.
+
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1", "packet": "LOOP-1",
+  "base": "c58e46e359c7e05505d8bab8b46327d3de8ce91e", "head": "3bcfe12974f71d8c5b4e26bcd66878fdf4c9c29a",
+  "changedPaths": [
+    "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts", "apps/web/src/document-editor.ts", "apps/web/src/editor-controls.ts", "apps/web/src/message-catalog.ts", "apps/web/src/message-render.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-runtime.ts", "apps/web/test/browser/composed-application.spec.ts",
+    "apps/web/test/browser/inventory-catalog-aliases.spec.ts", "apps/web/test/browser/inventory-documents.spec.ts", "apps/web/test/browser/inventory-locations.spec.ts", "apps/web/test/browser/inventory-replenishment.spec.ts", "apps/web/test/browser/inventory-warehouse-mode.spec.ts", "apps/web/test/browser/item-stock.spec.ts", "apps/web/test/browser/loop-scorecard.composed-application.spec.ts", "apps/web/test/browser/loop-scorecard.ts", "apps/web/test/browser/meta-sales.spec.ts", "apps/web/test/browser/order-entry.spec.ts",
+    "apps/web/test/browser/payables.spec.ts", "apps/web/test/browser/purchase-approvals.spec.ts", "apps/web/test/browser/purchase-pricing.spec.ts", "apps/web/test/browser/receivables.spec.ts", "apps/web/test/browser/receiving.composed-application.spec.ts", "apps/web/test/surface-runtime-contract.test.ts", "packages/domain/src/app/builder.ts", "packages/domain/src/app/order-entry.ts", "packages/domain/src/app/today.ts", "packages/domain/src/sales/workspace.ts",
+    "test/architecture/surface-grammar-conformance.test.ts", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/integration/surface-data-binding.test.ts", "test/performance/page-budgets.ts", "test/postgres/composed-application.test.ts", "test/postgres/declared-list.test.ts", "test/unit/purchasing-definition.test.ts", "test/unit/sales-definition.test.ts"
+  ],
+  "symbols": [
+    {"path": "apps/web/test/browser/loop-scorecard.ts", "name": "LoopScorecard"}, {"path": "apps/web/test/browser/loop-scorecard.ts", "name": "DatabaseStatistics"},
+    {"path": "packages/domain/src/app/today.ts", "name": "todaySurface"}, {"path": "apps/web/src/surface-runtime.ts", "name": "landingSurface"}
+  ]
+}
+```

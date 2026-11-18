@@ -82,7 +82,10 @@ for (const javaScriptEnabled of [true, false]) {
         const lineTop = await page
           .locator('[data-composition-dataset$="dataset.order_lines"]')
           .boundingBox();
-        expect(lineTop!.y).toBeLessThan(650);
+        // LOOP-1: a confirmed order's next action (Ship) now sits above
+        // the lines, so their table starts lower, still on the first
+        // 1280x800 screen.
+        expect(lineTop!.y).toBeLessThan(800);
         await expect(page.locator('.composition-header')).toContainText(
           'Released',
         );

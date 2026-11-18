@@ -202,7 +202,9 @@ async function journey(
   const orderLineId = (await orderLine.getAttribute('data-record-id'))!;
   expect(orderLineId).toBeTruthy();
   const orderUrl = url('purchase_order', 'detail', orderId);
-  await page.getByRole('button', { name: 'Place order', exact: true }).click();
+  await page
+    .getByRole('button', { name: /^(?:Next action: )?Place order$/u })
+    .click();
   await page
     .getByRole('dialog')
     .getByRole('button', { name: 'Review Place order', exact: true })

@@ -182,14 +182,14 @@ async function openNew(page: Page) {
     .getByRole('navigation', { name: 'Release navigation' })
     .locator('.navigation-tree > li')
     .getByRole('group')
-    .filter({ hasText: 'Inventory' });
+    .filter({ hasText: 'Stock' });
   const transactions = inventory.getByRole('link', {
     name: 'Inventory transactions',
     exact: true,
   });
   // A group already open on this page stays open; clicking it would close it.
   if (!(await transactions.isVisible()))
-    await inventory.getByText('Inventory', { exact: true }).click();
+    await inventory.getByText('Stock', { exact: true }).click();
   await transactions.click();
   await expect(
     page.getByRole('heading', { level: 1, name: 'Inventory transactions' }),

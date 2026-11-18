@@ -1068,11 +1068,8 @@ function renderCapabilityCommand(
   // would have been two identical forms differing only in their button label
   // and posting the same `intent` -- the collision this packet fixes, arriving
   // for the first time on a tree where transitions actually bind.
-  const explanation = next
-    ? ''
-    : operation.capabilityId
-      ? '<span><strong>Draft staged.</strong> Posting is a separate confirmed step.</span>'
-      : '<span><strong>Ready.</strong> This moves the record to its next state.</span>';
+  // The button says what it does; no developer sentence beside it (LOOP-1).
+  const explanation = '';
   return `<form class="capability-command" method="post" action="${escapeHtml(surfaceHref(context.surface, record.recordId, record.archived, context))}" data-capability-id="${escapeHtml(operation.capabilityId ?? '')}" data-operation-id="${escapeHtml(operation.operationId)}"><input type="hidden" name="operationId" value="${escapeHtml(operation.operationId)}"><input type="hidden" name="idempotencyKey" value="${randomUUID()}"><input type="hidden" name="recordId" value="${escapeHtml(record.recordId)}"><input type="hidden" name="expectedRevision" value="${record.revision}">${explanation}<button type="submit"${next ? ` aria-label="${escapeHtml(next.name)}"` : ''}>${escapeHtml(operation.label)}</button></form>`;
 }
 
