@@ -282,6 +282,83 @@ test('compiled fixture surfaces bind live Q0/O0 data through one pinned request 
   }
 });
 
+test('SPEED-1: a page finishes its reads before it renders; a policy change then is the page own, and a task step under one redirects', async () => {
+  const compiled = compileFixture();
+  const policy = new RecordingPolicy('ALLOW');
+  const entry = runtimeEntry(compiled, policy, {
+    a: identity(tenantA, environmentA, principalA),
+  });
+  const view = await issuedView(entry, 'a');
+  const operationMediation = new SemanticOperationMediationAuthority();
+  const gateways = {
+    operationGateway: new SemanticOperationGateway(
+      policy,
+      new InMemoryGenericExecutor(),
+      operationMediation,
+    ),
+    operationMediation,
+    queryGateway: fixedQueryGateway('exact', []),
+  };
+  const listUrl = `/?surface=${encodeURIComponent(`${FIXTURE_IDS.namespace}:surface.master_list`)}`;
+  const order: string[] = [];
+  const page = await renderSurfaceRuntimeWithData(
+    view,
+    listUrl,
+    gateways,
+    null,
+    {
+      finishReads: async () => {
+        order.push('finished');
+      },
+    },
+  );
+  order.push('rendered');
+  assert.deepEqual(order, ['finished', 'rendered']);
+  assert.match(page.html, /data-data-state="empty"/);
+
+  const changed = Object.assign(new Error('the policy changed'), {
+    code: 'READ_SNAPSHOT_POLICY_CHANGED',
+    name: 'ReadSnapshotPolicyChangedError',
+  });
+  await assert.rejects(
+    renderSurfaceRuntimeWithData(view, listUrl, gateways, null, {
+      finishReads: async () => {
+        throw changed;
+      },
+    }),
+    (error: unknown) => error === changed,
+  );
+
+  // A task step under a policy change is sent again by a fresh GET, its task
+  // parameters dropped; it never reports a failure of what it committed.
+  const server = createSurfaceRuntimeServer(entry, gateways, null, undefined, {
+    readSnapshot: async (work) => {
+      await work(async () => undefined);
+      throw changed;
+    },
+  });
+  const baseUrl = await listen(server);
+  try {
+    const step = await fetch(`${baseUrl}${listUrl}&taskToken=t`, {
+      body: new URLSearchParams({
+        compositionAction: 'northstar.fixture:action.x',
+        taskStage: 'confirm',
+        taskToken: 't',
+      }).toString(),
+      headers: {
+        authorization: 'a',
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      method: 'POST',
+      redirect: 'manual',
+    });
+    assert.equal(step.status, 303);
+    assert.equal(step.headers.get('location'), listUrl.replace('%3A', '%3A'));
+  } finally {
+    await close(server);
+  }
+});
+
 test('frozen Q0 outcomes and gateway failures render bounded safe states', async () => {
   const compiled = compileFixture();
   const policy = new RecordingPolicy('ALLOW');

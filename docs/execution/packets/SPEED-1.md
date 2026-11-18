@@ -1,6 +1,6 @@
 # SPEED-1 — a record page in a few database trips, measured and held there
 
-Status: slice 1 at `3ab5853a`; slices 2-4 at `69b7adc1` (one integration, orchestrator ruling); slices 5-6 at `1663ade6`. Tier: request
+Status: slice 1 at `3ab5853a`; slices 2-4 at `69b7adc1` (one integration, orchestrator ruling); slices 5-6 at `1663ade6`; security fix round at `ab5ab5e2`. Tier: request
 security path, no file of the `AGENTS.md` §4 Critical set; slices 2-4 get the orchestrator's two critical reviews. Base: `main`
 `74b3367f`. Stops: none. Charter: [SPEED-1-charter.md](SPEED-1-charter.md). ADR: [ADR-0071](../../decisions/ADR-0071-read-decisions-are-live-per-request-writes-per-call.md).
 
@@ -29,16 +29,21 @@ security path, no file of the `AGENTS.md` §4 Critical set; slices 2-4 get the o
 9. Slice 6: `corepack pnpm build && corepack pnpm start` runs the app from `dist/` with plain Node (`start-production.mjs`, resolve
    hook `production-resolve.mjs`); `apps/api/src/measure-page.ts` times the PO detail the same way under tsx and compiled.
 
+10. Fix round (two reviews of `3ab5853a^1..69b7adc1`): an invocation runs outside any page snapshot, so every write-path decision
+    is live (S1); a task step under a policy change is sent again by GET, its commit intact (S2); moving a policy row bumps both
+    scopes (migration 0030, S3); a page reads one tenant and environment (`ReadSnapshotScopeError`, S4); an aggregate anchor is
+    written only under the live epoch (S5); denials are recorded after the reads (S6); the editor finishes outside its catch (S7);
+    a transaction of its own takes the page's turn, one connection per request (S8); a loading release is awaited outside the
+    snapshot (S9). Each has a test in `read-snapshot.test.ts` or `surface-data-binding.test.ts`.
+
 ## Decisions (one line each)
 
 - Meter in the provider, injected into the web server as a probe; `apps/web` never imports the provider.
 - Budget fixture: `order_pages` (no seed profile has orders); a 303 workspace entry counts both hops; ceilings only move down.
 - Snapshot API: `withReadSnapshot` / `withTrustedRequestRead`; a page declares nothing: its reads join through the provider.
-- Slices 2-4 integrate together: their commits interleave and the reviews read them as one diff (orchestrator, 2026-11-17).
-- Bridges: `rolePool` meters its pools; `saved-filter-executor.ts` reads join; the list count skip in the interpreter.
-- A company-scoped aggregate writes its cached anchor, so it never joins; the storage target loads as the runtime role.
-- Not built: references by an `IN` list (identical references already run once); advisory previews need no batch query now.
-- The client script stays inline, hash-pinned (ADR-0036 §1); only the stylesheet moves in slice 5 (orchestrator).
+- Bridges: `rolePool` meters pools; saved-filter reads join; the list count skip; migration 0030 (approved, Critical: unread).
+- A company-scoped aggregate writes its cached anchor, so it never joins. Not built: references by an `IN` list.
+- Slices 2-4 integrate together (orchestrator); the client script stays inline and hash-pinned (ADR-0036 §1).
 
 ## Slices
 
@@ -51,21 +56,17 @@ security path, no file of the `AGENTS.md` §4 Critical set; slices 2-4 get the o
 | stock by item | 76 / 586 / 67 / 62 | 2 / 43 | 2 / 23 / 3 / 0 |
 | sales order detail | 259 / 2139 / 207 / 236 (269 / 2209 after LOOP-1 slice 3) | 2 / 186 | 2 / 56 / 3 / 5 |
 | task open / review | 393 / 205 transactions | unchanged | 2 / 36 / 3 / 0 each |
-| task Confirm | 217 / 1879 / 169 / 204 | unchanged | 16 / 248 / 14 / 15 |
+| task Confirm | 217 / 1879 / 169 / 204 | unchanged | 16 / 248 / 14 / 15; 21 / 287 / 17 / 17 after fix S1 |
 
-Warm catalog parses after 2-4: operation catalog, query catalog, surface manifest 0 on every page; surface bindings 49-100.
-PO detail wall / CPU per request, one laptop, 20 warm loads: charter base 16.3 s / 12.4 s; after, tsx 141-189 ms / 120-170 ms,
-compiled 141-206 ms / 120-164 ms (the compiled start helps start-up, not a warm page). Slice 5: 58 KB less HTML per page.
-
-Confirm's 16 transactions: the step's snapshot (12 statements), 7 live re-authorizations, 2 trust-service mutations, 2
-capability-executor target reads (write path), 1 snapshot reopened between writes, the posting write (66), the read-back snapshot
-(28), the live epoch check. No read outside the write path is left to fold; pinned at 16.
+Warm parses: operation and query catalogs and the manifest 0 everywhere; bindings 49-100. PO detail per request, one laptop:
+base 16.3 s wall / 12.4 s CPU; after ~141-206 ms / 120-170 ms, tsx and compiled alike. Slice 5: 58 KB less HTML a page.
+Confirm's 16 transactions: the step's snapshot, 7 live re-authorizations, 2 trust-service mutations, 2 executor target reads,
+1 snapshot reopened between writes, the posting write, the read-back snapshot, the live epoch check; nothing left to fold.
 
 ## Gates
 
-- Slice 1: CI run 44201921559 green at `81c218b0` (PR #62). Slices 2-4: CI run 44225809436 green at `a6a6348f` (PR #67). Local: format, typecheck, lint, unit tests
-  (meter, query catalog memo), architecture tests that read the changed files, `read-snapshot.test.ts` and `page-budget.test.ts`
-  (orchestrator-approved local runs, one at a time under the test lock).
+- CI: slice 1 run 44201921559 (`81c218b0`), slices 2-4 run 44225809436 (`a6a6348f`), slices 5-6 run 44237933304 (`f840fee6`).
+  Local: format, typecheck, lint, unit tests, approved runs of `read-snapshot.test.ts` and `page-budget.test.ts` under the lock.
 
 ## Test it yourself
 
@@ -75,6 +76,5 @@ start` serves the same app compiled. `curl -sIL 'http://127.0.0.1:4174/?surface=
 
 ## Filed
 
-- Confirm: 7 live re-authorizations and 2 executor target reads are 9 transactions of the write path (unchanged by charter).
-- Surface binding parses (49-100 per page) are per request view; a cross-request memo is LOOP-1's.
-- The Customize screen's sandbox worker is a `.ts` path, so the compiled start does not serve Customize.
+- Confirm's 9 write-path transactions (live re-authorizations, executor reads) stay; the one-statement batched count is filed.
+- Binding parses (49-100 a page) are per request view (LOOP-1's memo); the compiled start does not serve Customize.

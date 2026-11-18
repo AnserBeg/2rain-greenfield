@@ -1160,9 +1160,16 @@ function governedScripts(): readonly (readonly [string, string])[] {
   const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as {
     scripts?: Record<string, string>;
   };
+  // Like the root aggregate, the local PostgreSQL entry point delegates to
+  // individually leased, CI-invoked scripts. Its outer lease spans all three.
+  assert.equal(
+    manifest.scripts?.['test:postgres'],
+    "node scripts/run-with-test-lock.mjs exclusive -- bash -c 'corepack pnpm test:postgres:1 && corepack pnpm test:postgres:2 && corepack pnpm test:postgres:3'",
+  );
   return Object.entries(manifest.scripts ?? {}).filter(
     ([script]) =>
       script !== 'test' &&
+      script !== 'test:postgres' &&
       (script.startsWith('test:') || script.startsWith('check:')),
   );
 }
