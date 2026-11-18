@@ -456,11 +456,22 @@ body[data-reference-enhanced] [data-reference-field][aria-busy="true"] .referenc
    screen the page is two columns, the title and the stepper span both, and
    the rail's sections fill the right column from the top (dense flow). */
 @media(min-width:1181px){
-.surface-grid:has([data-composition-rail]){grid-template-columns:minmax(0,1fr) var(--rail-w);grid-auto-flow:row dense;align-items:start}
-.surface-grid:has([data-composition-rail])>.surface-slot>*,.surface-grid:has([data-composition-rail]) .composition-header>*{grid-column:1}
-.surface-grid:has([data-composition-rail]) :is(.composition-title,.record-breadcrumb,.composition-alert,.composition-progression,.composition-record-actions,.composition-back){grid-column:1/-1}
-.surface-grid:has([data-composition-rail]) [data-composition-rail]{grid-column:2}
+.surface-grid:has(.composition-rail){grid-template-columns:minmax(0,1fr) var(--rail-w);grid-auto-flow:row dense;align-items:start;row-gap:0}
+.surface-grid:has(.composition-rail)>.surface-slot>*,.surface-grid:has(.composition-rail) .composition-header>*{grid-column:1;margin-bottom:var(--gap)}
+.surface-grid:has(.composition-rail) :is(.composition-title,.record-breadcrumb,.composition-alert,.composition-progression,.composition-record-actions,.composition-back){grid-column:1/-1}
+/* The rail is one column: it spans the sheet's rows, whose gap is each
+   item's margin, so the rows it spans past the sheet's last add nothing. */
+.surface-grid:has(.composition-rail) .composition-rail{grid-column:2;grid-row:span 12}
 }
+/* A form's other fields wait behind More details; the summary names them
+   quietly, on one line (LOOK-1 round 2). */
+.draft-more>summary{display:flex;align-items:baseline;gap:8px;min-width:0;padding:4px 0;color:var(--ink-2);font-size:13px;font-weight:500;cursor:pointer}
+.draft-more__names{min-width:0;overflow:hidden;color:var(--muted);font-size:12px;font-weight:400;white-space:nowrap;text-overflow:ellipsis}
+.draft-more>summary::-webkit-details-marker{display:none}
+.draft-more>summary::before{content:"›";flex:none;color:var(--muted);transition:transform var(--motion-duration) var(--motion-easing)}
+.draft-more[open]>summary::before{transform:rotate(90deg)}
+.draft-more[open]>summary{margin-bottom:10px}
+.composition-rail{grid-column:1/-1;display:grid;gap:var(--gap);align-content:start;min-width:0}
 [data-composition-rail]{padding:calc(var(--row-y) + 4px) var(--pad-x) calc(var(--row-y) + 6px)}
 [data-composition-rail]>.data-table-wrap{margin:8px calc(-1 * var(--pad-x)) calc(-1 * (var(--row-y) + 6px));border-top:1px solid var(--rule)}
 [data-composition-rail] .composition-collection-heading details{display:none}

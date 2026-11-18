@@ -1372,9 +1372,16 @@ export function renderCompositionChildren(
   surface?: CompiledSurfaceDefinition,
   view?: RequestRuntimeView,
 ): string {
+  const rail: string[] = [];
   const children = data.children
     .map((child) => {
       if (child.definition.presentation && surface && view) {
+        // The declared rail's datasets stack in one column beside the sheet
+        // (LOOK-1 round 2), in their declared order.
+        if (child.definition.presentation.rail) {
+          rail.push(renderPresentedChild(child, data, surface, view));
+          return '';
+        }
         const presented = renderPresentedChild(child, data, surface, view);
         const totals = renderCompositionTotals(surface, data, child);
         return totals
@@ -1402,7 +1409,9 @@ export function renderCompositionChildren(
       }</section>`;
     })
     .join('');
-  return children;
+  return rail.length > 0
+    ? `${children}<div class="composition-rail">${rail.join('')}</div>`
+    : children;
 }
 
 /**

@@ -871,7 +871,7 @@ function renderTitleStatus(context: SurfaceComponentContext): string {
           : '';
   return slotPanel(
     context,
-    `<header class="surface-heading surface-heading--slot"><div><h1>${escapeHtml(title)}</h1></div>${status}</header>${feedbackHtml(context.feedback)}`,
+    `<header class="surface-heading surface-heading--slot"><div>${record && !form ? `<p class="eyebrow">${escapeHtml(entityLabel(context.surface))}</p>` : ''}<h1>${escapeHtml(title)}</h1></div>${status}</header>${feedbackHtml(context.feedback)}`,
     'title-status-slot',
   );
 }
@@ -1148,6 +1148,19 @@ function renderKeyFacts(context: SurfaceComponentContext): string {
       'key-facts-slot',
     );
   }
+  // A record page whose title already names the record and its state keeps
+  // its identity and revision in quiet technical details (LOOK-1 round 2),
+  // as a document page does.
+  if (
+    record &&
+    context.surface.surfaceRole === 'record' &&
+    hasSurfaceSlot(context, 'titleStatus')
+  )
+    return slotPanel(
+      context,
+      `<details class="panel composition-technical key-facts-panel" data-data-state="exact" data-record-id="${escapeHtml(record.recordId)}"><summary>Technical details · record identity, activity and revision</summary><dl class="record-fields"><div><dt>Record</dt><dd><code>${escapeHtml(shortIdentity(record.recordId))}</code></dd></div><div><dt>State</dt><dd>${record.archived ? 'Archived' : 'Active'}</dd></div><div><dt>Revision</dt><dd>${String(record.revision)}</dd></div></dl></details>`,
+      'key-facts-slot',
+    );
   const compatibilityStatus =
     record && !hasSurfaceSlot(context, 'titleStatus')
       ? `<span class="status-pill" data-status-role="${record.archived ? 'attention' : 'success'}">${record.archived ? 'Archived' : 'Active'} · revision ${record.revision}</span>`
@@ -1183,7 +1196,7 @@ function renderSections(context: SurfaceComponentContext): string {
     return slotPanel(
       context,
       record
-        ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><h2>${escapeHtml(entityLabel(context.surface))} information</h2></div></div><details class="record-section-group" open><summary>${escapeHtml(entityLabel(context.surface))} fields</summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${renderValue(record.values[fieldId])}</dd></div>`).join('')}</dl></details></section>`
+        ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}<section class="panel data-panel" data-data-state="exact"><div class="panel__heading"><div><h2>Details</h2></div></div><details class="record-section-group" open><summary>${escapeHtml(entityLabel(context.surface))} fields</summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`
         : dataDiagnostic('QUERY_NOT_FOUND'),
       'sections-slot',
     );
@@ -2420,6 +2433,22 @@ function renderInputValue(value: unknown): string {
   return value === null || value === undefined
     ? ''
     : escapeHtml(typeof value === 'string' ? value : JSON.stringify(value));
+}
+
+/**
+ * A generic record page's value as a person reads it (LOOK-1 round 2): a
+ * choice by its label, a date as a date, by the field's compiled kind --
+ * never an option id or a raw instant.
+ */
+function recordFieldValue(
+  context: SurfaceComponentContext,
+  record: SemanticRecordDto,
+  fieldId: string,
+): string {
+  const value = record.values[fieldId];
+  if (value === null || value === undefined || typeof value === 'number')
+    return renderValue(value);
+  return escapeHtml(displayFieldValue(context.view, record, fieldId, value));
 }
 
 function renderValue(value: unknown): string {

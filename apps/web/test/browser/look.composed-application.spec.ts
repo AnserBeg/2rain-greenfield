@@ -130,6 +130,9 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
               // The order date is a date (round 2): no "(UTC)" anywhere.
               expect.soft(rawCodes(text), `${screen} raw codes`).toEqual([]);
               expect
+                .soft(machineText(text), `${screen} canonical ids or instants`)
+                .toEqual([]);
+              expect
                 .soft(
                   await page.evaluate(
                     () => document.documentElement.scrollWidth <= innerWidth,
@@ -146,6 +149,18 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
     LINEAGE_INSTALL_VOLUME,
   );
 });
+
+/**
+ * Text only a machine writes (round 2): a canonical id such as an option's,
+ * or a raw instant -- what a value shown by its field kind never is.
+ */
+function machineText(text: string): readonly string[] {
+  return [
+    ...text.matchAll(
+      /\b[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+:[a-z]+\.[a-z0-9_-]+|\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/gu,
+    ),
+  ].map((match) => match[0]);
+}
 
 /** The Ledger's generic parts each screen must show. */
 async function requireLedgerParts(
