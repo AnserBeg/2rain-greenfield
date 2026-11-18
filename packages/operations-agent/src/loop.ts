@@ -10,9 +10,10 @@ import type {
   ModelTurn,
   ModelUsage,
 } from './model.js';
+import { toMessages } from './anthropic-model.js';
+import { isRecord } from './catalog.js';
 import type { AgentScreen, OperationsAgentSession } from './session.js';
 import {
-  customizeHandoff,
   OPERATIONS_AGENT_SYSTEM_PROMPT,
   OPERATIONS_AGENT_TOOLS,
 } from './tools.js';
@@ -53,7 +54,7 @@ export class SpendMeter {
   }
   /**
    * The output tokens one call may use (end review X13): what is left of the
-   * cap after the call's estimated input, priced as uncached input, at the
+   * cap after the call's estimated input, priced at the highest input rate, at the
    * output price. 0 when less than a minimal reply is left; undefined when
    * unpriced (no cap to keep).
    */
@@ -62,7 +63,13 @@ export class SpendMeter {
     const left =
       this.capUsd -
       this.#usd -
-      (estimatedInputTokens * this.#prices.input) / 1_000_000;
+      (estimatedInputTokens *
+        Math.max(
+          this.#prices.input,
+          this.#prices.cacheWrite,
+          this.#prices.cacheRead,
+        )) /
+        1_000_000;
     const tokens = Math.floor((left * 1_000_000) / this.#prices.output);
     return tokens < MINIMUM_CALL_OUTPUT_TOKENS
       ? 0
@@ -80,21 +87,31 @@ export class SpendCapReached extends Error {
   override readonly name = 'SpendCapReached';
 }
 
-/**
- * A call's input tokens, estimated before it is sent: every character of the
- * prompt, the tools and the conversation at three per token (an overcount
- * for English and JSON, so the reservation errs high).
- */
-export function estimateInputTokens(request: {
-  readonly system: string;
-  readonly tools: readonly unknown[];
-  readonly conversation: readonly unknown[];
-}): number {
-  return Math.ceil(
-    (request.system.length +
-      JSON.stringify(request.tools).length +
-      JSON.stringify(request.conversation).length) /
-      3,
+/** Reserve one token per serialized UTF-8 byte, including tool-data escaping,
+ * plus room for provider message framing. */
+export function estimateInputTokens(
+  request: Pick<
+    Parameters<ModelAdapter['next']>[0],
+    'system' | 'tools' | 'conversation'
+  >,
+): number {
+  return (
+    Buffer.byteLength(
+      JSON.stringify({
+        system: [
+          {
+            type: 'text',
+            text: request.system,
+            cache_control: { type: 'ephemeral' },
+          },
+        ],
+        tools: request.tools,
+        messages: toMessages(
+          request.conversation as readonly ConversationEntry[],
+        ),
+      }),
+      'utf8',
+    ) + 256
   );
 }
 
@@ -120,7 +137,7 @@ export async function meteredNext(
       ...request,
       ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
       onText: (delta) => {
-        streamed += delta.length;
+        streamed += Buffer.byteLength(delta);
         request.onText?.(delta);
       },
     });
@@ -132,10 +149,13 @@ export async function meteredNext(
   } catch (error) {
     if (request.signal?.aborted || streamed > 0)
       meter.charge({
-        inputTokens,
-        outputTokens: Math.ceil(streamed / 3),
+        inputTokens: 0,
+        outputTokens: Math.min(
+          streamed,
+          maxOutputTokens ?? CALL_OUTPUT_CEILING,
+        ),
         cacheReadTokens: 0,
-        cacheWriteTokens: 0,
+        cacheWriteTokens: inputTokens,
       });
     throw error;
   }
@@ -159,8 +179,7 @@ export interface AgentRunResult {
   readonly seconds: number;
   readonly error?: string;
   /**
-   * Set when the model's whole final answer is the typed customization
-   * handoff (end review X11); hosts read this, never the answer's text.
+   * A standalone erp_plan customization intent directed to the drafting lane.
    */
   readonly handoff?: { readonly change: string };
 }
@@ -249,6 +268,24 @@ export async function runOperationsAgent(
   // The person's own words: currencies they name are theirs to use.
   if (typeof options.session.noteRequest === 'function')
     options.session.noteRequest(options.request);
+  // Remove complete old exchanges if their replay would crowd out this request.
+  while (
+    conversation.length > 1 &&
+    options.meter.outputBudget(
+      estimateInputTokens({
+        system,
+        tools: OPERATIONS_AGENT_TOOLS,
+        conversation,
+      }),
+    ) === 0
+  ) {
+    const next = conversation.findIndex(
+      (entry, i) => i > 0 && entry.role === 'user',
+    );
+    if (next < 0) break;
+    conversation.splice(0, next);
+  }
+  const historyLength = conversation.length - 1;
   const started = performance.now();
   const usage = {
     inputTokens: 0,
@@ -264,7 +301,6 @@ export async function runOperationsAgent(
     answer: string,
     error?: string,
   ): AgentRunResult => {
-    const change = stop === 'answered' ? customizeHandoff(answer) : null;
     return {
       answer,
       stop,
@@ -275,7 +311,6 @@ export async function runOperationsAgent(
       conversation,
       seconds: (performance.now() - started) / 1000,
       ...(error ? { error } : {}),
-      ...(change !== null ? { handoff: { change } } : {}),
     };
   };
   const maximumTurns = options.maximumTurns ?? 40;
@@ -309,8 +344,10 @@ export async function runOperationsAgent(
     } catch (error) {
       if (options.signal?.aborted)
         return finish('stopped', 'Stopped by the person.');
-      if (error instanceof SpendCapReached)
+      if (error instanceof SpendCapReached) {
+        if (turns === 1) conversation.splice(historyLength);
         return finish('spend-cap', 'Stopped: the run reached its spend cap.');
+      }
       return finish(
         'model-error',
         'Stopped: the model call failed.',
@@ -360,6 +397,7 @@ export async function runOperationsAgent(
     if (turn.stop === 'refusal') return finish('refusal', turn.text);
     if (turn.toolCalls.length === 0) return finish('answered', turn.text);
     const results = [];
+    let customization = false;
     for (const call of turn.toolCalls) {
       if (options.signal?.aborted) {
         // Every tool_use needs its result before the next model call.
@@ -377,6 +415,14 @@ export async function runOperationsAgent(
         call.input,
         options.signal ? { signal: options.signal } : {},
       );
+      if (
+        turn.toolCalls.length === 1 &&
+        call.name === 'erp_plan' &&
+        !outcome.isError &&
+        isRecord(outcome.content) &&
+        outcome.content.outcome === 'customization-request'
+      )
+        customization = true;
       options.onEvent?.({
         kind: 'result',
         name: call.name,
@@ -390,6 +436,11 @@ export async function runOperationsAgent(
       });
     }
     conversation.push({ role: 'tool', results });
+    if (customization && !options.signal?.aborted)
+      return {
+        ...finish('answered', 'Customization requested.'),
+        handoff: { change: options.request },
+      };
     if (options.signal?.aborted)
       return finish('stopped', 'Stopped by the person.');
   }

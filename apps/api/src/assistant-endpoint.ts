@@ -126,6 +126,7 @@ interface Conversation {
   history: readonly ConversationEntry[];
   /** When the person last used it, on the endpoint's clock. */
   lastUsed: number;
+  recentStart: number;
   running: AbortController | null;
   pending: PendingPlan | null;
   /** Where the current run's events go. */
@@ -206,6 +207,7 @@ export function createAssistantEndpoint(
       meter: new SpendMeter(prices, capUsd),
       history: [],
       lastUsed: now(),
+      recentStart: 0,
       running: null,
       pending: null,
       emit: () => undefined,
@@ -272,6 +274,39 @@ export function createAssistantEndpoint(
         response.end();
         return true;
       }
+      const screen = screenOf(body.screen);
+      // The page's company, proved for this person now (X9). A conversation
+      // stays in the company it opened in: a page in another company starts
+      // a new one.
+      const pageCompany = () =>
+        options
+          .company({
+            cookie: String(request.headers.cookie ?? ''),
+            surfaceId: screen?.surfaceId ?? null,
+            search:
+              typeof body.page === 'string' && body.page.length <= 2_000
+                ? body.page
+                : '',
+          })
+          .catch(() => null);
+      if (['undo', 'latest', 'history'].includes(action) && mine) {
+        const page = typeof body.page === 'string' ? await pageCompany() : null;
+        if (
+          !page ||
+          page.companyId !== mine.company.companyId ||
+          conversations.get(mine.id) !== mine
+        ) {
+          response.statusCode = 409;
+          response.setHeader('content-type', 'application/json');
+          response.end(
+            JSON.stringify({
+              outcome: 'refused',
+              text: 'This conversation belongs to another company.',
+            }),
+          );
+          return true;
+        }
+      }
       if (action === 'undo') {
         // The person's Undo click: the latest change of their conversation,
         // named by its id, and never while a run is working.
@@ -289,9 +324,11 @@ export function createAssistantEndpoint(
         // Undo holds the conversation like a run: no ask or second Undo
         // interleaves with it.
         mine.running = new AbortController();
-        const undone = await mine.session.undo(body.changeId).finally(() => {
-          mine.running = null;
-        });
+        const undone = await mine.session
+          .undo(body.changeId, mine.running.signal)
+          .finally(() => {
+            mine.running = null;
+          });
         response.statusCode = 200;
         response.end(
           JSON.stringify(
@@ -309,15 +346,12 @@ export function createAssistantEndpoint(
         // The conversation's current undoable change, for a panel that
         // reopened after a navigation or a Stop.
         response.setHeader('content-type', 'application/json; charset=utf-8');
-        const change = mine?.session.latestChange();
-        response.statusCode = 200;
         response.end(
           JSON.stringify({
             running: Boolean(mine?.running),
-            did:
-              change && !change.undone && !mine?.running
-                ? { changeId: change.changeId, summary: change.summary }
-                : null,
+            ...(mine && !mine.running
+              ? await didSince(mine, mine.recentStart)
+              : {}),
           }),
         );
         return true;
@@ -340,20 +374,7 @@ export function createAssistantEndpoint(
         response.end();
         return true;
       }
-      const screen = screenOf(body.screen);
-      // The page's company, proved for this person now (X9). A conversation
-      // stays in the company it opened in: a page in another company starts
-      // a new one.
-      const company = await options
-        .company({
-          cookie: String(request.headers.cookie ?? ''),
-          surfaceId: screen?.surfaceId ?? null,
-          search:
-            typeof body.page === 'string' && body.page.length <= 2_000
-              ? body.page
-              : '',
-        })
-        .catch(() => null);
+      const company = await pageCompany();
       if (!company) {
         response.statusCode = 200;
         response.setHeader(
@@ -373,7 +394,11 @@ export function createAssistantEndpoint(
         return true;
       }
       const same =
-        mine?.company.companyId === company.companyId ? mine : undefined;
+        mine &&
+        conversations.get(mine.id) === mine &&
+        mine.company.companyId === company.companyId
+          ? mine
+          : undefined;
       if (!same && !makeRoom(principalId)) {
         response.statusCode = 429;
         response.end();
@@ -407,7 +432,7 @@ export function createAssistantEndpoint(
         capUsd,
         company: conversation.company.label,
       });
-      const before = conversation.session.latestChange()?.changeId ?? null;
+      const before = conversation.session.changes().length;
       try {
         await runTurn(conversation, text, screen, controller);
         conversation.lastUsed = now();
@@ -419,9 +444,11 @@ export function createAssistantEndpoint(
           type: 'error',
           message:
             error instanceof Error ? error.message : 'the assistant failed',
-          ...didThisTurn(conversation.session.latestChange(), before),
+          ...(await didSince(conversation, before)),
         });
       } finally {
+        if (conversation.session.changes().length > before)
+          conversation.recentStart = before;
         conversation.running = null;
         conversation.pending = null;
         response.end();
@@ -460,10 +487,9 @@ export function createAssistantEndpoint(
       });
       return;
     }
-    const changeBefore = conversation.session.latestChange()?.changeId ?? null;
+    const changeBefore = conversation.session.changes().length;
     emit({ type: 'step', label: 'Reading the screen' });
     const preamble = await agentPreamble(conversation.session, screen);
-    let callText = '';
     const run = await runOperationsAgent({
       model,
       session: conversation.session,
@@ -475,15 +501,8 @@ export function createAssistantEndpoint(
       onEvent: (event) => {
         const label = stepLabel(event);
         if (label) emit({ type: 'step', label });
-        if (event.kind === 'thinking') callText = '';
-        if (event.kind === 'delta') callText += event.text;
-        // A typed answer (the handoff's JSON) is not shown as prose; the
-        // answer event says it in words.
-        const typed = callText.trimStart().startsWith('{');
-        if (event.kind === 'delta' && !typed)
-          emit({ type: 'delta', text: event.text });
-        if (event.kind === 'text' && !event.text.trimStart().startsWith('{'))
-          emit({ type: 'text', text: event.text });
+        if (event.kind === 'delta') emit({ type: 'delta', text: event.text });
+        if (event.kind === 'text') emit({ type: 'text', text: event.text });
       },
     });
     conversation.history = run.conversation;
@@ -502,11 +521,7 @@ export function createAssistantEndpoint(
         ...drafted,
         stop: 'handoff',
         links: answerLinks,
-        ...didThisTurn(
-          conversation.session.latestChange(),
-          changeBefore,
-          answerLinks,
-        ),
+        ...(await didSince(conversation, changeBefore)),
         // The draft's own model calls count toward this turn and the cap.
         usd: run.usd + (conversation.meter.usd - beforeDraft),
         spentUsd: conversation.meter.usd,
@@ -523,11 +538,7 @@ export function createAssistantEndpoint(
             : run.answer || '(no answer)',
       stop: run.stop,
       links: answerLinks,
-      ...didThisTurn(
-        conversation.session.latestChange(),
-        changeBefore,
-        answerLinks,
-      ),
+      ...(await didSince(conversation, changeBefore)),
       usd: run.usd,
       spentUsd: conversation.meter.usd,
     });
@@ -611,10 +622,39 @@ export function createAssistantEndpoint(
           target: step.targetLabel
             ? `${step.targetLabel} (${step.target})`
             : step.target,
-          inputs: plainInputs(step.inputs),
+          inputs: plainInputs(step.inputs, step.optionFields ?? []),
         })),
       });
     });
+  }
+
+  async function didSince(conversation: Conversation, start: number) {
+    const receipts = conversation.session.changes().slice(start);
+    if (!receipts.length) return { changes: [], did: null };
+    const surfaces = await conversationSurfaces(conversation);
+    const changes = receipts.map((change) => {
+      const surface = surfaces.get(change.entity);
+      return {
+        ...change,
+        ...(surface
+          ? {
+              href: recordHref(
+                surface,
+                change.recordId,
+                conversation.company.companyId,
+              ),
+            }
+          : {}),
+      };
+    });
+    return { changes, did: changes.at(-1) };
+  }
+  function conversationSurfaces(conversation: Conversation) {
+    return options.runtime.entry
+      .run({ headers: { cookie: conversation.cookie } }, (view) =>
+        Promise.resolve(detailSurfaces(view.projections)),
+      )
+      .catch(() => new Map<string, DetailSurface>());
   }
 
   /** Records read or written, as links: written ones and those the answer names. */
@@ -631,20 +671,16 @@ export function createAssistantEndpoint(
       )
       .slice(-8);
     if (touched.length === 0) return [];
-    const surfaces = await options.runtime.entry
-      .run({ headers: { cookie: conversation.cookie } }, (view) =>
-        Promise.resolve(detailSurfaces(view.projections)),
-      )
-      .catch(() => new Map<string, DetailSurface>());
+    const surfaces = await conversationSurfaces(conversation);
     return touched.flatMap((record) => {
       const surface = surfaces.get(record.entityId);
       if (!surface) return [];
       // A company-owned record's page names the conversation's company.
-      const href = `/?surface=${encodeURIComponent(surface.surfaceId)}&record=${encodeURIComponent(record.recordId)}${
-        surface.companyParameter
-          ? `&${encodeURIComponent(surface.companyParameter)}=${encodeURIComponent(conversation.company.companyId)}`
-          : ''
-      }`;
+      const href = recordHref(
+        surface,
+        record.recordId,
+        conversation.company.companyId,
+      );
       return [
         {
           href,
@@ -656,27 +692,18 @@ export function createAssistantEndpoint(
   }
 }
 
-/**
- * "Did: ..." with Undo, when this turn made a change at once, and a link to
- * the record it wrote (the Did row carries it; no separate "Changed" line).
- */
-function didThisTurn(
-  change: { changeId: string; summary: string; undone: boolean } | null,
-  before: string | null,
-  links: readonly { href: string; wrote: boolean }[] = [],
-): { did?: { changeId: string; summary: string; href?: string } } {
-  const written = links.find((link) => link.wrote);
-  return change && change.changeId !== before && !change.undone
-    ? {
-        did: {
-          changeId: change.changeId,
-          summary: change.summary,
-          ...(written ? { href: written.href } : {}),
-        },
-      }
-    : {};
+function recordHref(
+  surface: DetailSurface,
+  recordId: string,
+  company: string,
+): string {
+  const params = new URLSearchParams({
+    surface: surface.surfaceId,
+    record: recordId,
+  });
+  if (surface.companyParameter) params.set(surface.companyParameter, company);
+  return '/?' + params.toString();
 }
-
 interface DetailSurface {
   readonly surfaceId: string;
   /** Its query's company parameter, when the record is company-owned. */
@@ -753,7 +780,10 @@ export function stepLabel(event: AgentEvent): string | null {
   }
 }
 
-function plainInputs(inputs: Readonly<Record<string, unknown>>): string {
+function plainInputs(
+  inputs: Readonly<Record<string, unknown>>,
+  options: readonly string[],
+): string {
   const parts: string[] = [];
   for (const bag of ['values', 'patch', 'relations', 'arguments'] as const) {
     const values = inputs[bag];
@@ -763,8 +793,10 @@ function plainInputs(inputs: Readonly<Record<string, unknown>>): string {
       continue;
     }
     for (const [id, value] of Object.entries(values as object)) {
-      if (value === null || value === undefined) continue;
-      parts.push(`${local(id).replaceAll('_', ' ')}: ${shownValue(value)}`);
+      if (value === undefined) continue;
+      parts.push(
+        `${local(id).replaceAll('_', ' ')}: ${shownValue(value, options.includes(id))}`,
+      );
     }
   }
   return parts.join(' · ');
@@ -775,19 +807,18 @@ function plainInputs(inputs: Readonly<Record<string, unknown>>): string {
  * with a namespace, `northstar.app:option.net_30`) is shortened; a number,
  * a date or free text is shown exactly as bound (10.25 stays 10.25).
  */
-function shownValue(value: unknown): string {
+function shownValue(value: unknown, option = false): string {
+  if (value === null) return 'clear';
   if (typeof value === 'object' && value !== null) {
     if (!Array.isArray(value) && 'fromStep' in value)
       return `the record step ${String((value as { fromStep: number }).fromStep)} makes`;
     return JSON.stringify(value);
   }
   const text = String(value);
-  return /^[a-z][\w.-]*:[a-z_]+\.[\w-]+$/u.test(text)
-    ? local(text).replaceAll('_', ' ')
-    : text;
+  return option ? local(text).replaceAll('_', ' ') : text;
 }
 
-function planDigest(plan: PlanForApproval, companyId: string): string {
+export function planDigest(plan: PlanForApproval, companyId: string): string {
   return createHash('sha256')
     .update(
       JSON.stringify({ companyId, planId: plan.planId, steps: plan.steps }),
@@ -886,5 +917,7 @@ export function loopbackAuthorities(host: string, port: number): string[] {
   if (host === '::1') names.add('[::1]');
   return [...names]
     .filter((name) => name !== '::1')
-    .map((name) => `${name}:${String(port)}`);
+    .flatMap((name) =>
+      port === 80 ? [name, `${name}:80`] : [`${name}:${String(port)}`],
+    );
 }

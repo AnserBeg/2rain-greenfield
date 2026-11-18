@@ -54,6 +54,9 @@ import {
   type BusinessWords,
 } from './business-words.js';
 import { operationRisk, type OperationRisk, type RiskClass } from './risk.js';
+import { capabilityChildren } from './capability-children.js';
+import { referenceTargets } from './record-references.js';
+import { validateApprovalArguments } from '../../domain/src/purchasing/approval-arguments.js';
 import { asData, type OperationsAgentToolId } from './tools.js';
 
 export type AgentRuntime = Pick<
@@ -74,6 +77,7 @@ export interface PlanForApproval {
      * a modelling name, never shown to the person: X16).
      */
     readonly operationLabel: string | null;
+    readonly optionFields?: readonly string[];
     readonly effect: string;
     readonly target: string;
     /** The target's number or name as the host read it at planning. */
@@ -148,6 +152,9 @@ export interface AgentChange {
   readonly changeId: string;
   readonly summary: string;
   readonly undone: boolean;
+  readonly undoable: boolean;
+  readonly recordId: string;
+  readonly entity: string;
 }
 
 export type UndoOutcome =
@@ -192,6 +199,7 @@ interface PlanStep {
 }
 
 interface ChildSnapshot {
+  readonly entity: string;
   readonly queryId: string;
   readonly relationId: string;
   readonly rows: readonly (readonly [string, number])[];
@@ -219,6 +227,7 @@ interface StoredPlan {
   readonly release: PlanRelease;
   readonly digest: string;
   readonly riskClass: RiskClass;
+  readonly approvalSignal?: AbortSignal;
   status: 'approved' | 'declined' | 'executed' | 'failed';
   execution?: {
     readonly key: string;
@@ -234,28 +243,6 @@ class ToolInputError extends Error {
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
-/**
- * Whether an `..._id` field names a record type of the release: its name
- * less `_id` is a type, ends with one, or ends with a type's last word
- * (`default_ship_to_address_id` and `party_address`).
- */
-function namesRecordType(types: ReadonlySet<string>, fieldId: string): boolean {
-  const base = localName(fieldId).replace(/_id$/u, '');
-  const last = base.split('_').at(-1)!;
-  for (const type of types)
-    if (
-      base === type ||
-      base.endsWith(`_${type}`) ||
-      type === last ||
-      type.endsWith(`_${last}`)
-    )
-      return true;
-  return false;
-}
-
-/** A record id anywhere inside a text, in any case. */
-const embeddedUuid =
-  /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/iu;
 const hostOwnedKeys = new Set([
   'tenantId',
   'tenant',
@@ -288,7 +275,7 @@ export class OperationsAgentSession {
    * reference fields, and the records an execution wrote. Never an id the
    * model typed and a result echoed back.
    */
-  readonly #seenIds = new Map<string, string>();
+  readonly #seenIds = new Map<string, Set<string>>();
   /** Currency codes held by records the host returned. */
   readonly #recordCurrencies = new Set<string>();
   /** Currency codes the person named in the current request only. */
@@ -297,11 +284,6 @@ export class OperationsAgentSession {
   /** Executions in commit order, and the plans the host has verified. */
   #sequence = 0;
   readonly #verified = new Set<string>();
-  /** The person's Stop for the current run: no mutation starts after it. */
-  #signal: AbortSignal | undefined;
-  /** For an Undo that stopped partway: the records it already put back. */
-  readonly #undoneRecords = new Map<string, Set<string>>();
-
   constructor(options: OperationsAgentSessionOptions) {
     this.#options = options;
     this.#mint = options.mintId ?? randomUUID;
@@ -325,11 +307,10 @@ export class OperationsAgentSession {
     input: unknown,
     options: { readonly signal?: AbortSignal } = {},
   ): Promise<ToolOutcome> {
-    this.#signal = options.signal;
     let outcome: ToolOutcome;
     try {
       if (!isRecord(input)) throw new ToolInputError('input must be an object');
-      const content = await this.#dispatch(tool, input);
+      const content = await this.#dispatch(tool, input, options.signal);
       outcome = { content: this.#bounded(content), isError: false };
     } catch (error) {
       outcome = {
@@ -349,6 +330,7 @@ export class OperationsAgentSession {
   #dispatch(
     tool: string,
     input: Record<string, ImmutableJsonValue>,
+    signal?: AbortSignal,
   ): Promise<ImmutableJsonValue> {
     switch (tool as OperationsAgentToolId) {
       case 'erp_discover':
@@ -356,9 +338,9 @@ export class OperationsAgentSession {
       case 'erp_query':
         return this.#query(input);
       case 'erp_plan':
-        return this.#plan(input);
+        return this.#plan(input, false, undefined, signal);
       case 'erp_execute':
-        return this.#execute(input);
+        return this.#execute(input, signal);
       case 'erp_verify':
         return this.#verify(input);
       default:
@@ -511,7 +493,10 @@ export class OperationsAgentSession {
           named.recordId,
           this.#options.companyId,
         ).catch(() => null);
-        if (record) {
+        if (record?.recordId === named.recordId) {
+          lines.push(
+            `The page is showing record ${record.recordId}; "this", "it" and "here" mean that record.`,
+          );
           this.#touch(named.entityId, record, false);
           this.#learn(named.entityId, [record]);
           // Its text is data the model reads, never instructions (X11).
@@ -537,21 +522,38 @@ export class OperationsAgentSession {
   noteRequest(text: string): void {
     // A currency named in an earlier request does not carry over.
     this.#requestCurrencies = new Set();
-    for (const code of text.match(/\b[A-Z]{3}\b/gu) ?? [])
-      this.#requestCurrencies.add(code);
+    for (const match of text.matchAll(/\b[A-Z]{3}\b/gu)) {
+      const before = text.slice(0, match.index);
+      const after = text.slice(match.index + 3);
+      if (
+        (!before.trim() && !after.trim()) ||
+        /(?:\b(?:in|use|using|currency(?: is)?|denominated in)|[0-9])\s*[:=]?\s*$/iu.test(
+          before,
+        ) ||
+        /^\s*(?:[0-9]|currency\b|dollars?\b)/iu.test(after)
+      )
+        this.#requestCurrencies.add(match[0]);
+    }
     for (const [words, code] of CURRENCY_WORDS)
       if (words.test(text)) this.#requestCurrencies.add(code);
+  }
+
+  #remember(id: string, entity: string): void {
+    const key = id.toLowerCase();
+    const types = this.#seenIds.get(key) ?? new Set<string>();
+    types.add(entity);
+    this.#seenIds.set(key, types);
   }
 
   /** Learns the typed identities a successful read or write returned. */
   #learn(entityId: string, records: readonly SemanticRecordDto[]): void {
     for (const record of records) {
-      this.#seenIds.set(record.recordId.toLowerCase(), entityId);
+      this.#remember(record.recordId, entityId);
       for (const [fieldId, value] of Object.entries(record.values)) {
         if (typeof value !== 'string' || value === '') continue;
         const name = localName(fieldId);
-        if (name.endsWith('_id') && uuidPattern.test(value))
-          this.#seenIds.set(value.toLowerCase(), '');
+        const target = referenceTargets.get(fieldId);
+        if (target && uuidPattern.test(value)) this.#remember(value, target);
         if (name.endsWith('_currency')) {
           const code = currencyCode(value);
           if (code) this.#recordCurrencies.add(code);
@@ -570,72 +572,58 @@ export class OperationsAgentSession {
     view: RequestRuntimeView,
     steps: readonly PlanStep[],
   ): string | null {
-    const defaultCurrency = declaredCurrencyDefault(view).code;
-    const catalog = pinnedCatalog(view);
-    const types = new Set(
-      [
-        ...catalog.operations.map((operation) =>
-          catalog.operationEntity(operation),
-        ),
-        ...catalog.queries.map((query) => query.sourceEntityId),
-      ]
-        .filter(Boolean)
-        .map(localName),
-    );
+    const { code: defaultCurrency, offered } = declaredCurrencyDefault(view);
     for (const step of steps) {
-      const where = `step ${String(step.step)} (${localName(step.operation.operationId)})`;
-      // Every declared reference position, whatever the value looks like:
-      // the existing target, each relation, and each `..._id` field.
-      const references: [string, ImmutableJsonValue][] = [
-        [
-          'target',
-          typeof step.recordId === 'string' && step.pinnedRevision !== null
-            ? step.recordId
-            : null,
-        ],
-        ...Object.entries(step.relations ?? {}),
-        ...Object.entries({ ...step.values, ...step.patch }).filter(
-          ([fieldId]) => localName(fieldId).endsWith('_id'),
-        ),
-      ];
-      for (const [name, value] of references) {
-        if (value === null || value === undefined) continue;
-        if (isRecord(value) && typeof value.fromStep === 'number') continue;
-        const label = name === 'target' ? 'the target record' : localName(name);
-        if (typeof value !== 'string')
-          return `${where}: ${label} must be a record id, not ${JSON.stringify(value)}.`;
-        // An `..._id` field that names no record type of the release holds
-        // a code ("EA" for a unit, an actor): it is a reference only if it
-        // carries a record id in any form (padded, cased, wrapped). One that
-        // names a record type (`..._party_id`) always is.
-        if (
-          name !== 'target' &&
-          !(step.relations && name in step.relations) &&
-          !namesRecordType(types, name) &&
-          !embeddedUuid.test(value)
-        )
-          continue;
-        if (!this.#seenIds.has(value.toLowerCase()))
-          return `${where}: ${label} ${value} did not come from a lookup in this conversation. Find the record with erp_discover resolve or a query, then plan with the id it returns.`;
+      const where = `step ${step.step} (${localName(step.operation.operationId)})`;
+      const refs: [
+        string,
+        ImmutableJsonValue | undefined,
+        string | undefined,
+      ][] = [];
+      if (typeof step.recordId !== 'string' || step.pinnedRevision !== null)
+        refs.push(['target', step.recordId, step.entity]);
+      for (const r of step.operation.inputContract?.relationInputs ?? [])
+        refs.push([
+          r.relationId,
+          step.relations?.[r.relationId],
+          r.targetEntityId,
+        ]);
+      for (const [key, value] of Object.entries({
+        ...step.values,
+        ...step.patch,
+      })) {
+        const target = referenceTargets.get(key);
+        if (target || isRecord(value)) refs.push([key, value, target]);
       }
-      // Arguments are a flat object of plain values; anything else is a
-      // structure no operation here declares.
-      if (step.arguments !== undefined && step.arguments !== null) {
-        if (
-          !isRecord(step.arguments) ||
-          Object.values(step.arguments).some(
-            (value) => typeof value === 'object' && value !== null,
-          )
-        )
-          return `${where}: arguments must be a flat object of plain values; nested lists or objects are not supported.`;
+      for (const [name, value, type] of refs) {
+        if (value == null) continue;
+        const matches =
+          type &&
+          (typeof value === 'string'
+            ? this.#seenIds.get(value.toLowerCase())?.has(type)
+            : isRecord(value) &&
+              typeof value.fromStep === 'number' &&
+              steps[value.fromStep - 1]?.entity === type);
+        if (!matches)
+          return `${where}: ${localName(name)} ${typeof value === 'string' ? value : JSON.stringify(value)} did not come from a lookup or earlier step for ${type ? localName(type) : 'a declared reference'}. Find the right record, then plan again.`;
       }
       for (const [fieldId, value] of Object.entries({
         ...step.values,
         ...step.patch,
       })) {
         if (!/_currency$/u.test(localName(fieldId)) || value === null) continue;
-        const code = typeof value === 'string' ? currencyCode(value) : null;
-        if (!code)
+        const field = step.operation.inputContract?.fields.find(
+          (field) => field.fieldId === fieldId,
+        );
+        const code =
+          typeof value !== 'string'
+            ? null
+            : field?.enumOptionIds.includes(value)
+              ? currencyCode(value)
+              : ISO_CURRENCY.test(value)
+                ? value
+                : null;
+        if (!code || !(field?.enumOptionIds.length || offered.includes(code)))
           return `${where}: ${localName(fieldId)} ${JSON.stringify(value)} is not a currency code such as CAD.`;
         if (
           code !== defaultCurrency &&
@@ -649,210 +637,107 @@ export class OperationsAgentSession {
   }
 
   /**
-   * The latest change the agent made at once in this session, if any: the
-   * last reversible plan, in commit order, that actually wrote something,
-   * summarized from the steps that succeeded.
+   * Successful forward receipts in commit order. Only the last receipt can offer Undo.
    */
-  latestChange(): AgentChange | null {
-    const plan = [...this.#plans.values()]
-      .filter(
-        (candidate) =>
-          candidate.riskClass === 'reversible' &&
-          !this.#undoPlans.has(candidate.planId) &&
-          candidate.execution?.results.some(
-            (result) => result.outcome === 'succeeded',
-          ),
-      )
-      .sort((a, b) => a.execution!.sequence - b.execution!.sequence)
-      .at(-1);
-    if (!plan?.execution) return null;
-    return {
-      changeId: plan.planId,
-      summary: changeSummary(plan),
-      undone: this.#undone.has(plan.planId),
-    };
+  changes(): AgentChange[] {
+    const plans = [...this.#plans.values()]
+      .filter((plan) => plan.execution && !this.#undoPlans.has(plan.planId))
+      .sort((a, b) => a.execution!.sequence - b.execution!.sequence);
+    const receipts = plans.flatMap((plan) =>
+      plan.execution!.results.flatMap((result) => {
+        if (result.outcome !== 'succeeded' || !result.recordId) return [];
+        const step = plan.steps[result.step - 1]!;
+        return [
+          {
+            changeId:
+              plan.steps.length === 1
+                ? plan.planId
+                : `${plan.planId}/${result.step}`,
+            recordId: result.recordId,
+            entity: step.entity,
+            summary: changeSummary(step, result),
+            undone: this.#undone.has(plan.planId),
+            undoable: plan.riskClass === 'reversible',
+          },
+        ];
+      }),
+    );
+    return receipts.map((change, index) => ({
+      ...change,
+      undoable:
+        change.undoable && !change.undone && index === receipts.length - 1,
+    }));
   }
 
-  /**
-   * Undo the latest change, named by its id (the person's Undo click): a
-   * planned, executed and verified operation of its own. It refuses, saying
-   * why, when a record changed after the agent's write or the change is not
-   * the latest one.
-   */
-  async undo(changeId: string): Promise<UndoOutcome> {
+  latestChange(): AgentChange | null {
+    return this.changes().at(-1) ?? null;
+  }
+
+  async undo(changeId: string, signal?: AbortSignal): Promise<UndoOutcome> {
     const latest = this.latestChange();
-    if (!latest || latest.changeId !== changeId)
+    if (!latest?.undoable || latest.changeId !== changeId)
       return {
         outcome: 'refused',
-        reason: 'Only the latest change of this conversation can be undone.',
+        reason: 'Only the latest single reversible update can be undone.',
       };
-    if (latest.undone)
-      return { outcome: 'refused', reason: 'That change was already undone.' };
     const plan = this.#plans.get(changeId)!;
-    const results = plan.execution!.results;
-    // Anything this session wrote after the change may depend on it.
-    const later = [...this.#plans.values()].find(
-      (other) =>
-        other.planId !== changeId &&
-        !this.#undoPlans.has(other.planId) &&
-        (other.execution?.sequence ?? 0) > plan.execution!.sequence &&
-        other.execution?.results.some((r) => r.outcome === 'succeeded'),
-    );
-    if (later)
+    const step = plan.steps[0]!;
+    const receipt = plan.execution!.results[0]!;
+    if (
+      !step.prior ||
+      !step.risk.inverse ||
+      !receipt.recordId ||
+      receipt.revision === null
+    )
       return {
         outcome: 'refused',
-        reason:
-          'Something else was done after this change in this conversation and may depend on it, so it cannot be undone here.',
+        reason: 'The update has no revision-checked inverse.',
       };
-    const done = this.#undoneRecords.get(changeId) ?? new Set<string>();
-    // The revision each record had right after the agent's last write to it.
-    const written = new Map<string, { revision: number; step: PlanStep }>();
-    for (const step of plan.steps) {
-      const result = results.find((entry) => entry.step === step.step);
-      if (
-        result?.outcome === 'succeeded' &&
-        result.recordId &&
-        !done.has(result.recordId)
-      )
-        written.set(result.recordId, {
-          revision: result.revision ?? 0,
-          step: written.get(result.recordId)?.step ?? step,
-        });
-    }
-    if (written.size === 0)
-      return { outcome: 'refused', reason: 'That change wrote nothing.' };
-    const created = new Set(
-      plan.steps
-        .filter((step) => step.risk.inverse?.kind === 'archive')
-        .map((step) => results.find((r) => r.step === step.step)?.recordId),
+    const intents = [
+      {
+        operationId: step.risk.inverse.operationId,
+        target: receipt.recordId,
+        patch: step.prior,
+      },
+    ];
+    const planned = await this.#plan(
+      { intents },
+      true,
+      new Map([[receipt.recordId, receipt.revision]]),
+      signal,
     );
-    const blocked = await this.#run(async (view) => {
-      const catalog = pinnedCatalog(view);
-      for (const [recordId, { step }] of written) {
-        if (!created.has(recordId)) continue;
-        const user = await this.#referencedBy(
-          view,
-          catalog,
-          step.entity,
-          recordId,
-        );
-        if (user)
-          return `${user} now uses the ${localName(step.entity).replaceAll('_', ' ')} this change created, so archiving it would break that record.`;
-      }
-      return null;
-    });
-    if (blocked) return { outcome: 'refused', reason: blocked };
-    // Reverse order: archive what was made, put back what was changed. A
-    // record made in this change is archived, not restored field by field.
-    const intents: ImmutableJsonValue[] = [];
-    for (const step of [...plan.steps].reverse()) {
-      const result = results.find((entry) => entry.step === step.step);
-      if (
-        result?.outcome !== 'succeeded' ||
-        !result.recordId ||
-        done.has(result.recordId)
-      )
-        continue;
-      const inverse = step.risk.inverse;
-      if (inverse?.kind === 'archive')
-        intents.push({
-          operationId: inverse.operationId,
-          target: result.recordId,
-        });
-      else if (
-        inverse?.kind === 'restorePriorValues' &&
-        step.prior &&
-        !created.has(result.recordId)
-      )
-        intents.push({
-          operationId: inverse.operationId,
-          target: result.recordId,
-          patch: step.prior,
-        });
-    }
-    // Each inverse is pinned to the revision the agent's write left, so the
-    // gateway's compare-and-write refuses it if anyone changed the record
-    // since; the check and the write are one.
-    const pins = new Map(
-      [...written].map(([recordId, entry]) => [recordId, entry.revision]),
-    );
-    const planned = (await this.#plan({ intents }, true, pins)) as Record<
-      string,
-      ImmutableJsonValue
-    >;
-    if (typeof planned.planId !== 'string')
+    if (!isRecord(planned) || typeof planned.planId !== 'string')
       return {
         outcome: 'refused',
-        reason: `Undo could not be planned: ${String(planned.reason ?? planned.error ?? 'refused')}`,
+        reason: isRecord(planned)
+          ? String(planned.reason ?? 'Undo could not be planned.')
+          : 'Undo could not be planned.',
       };
     this.#undoPlans.add(planned.planId);
     this.toolCalls.push({ tool: 'undo:plan', isError: false });
-    await this.#execute({
-      planId: planned.planId,
-      executionIdempotencyKey: `undo-${changeId}-${String(done.size)}`,
-    });
-    const undoPlan = this.#plans.get(planned.planId)!;
-    const undoResults = undoPlan.execution?.results ?? [];
-    for (const result of undoResults)
-      if (result.outcome === 'succeeded' && result.recordId)
-        done.add(result.recordId);
-    this.#undoneRecords.set(changeId, done);
-    const verified = (await this.#verify({
-      operationSessionId: planned.planId,
-    }).catch(() => ({ verified: false }))) as Record<
-      string,
-      ImmutableJsonValue
-    >;
-    const failed = undoResults.find((result) => result.outcome !== 'succeeded');
-    if (failed)
+    await this.#execute(
+      { planId: planned.planId, executionIdempotencyKey: `undo-${changeId}` },
+      signal,
+    );
+    const restored = this.#plans.get(planned.planId)?.execution?.results[0];
+    if (
+      restored?.outcome !== 'succeeded' ||
+      restored.recordId !== receipt.recordId
+    )
       return {
         outcome: 'refused',
-        reason: `Undo stopped partway: ${String(done.size)} record(s) put back; the next one did not (${failed.error ?? failed.outcome}). Click Undo again to finish only what is left.`,
+        reason:
+          restored?.error ?? 'The release changed before Undo. Try again.',
       };
     this.#undone.add(changeId);
+    const verified = await this.#verify({
+      operationSessionId: planned.planId,
+    }).catch(() => null);
     return {
       outcome: 'undone',
       summary: `Undid: ${latest.summary}`,
-      verified: verified.verified === true,
+      verified: isRecord(verified) && verified.verified === true,
     };
-  }
-
-  /**
-   * The first active record that names `recordId` in a reference field
-   * (`..._<type>_id`), as its number or name; null when none does.
-   */
-  async #referencedBy(
-    view: RequestRuntimeView,
-    catalog: PinnedCatalog,
-    entity: string,
-    recordId: string,
-  ): Promise<string | null> {
-    const type = localName(entity);
-    const word = type.split('_').at(-1)!;
-    for (const query of catalog.queries) {
-      if (
-        query.queryType !== 'list' ||
-        query.sourceEntityId === entity ||
-        localName(query.queryId) !== `${localName(query.sourceEntityId)}_list`
-      )
-        continue;
-      const field = query.selections.find((selection) => {
-        const name = localName(selection.fieldId);
-        return name.endsWith(`_${type}_id`) || name.endsWith(`_${word}_id`);
-      });
-      if (!field) continue;
-      const found = await this.#list(
-        view,
-        query,
-        { filters: [{ fieldId: field.fieldId, value: recordId }] },
-        1,
-        catalog,
-      ).catch(() => ({ records: [] as SemanticRecordDto[] }));
-      const row = found.records[0];
-      if (row)
-        return `${localName(query.sourceEntityId).replaceAll('_', ' ')} ${recordLabel(row) ?? row.recordId}`;
-    }
-    return null;
   }
 
   /** Records this session read or wrote, newest last; written ones marked. */
@@ -1169,6 +1054,7 @@ export class OperationsAgentSession {
       view?: string;
       filters?: readonly ImmutableJsonValue[];
       parent?: Record<string, ImmutableJsonValue>;
+      scope?: 'parentScope' | 'referenceScope';
       cursor?: string;
     },
     limit: number,
@@ -1243,64 +1129,84 @@ export class OperationsAgentSession {
             search: request.search ?? '',
             sort: [],
             ...(filters.length > 0 ? { fieldFilters: filters } : {}),
-            ...(parent ? { parentScope: parent } : {}),
+            ...(parent ? { [request.scope ?? 'parentScope']: parent } : {}),
           },
         },
         this.#options.companyId,
       ),
     });
+    if (request.scope) {
+      const coverage = result.listCoverage;
+      const applied = coverage?.[request.scope];
+      if (
+        result.outcome !== 'exact' ||
+        !coverage ||
+        coverage.hasMore !== Boolean(coverage.nextCursor) ||
+        !applied ||
+        applied.relationId !== parent?.relationId ||
+        applied.recordId !== parent.recordId
+      )
+        throw new ToolInputError(
+          'The query could not confirm complete child coverage.',
+        );
+    }
     return {
       records: result.records,
       nextCursor: result.listCoverage?.nextCursor ?? null,
     };
   }
 
-  /**
-   * The child lines of a record a capability reads at execution: every
-   * record type whose create requires a relation to this one, listed under
-   * the parent through its own list query.
-   */
+  /** Snapshot each declared child collection through its own query and scope. */
   async #children(
     view: RequestRuntimeView,
     catalog: PinnedCatalog,
-    entity: string,
-    recordId: string,
-  ): Promise<readonly ChildSnapshot[]> {
+    operation: RegisteredOperationDefinition,
+    recordId: string | null,
+  ): Promise<ChildSnapshot[]> {
     const snapshots: ChildSnapshot[] = [];
-    const seen = new Set<string>();
-    for (const operation of catalog.operations) {
-      if (effectKind(operation) !== 'createRecordEffect') continue;
-      const child = catalog.operationEntity(operation);
-      for (const relation of operation.inputContract?.relationInputs ?? []) {
-        if (
-          !relation.required ||
-          relation.targetEntityId !== entity ||
-          seen.has(relation.relationId)
-        )
-          continue;
-        seen.add(relation.relationId);
-        const query = catalog.queries.find(
-          (candidate) =>
-            candidate.sourceEntityId === child &&
-            candidate.queryType === 'list' &&
-            localName(candidate.queryId) === `${localName(child)}_list`,
+    const namespace = operation.operationId.split(':')[0];
+    for (const read of capabilityChildren(localName(operation.operationId))) {
+      const query = catalog.query(`${namespace}:query.${read.query}`);
+      if (!query)
+        throw new ToolInputError(
+          `No query for ${read.query}; cannot verify the complete plan.`,
         );
-        if (!query) continue;
-        const listed = await this.#list(
-          view,
-          query,
-          { parent: { relationId: relation.relationId, recordId } },
-          100,
-          catalog,
-        );
-        snapshots.push({
-          queryId: query.queryId,
-          relationId: relation.relationId,
-          rows: listed.records
-            .map((row) => [row.recordId, row.revision] as const)
-            .sort((a, b) => a[0].localeCompare(b[0])),
-        });
+      const relationId = `${namespace}:relation.${read.relation}`;
+      const rows = new Map<string, number>();
+      if (recordId !== null) {
+        let cursor: string | null = null;
+        const seen = new Set<string>();
+        do {
+          const listed = await this.#list(
+            view,
+            query,
+            {
+              parent: { relationId, recordId },
+              scope: read.scope,
+              ...(cursor ? { cursor } : {}),
+            },
+            100,
+            catalog,
+          );
+          for (const row of listed.records) {
+            if (rows.has(row.recordId))
+              throw new ToolInputError('Child pages overlapped; plan again.');
+            rows.set(row.recordId, row.revision);
+          }
+          cursor = listed.nextCursor;
+          if (cursor && seen.has(cursor))
+            throw new ToolInputError(
+              'Child paging stopped advancing; plan again.',
+            );
+          if (cursor) seen.add(cursor);
+        } while (cursor);
       }
+      snapshots.push({
+        queryId: query.queryId,
+        relationId,
+        entity: query.sourceEntityId,
+        rows: [...rows].sort(([a], [b]) => a.localeCompare(b)),
+      });
     }
     return snapshots;
   }
@@ -1316,7 +1222,6 @@ export class OperationsAgentSession {
     catalog: PinnedCatalog,
     words: BusinessWords,
     step: PlanStep,
-    steps: readonly PlanStep[],
   ): Promise<{ noun: string | null; partOf?: number }> {
     const parent = words.roleParent(step.entity);
     if (parent) {
@@ -1332,15 +1237,6 @@ export class OperationsAgentSession {
     const role = words.roleOf(step.entity);
     if (!role) return { noun: words.typeLabel(step.entity) };
     const kinds: unknown[] = [];
-    for (const other of steps) {
-      if (other.entity !== role.childEntity) continue;
-      const ref = other.relations?.[role.relationId];
-      if (
-        (isRecord(ref) && ref.fromStep === step.step) ||
-        ref === step.recordId
-      )
-        kinds.push(other.values?.[role.kindFieldId]);
-    }
     const query = role.listQueryId ? catalog.query(role.listQueryId) : null;
     if (
       query &&
@@ -1368,6 +1264,7 @@ export class OperationsAgentSession {
     personsUndo = false,
     /** Undo pins each record to the revision the agent's write left. */
     pins?: ReadonlyMap<string, number>,
+    signal?: AbortSignal,
   ): Promise<ImmutableJsonValue> {
     if (
       input.requestedBulkMode !== undefined &&
@@ -1379,6 +1276,15 @@ export class OperationsAgentSession {
     if (input.intents.length > 12)
       throw new ToolInputError('at most 12 steps in one plan');
     const intents = input.intents;
+    if (
+      intents.length === 1 &&
+      isRecord(intents[0]) &&
+      intents[0].kind === 'customization' &&
+      Object.keys(intents[0]).length === 1
+    )
+      return Promise.resolve({ outcome: 'customization-request' });
+    if (intents.some((intent) => isRecord(intent) && 'kind' in intent))
+      throw new ToolInputError('Request a customization on its own.');
     return this.#run(async (view) => {
       const catalog = pinnedCatalog(view);
       const steps: PlanStep[] = [];
@@ -1408,6 +1314,7 @@ export class OperationsAgentSession {
           operation,
           intent,
           step,
+          steps,
           pins,
         );
         steps.push(built.step);
@@ -1431,47 +1338,22 @@ export class OperationsAgentSession {
           note: 'nothing was written; the plan was not created',
         };
       const planId = this.#mint();
-      // A create runs at once only if the person may archive what it makes:
-      // otherwise its Undo would be refused (end review X5).
-      const usable = await this.#usableIds(view, catalog);
-      for (const [index, step] of steps.entries()) {
-        const inverse = step.risk.inverse;
-        if (
-          step.risk.riskClass === 'reversible' &&
-          inverse?.kind === 'archive' &&
-          !usable.operations.has(inverse.operationId)
-        )
-          steps[index] = {
-            ...step,
-            risk: {
-              riskClass: 'needsYes',
-              reason:
-                'You may not archive what this adds, so it could not be undone; it needs your OK.',
-            },
-          };
-      }
       // The person's words for each record (X16): presentation only.
       const words = businessWords(view, catalog);
       for (const [index, step] of steps.entries())
         steps[index] = {
           ...step,
-          ...(await this.#noun(view, catalog, words, step, steps)),
+          ...(await this.#noun(view, catalog, words, step)),
         };
       const release = releaseOf(view);
       const digest = planDigest(steps, release, this.#options.companyId);
-      // A plan is reversible only when every step is, and an undo of a step
-      // made earlier in the same plan is covered by archiving what it made.
-      const riskClass: RiskClass = steps.every(
-        (step) =>
-          step.risk.riskClass === 'reversible' &&
-          (step.risk.inverse?.kind !== 'restorePriorValues' ||
-            step.prior !== undefined ||
-            (typeof step.recordId !== 'string' &&
-              steps[step.recordId.fromStep - 1]?.risk.inverse?.kind ===
-                'archive')),
-      )
-        ? 'reversible'
-        : 'needsYes';
+      const only = steps.length === 1 ? steps[0] : undefined;
+      const riskClass: RiskClass =
+        only?.risk.riskClass === 'reversible' &&
+        only.prior &&
+        Object.keys(only.prior).length
+          ? 'reversible'
+          : 'needsYes';
       const reasons = [
         ...new Set(
           steps
@@ -1479,6 +1361,8 @@ export class OperationsAgentSession {
             .map((step) => step.risk.reason),
         ),
       ];
+      if (steps.length > 1)
+        reasons.push('This plan has multiple steps, so it needs your OK.');
       const presentation: PlanForApproval = {
         planId,
         summary: `${String(steps.length)} step(s)`,
@@ -1486,7 +1370,13 @@ export class OperationsAgentSession {
         steps: steps.map((step) => ({
           step: step.step,
           operationId: step.operation.operationId,
-          operationLabel: step.operation.label ?? null,
+          operationLabel:
+            effectKind(step.operation) === 'registeredCapabilityEffect'
+              ? actionLabel(step.operation)
+              : (step.operation.label ?? null),
+          optionFields: (step.operation.inputContract?.fields ?? [])
+            .filter((f) => f.enumOptionIds.length)
+            .map((f) => f.fieldId),
           effect: businessEffect(
             words,
             step.operation,
@@ -1530,6 +1420,7 @@ export class OperationsAgentSession {
         release,
         digest,
         riskClass,
+        ...(signal ? { approvalSignal: signal } : {}),
         status: approved ? 'approved' : 'declined',
       });
       return {
@@ -1559,6 +1450,7 @@ export class OperationsAgentSession {
     operation: RegisteredOperationDefinition,
     intent: Record<string, ImmutableJsonValue>,
     step: number,
+    earlier: readonly PlanStep[],
     pins?: ReadonlyMap<string, number>,
   ): Promise<{ step: PlanStep; check: ImmutableJsonValue; refused?: string }> {
     const where = `step ${String(step)} (${localName(operation.operationId)})`;
@@ -1582,6 +1474,15 @@ export class OperationsAgentSession {
     )
       throw new ToolInputError(
         `${where}: arguments must be a flat object of plain values; nested lists or objects are not supported`,
+      );
+    if (
+      operation.effect.kind === 'registeredCapabilityEffect' &&
+      operation.effect.capability.targetId ===
+        'northstar.purchasing:capability.order_approvals'
+    )
+      validateApprovalArguments(
+        localName(operation.operationId),
+        intent.arguments ?? {},
       );
     const fields = new Map(
       (contract?.fields ?? []).map((field) => [field.fieldId, field]),
@@ -1680,6 +1581,7 @@ export class OperationsAgentSession {
       // A create is judged here (nothing exists yet); an update is judged
       // again below against the record it changes.
       risk: writeRisk(
+        view,
         catalog,
         operation,
         prefix,
@@ -1704,11 +1606,39 @@ export class OperationsAgentSession {
       };
     }
     const target = refValue(intent.target, step, `${where} target`);
-    if (typeof target !== 'string')
+    if (typeof target !== 'string') {
+      let origin = earlier[(target as { fromStep: number }).fromStep - 1]!;
+      while (typeof origin.recordId !== 'string')
+        origin = earlier[origin.recordId.fromStep - 1]!;
       return {
-        step: { ...base, recordId: target as StepRef, pinnedRevision: null },
+        step: {
+          ...base,
+          recordId: target as StepRef,
+          pinnedRevision: null,
+          ...(operation.effect.kind === 'registeredCapabilityEffect'
+            ? {
+                children: await this.#children(
+                  view,
+                  catalog,
+                  operation,
+                  origin.pinnedRevision === null ? null : origin.recordId,
+                ),
+              }
+            : {}),
+        },
         check: `${describePredicate(operation.precondition)}; checked at execution against the record step ${String((target as { fromStep: number }).fromStep)} produces`,
       };
+    }
+    if (!pins && !this.#seenIds.get(target.toLowerCase())?.has(entity))
+      return {
+        step: { ...base, recordId: target, pinnedRevision: null },
+        check: 'lookup required',
+        refused: `${where}: the target record ${target} did not come from a lookup for ${localName(entity)}.`,
+      };
+    const countRelation =
+      prefix === 'stock_count_line'
+        ? `${entity.split(':')[0]}:relation.stock_count_line_session`
+        : null;
     const record = await readRecord(
       this.#options.runtime,
       view,
@@ -1716,11 +1646,31 @@ export class OperationsAgentSession {
       operation.readBackQueryId,
       target,
       this.#options.companyId,
+      false,
+      countRelation ?? undefined,
     );
     if (!record)
       throw new ToolInputError(
         `${where}: no ${localName(entity)} ${target} is visible to the person`,
       );
+    let needsCountApproval = false;
+    if (countRelation) {
+      const parent = record.relationLabels?.[countRelation]?.recordId;
+      const parentState = parent
+        ? await readRecord(
+            this.#options.runtime,
+            view,
+            catalog,
+            `${entity.split(':')[0]}:query.stock_count_get`,
+            parent,
+            this.#options.companyId,
+          )
+        : null;
+      needsCountApproval =
+        parentState?.values[
+          `${entity.split(':')[0]}:field.stock_count_state`
+        ] !== `${entity.split(':')[0]}:option.stock_count_state_draft`;
+    }
     const evaluation = evaluateRegisteredOperationPrecondition(
       operation.precondition,
       record.values,
@@ -1730,15 +1680,21 @@ export class OperationsAgentSession {
       step: {
         ...base,
         ...(effectKind(operation) === 'registeredCapabilityEffect'
-          ? { children: await this.#children(view, catalog, entity, target) }
+          ? { children: await this.#children(view, catalog, operation, target) }
           : {}),
-        risk: writeRisk(
-          catalog,
-          operation,
-          prefix,
-          { ...values, ...patch },
-          record.values,
-        ),
+        risk: needsCountApproval
+          ? {
+              riskClass: 'needsYes',
+              reason: 'Editing a count outside draft needs your OK.',
+            }
+          : writeRisk(
+              view,
+              catalog,
+              operation,
+              prefix,
+              { ...values, ...patch },
+              record.values,
+            ),
         recordId: target,
         // Undo pins the revision the agent's write left; otherwise the
         // revision read now.
@@ -1772,6 +1728,7 @@ export class OperationsAgentSession {
 
   async #execute(
     input: Record<string, ImmutableJsonValue>,
+    signal?: AbortSignal,
   ): Promise<ImmutableJsonValue> {
     const planId = requiredText(input.planId, 'planId');
     const key = requiredText(
@@ -1809,6 +1766,7 @@ export class OperationsAgentSession {
         return executionReport(plan, fresh);
       });
     }
+    if (plan.approvalSignal?.aborted) plan.status = 'declined';
     if (plan.status !== 'approved')
       throw new ToolInputError(
         'the person did not approve this plan; it cannot run',
@@ -1828,7 +1786,7 @@ export class OperationsAgentSession {
     let stopped = false;
     let releaseChanged: PlanRelease | null = null;
     for (const step of plan.steps) {
-      if (!stopped && this.#signal?.aborted) {
+      if (!stopped && signal?.aborted) {
         // The person's Stop: nothing more is written after it.
         stopped = true;
         results.push({
@@ -1889,20 +1847,45 @@ export class OperationsAgentSession {
           // the capability runs; any drift refuses the step. The window that
           // remains is between this read and the capability's own read in
           // its transaction (not under the posting locks).
-          if (step.children && typeof step.recordId === 'string') {
+          if (step.children) {
             const now = await this.#children(
               view,
               pinnedCatalog(view),
-              step.entity,
-              step.recordId,
+              step.operation,
+              recordId,
             );
-            if (JSON.stringify(now) !== JSON.stringify(step.children)) {
+            const expected = step.children.map((child) => {
+              const rows = new Map(child.rows);
+              for (const receipt of results) {
+                const earlier = plan.steps[receipt.step - 1]!;
+                if (
+                  earlier.entity !== child.entity ||
+                  !receipt.recordId ||
+                  receipt.revision === null
+                )
+                  continue;
+                const relation = earlier.relations?.[child.relationId];
+                const belongs =
+                  relation != null &&
+                  resolveRef(relation as StepRef, results) === recordId;
+                if (!rows.has(receipt.recordId) && !belongs) continue;
+                if (effectKind(earlier.operation) === 'archiveRecordEffect')
+                  rows.delete(receipt.recordId);
+                else rows.set(receipt.recordId, receipt.revision);
+              }
+              return {
+                ...child,
+                rows: [...rows].sort(([a], [b]) => a.localeCompare(b)),
+              };
+            });
+            if (JSON.stringify(now) !== JSON.stringify(expected)) {
               linesChanged = `its lines changed after the plan was approved (${step.children
                 .map((child) => localName(child.queryId))
                 .join(', ')}); it did not run. Plan again and ask the person.`;
               return null;
             }
           }
+          signal?.throwIfAborted();
           return this.#options.runtime.operationGateway.invoke(
             view,
             {
@@ -2204,7 +2187,7 @@ function screenFacts(
       ? screen.recordId
       : null;
   return {
-    text: `Screen: the person is on "${surface.label ?? localName(surface.surfaceId)}" (${surface.archetype ?? 'page'}${entity ? `, ${localName(entity)}` : ''})${record ? `, showing record ${record}; "this", "it" and "here" mean that record` : ''}.`,
+    text: `Screen: the person is on "${surface.label ?? localName(surface.surfaceId)}" (${surface.archetype ?? 'page'}${entity ? `, ${localName(entity)}` : ''}).`,
     recordId: record,
     entityId: entity ?? '',
     getQueryId: getQuery?.queryId ?? null,
@@ -2222,6 +2205,7 @@ function screenFacts(
  * - an update of a settings record (`..._settings`) needs a yes.
  */
 function writeRisk(
+  view: RequestRuntimeView,
   catalog: PinnedCatalog,
   operation: RegisteredOperationDefinition,
   prefix: string,
@@ -2232,6 +2216,16 @@ function writeRisk(
   if (catalogRisk.riskClass !== 'reversible') return catalogRisk;
   for (const field of operation.inputContract?.fields ?? []) {
     const name = localName(field.fieldId);
+    if (
+      current &&
+      name.endsWith('_state') &&
+      field.enumOptionIds[0]?.endsWith('_draft') &&
+      current[field.fieldId] !== field.enumOptionIds[0]
+    )
+      return {
+        riskClass: 'needsYes',
+        reason: 'Editing a document outside draft needs your OK.',
+      };
     if (
       !/_(?:state|status)$/u.test(name) ||
       field.enumOptionIds.length === 0 ||
@@ -2251,7 +2245,39 @@ function writeRisk(
         ).replaceAll('_', ' ')}, so it needs your OK.`,
       };
   }
-  if (current !== null && prefix.endsWith('_settings'))
+  const surfaces = (
+    view.projections.surface.payload as unknown as {
+      surfaces: {
+        dataSourceQueryId?: string;
+        workspace?: {
+          membership?: string;
+          icon?: string;
+          entry?: { companyQueryId?: string };
+        };
+      }[];
+    }
+  ).surfaces;
+  const entity = catalog.operationEntity(operation);
+  const settings = surfaces.some(
+    (s) =>
+      s.workspace?.membership === 'setup' &&
+      s.workspace.icon === 'settings' &&
+      catalog.query(s.dataSourceQueryId ?? '')?.sourceEntityId === entity,
+  );
+  const company = surfaces.some(
+    (s) =>
+      s.workspace?.entry?.companyQueryId &&
+      catalog.query(s.workspace.entry.companyQueryId)?.sourceEntityId ===
+        entity,
+  );
+  if (
+    current &&
+    (settings ||
+      (company &&
+        Object.keys(written).some((id) =>
+          localName(id).endsWith('_is_default'),
+        )))
+  )
     return {
       riskClass: 'needsYes',
       reason: 'This changes a setting, so it needs your OK.',
@@ -2276,50 +2302,39 @@ function currencyCode(value: string): string | null {
 }
 
 /** What an executed plan did, in short words, for "Did: ..." and Undo. */
-function changeSummary(plan: StoredPlan): string {
-  // Only what succeeded, in the order it committed, in the person's words
-  // (X16): the record by its business word and its name when it has one.
-  const succeeded = plan.steps.filter(
-    (step) =>
-      plan.execution?.results.find((entry) => entry.step === step.step)
-        ?.outcome === 'succeeded',
-  );
-  return succeeded
-    .filter(
-      (step) =>
-        step.partOf === undefined ||
-        !succeeded.some((other) => other.step === step.partOf),
-    )
-    .map((step) => {
-      if (step.partOf !== undefined)
-        return `made it a ${step.noun ?? 'new role'}`;
-      const result = plan.execution?.results.find(
-        (entry) => entry.step === step.step,
-      );
-      const values = result?.values ?? {};
-      // The record type's own name first, then its number, SKU or code.
-      const type = localName(step.entity);
-      const own = (suffix: string) =>
-        Object.entries(values).find(
-          ([fieldId, value]) =>
-            localName(fieldId) === `${type}${suffix}` &&
-            typeof value === 'string' &&
-            value !== '',
-        )?.[1];
-      const label =
-        ['_name', '_number', '_sku', '_code']
-          .map(own)
-          .find((value) => value !== undefined) ??
-        step.targetLabel ??
-        null;
-      const verb =
-        step.risk.inverse?.kind === 'archive' ? 'created' : 'changed';
-      const what = [step.noun ?? null, label === null ? null : String(label)]
-        .filter((part): part is string => part !== null)
-        .join(' ');
-      return `${verb} ${what || 'a record'}`;
-    })
-    .join(', ');
+function changeSummary(step: PlanStep, result: StepResult): string {
+  const type = localName(step.entity);
+  const fields = result.values ?? {};
+  const label =
+    ['_name', '_number', '_sku', '_code']
+      .map(
+        (suffix) =>
+          Object.entries(fields).find(
+            ([key, value]) =>
+              localName(key) === type + suffix &&
+              typeof value === 'string' &&
+              value !== '',
+          )?.[1],
+      )
+      .find(Boolean) ?? step.targetLabel;
+  if (step.partOf !== undefined) return `added the ${step.noun ?? 'new'} role`;
+  const verb = (
+    {
+      createRecordEffect: 'created',
+      archiveRecordEffect: 'archived',
+      restoreRecordEffect: 'restored',
+      updateRecordEffect: 'changed',
+    } as Record<string, string>
+  )[effectKind(step.operation)];
+  const who = [step.noun ?? 'record', label].filter(Boolean).join(' ');
+  return verb ? `${verb} ${who}` : `${actionLabel(step.operation)} (${who})`;
+}
+
+function actionLabel(operation: RegisteredOperationDefinition): string {
+  if (operation.label) return operation.label;
+  const words = localName(operation.operationId).split('_');
+  const verb = words.pop()!;
+  return [verb.charAt(0).toUpperCase() + verb.slice(1), ...words].join(' ');
 }
 
 /** A record's human name: its number, name, SKU or code, when it has one. */
@@ -2398,6 +2413,7 @@ async function readRecord(
   companyId: string,
   /** Archived records too: an archive's read-back finds what it archived. */
   includeArchived = false,
+  relationTarget?: string,
 ): Promise<SemanticRecordDto | null> {
   const query = catalog.query(queryId);
   if (!query || query.queryType !== 'get') return null;
@@ -2406,11 +2422,17 @@ async function readRecord(
     queryId,
     arguments: withScope(
       query,
-      includeArchived ? { includeArchived: true, recordId } : { recordId },
+      {
+        recordId,
+        ...(includeArchived ? { includeArchived: true } : {}),
+        ...(relationTarget ? { relationTargets: [relationTarget] } : {}),
+      },
       companyId,
     ),
   });
-  return result.records[0] ?? null;
+  return result.outcome === 'exact' && result.records[0]?.recordId === recordId
+    ? result.records[0]
+    : null;
 }
 
 function withScope(
