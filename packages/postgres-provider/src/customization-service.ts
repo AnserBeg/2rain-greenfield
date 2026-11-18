@@ -432,7 +432,7 @@ export class PostgresCustomizationService {
         (await this.#upgrades(context)).map((upgrade) => ({
           ...upgrade,
           state:
-            active.releaseId === upgrade.candidateReleaseId
+            active.upgrade?.upgradeId === upgrade.upgradeId
               ? ('live' as const)
               : active.releaseId !== upgrade.sourceReleaseId
                 ? ('stale' as const)
@@ -931,8 +931,9 @@ export class PostgresCustomizationService {
       const targetReleaseId =
         active.upgrade?.candidateReleaseId === active.releaseId
           ? active.upgrade.sourceReleaseId
-          : active.chain.at(-1)?.parentRevisionId ===
-              active.upgrade?.candidateRevisionId
+          : active.upgrade &&
+              active.chain.at(-1)?.parentRevisionId ===
+                active.upgrade.candidateRevisionId
             ? active.upgrade.candidateReleaseId
             : (active.chain.at(-2)?.resultingReleaseId ?? active.baseReleaseId);
       if (!targetReleaseId) {

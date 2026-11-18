@@ -739,10 +739,12 @@ export async function createComposedApplicationRuntime(
         {
           ...options.customization,
           compiledApplication: options.compiledApplication,
-          localDemoIdentity: options.localDemoIdentity,
+          ...(options.localDemoIdentity
+            ? { localDemoIdentity: true as const }
+            : {}),
           providerErrorMappings: options.providerErrorMappings,
           capabilityOperationExecutorFactories:
-            options.capabilityOperationExecutorFactories,
+            options.capabilityOperationExecutorFactories ?? [],
         },
       );
       customizationUpgrade = await customization.prepareUpgrade();

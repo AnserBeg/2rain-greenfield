@@ -5,16 +5,16 @@
   "tables": [
     {
       "schema": "north_star_internal",
+      "table": "inventory_projection_discrepancies",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "north_star_internal",
       "table": "module_fold_function_ddl_witnesses",
       "classification": "tenant-independent",
       "reasonCode": "kernel-integrity-witness",
       "reason": "Pins the database-wide Unicode fold-function definition so materializer DDL drift can be detected; it contains no business records."
-    },
-    {
-      "schema": "north_star_internal",
-      "table": "inventory_projection_discrepancies",
-      "classification": "tenant-scoped",
-      "tenantColumn": "tenant_id"
     },
     {
       "schema": "north_star_internal",
@@ -135,6 +135,12 @@
     {
       "schema": "platform",
       "table": "customization_patches",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "customization_upgrades",
       "classification": "tenant-scoped",
       "tenantColumn": "tenant_id"
     },

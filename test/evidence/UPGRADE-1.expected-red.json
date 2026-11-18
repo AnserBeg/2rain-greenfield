@@ -3,11 +3,11 @@
   "packet": "UPGRADE-1",
   "entries": [
     {
-      "name": "upgrade-tenant-scope-omitted",
+      "name": "upgrade-row-scope-omitted",
       "claim": "Upgrade replay bindings remain tenant/environment scoped and reject a payload digest mismatch.",
       "file": "db/migrations/0032_customization_upgrades.sql",
       "original": "  USING (\n    tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid\n    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid\n  );",
-      "replacement": "  USING (\n    environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid\n    OR true\n  );",
+      "replacement": "  USING (true);",
       "test": {
         "files": ["test/postgres/customization.test.ts"],
         "namePattern": "a platform label upgrade"
@@ -53,6 +53,24 @@
           "file": "test/postgres/customization.test.ts",
           "name": "a platform label upgrade preserves the field and layout, waits for approval, activates and rolls back",
           "expected": "customization_upgrades_binding"
+        }
+      ]
+    },
+    {
+      "name": "upgrade-replayed-as-separate-drafts",
+      "claim": "The replay is one compiler transition from the prior live tenant release, so its staged candidate retains both patches and an exact rollback edge.",
+      "file": "packages/customization/src/sandbox-worker.ts",
+      "original": "      ? request.chain.length\n      : (request.startAt ?? 0) + 1;",
+      "replacement": "      ? 1\n      : (request.startAt ?? 0) + 1;",
+      "test": {
+        "files": ["test/unit/customization.test.ts"],
+        "namePattern": "an upgrade compiles"
+      },
+      "kills": [
+        {
+          "file": "test/unit/customization.test.ts",
+          "name": "an upgrade compiles field and layout intent as one transition from the prior live tenant release",
+          "expected": "2 !== 1"
         }
       ]
     }
