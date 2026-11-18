@@ -1,25 +1,4 @@
-/**
- * The risk class of an operation, derived only from facts its compiled
- * contract already carries (AGENT-3 slice 3; plan §9.4 "confirmation follows
- * the plan's risk class"). Never a hand list, never the model's word.
- *
- * | contract facts                                              | class      |
- * |-------------------------------------------------------------|------------|
- * | tier o0, create effect, confirmation none, the record type  | reversible |
- * |   has an o0 archive operation (the inverse: archive it)     |            |
- * | tier o0, update effect, confirmation none, takes a patch,   | reversible |
- * |   and no confirmed operation of the record type writes the  |            |
- * |   same fields (the inverse: the same update, prior values)  |            |
- * | anything else: o1 capabilities (they may move stock, post   | needsYes   |
- * |   money or change a document's state), archive, restore,    |            |
- * |   state transitions, confirmation humanRequired, an unknown |            |
- * |   tier or effect, a missing inverse                         |            |
- *
- * No contract carries a posting or outward flag today, so the pre-ruled
- * fallback holds: reversible is an O0 create or update only. A plan is
- * reversible only when every step is; one step needing a yes makes the plan
- * need a yes bound to exactly that plan.
- */
+/** Only a revision-checked O0 patch can run before confirmation. */
 import type { RegisteredOperationDefinition } from '../../runtime/src/semantic-operation-gateway.js';
 
 import { effectKind, type PinnedCatalog } from './catalog.js';
@@ -34,9 +13,10 @@ export interface OperationRisk {
    */
   readonly reason: string;
   /** The inverse for a reversible operation. */
-  readonly inverse?:
-    | { readonly kind: 'archive'; readonly operationId: string }
-    | { readonly kind: 'restorePriorValues'; readonly operationId: string };
+  readonly inverse?: {
+    readonly kind: 'restorePriorValues';
+    readonly operationId: string;
+  };
 }
 
 export function operationRisk(
@@ -61,25 +41,8 @@ export function operationRisk(
       riskClass: 'needsYes',
       reason: 'This change needs your OK.',
     };
-  if (kind === 'createRecordEffect') {
-    const entity = catalog.operationEntity(operation);
-    const archive = catalog.operations.find(
-      (candidate) =>
-        effectKind(candidate) === 'archiveRecordEffect' &&
-        (candidate as { tier?: unknown }).tier === 'o0' &&
-        catalog.operationEntity(candidate) === entity,
-    );
-    return archive
-      ? {
-          riskClass: 'reversible',
-          reason: 'Undo takes back what this adds.',
-          inverse: { kind: 'archive', operationId: archive.operationId },
-        }
-      : {
-          riskClass: 'needsYes',
-          reason: 'What this adds cannot be taken back, so it needs your OK.',
-        };
-  }
+  if (kind === 'createRecordEffect')
+    return { riskClass: 'needsYes', reason: 'Adding a record needs your OK.' };
   if (kind === 'updateRecordEffect') {
     const keys = operation.inputContract?.closedArgumentKeys ?? [];
     // A field another operation of the record type writes only with the

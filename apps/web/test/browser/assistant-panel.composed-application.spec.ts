@@ -70,21 +70,17 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
     () => ({
       text: 'Here is what I found:\n\n| Customer | Number |\n|---|---|\n| Lethbridge Millwork | P-2016 |',
     }),
-    // Turn 2: a reversible create runs at once (no yes asked).
-    () => ({
+    // Turn 2: one master edit runs immediately.
+    (conversation) => ({
       toolCalls: [
         {
           name: 'erp_plan',
           input: {
             intents: [
               {
-                operationId: 'party_create',
-                values: { number: 'P-7701', name: 'Panel Test Customer' },
-              },
-              {
-                operationId: 'party_role_create',
-                values: { kind: 'customer', status: 'active' },
-                relations: { party: { fromStep: 1 } },
+                operationId: 'party_update',
+                target: firstQueriedRecord(conversation),
+                patch: { name: 'Panel Test Customer' },
               },
             ],
           },
@@ -114,7 +110,7 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
         },
       ],
     }),
-    () => ({ text: 'Done: I created customer **P-7701**.' }),
+    () => ({ text: 'Done: I renamed the contact **P-7701**.' }),
     // Turn 3: archiving needs the person's yes.
     (conversation) => ({
       toolCalls: [
@@ -150,6 +146,11 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
     () => ({ text: 'Noted: nothing will be shipped.' }),
     // Turn 6 (X3): a card left by Stop goes dead.
     archivePlan(2),
+    () => ({
+      toolCalls: [
+        { name: 'erp_plan', input: { intents: [{ kind: 'customization' }] } },
+      ],
+    }),
   ]);
   await withEphemeralPostgres(
     'assistant-panel-browser',
@@ -159,6 +160,33 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
         port: 0,
         tenantSlug: 'assistant-panel-browser',
         assistantModel: () => Promise.resolve(model),
+        draftingProvider: async () => ({
+          modelId: 'scripted-draft',
+          next: async (request) => {
+            expect(request.signal).toBeDefined();
+            expect(request.maxOutputTokens).toBeGreaterThan(0);
+            return {
+              text: '',
+              stop: 'tools',
+              toolCalls: [
+                {
+                  id: 'd',
+                  name: 'draft_customization',
+                  input: {
+                    kind: 'unsupported',
+                    missingCapability: 'workflow automation',
+                  },
+                },
+              ],
+              usage: {
+                inputTokens: 10000,
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+                outputTokens: 0,
+              },
+            };
+          },
+        }),
       });
       try {
         page.setDefaultTimeout(20_000);
@@ -184,36 +212,35 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
         await expect(panel.locator('[data-assistant-spend]')).toBeHidden();
         await expect(panel.locator('[data-assistant-status]')).toBeHidden();
 
-        await say('Add customer P-7701, Panel Test Customer');
-        await expect(reply(1)).toContainText('Done: I created customer');
+        await say('Rename the first contact Panel Test Customer');
+        await expect(reply(1)).toContainText('Done: I renamed the contact');
         await expect(panel.locator('[data-assistant-plan]')).toHaveCount(0);
         const did = reply(1).locator('[data-assistant-did]');
         // X16: the record's role and name, never "party"; the Did row links
         // the record and there is no separate "Changed" line.
-        await expect(did).toContainText(
-          'Did: created customer Panel Test Customer.',
-        );
+        await expect(did).toContainText('changed record Panel Test Customer.');
         await expect(reply(1)).not.toContainText('Changed:');
         const link = did.locator('a', { hasText: 'Open' });
         const href = await link.getAttribute('href');
         expect(href).toContain('record=');
 
-        // The link opens the record the assistant made, on its own page.
+        // Open the edited record and verify its new name on its own page.
         const opened = await page.context().newPage();
         await opened.goto(`${application.baseUrl}${href!}`);
         await expect(opened.locator('main')).toContainText(
           'Panel Test Customer',
         );
 
-        // Undo the create (the latest change made at once) before anything
-        // else runs (X8: a later write could depend on it), verified: the
-        // record it made is archived, so its page no longer finds it.
+        // Undo restores the previous name on the same record.
         await did.locator('[data-assistant-undo]').click();
         await expect(did).toContainText(
-          'Undid: created customer Panel Test Customer (checked)',
+          'Undid: changed record Panel Test Customer (checked)',
         );
         await opened.reload();
-        await expect(opened.locator('main')).toContainText('Record not found');
+        await expect(opened.locator('main')).not.toContainText(
+          'Panel Test Customer',
+        );
+        await expect(opened.locator('main')).toContainText('P-1001');
 
         await say('Archive the first customer');
         const plan = panel.locator('[data-assistant-plan]');
@@ -233,12 +260,30 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
         // LOOK-1: the panel in the Ledger look, wide and phone, light and
         // dark -- a reply's table, a change with Undo, a plan awaiting yes.
         await shootAssistant(page);
+        await page.route('**/?assistant=decide', (route) => route.abort(), {
+          times: 1,
+        });
+        await plan.locator('[data-assistant-yes]').click();
+        await expect(plan).toContainText('Try again');
+        await expect(plan.locator('[data-assistant-yes]')).toBeEnabled();
         await plan.locator('[data-assistant-yes]').click();
         await expect(reply(2)).toContainText('Archived.');
 
         // X2: words that are not a whole yes decline and are sent on.
         await say('Archive the second customer');
         const second = panel.locator('[data-assistant-plan]').nth(1);
+        await expect(second.locator('[data-assistant-yes]')).toBeEnabled();
+        // Replay the old click handler while the new card is pending and inspect its actual request.
+        const stale = page.waitForRequest((request) =>
+          request.url().endsWith('?assistant=decide'),
+        );
+        await plan.first().evaluate((card) => {
+          card.removeAttribute('data-assistant-settled');
+          card.querySelector('button')!.dispatchEvent(new Event('click'));
+        });
+        expect((await stale).postDataJSON().planId).toBe(
+          await plan.first().getAttribute('data-assistant-plan'),
+        );
         await expect(second.locator('[data-assistant-yes]')).toBeEnabled();
         await say("Okay, don't ship it");
         await expect(second).toContainText('Not done.');
@@ -252,6 +297,79 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
         await panel.locator('[data-assistant-stop]').click();
         await expect(third.locator('[data-assistant-yes]')).toBeDisabled();
         await expect(third.locator('[data-assistant-no]')).toBeDisabled();
+        await say('Add a custom workflow');
+        await expect(
+          panel.locator('[data-assistant-stop-reason="handoff"]'),
+        ).toContainText('could not be drafted');
+        await expect(panel.locator('[data-assistant-spend]')).toContainText(
+          'USD 0.04',
+        );
+        // A timed-out card settles while the host is still composing its answer.
+        // Feed those stream events separately to observe the client between them.
+        const finishEvent = await page.evaluateHandle(() => {
+          const original = window.fetch;
+          let complete!: () => void;
+          window.fetch = (...args) => {
+            if (!String(args[0]).includes('assistant=ask'))
+              return original(...args);
+            window.fetch = original;
+            const encoder = new TextEncoder();
+            return Promise.resolve(
+              new Response(
+                new ReadableStream({
+                  start(controller) {
+                    const emit = (value: unknown) =>
+                      controller.enqueue(
+                        encoder.encode(JSON.stringify(value) + '\n'),
+                      );
+                    emit({
+                      type: 'plan',
+                      planId: 'timed-out-card',
+                      digest: 'd',
+                      steps: [],
+                    });
+                    emit({
+                      type: 'decided',
+                      planId: 'timed-out-card',
+                      approved: false,
+                    });
+                    complete = () => {
+                      emit({
+                        type: 'error',
+                        message: 'The model stopped after writing.',
+                        changes: [
+                          {
+                            changeId: 'saved-receipt',
+                            summary: 'archived the order',
+                            undoable: false,
+                          },
+                        ],
+                      });
+                      controller.close();
+                    };
+                  },
+                }),
+              ),
+            );
+          };
+          return () => complete();
+        });
+        await say('Prepare another plan');
+        const timedOut = panel.locator(
+          '[data-assistant-plan="timed-out-card"]',
+        );
+        await expect(timedOut).toContainText('Not done.');
+        const input = panel.locator('textarea');
+        await input.fill('My next request');
+        await input.press('Enter');
+        await expect(input).toHaveValue('My next request');
+        await finishEvent.evaluate((finish) => finish());
+        await expect(
+          panel.locator('[data-assistant-did="saved-receipt"]'),
+        ).toContainText('archived the order');
+        await expect(
+          panel.locator('[data-assistant-did="saved-receipt"] button'),
+        ).toHaveCount(0);
       } finally {
         await application.close();
       }
