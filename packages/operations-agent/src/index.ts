@@ -10,7 +10,8 @@ export {
   type ToolOutcome,
 } from './session.js';
 export {
-  CUSTOMIZE_HANDOFF,
+  asData,
+  customizeHandoff,
   OPERATIONS_AGENT_SYSTEM_PROMPT,
   OPERATIONS_AGENT_TOOLS,
   type ModelToolDefinition,
@@ -28,7 +29,11 @@ export {
 } from './model.js';
 export {
   agentPreamble,
+  CALL_OUTPUT_CEILING,
+  estimateInputTokens,
+  meteredNext,
   runOperationsAgent,
+  SpendCapReached,
   SpendMeter,
   systemPrompt,
   type AgentPreamble,
