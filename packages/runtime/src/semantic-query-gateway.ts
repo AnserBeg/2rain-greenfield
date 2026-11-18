@@ -1543,6 +1543,17 @@ export function registeredSemanticQueryFromPinnedView(
       'pinned query catalog has an invalid kind, version, or shape',
     );
   }
+  // SPEED-1: a release's catalog is parsed once across requests. Each request
+  // view carries its own deeply frozen copy, so the parse is found by the
+  // payload's exact content, and published only after the whole catalog was
+  // admitted below; a refused catalog is never cached and refuses again.
+  const content = cacheable ? serializedQueryCatalog(payload) : undefined;
+  const shared =
+    content === undefined ? undefined : parsedQueryCatalogs.get(content);
+  if (shared) {
+    pinnedQueryCatalogs.set(view, shared);
+    return shared.get(queryId);
+  }
   recordCatalogParse('queryCatalog');
   const queryIds = new Set<string>();
   const catalog = new Map<string, RegisteredSemanticQueryDefinition>();
@@ -1559,7 +1570,27 @@ export function registeredSemanticQueryFromPinnedView(
   // Publish only after every entry and duplicate check passed. A failed first
   // lookup must not make a later lookup see a partially validated catalog.
   if (cacheable) pinnedQueryCatalogs.set(view, catalog);
+  if (content !== undefined) {
+    if (parsedQueryCatalogs.size >= PARSED_QUERY_CATALOG_LIMIT)
+      parsedQueryCatalogs.delete(parsedQueryCatalogs.keys().next().value!);
+    parsedQueryCatalogs.set(content, catalog);
+  }
   return catalog.get(queryId);
+}
+
+/** How many releases' parsed query catalogs are kept; the oldest goes first. */
+const PARSED_QUERY_CATALOG_LIMIT = 8;
+const parsedQueryCatalogs = new Map<
+  string,
+  ReadonlyMap<string, RegisteredSemanticQueryDefinition>
+>();
+
+function serializedQueryCatalog(payload: unknown): string | undefined {
+  try {
+    return JSON.stringify(payload);
+  } catch {
+    return undefined;
+  }
 }
 
 function parseQueryDefinition(
