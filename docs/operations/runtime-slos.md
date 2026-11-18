@@ -6,8 +6,8 @@ existing-table locking-DDL window; PR-6d literal search and prefix-range
 gates; U1 registered-query feedback-ladder grading; later platform budgets
 for percentile/error-budget ratification
 
-This document records the runtime request-path bounds supported by the current
-measurements. It does not turn one-host measurements into fleet percentiles or claim a
+This document records the runtime request-path bounds the repository can defend
+today. It does not turn one-host measurements into fleet percentiles or claim a
 launch error budget. The binding measurement source is the converged
 [RLS index-access verdict](../execution/debates/pr6-rls-index-access-verdict.md),
 which used pinned PostgreSQL 16.14 as the `NOBYPASSRLS` runtime role against
