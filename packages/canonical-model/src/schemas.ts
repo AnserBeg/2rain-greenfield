@@ -2065,6 +2065,10 @@ export const SurfaceLauncherSchema = z.strictObject({
         view: CanonicalIdSchema.optional(),
         /** The work queue's icon in the sidebar (LOOK-1). Optional v6 key. */
         icon: NavigationIconSchema.optional(),
+        /** Up to five rows of this same List query, linked to its record page. Optional v6 key. */
+        preview: z
+          .strictObject({ recordSurface: CanonicalIdSchema })
+          .optional(),
       }),
     )
     .min(1)

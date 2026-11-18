@@ -27,6 +27,7 @@ import {
   normalizeApplicationPackage,
   type SurfaceComposition,
   type SurfaceDocumentEditor,
+  type SurfaceLauncher,
 } from '../../packages/canonical-model/src/index.js';
 import {
   DEFAULT_COMPILER_LIMITS,
@@ -202,6 +203,33 @@ test('INTERACT-1 compiles row defaults and picker details and refuses missing so
       'refused',
     );
   }
+});
+
+test('INTERACT-1 compiles a queue preview and refuses a record page of another entity', () => {
+  const normalized = normalizeApplicationPackage(
+    composedApplicationDefinition(),
+  );
+  const compiled = mustCompile(inputNormalized(normalized));
+  const surfaces = projectionPayload<{
+    surfaces: Array<{ surfaceId: string; launcher?: SurfaceLauncher }>;
+  }>(compiled, PROJECTION_FAMILY_IDS.surfaceManifest).surfaces;
+  assert.equal(
+    surfaces.find(
+      (surface) =>
+        surface.surfaceId === 'northstar.app:surface.inventory_today',
+    )?.launcher?.tiles[0]?.preview?.recordSurface,
+    'northstar.app:surface.purchase_order_detail',
+  );
+  const invalid = structuredClone(normalized);
+  const today = invalid.surfaces.find(
+    (surface) => surface.surfaceId === 'northstar.app:surface.inventory_today',
+  );
+  assert.ok(today && 'launcher' in today && today.launcher);
+  const launcher = today.launcher as SurfaceLauncher;
+  const preview = launcher.tiles[0]!.preview!;
+  preview.recordSurface =
+    'northstar.app:surface.sales_order_detail' as typeof preview.recordSurface;
+  assert.equal(compileApplication(inputNormalized(invalid)).status, 'refused');
 });
 
 test('ordinary v1 and v2 parent/child definitions compile cleanly and twice identically', () => {

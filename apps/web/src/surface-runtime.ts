@@ -405,6 +405,7 @@ export async function renderSurfaceRuntimeWithData(
       null,
       landingSurface(selection.navigation, selection.surfaces)?.surfaceId ===
         selection.selected.surfaceId,
+      true,
     );
     return rendered(() =>
       renderSelectedSurface(
