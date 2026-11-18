@@ -295,6 +295,7 @@ export const ASSISTANT_PANEL_CSP_HASH = `sha256-${createHash('sha256').update(AS
 const PANEL_STYLES = `
 .assistant-toggle{min-height:44px;padding:0 14px;border-radius:999px;border:1px solid var(--line-strong);background:var(--accent);color:var(--ink-on-accent);font:inherit;cursor:pointer}
 .assistant-toggle--inline{margin-left:auto}
+.assistant-toggle--inline+.shell-account{margin-left:0}
 .assistant-toggle--floating{position:fixed;right:16px;bottom:16px;z-index:40;min-height:44px}
 .assistant-panel{position:fixed;top:0;right:0;bottom:0;z-index:70;width:min(420px,100vw);display:flex;flex-direction:column;background:var(--surface-panel);color:var(--ink);border-left:1px solid var(--line);box-shadow:var(--elevation-overlay)}
 .assistant-panel[hidden]{display:none}
