@@ -30,7 +30,7 @@ export interface AssistantMount {
  * with trailing punctuation at most. "Okay, don't ship it" is not one.
  */
 export const ASSISTANT_AFFIRMATIVE =
-  /^(?:y|yes|yeah|yep|ok|okay|sure|go|go ahead|do it|confirm|approve|yes please|yes,? do it)[.!\s]*$/iu;
+  /^(?:y|yes|yeah|yep|ok|okay|sure|go|go ahead|do it|confirm|approve|yes,? please|yes,? do it)[.!\s]*$/iu;
 
 export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
   const root = document.querySelector('[data-assistant-panel]');
@@ -71,7 +71,7 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
   const post = (action, body, signal) => fetch('/?assistant=' + action, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-northstar-assistant': '1' },
-    body: JSON.stringify(body),
+    body: JSON.stringify({page: location.search, screen:{surfaceId:new URLSearchParams(location.search).get('surface')}, ...body}),
     signal,
   });
   const element = (tag, text, cls) => {
@@ -146,15 +146,29 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
 
   // A card settles once: its buttons go dead and never speak for another plan.
   const settle = (card) => {
+    if (pending && pending.card === card) {
+      pending = null;
+      form.querySelector('button[type=submit]').disabled = Boolean(running);
+    }
     card.setAttribute('data-assistant-settled', '');
     card.querySelectorAll('button').forEach((button) => { button.disabled = true; });
   };
   // Each card answers only for its own conversation, plan and digest.
   const decideCard = async (card, own, approve) => {
-    if (card.hasAttribute('data-assistant-settled')) return;
-    settle(card);
-    if (pending && pending.card === card) pending = null;
-    await post('decide', { conversation: own.conversation, planId: own.planId, digest: own.digest, approve });
+    if (card.hasAttribute('data-assistant-settled') || card.hasAttribute('aria-busy')) return;
+    card.setAttribute('aria-busy','true');
+    card.querySelectorAll('button').forEach(button => { button.disabled = true; });
+    try {
+      const response = await post('decide', { conversation: own.conversation, planId: own.planId, digest: own.digest, approve });
+      if (!response.ok) throw new Error('The decision was not acknowledged.');
+      settle(card);
+    } catch {
+      if (!card.hasAttribute('data-assistant-settled')) {
+        card.querySelectorAll('button').forEach(button => { button.disabled = false; });
+        card.appendChild(element('p','Your decision could not be sent. Try again.','assistant-error'));
+        queued=null;
+      }
+    } finally { card.removeAttribute('aria-busy'); }
   };
   const decide = (approve) => pending ? decideCard(pending.card, pending.own, approve) : undefined;
   const affirmative = new RegExp(${JSON.stringify(ASSISTANT_AFFIRMATIVE.source)}, 'iu');
@@ -198,6 +212,8 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
       open.href = change.href;
       did.appendChild(document.createTextNode(' '));
     }
+    log.querySelectorAll('[data-assistant-undo]').forEach(button => {button.disabled=true;});
+    if (!change.undoable) return;
     const undo = did.appendChild(element('button', 'Undo'));
     undo.type = 'button';
     undo.setAttribute('data-assistant-undo', '');
@@ -215,7 +231,7 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     if (!conversation) return;
     const answer = await post('latest', { conversation }).catch(() => null);
     const result = answer && answer.ok ? await answer.json().catch(() => null) : null;
-    if (result && result.did) showDid(log, result.did);
+    if (result && result.changes?.length) result.changes.forEach(change=>showDid(log,change));
     else if (result && result.running && tries < 10) setTimeout(() => offerLatest(tries + 1), 1000);
   };
   offerLatest();
@@ -290,10 +306,11 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
               const open = draft.appendChild(element('a', 'Review it on the Customize screen'));
               open.href = '/?customize';
             }
-            if (event.did) showDid(reply, event.did);
+            (event.changes || []).forEach(change=>showDid(reply,change));
             showSpend(event.spentUsd);
           } else if (event.type === 'error') {
             reply.appendChild(element('p', event.message, 'assistant-error'));
+            (event.changes || []).forEach(change=>showDid(reply,change));
           }
         }
       }
@@ -323,7 +340,7 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     const text = input.value.trim();
-    if (!text) return;
+    if (!text || (running && !pending)) return;
     input.value = '';
     if (pending) {
       // Only a whole, plain yes approves the plan on screen. Anything else
