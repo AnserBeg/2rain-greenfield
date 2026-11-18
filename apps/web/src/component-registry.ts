@@ -2688,7 +2688,7 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
           )}</select></div><div class="form-field"><label for="${controlId('dir')}">Order</label><select id="${controlId('dir')}" name="dir"><option value="asc"${current?.direction === 'descending' ? '' : ' selected'}>Ascending</option><option value="desc"${current?.direction === 'descending' ? ' selected' : ''}>Descending</option></select></div>`
       : '';
   const clearHref = `/?${declaredListParameters(state, base, { filterValues: {}, page: 1, search: '' }).toString()}`;
-  const controls = `<form class="list-controls" data-list-search method="get" action="/">${formHidden}<div class="form-field list-controls__search"><label><span>Search ${escapeHtml(input.recordLabel.toLowerCase())}</span><input type="search" name="q" value="${escapeHtml(state.search)}" maxlength="240" autocomplete="off"></label></div>${filterControls}${sortControls}<div class="list-controls__actions"><button type="submit">Apply</button>${narrowed ? `<a class="secondary-action" href="${escapeHtml(clearHref)}">Clear</a>` : ''}</div></form>`;
+  const controls = `<form class="list-controls" data-list-search method="get" action="/">${formHidden}<div class="form-field list-controls__search"><label><span>Search ${escapeHtml(input.recordLabel.toLowerCase())}</span><input type="search" name="q" value="${escapeHtml(state.search)}" maxlength="240" autocomplete="off" placeholder="Search ${escapeHtml(input.recordLabel.toLowerCase())}"></label></div>${filterControls}${sortControls}<div class="list-controls__actions"><button type="submit">Apply</button>${narrowed ? `<a class="secondary-action" href="${escapeHtml(clearHref)}">Clear</a>` : ''}</div></form>`;
   const sortState = new Map(
     state.sort.map((sort) => [sort.columnId, sort.direction]),
   );
@@ -2740,7 +2740,13 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
           const text = declaredCellText(column, record, input.present);
           // The label leads and the column id ends the cell's attributes, as
           // readers of the List's markup expect; the kind sits between.
-          const label = `data-column-label="${escapeHtml(column.label)}"${kind(column)} data-column-priority="${String(column.priority)}" data-column-id="${escapeHtml(column.columnId)}"`;
+          // A zero figure reads faint, so the figures that matter stand out
+          // (LOOK-1 round 3).
+          const zero =
+            text !== null &&
+            kind(column) !== '' &&
+            /^-?0(?:\.0+)?$/u.test(text);
+          const label = `data-column-label="${escapeHtml(column.label)}"${kind(column)}${zero ? ' data-zero' : ''} data-column-priority="${String(column.priority)}" data-column-id="${escapeHtml(column.columnId)}"`;
           if (column.role === 'title') {
             const title = text ?? record.recordId.slice(0, 8);
             const href = input.detailHref(record);
@@ -2756,6 +2762,7 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
           // What the row is short of now is marked, as the reference marks
           // an exception "!" (SUPPLY-WARNINGS).
           const short = shortMarked(list, column, record);
+
           return `<td ${label}>${text === null ? '<span class="muted">—</span>' : escapeHtml(text)}${late === null ? '' : ` <span class="status-pill" data-status-role="attention" data-overdue-days="${String(late)}">${escapeHtml(`${String(late)} ${late === 1 ? 'day' : 'days'} late`)}</span>`}${short ? ' <span class="status-pill" data-status-role="blocked" data-short-mark="true"><span aria-hidden="true">!</span><span class="sr-only">Short of stock</span></span>' : ''}</td>`;
         })
         .join('');
@@ -2810,5 +2817,5 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
     input.progressWithheld,
     input.supplyWithheld,
   );
-  return `<section class="panel data-panel" data-data-state="exact" data-list-result="${escapeHtml(coverage.schemaVersion)}" data-declared-list="true"${anchor}><div class="panel__heading"><div><h2>${escapeHtml(input.recordLabel)}</h2></div><div class="list-summary"><span class="status-pill" data-status-role="success" data-list-total="${String(coverage.totalCount)}">${escapeHtml(count)}</span>${range ? `<span class="muted">${escapeHtml(range)}</span>` : ''}${exportControl}</div></div>${withheld}${controls}${empty}${input.records.length > 0 ? `<div class="data-table-wrap" data-list-rendering="responsive-single"><table><thead><tr>${input.selectionCell ? '<th scope="col">Select</th>' : ''}${header}${rowActions ? '<th scope="col">Actions</th>' : ''}</tr></thead><tbody>${body}</tbody></table></div>` : ''}${paging}</section>`;
+  return `<section class="panel data-panel" data-data-state="exact" data-list-result="${escapeHtml(coverage.schemaVersion)}" data-declared-list="true"${anchor}><div class="panel__heading"><div><h2>${escapeHtml(input.recordLabel)}</h2></div><div class="list-summary"><span class="list-count" data-list-total="${String(coverage.totalCount)}">${escapeHtml(count)}</span>${range ? `<span class="muted">${escapeHtml(range)}</span>` : ''}${exportControl}</div></div>${withheld}${controls}${empty}${input.records.length > 0 ? `<div class="data-table-wrap" data-list-rendering="responsive-single"${list.compact ? ` data-compact="${escapeHtml(list.compact)}"` : ''}><table><thead><tr>${input.selectionCell ? '<th scope="col">Select</th>' : ''}${header}${rowActions ? '<th scope="col">Actions</th>' : ''}</tr></thead><tbody>${body}</tbody></table></div>` : ''}${paging}</section>`;
 }
