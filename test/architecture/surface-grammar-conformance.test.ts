@@ -406,7 +406,7 @@ test('compiled navigation stays flat within budget and groups mounted modules be
   // Business destinations lead; supporting masters share the overflow entry.
   assert.deepEqual(
     grouped.entries.map((entry) => entry.label),
-    ['Sales', 'Purchasing', 'Stock', 'Customers and suppliers', 'More'],
+    ['Sales', 'Purchasing', 'Stock', 'Contacts', 'More'],
   );
   assert.deepEqual(compact.navigationEntryIds, [
     'northstar.app:module.sales',
