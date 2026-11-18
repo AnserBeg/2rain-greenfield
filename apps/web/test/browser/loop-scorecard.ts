@@ -34,6 +34,7 @@ import {
  */
 export class LoopScorecard {
   readonly steps: ScorecardStep[] = [];
+  readonly postings: { name: string; clicks: number; loads: number }[] = [];
   /** Facts a step measures beside its counts, such as a form's field count. */
   readonly notes = new Map<string, string>();
   /** Every page and fragment request, with the database work it caused. */
@@ -146,6 +147,27 @@ export class LoopScorecard {
     await this.scan();
     await target.click();
     this.step().clicks += 1;
+  }
+
+  interactionMark(): { clicks: number; loads: number } {
+    const { clicks, loads } = this.step();
+    return { clicks, loads };
+  }
+
+  /** Count from a ready form or task opener through its verified result. */
+  async recordPosting(
+    name: string,
+    before: { clicks: number; loads: number },
+  ): Promise<void> {
+    await this.page.waitForLoadState('load');
+    const after = this.interactionMark();
+    const posting = {
+      name,
+      clicks: after.clicks - before.clicks,
+      loads: after.loads - before.loads,
+    };
+    this.postings.push(posting);
+    console.log(`INTERACT_POSTING ${JSON.stringify(posting)}`);
   }
 
   async choose(target: Locator, option: { label: string }): Promise<void> {
@@ -764,6 +786,7 @@ async function runTask(
   } = {},
 ): Promise<void> {
   const { page } = card;
+  const posting = card.interactionMark();
   await card.click(opener);
   const dialog = page.locator('[data-composition-task]');
   await expect(dialog).toBeVisible();
@@ -789,6 +812,7 @@ async function runTask(
     await card.click(dialog.getByRole('link', { name: /^Back to/u }));
   }
   await expect(dialog).toHaveCount(0);
+  await card.recordPosting(label, posting);
 }
 
 function nextAction(page: Page): Locator {
