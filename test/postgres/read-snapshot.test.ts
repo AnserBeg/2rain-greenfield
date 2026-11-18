@@ -13,7 +13,6 @@ import {
   runMigrations,
 } from '../../packages/postgres-provider/src/migrations.js';
 import {
-  afterReadsFinish,
   ReadSnapshotIntegrityError,
   ReadSnapshotPolicyChangedError,
   ReadSnapshotScopeError,
@@ -27,6 +26,7 @@ import {
 import {
   ReleaseRoutingOperationGateway,
   ReleaseRoutingQueryGateway,
+  releaseServingRoute,
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import {
   assertScopePolicyCurrent,
@@ -439,6 +439,18 @@ test('SPEED-1 security fixes: one scope per page, both scopes of a moved grant, 
         // S3: moving the membership from this environment to another bumps
         // this environment's epoch too, so the page holding its grants is
         // discarded and assembled again, now denied.
+        const epochOf = async (environment: string) =>
+          Number(
+            (
+              await admin.query<{ v: string }>(
+                `SELECT policy_version::text AS v
+                   FROM platform.current_policy_epochs
+                  WHERE tenant_id = $1 AND environment_id = $2`,
+                [tenantId, environment],
+              )
+            ).rows[0]?.v ?? 0,
+          );
+        const destinationBefore = await epochOf(otherEnvironmentId);
         let moved = false;
         const afterMove = await page(() =>
           entry.run({}, async (view) => {
@@ -457,6 +469,8 @@ test('SPEED-1 security fixes: one scope per page, both scopes of a moved grant, 
           }),
         );
         assert.deepEqual(afterMove, ['DENY', 'DENY']);
+        // ...and the destination's epoch too: authority arrived there.
+        assert.equal(await epochOf(otherEnvironmentId), destinationBefore + 1);
         await admin.query(
           `UPDATE platform.current_policy_memberships SET environment_id = $2
             WHERE tenant_id = $1 AND membership_id = $3`,
@@ -482,70 +496,6 @@ test('SPEED-1 security fixes: one scope per page, both scopes of a moved grant, 
           ReadSnapshotPolicyChangedError,
         );
         assert.equal(tries, 1);
-
-        // S6: a durable write deferred while the page reads keeps one
-        // snapshot (one transaction start throughout), and lands after.
-        const startedAt = async (client: pg.PoolClient) =>
-          String(
-            (await client.query<{ at: string }>(`SELECT now()::text AS at`))
-              .rows[0]!.at,
-          );
-        const starts = await page(async () => {
-          const first = await withTrustedRequestRead(
-            runtime,
-            context,
-            startedAt,
-          );
-          await afterReadsFinish(runtime, () =>
-            withTrustedRequestTransaction(runtime, context, async (client) => {
-              await client.query(
-                `INSERT INTO public.snapshot_probe VALUES ('denial')`,
-              );
-            }),
-          );
-          const unseen = await withTrustedRequestRead(
-            runtime,
-            context,
-            readProbe,
-          );
-          const second = await withTrustedRequestRead(
-            runtime,
-            context,
-            startedAt,
-          );
-          return { first, second, unseen: unseen.length };
-        });
-        assert.equal(starts.first, starts.second);
-        assert.equal(starts.unseen, 0);
-        assert.equal(
-          (await admin.query(`SELECT note FROM public.snapshot_probe`)).rows
-            .length,
-          1,
-        );
-        // ...and lands even when the page fails.
-        await assert.rejects(
-          page(async () => {
-            await withTrustedRequestRead(runtime, context, startedAt);
-            await afterReadsFinish(runtime, () =>
-              withTrustedRequestTransaction(
-                runtime,
-                context,
-                async (client) => {
-                  await client.query(
-                    `INSERT INTO public.snapshot_probe VALUES ('failed page')`,
-                  );
-                },
-              ),
-            );
-            throw new Error('the page failed');
-          }),
-          /the page failed/u,
-        );
-        assert.equal(
-          (await admin.query(`SELECT note FROM public.snapshot_probe`)).rows
-            .length,
-          2,
-        );
 
         // S8: parallel reads beside a write of its own never need a second
         // connection: two pages, a pool of two, each page's write in parallel
@@ -658,6 +608,92 @@ test('SPEED-1 security fixes: one scope per page, both scopes of a moved grant, 
         } finally {
           blocker.release();
         }
+
+        // Fix read 4: an invocation and a sibling read of one cold release in
+        // one page, the invocation first, the release's real route loading it
+        // (with a connection of its own) while the page holds the other.
+        const route = releaseServingRoute(
+          async () => {
+            await withTrustedRequestTransaction(runtime, context, (client) =>
+              client.query(`SELECT 1`),
+            );
+            return 'loaded';
+          },
+          () =>
+            Object.freeze({
+              operationGateway: {
+                invoke: async () => 'invoked' as never,
+              },
+              policy,
+              queryGateway: { invoke: async () => 'answered' },
+            }) as never,
+        );
+        const coldOperations = new ReleaseRoutingOperationGateway(
+          route as never,
+          policy,
+          new SemanticOperationMediationAuthority(),
+        );
+        const coldQueries = new ReleaseRoutingQueryGateway(
+          route as never,
+          policy,
+        );
+        const cold = { release: { releaseId: 'cold' } } as never;
+        const occupied = await runtime.connect();
+        try {
+          assert.deepEqual(
+            await page(async () => {
+              await withTrustedRequestRead(runtime, context, principalOf);
+              return Promise.all([
+                coldOperations.invoke(cold, {} as never, {} as never),
+                coldQueries.invoke(cold, {} as never),
+              ]);
+            }),
+            ['invoked', 'answered'],
+          );
+        } finally {
+          occupied.release();
+        }
+
+        // Fix read 2: the anchor's epoch lock is scope-checked, and a policy
+        // change waits behind a transaction holding it.
+        await assert.rejects(
+          withTrustedRequestTransaction(runtime, context, (client) =>
+            client.query(`SELECT platform.lock_current_policy_epoch($1, $2)`, [
+              tenantId,
+              otherEnvironmentId,
+            ]),
+          ),
+          /trusted session scope/u,
+        );
+        const epochNow = async () =>
+          `northstar.current-policy/${String(await epochOf(environmentId))}`;
+        let revoked = false;
+        let revocation: Promise<unknown> | undefined;
+        await withTrustedRequestTransaction(
+          runtime,
+          context,
+          async (client) => {
+            await assertScopePolicyCurrent(client, {
+              context,
+              definition: { queryId: 'northstar.test:query.x' },
+              legalEntityReadScope: { policyVersion: await epochNow() },
+            } as never);
+            revocation = admin
+              .query(
+                `UPDATE platform.current_policy_roles SET role_key = role_key
+                WHERE tenant_id = $1 AND environment_id = $2`,
+                [tenantId, environmentId],
+              )
+              .then(() => {
+                revoked = true;
+              });
+            await new Promise((resolve) => setTimeout(resolve, 750));
+            // Still waiting: the anchor transaction holds the epoch row.
+            assert.equal(revoked, false);
+          },
+        );
+        await revocation;
+        assert.equal(revoked, true);
 
         // Module role: a module read runs as the module role, verified the
         // first time each way; a runtime read after it runs as the login role.

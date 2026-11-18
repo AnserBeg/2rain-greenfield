@@ -2187,6 +2187,29 @@ export function renderApplicationDiagnostic(
   });
 }
 
+/**
+ * SPEED-1 (fix read 3): a task's Confirm or retry stopped by a policy change
+ * after some of its steps may have committed. Nothing of the record is shown
+ * (the page it was assembled under is no longer current); the notice names
+ * the uncertainty and offers the session's own retry, which reuses its inputs
+ * and request keys and is bound to the session's actor.
+ */
+export function taskRecoveryNotice(
+  requestUrl: string,
+  submission: Readonly<Record<string, string>>,
+): SurfaceRuntimeResponse {
+  const url = new URL(requestUrl, 'http://surface-runtime.local');
+  const ref: SurfaceMessageRef = { code: 'COMPOSITION_UNCERTAIN' };
+  const keep = (name: string) =>
+    typeof submission[name] === 'string'
+      ? `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(submission[name])}">`
+      : '';
+  return Object.freeze({
+    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(surfaceMessage(ref.code).sentence)} · 2rain</title><link rel="stylesheet" href="${FONT_STYLESHEET_HREF}"><link rel="stylesheet" href="${SURFACE_STYLESHEET.href}"></head><body class="standalone"><main class="standalone__card" role="alert" data-task-recovery ${messageAttributes(ref)}>${messageBody(ref, 'Task', 'h1')}<form method="post" action="${escapeHtml(url.pathname + url.search)}">${keep('taskToken')}${keep('compositionAction')}<button name="taskStage" value="retry">Retry same request</button></form></main></body></html>`,
+    statusCode: 409,
+  });
+}
+
 function diagnosticDocument(
   view: RuntimeViewContract.RequestRuntimeView,
   ref: SurfaceMessageRef,

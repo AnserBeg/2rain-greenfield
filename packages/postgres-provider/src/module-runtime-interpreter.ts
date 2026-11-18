@@ -1395,13 +1395,10 @@ export async function assertScopePolicyCurrent(
   // Only a scope this provider's live policy issued names its epoch; one
   // issued by another policy gateway (a test double) has no epoch here.
   if (!scope || !isCurrentPolicyVersion(scope.policyVersion)) return;
+  // FOR SHARE on the scope's epoch row, held to this transaction's commit:
+  // a concurrent policy change waits behind the anchor (fix read 2).
   const result = await client.query<{ policy_version: string }>(
-    `SELECT COALESCE(
-       (SELECT policy_version::text
-          FROM platform.current_policy_epochs
-         WHERE tenant_id = $1 AND environment_id = $2),
-       '0'
-     ) AS policy_version`,
+    `SELECT platform.lock_current_policy_epoch($1, $2) AS policy_version`,
     [request.context.tenantId, request.context.environmentId],
   );
   const live = currentPolicyVersionOf(result.rows[0]?.policy_version);

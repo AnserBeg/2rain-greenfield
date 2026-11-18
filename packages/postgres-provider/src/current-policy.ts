@@ -21,7 +21,6 @@ import {
   type EvidenceMetadataInput,
 } from '../../platform-runtime/src/trust/contracts.js';
 import {
-  afterReadsFinish,
   withTrustedRequestRead,
   withTrustedRequestTransaction,
 } from './request-context.js';
@@ -263,23 +262,25 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
 
 export class PostgresSemanticQueryDenialRecorder implements SemanticQueryDenialRecorder {
   readonly #trust: PostgresTrustService;
-  readonly #pool: Pool;
 
   constructor(
     pool: Pool,
     private readonly actorIssuer: TrustedActorEnvelopeIssuer,
+    /**
+     * SPEED-1: the connections denial evidence is written on. Given its own
+     * pool, a denial is committed at once -- durably, before the request is
+     * answered, its failure the request's -- without ending a page's read
+     * snapshot on `pool` or competing with the page for a connection.
+     */
+    evidencePool: Pool = pool,
   ) {
-    this.#pool = pool;
-    this.#trust = new PostgresTrustService(pool);
+    this.#trust = new PostgresTrustService(evidencePool);
   }
 
   async recordDenied(
     request: Parameters<SemanticQueryDenialRecorder['recordDenied']>[0],
   ) {
-    // Inside a page's read snapshot the denial is recorded once the page's
-    // reads finish, in its own durable transaction, so the page keeps one
-    // snapshot (SPEED-1 S6); elsewhere it is recorded now.
-    await afterReadsFinish(this.#pool, () => this.#record(request));
+    await this.#record(request);
   }
 
   async #record(
