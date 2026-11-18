@@ -8,7 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, matchesGlob, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
@@ -440,6 +440,31 @@ test('declared unfiltered producers are wired to CI and their evidence paths', (
   }
 });
 
+test('every file selected by the former general PostgreSQL glob belongs to exactly one shard', () => {
+  const oldGeneralGlob =
+    'test/postgres/**/!(commercial-totals|composed-application|counter-sale|customer-credit|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|replenishment|stock-serializer).test.ts';
+  const shards = ['postgres-1', 'postgres-2', 'postgres-3'].map(
+    getReachabilityProducer,
+  );
+  const files = globSync(oldGeneralGlob);
+  assert.ok(files.length > 0);
+  // These paths share basenames with root files assigned to shards 1 and 2.
+  files.push(
+    'test/postgres/region/locations.test.ts',
+    'test/postgres/region/subregion/releases.test.ts',
+  );
+  for (const file of files) {
+    const owners = shards.filter(({ argv }) =>
+      argv.some((pattern) => matchesGlob(file, pattern)),
+    );
+    assert.equal(
+      owners.length,
+      1,
+      `${file} selected by: ${owners.map(({ id }) => id).join(', ')}`,
+    );
+  }
+});
+
 test('the Playwright producers run every browser spec in exactly one job and report their own evidence', async () => {
   const specs = globSync('apps/web/test/browser/**/*.spec.ts')
     .map((path) => resolve(path))
@@ -584,39 +609,35 @@ test('CI aggregates only after every evidence-producing job succeeds', () => {
   assert.doesNotMatch(job, /if:\s*always\(\)/u);
   assert.match(job, /CI_JOB_RESULTS: \$\{\{ toJSON\(needs\) \}\}/u);
   assert.match(job, /run: node \.github\/scripts\/check-ci-results\.mjs/u);
-  for (const [prose, result, replay, accepted] of [
-    ['false', 'success', 'success', true],
-    ['false', 'skipped', 'success', false],
-    ['false', 'failure', 'success', false],
-    ['false', 'success', 'skipped', false],
-    ['false', 'success', 'failure', false],
-    ['true', 'skipped', 'skipped', true],
-    ['true', 'failure', 'skipped', false],
-    ['true', 'skipped', 'success', false],
-    ['', 'skipped', 'skipped', false],
+  assert.match(job, /^ {6}- security$/mu);
+  for (const [jobName, result, replay, accepted] of [
+    ['postgres', 'success', 'success', true],
+    ['postgres', 'skipped', 'success', false],
+    ['postgres', 'failure', 'success', false],
+    ['security', 'cancelled', 'success', false],
+    ['quality', 'skipped', 'success', false],
+    ['postgres-composed', 'failure', 'success', false],
+    ['postgres-composed', 'success', 'skipped', false],
+    ['postgres-composed', 'success', 'failure', false],
   ] as const) {
+    const jobs = {
+      quality: { result: 'success' },
+      security: { result: 'success' },
+      postgres: { result: 'success' },
+      'postgres-composed': { result: 'success', outputs: { replay } },
+    };
+    jobs[jobName].result = result;
     const run = spawnSync(
       process.execPath,
       ['.github/scripts/check-ci-results.mjs'],
       {
-        env: {
-          ...process.env,
-          CI_JOB_RESULTS: JSON.stringify({
-            changes: { result: 'success', outputs: { prose_only: prose } },
-            quality: { result: 'success' },
-            'postgres-composed': {
-              result: 'success',
-              outputs: { replay },
-            },
-            postgres: { result },
-          }),
-        },
+        env: { ...process.env, CI_JOB_RESULTS: JSON.stringify(jobs) },
       },
     );
     assert.equal(
       run.status === 0,
       accepted,
-      `prose=${prose}, postgres=${result}, replay=${replay}`,
+      `${jobName}=${result}, replay=${replay}`,
     );
   }
 });

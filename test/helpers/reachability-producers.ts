@@ -107,7 +107,7 @@ export const reachabilityProducers = [
     'test/postgres/releases.test.ts',
   ]),
   nodeProducer('postgres-3', 'postgres', 'test:postgres:3', [
-    'test/postgres/**/!(catalog-extras|commercial-totals|composed-application|counter-sale|customer-credit|customization|customization-world|document-numbering|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|locations|module-index-conformance|module-runtime|module-storage-transition|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|releases|replenishment|stock-serializer).test.ts',
+    'test/postgres/{!(catalog-extras|commercial-totals|composed-application|counter-sale|customer-credit|customization|customization-world|document-numbering|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|locations|module-index-conformance|module-runtime|module-storage-transition|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|releases|replenishment|stock-serializer),*/**/*}.test.ts',
   ]),
   nodeProducer(
     'postgres-composed',

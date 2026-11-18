@@ -1,5 +1,4 @@
 name: CI
-run-name: &ci-title ${{ github.event.pull_request && format('CI for PR {0} against {1}', github.event.pull_request.number, github.event.pull_request.base.sha) || format('CI for {0}', github.ref) }}
 
 on:
   pull_request:
@@ -24,48 +23,25 @@ defaults:
     shell: bash
 
 jobs:
-  # Request the replay runner immediately. Its checkout classifies the same diff
-  # as the matrix dispatcher so prose exits before Node or PostgreSQL setup.
   postgres-composed:
     name: PostgreSQL composed application
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    permissions: &classification-permissions
-      contents: read
-      actions: read
     outputs:
       replay: ${{ steps.replay.outcome }}
     steps:
-      - &classification-checkout
-        name: Check out repository
+      - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-      - &classify
-        name: Classify this push
-        id: classify
-        env:
-          BEFORE: ${{ github.event.before }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_ACTION: ${{ github.event.action }}
-          RUN_TITLE: *ci-title
-          GH_TOKEN: ${{ github.token }}
-        run: .github/scripts/classify-ci-changes.sh
       - name: Set up pinned Node.js
-        if: steps.classify.outputs.prose_only == 'false'
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .node-version
       - name: Install frozen dependencies
-        if: steps.classify.outputs.prose_only == 'false'
         run: corepack pnpm install --frozen-lockfile --reporter=append-only
       - name: Run composed application PostgreSQL tests
         id: replay
-        if: steps.classify.outputs.prose_only == 'false'
         run: corepack pnpm test:postgres:composed
       - name: Retain composed PostgreSQL executed-file evidence
-        if: steps.classify.outputs.prose_only == 'false'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: reachability-postgres-composed-${{ github.sha }}
@@ -73,19 +49,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  changes:
-    name: Classify changed files
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions: *classification-permissions
-    outputs:
-      prose_only: ${{ steps.classify.outputs.prose_only }}
-    steps:
-      - *classification-checkout
-      - *classify
-
   quality:
-    needs: changes
     name: Clean install, quality, and build
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -102,72 +66,39 @@ jobs:
         run: corepack enable
       - name: Install frozen dependencies
         run: corepack pnpm install --frozen-lockfile --reporter=append-only
-      - name: Check document records
-        if: needs.changes.outputs.prose_only == 'true'
-        run: bash scripts/check-records.sh
-      - name: Scan prose changes for secrets
-        if: needs.changes.outputs.prose_only == 'true'
-        env:
-          SECURITY_EVIDENCE_DIR: test-results/security
-          PROSE_COMMIT_RANGE: ${{ github.event.before || github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha || github.sha }}
-        run: .github/scripts/run-security-scans.sh --secrets-only
-      - name: Retain prose secret scan evidence
-        if: always() && needs.changes.outputs.prose_only == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: security-evidence-${{ github.sha }}
-          path: test-results/security/
-          if-no-files-found: error
-          retention-days: 7
       - name: Begin executed-file evidence run
-        if: needs.changes.outputs.prose_only == 'false'
         run: node --import tsx test/helpers/begin-reachability-run.ts
       - name: Check formatting
         run: corepack pnpm format
       - name: Lint
-        if: needs.changes.outputs.prose_only == 'false'
         run: corepack pnpm lint
       - name: Typecheck
-        if: needs.changes.outputs.prose_only == 'false'
         run: corepack pnpm typecheck
       - name: Build
-        if: needs.changes.outputs.prose_only == 'false'
         run: corepack pnpm build
       - name: Check mutation manifests still name live production text
-        if: needs.changes.outputs.prose_only == 'false'
         run: corepack pnpm check:expected-red
       - name: Prove the expected-red gate can fail
-        if: needs.changes.outputs.prose_only == 'false'
         run: corepack pnpm check:expected-red-controls
       - name: Run unit tests
-        if: needs.changes.outputs.prose_only == 'false'
         run: corepack pnpm test:unit
       - name: Run compiler tests
-        if: needs.changes.outputs.prose_only == 'false'
         run: corepack pnpm test:compiler
       - name: Run integration tests
-        if: needs.changes.outputs.prose_only == 'false'
         run: corepack pnpm test:integration
       - name: Run agent tests
-        if: needs.changes.outputs.prose_only == 'false'
         run: corepack pnpm test:agent
       - name: Run architecture and hygiene tests
-        if: needs.changes.outputs.prose_only == 'false'
         run: corepack pnpm test:architecture
       - name: Check compiled demo release freshness
-        if: needs.changes.outputs.prose_only == 'false'
         run: corepack pnpm check:demo-release
       - name: Check compiled application release freshness
-        if: needs.changes.outputs.prose_only == 'false'
         run: corepack pnpm check:app-release
       - name: Run web surface contracts
-        if: needs.changes.outputs.prose_only == 'false'
         run: corepack pnpm test:contracts
       - name: Check language coverage obligations
-        if: needs.changes.outputs.prose_only == 'false'
         run: corepack pnpm check:language-coverage
       - name: Retain quality executed-file evidence
-        if: needs.changes.outputs.prose_only == 'false'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: reachability-quality-${{ github.sha }}
@@ -192,7 +123,6 @@ jobs:
           git diff --exit-code
           test -z "$(git status --porcelain --untracked-files=all)"
       - name: Retain compiled scaffold
-        if: needs.changes.outputs.prose_only == 'false'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: scaffold-dist-${{ github.sha }}
@@ -201,8 +131,6 @@ jobs:
           retention-days: 7
 
   performance:
-    needs: changes
-    if: needs.changes.outputs.prose_only == 'false'
     name: Exclusive compiler performance budget
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -230,8 +158,6 @@ jobs:
           retention-days: 7
 
   postgres:
-    needs: changes
-    if: needs.changes.outputs.prose_only == 'false'
     name: PostgreSQL schema and isolation (shard ${{ matrix.shard }})
     strategy:
       fail-fast: false
@@ -279,8 +205,6 @@ jobs:
   # install the composed release in most tests, so they run beside the other
   # PostgreSQL tests, under the same bound.
   postgres-commercial:
-    needs: changes
-    if: needs.changes.outputs.prose_only == 'false'
     name: PostgreSQL commercial workflows
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -310,8 +234,6 @@ jobs:
   # The sales-side workflows run beside the commercial ones rather than after
   # them, under the same bound (INTEGRATION).
   postgres-sales:
-    needs: changes
-    if: needs.changes.outputs.prose_only == 'false'
     name: PostgreSQL sales workflows
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -341,8 +263,6 @@ jobs:
   # The inventory files run beside the other PostgreSQL tests rather than after
   # them, under the same bound (INTEGRATION).
   postgres-inventory:
-    needs: changes
-    if: needs.changes.outputs.prose_only == 'false'
     name: PostgreSQL inventory
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -370,8 +290,6 @@ jobs:
           retention-days: 7
 
   browser:
-    needs: changes
-    if: needs.changes.outputs.prose_only == 'false'
     name: Browser runner
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -406,8 +324,6 @@ jobs:
   # apps/web/playwright.shared.ts decides which job runs a spec, by its file
   # name.
   browser-operations:
-    needs: changes
-    if: needs.changes.outputs.prose_only == 'false'
     name: Operations browser runner
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -440,8 +356,6 @@ jobs:
   # than after them, under the same bound (INTEGRATION: the union's operations
   # specs alone passed the 20-minute bound).
   browser-inventory:
-    needs: changes
-    if: needs.changes.outputs.prose_only == 'false'
     name: Inventory browser runner
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -473,8 +387,6 @@ jobs:
   # The composed application's journeys run beside the operations specs rather
   # than after them, under the same bound.
   browser-composed:
-    needs: changes
-    if: needs.changes.outputs.prose_only == 'false'
     name: Composed application browser runner
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -504,8 +416,6 @@ jobs:
           retention-days: 7
 
   security:
-    needs: changes
-    if: needs.changes.outputs.prose_only == 'false'
     name: Dependency and secret scans
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -582,7 +492,6 @@ jobs:
     name: Executed-file reachability
     if: ${{ !cancelled() }}
     needs:
-      - changes
       - security
       - quality
       - performance
@@ -606,26 +515,20 @@ jobs:
           CI_JOB_RESULTS: ${{ toJSON(needs) }}
         run: node .github/scripts/check-ci-results.mjs
       - name: Set up pinned Node.js
-        if: needs.changes.outputs.prose_only == 'false'
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .node-version
       - name: Enable Corepack
-        if: needs.changes.outputs.prose_only == 'false'
         run: corepack enable
       - name: Install frozen dependencies
-        if: needs.changes.outputs.prose_only == 'false'
         run: corepack pnpm install --frozen-lockfile --reporter=append-only
       - name: Begin executed-file evidence run
-        if: needs.changes.outputs.prose_only == 'false'
         run: node --import tsx test/helpers/begin-reachability-run.ts
       - name: Download executed-file evidence
-        if: needs.changes.outputs.prose_only == 'false'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: reachability-*-${{ github.sha }}
           path: test-results/reachability
           merge-multiple: true
       - name: Compare executed files with repository discovery
-        if: needs.changes.outputs.prose_only == 'false'
         run: corepack pnpm check:reachability
