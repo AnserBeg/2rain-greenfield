@@ -24,7 +24,7 @@ test('SPEED-1 compiled start: workspace TypeScript resolves to dist; third-party
       ) => Promise<{ format?: string; url: string }>,
     ) => Promise<{ format?: string; url: string }>;
   };
-  const seen: { parentURL?: string; specifier: string }[] = [];
+  const seen: { parentURL: string | undefined; specifier: string }[] = [];
   const next =
     (url: string) =>
     async (specifier: string, context: { parentURL?: string }) => {
