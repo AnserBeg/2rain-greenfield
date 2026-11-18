@@ -17,6 +17,13 @@ import {
 // application on the order-pages fixture and its database work is read from
 // the response's Server-Timing header. A page must render its real content
 // to be measured: a cheap error page never passes a budget.
+//
+// Timing is not budgeted here (CI runners vary). The PO detail's wall and CPU
+// time are measured the same way under tsx and compiled by
+// `apps/api/src/measure-page.ts` (compiled: `corepack pnpm build`, then
+// `node scripts/start-production.mjs dist/apps/api/src/measure-page.js`).
+// 2026-11-17, one laptop: charter base 16.3 s wall / 12.4 s CPU per request;
+// after SPEED-1 about 140-190 ms wall / 120-170 ms CPU, tsx and compiled alike.
 
 const ns = 'northstar.app';
 type Fixture = Parameters<Parameters<typeof withOrderEntryFixture>[0]>[0];
