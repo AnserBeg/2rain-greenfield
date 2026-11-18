@@ -52,27 +52,69 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     spend.textContent = amount <= 0 ? '' : amount < 0.01 ? 'This conversation has used less than USD 0.01.' : 'This conversation has used USD ' + amount.toFixed(2) + '.';
   };
   const key = 'northstar-assistant-conversation';
-  let conversation = sessionStorage.getItem(key) || null;
-  let running = null;
+  const read = (suffix) => {
+    try { return sessionStorage.getItem(key + suffix); } catch { return null; }
+  };
+  const remember = (suffix, value) => {
+    try {
+      if (value === null) sessionStorage.removeItem(key + suffix);
+      else sessionStorage.setItem(key + suffix, value);
+    } catch { /* Storage may be unavailable in this tab. */ }
+  };
+  let conversation = read('');
+  let running = false;
   let pending = null;
   let started = 0;
   let ticking = null;
 
-  const setOpen = (open) => {
-    root.hidden = !open;
-    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-    sessionStorage.setItem(key + '-open', open ? '1' : '0');
-    if (open) input.focus();
+  const handle = root.querySelector('[role=separator]');
+  let preferred = Number(read('-width')) || 420;
+  const size = () => {
+    const max = Math.max(320, Math.floor(document.documentElement.clientWidth / 2));
+    const width = Math.round(Math.min(max, Math.max(320, preferred)));
+    document.documentElement.style.setProperty('--assistant-width', width + 'px');
+    handle.setAttribute('aria-valuemax', String(max));
+    handle.setAttribute('aria-valuenow', String(width));
+    return width;
   };
-  toggle.addEventListener('click', () => setOpen(root.hidden));
-  root.querySelector('[data-assistant-close]').addEventListener('click', () => setOpen(false));
-  if (sessionStorage.getItem(key + '-open') === '1') setOpen(true);
+  const resize = (requested) => {
+    preferred = requested;
+    preferred = size();
+    remember('-width', String(preferred));
+  };
+  handle.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    resize(size() + (event.key === 'ArrowLeft' ? 16 : -16));
+  });
+  let drag = null;
+  handle.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || !event.isPrimary) return;
+    handle.setPointerCapture(event.pointerId);
+    drag = { x: event.clientX, width: size() };
+  });
+  handle.addEventListener('pointermove', (event) => {
+    if (drag && handle.hasPointerCapture(event.pointerId)) resize(drag.width + drag.x - event.clientX);
+  });
+  handle.addEventListener('lostpointercapture', () => { drag = null; });
+  window.addEventListener('resize', size);
+  size();
 
-  const post = (action, body, signal) => fetch('/?assistant=' + action, {
+  const setOpen = (open, focus = false) => {
+    root.hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+    remember('-open', open ? '1' : '0');
+    if (focus) (open ? input : toggle).focus();
+  };
+  toggle.addEventListener('click', () => setOpen(root.hidden, true));
+  root.querySelector('[data-assistant-close]').addEventListener('click', () => setOpen(false, true));
+  setOpen(read('-open') === '1');
+
+  const post = (action, body) => fetch('/?assistant=' + action, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-northstar-assistant': '1' },
     body: JSON.stringify(body),
-    signal,
+    keepalive: action === 'ask',
   });
   const element = (tag, text, cls) => {
     const node = document.createElement(tag);
@@ -133,12 +175,13 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     status.hidden = !on;
     stop.hidden = !on;
     form.querySelector('button[type=submit]').disabled = on && !pending;
-    if (on) {
+    if (on && !ticking) {
+      timer.textContent = '0 s';
       started = performance.now();
       ticking = setInterval(() => {
         timer.textContent = ((performance.now() - started) / 1000).toFixed(0) + ' s';
       }, 250);
-    } else if (ticking) {
+    } else if (!on && ticking) {
       clearInterval(ticking);
       ticking = null;
     }
@@ -150,13 +193,13 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     card.querySelectorAll('button').forEach((button) => { button.disabled = true; });
   };
   // Each card answers only for its own conversation, plan and digest.
-  const decideCard = async (card, own, approve) => {
+  const decideCard = async (card, own, approve, typed) => {
     if (card.hasAttribute('data-assistant-settled')) return;
     settle(card);
     if (pending && pending.card === card) pending = null;
-    await post('decide', { conversation: own.conversation, planId: own.planId, digest: own.digest, approve });
+    await post('decide', { conversation: own.conversation, planId: own.planId, digest: own.digest, approve, typed });
   };
-  const decide = (approve) => pending ? decideCard(pending.card, pending.own, approve) : undefined;
+  const decide = (approve, typed) => pending ? decideCard(pending.card, pending.own, approve, typed) : undefined;
   const affirmative = new RegExp(${JSON.stringify(ASSISTANT_AFFIRMATIVE.source)}, 'iu');
   let queued = null;
 
@@ -191,6 +234,7 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
   // an answer, and again after a Stop or a page load (from ?assistant=latest).
   const showDid = (container, change) => {
     if (log.querySelector('[data-assistant-did="' + change.changeId + '"]')) return;
+    log.querySelectorAll('[data-assistant-undo]').forEach((button) => { button.disabled = true; });
     const did = container.appendChild(element('p', 'Did: ' + change.summary + '. ', 'assistant-did'));
     did.setAttribute('data-assistant-did', change.changeId);
     if (change.href) {
@@ -211,41 +255,148 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     });
     scroll();
   };
-  const offerLatest = async (tries = 1) => {
-    if (!conversation) return;
-    const answer = await post('latest', { conversation }).catch(() => null);
-    const result = answer && answer.ok ? await answer.json().catch(() => null) : null;
-    if (result && result.did) showDid(log, result.did);
-    else if (result && result.running && tries < 10) setTimeout(() => offerLatest(tries + 1), 1000);
-  };
-  offerLatest();
-
-  const ask = async (text) => {
+  let reply;
+  let streamed = '';
+  let generation = 0;
+  const beginReply = (text) => {
     const mine = log.appendChild(element('div', text, 'assistant-me'));
     mine.setAttribute('data-assistant-said', '');
-    const reply = log.appendChild(element('div', null, 'assistant-reply'));
+    reply = log.appendChild(element('div', null, 'assistant-reply'));
     reply.setAttribute('data-assistant-reply', '');
-    let streamed = '';
+    streamed = '';
     scroll();
-    const controller = new AbortController();
-    running = controller;
+  };
+  const display = (event) => {
+    if (event.type === 'said') { beginReply(event.text); return; }
+    if (event.type === 'confirmation') { log.appendChild(element('div', event.text, 'assistant-me')); return; }
+    if (event.type === 'undo') {
+      const did = log.querySelector('[data-assistant-did="' + event.changeId + '"]');
+      if (did) did.appendChild(element('span', ' ' + event.text, 'assistant-muted'));
+      return;
+    }
+    if (event.type === 'step') {
+      label.textContent = event.label;
+    } else if (event.type === 'delta') {
+      streamed += event.text;
+      render(reply, streamed);
+      scroll();
+    } else if (event.type === 'text') {
+      streamed += '\n';
+    } else if (event.type === 'plan') {
+      planCard(event);
+    } else if (event.type === 'decided') {
+      const card = log.querySelector('[data-assistant-plan="' + event.planId + '"]');
+      if (card) {
+        settle(card);
+        if (pending?.card === card) pending = null;
+        card.appendChild(element('p', event.approved ? 'You said yes.' : 'Not done.', 'assistant-muted'));
+      }
+    } else if (event.type === 'answer') {
+      render(reply, event.text);
+      reply.setAttribute('data-assistant-stop-reason', event.stop);
+      // Records the answer names; what this turn changed is on the Did row.
+      const named = (event.links || []).filter((link) => !link.wrote);
+      if (named.length) {
+        const links = reply.appendChild(element('p', null, 'assistant-links'));
+        named.forEach((link) => {
+          const anchor = links.appendChild(element('a', link.label));
+          anchor.href = link.href;
+        });
+      }
+      if (event.draft) {
+        const draft = reply.appendChild(element('section', null, 'assistant-plan'));
+        draft.setAttribute('data-assistant-draft', '');
+        draft.appendChild(element('pre', event.draft.diff, 'assistant-diff'));
+        const open = draft.appendChild(element('a', 'Review it on the Customize screen'));
+        open.href = '/?customize';
+      }
+      if (event.did) showDid(reply, event.did);
+      showSpend(event.spentUsd);
+    } else if (event.type === 'error') {
+      reply.appendChild(element('p', event.message, 'assistant-error'));
+      if (event.did) showDid(reply, event.did);
+    }
+  };
+
+  const finish = () => {
+    pending = null;
+    running = false;
+    log.querySelectorAll('[data-assistant-plan]:not([data-assistant-settled])').forEach(settle);
+    busy(false);
+    scroll();
+    if (queued) {
+      const next = queued;
+      queued = null;
+      ask(next);
+    }
+  };
+  // Only a reconnected page polls. Apply the suffix after its last rendered
+  // event so a live plan retains its keyboard focus while waiting for a yes.
+  const restore = async (owner, version, after = 0, missing = 0) => {
+    if (generation !== version) return;
+    running = true;
+    busy(true);
+    try {
+      const response = await post('history', { conversation: owner, after });
+      if (version !== generation) return;
+      if (response.status === 204) {
+        // Navigation can overtake creation of a just-submitted conversation.
+        if (missing < 4) {
+          setTimeout(() => restore(owner, version, after, missing + 1), 500);
+          return;
+        }
+        conversation = null;
+        remember('', null);
+        finish();
+        return;
+      }
+      if (!response.ok) throw new Error('Could not reconnect.');
+      const state = await response.json();
+      if (version !== generation) return;
+      state.transcript.forEach(display);
+      if (pending && (!state.pending || pending.own.digest !== state.pending.digest)) {
+        settle(pending.card);
+        pending = null;
+      }
+      if (state.did && !state.running) showDid(log, state.did);
+      log.querySelectorAll('[data-assistant-did]').forEach((row) => {
+        row.querySelector('button').disabled = state.running || row.dataset.assistantDid !== state.did?.changeId;
+      });
+      if (!state.running) { finish(); return; }
+      label.textContent = state.step;
+      after += state.transcript.length;
+    } catch {
+      if (version !== generation) return;
+      label.textContent = 'Reconnecting';
+    }
+    setTimeout(() => restore(owner, version, after), 600);
+  };
+
+  const ask = async (text) => {
+    const version = ++generation;
+    const startId = conversation ? undefined : crypto.randomUUID();
+    if (startId) {
+      conversation = startId;
+      remember('', startId);
+    }
+    beginReply(text);
+    running = true;
     busy(true);
     label.textContent = 'Starting';
     try {
       const params = new URLSearchParams(location.search);
       const response = await post('ask', {
-        conversation,
-        text,
+        conversation, startId, text,
         screen: params.get('surface') ? { surfaceId: params.get('surface'), recordId: params.get('record') } : null,
-        // The page's company is read from its own address and proved by the host.
         page: location.search,
-      }, controller.signal);
+      });
       if (!response.ok || !response.body) throw new Error('The assistant did not answer (' + response.status + ').');
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
       for (;;) {
         const { value, done } = await reader.read();
+        if (version !== generation) { await reader.cancel(); return; }
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         let newline;
@@ -253,72 +404,35 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
           const event = JSON.parse(buffer.slice(0, newline));
           buffer = buffer.slice(newline + 1);
           if (event.type === 'conversation') {
+            if (event.id !== conversation) {
+              log.replaceChildren();
+              beginReply(text);
+            }
             conversation = event.id;
-            sessionStorage.setItem(key, conversation);
-          } else if (event.type === 'step') {
-            label.textContent = event.label;
-          } else if (event.type === 'delta') {
-            streamed += event.text;
-            render(reply, streamed);
-            scroll();
-          } else if (event.type === 'text') {
-            streamed += '\n';
-          } else if (event.type === 'plan') {
-            planCard(event);
-          } else if (event.type === 'decided') {
-            const card = log.querySelector('[data-assistant-plan="' + event.planId + '"]');
-            if (card) {
-              settle(card);
-              card.appendChild(element('p', event.approved ? 'You said yes.' : 'Not done.', 'assistant-muted'));
-            }
-          } else if (event.type === 'answer') {
-            render(reply, event.text);
-            reply.setAttribute('data-assistant-stop-reason', event.stop);
-            // Records the answer names; what this turn changed is on the Did row.
-            const named = (event.links || []).filter((link) => !link.wrote);
-            if (named.length) {
-              const links = reply.appendChild(element('p', null, 'assistant-links'));
-              named.forEach((link) => {
-                const anchor = links.appendChild(element('a', link.label));
-                anchor.href = link.href;
-              });
-            }
-            if (event.draft) {
-              const draft = reply.appendChild(element('section', null, 'assistant-plan'));
-              draft.setAttribute('data-assistant-draft', '');
-              draft.appendChild(element('pre', event.draft.diff, 'assistant-diff'));
-              const open = draft.appendChild(element('a', 'Review it on the Customize screen'));
-              open.href = '/?customize';
-            }
-            if (event.did) showDid(reply, event.did);
-            showSpend(event.spentUsd);
-          } else if (event.type === 'error') {
-            reply.appendChild(element('p', event.message, 'assistant-error'));
-          }
+            remember('', conversation);
+          } else display(event);
         }
       }
     } catch (error) {
-      if (!controller.signal.aborted) reply.appendChild(element('p', String(error && error.message || error), 'assistant-error'));
-      else {
-        reply.appendChild(element('p', 'Stopped.', 'assistant-muted'));
-        // What was written before the Stop is checked by the host and stays
-        // undoable; ask for it once the run has wound down.
-        setTimeout(() => offerLatest(), 1000);
-      }
-    } finally {
-      running = null;
-      pending = null;
-      // A run that ended leaves no live card behind.
-      log.querySelectorAll('[data-assistant-plan]:not([data-assistant-settled])').forEach(settle);
-      busy(false);
-      scroll();
+      if (version !== generation) return;
+      reply.appendChild(element('p', String(error && error.message || error), 'assistant-error'));
     }
-    if (queued) {
-      const next = queued;
-      queued = null;
-      ask(next);
-    }
+    finish();
   };
+  if (conversation) restore(conversation, generation);
+  window.addEventListener('pageshow', (event) => {
+    if (!event.persisted) return;
+    generation += 1;
+    queued = null;
+    finish();
+    log.replaceChildren();
+    showSpend(0);
+    setOpen(read('-open') === '1');
+    preferred = Number(read('-width')) || 420;
+    size();
+    conversation = read('');
+    if (conversation) restore(conversation, generation);
+  });
 
   form.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -331,7 +445,7 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
       // assistant as the next request once this run ends.
       if (affirmative.test(text)) {
         log.appendChild(element('div', text, 'assistant-me'));
-        decide(true);
+        decide(true, text);
       } else {
         queued = text;
         decide(false);
@@ -348,15 +462,14 @@ export const ASSISTANT_PANEL_SCRIPT = String.raw`(() => {
     }
   });
   stop.addEventListener('click', () => {
-    if (running) {
-      post('stop', { conversation });
-      running.abort();
-    }
+    if (running) post('stop', { conversation });
   });
   fresh.addEventListener('click', () => {
-    if (running) return;
+    generation += 1;
     conversation = null;
-    sessionStorage.removeItem(key);
+    remember('', null);
+    queued = null;
+    finish();
     log.textContent = '';
     showSpend(0);
   });
@@ -407,7 +520,24 @@ const PANEL_STYLES = `
 .assistant-panel form{display:flex;align-items:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--rule);background:var(--sheet)}
 .assistant-panel textarea{flex:1;min-height:44px;padding:8px 10px;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);color:var(--ink);font:inherit;resize:vertical}
 .assistant-panel form button[type=submit]{height:36px;border-color:var(--accent);background:var(--accent);color:var(--paper)}
-@media (max-width:800px){.assistant-panel{width:100vw;border-left:0}.assistant-panel button,.assistant-panel form button[type=submit]{height:44px;min-height:44px;padding:0 14px}.assistant-toggle--inline{height:36px}}
+
+.assistant-resize{display:none}
+.assistant-panel textarea{min-width:0}
+.assistant-log{overflow-wrap:anywhere}
+@media (min-width:960px){
+  body:has(.assistant-panel:not([hidden])){--dock-width:clamp(320px,var(--assistant-width,420px),50vw)}
+  .ledger-viewport{container:ledger / inline-size;margin-right:var(--dock-width,0px)}
+  .ledger-viewport .topbar{margin-right:calc(-1 * var(--dock-width,0px));position:sticky;top:0;z-index:58}
+  body:has(.assistant-panel:not([hidden])) .topbar{height:48px;flex-wrap:nowrap}
+  body:has(.assistant-panel:not([hidden])) .shell-search{order:0;flex:0 1 340px}
+  body.standalone:has(.assistant-panel:not([hidden])){padding-right:var(--dock-width)}
+  .assistant-panel{width:var(--dock-width);box-shadow:none}
+  .ledger-viewport~.assistant-panel{top:48px}
+  .assistant-resize{display:block;position:absolute;left:-5px;top:0;bottom:0;width:10px;cursor:col-resize;touch-action:none;user-select:none}
+  .assistant-resize::after{content:"";position:absolute;inset:0 auto 0 4px;width:1px;background:var(--rule)}
+  .assistant-resize:is(:hover,:focus-visible)::after{width:3px;background:var(--accent)}
+}
+@media (max-width:800px){.assistant-panel{width:100%;border-left:0}.assistant-panel button,.assistant-panel form button[type=submit]{height:44px;min-height:44px;padding:0 14px}.assistant-toggle--inline{height:36px}}
 `;
 
 /** The panel's styles, served from a content-hash route (`style-src 'self'`). */
@@ -425,7 +555,7 @@ const TOGGLE = (placement: 'inline' | 'floating') =>
 /** Where the shell's top bar puts its account menu: the toggle sits before it. */
 const SHELL_ACCOUNT = '<details class="shell-account">';
 
-const PANEL_MARKUP = `<aside id="assistant-panel" class="assistant-panel" data-assistant-panel aria-label="Assistant" hidden><header><h2>Assistant</h2><button type="button" data-assistant-new>New conversation</button><button type="button" data-assistant-close aria-label="Close the assistant">Close</button></header><div class="assistant-log" data-assistant-log aria-live="polite"></div><div class="assistant-status" data-assistant-status role="status" hidden><span data-assistant-step>Working</span><span data-assistant-elapsed>0 s</span><button type="button" data-assistant-stop hidden>Stop</button></div><form data-assistant-form><label class="visually-hidden" for="assistant-input">Ask the assistant</label><textarea id="assistant-input" name="text" rows="2" placeholder="Ask or tell the assistant…"></textarea><button type="submit">Send</button></form><p class="assistant-muted" data-assistant-spend hidden></p></aside>`;
+const PANEL_MARKUP = `<aside id="assistant-panel" class="assistant-panel" data-assistant-panel aria-label="Assistant" hidden><div class="assistant-resize" role="separator" tabindex="0" aria-label="Resize assistant" aria-orientation="vertical" aria-controls="assistant-panel" aria-valuemin="320" aria-valuenow="420"></div><header><h2>Assistant</h2><button type="button" data-assistant-new>New conversation</button><button type="button" data-assistant-close aria-label="Close the assistant">Close</button></header><div class="assistant-log" data-assistant-log aria-live="polite"></div><div class="assistant-status" data-assistant-status role="status" hidden><span data-assistant-step>Working</span><span data-assistant-elapsed>0 s</span><button type="button" data-assistant-stop hidden>Stop</button></div><form data-assistant-form><label class="visually-hidden" for="assistant-input">Ask the assistant</label><textarea id="assistant-input" name="text" rows="2" placeholder="Ask or tell the assistant…"></textarea><button type="submit">Send</button></form><p class="assistant-muted" data-assistant-spend hidden></p></aside>`;
 
 /**
  * The page with the panel added before `</body>`. Only a full page served
@@ -446,11 +576,16 @@ export function withAssistantPanel<
   // floating one.
   const inShell = result.html.includes(SHELL_ACCOUNT);
   const html = inShell
-    ? result.html.replace(SHELL_ACCOUNT, `${TOGGLE('inline')}${SHELL_ACCOUNT}`)
+    ? result.html
+        .replace(
+          '<div class="app-shell"',
+          '<div class="ledger-viewport"><div class="app-shell"',
+        )
+        .replace(SHELL_ACCOUNT, `${TOGGLE('inline')}${SHELL_ACCOUNT}`)
     : result.html;
   const index = html.lastIndexOf('</body>');
   return {
     ...result,
-    html: `${html.slice(0, index)}<link rel="stylesheet" href="${ASSISTANT_PANEL_STYLESHEET_HREF}">${inShell ? '' : TOGGLE('floating')}${PANEL_MARKUP}<script data-assistant-script>${ASSISTANT_PANEL_SCRIPT}</script>${html.slice(index)}`,
+    html: `${html.slice(0, index)}${inShell && html.includes('<div class="ledger-viewport">') ? '</div>' : ''}<link rel="stylesheet" href="${ASSISTANT_PANEL_STYLESHEET_HREF}">${inShell ? '' : TOGGLE('floating')}${PANEL_MARKUP}<script data-assistant-script>${ASSISTANT_PANEL_SCRIPT}</script>${html.slice(index)}`,
   };
 }
