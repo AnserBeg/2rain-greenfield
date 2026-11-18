@@ -5656,6 +5656,73 @@ async function orderEntryWitness(
 
 type OrderEntryWitness = Awaited<ReturnType<typeof orderEntryWitness>>;
 
+test('INTERACT-1 saveThen verifies the full draft before placement and recovers a saved draft after refusal', async () => {
+  const f = await orderEntryWitness();
+  const editor = (await f.open())!;
+  assert.match(editor.slots!.commandBar!, /Save draft[\s\S]*Save and place/u);
+  let placements = 0;
+  const gateways: SurfaceRuntimeGateways = {
+    ...f.gateways,
+    operationGateway: new SemanticOperationGateway(
+      f.policy,
+      {
+        async execute(request) {
+          if (
+            request.definition.operationId ===
+            `${f.ns}:operation.sales_order_release`
+          ) {
+            placements++;
+            assert.equal(
+              f.executor.calls.filter((call) =>
+                call.definition.operationId.endsWith('_create'),
+              ).length,
+              2,
+            );
+            throw new Error('Controlled placement refusal');
+          }
+          return f.executor.execute(request);
+        },
+        async recordNonAccepted() {},
+      },
+      f.gateways.operationMediation,
+    ),
+  };
+  const body = {
+    draftSession: hiddenValue(editor.slots!.keyFacts!, 'draftSession'),
+    draftVersion: hiddenValue(editor.slots!.keyFacts!, 'draftVersion'),
+    draftAction: 'saveThen',
+    ...f.values(editor),
+  };
+  const result = await submitSurfaceRuntimeIntent(
+    f.view,
+    f.url.pathname + f.url.search,
+    body,
+    gateways,
+  );
+  assert.equal(result.statusCode, 200);
+  assert.match(result.html, /data-save-then-recovery/u);
+  assert.match(result.html, /Draft saved[\s\S]*Open saved draft/u);
+  const saved = [...f.executor.rows.values()].find(
+    (row) => row.entityId === `${f.ns}:entity.sales_order`,
+  )!;
+  assert.equal(
+    saved.values[`${f.ns}:derived_state_field.machine.sales_order_lifecycle`],
+    `${f.ns}:state.sales_order_draft`,
+  );
+  assert.equal(placements, 1);
+  const count = f.executor.calls.length;
+  const replay = await submitSurfaceRuntimeIntent(
+    f.view,
+    f.url.pathname + f.url.search,
+    body,
+    gateways,
+  );
+  assert.equal(replay.statusCode, 303);
+  assert.match(replay.location!, new RegExp(saved.recordId, 'u'));
+  assert.equal(placements, 1);
+  assert.equal(f.executor.calls.length, count);
+});
+
 async function persistedDraft(f: OrderEntryWitness, lineCount = 1) {
   let editor = (await f.open())!;
   for (let index = 1; index < lineCount; index++)

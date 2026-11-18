@@ -232,6 +232,37 @@ test('INTERACT-1 compiles a queue preview and refuses a record page of another e
   assert.equal(compileApplication(inputNormalized(invalid)).status, 'refused');
 });
 
+test('INTERACT-1 compiles saveThen and refuses an operation on another document', () => {
+  const normalized = normalizeApplicationPackage(
+    composedApplicationDefinition(),
+  );
+  const compiled = mustCompile(inputNormalized(normalized));
+  const surfaces = projectionPayload<{
+    surfaces: Array<{
+      surfaceId: string;
+      documentEditor?: SurfaceDocumentEditor;
+    }>;
+  }>(compiled, PROJECTION_FAMILY_IDS.surfaceManifest).surfaces;
+  assert.equal(
+    surfaces.find(
+      (surface) =>
+        surface.surfaceId === 'northstar.app:surface.purchase_order_form',
+    )?.documentEditor?.saveThen?.operationId,
+    'northstar.app:operation.purchase_order_release',
+  );
+  const invalid = structuredClone(normalized);
+  const form = invalid.surfaces.find(
+    (surface) =>
+      surface.surfaceId === 'northstar.app:surface.purchase_order_form',
+  );
+  assert.ok(form && 'documentEditor' in form && form.documentEditor);
+  const editor = form.documentEditor as SurfaceDocumentEditor;
+  const followUp = editor.saveThen!;
+  followUp.operationId =
+    'northstar.app:operation.sales_order_release' as typeof followUp.operationId;
+  assert.equal(compileApplication(inputNormalized(invalid)).status, 'refused');
+});
+
 test('ordinary v1 and v2 parent/child definitions compile cleanly and twice identically', () => {
   const first = mustCompile(input(ordinaryModuleV1()));
   const firstAgain = mustCompile(input(ordinaryModuleV1()));
