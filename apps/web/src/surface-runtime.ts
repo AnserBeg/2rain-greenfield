@@ -4,6 +4,7 @@ import {
   submitCompositionAction,
   displayFieldValue,
   renderCompositionPrintDocument,
+  taskTransportError,
 } from './surface-composition.js';
 import {
   resolveWorkspaceEntry,
@@ -1027,10 +1028,19 @@ export async function submitSurfaceRuntimeIntent(
   requestUrl: string,
   submission: SurfaceRuntimeSubmission,
   gateways: SurfaceRuntimeGateways,
+  transport: 'page' | 'task-fragment' = 'page',
 ): Promise<SurfaceRuntimeResponse> {
   assertRequestRuntimeView(view);
   const selection = selectSurface(view, requestUrl);
   if ('statusCode' in selection) return selection;
+  const fragment = transport === 'task-fragment';
+  if (
+    fragment &&
+    (!submission.compositionAction ||
+      selection.selected.composition?.presentation?.task?.mode !==
+        'nativeDialog')
+  )
+    return { statusCode: 409, html: '' };
   let binding: CompiledSurfaceDataBinding;
   try {
     binding = readCompiledSurfaceDataBinding(view, selection.selected);
@@ -1074,7 +1084,10 @@ export async function submitSurfaceRuntimeIntent(
       html: string,
       data: Parameters<Parameters<typeof submitCompositionAction>[5]>[1],
       statusCode: number,
+      outcome?: Parameters<Parameters<typeof submitCompositionAction>[5]>[3],
     ) => {
+      if (fragment && (!data || outcome === undefined))
+        return { statusCode, html: recordTaskRegion(html) };
       return data
         ? renderSelectedSurface(
             view,
@@ -1083,13 +1096,20 @@ export async function submitSurfaceRuntimeIntent(
               status: 'READY',
               records: [data.record],
               composition: data,
-              compositionTask: html,
+              ...(fragment && outcome?.inline ? {} : { compositionTask: html }),
             },
             null,
             binding.operations,
             statusCode,
             data.scope ? [data.scope] : [],
             workspaceContext,
+            undefined,
+            null,
+            null,
+            null,
+            fragment
+              ? { outcome: outcome?.inline ? outcome.html : '' }
+              : undefined,
           )
         : {
             statusCode,
@@ -1110,8 +1130,8 @@ export async function submitSurfaceRuntimeIntent(
       requestUrl,
       submission,
       gateways,
-      (html, data, statusCode) => {
-        step.render = () => renderStep(html, data, statusCode);
+      (html, data, statusCode, outcome) => {
+        step.render = () => renderStep(html, data, statusCode, outcome);
         return deferred;
       },
     );
@@ -1326,6 +1346,7 @@ function renderSelectedSurface(
   formReferences: Readonly<
     Record<string, SurfaceFormReferenceChoices>
   > | null = null,
+  fragment?: { readonly outcome: string },
 ): SurfaceRuntimeResponse {
   // Compact and full layouts are alternative renderings of these same slots;
   // a responsive implementation must never mount both at once.
@@ -1356,19 +1377,32 @@ function renderSelectedSurface(
         ${selected.statusRoles.map((role) => `<span data-status-role="${escapeHtml(role)}">${escapeHtml(role)}</span>`).join('')}
       </div>
     </header>`;
-  const body = `${pageHeading}
+  const nativeTask =
+    selected.composition?.presentation?.task?.mode === 'nativeDialog';
+  const body = `${nativeTask ? recordTaskRegion(fragment?.outcome ?? '') : ''}${pageHeading}
     <div class="surface-grid" data-surface-archetype="${escapeHtml(selected.archetype)}">
       ${renderedSlots.map((result) => result.html).join('')}
     </div>`;
   // The one hash-pinned script also enhances draft-editor reference controls and
   // their create dialog, and is emitted only when this response renders one.
   // Matched inside a tag: escaped record text can never form `<... data-...`.
+  if (fragment) {
+    const launcher = landingSurface(navigation, surfaces);
+    const queues = launcher
+      ? renderWorkQueues(
+          view,
+          launcher,
+          surfaces,
+          selected,
+          workspaceContext,
+          queueCountsFor(view),
+        )
+      : '';
+    return { statusCode, html: surfaceContent(body) + queues };
+  }
   const enhanceTaskDialog =
     /<[a-z]+\s[^>]*\bdata-(?:reference-control|editor-create)\b/u.test(body) ||
-    (data.status === 'READY' &&
-      selected.composition?.presentation?.task?.mode === 'nativeDialog' &&
-      data.compositionTask?.includes('<dialog ') === true &&
-      data.compositionTask.includes('data-composition-task'));
+    (data.status === 'READY' && nativeTask);
 
   // The launcher page already read its tiles' counts; the sidebar's queues
   // show them rather than asking again.
@@ -1393,6 +1427,14 @@ function renderSelectedSurface(
     ),
     statusCode,
   });
+}
+
+function recordTaskRegion(body: string): string {
+  return `<div id="record-task-region">${taskTransportError}${body}</div>`;
+}
+
+function surfaceContent(body: string): string {
+  return `<main id="surface-content" tabindex="-1">${body}</main>`;
 }
 
 /**
@@ -2297,6 +2339,7 @@ export function renderApplicationDiagnostic(
 export function taskRecoveryNotice(
   requestUrl: string,
   submission: Readonly<Record<string, string>>,
+  fragment = false,
 ): SurfaceRuntimeResponse {
   const url = new URL(requestUrl, 'http://surface-runtime.local');
   const ref: SurfaceMessageRef = { code: 'COMPOSITION_UNCERTAIN' };
@@ -2304,8 +2347,15 @@ export function taskRecoveryNotice(
     typeof submission[name] === 'string'
       ? `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(submission[name])}">`
       : '';
+  const content = `${messageBody(ref, 'Task', 'h1')}<form method="post" action="${escapeHtml(url.pathname + url.search)}">${keep('taskToken')}${keep('compositionAction')}<button name="taskStage" value="retry">Retry same request</button></form>`;
   return Object.freeze({
-    html: `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(surfaceMessage(ref.code).sentence)} · 2rain</title><link rel="stylesheet" href="${FONT_STYLESHEET_HREF}"><link rel="stylesheet" href="${SURFACE_STYLESHEET.href}"></head><body class="standalone"><main class="standalone__card" role="alert" data-task-recovery ${messageAttributes(ref)}>${messageBody(ref, 'Task', 'h1')}<form method="post" action="${escapeHtml(url.pathname + url.search)}">${keep('taskToken')}${keep('compositionAction')}<button name="taskStage" value="retry">Retry same request</button></form></main></body></html>`,
+    html: fragment
+      ? surfaceContent(
+          recordTaskRegion(
+            `<section class="panel" role="alert" data-task-recovery ${messageAttributes(ref)}>${content}</section>`,
+          ),
+        )
+      : `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(surfaceMessage(ref.code).sentence)} · 2rain</title><link rel="stylesheet" href="${FONT_STYLESHEET_HREF}"><link rel="stylesheet" href="${SURFACE_STYLESHEET.href}"></head><body class="standalone"><main class="standalone__card" role="alert" data-task-recovery ${messageAttributes(ref)}>${content}</main></body></html>`,
     statusCode: 409,
   });
 }
@@ -2380,7 +2430,7 @@ function shellDocument(
           <details class="shell-diagnostics"><summary>Diagnostics</summary><dl><dt>Tenant</dt><dd>${escapeHtml(view.tenantId)}</dd><dt>Environment</dt><dd>${escapeHtml(view.environmentId)}</dd><dt>Principal</dt><dd>${escapeHtml(view.principalId)}</dd><dt>Pinned release</dt><dd>${escapeHtml(view.release.releaseId)}</dd><dt>Release root</dt><dd>${escapeHtml(view.release.contentHash)}</dd><dt>Fence</dt><dd>${view.pointer.fence}</dd></dl></details>
           </div></details>
         </header>
-        <main id="surface-content" tabindex="-1">${body}</main>
+        ${surfaceContent(body)}
       </div>
     </div>
     ${enhanceTaskDialog ? `<script>${SURFACE_CLIENT_SCRIPT}</script>` : ''}
@@ -2442,7 +2492,7 @@ function renderWorkQueues(
     })
     .join('');
   const home = `<li><a href="${escapeHtml(scopedSurfaceHref(view, launcher, workspaceContext, {}))}"${selected?.surfaceId === launcher.surfaceId ? ' aria-current="page"' : ''}><span class="nav-icon" aria-hidden="true">${navigationIcon(launcher)}</span><span>${escapeHtml(launcher.label)}</span></a></li>`;
-  return `<nav class="work-queues" aria-label="Work queues"><ul>${home}${items}</ul></nav>`;
+  return `<nav class="work-queues" id="shell-work-queues" aria-label="Work queues"><ul>${home}${items}</ul></nav>`;
 }
 
 /**

@@ -554,14 +554,12 @@ export async function receiveInFull(card: LoopScorecard): Promise<void> {
   card.begin(LOOP_STEPS.receive);
   await runTask(card, nextAction(page), 'Receive', {
     async enter() {
-      await card.click(
-        page.getByRole('button', { name: 'Fill open quantities', exact: true }),
-      );
       await card.fill(
         page.getByLabel(/Actual received unit cost/u).first(),
         f.unitCost,
       );
     },
+    inline: true,
   });
   await expect(cell(page, 'purchasing_lines', 'Received')).toHaveText(
     f.purchased,
@@ -617,10 +615,8 @@ export async function ship(card: LoopScorecard): Promise<void> {
   await runTask(card, nextAction(page), 'Ship', {
     async enter() {
       await chooseReference(card, 'Ship from', f.location[1]);
-      await card.click(
-        page.getByRole('button', { name: 'Fill open quantities', exact: true }),
-      );
     },
+    inline: true,
   });
   await expect(cell(page, 'fulfillment_lines', 'Shipped')).toHaveText(f.sold);
   await card.end('done');
@@ -765,6 +761,7 @@ async function runTask(
     readonly enter?: () => Promise<void>;
     readonly review?: string;
     readonly confirm?: string;
+    readonly inline?: boolean;
   } = {},
 ): Promise<void> {
   const { page } = card;
@@ -776,16 +773,22 @@ async function runTask(
     name: stages.review ?? `Review ${label}`,
     exact: true,
   });
-  if (await review.isVisible()) await card.click(review);
+  if (!stages.inline && (await review.isVisible())) await card.click(review);
   await card.click(
     dialog.getByRole('button', {
       name: stages.confirm ?? `Confirm ${label}`,
       exact: true,
     }),
   );
-  await expect(dialog).toHaveAttribute('data-task-phase', 'result');
-  // Back to the record, where the next step is offered.
-  await card.click(dialog.getByRole('link', { name: /^Back to/u }));
+  if (stages.inline) {
+    await expect(
+      page.getByRole('status').filter({ hasText: `${label}: done` }),
+    ).toBeVisible();
+  } else {
+    await expect(dialog).toHaveAttribute('data-task-phase', 'result');
+    // Back to the record, where the next step is offered.
+    await card.click(dialog.getByRole('link', { name: /^Back to/u }));
+  }
   await expect(dialog).toHaveCount(0);
 }
 

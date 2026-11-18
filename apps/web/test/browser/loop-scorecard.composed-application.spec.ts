@@ -41,6 +41,16 @@ test('LOOP-1 scorecard: purchase order to stock to a shipped, invoiced and paid 
       });
       try {
         await walkToShipped(card, application.baseUrl);
+        const receipt = card.steps.find(
+          ({ name }) => name === LOOP_STEPS.receive,
+        );
+        const shipment = card.steps.find(
+          ({ name }) => name === LOOP_STEPS.ship,
+        );
+        expect(receipt?.clicks).toBe(2);
+        expect(receipt?.loads).toBeLessThanOrEqual(2);
+        expect(shipment?.clicks).toBeLessThanOrEqual(4);
+        expect(shipment?.loads).toBeLessThanOrEqual(2);
         // Slice 2: once invoiced, the order offers the payment as its next
         // action (until then it was recorded on the invoice's page).
         expect(

@@ -143,14 +143,9 @@ test('an order page names its short lines and its progress, receives a truck of 
         await expect(lineInput('Quantity to receive', 3)).toBeVisible();
       },
     );
-    await dialog
-      .getByRole('button', {
-        name: 'Review Receive',
-        exact: true,
-      })
-      .click();
-    // Two lines are reviewed; the empty one is not received.
-    await expect(dialog.locator('[data-task-row]')).toHaveCount(2);
+    const prepared = dialog.getByRole('region', { name: 'Review and confirm' });
+    // Two lines are reviewed in place; clearing line 2 omits it from the prepared receipt.
+    await expect(prepared.locator('[data-task-row]')).toHaveCount(2);
     await dialog
       .getByRole('button', {
         name: 'Confirm Receive',
@@ -160,9 +155,6 @@ test('an order page names its short lines and its progress, receives a truck of 
     await expect(page.getByRole('status').first()).toContainText(
       'Receive: done',
     );
-    await page
-      .getByRole('link', { name: 'Back to order', exact: true })
-      .click();
     for (const [line, received] of [
       [scenario.truck.lines[0]!, '5'],
       [scenario.truck.lines[1]!, '0'],
