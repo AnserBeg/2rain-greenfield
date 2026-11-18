@@ -5,6 +5,7 @@ import { withEphemeralPostgres } from '../../../../test/helpers/postgres.js';
 
 import {
   DatabaseStatistics,
+  LOOP_STEPS,
   invoiceAndPay,
   LoopScorecard,
   walkToShipped,
