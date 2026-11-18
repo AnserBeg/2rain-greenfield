@@ -871,7 +871,15 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
       },
       {
         datasetId: lines,
-        presentation: { selection: 'explicit', selectedActions: 'row' },
+        presentation: {
+          selection: 'explicit',
+          selectedActions: 'row',
+          // Each line's bar: shipped of ordered (LOOK-1).
+          progress: {
+            total: id('column', 'ordered'),
+            done: id('column', 'shipped'),
+          },
+        },
         label: 'Fulfillment',
         orderKey: 10,
         // The line figures and what each line is short (ORDER-PARITY), read

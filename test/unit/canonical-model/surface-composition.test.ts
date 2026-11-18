@@ -897,3 +897,39 @@ test('SALES-EXTRAS: a counter sale is one Task of up to twelve steps whose per-r
     false,
   );
 });
+
+test('LOOK-1: line progress names two quantity columns of its own dataset', () => {
+  const progress = (value: Json) =>
+    (value.children as Json[]).find(
+      (child) => child.datasetId === id('dataset', 'purchasing_lines'),
+    )!.presentation.progress as Json;
+  // Accepted as the purchase order declares it: received of ordered.
+  const model = structuredClone(normalized);
+  assert.deepEqual(progress(composition(model, 'purchase_order_detail')), {
+    total: id('column', 'purchasing_quantity'),
+    done: id('column', 'purchasing_received'),
+  });
+  validateSurfaceCompositions(model as never);
+  // A text column, a column of another dataset, and one column twice.
+  for (const mutate of [
+    (value: Json) => {
+      progress(value).done = id('column', 'purchasing_sku');
+    },
+    (value: Json) => {
+      progress(value).done = id('column', 'purchasing_priced_quantity');
+    },
+    (value: Json) => {
+      progress(value).done = progress(value).total;
+    },
+  ])
+    assert.match(
+      refused('purchase_order_detail', mutate),
+      /line progress names two of the dataset's quantity columns/u,
+    );
+  // The key is closed: an unknown member fails the schema.
+  const purchase = structuredClone(
+    composition(normalized, 'purchase_order_detail'),
+  );
+  progress(purchase).ratio = 'half';
+  assert.equal(SurfaceCompositionSchema.safeParse(purchase).success, false);
+});

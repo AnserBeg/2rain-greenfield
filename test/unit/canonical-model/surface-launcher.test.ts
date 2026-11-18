@@ -259,3 +259,47 @@ test('WAREHOUSE-MODE: the period lock page offers Close and Reopen as its own op
     ],
   );
 });
+
+test('LOOK-1: icons come from the closed set on a module, a destination and a queue', () => {
+  const app = application();
+  const today = app.surfaces.find(
+    (surface) => surface.surfaceId === id('surface', 'inventory_today'),
+  )!;
+  const launcher = today.launcher as Omit<Launcher, 'tiles'> & {
+    tiles: Array<Launcher['tiles'][number] & { icon?: string }>;
+  };
+  // Accepted as the composed application declares them.
+  assert.deepEqual(
+    launcher.tiles.map((tile) => tile.icon),
+    ['inbox', 'truck', 'invoice', 'alert'],
+  );
+  assert.equal((today.workspace as { icon?: string }).icon, 'home');
+  const modules = app.modules as Array<{ icon?: string }>;
+  assert.ok(modules.every((module) => typeof module.icon === 'string'));
+  normalizeApplicationPackage(app as never);
+  // A name outside the set is refused wherever it is declared.
+  assert.equal(
+    SurfaceLauncherSchema.safeParse({
+      ...launcher,
+      tiles: [{ ...launcher.tiles[0], icon: 'rocket' }],
+    }).success,
+    false,
+  );
+  assert.equal(
+    SurfaceWorkspaceSchema.safeParse({
+      ...(today.workspace as Json),
+      icon: 'rocket',
+    }).success,
+    false,
+  );
+  const unknownModuleIcon = application();
+  (unknownModuleIcon.modules as Array<{ icon?: string }>)[0]!.icon = 'rocket';
+  assert.throws(
+    () => normalizeApplicationPackage(unknownModuleIcon as never),
+    CanonicalModelError,
+  );
+  // Absent, the key is absent: an undeclared icon falls back in the renderer.
+  const plain = application();
+  delete (plain.modules as Array<{ icon?: string }>)[0]!.icon;
+  normalizeApplicationPackage(plain as never);
+});

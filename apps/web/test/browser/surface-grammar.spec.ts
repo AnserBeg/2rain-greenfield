@@ -172,6 +172,11 @@ test('compiled groups keep six list surfaces reachable through five primary entr
   await expect(primaryEntries.getByRole('link')).toHaveCount(4);
   const more = primaryEntries.getByRole('group').filter({ hasText: 'More' });
   await expect(more).toHaveCount(1);
+  // LOOK-1 (owner ruling): at phone width the sidebar is a drawer behind the
+  // menu button, a native disclosure that needs no script.
+  const menu = page.locator('.shell-menu > summary');
+  await expect(page.locator('.sidebar')).toBeHidden();
+  await expect(menu).toBeVisible();
 
   const primaryTargets = await primaryEntries
     .locator(':scope > a, :scope > details > summary')
@@ -191,6 +196,10 @@ test('compiled groups keep six list surfaces reachable through five primary entr
   await expect(page.locator('.sidebar')).toHaveCSS('bottom', '0px');
   await page.keyboard.press('Tab');
   await expect(page.locator('.skip-link')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(menu).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.sidebar')).toBeVisible();
   for (let index = 0; index < 5; index += 1) {
     await page.keyboard.press('Tab');
   }
@@ -207,6 +216,7 @@ test('compiled groups keep six list surfaces reachable through five primary entr
     (_, index) => `Budget item ${index + 1}`,
   );
   for (let index = 0; index < expectedSurfaceLabels.length; index += 1) {
+    if (index > 0) await menu.click();
     if (index >= 4) {
       await more.getByText('More', { exact: true }).click();
     }
@@ -425,8 +435,8 @@ test('separability red: the band follows the accent token rather than a copied c
   );
   // Move the ACCENT onto success's green instead of moving a status role. A
   // hardcoded teal comparator stays green here; a derived one cannot: success
-  // now sits in the band, and inProgress, which rides the accent by ruling, is
-  // left outside it.
+  // (its ink and its soft ground) now sits in the band, and inProgress, which
+  // rides the accent by ruling, is left outside it.
   await page.addStyleTag({
     content: ':root{--accent:var(--success)!important}',
   });
@@ -438,6 +448,7 @@ test('separability red: the band follows the accent token rather than a copied c
   const separability = observeBrandStatusSeparability(samples, brand.hue);
   assert.equal(separability.hueSamplesRead, STATUS_ROLES.length * 2);
   assert.deepEqual(separability.violations.toSorted(), [
+    'ACCENT_HUE:success:background',
     'ACCENT_HUE:success:foreground',
     'ACCENT_HUE_EXPECTED:inProgress:foreground',
   ]);

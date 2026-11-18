@@ -649,18 +649,36 @@ function applicable(action: Action, data: CompositionData): boolean {
 export function renderCompositionHeader(
   surface: CompiledSurfaceDefinition,
   data: CompositionData,
+  /** The status kind the record's own List declares for its state, if any. */
+  statusRole: string | null = null,
 ): string {
   const header = surface.composition?.presentation?.header;
   if (!header) return '';
   if (data.fieldsFailed)
     return compositionMessage('COMPOSITION_CHILD_FAILED', 'alert');
   const cell = (id: string) => h(data.fields.cells[id] ?? '—');
+  // The Ledger page header (LOOK-1): eyebrow, the record's number with its
+  // status badge, then the subtitle. A state with no declared kind is the
+  // neutral outlined badge.
+  return `<header class="composition-header"><p class="eyebrow">${h(surface.label)}</p><div class="composition-heading"><h1>${cell(header.title)}</h1>${header.status ? `<span class="composition-business-status"${statusRole ? ` data-status-role="${h(statusRole)}"` : ''}>${cell(header.status)}</span>` : ''}</div><p class="composition-subtitle">${header.subtitle.map(cell).join(' · ')}</p></header>`;
+}
+
+/**
+ * The record's facts grid (LOOK-1): the header's declared facts, label over
+ * value, in definition order; an empty value reads "—".
+ */
+export function renderCompositionFacts(
+  surface: CompiledSurfaceDefinition,
+  data: CompositionData,
+): string {
+  const header = surface.composition?.presentation?.header;
+  if (!header?.facts.length || data.fieldsFailed) return '';
   const label = (id: string) =>
     h(
       surface.composition!.fields.find((column) => column.columnId === id)!
         .label,
     );
-  return `<header class="composition-header"><p class="eyebrow">${h(surface.label)}</p><div class="composition-heading"><div><h1>${cell(header.title)}</h1><p class="composition-subtitle">${header.subtitle.map(cell).join(' · ')}</p></div>${header.status ? `<span class="composition-business-status">${cell(header.status)}</span>` : ''}</div><dl class="composition-header-facts">${header.facts.map((id) => `<div><dt>${label(id)}</dt><dd>${cell(id)}</dd></div>`).join('')}</dl></header>`;
+  return `<section class="panel composition-facts" aria-label="Key facts"><dl class="composition-header-facts">${header.facts.map((id) => `<div><dt>${label(id)}</dt><dd>${h(data.fields.cells[id] ?? '—')}</dd></div>`).join('')}</dl></section>`;
 }
 /** A dataset's row name: its primary cell, else its first column's. */
 function rowName(
@@ -785,6 +803,13 @@ export function renderCompositionProgression(
         '',
       )}${child.rows.length > shown.length ? `<li><a href="#${h(datasetId)}">${h(`${String(child.rows.length - shown.length)} more in ${child.definition.label}`)}</a></li>` : ''}</ul>`;
   };
+  const currentIndex = states.findIndex(
+    (state) => state === 'current' || state === 'attention',
+  );
+  const stepLine =
+    currentIndex >= 0
+      ? `Step ${String(currentIndex + 1)} of ${String(states.length)} · ${progression.steps[currentIndex]!.label}`
+      : null;
   const steps = progression.steps
     .map((step, index) => {
       const state = states[index]!;
@@ -809,18 +834,115 @@ export function renderCompositionProgression(
       );
       if (action && applicable(action, data)) {
         nextActions.set(data, action.actionId);
-        next = `<div class="composition-progression-next" data-next-action="${h(action.actionId)}"><div><p class="eyebrow">Next action</p><strong>${h(action.label)}</strong><p>${h(action.description)}</p></div>${actionLink(action, data, view, `Next action: ${action.label}`)}</div>`;
+        next = `<div class="composition-progression-next" data-next-action="${h(action.actionId)}"><div><p class="eyebrow">Next step</p><strong>${h(nextSentence(surface, action, data))}</strong>${stepLine ? `<p>${h(stepLine)}</p>` : ''}</div>${actionLink(action, data, view, `Next action: ${action.label}`)}</div>`;
         break;
       }
     } else {
       const control = operationControl(entry.operation.targetId, 'Next action');
       if (control) {
-        next = `<div class="composition-progression-next" data-next-operation="${h(entry.operation.targetId)}"><div><p class="eyebrow">Next action</p></div>${control}</div>`;
+        next = `<div class="composition-progression-next" data-next-operation="${h(entry.operation.targetId)}"><div><p class="eyebrow">Next step</p><strong>${h(recordSentence(surface, data))}</strong>${stepLine ? `<p>${h(stepLine)}</p>` : ''}</div>${control}</div>`;
         break;
       }
     }
   }
-  return `<section class="panel composition-progression" aria-labelledby="composition-progression-heading" data-composition-progression><header><p class="eyebrow">Record progression</p><h2 id="composition-progression-heading">${h(progression.title)}</h2></header><ol class="composition-progression-steps">${steps}</ol>${next}</section>`;
+  return `<section class="panel composition-progression" aria-labelledby="composition-progression-heading" data-composition-progression><header class="composition-progression-heading"><p class="eyebrow">Record progression</p><h2 id="composition-progression-heading">${h(progression.title)}</h2></header><ol class="composition-progression-steps">${steps}</ol>${stepLine ? `<p class="composition-progression-phone" aria-hidden="true">${h(stepLine)}</p>` : ''}${next}</section>`;
+}
+
+/**
+ * The next step's sentence (LOOK-1, spec §6), from the record's own figures
+ * only. A Task over rows that fills each row from a declared column states
+ * what is still open: "{open} of {total} {item} still open." for one line,
+ * "{units} units still open on {lines} lines." for several -- the total read
+ * from the dataset's declared line progress. Any other next step states the
+ * record and where it stands.
+ */
+function nextSentence(
+  surface: CompiledSurfaceDefinition,
+  action: Action,
+  data: CompositionData,
+): string {
+  const fill = action.inputs.find((input) => input.perRow?.fillFrom)?.perRow
+    ?.fillFrom;
+  const child = data.children.find(
+    (value) => value.definition.datasetId === action.rows?.datasetId,
+  );
+  const column = child?.definition.columns.find(
+    (value) => value.columnId === fill?.columnId,
+  );
+  if (!fill || !child || child.status !== 'ready' || !column)
+    return recordSentence(surface, data);
+  const open = taskRows(action, data)
+    .map((row) => ({ row, value: decimalOf(row.record, column.field) }))
+    .filter(
+      (entry): entry is { row: Row; value: string } =>
+        entry.value !== null && POSITIVE_DECIMAL.test(entry.value),
+    );
+  if (!open.length) return recordSentence(surface, data);
+  if (open.length === 1) {
+    const { row, value } = open[0]!;
+    const progress = child.definition.presentation?.progress;
+    const total = child.definition.columns.find(
+      (candidate) => candidate.columnId === progress?.total,
+    );
+    const of = total ? decimalOf(row.record, total.field) : null;
+    return `${value}${of ? ` of ${of}` : ''} ${rowName(child.definition, row)} still open.`;
+  }
+  return `${sumDecimals(open.map((entry) => entry.value))} units still open on ${String(open.length)} lines.`;
+}
+
+/** "{title} is {status}." -- the record and where it stands. */
+function recordSentence(
+  surface: CompiledSurfaceDefinition,
+  data: CompositionData,
+): string {
+  const header = surface.composition?.presentation?.header;
+  const title = header ? data.fields.cells[header.title] : undefined;
+  const status = header?.status ? data.fields.cells[header.status] : undefined;
+  return title && status && status !== '—'
+    ? `${title} is ${status}.`
+    : (title ?? surface.label);
+}
+
+/** A row's stored decimal at a field, or null when it states none. */
+function decimalOf(record: SemanticRecordDto, field: string): string | null {
+  try {
+    const value = recordValue(record, field);
+    return typeof value === 'string' && /^-?\d+(?:\.\d+)?$/u.test(value)
+      ? value
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Compares two non-negative decimal strings exactly. */
+function compareDecimals(left: string, right: string): number {
+  const scale = Math.max(
+    left.split('.')[1]?.length ?? 0,
+    right.split('.')[1]?.length ?? 0,
+  );
+  const units = (value: string) => {
+    const [whole, fraction = ''] = value.split('.');
+    return BigInt(`${whole}${fraction.padEnd(scale, '0')}`);
+  };
+  const delta = units(left) - units(right);
+  return delta > 0n ? 1 : delta < 0n ? -1 : 0;
+}
+
+/** The exact sum of non-negative decimal strings, never through a float. */
+function sumDecimals(values: readonly string[]): string {
+  const scale = Math.max(
+    0,
+    ...values.map((value) => value.split('.')[1]?.length ?? 0),
+  );
+  const total = values.reduce((sum, value) => {
+    const [whole, fraction = ''] = value.split('.');
+    return sum + BigInt(`${whole}${fraction.padEnd(scale, '0')}`);
+  }, 0n);
+  const text = total.toString().padStart(scale + 1, '0');
+  const integer = scale ? text.slice(0, -scale) : text;
+  const decimals = scale ? text.slice(-scale).replace(/0+$/u, '') : '';
+  return decimals ? `${integer}.${decimals}` : integer;
 }
 
 /** The action each rendered record offers as its next step, if any. */
@@ -920,6 +1042,33 @@ function renderPresentedChild(
   const rowActions = actions.filter(
     (action) => action.presentation?.placement === 'row',
   );
+  // Per-line progress (LOOK-1): a bar and "{done} of {total}" beside the
+  // row's name, from the two quantity columns the dataset declares.
+  const progress = definition.presentation?.progress;
+  const progressTotal = definition.columns.find(
+    (column) => column.columnId === progress?.total,
+  );
+  const progressDone = definition.columns.find(
+    (column) => column.columnId === progress?.done,
+  );
+  const progressHeading =
+    progressTotal && progressDone
+      ? `<th scope="col" class="composition-progress-heading">${h(progressDone.label)}</th>`
+      : '';
+  const progressCell = (row: Row) => {
+    if (!progressTotal || !progressDone) return '';
+    const total = decimalOf(row.record, progressTotal.field);
+    const done = decimalOf(row.record, progressDone.field);
+    if (total === null || done === null)
+      return `<td data-cell-role="progress" data-column-label="${h(progressDone.label)}">—</td>`;
+    const state =
+      !POSITIVE_DECIMAL.test(done) || !POSITIVE_DECIMAL.test(total)
+        ? 'none'
+        : compareDecimals(done, total) >= 0
+          ? 'complete'
+          : 'partial';
+    return `<td data-cell-role="progress" data-column-label="${h(progressDone.label)}"><span class="line-progress" data-progress="${state}">${POSITIVE_DECIMAL.test(total) ? `<progress value="${h(done)}" max="${h(total)}">${h(done)} of ${h(total)}</progress>` : ''}<span><b>${h(row.cells[progressDone.columnId] ?? done)}</b> of ${h(row.cells[progressTotal.columnId] ?? total)}</span></span></td>`;
+  };
   const cells = (row: Row, values: Column[]) =>
     values
       .map(
@@ -932,7 +1081,7 @@ function renderPresentedChild(
       ? childFailure(child.error)
       : child.status === 'empty'
         ? compositionMessage('COMPOSITION_CHILD_EMPTY')
-        : `<div class="data-table-wrap"${definition.presentation?.compact ? ` data-compact="${h(definition.presentation.compact)}" tabindex="0" role="region" aria-label="${h(definition.label)} table; scroll for all columns"` : ''}><table><thead><tr>${displayed.map((column) => `<th scope="col" class="${column.presentation?.role === 'quantity' ? 'composition-quantity' : ''}">${h(column.label)}</th>`).join('')}${detail.length ? '<th scope="col">Details</th>' : ''}${definition.presentation?.selection !== 'none' || rowActions.length ? '<th scope="col">Actions</th>' : ''}</tr></thead><tbody>${child.rows
+        : `<div class="data-table-wrap"${definition.presentation?.compact ? ` data-compact="${h(definition.presentation.compact)}" tabindex="0" role="region" aria-label="${h(definition.label)} table; scroll for all columns"` : ''}><table><thead><tr>${displayed.map((column) => `<th scope="col" class="${column.presentation?.role === 'quantity' ? 'composition-quantity' : ''}">${h(column.label)}</th>${column === primary ? progressHeading : ''}`).join('')}${detail.length ? '<th scope="col">Details</th>' : ''}${definition.presentation?.selection !== 'none' || rowActions.length ? '<th scope="col">Actions</th>' : ''}</tr></thead><tbody>${child.rows
             .map((row) => {
               const selected =
                 data.selections[definition.datasetId]?.recordId ===
@@ -964,7 +1113,7 @@ function renderPresentedChild(
                         applicable(action, rowData),
                     )
                   : [];
-              return `<tr data-compact-card="true" data-presented-row="true" data-record-id="${h(row.record.recordId)}" ${selected ? 'data-selected="true"' : ''}>${displayed.map((column) => `<td data-column-label="${h(column.label)}" data-column-priority="${column.presentation?.priority ?? column.orderKey}" data-cell-role="${column.presentation?.role ?? 'value'}">${column === primary ? `<strong>${h(row.cells[column.columnId] ?? '—')}</strong><div class="composition-cell-secondary">${cells(row, secondary)}</div>` : h(row.cells[column.columnId] ?? '—')}</td>`).join('')}${detail.length ? `<td data-cell-role="detail" data-column-label="Details"><details><summary>Supporting details</summary><div class="composition-cell-secondary">${cells(row, detail)}</div></details></td>` : ''}${
+              return `<tr data-compact-card="true" data-presented-row="true" data-record-id="${h(row.record.recordId)}" ${selected ? 'data-selected="true"' : ''}>${displayed.map((column) => `<td data-column-label="${h(column.label)}" data-column-priority="${column.presentation?.priority ?? column.orderKey}" data-cell-role="${column.presentation?.role ?? 'value'}">${column === primary ? `<strong>${h(row.cells[column.columnId] ?? '—')}</strong><div class="composition-cell-secondary">${cells(row, secondary)}</div>` : h(row.cells[column.columnId] ?? '—')}</td>${column === primary ? progressCell(row) : ''}`).join('')}${detail.length ? `<td data-cell-role="detail" data-column-label="Details"><details><summary>Supporting details</summary><div class="composition-cell-secondary">${cells(row, detail)}</div></details></td>` : ''}${
                 definition.presentation?.selection !== 'none' ||
                 rowActions.length
                   ? `<td data-cell-role="actions" data-column-label="Actions">${selectedActions.map((action) => actionLink(action, rowData, view)).join('')}${definition.presentation?.selection !== 'none' ? `<a href="${h(url.pathname + url.search + url.hash)}" ${active ? 'aria-current="true"' : ''}>${active ? 'Selected' : 'Select'}</a>` : ''}${rowActions
@@ -977,6 +1126,31 @@ function renderPresentedChild(
             .join('')}</tbody></table></div>`;
   return `<section id="${h(definition.datasetId)}" class="panel data-panel composition-collection" data-composition-dataset="${h(definition.datasetId)}" data-resolution="${child.status}"><div class="composition-collection-heading"><h2>${h(definition.label)}</h2>${definition.presentation?.description ? `<details><summary>About these quantities</summary><p class="composition-description">${h(definition.presentation.description)}</p></details>` : ''}</div>${body}</section>`;
 }
+/**
+ * The totals block (LOOK-1) under the lines its printed document totals: the
+ * declared print totals, each a label and its amount, the last the grand
+ * total over a double rule. Shown only with the first printed dataset, when
+ * it loaded.
+ */
+function renderCompositionTotals(
+  surface: CompiledSurfaceDefinition,
+  data: CompositionData,
+  child: CompositionData['children'][number],
+): string {
+  const print = surface.composition?.presentation?.print;
+  if (
+    !print?.totals?.length ||
+    print.datasets[0] !== child.definition.datasetId ||
+    child.status !== 'ready' ||
+    data.fieldsFailed
+  )
+    return '';
+  const label = (id: string) =>
+    surface.composition!.fields.find((column) => column.columnId === id)
+      ?.label ?? '';
+  return `<dl class="composition-totals">${print.totals.map((id) => `<div><dt>${h(label(id))}</dt><dd>${h(data.fields.cells[id] ?? '—')}</dd></div>`).join('')}</dl>`;
+}
+
 /** The URL of this record's printable document, preserving its scope. */
 export function compositionPrintHref(data: CompositionData): string {
   const url = new URL(data.url, 'http://surface-runtime.local');
@@ -1110,8 +1284,13 @@ export function renderCompositionChildren(
 ): string {
   const children = data.children
     .map((child) => {
-      if (child.definition.presentation && surface && view)
-        return renderPresentedChild(child, data, surface, view);
+      if (child.definition.presentation && surface && view) {
+        const presented = renderPresentedChild(child, data, surface, view);
+        const totals = renderCompositionTotals(surface, data, child);
+        return totals
+          ? `${presented.slice(0, -'</section>'.length)}${totals}</section>`
+          : presented;
+      }
       const columns = ordered(child.definition.columns);
       return `<section class="panel data-panel" data-composition-dataset="${h(child.definition.datasetId)}" data-resolution="${child.status}"><h2>${h(child.definition.label)}</h2>${
         child.status === 'failed'

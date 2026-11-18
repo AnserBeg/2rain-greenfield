@@ -520,13 +520,13 @@ composedTest.describe('focus ring coverage', () => {
     'focus-ring red: a regression confined to the dark block is observed',
     async ({ composedApplication, page }) => {
       composedTest.setTimeout(journeyTimeoutMilliseconds.focusRing);
-      // §2.2 gives the surface context --b600 light and --b300 dark. Putting the
-      // light value into the dark scheme is invisible to any light-only run.
+      // The ring is the accent, which dark redefines. Putting the light
+      // accent into the dark scheme is invisible to any light-only run.
       const observed = await readFocusRingCoverage(
         page,
         composedApplication.currentBaseUrl(),
         'dark',
-        ':root{--focus-ring-surface:var(--b600)!important}',
+        ':root{--focus-ring-surface:#0E6670!important}',
       );
       const result = observeFocusRingCoverage(observed);
 
@@ -545,44 +545,31 @@ composedTest.describe('focus ring coverage', () => {
   );
 
   composedTest(
-    'focus-ring red: the retired --b500 fails on the ground §2.1 never measured',
+    'focus-ring red: a ring that reads on the sheet fails on the sidebar ground it also lands on',
     async ({ composedApplication, page }) => {
       composedTest.setTimeout(journeyTimeoutMilliseconds.focusRing);
+      // The Ledger sidebar is its own ground (--side), and its current item
+      // sits on a sheet. A rail ring of --rule-2 is a hairline on both, so
+      // both sidebar selectors red, and only they do.
       const observed = await readFocusRingCoverage(
         page,
         composedApplication.currentBaseUrl(),
         'light',
-        ':root{--focus-ring-rail:var(--b500)!important}',
+        ':root{--focus-ring-rail:var(--rule-2)!important}',
       );
       const result = observeFocusRingCoverage(observed);
 
-      // The control is only meaningful if the flyout ground was actually
+      // The control is only meaningful if the sidebar ground was actually
       // reached, so that is asserted before the violation is.
-      assert.ok(
-        result.grounds.some((ground) => ground.includes('#0f5f8c')),
-        `rail-raised was never measured; grounds were ${result.grounds.join(' | ')}`,
-      );
-      const summaryGrounds = observed.measurements
-        .filter(
-          (measurement) =>
-            measurement.selector ===
-            '.navigation-group > summary:focus-visible',
-        )
-        .map((measurement) => parseComputedColor(measurement.groundColor).hex);
       const linkGrounds = observed.measurements
         .filter(
           (measurement) => measurement.selector === '.sidebar a:focus-visible',
         )
         .map((measurement) => parseComputedColor(measurement.groundColor).hex);
-      // An outline with positive offset lands outside the summary on its
-      // details/rail ground. Child-link outlines in the open More flyout land
-      // on rail-raised, and so does the summary of Catalog, a group nested in
-      // that flyout since it lists tax codes too. --b500 clears the former
-      // (3.61:1) and fails the latter (2.08:1), so this control pins the
-      // observed grounds before the exact red.
-      assert.ok(summaryGrounds.includes('#0b3a55'));
-      assert.ok(summaryGrounds.includes('#0f5f8c'));
-      assert.ok(linkGrounds.includes('#0f5f8c'));
+      assert.ok(
+        linkGrounds.includes('#edede9'),
+        `the sidebar ground was never measured; grounds were ${result.grounds.join(' | ')}`,
+      );
       assert.deepEqual(result.violations, [
         'FOCUS_RING_CONTRAST:.navigation-group > summary:focus-visible',
         'FOCUS_RING_CONTRAST:.sidebar a:focus-visible',
@@ -1186,21 +1173,16 @@ async function inventoryNavigationJourney(
   await page.setViewportSize({ height: 844, width: 390 });
   await expect(responsiveList).toHaveCount(1);
   await expect(firstResponsiveRow).toHaveCSS('display', 'grid');
+  // LOOK-1 (owner ruling): at phone width the sidebar is a drawer behind the
+  // menu button; opened, it shows at most five top-level entries, each group
+  // a disclosure.
   await expect(page.locator('.sidebar')).toHaveCSS('position', 'fixed');
-  await expect(page.locator('.sidebar')).toHaveCSS('bottom', '0px');
-  expect(
-    await navigation.getByRole('link').evaluateAll(
-      (links) =>
-        links.filter((link) => {
-          const item = link.closest('li');
-          return (
-            item !== null &&
-            getComputedStyle(item).display !== 'none' &&
-            getComputedStyle(link).display !== 'none'
-          );
-        }).length,
-    ),
-  ).toBeLessThanOrEqual(5);
+  await expect(page.locator('.sidebar')).toBeHidden();
+  await page.locator('.shell-menu > summary').click();
+  await expect(page.locator('.sidebar')).toBeVisible();
+  await expect(navigation.locator('.navigation-tree > li')).toHaveCount(5);
+  await page.locator('.shell-menu > summary').click();
+  await expect(page.locator('.sidebar')).toBeHidden();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,

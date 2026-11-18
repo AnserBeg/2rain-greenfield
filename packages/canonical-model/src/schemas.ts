@@ -509,8 +509,49 @@ const compositionSeam = z.strictObject({
   schemaVersion: nodeVersion,
   status: z.literal('unsupported'),
 });
+/**
+ * The closed icon vocabulary a navigation group (a module), a navigation
+ * destination (a surface's workspace) and a launcher tile may name (LOOK-1;
+ * the Ledger spec's icon set). The renderer draws each as inline SVG; a name
+ * outside the set is refused, and an absent icon falls back to one chosen by
+ * what the destination is. Optional key; absence preserves historical bytes.
+ */
+export const NAVIGATION_ICON_NAMES = [
+  'home',
+  'inbox',
+  'truck',
+  'invoice',
+  'cart',
+  'receipt',
+  'tag',
+  'box',
+  'boxes',
+  'transfer',
+  'users',
+  'building',
+  'location',
+  'settings',
+  'chart',
+  'clipboard',
+  'lock',
+  'calculator',
+  'wrench',
+  'alert',
+] as const;
+export type NavigationIcon = (typeof NAVIGATION_ICON_NAMES)[number];
+// A refined name rather than an enum axis: the set is presentation the
+// renderer draws in full, not a language behaviour with obligations to honour.
+export const NavigationIconSchema = z
+  .string()
+  .refine(
+    (name): name is NavigationIcon =>
+      (NAVIGATION_ICON_NAMES as readonly string[]).includes(name),
+    { message: 'icon is not in the closed icon set' },
+  );
 const normalizedModuleDefinition = z.strictObject({
   composition: compositionSeam,
+  /** The navigation group's icon (LOOK-1). Optional key. */
+  icon: NavigationIconSchema.optional(),
   kind: z.literal('moduleDefinition'),
   label: LabelSchema,
   lifecycle: z.enum(['active', 'retired']),
@@ -933,6 +974,19 @@ const compositionDataset = z.strictObject({
       selection: z.enum(['explicit', 'none']),
       selectedActions: z.literal('row').optional(),
       compact: z.literal('scrollTable').optional(),
+      /**
+       * Per-line progress (LOOK-1, owner ruling): the quantity column a row
+       * is measured against and the column that says how much of it is done,
+       * both quantity columns of this dataset -- an order line's ordered and
+       * received. Rendered as a bar with "{done} of {total}". Optional v6 key
+       * (ADR-0047 §7); absence preserves historical bytes.
+       */
+      progress: z
+        .strictObject({
+          total: CanonicalIdSchema,
+          done: CanonicalIdSchema,
+        })
+        .optional(),
     })
     .optional(),
   datasetId: CanonicalIdSchema,
@@ -1103,6 +1157,8 @@ export const SurfaceWorkspaceSchema = z.strictObject({
    * v6 key (ADR-0047 §7).
    */
   navigationModuleId: CanonicalIdSchema.optional(),
+  /** The destination's navigation icon (LOOK-1). Optional v6 key. */
+  icon: NavigationIconSchema.optional(),
   entry: z
     .strictObject({
       companyQueryId: CanonicalIdSchema,
@@ -1927,6 +1983,8 @@ export const SurfaceLauncherSchema = z.strictObject({
         surface: CanonicalIdSchema,
         /** One of that List's declared views, opened and counted. */
         view: CanonicalIdSchema.optional(),
+        /** The work queue's icon in the sidebar (LOOK-1). Optional v6 key. */
+        icon: NavigationIconSchema.optional(),
       }),
     )
     .min(1)

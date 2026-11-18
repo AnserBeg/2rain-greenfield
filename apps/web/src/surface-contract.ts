@@ -9,6 +9,7 @@ import {
   SurfaceDocumentEditorSchema,
   SurfaceFormSchema,
   SurfaceLauncherSchema,
+  NavigationIconSchema,
   SurfaceListSchema,
   type SurfaceForm,
   type SurfaceLauncher,
@@ -328,6 +329,8 @@ export interface CompiledNavigationSurface {
 
 export interface CompiledNavigationGroup {
   readonly children: readonly CompiledNavigationEntry[];
+  /** The module's declared icon (LOOK-1); absent when undeclared. */
+  readonly icon?: string;
   readonly kind: 'navigationGroup';
   readonly label: string;
   readonly navigationId: string;
@@ -1005,6 +1008,9 @@ function parseNavigationEntry(
         ),
       ),
     ),
+    ...(value.icon === undefined
+      ? {}
+      : { icon: NavigationIconSchema.parse(value.icon) }),
     kind: 'navigationGroup' as const,
     label: value.label,
     navigationId: value.navigationId,

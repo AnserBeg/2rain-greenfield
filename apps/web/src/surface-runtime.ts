@@ -11,6 +11,7 @@ import {
 } from './workspace-entry.js';
 import { documentEditor } from './document-editor.js';
 import {
+  companyParameterFor,
   launcherTiles,
   resolveLauncherScan,
   type LauncherRenderData,
@@ -27,7 +28,10 @@ import {
   withheldSupplyQuery,
   type DeclaredListState,
 } from './list-declaration.js';
-import type { SurfaceList } from '../../../packages/canonical-model/src/index.js';
+import type {
+  NavigationIcon,
+  SurfaceList,
+} from '../../../packages/canonical-model/src/index.js';
 import { assertRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
 import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../../packages/runtime/src/semantic-operation-gateway.js';
@@ -98,7 +102,15 @@ export function withLocalDemoIdentity(
 ): SurfaceRuntimeResponse {
   if (!actors) return response;
   const bar = `<aside class="demo-identity" aria-label="Local demo identity"><form method="post"><label>Acting as <select name="localDemoActAs" aria-label="Acting as">${actors.map((actor) => `<option value="${actor.key}"${actor.key === selected ? ' selected' : ''}>${escapeHtml(actor.label)}</option>`).join('')}</select></label><button type="submit">Switch person</button><span>Local demo</span></form></aside>`;
-  return { ...response, html: response.html.replace('<body>', `<body>${bar}`) };
+  // Inside the shell it sits in the sidebar's footer beside the principal
+  // (LOOK-1); a page without the shell keeps it at the top of the body.
+  const footer = '<div class="side-foot" data-shell-region="principal">';
+  return {
+    ...response,
+    html: response.html.includes(footer)
+      ? response.html.replace(footer, `${footer}${bar}`)
+      : response.html.replace('<body>', `<body>${bar}`),
+  };
 }
 
 export interface SurfaceRuntimeResponse {
@@ -1286,6 +1298,13 @@ function renderSelectedSurface(
       data.compositionTask?.includes('<dialog ') === true &&
       data.compositionTask.includes('data-composition-task'));
 
+  // The launcher page already read its tiles' counts; the sidebar's queues
+  // show them rather than asking again.
+  const queueCounts =
+    data.status === 'LAUNCHER_READY'
+      ? new Map(data.launcher.tiles.map((tile) => [tile.tileId, tile.count]))
+      : null;
+
   return Object.freeze({
     html: shellDocument(
       view,
@@ -1295,6 +1314,7 @@ function renderSelectedSurface(
       body,
       workspaceContext,
       enhanceTaskDialog,
+      queueCounts,
     ),
     statusCode,
   });
@@ -2193,6 +2213,7 @@ function shellDocument(
   body: string,
   workspaceContext: WorkspaceContextBar | null = null,
   enhanceTaskDialog = false,
+  queueCounts: ReadonlyMap<string, number | null> | null = null,
 ): string {
   const title = selected?.label ?? 'Release diagnostic';
   const navigation = navigationEntries(surfaces, compiledNavigation);
@@ -2202,6 +2223,12 @@ function shellDocument(
     surfaces,
     selected,
   );
+  const landing = landingSurface(compiledNavigation, surfaces);
+  const launcher = landing?.launcher ? landing : null;
+  const company =
+    workspaceContext?.options.find(
+      (option) => option.recordId === workspaceContext.selectedRecordId,
+    )?.label ?? null;
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -2215,16 +2242,19 @@ function shellDocument(
   <body>
     <a class="skip-link" href="#surface-content">Skip to content</a>
     <div class="app-shell" data-release-id="${escapeHtml(view.release.releaseId)}" data-release-content-hash="${escapeHtml(view.release.contentHash)}" data-pointer-fence="${view.pointer.fence}">
-      <aside class="sidebar" style="--compact-nav-count:${String(Math.min(navigation.length, 5))}">
-        <div class="brand"><span class="brand__mark" aria-hidden="true">2</span><span><strong>2rain</strong><small>Compiled workspace</small></span></div>
+      <aside class="sidebar" id="shell-sidebar" style="--compact-nav-count:${String(Math.min(navigation.length, 5))}">
+        <details class="shell-menu"><summary aria-label="Menu" aria-controls="shell-sidebar">${svgIcon('<path d="M4 7h16M4 12h16M4 17h16"/>')}</summary></details>
+        <div class="brand"><span class="brand__mark" aria-hidden="true">${escapeHtml(initials(company ?? '2rain'))}</span><span><strong>${escapeHtml(company ?? '2rain')}</strong><small>${company ? '2rain' : 'Compiled workspace'}</small></span></div>
+        ${launcher ? renderWorkQueues(view, launcher, surfaces, selected, workspaceContext, queueCounts) : ''}
         <nav aria-label="Release navigation">
-          <p class="nav-label">Application</p>
           <ul class="navigation-tree">${navigation.map((entry) => navigationItem(view, entry, surfaces, selected, workspaceContext)).join('')}</ul>
         </nav>
+        <div class="side-foot" data-shell-region="principal"><span class="principal__avatar" aria-hidden="true">${escapeHtml(initials('Signed in'))}</span><span class="side-foot__who"><strong>Signed in</strong><small>${escapeHtml(view.environmentId)}</small></span></div>
       </aside>
       <div class="workspace">
         <header class="topbar">
           <strong class="topbar__context">${escapeHtml(activeDestination ?? selected?.label ?? 'Workspace')}</strong>
+          ${launcher && launcher !== selected ? renderShellSearch(view, launcher, workspaceContext) : ''}
           ${workspaceContext ? renderWorkspaceContextBar(workspaceContext) : ''}
           <div class="principal" aria-label="Signed-in principal">Signed in</div>
           <details class="shell-diagnostics"><summary>Diagnostics</summary><dl><dt>Tenant</dt><dd>${escapeHtml(view.tenantId)}</dd><dt>Environment</dt><dd>${escapeHtml(view.environmentId)}</dd><dt>Principal</dt><dd>${escapeHtml(view.principalId)}</dd><dt>Pinned release</dt><dd>${escapeHtml(view.release.releaseId)}</dd><dt>Release root</dt><dd>${escapeHtml(view.release.contentHash)}</dd><dt>Fence</dt><dd>${view.pointer.fence}</dd></dl></details>
@@ -2235,6 +2265,109 @@ function shellDocument(
     ${enhanceTaskDialog ? `<script>${SURFACE_CLIENT_SCRIPT}</script>` : ''}
   </body>
 </html>`;
+}
+
+/** Up to two capitals from a name's first words: the sidebar's mark. */
+function initials(name: string): string {
+  const letters = name
+    .split(/\s+/u)
+    .filter((word) => /^\p{L}/u.test(word))
+    .slice(0, 2)
+    .map((word) => word[0]!.toUpperCase())
+    .join('');
+  return letters || '2';
+}
+
+/**
+ * The work queues at the top of the sidebar (LOOK-1, owner ruling): the
+ * landing launcher itself ("Today"), then each of its declared tiles in their
+ * fixed order -- a List at its view, in the page's company -- with that view's
+ * count when the page's loader read it. A zero stays visible so positions
+ * never move; an unread count renders no chip, never a guess.
+ */
+function renderWorkQueues(
+  view: RuntimeViewContract.RequestRuntimeView,
+  launcher: CompiledSurfaceDefinition,
+  surfaces: readonly CompiledSurfaceDefinition[],
+  selected: CompiledSurfaceDefinition | null,
+  workspaceContext: WorkspaceContextBar | null,
+  counts: ReadonlyMap<string, number | null> | null,
+): string {
+  const currentView =
+    workspaceContext?.preservedParameters.find(([name]) => name === 'view')?.[1] ??
+    null;
+  const tiles = [...(launcher.launcher?.tiles ?? [])].sort(
+    (left, right) =>
+      left.orderKey - right.orderKey ||
+      (left.tileId < right.tileId ? -1 : left.tileId > right.tileId ? 1 : 0),
+  );
+  const items = tiles
+    .map((tile) => {
+      const surface = surfaces.find(
+        (candidate) => candidate.surfaceId === tile.surface,
+      );
+      if (!surface) return '';
+      const href = scopedSurfaceHref(view, surface, workspaceContext, {
+        ...(tile.view ? { view: tile.view } : {}),
+      });
+      const current =
+        selected?.surfaceId === tile.surface && currentView === tile.view;
+      const count = counts?.get(tile.tileId);
+      return `<li><a href="${escapeHtml(href)}" data-queue="${escapeHtml(tile.tileId)}"${current ? ' aria-current="page"' : ''}><span class="nav-icon" aria-hidden="true">${declaredIcon(tile.icon) ?? NAVIGATION_ICONS.queue}</span><span>${escapeHtml(tile.label)}</span>${typeof count === 'number' ? `<span class="queue-count">${String(count)}</span>` : ''}</a></li>`;
+    })
+    .join('');
+  const home = `<li><a href="${escapeHtml(scopedSurfaceHref(view, launcher, workspaceContext, {}))}"${selected?.surfaceId === launcher.surfaceId ? ' aria-current="page"' : ''}><span class="nav-icon" aria-hidden="true">${navigationIcon(launcher)}</span><span>${escapeHtml(launcher.label)}</span></a></li>`;
+  return `<nav class="work-queues" aria-label="Work queues"><ul>${home}${items}</ul></nav>`;
+}
+
+/**
+ * The top bar's search: the landing launcher's declared scan, submitted to
+ * that launcher as its own scan box submits it (a GET with the code), so a
+ * number or SKU typed here opens what the launcher would open.
+ */
+function renderShellSearch(
+  view: RuntimeViewContract.RequestRuntimeView,
+  launcher: CompiledSurfaceDefinition,
+  workspaceContext: WorkspaceContextBar | null,
+): string {
+  const scan = launcher.launcher?.scan;
+  if (!scan) return '';
+  const href = new URL(
+    scopedSurfaceHref(view, launcher, workspaceContext, {}),
+    'http://shell.local',
+  );
+  const hidden = [...href.searchParams.entries()]
+    .map(
+      ([name, value]) =>
+        `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`,
+    )
+    .join('');
+  return `<form class="shell-search" method="get" action="/" role="search">${hidden}<label><span class="sr-only">${escapeHtml(scan.label)}</span><span class="nav-icon" aria-hidden="true">${NAVIGATION_ICONS.search}</span><input name="scan" type="search" placeholder="${escapeHtml(scan.label)}" autocomplete="off" spellcheck="false" enterkeyhint="go" maxlength="120"></label></form>`;
+}
+
+/** A surface's link in the page's company, as navigation builds it. */
+function scopedSurfaceHref(
+  view: RuntimeViewContract.RequestRuntimeView,
+  surface: CompiledSurfaceDefinition,
+  workspaceContext: WorkspaceContextBar | null,
+  extra: Readonly<Record<string, string>>,
+): string {
+  const parameters = new URLSearchParams({ surface: surface.surfaceId });
+  for (const [name, value] of Object.entries(extra))
+    parameters.set(name, value);
+  if (workspaceContext?.selectedRecordId) {
+    try {
+      const scope = surface.launcher
+        ? companyParameterFor(view, surface)
+        : readCompiledSurfaceDataBinding(view, surface).query.legalEntityScope
+            ?.operand.parameterId;
+      if (scope) parameters.set(scope, workspaceContext.selectedRecordId);
+    } catch {
+      // The binding validator renders the destination diagnostic; the shell
+      // never guesses a parameter id when the pinned artifact is malformed.
+    }
+  }
+  return `/?${parameters.toString()}`;
 }
 
 function navigationItem(
@@ -2259,7 +2392,7 @@ function navigationItem(
       const surface = surfaceForNavigation(surfaces, entry.children[0]);
       return `<li class="navigation-node navigation-node--direct">${navigationLink(view, surface, selected, entry.label, workspaceContext, surfaces)}</li>`;
     }
-    return `<li class="navigation-node navigation-node--group"><details class="navigation-group"${current ? ' data-current="true"' : ''}><summary><span class="nav-icon" aria-hidden="true">${NAVIGATION_ICONS.group}</span><span class="nav-text"><span class="nav-group-label">${escapeHtml(entry.label)}</span>${destination && destination !== entry.label ? `<small>${escapeHtml(destination)}</small>` : ''}</span><span class="nav-arrow" aria-hidden="true">›</span></summary><ul class="navigation-children">${entry.children.map((child) => navigationItem(view, child, surfaces, selected, workspaceContext)).join('')}</ul></details></li>`;
+    return `<li class="navigation-node navigation-node--group"><details class="navigation-group"${current ? ' data-current="true"' : ''}><summary><span class="nav-icon" aria-hidden="true">${declaredIcon(entry.icon) ?? NAVIGATION_ICONS.group}</span><span class="nav-text"><span class="nav-group-label">${escapeHtml(entry.label)}</span>${destination && destination !== entry.label ? `<small>${escapeHtml(destination)}</small>` : ''}</span><span class="nav-arrow" aria-hidden="true">›</span></summary><ul class="navigation-children">${entry.children.map((child) => navigationItem(view, child, surfaces, selected, workspaceContext)).join('')}</ul></details></li>`;
   }
   const surface = surfaceForNavigation(surfaces, entry);
   return `<li class="navigation-node navigation-node--surface">${navigationLink(view, surface, selected, navigationLabel(surface), workspaceContext, surfaces)}</li>`;
@@ -2281,13 +2414,87 @@ const NAVIGATION_ICONS = Object.freeze({
     '<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>',
   ),
   page: svgIcon('<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/>'),
+  queue: svgIcon(
+    '<path d="M4 13l2.5-7h11L20 13"/><path d="M4 13v6h16v-6h-5l-1 2h-4l-1-2z"/>',
+  ),
+  search: svgIcon('<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>'),
 });
+/**
+ * The language's closed icon set (LOOK-1), drawn as inline SVG: a module,
+ * destination or queue that declares one shows it; one that declares none
+ * falls back to what it is (a launcher, a List, a page).
+ */
+const DECLARED_ICONS: Readonly<Record<NavigationIcon, string>> = Object.freeze(
+  {
+    home: svgIcon('<path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/>'),
+    inbox: NAVIGATION_ICONS.queue,
+    truck: svgIcon(
+      '<path d="M3 6h11v10H3z"/><path d="M14 10h4l3 3v3h-7"/><circle cx="7" cy="18" r="1.6"/><circle cx="17" cy="18" r="1.6"/>',
+    ),
+    invoice: svgIcon(
+      '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
+    ),
+    cart: svgIcon(
+      '<path d="M3 4h2l2 11h11l2-8H6.5"/><circle cx="9" cy="19" r="1.4"/><circle cx="17" cy="19" r="1.4"/>',
+    ),
+    receipt: svgIcon(
+      '<path d="M5 3h14v18H5z"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+    ),
+    tag: svgIcon(
+      '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.3"/>',
+    ),
+    box: svgIcon(
+      '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>',
+    ),
+    boxes: svgIcon(
+      '<path d="M3 12h8v8H3zM13 12h8v8h-8zM8 4h8v8H8z"/>',
+    ),
+    transfer: svgIcon('<path d="M4 8h14l-3-3M20 16H6l3 3"/>'),
+    users: svgIcon(
+      '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 5.5a3 3 0 010 5.5M18 14.5c2 .8 3 2.8 3 5.5"/>',
+    ),
+    building: svgIcon(
+      '<path d="M4 21V4h11v17M15 9h5v12M2 21h20"/><path d="M8 8h3M8 12h3M8 16h3"/>',
+    ),
+    location: svgIcon(
+      '<path d="M12 21s-7-6.2-7-11.5a7 7 0 0114 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
+    ),
+    settings: svgIcon(
+      '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9L7 7M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>',
+    ),
+    chart: svgIcon('<path d="M4 20V4M4 20h16"/><path d="M8 16v-5M12 16V8M16 16v-3"/>'),
+    clipboard: svgIcon(
+      '<path d="M8 4h8v3H8z"/><path d="M16 5h3v16H5V5h3"/><path d="M9 12l2 2 4-4"/>',
+    ),
+    lock: svgIcon(
+      '<rect x="5" y="11" width="14" height="10" rx="1.5"/><path d="M8 11V8a4 4 0 018 0v3"/>',
+    ),
+    calculator: svgIcon(
+      '<rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M8 7h8M8 12h.01M12 12h.01M16 12h.01M8 16h.01M12 16h.01M16 16h.01"/>',
+    ),
+    wrench: svgIcon(
+      '<path d="M15 4a5 5 0 00-4.6 6.9L4 17.3V20h2.7l6.4-6.4A5 5 0 0020 9l-3 1-2-2 1-3z"/>',
+    ),
+    alert: svgIcon(
+      '<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/>',
+    ),
+  },
+);
+/** A declared icon's drawing; null when none is declared. */
+function declaredIcon(name: string | undefined): string | null {
+  return name !== undefined && Object.hasOwn(DECLARED_ICONS, name)
+    ? DECLARED_ICONS[name as NavigationIcon]
+    : null;
+}
 function navigationIcon(surface: CompiledSurfaceDefinition): string {
-  return surface.launcher
-    ? NAVIGATION_ICONS.launcher
-    : surface.surfaceRole === 'list'
-      ? NAVIGATION_ICONS.list
-      : NAVIGATION_ICONS.page;
+  const declared = declaredIcon(surface.workspace?.icon);
+  return declared
+    ? declared
+    : surface.launcher
+      ? NAVIGATION_ICONS.launcher
+      : surface.surfaceRole === 'list'
+        ? NAVIGATION_ICONS.list
+        : NAVIGATION_ICONS.page;
 }
 
 function navigationLink(

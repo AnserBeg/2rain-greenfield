@@ -1242,6 +1242,7 @@ interface SurfaceNavigationGroup {
   readonly children: readonly (
     SurfaceNavigationGroup | SurfaceNavigationLeaf
   )[];
+  readonly icon?: string;
   readonly kind: 'navigationGroup';
   readonly label: string;
   readonly navigationId: string;
@@ -1278,6 +1279,8 @@ function surfaceNavigationTree(
       ? [
           {
             children,
+            // The group's declared icon (LOOK-1); absent, the key is absent.
+            ...('icon' in module && module.icon ? { icon: module.icon } : {}),
             kind: 'navigationGroup' as const,
             label: module.label,
             navigationId: module.moduleId,

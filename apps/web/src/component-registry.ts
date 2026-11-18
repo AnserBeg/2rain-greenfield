@@ -3,6 +3,7 @@ import {
   renderCompositionFields,
   renderCompositionActions,
   renderCompositionChildren,
+  renderCompositionFacts,
   renderCompositionHeader,
   renderCompositionProgression,
   displayFieldValue,
@@ -835,7 +836,11 @@ function renderTitleStatus(context: SurfaceComponentContext): string {
     };
     return slotPanel(
       context,
-      renderCompositionHeader(context.surface, composition) +
+      renderCompositionHeader(
+        context.surface,
+        composition,
+        compositionStatusRole(context, record),
+      ) +
         feedbackHtml(context.feedback) +
         renderCompositionAlerts(context.surface, composition) +
         renderCompositionProgression(
@@ -845,7 +850,8 @@ function renderTitleStatus(context: SurfaceComponentContext): string {
           operationControl,
           // Nothing else is started while a Task is open.
           !context.data.compositionTask,
-        ),
+        ) +
+        renderCompositionFacts(context.surface, composition),
       'title-status-slot',
     );
   }
@@ -869,6 +875,44 @@ function renderTitleStatus(context: SurfaceComponentContext): string {
     `<header class="surface-heading surface-heading--slot"><div><h1>${escapeHtml(title)}</h1></div>${status}</header>${feedbackHtml(context.feedback)}`,
     'title-status-slot',
   );
+}
+
+/**
+ * The status kind of a document's state (LOOK-1): the role its own List
+ * declares for that state -- a List over the same records whose status
+ * column reads the same field. A state no List names is neutral (null).
+ */
+function compositionStatusRole(
+  context: SurfaceComponentContext,
+  record: SemanticRecordDto,
+): string | null {
+  const header = context.surface.composition?.presentation?.header;
+  const field = context.surface.composition?.fields.find(
+    (column) => column.columnId === header?.status,
+  )?.field;
+  if (!field) return null;
+  let entityId: string;
+  try {
+    entityId = surfaceEntityId(context);
+  } catch {
+    return null;
+  }
+  const raw = record.values[field];
+  for (const surface of context.surfaces ?? []) {
+    if (!surface.list) continue;
+    let same = false;
+    try {
+      same = surfaceSourceEntityId(context.view, surface) === entityId;
+    } catch {
+      same = false;
+    }
+    if (!same) continue;
+    const role = surface.list.columns
+      .find((column) => column.role === 'status' && column.field === field)
+      ?.statusRoles?.find((entry) => entry.value === raw)?.role;
+    if (role) return role;
+  }
+  return null;
 }
 
 function renderArchiveToggle(context: SurfaceComponentContext): string {
