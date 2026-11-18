@@ -77,7 +77,12 @@ import {
 } from '../../runtime/src/list-behavior/index.js';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 
-import { withTrustedRequestTransaction } from './request-context.js';
+import {
+  withTrustedRequestRead,
+  withTrustedRequestTransaction,
+  type ReadSnapshotHandle,
+  type SnapshotRoleSwitch,
+} from './request-context.js';
 import { PostgresTrustService } from './trust/postgres-trust-service.js';
 import type { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
 
@@ -298,20 +303,71 @@ export class PostgresModuleRuntimeInterpreter
       SemanticAggregateQueryExecutionRequest | SemanticQueryExecutionRequest,
   ): Promise<SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope> {
     try {
-      return await withTrustedRequestTransaction(
+      // A company-scoped aggregate keeps a cached anchor (an advisory lock
+      // and an insert), so it is no pure read: it never joins a page's read
+      // snapshot and runs in its own transaction, as before (SPEED-1).
+      if (request.definition.queryType === 'aggregate')
+        return await withTrustedRequestTransaction(
+          this.pool,
+          request.context,
+          async (client) => {
+            const storage = await this.#loadPinnedStorageTarget(
+              client,
+              request,
+            );
+            return withModuleRuntimeRole(client, () =>
+              executeQueryOnClient(
+                client,
+                storage,
+                request,
+                this.observeAggregateCache,
+              ),
+            );
+          },
+        );
+      // The pinned storage target is read as the runtime login role (release
+      // artifacts); alone, the read then switches to the module role itself.
+      const loaded = await withTrustedRequestRead(
         this.pool,
         request.context,
-        async (client) => {
+        async (client, snapshot) => {
           const storage = await this.#loadPinnedStorageTarget(client, request);
-          return withModuleRuntimeRole(client, () =>
+          if (snapshot) return { storage };
+          return {
+            result: await withModuleRuntimeRole(client, () =>
+              executeQueryOnClient(
+                client,
+                storage,
+                request,
+                this.observeAggregateCache,
+              ),
+            ),
+          };
+        },
+      );
+      if ('result' in loaded) return loaded.result;
+      // In a page's read snapshot the read runs as the module role the
+      // snapshot holds (verified once per snapshot), and an identical read --
+      // the same query, arguments, plans and company scope on the same
+      // release -- runs once: the snapshot cannot change between the two.
+      return await withTrustedRequestRead(
+        this.pool,
+        request.context,
+        async (client, snapshot) => {
+          const execute = () =>
             executeQueryOnClient(
               client,
-              storage,
+              loaded.storage,
               request,
               this.observeAggregateCache,
-            ),
-          );
+              snapshot,
+            );
+          // The snapshot finished in between: a read of its own, as alone.
+          if (!snapshot) return withModuleRuntimeRole(client, execute);
+          const key = identicalReadKey(request);
+          return key === null ? execute() : snapshot.memo(key, execute);
         },
+        MODULE_RUNTIME_READ_ROLE,
       );
     } catch (error) {
       throw providerBoundaryFailure(
@@ -1318,6 +1374,30 @@ async function assertRestorableRelations(
   }
 }
 
+/**
+ * Everything an executed read depends on besides the snapshot itself, or null
+ * when some part does not serialize (then the read is never shared).
+ */
+function identicalReadKey(
+  request:
+    SemanticAggregateQueryExecutionRequest | SemanticQueryExecutionRequest,
+): string | null {
+  try {
+    return `module-read:${JSON.stringify([
+      request.view.release.releaseId,
+      request.view.release.contentHash,
+      request.definition.queryId,
+      request.arguments,
+      request.parameterValues,
+      request.filterPlans,
+      request.list,
+      request.legalEntityReadScope?.legalEntityIds ?? null,
+    ])}`;
+  } catch {
+    return null;
+  }
+}
+
 async function executeQueryOnClient(
   client: PoolClient,
   storage: StorageTargetPayloadV1,
@@ -1325,6 +1405,7 @@ async function executeQueryOnClient(
     SemanticAggregateQueryExecutionRequest | SemanticQueryExecutionRequest,
   observeAggregateCache:
     ((observation: AggregateCacheObservation) => void) | undefined,
+  snapshot: ReadSnapshotHandle | null = null,
 ): Promise<SemanticAggregateResultEnvelope | SemanticQueryResultEnvelope> {
   const { arguments: argumentValue, definition, filterPlans, list } = request;
   const entity = requiredEntity(storage, definition.sourceEntityId);
@@ -1358,6 +1439,7 @@ async function executeQueryOnClient(
       : null;
   const readScope = await verifyLegalEntityReadScope(
     client,
+    snapshot,
     storage,
     request.legalEntityReadScope,
     [
@@ -3897,17 +3979,6 @@ async function listSharedRecords(
     predicates,
   );
   const whereSql = predicates.length > 0 ? predicates.join(' AND ') : 'true';
-  const count = await client.query<{ total_count: string }>(
-    `SELECT count(*)::text AS total_count ${fromSql} WHERE ${whereSql}`,
-    values,
-  );
-  const totalCount = Number(count.rows[0]?.total_count ?? '0');
-  if (!Number.isSafeInteger(totalCount) || totalCount < 0) {
-    throw failure(
-      'MODULE_LIST_RESULT_INVALID',
-      'list count is not a non-negative safe integer',
-    );
-  }
   const pageValues = [...values];
   const limitSql = parameter(pageValues, list.query.effectivePageSize + 1);
   const offsetSql = parameter(pageValues, list.query.pageOffset);
@@ -3926,6 +3997,26 @@ async function listSharedRecords(
     pageValues,
   );
   const hasMore = rows.rows.length > list.query.effectivePageSize;
+  // The first page holding every row (same FROM and WHERE) is its own count;
+  // any other page asks the database (SPEED-1: one statement, not two, for
+  // every short list on a page).
+  const totalCount =
+    list.query.pageOffset === 0 && !hasMore
+      ? rows.rows.length
+      : Number(
+          (
+            await client.query<{ total_count: string }>(
+              `SELECT count(*)::text AS total_count ${fromSql} WHERE ${whereSql}`,
+              values,
+            )
+          ).rows[0]?.total_count ?? '0',
+        );
+  if (!Number.isSafeInteger(totalCount) || totalCount < 0) {
+    throw failure(
+      'MODULE_LIST_RESULT_INVALID',
+      'list count is not a non-negative safe integer',
+    );
+  }
   const pageRows = rows.rows.slice(0, list.query.effectivePageSize);
   const records = pageRows.map((row) =>
     toListDto(
@@ -5340,6 +5431,45 @@ function decodeCanonical(bytes: Uint8Array): Record<string, unknown> {
   }
 }
 
+/**
+ * The module role as a page's read snapshot assumes it (SPEED-1): the same
+ * statements and the same role-fact checks as `withModuleRuntimeRole`, the
+ * checks run the first time each direction is taken in a snapshot. The
+ * snapshot's opening envelope has already verified the runtime login role.
+ */
+export const MODULE_RUNTIME_READ_ROLE: SnapshotRoleSwitch = Object.freeze({
+  async assume(client: PoolClient, verify: boolean) {
+    await client.query('SET LOCAL ROLE north_star_module_runtime');
+    if (!verify) return;
+    const assumed = await roleFacts(client);
+    if (
+      assumed.currentRole !== 'north_star_module_runtime' ||
+      assumed.sessionRole !== 'north_star_runtime' ||
+      assumed.superuser ||
+      assumed.bypassRls
+    ) {
+      throw failure(
+        'MODULE_ROLE_ASSUMPTION_INVALID',
+        'module DML role assumption violated least privilege',
+      );
+    }
+  },
+  async restore(client: PoolClient, verify: boolean) {
+    await client.query('RESET ROLE');
+    if (!verify) return;
+    const reset = await roleFacts(client);
+    if (
+      reset.currentRole !== 'north_star_runtime' ||
+      reset.sessionRole !== 'north_star_runtime'
+    ) {
+      throw failure(
+        'MODULE_ROLE_RESET_FAILED',
+        'trusted runtime role was not restored before evidence writes',
+      );
+    }
+  },
+});
+
 export async function withModuleRuntimeRole<T>(
   client: PoolClient,
   run: () => Promise<T>,
@@ -5882,6 +6012,7 @@ export function legalEntityReadScopeRequirement(
 
 async function verifyLegalEntityReadScope(
   client: PoolClient,
+  snapshot: ReadSnapshotHandle | null,
   storage: StorageTargetPayloadV1,
   value: LegalEntityReadScope | null,
   readEntities: readonly StorageEntity[],
@@ -5919,12 +6050,21 @@ async function verifyLegalEntityReadScope(
   safeIdentifier(master.physicalTableName);
   safeIdentifier(master.recordIdentity.column);
 
-  const result = await client.query<{ legal_entity_id: string }>(
-    `SELECT ${quoted(master.recordIdentity.column)}::text AS legal_entity_id
+  const readMaster = () =>
+    client.query<{ legal_entity_id: string }>(
+      `SELECT ${quoted(master.recordIdentity.column)}::text AS legal_entity_id
        FROM north_star_module.${quoted(master.physicalTableName)}
       WHERE ${quoted(master.recordIdentity.column)} = ANY($1::uuid[])`,
-    [[...legalEntityIds]],
-  );
+      [[...legalEntityIds]],
+    );
+  // Within one read snapshot the companies' existence cannot change: one
+  // check serves every read of the page (SPEED-1).
+  const result = snapshot
+    ? await snapshot.memo(
+        `legal-entity-master:${master.physicalTableName}:${legalEntityIds.join(',')}`,
+        readMaster,
+      )
+    : await readMaster();
   const existingIds = new Set(
     result.rows.map((row) =>
       requiredUuid(row.legal_entity_id, 'legalEntityId'),

@@ -180,7 +180,11 @@ export async function startComposedApplication(
       runtime.identityMode === 'LOCAL_DEMO' ? customize : undefined,
       // Loopback-only dev and test server: each response reports its
       // database work as `Server-Timing` (SPEED-1).
-      { requestWork: createRequestWorkProbe() },
+      {
+        readSnapshot: (work, snapshotOptions) =>
+          runtime.readSnapshot(work, snapshotOptions),
+        requestWork: createRequestWorkProbe(),
+      },
     );
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
