@@ -31,7 +31,7 @@ Run `node --import tsx --test --test-name-pattern="field-only chain|release-boun
 ```record-claim
 {
   "schemaVersion":"northstar.record-claim/v1","packet":"CRITFIX-C",
-  "base":"81ba7405e7512a806882f9ea3cff51af8c7115d9","head":"a78ad2ae8499271acc7037ecbe66dcd54aa0c848",
+  "base":"81ba7405e7512a806882f9ea3cff51af8c7115d9","head":"f85420f138e03a2b5a5d11b48fb10ecc7a1be9ef",
   "changedPaths":[
     "apps/api/src/composition-root.ts", "apps/web/src/customize-screen.ts", "db/migrations/0036_verified_release_history.sql", "db/schema.snapshot.json", "packages/customization/src/sandbox-worker.ts",
     "packages/customization/src/sandbox.ts", "packages/postgres-provider/src/active-release-root.ts", "packages/postgres-provider/src/composed-application-runtime.ts", "packages/postgres-provider/src/customization-lineage.ts", "packages/postgres-provider/src/customization-service.ts",
