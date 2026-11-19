@@ -11,6 +11,7 @@ import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behav
 import { trustedContextForRequestRuntimeView } from '../../packages/runtime/src/request-runtime-view.js';
 import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { COMPANY, worldOver } from '../agent/agent-world.js';
+import { recordedPatch } from '../helpers/customization-patch-record.js';
 import {
   LINEAGE_INSTALL_VOLUME,
   withEphemeralPostgres,
