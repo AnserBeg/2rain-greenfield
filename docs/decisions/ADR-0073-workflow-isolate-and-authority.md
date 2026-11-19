@@ -12,7 +12,8 @@ of human authority, verified code, or the scope of a source event.
 
 Until sign-in exists, the platform trusts the application runtime's principal
 assertion and the runtime's existing writes of release approvals and activation
-verification receipts under 0004. Customize approval uses this same mechanism.
+verification receipts under the release activation contracts introduced in 0004.
+Customize approval uses this same mechanism.
 `PostgresCustomizationService.approve` obtains the trusted approver context and
 calls the normal release helpers, which use
 `PostgresReleaseApprovalService.createApproval`. The release activation service
@@ -21,7 +22,8 @@ writes the verification receipt under the same trusted request context.
 [Release approval helper](../../packages/postgres-provider/src/composed-application-runtime.ts#L3011) ·
 [Principal assertion](../../packages/postgres-provider/src/request-context.ts#L611) ·
 [Verification receipt](../../packages/postgres-provider/src/release-activation-service.ts#L427) ·
-[0004 runtime grants](../../db/migrations/0004_release_activation_contracts.sql#L1112)
+[0004 approval grant](../../db/migrations/0004_release_activation_contracts.sql#L1112) ·
+[0005 verification receipt grant](../../db/migrations/0005_release_activation_kernel.sql#L1025)
 
 - **I1.** A Tier B or unknown-dependency write requires a human decision bound
   to the exact plan and execution fence.
