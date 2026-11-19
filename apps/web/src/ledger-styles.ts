@@ -72,7 +72,7 @@ th,td,dd,output,.cell-numeric,code{font-variant-numeric:tabular-nums}
 .sidebar-scroll{flex:1;min-height:0;display:flex;flex-direction:column;gap:8px;overflow-y:auto;margin:0 -4px;padding:0 4px}
 .sidebar .workspace-context-bar{display:flex;flex:none;align-items:flex-start;gap:9px;padding:6px 6px 10px;border-bottom:1px solid var(--rule)}
 .sidebar .workspace-context-bar__options{display:grid;flex:1;min-width:0;gap:2px;overflow:visible}
-.sidebar .workspace-company{display:block;min-height:0;padding:0;border:0;color:var(--muted);font-size:12px;font-weight:400;line-height:1.3}
+.sidebar .workspace-company{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:0;padding:0;border:0;color:var(--muted);font-size:12px;font-weight:400;line-height:1.3}
 .sidebar .workspace-company[aria-current=true]{color:var(--ink);font-size:13px;font-weight:600}
 .sidebar .workspace-company:hover{background:transparent;color:var(--ink);text-decoration:underline}
 /* The account menu: who is signed in, the demo's person switch and the
@@ -91,7 +91,7 @@ th,td,dd,output,.cell-numeric,code{font-variant-numeric:tabular-nums}
 .side-foot__who strong{font-weight:500}
 .side-foot__who small{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .workspace{min-width:0;display:flex;flex-direction:column}
-.topbar{position:relative;display:flex;align-items:center;gap:12px;min-height:48px;padding:6px var(--gutter);border-bottom:1px solid var(--rule);background:var(--paper);color:var(--muted);font-size:12px}
+.topbar{position:relative;display:flex;align-items:center;gap:12px;min-height:48px;padding:6px max(var(--gutter),calc((100% - var(--page-max)) / 2 + var(--gutter)));border-bottom:1px solid var(--rule);background:var(--paper);color:var(--muted);font-size:12px}
 .topbar__context{display:none;color:var(--ink);font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .shell-menu{display:none}
 .shell-menu>summary{display:grid;place-items:center;width:32px;height:32px;border-radius:4px;color:var(--ink-2);cursor:pointer;list-style:none}
@@ -120,7 +120,7 @@ th,td,dd,output,.cell-numeric,code{font-variant-numeric:tabular-nums}
 .workspace-context-bar__options{display:flex;min-width:0;gap:4px;overflow-x:auto}
 .workspace-context-bar__options .secondary-action{flex:none;min-height:26px;height:26px;padding:0 10px;font-size:12px}
 .workspace-context-bar__options .secondary-action[aria-current=true]{border-color:var(--rule-2);background:var(--sheet);color:var(--ink)}
-main{width:100%;max-width:var(--page-max);padding:var(--gap) var(--gutter) 56px}
+main{width:100%;max-width:var(--page-max);margin-inline:auto;padding:var(--gap) var(--gutter) 56px}
 
 /* ---------- page heading ---------- */
 .surface-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px}
@@ -203,6 +203,8 @@ button:disabled{opacity:.55;cursor:not-allowed}
 .data-table-wrap td:has(.cell-numeric),.data-table-wrap [data-cell-kind=number]{text-align:right}
 .record-link{color:var(--accent-text);font-weight:500}
 .data-table-wrap td[data-column-priority="0"] .record-link{white-space:nowrap}
+.data-panel>.data-table-wrap :is(th,td):first-child{padding-inline-start:var(--pad-x)}
+.data-panel>.data-table-wrap :is(th,td):last-child{padding-inline-end:var(--pad-x)}
 .data-panel>.data-table-wrap,.composition-collection>.data-table-wrap{margin:12px calc(-1 * var(--pad-x)) calc(-1 * (var(--row-y) + 8px));border-top:1px solid var(--rule)}
 
 /* ---------- lists ---------- */
@@ -223,6 +225,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
 /* Declared Lists (LOOK-1 round 3): the page names the List once; the count
    is plain; the toolbar is one line; zeros are faint; a status that is the
    normal outcome reads as text, so only exceptions are badges. */
+[data-declared-list]>.panel__heading>div:first-child:has(>h2:only-child){position:absolute}
 [data-declared-list]>.panel__heading h2{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
 .list-count{color:var(--muted);font-size:12px}
 td[data-zero]{color:var(--faint)}
@@ -415,9 +418,9 @@ html:has([data-save-boundary]){scroll-padding-bottom:120px}
 .composition-totals__currency{color:var(--muted);font-size:11px;font-weight:500}
 .composition-totals dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
 .composition-totals div:last-child{margin-top:4px;padding:8px 0 3px;border-top:1px solid var(--ink);border-bottom:3px double var(--ink);font-weight:600;font-size:14px}
-.line-progress{display:inline-flex;align-items:center;gap:10px;white-space:nowrap;color:var(--muted)}
+.line-progress{display:inline;white-space:nowrap;color:var(--muted)}
 .line-progress b{color:var(--ink);font-weight:600}
-.line-progress progress{-webkit-appearance:none;appearance:none;width:44px;height:3px;border:0;border-radius:2px;background:var(--rule);overflow:hidden}
+.line-progress progress{vertical-align:middle;margin-inline-end:10px;-webkit-appearance:none;appearance:none;width:44px;height:3px;border:0;border-radius:2px;background:var(--rule);overflow:hidden}
 .line-progress progress::-webkit-progress-bar{background:var(--rule);border-radius:2px}
 .line-progress progress::-webkit-progress-value{background:var(--accent);border-radius:2px}
 .line-progress progress::-moz-progress-bar{background:var(--accent)}
@@ -469,7 +472,15 @@ html:has([data-save-boundary]){scroll-padding-bottom:120px}
 .composition-title{grid-column:1/-1}
 /* The record's other commands sit at the header's right (spec: secondary
    actions beside the title, never the primary); opened, they drop down. */
-.composition-record-actions{position:relative;grid-column:1/-1;order:-2;justify-self:end;align-self:end;margin-top:calc(-1 * var(--gap) - var(--ctl-h) - 2px);z-index:4}
+.surface-grid:has(.composition-title):has(.composition-record-actions){grid-template-rows:[breadcrumb] auto [title] auto}
+.surface-grid:has(.composition-record-actions) .composition-title{grid-row:title;padding-inline-end:calc(var(--ctl-h) + var(--gap))}
+.surface-grid:has(.composition-record-actions) .record-breadcrumb{grid-row:breadcrumb}
+.composition-record-actions{position:relative;grid-row:title;grid-column:1/-1;order:-2;justify-self:end;align-self:start;z-index:4}
+/* Generic records place their declared secondary commands in the title row too. */
+.surface-grid:has(.record-section-group):has(.command-bar-slot>.command-bar>.action-overflow){grid-template-rows:[breadcrumb] auto [title] auto}
+.surface-grid:has(.record-section-group):has(.command-bar-slot>.command-bar>.action-overflow) .surface-heading--slot{grid-row:title;grid-column:1/8;margin-bottom:0;align-self:start}
+.surface-grid:has(.record-section-group) .command-bar-slot>.command-bar:has(>.action-overflow){grid-row:title;grid-column:8/-1;justify-content:flex-end;align-self:start}
+.surface-grid:has(.record-section-group) .command-bar>.action-overflow{margin-left:0}
 .composition-record-actions>summary{display:inline-flex;align-items:center;min-height:var(--ctl-h);padding:0 12px;border:1px solid var(--rule-2);border-radius:4px;background:var(--sheet);color:var(--ink);font-size:13px;font-weight:500;cursor:pointer;list-style:none}
 .composition-record-actions>summary::-webkit-details-marker{display:none}
 .composition-record-actions>summary{min-width:var(--ctl-h);justify-content:center;letter-spacing:.08em}
@@ -487,13 +498,14 @@ html:has([data-save-boundary]){scroll-padding-bottom:120px}
 .composition-collection td[data-cell-role=primary] strong{font-weight:500}
 .composition-cell-secondary{display:flex;gap:6px;flex-wrap:wrap;margin-top:2px;color:var(--muted);font-size:11px;font-weight:400}
 .composition-cell-secondary>span{display:block}
-.composition-quantity,.composition-collection td[data-cell-role=quantity]{text-align:right;font-variant-numeric:tabular-nums}
+.composition-progress-heading,.composition-collection td[data-cell-role=progress],.composition-quantity,.composition-collection td[data-cell-role=quantity]{text-align:right;font-variant-numeric:tabular-nums}
 .composition-description{color:var(--muted);margin:6px 0}
 .composition-collection td[data-cell-role=actions]{text-align:right}
 .composition-collection td[data-cell-role=actions] a,.composition-collection summary{display:inline-flex;align-items:center;min-height:26px}
 .composition-collection td[data-cell-role=actions] a+a,.composition-collection td[data-cell-role=actions] form+a,.composition-collection td[data-cell-role=actions] a+form{margin-left:10px}
 .composition-collection td[data-cell-role=actions] form{display:inline-flex}
 .composition-collection td[data-cell-role=actions] button,.composition-collection td[data-cell-role=actions] a.button{min-height:calc(var(--ctl-h) - 6px);padding:0 9px;font-size:12px}
+.composition-collection:has(>.composition-totals)>.data-table-wrap{margin-bottom:0}
 .composition-collection tr[data-selected=true] td{background:var(--accent-soft)}
 .composition-collection[data-resolution=empty],.composition-collection[data-resolution=failed],.data-panel[data-composition-dataset][data-resolution=empty]{display:grid;grid-template-columns:minmax(10rem,auto) minmax(0,1fr);align-items:baseline;gap:4px 16px}
 .composition-collection[data-resolution=empty] [data-message],.data-panel[data-composition-dataset][data-resolution=empty] [data-message]{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;color:var(--muted);font-size:12px}
@@ -538,7 +550,7 @@ td[data-cell-role=actions] a:not([class]){color:var(--muted);font-size:12px}
 .surface-grid:has(.composition-rail) .composition-rail{grid-column:2;grid-row:span 12}
 /* Beside the rail the sheet is narrower: its tables keep every column in
    view with tighter cells and headers that may wrap. */
-.surface-grid:has(.composition-rail) .composition-collection .data-table-wrap :is(th,td){padding-inline:8px}
+.surface-grid:has(.composition-rail) .composition-collection .data-table-wrap :is(th,td):not(:first-child):not(:last-child){padding-inline:8px}
 .surface-grid:has(.composition-rail) .composition-collection .data-table-wrap th{white-space:normal}
 }
 /* A form's other fields wait behind More details; the summary names them
@@ -568,7 +580,8 @@ td[data-cell-role=actions] a:not([class]){color:var(--muted);font-size:12px}
 [data-composition-rail] td:first-child{grid-column:1/-1;font-family:var(--f-mono);font-size:12px;color:var(--accent-text)}
 [data-composition-rail] td:not(:first-child)::before{content:attr(data-column-label) " ";color:var(--muted)}
 [data-composition-rail] td[data-cell-role=actions]::before{content:none}
-[data-composition-rail][data-resolution=empty]{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.composition-rail>[data-composition-rail][data-resolution=empty]{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:baseline;gap:10px}
+.composition-rail>[data-composition-rail][data-resolution=empty]>:last-child{justify-self:end}
 /* An empty section is one quiet line beside its heading. */
 .composition-collection[data-resolution=empty] :is([data-message-detail],[data-message-next-action]),.data-panel[data-composition-dataset][data-resolution=empty] :is([data-message-detail],[data-message-next-action]){display:none}
 /* Identity and revision stay reachable, out of the reading path. */
@@ -655,6 +668,8 @@ td[data-cell-role=actions] a:not([class]){color:var(--muted);font-size:12px}
 .composition-task-rows th,.composition-task-rows-review th{padding:8px 8px 6px;border-bottom:1px solid var(--rule);color:var(--muted);font-size:11px;font-weight:500;text-align:left}
 .composition-task-rows td,.composition-task-rows-review td{padding:6px 8px;border-bottom:1px solid var(--rule)}
 .composition-task-rows td input{min-width:6rem}
+.composition-task-rows th.composition-quantity,.composition-task-rows td[data-cell-role=quantity],.draft-lines [data-cell-kind=number],.draft-lines [data-cell-kind=number] input,.composition-task-rows [data-cell-kind=number],.composition-task-rows input[inputmode=decimal]{text-align:right}
+.draft-lines :is(td,th):first-child,.composition-task-rows :is(td,th):first-child{padding-inline-start:0}
 .composition-task-rows-review caption{padding:6px 0;text-align:left;font-weight:600}
 
 /* ---------- print ---------- */
@@ -705,8 +720,8 @@ td[data-cell-role=actions] a:not([class]){color:var(--muted);font-size:12px}
 .shell-menu{display:block;position:fixed;z-index:61;top:8px;left:max(10px,env(safe-area-inset-left,0px));visibility:visible}
 body:has(.shell-menu[open]) .sidebar{visibility:visible}
 .app-shell:has(.shell-menu[open])::after{content:"";position:fixed;inset:48px 0 0;z-index:55;background:var(--scrim)}
-.topbar{position:sticky;top:0;z-index:58;min-height:48px;height:auto;gap:10px;flex-wrap:wrap;padding:6px max(16px,env(safe-area-inset-right,0px)) 6px 56px}
-.topbar__context{display:block;flex:1}
+.topbar{position:sticky;top:0;z-index:58;min-height:48px;height:auto;gap:10px;flex-wrap:wrap;padding:6px max(16px,env(safe-area-inset-right,0px)) 6px max(16px,env(safe-area-inset-left,0px))}
+.topbar__context{display:block;flex:1;padding-left:40px}
 .shell-search{order:3;flex-basis:100%;margin:0}
 .shell-search label{width:100%}
 .principal{margin-left:0}
@@ -783,8 +798,6 @@ table.draft-lines.form-fields{border-top:0}
 .composition-heading{gap:8px}
 .composition-header-facts{font-size:12px}
 .composition-context nav{gap:8px}
-.composition-record-actions{justify-self:start;margin-top:0}
-.composition-record-actions[open]>.command-bar{left:0;right:auto}
 .composition-progression-steps{grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:3px;padding-bottom:6px}
 .composition-progression-steps>li{grid-template-columns:1fr}
 .composition-progression-steps>li>div{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
@@ -818,5 +831,17 @@ table.draft-lines.form-fields{border-top:0}
 .data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td[data-cell-role=quantity],.data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td[data-cell-kind=number]{text-align:right}
 .data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td{white-space:nowrap}
 .data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td::before{display:none}
+/* The labelled card uses the same inset as the section that introduces it. */
+.composition-collection:not([data-composition-rail]) tr[data-presented-row=true],.draft-line,.composition-task-rows tr[data-task-row]{padding-inline:0;border-inline:0;border-radius:0}
+.composition-collection tr[data-presented-row=true] td:is([data-cell-role=quantity],[data-cell-role=progress]){align-items:flex-end;text-align:right}
+.composition-collection tr[data-presented-row=true] td[data-cell-role=actions]{order:1}
+.data-panel>.data-table-wrap[data-compact=scrollTable]{margin-inline:calc(-1 * var(--pad-x));max-width:calc(100% + 2 * var(--pad-x))}
+.data-panel>.data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td:first-child{padding-inline-start:var(--pad-x)}
+.data-panel>.data-table-wrap[data-compact=scrollTable] tr[data-compact-card=true] td:last-child{padding-inline-end:var(--pad-x)}
+.composition-task-rows .data-table-wrap tr[data-task-row] :is(td[data-cell-role=quantity],td[data-cell-kind=number]){text-align:right}
+.data-panel>.data-table-wrap:not([data-compact=scrollTable]) tr[data-compact-card=true] :is(td:first-child,td:last-child){padding-inline:0}
+[data-declared-list]>.data-table-wrap:not([data-compact=scrollTable]) tr[data-compact-card=true]{padding-inline:0;border-inline:0}
+.draft-lines td[data-cell-kind=number]::before{text-align:right}
+
 }
 `;

@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { scriptedModel } from '../../../../packages/operations-agent/src/index.js';
 import { startComposedApplication } from '../../../api/src/composition-root.js';
 import {
   LINEAGE_INSTALL_VOLUME,
@@ -17,9 +18,9 @@ import {
 } from './loop-scorecard.js';
 
 /**
- * LOOK-1's proof: the seven screens of the Ledger mockup
+ * The Ledger screens from the LOOK-1 mockup
  * (`docs/design/ledger-final.html`) rendered by the generator from the
- * distributor seed -- Today, a purchase order with its next step, the receive
+ * distributor seed -- Today, the PO list, a purchase order and its next step, the receive
  * dialog, stock by item, a sales order, a record type a tenant adds through
  * Customize (Equipment: draft, approve, activate, then one record's page) and
  * the new purchase order form -- each at 1440 and 390 wide, light and dark.
@@ -29,6 +30,7 @@ import {
  */
 const SCREENS = [
   'home',
+  'po-list',
   'po',
   'receive',
   'stock',
@@ -43,7 +45,7 @@ const VIEWPORTS = [
   { width: 390, height: 844 },
 ] as const;
 
-test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone, light and dark', async ({
+test('the Ledger pages share their content edges and gutters on desktop and phone in both themes', async ({
   page,
 }, testInfo) => {
   test.setTimeout(1_500_000);
@@ -58,6 +60,10 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
         databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
         port: 0,
         seedProfile: 'distributor',
+        assistantModel: async () =>
+          scriptedModel([
+            () => ({ text: 'This purchase order is ready to receive.' }),
+          ]),
         tenantSlug: 'look-browser',
       });
       try {
@@ -91,6 +97,7 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
 
         const urls: Readonly<Record<Screen, string>> = {
           home: `${base}/`,
+          'po-list': await menuDestination(page, base, 'Purchase orders'),
           po: purchaseOrder,
           receive: purchaseOrder,
           stock: await menuDestination(page, base, 'Stock by item'),
@@ -99,6 +106,11 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
           'new-po': await newPurchaseOrder(page, base),
         };
 
+        for (const width of [1280, 1920]) {
+          await page.setViewportSize({ width, height: 900 });
+          await page.goto(purchaseOrder);
+          await requireAlignment(page, 'po');
+        }
         for (const scheme of ['light', 'dark'] as const)
           for (const viewport of VIEWPORTS) {
             await page.emulateMedia({ colorScheme: scheme });
@@ -149,7 +161,35 @@ test('LOOK-1: the seven mockup screens render in the Ledger look, wide and phone
                   path: `${out}/app-${screen}-${String(viewport.width)}-${scheme}-end.png`,
                 });
               }
+              if (screen === 'po') {
+                const panel = page.locator('[data-assistant-panel]');
+                await page
+                  .getByRole('button', { name: 'Assistant', exact: true })
+                  .click();
+                await panel
+                  .getByRole('button', { name: 'New conversation' })
+                  .click();
+                await panel
+                  .locator('textarea')
+                  .fill('What is the next step on this purchase order?');
+                await panel.getByRole('button', { name: 'Send' }).click();
+                await expect(
+                  panel.locator('[data-assistant-reply]'),
+                ).toHaveText('This purchase order is ready to receive.');
+                mkdirSync(resolve(out, 'panel-2'), { recursive: true });
+                await page.screenshot({
+                  path: resolve(
+                    out,
+                    'panel-2',
+                    `po-detail-${String(viewport.width)}-${scheme}.png`,
+                  ),
+                });
+                await panel
+                  .getByRole('button', { name: 'Close the assistant' })
+                  .click();
+              }
               await requireLedgerParts(page, screen, viewport.width);
+              if (scheme === 'light') await requireAlignment(page, screen);
               const text = await page.locator('body').innerText();
               // The order date is a date (round 2): no "(UTC)" anywhere.
               expect.soft(rawCodes(text), `${screen} raw codes`).toEqual([]);
@@ -200,6 +240,7 @@ async function requireLedgerParts(
   const parts: Readonly<Record<Screen, readonly string[]>> = {
     // Searched from the top bar (round 3): no find box of its own.
     home: ['.launcher-tiles .launcher-tile', '.shell-search input'],
+    'po-list': ['[data-declared-list]', '.list-controls'],
     po: [
       '.composition-header h1',
       '.composition-business-status',
@@ -228,6 +269,239 @@ async function requireLedgerParts(
     await expect
       .soft(page.locator(selector).first(), `${screen} shows ${selector}`)
       .toBeAttached();
+}
+
+/** Measure the painted text and controls as well as their enclosing sheets. */
+async function requireAlignment(page: Page, screen: Screen): Promise<void> {
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+  const errors = await page.evaluate((screen) => {
+    const failures: string[] = [];
+    function near(name: string, actual: number, expected: number) {
+      if (Math.abs(actual - expected) > 1)
+        failures.push(`${name}: ${actual} vs ${expected}`);
+    }
+    function el(selector: string): HTMLElement {
+      const found = document.querySelector<HTMLElement>(selector);
+      if (!found) throw new Error(`${screen} missing ${selector}`);
+      return found;
+    }
+    const rect = (selector: string) => el(selector).getBoundingClientRect();
+    function ink(node: Element) {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      return range.getBoundingClientRect();
+    }
+    const grid = rect('main .surface-grid');
+    const area = rect('.workspace');
+    const wide = innerWidth > 900;
+    near('equal page gutters', grid.left - area.left, area.right - grid.right);
+    near('top bar search', rect('.shell-search').left, grid.left);
+    near('top bar account', rect('.shell-account').right, grid.right);
+    near('title', rect('main h1').left, grid.left);
+    const sheet = (selector: string) => {
+      const box = rect(selector);
+      near(selector + ' left', box.left, grid.left);
+      near(selector + ' right', box.right, grid.right);
+    };
+    if (screen === 'home') sheet('.launcher-tiles ul');
+    if (screen === 'stock' || screen === 'po-list') {
+      sheet('[data-declared-list]');
+      const firstCell = el('[data-declared-list] tbody td');
+      const cards =
+        getComputedStyle(el('[data-declared-list] thead')).position ===
+        'absolute';
+      near(
+        'search and first column',
+        rect('.list-controls input[type=search]').left,
+        cards ? firstCell.getBoundingClientRect().left : ink(firstCell).left,
+      );
+    }
+    if (['po', 'so', 'new-po', 'record', 'receive'].includes(screen)) {
+      near('breadcrumb', rect('.record-breadcrumb').left, grid.left);
+      near(
+        'eyebrow',
+        rect('main :is(.surface-heading--slot,.composition-title) .eyebrow')
+          .left,
+        grid.left,
+      );
+    }
+    if (screen === 'new-po') {
+      for (const selector of [
+        '.panel:has([data-document-editor])',
+        '.draft-lines-panel',
+        '.panel:has([data-save-boundary])',
+      ])
+        sheet(selector);
+      near(
+        'form inset',
+        rect('[data-document-editor] legend').left,
+        rect('.draft-lines-panel h2').left,
+      );
+      near(
+        'first form cell',
+        rect('.draft-line .reference-search input').left,
+        rect('.draft-lines-panel h2').left,
+      );
+      const draft = el('[data-document-editor] .draft-header');
+      const columns =
+        getComputedStyle(draft).gridTemplateColumns.split(' ').length;
+      const fields = [
+        ...draft.querySelectorAll(
+          ':scope > .form-field:not(.form-field--wide)',
+        ),
+      ];
+      for (const [i, field] of fields.entries()) {
+        const reference = fields[i % columns]!.getBoundingClientRect();
+        const box = field.getBoundingClientRect();
+        near('field column left', box.left, reference.left);
+        near('field column right', box.right, reference.right);
+      }
+    }
+    if (screen === 'record') {
+      sheet('.panel:has(.record-section-group)');
+      near(
+        'record command edge',
+        rect('.command-bar-slot .action-overflow summary').right,
+        grid.right,
+      );
+      near(
+        'commands at the eyebrow',
+        rect('.command-bar-slot > .command-bar').top,
+        rect('.surface-heading .eyebrow').top,
+      );
+      near(
+        'record facts and section',
+        rect('.record-section-group h2').left,
+        rect('.record-section-group .record-fields dt').left,
+      );
+    }
+    if (['po', 'so', 'receive'].includes(screen)) {
+      sheet('.composition-progression');
+      const facts = rect('.composition-facts');
+      const rail = rect('.composition-rail');
+      const lines = el('.composition-collection:has(.line-progress)');
+      const lineRow = lines.querySelector('tbody tr')!;
+      const firstCell = lineRow.querySelector(
+        wide ? 'td' : 'td[data-cell-role=primary]',
+      )!;
+      const first = ink(firstCell.querySelector('strong') ?? firstCell);
+      near('sheet left', facts.left, grid.left);
+      near('joined sheets', lines.getBoundingClientRect().right, facts.right);
+      near('rail right', rail.right, grid.right);
+      if (!wide) near('stacked rail left', rail.left, grid.left);
+      near(
+        'facts and section',
+        rect('.composition-header-facts dt').left,
+        lines.querySelector('h2')!.getBoundingClientRect().left,
+      );
+      near(
+        'facts and first cell',
+        rect('.composition-header-facts dt').left,
+        first.left,
+      );
+      near(
+        'details inset',
+        rect('[data-composition-fields] h2').left,
+        first.left,
+      );
+      if (screen !== 'receive') {
+        near(
+          'header menu at eyebrow',
+          rect('.composition-record-actions > summary').top,
+          rect('.composition-title .eyebrow').top,
+        );
+        near(
+          'header menu right',
+          rect('.composition-record-actions > summary').right,
+          grid.right,
+        );
+      }
+      const row = document.querySelector(
+        '.composition-rail [data-resolution=empty]',
+      );
+      if (row) {
+        const label = row.querySelector('h2')!.getBoundingClientRect();
+        const pill = row
+          .querySelector(
+            '[data-message-sentence], .composition-message strong',
+          )!
+          .getBoundingClientRect();
+        near('rail insets', label.left - rail.left, rail.right - pill.right);
+      }
+      if (wide) {
+        near(
+          'progress baseline',
+          ink(lineRow.querySelector('.line-progress > span')!).bottom,
+          ink(lineRow.querySelector('td[data-cell-role=quantity]')!).bottom,
+        );
+        const amount = document.querySelector(
+          '.composition-collection:has(.composition-totals) td[data-column-label="Amount"]',
+        );
+        if (amount)
+          near(
+            'amount and grand total',
+            ink(amount).right,
+            ink(el('.composition-totals div:last-child dd')).right,
+          );
+      }
+    }
+    if (screen === 'receive') {
+      near(
+        'dialog fields',
+        rect('.composition-task-header h2').left,
+        rect('.composition-inputs').left,
+      );
+      near(
+        'dialog lines',
+        rect('.composition-task-rows legend').left,
+        rect('.composition-task-header h2').left,
+      );
+      near(
+        'dialog footer',
+        rect('.composition-task-footer button:last-child').right,
+        rect('.composition-inputs').right,
+      );
+    }
+    for (const table of document.querySelectorAll<HTMLTableElement>(
+      'main table',
+    )) {
+      const head = table.tHead?.rows[0];
+      const row = table.tBodies[0]?.rows[0];
+      if (!row || !head || !table.getBoundingClientRect().width) continue;
+      const cards = getComputedStyle(table.tHead!).position === 'absolute';
+      for (const cell of row.cells) {
+        const th = head.cells[cell.cellIndex];
+        if (!th || !cell.getBoundingClientRect().width) continue;
+        if (
+          !th.matches(
+            '[data-cell-kind=number],.composition-quantity,.composition-progress-heading',
+          )
+        )
+          continue;
+        near(
+          (th.textContent ?? '') + ' cell right alignment',
+          getComputedStyle(cell).textAlign === 'right' ? 1 : -1,
+          1,
+        );
+        if (cards || !th.getBoundingClientRect().width) continue;
+        const control = cell.querySelector('input');
+        const header =
+          th.querySelector('a')?.getBoundingClientRect() ?? ink(th);
+        near(
+          th.textContent + ' figures',
+          control?.getBoundingClientRect().right ?? ink(cell).right,
+          header.right,
+        );
+      }
+    }
+    return failures;
+  }, screen);
+  expect
+    .soft(
+      errors,
+      `${screen} alignment at ${String(page.viewportSize()?.width)}`,
+    )
+    .toEqual([]);
 }
 
 async function menuDestination(
