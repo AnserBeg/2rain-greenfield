@@ -41,7 +41,7 @@ The release manifest and release-verification code must match **both** direction
 | --- | --- |
 | Validation | Operation catalog |
 | Calculated display fields | Surface, query, or agent catalog, with the floor pinned to an existing gated consumer |
-| Workflows | Surface, with floor 26 reserved for WORKFLOW-1 (ADR-0073) |
+| Workflows | Surface, with floor 27 reserved for WORKFLOW-1 (ADR-0073) |
 
 A test for each feature runs an actual older binary or its serving reader and proves that it refuses the feature-bearing release before serving it. A current reader with a simulated unsupported family does not establish this. A release without these declarations keeps its existing floors. Deployments keep at least the newest patch parser and reader floors already used by tenants.
 

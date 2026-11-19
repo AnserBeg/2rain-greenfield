@@ -56,7 +56,11 @@ export interface AgentWorld {
   invoke(
     local: string,
     input: ImmutableJsonValue,
-    options?: { actor?: DemoActor; channel?: 'AGENT' | 'UI' },
+    options?: {
+      actor?: DemoActor;
+      channel?: 'AGENT' | 'UI';
+      idempotencyKey?: string;
+    },
   ): Promise<SemanticOperationResultEnvelope>;
   create(
     local: string,
@@ -157,7 +161,7 @@ export function worldOver(
           schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
           operationId,
           input,
-          idempotencyKey: randomUUID(),
+          idempotencyKey: options.idempotencyKey ?? randomUUID(),
           confirmationGrant:
             operation.confirmation === 'humanRequired'
               ? runtime.operationMediation.issueConfirmationGrant(
