@@ -357,23 +357,30 @@ export async function openComposedApplicationRuntime(
     'compiledApplication' | 'databaseUrl' | 'rollbackReleaseRoot' | 'tenantSlug'
   >,
 ): Promise<ComposedApplicationRuntime> {
-  const compiledApplication =
-    options.compiledApplication ?? (await readCompiledApplication());
+  let compiledApplication: unknown;
   return createComposedApplicationRuntime({
     capabilityOperationExecutorFactories: CAPABILITY_EXECUTOR_FACTORIES,
-    compiledApplication,
+    async loadCompiledApplication() {
+      compiledApplication =
+        options.compiledApplication ?? (await readCompiledApplication());
+      return compiledApplication;
+    },
     customization: {
-      acknowledgement: readUnboundPermissionAcknowledgementFor(
-        new URL('../../web/release/app.authored.json', import.meta.url)
-          .pathname,
-        'northstar.app:package.application',
-      ),
-      firstPartyAuthored: canonicalAuthoredProjection(
-        parseNormalizedApplicationPackageJson(
-          parseCompiledApplication(compiledApplication).application
-            .normalizedDefinitionBytes,
-        ),
-      ) as unknown as Record<string, unknown>,
+      get acknowledgement() {
+        return readUnboundPermissionAcknowledgementFor(
+          new URL('../../web/release/app.authored.json', import.meta.url)
+            .pathname,
+          'northstar.app:package.application',
+        );
+      },
+      get firstPartyAuthored() {
+        return canonicalAuthoredProjection(
+          parseNormalizedApplicationPackageJson(
+            parseCompiledApplication(compiledApplication).application
+              .normalizedDefinitionBytes,
+          ),
+        ) as unknown as Record<string, unknown>;
+      },
     },
     databaseUrl: options.databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,

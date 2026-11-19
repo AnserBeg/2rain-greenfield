@@ -716,6 +716,7 @@ async function assertCanonicalBinding(
   }
   if (pointer.release_id !== null) {
     await authorizeReverseTransitionIfApplicable(client, context, {
+      expectedPointerId: pointer.pointer_id,
       expectedFence: pointerFence,
       sourceReleaseId: pointer.release_id,
       targetReleaseId: release.release_id,

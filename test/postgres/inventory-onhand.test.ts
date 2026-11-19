@@ -1,3 +1,4 @@
+import { activateInventoryFixture } from '../helpers/verified-fixture-release.js';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
@@ -344,7 +345,13 @@ test('registered onHand is temporal, narrowed, and atomically invalidates a same
         [fixture.empty, fixture.emptyDefinition],
         [fixture.inventory, fixture.inventoryDefinition],
       ]);
-      await setPointer(database.pool, releases[0]!.releaseId);
+      await activateInventoryFixture(
+        database.pool,
+        runtimePool,
+        context,
+        releases[0]!.releaseId,
+        fixture.empty,
+      );
       await grantExecutorAuthority(database.pool);
       const prepared = await new PostgresModuleStorageMaterializer(
         materializerPool,
@@ -358,7 +365,13 @@ test('registered onHand is temporal, narrowed, and atomically invalidates a same
         targetReleaseId: releases[1]!.releaseId,
       });
       assert.equal(prepared.schemaState, 'APPLIED');
-      await setPointer(database.pool, releases[1]!.releaseId);
+      await activateInventoryFixture(
+        database.pool,
+        runtimePool,
+        context,
+        releases[1]!.releaseId,
+        fixture.inventory,
+      );
       await seedFoundation(runtimePool, context, binding);
       await seedMovement(runtimePool, context, binding, {
         effectiveAt: '2026-01-10T00:00:00.000Z',

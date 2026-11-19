@@ -56,11 +56,9 @@ SELECT o.tenant_id, o.environment_id, o.outbox_id
 
 CREATE FUNCTION platform.workflow_index_unresolved_receipt() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp
-AS $$
-BEGIN
+AS $$ BEGIN
   INSERT INTO platform.workflow_unresolved_receipts VALUES (NEW.tenant_id, NEW.environment_id, NEW.outbox_id);
-  RETURN NEW;
-END
+  RETURN NEW; END
 $$;
 REVOKE ALL ON FUNCTION platform.workflow_index_unresolved_receipt() FROM PUBLIC;
 CREATE TRIGGER workflow_index_unresolved_receipt
@@ -70,12 +68,10 @@ CREATE TRIGGER workflow_index_unresolved_receipt
 
 CREATE FUNCTION platform.workflow_resolve_receipt() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp
-AS $$
-BEGIN
+AS $$ BEGIN
   DELETE FROM platform.workflow_unresolved_receipts
    WHERE (tenant_id, environment_id, outbox_id) = (NEW.tenant_id, NEW.environment_id, NEW.outbox_id);
-  RETURN NEW;
-END
+  RETURN NEW; END
 $$;
 REVOKE ALL ON FUNCTION platform.workflow_resolve_receipt() FROM PUBLIC;
 CREATE TRIGGER workflow_resolve_receipt AFTER INSERT ON platform.workflow_event_occurrences
@@ -167,8 +163,7 @@ CREATE FUNCTION platform.workflow_lock_runnable_effect(
   requested_fence bigint, requested_effect uuid
 ) RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
-AS $$
-BEGIN
+AS $$ BEGIN
   PERFORM 1
     FROM platform.workflow_runs AS r
     JOIN platform.workflow_effect_outbox AS e USING (tenant_id, environment_id, run_id)
@@ -184,8 +179,7 @@ BEGIN
      AND e.idempotency_key = requested_effect
      AND w.definition_bindings->d.workflow_id->>'digest' = platform.workflow_definition_digest(d)
    FOR UPDATE OF r;
-  RETURN FOUND;
-END
+  RETURN FOUND; END
 $$;
 REVOKE ALL ON FUNCTION platform.workflow_lock_runnable_effect(uuid, uuid, uuid, bigint, uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform.workflow_lock_runnable_effect(uuid, uuid, uuid, bigint, uuid)
@@ -202,8 +196,7 @@ DECLARE
   environment uuid := nullif(current_setting('north_star.environment_id', true), '')::uuid;
   principal uuid := nullif(current_setting('north_star.principal_id', true), '')::uuid;
   active_pointer uuid;
-  active_release uuid;
-BEGIN
+  active_release uuid; BEGIN
   IF decision NOT IN ('APPROVED', 'DECLINED') OR decision IS NULL OR principal IS NULL
      OR nullif(current_setting('north_star.request_id', true), '') IS NULL
   THEN RETURN false; END IF;
@@ -236,8 +229,7 @@ BEGIN
    WHERE a.tenant_id = tenant AND a.environment_id = environment AND a.run_id = requested_run
      AND a.cursor = requested_cursor AND a.fence = requested_fence
      AND a.plan_digest = requested_plan_digest AND a.status = 'PENDING';
-  RETURN FOUND;
-END
+  RETURN FOUND; END
 $$;
 REVOKE ALL ON FUNCTION platform.workflow_decide_approval(uuid, integer, bigint, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION platform.workflow_decide_approval(uuid, integer, bigint, text, text)
@@ -249,8 +241,7 @@ SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
   incoming jsonb;
-  outgoing jsonb;
-BEGIN
+  outgoing jsonb; BEGIN
   SELECT COALESCE(jsonb_object_agg(d.workflow_id, jsonb_build_object(
            'digest', e.binding_digest, 'eventType', d.event_type,
            'unattendedOperations', e.unattended_operations

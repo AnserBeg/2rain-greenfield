@@ -33,6 +33,7 @@ export interface SandboxRequest {
   readonly startAt?: number;
   /** Reproducing an already recorded revision uses its own permission census. */
   readonly historical?: boolean;
+  readonly stepAcknowledgements?: readonly AcknowledgementInput[];
   /** Replay the entire chain once against tip, the previously live release. */
   readonly upgradeBaseRoot?: string;
 }

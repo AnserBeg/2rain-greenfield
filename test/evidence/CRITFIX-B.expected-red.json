@@ -78,7 +78,7 @@
       "name": "rollback-ignores-displayed-release",
       "claim": "A stale form cannot reverse a different release.",
       "file": "packages/postgres-provider/src/customization-service.ts",
-      "original": "active.releaseId !== expectedReleaseId",
+      "original": "expectedReleaseId !== pointer.releaseId",
       "replacement": "false",
       "test": {
         "files": ["test/postgres/customization.test.ts"],
