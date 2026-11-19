@@ -148,7 +148,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
 > = Object.freeze({
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.agent]: {
     capabilityId: 'northstar.runtime:capability.agent-discovery',
-    maximumSupportedVersion: 1,
+    maximumSupportedVersion: 2,
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.catalog]: {
     capabilityId: 'northstar.runtime:capability.semantic-model',

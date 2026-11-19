@@ -54,6 +54,7 @@ export interface ListPreset {
 }
 
 interface AgentDiscoveryPayload {
+  readonly confirmationRequiredFor?: readonly string[];
   readonly operations: readonly { operationId: string }[];
   readonly queries: readonly { queryId: string; fieldIds: readonly string[] }[];
   readonly listPresets?: readonly ListPreset[];
@@ -61,6 +62,7 @@ interface AgentDiscoveryPayload {
 }
 
 export interface PinnedCatalog {
+  readonly confirmationRequiredFor: ReadonlySet<string>;
   readonly operations: readonly RegisteredOperationDefinition[];
   readonly queries: readonly QueryCatalogEntry[];
   readonly presets: readonly ListPreset[];
@@ -75,7 +77,7 @@ const catalogs = new WeakMap<object, PinnedCatalog>();
 
 /** One parsed catalog per pinned release content, cached by payload identity. */
 export function pinnedCatalog(view: RequestRuntimeView): PinnedCatalog {
-  const key = view.projections.operation.payload as object;
+  const key = view.projections;
   const cached = catalogs.get(key);
   if (cached) return cached;
   const agent = view.projections.agent
@@ -107,7 +109,27 @@ export function pinnedCatalog(view: RequestRuntimeView): PinnedCatalog {
   const presetById = new Map(
     (agent.listPresets ?? []).map((preset) => [preset.queryId, preset]),
   );
+  // Older releases have no field declarations. Require confirmation for their setup records.
+  const setupSurfaces =
+    (
+      view.projections.surface.payload as unknown as {
+        surfaces?: readonly {
+          workspace?: { membership?: string };
+          dataSourceQueryId?: string;
+        }[];
+      }
+    ).surfaces ?? [];
+  const confirmationRequiredFor = new Set(
+    agent.confirmationRequiredFor ??
+      setupSurfaces.flatMap((s) => {
+        const entity =
+          s.workspace?.membership === 'setup' &&
+          queryById.get(s.dataSourceQueryId ?? '')?.sourceEntityId;
+        return entity ? [entity] : [];
+      }),
+  );
   const catalog: PinnedCatalog = {
+    confirmationRequiredFor,
     operations,
     queries,
     presets: agent.listPresets ?? [],

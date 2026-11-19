@@ -174,6 +174,22 @@ export function lowerBaseProjectionPayloads(
     compilerSemanticProfileVersion,
     verificationPackageRevision,
   );
+  const confirmationRequiredFor = [
+    ...verificationPackageRevision.entities
+      .filter(
+        (e) =>
+          'requiresAssistantConfirmation' in e &&
+          e.requiresAssistantConfirmation,
+      )
+      .map((e) => e.entityId),
+    ...verificationPackageRevision.fields
+      .filter(
+        (f) =>
+          'requiresAssistantConfirmation' in f &&
+          f.requiresAssistantConfirmation,
+      )
+      .map((f) => f.fieldId),
+  ];
   const plans = [
     plan(
       PROJECTION_FAMILY_IDS.semanticModel,
@@ -223,7 +239,20 @@ export function lowerBaseProjectionPayloads(
       PROJECTION_FAMILY_IDS.agentDiscovery,
       namespace,
       packageScope,
-      agentDiscoveryPayload(packageRevision, verificationPackageRevision),
+      agentDiscoveryPayload(
+        packageRevision,
+        verificationPackageRevision,
+        confirmationRequiredFor,
+      ),
+      undefined,
+      confirmationRequiredFor.length
+        ? {
+            capabilityId:
+              runtimeCapabilities[PROJECTION_FAMILY_IDS.agentDiscovery]
+                .capabilityId,
+            minimumVersion: 2,
+          }
+        : undefined,
     ),
     plan(
       PROJECTION_FAMILY_IDS.verificationPlan,
@@ -1398,6 +1427,7 @@ function policyReferencesPayload(
 function agentDiscoveryPayload(
   packageRevision: NormalizedApplicationPackage,
   original: VersionedNormalizedApplicationPackage,
+  confirmationRequiredFor: readonly string[],
 ): unknown {
   const declared = new Map(
     original.queries.map((query) => [String(query.queryId), query]),
@@ -1405,6 +1435,7 @@ function agentDiscoveryPayload(
   const listPresets = agentListPresets(original);
   return {
     kind: 'agentDiscoveryPayload',
+    ...(confirmationRequiredFor.length ? { confirmationRequiredFor } : {}),
     operations: packageRevision.operations.map((operation) => ({
       operationId: operation.operationId,
       readBackQueryId: operation.readBack.targetId,

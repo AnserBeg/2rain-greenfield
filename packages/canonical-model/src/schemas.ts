@@ -2574,17 +2574,25 @@ const normalizedV6OperationDefinition = normalizedV3OperationDefinition.extend({
 const authoredV6OperationDefinition = authoredV3OperationDefinition.extend({
   label: operationLabel,
 });
+// A whole settings record, or one policy field, can require the person's yes.
+const assistantConfirmation = {
+  requiresAssistantConfirmation: z.literal(true).optional(),
+};
 const normalizedV6FieldDefinition = normalizedV3FieldDefinition.extend({
+  ...assistantConfirmation,
   numbering: FieldNumberingSchema.optional(),
 });
 const authoredV6FieldDefinition = authoredV3FieldDefinition.extend({
+  ...assistantConfirmation,
   numbering: FieldNumberingSchema.optional(),
 });
 const companyOwnership = z.enum(['entityOwned', 'tenantShared']).optional();
 const normalizedV6EntityDefinition = normalizedEntityDefinition.extend({
+  ...assistantConfirmation,
   companyOwnership,
 });
 const authoredV6EntityDefinition = authoredEntityDefinition.extend({
+  ...assistantConfirmation,
   companyOwnership,
 });
 // A list query may declare the most rows one export statement returns. It is a

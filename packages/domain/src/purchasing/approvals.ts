@@ -320,6 +320,9 @@ export function withPurchaseOrderApprovals(
         kind: 'entityDefinition',
         schemaVersion: version,
         entityId: id('entity', local),
+        ...(local === 'purchasing_settings'
+          ? { requiresAssistantConfirmation: true }
+          : {}),
         label:
           local === 'purchasing_settings'
             ? 'Purchasing settings'
