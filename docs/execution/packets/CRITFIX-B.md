@@ -21,7 +21,7 @@ Deploy only versions at or above the newest patch-parser and surface-reader floo
 ```record-claim
 {
   "schemaVersion":"northstar.record-claim/v1","packet":"CRITFIX-B",
-  "base":"7df1ea960f03528926be71e55cbbea7cfcbb77a3","head":"9cbd3fa44b0e084fc005659cb24bd3e674e859f5",
+  "base":"7df1ea960f03528926be71e55cbbea7cfcbb77a3","head":"88b02c4de8e17e130c658efe147d8b068016067f",
   "changedPaths":[
     "apps/api/scripts/customize-cli.ts", "apps/api/src/main.ts", "apps/web/scripts/unbound-permission-acknowledgement.ts",
     "apps/web/src/customize-screen.ts", "db/migrations/0033_customization_upgrade_bindings.sql", "db/schema.snapshot.json",
