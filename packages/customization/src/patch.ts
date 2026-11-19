@@ -206,7 +206,7 @@ export const CUSTOMIZATION_CHANGE_MEMBER_KINDS = Object.freeze(
 
 const validationRule: z.ZodType<FormulaValidationRule> =
   FormulaValidationRuleDefinitionSchema;
-const SinglePatchSchema = z.discriminatedUnion('kind', [
+const singlePatchKinds = [
   ...ChangeMemberSchema.options,
   z.strictObject({
     kind: z.literal('narrowPermission'),
@@ -224,12 +224,18 @@ const SinglePatchSchema = z.discriminatedUnion('kind', [
     }),
     roleKey: OperationRoleKeySchema,
   }),
+] as const;
+
+const SinglePatchSchema = z.discriminatedUnion('kind', [
+  ...singlePatchKinds,
   z.strictObject({
     kind: z.literal('addValidation'),
     rule: validationRule,
   }),
 ]);
-type ParsedPatch = z.infer<typeof SinglePatchSchema>;
+type ParsedPatch =
+  | z.output<(typeof singlePatchKinds)[number]>
+  | { kind: 'addValidation'; rule: FormulaValidationRule };
 export type SingleCustomizationPatch =
   ParsedPatch | (Extract<ParsedPatch, { kind: 'addField' }> & { legacy: true });
 
@@ -241,10 +247,9 @@ const changeSet = z.strictObject({
     .min(2)
     .max(MAX_CUSTOMIZATION_CHANGE_PATCHES),
 });
-export const CustomizationPatchSchema = z.discriminatedUnion('kind', [
-  SinglePatchSchema,
-  changeSet,
-]);
+export const CustomizationPatchSchema: z.ZodType<
+  ParsedPatch | z.infer<typeof changeSet>
+> = z.discriminatedUnion('kind', [SinglePatchSchema, changeSet]);
 export type CustomizationPatch =
   SingleCustomizationPatch | z.infer<typeof changeSet>;
 export type CustomizationPatchKind = CustomizationPatch['kind'];
