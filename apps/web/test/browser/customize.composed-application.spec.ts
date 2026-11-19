@@ -36,9 +36,9 @@ test('a rule drafted in Customize refuses an empty field on the live form until 
           .getByRole('button', { name: 'Set up validation' })
           .click();
         await page
-          .getByLabel('Field', { exact: true })
+          .locator('select[name="fieldId"]')
           .selectOption('northstar.app:field.item_description');
-        await page.getByLabel('Rule', { exact: true }).selectOption('required');
+        await page.locator('select[name="check"]').selectOption('required');
         await page.getByLabel('Message shown when saving').fill(message);
         await page
           .getByRole('button', { name: 'Draft validation rule' })
