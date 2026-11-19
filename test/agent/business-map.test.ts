@@ -274,6 +274,15 @@ function guardedSession(
     invoked: [] as string[],
     afterInvoke: () => {},
     denyReads: false,
+    getRecords: new Map<
+      string,
+      {
+        recordId: string;
+        revision: number;
+        archived: boolean;
+        values: Record<string, string>;
+      }[]
+    >(),
     onList: undefined as
       | undefined
       | ((
@@ -346,7 +355,9 @@ function guardedSession(
                   })
                 : Promise.resolve({
                     outcome: 'exact',
-                    records: [state.record],
+                    records: state.getRecords.get(request.queryId) ?? [
+                      state.record,
+                    ],
                     listCoverage: {
                       ...request.arguments.list,
                       hasMore: false,
@@ -1541,13 +1552,30 @@ test('AGENT-5 8: stored reference text cannot prove a location identity', async 
   });
   await session.call('erp_query', { queryId: 'location_list' });
   assert.match(JSON.stringify(await plan()), /lookup.*location/u);
-  state.record.recordId = location;
-  await session.call('erp_query', {
-    queryId: 'location_get',
-    arguments: { recordId: location },
-  });
-  state.record.recordId = PARTY;
+  const resolved = { ...state.record, recordId: location, values: {} };
+  state.getRecords.set(`${NS}:query.location_get`, [resolved]);
   assert.ok(((await plan()) as { planId?: string }).planId);
+  // A valid reference on the line can supply the lookup candidate by itself.
+  const { session: next, state: line } = guardedSession();
+  line.record.values[`${NS}:field.item_preferred_location_id`] = location;
+  line.getRecords.set(`${NS}:query.location_get`, [resolved]);
+  await next.call('erp_query', {
+    queryId: 'item_get',
+    arguments: { recordId: PARTY },
+  });
+  const valid = await next.call('erp_plan', {
+    intents: [
+      {
+        operationId: 'item_update',
+        target: PARTY,
+        patch: { preferred_location_id: location },
+      },
+    ],
+  });
+  assert.ok(
+    (valid.content as { planId?: string }).planId,
+    JSON.stringify(valid.content),
+  );
 });
 
 test('AGENT-5 9: uppercase UUID targets and references bind their canonical IDs', async () => {

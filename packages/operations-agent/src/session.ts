@@ -270,7 +270,7 @@ export class OperationsAgentSession {
   readonly approvals: ApprovalRecord[] = [];
   readonly #touched = new Map<string, TouchedRecord>();
   readonly #undoPlans = new Set<string>();
-  /** A returned row can identify a candidate. Only its exact get confirms the type. */
+  /** A candidate permits a lookup. Only a matching get establishes identity. */
   readonly #identities = new Map<string, 'candidate' | 'exact'>();
   /** Currency codes held by records the host returned. */
   readonly #recordCurrencies = new Set<string>();
@@ -536,6 +536,11 @@ export class OperationsAgentSession {
       if (words.test(text)) this.#requestCurrencies.add(code);
   }
 
+  #noteCandidate(entity: string, id: string): void {
+    const key = `${entity}/${id.toLowerCase()}`;
+    if (!this.#identities.has(key)) this.#identities.set(key, 'candidate');
+  }
+
   #learn(
     entityId: string,
     records: readonly SemanticRecordDto[],
@@ -544,10 +549,14 @@ export class OperationsAgentSession {
     for (const record of records) {
       const key = `${entityId}/${record.recordId}`;
       if (record.recordId === exactId) this.#identities.set(key, 'exact');
-      else if (!this.#identities.has(key))
-        this.#identities.set(key, 'candidate');
+      else this.#noteCandidate(entityId, record.recordId);
       for (const [fieldId, value] of Object.entries(record.values)) {
         if (typeof value !== 'string' || value === '') continue;
+        // Legacy references are stored as text. A matching get must verify
+        // the declared target before this value may be bound to a write.
+        const target = referenceTargets.get(fieldId);
+        if (target && uuidPattern.test(value))
+          this.#noteCandidate(target, value);
         if (localName(fieldId).endsWith('_currency')) {
           const code = currencyCode(value);
           if (code) this.#recordCurrencies.add(code);
