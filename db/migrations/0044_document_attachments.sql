@@ -84,8 +84,8 @@ REVOKE ALL ON platform.document_blobs FROM PUBLIC;
 GRANT SELECT, INSERT ON platform.document_blobs TO north_star_runtime;
 CREATE POLICY document_trusted_scope ON platform.document_blobs TO north_star_runtime
   USING (
-    tenant_id = north_star_internal.trusted_tenant_id()
-    AND environment_id = north_star_internal.trusted_environment_id()
+    tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
+    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
     AND nullif(current_setting('north_star.principal_id', true), '')::uuid IS NOT NULL
   );
 
@@ -95,8 +95,8 @@ REVOKE ALL ON platform.document_upload_staging FROM PUBLIC;
 GRANT SELECT, INSERT ON platform.document_upload_staging TO north_star_runtime;
 CREATE POLICY document_trusted_scope ON platform.document_upload_staging TO north_star_runtime
   USING (
-    tenant_id = north_star_internal.trusted_tenant_id()
-    AND environment_id = north_star_internal.trusted_environment_id()
+    tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
+    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
     AND nullif(current_setting('north_star.principal_id', true), '')::uuid IS NOT NULL
   );
 
@@ -106,8 +106,8 @@ REVOKE ALL ON platform.document_versions FROM PUBLIC;
 GRANT SELECT, INSERT ON platform.document_versions TO north_star_runtime;
 CREATE POLICY document_trusted_scope ON platform.document_versions TO north_star_runtime
   USING (
-    tenant_id = north_star_internal.trusted_tenant_id()
-    AND environment_id = north_star_internal.trusted_environment_id()
+    tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
+    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
     AND nullif(current_setting('north_star.principal_id', true), '')::uuid IS NOT NULL
   );
 
@@ -117,8 +117,8 @@ REVOKE ALL ON platform.document_attachment_audit FROM PUBLIC;
 GRANT SELECT, INSERT ON platform.document_attachment_audit TO north_star_runtime;
 CREATE POLICY document_trusted_scope ON platform.document_attachment_audit TO north_star_runtime
   USING (
-    tenant_id = north_star_internal.trusted_tenant_id()
-    AND environment_id = north_star_internal.trusted_environment_id()
+    tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
+    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
     AND nullif(current_setting('north_star.principal_id', true), '')::uuid IS NOT NULL
   );
 
