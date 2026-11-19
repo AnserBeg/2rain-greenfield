@@ -1112,6 +1112,7 @@ test(
               assert.equal(await runStatus(pool, run), 'WAITING');
               instant = new Date(due);
               await Promise.all([rebooted.tick(scope), worker().tick(scope)]);
+              await rebooted.step(scope, run);
               assert.equal(await journalCount(pool, run, 'RESULT'), 2);
               await rebooted.step(scope, run);
               assert.equal(await runStatus(pool, run), 'COMPLETED');

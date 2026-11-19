@@ -27,7 +27,7 @@ import {
   type CustomizeScreenService,
 } from './customize-screen.js';
 import {
-  renderWorkflowApprovals,
+  loadWorkflowApprovals,
   WORKFLOW_APPROVALS_HREF,
   type WorkflowApprovalsService,
 } from './workflow-approvals.js';
@@ -36,6 +36,7 @@ import {
   FRAGMENT_REQUEST_HEADER,
   renderApplicationDiagnostic,
   renderSurfaceRuntime,
+  renderWorkflowApprovals,
   withLocalDemoIdentity,
   renderSurfaceRuntimeWithData,
   submitSurfaceRuntimeFragment,
@@ -269,8 +270,17 @@ async function handleRequest(
         writeHtml(response, { statusCode: 403, html: '' });
         return;
       }
-      const result = await entry.run({ headers: request.headers }, (view) =>
-        renderWorkflowApprovals(view, workflowApprovals, submission),
+      const result = await entry.run(
+        { headers: request.headers },
+        async (view) =>
+          renderWorkflowApprovals(
+            view,
+            await loadWorkflowApprovals(
+              trustedContextForRequestRuntimeView(view),
+              workflowApprovals,
+              submission,
+            ),
+          ),
       );
       const page = withLocalDemoIdentity(
         result,

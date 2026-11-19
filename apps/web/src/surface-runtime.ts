@@ -97,6 +97,11 @@ import {
   type SurfaceOperationIntent,
 } from './surface-contract.js';
 import { NAVIGATION_ICONS, declaredIcon, svgIcon } from './navigation-icons.js';
+import {
+  WORKFLOW_APPROVALS_HREF,
+  type ApprovalPlan,
+  type WorkflowApprovalsData,
+} from './workflow-approvals.js';
 
 /** Fixture-only shell furniture, never installed by the production composition. */
 export function withLocalDemoIdentity(
@@ -2522,12 +2527,45 @@ export function renderApplicationDiagnostic(
   });
 }
 
-export function renderWorkspaceWorklist(
+export function renderWorkflowApprovals(
   view: RuntimeViewContract.RequestRuntimeView,
-  title: string,
-  content: string,
+  { worklist, message, results }: WorkflowApprovalsData,
 ): SurfaceRuntimeResponse {
   assertRequestRuntimeView(view);
+  const plans = worklist.approvals.map(renderApprovalPlan).join('');
+  const runs = worklist.suspended
+    .map(
+      ({ runId, workflowId, reason }) =>
+        `<li><label><input name="run-${escapeHtml(runId)}" type="checkbox"> ${escapeHtml(workflowId)} · <code>${escapeHtml(runId)}</code></label> <span>${escapeHtml(reason)}</span></li>`,
+    )
+    .join('');
+  const notice = message
+    ? `<section class="panel" role="status" ${messageAttributes(message)}>${messageBody(message, '', 'h2')}</section>`
+    : '';
+  const outcome = results
+    ? `<section class="panel" role="status"><h2>Run results</h2><ul>${results
+        .map(
+          ({ runId, outcome }) =>
+            `<li><code>${escapeHtml(runId)}</code> · ${escapeHtml(outcome)}</li>`,
+        )
+        .join('')}</ul></section>`
+    : '';
+  const content = `<h1>Approvals</h1><div data-workflow-approvals>${notice}${outcome}
+    <section class="panel"><h2>Pending plans</h2>
+      ${plans || workflowWorklistEmpty('WORKFLOW_APPROVALS_EMPTY')}
+    </section>
+    <section class="panel"><h2>Suspended runs</h2>
+      ${
+        runs
+          ? `<form action="${WORKFLOW_APPROVALS_HREF}" method="post">
+        <ul>${runs}</ul>
+        <button name="action" value="retry">Retry selected</button>
+        <button name="action" value="cancel">Cancel selected</button>
+      </form>`
+          : workflowWorklistEmpty('WORKFLOW_SUSPENDED_EMPTY')
+      }
+    </section></div>
+  `;
   const selection = selectSurface(view, '/');
   if ('statusCode' in selection) return selection;
   return {
@@ -2536,14 +2574,47 @@ export function renderWorkspaceWorklist(
       selection.surfaces,
       selection.navigation,
       null,
-      `<h1>${escapeHtml(title)}</h1>${content}`,
+      content,
       null,
       false,
       null,
-      title,
+      'Approvals',
     ),
     statusCode: 200,
   };
+}
+
+function renderApprovalPlan(plan: ApprovalPlan): string {
+  const identity = {
+    runId: plan.runId,
+    cursor: String(plan.cursor),
+    fence: plan.fence,
+    digest: plan.digest,
+  };
+  return `<article class="panel" data-workflow-approval>
+    <h3>${escapeHtml(plan.summary)}</h3>
+    <dl><dt>Company</dt><dd><code>${escapeHtml(plan.companyId)}</code></dd>
+        <dt>Operation</dt><dd><code>${escapeHtml(plan.operationId)}</code></dd></dl>
+    <h4>Exact inputs</h4>
+    <pre class="workflow-plan-input"><code>${escapeHtml(JSON.stringify(plan.input, null, 2))}</code></pre>
+    <form action="${WORKFLOW_APPROVALS_HREF}" method="post">
+      ${Object.entries(identity)
+        .map(
+          ([key, value]) =>
+            `<input type="hidden" name="${key}" value="${escapeHtml(value)}">`,
+        )
+        .join('')}
+      <button name="action" value="approve">Approve</button>
+      <button name="action" value="decline">Decline</button>
+    </form>
+  </article>`;
+}
+
+function workflowWorklistEmpty(
+  code: 'WORKFLOW_APPROVALS_EMPTY' | 'WORKFLOW_SUSPENDED_EMPTY',
+): string {
+  const ref = { code };
+  return `<div ${messageAttributes(ref)}>${messageBody(ref, '', 'h2')}</div>`;
 }
 
 /**
