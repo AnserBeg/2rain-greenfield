@@ -96,7 +96,10 @@ test('Customize shows exact margin on Items and the item page and removes it on 
         expect(csv).toContain(title);
         expect(csv).toContain(margin);
         await row.getByRole('link', { name: itemName }).click();
-        await expect(page.getByText(title, { exact: true })).toBeVisible();
+        const marginLabel = page.getByText(title, { exact: true });
+        if (!(await marginLabel.isVisible()))
+          await page.locator('details.composition-more-fields summary').click();
+        await expect(marginLabel).toBeVisible();
         await expect(page.getByText(margin, { exact: true })).toBeVisible();
         const record = page.url();
         await page.goto(customize);
