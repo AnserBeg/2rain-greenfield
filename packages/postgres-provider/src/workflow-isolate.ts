@@ -1,3 +1,5 @@
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 
 import { canonicalize } from '@north-star/canonical-model';
@@ -44,9 +46,17 @@ export async function runWorkflowIsolate(
     new URL(`./workflow-isolate-worker.${extension}`, import.meta.url),
     {
       env: {},
+      execArgv: [],
       resourceLimits: { maxOldGenerationSizeMb: 32, stackSizeMb: 2 },
       workerData: {
         cpuMs: options.cpuMs ?? 100,
+        // Compiled workers start independently of the application's resolver.
+        engine:
+          typeof import.meta.resolve === 'function'
+            ? import.meta.resolve('quickjs-emscripten')
+            : pathToFileURL(
+                createRequire(import.meta.url).resolve('quickjs-emscripten'),
+              ).href,
         executable,
         input,
         maximumCallBytes: MAXIMUM_WORKFLOW_EFFECT_BYTES,

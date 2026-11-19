@@ -1,19 +1,18 @@
 import { performance } from 'node:perf_hooks';
 import { parentPort, workerData } from 'node:worker_threads';
 
-import {
-  newQuickJSWASMModule,
-  newVariant,
-  RELEASE_SYNC,
-} from 'quickjs-emscripten';
+import type * as QuickJS from 'quickjs-emscripten';
 
 const data = workerData as {
   readonly cpuMs: number;
+  readonly engine: string;
   readonly executable: string;
   readonly input: string;
   readonly maximumCallBytes: number;
 };
 
+const { newQuickJSWASMModule, newVariant, RELEASE_SYNC }: typeof QuickJS =
+  await import(data.engine);
 const pageCount = 256;
 const memory = new WebAssembly.Memory({
   initial: pageCount,
