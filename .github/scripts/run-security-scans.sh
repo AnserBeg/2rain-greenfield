@@ -3,6 +3,7 @@ set -euo pipefail
 
 readonly gitleaks_image='ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f'
 readonly synthetic_rule_id='north-star-synthetic-test-secret'
+readonly history_cutoff='fe97b63baedf8bdd42146318bb89d4be1aa948f6'
 
 repository_root=$(git rev-parse --show-toplevel)
 common_git_directory=$(git rev-parse --path-format=absolute --git-common-dir)
@@ -15,6 +16,36 @@ dependency_stderr="$evidence_directory/dependency-audit.stderr"
 clean_report="$evidence_directory/gitleaks-clean.json"
 negative_report="$evidence_directory/gitleaks-negative.json"
 summary_report="$evidence_directory/summary.json"
+
+history_scope=${SECURITY_HISTORY_SCOPE:-all}
+history_options=''
+case "$history_scope" in
+  all) ;;
+  ancestry | remainder)
+    # The pinned Gitleaks version normally passes --full-history --all
+    # --diff-filter=tuxdb. Divide that same history into the cutoff's
+    # ancestors and everything reachable outside them.
+    git merge-base --is-ancestor "$history_cutoff" HEAD
+    total_commits=$(git rev-list --count --all)
+    ancestor_commits=$(git rev-list --count "$history_cutoff")
+    remaining_commits=$(git rev-list --count --all "^$history_cutoff")
+    if ((ancestor_commits + remaining_commits != total_commits)); then
+      printf 'Secret scan ranges do not cover the Git history.\n' >&2
+      exit 1
+    fi
+    if [[ $history_scope == ancestry ]]; then
+      history_options="--full-history --diff-filter=tuxdb $history_cutoff"
+    else
+      history_options="--full-history --all --diff-filter=tuxdb ^$history_cutoff"
+    fi
+    printf 'Security history scope %s covers one part of %d commits.\n' \
+      "$history_scope" "$total_commits"
+    ;;
+  *)
+    printf 'Unknown security history scope %s.\n' "$history_scope" >&2
+    exit 1
+    ;;
+esac
 
 printf '[]\n' >"$clean_report"
 printf '[]\n' >"$negative_report"
@@ -32,7 +63,13 @@ esac
 run_gitleaks() {
   local target=$1
   local report=$2
-  shift 2
+  local history=$3
+  shift 3
+
+  local git_options=()
+  if [[ -n $history ]]; then
+    git_options=(--log-opts "$history")
+  fi
 
   docker run --rm \
     --user "$(id -u):$(id -g)" \
@@ -41,6 +78,7 @@ run_gitleaks() {
     --workdir "$repository_root" \
     "$gitleaks_image" \
     git \
+    "${git_options[@]}" \
     --no-banner \
     --no-color \
     --redact=100 \
@@ -54,7 +92,7 @@ set +e
 corepack pnpm audit --audit-level=high --json >"$dependency_report" 2>"$dependency_stderr"
 dependency_status=$?
 
-run_gitleaks "$repository_root" "$clean_report"
+run_gitleaks "$repository_root" "$clean_report" "$history_options"
 clean_status=$?
 set -e
 
@@ -79,6 +117,7 @@ set +e
 run_gitleaks \
   "$negative_fixture" \
   "$negative_report" \
+  "" \
   --volume "$negative_fixture:$negative_fixture:ro"
 negative_status=$?
 set -e

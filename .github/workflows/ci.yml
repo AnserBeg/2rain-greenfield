@@ -458,7 +458,11 @@ jobs:
           retention-days: 7
 
   security:
-    name: Dependency and secret scans
+    name: Dependency and secret scans (${{ matrix.history }})
+    strategy:
+      fail-fast: false
+      matrix:
+        history: [ancestry, remainder]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -477,12 +481,13 @@ jobs:
       - name: Run dependency and secret gates
         env:
           SECURITY_EVIDENCE_DIR: test-results/security
+          SECURITY_HISTORY_SCOPE: ${{ matrix.history }}
         run: .github/scripts/run-security-scans.sh
       - name: Retain security evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: security-evidence-${{ github.sha }}
+          name: security-evidence-${{ matrix.history }}-${{ github.sha }}
           path: test-results/security/
           if-no-files-found: error
           retention-days: 7
