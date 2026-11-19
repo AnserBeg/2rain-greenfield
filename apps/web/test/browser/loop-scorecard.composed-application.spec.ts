@@ -58,7 +58,14 @@ test('LOOP-1 scorecard: purchase order to stock to a shipped, invoiced and paid 
           await invoiceAndPay(card),
           "payment recorded as the order's next action",
         ).toBe(true);
-        expect(card.postings.length).toBeGreaterThanOrEqual(5);
+        expect(card.postings.map((posting) => posting.name)).toEqual([
+          'Place purchase order',
+          'Receive',
+          'Place sales order',
+          'Ship',
+          'Invoice',
+          'Record payment',
+        ]);
         for (const posting of card.postings) {
           expect(posting.clicks, posting.name).toBeLessThanOrEqual(4);
           expect(posting.loads, posting.name).toBeLessThanOrEqual(2);
