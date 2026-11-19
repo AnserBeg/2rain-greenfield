@@ -39,14 +39,10 @@ import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provi
 import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
-import {
-  parseSerializedRelease,
-  serializeRelease,
-} from '../../packages/customization/src/index.js';
+import { serializeRelease } from '../../packages/customization/src/index.js';
 import {
   canonicalize,
   normalizeApplicationPackage,
-  parseNormalizedApplicationPackageJson,
 } from '../../packages/canonical-model/src/index.js';
 import {
   compileApplicationRelease,
