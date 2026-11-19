@@ -31,9 +31,9 @@ Run `node --import tsx --test --test-name-pattern="field-only chain|release-boun
 ```record-claim
 {
   "schemaVersion":"northstar.record-claim/v1","packet":"CRITFIX-C",
-  "base":"81ba7405e7512a806882f9ea3cff51af8c7115d9","head":"f85420f138e03a2b5a5d11b48fb10ecc7a1be9ef",
+  "base":"5dc9c849f484d033dfccd3615cfc23cb2e2b683b","head":"e06ce08d9fa1d65b68a8a57016c012278eb89d14",
   "changedPaths":[
-    "apps/api/src/composition-root.ts", "apps/web/src/customize-screen.ts", "db/migrations/0036_verified_release_history.sql", "db/schema.snapshot.json", "packages/customization/src/sandbox-worker.ts",
+    "apps/api/src/composition-root.ts", "apps/web/src/customize-screen.ts", "db/migrations/0037_verified_release_history.sql", "db/schema.snapshot.json", "packages/customization/src/sandbox-worker.ts",
     "packages/customization/src/sandbox.ts", "packages/postgres-provider/src/active-release-root.ts", "packages/postgres-provider/src/composed-application-runtime.ts", "packages/postgres-provider/src/customization-lineage.ts", "packages/postgres-provider/src/customization-service.ts",
     "packages/postgres-provider/src/release-activation-service.ts", "packages/postgres-provider/src/release-approval-service.ts", "packages/postgres-provider/src/release-reverse-transition-policy.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/postgres-provider/src/verified-release-generation.ts",
     "test/agent/assistant-endpoint.test.ts", "test/architecture/release-persistence-boundary.test.ts", "test/architecture/request-runtime-view-boundary.test.ts", "test/evidence/CRITFIX-B.expected-red.json", "test/fixtures/g2/catalog/runtime-harness.ts",
