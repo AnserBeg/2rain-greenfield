@@ -98,6 +98,7 @@ const UPGRADE_PATCH_KINDS: ReadonlySet<string> = new Set([
 ]);
 
 export type CustomizationRefusalCode =
+  | 'CUSTOMIZE_TARGET_NOT_FOUND'
   | 'CUSTOMIZE_NOT_STARTED'
   | 'CUSTOMIZE_BASE_STALE'
   | 'CUSTOMIZE_BASE_MOVED'

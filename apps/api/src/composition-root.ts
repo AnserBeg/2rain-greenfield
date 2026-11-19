@@ -2,7 +2,7 @@ import {
   canonicalAuthoredProjection,
   parseNormalizedApplicationPackageJson,
 } from '@north-star/canonical-model';
-import { trustedContextForRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
+import { trustedContextForRequestRuntimeView } from '../../../packages/runtime/src/request-runtime-view.js';
 import { readFile } from 'node:fs/promises';
 import type { Server } from 'node:http';
 
