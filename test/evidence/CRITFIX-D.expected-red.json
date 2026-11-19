@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "packet": "CRITFIX-D",
+  "entries": [
+    {
+      "name": "recover-stale-fence",
+      "claim": "A recovery form applies only to the generation the user saw.",
+      "file": "packages/postgres-provider/src/customization-service.ts",
+      "original": "expected.fence !== swap.fence",
+      "replacement": "false",
+      "test": {
+        "files": ["test/postgres/customization-world.test.ts"],
+        "namePattern": "recover a failed verification with reverify and resume inventory posting"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customization-world.test.ts",
+          "name": "recover a failed verification with reverify and resume inventory posting",
+          "expected": "a stale attempt or fence must leave the failed swap untouched"
+        }
+      ]
+    },
+    {
+      "name": "revert-without-predecessor-proof",
+      "claim": "Revert requires the exact verified predecessor.",
+      "file": "packages/postgres-provider/src/release-reverse-transition-policy.ts",
+      "original": "!row.predecessor_verified ||",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/customization-world.test.ts"],
+        "namePattern": "recover a failed verification with revert and resume inventory posting"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customization-world.test.ts",
+          "name": "recover a failed verification with revert and resume inventory posting",
+          "expected": "a release ID without its exact predecessor verification cannot authorize revert"
+        }
+      ]
+    }
+  ]
+}

@@ -5,7 +5,7 @@
     {
       "name": "patch-kind-payload-binding-omitted",
       "claim": "The lineage table refuses a structurally valid patch whose identifier differs from the kind in its digested payload.",
-      "file": "db/migrations/0039_customization_patch_kind_identifier.sql",
+      "file": "db/migrations/0040_customization_patch_kind_identifier.sql",
       "original": "    AND (convert_from(payload, 'UTF8')::jsonb ->> 'kind') IS NOT DISTINCT FROM patch_kind",
       "replacement": "    AND true",
       "test": {
