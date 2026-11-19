@@ -203,9 +203,12 @@ test('a person builds Goods Receipt Inspection with the Customize screen and use
           await page
             .getByRole('button', { name: 'Activate now' })
             .click({ timeout: 180_000 });
+          await expect(page.getByRole('main')).toContainText(
+            'The change is live',
+          );
           await expect(
             page.locator('[data-customize-result="activated"]'),
-          ).toBeVisible({ timeout: 180_000 });
+          ).toBeVisible();
         };
         await page.goto(`${app.baseUrl}/?customize`);
         const create = page.locator('[data-customize-form="addRecordType"]');
