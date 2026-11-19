@@ -5,6 +5,7 @@ export {
   MODULE_COMPILER_PROFILE,
   compileApplication,
   compileApplicationRelease,
+  compilerAttestationFromManifest,
   expectedActiveReleaseFrom,
   reproduceHistoricalApplication,
   languageUsesModuleProjectionShape,

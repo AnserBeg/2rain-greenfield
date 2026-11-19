@@ -23,9 +23,10 @@ import {
   type SandboxRunnerOptions,
   type SandboxStep,
 } from '@north-star/customization';
-import type {
-  CompileSuccess,
-  ContentAddressedArtifact,
+import {
+  compilerAttestationFromManifest,
+  type ReleaseManifestEnvelope,
+  type ContentAddressedArtifact,
 } from '@north-star/compiler';
 import type { MintedUuid } from '@north-star/platform-runtime';
 import type { TrustedRequestContext } from '@north-star/runtime';
@@ -1527,14 +1528,13 @@ export class PostgresCustomizationService {
       async (client) => {
         const metadata = await client.query<{
           desired_state: Buffer;
-          output_protocol_version: string;
+          compiler_attestation_digest: string;
         }>(
-          `SELECT revision.desired_state, release.output_protocol_version
+          `SELECT revision.desired_state, release.compiler_attestation_digest
            FROM platform.tenant_releases AS release
            JOIN platform.app_package_revisions AS revision
              ON revision.tenant_id = release.tenant_id AND revision.revision_id = release.app_package_revision_id
-          WHERE release.tenant_id = $1 AND release.environment_id = $2 AND release.release_id = $3
-`,
+          WHERE release.tenant_id = $1 AND release.environment_id = $2 AND release.release_id = $3`,
           [context.tenantId, context.environmentId, releaseId],
         );
         const artifacts = await client.query<{
@@ -1573,16 +1573,27 @@ export class PostgresCustomizationService {
         'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
         'the recorded release has no manifest',
       );
+    const releaseManifest = JSON.parse(
+      new TextDecoder().decode(manifest.canonicalBytes),
+    ) as ReleaseManifestEnvelope;
+    const attestation = compilerAttestationFromManifest(releaseManifest, root);
+    if (
+      attestation.attestationDigest !==
+      stored.metadata.compiler_attestation_digest
+    )
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+        'the immutable manifest does not match its registered compiler attestation',
+      );
     return {
       normalizedDefinitionBytes: stored.metadata.desired_state,
       compiled: {
+        attestation,
         bundle: {
           artifacts,
-          releaseManifest: JSON.parse(
-            new TextDecoder().decode(manifest.canonicalBytes),
-          ),
+          releaseManifest,
           releaseManifestBytes: manifest.canonicalBytes,
-          outputProtocolVersion: stored.metadata.output_protocol_version,
+          outputProtocolVersion: releaseManifest.outputProtocolVersion,
           nodeContracts: [],
           kind: 'compiledReleaseBundle',
         },
@@ -1590,7 +1601,7 @@ export class PostgresCustomizationService {
         status: 'compiled',
         diagnostics: [],
         releaseRoot: root,
-      } as unknown as CompileSuccess,
+      },
     };
   }
 
