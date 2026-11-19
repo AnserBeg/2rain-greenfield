@@ -16,19 +16,19 @@ Status — Candidate for integration. The orchestrator approved the patch-kind m
 - Links are chosen at creation and restrict archiving a target with active dependents. Multiple inspections can refer to the same receipt, so Inspection needs no new uniqueness rule.
 - List search matches linked labels. Selecting a linked value narrows the list by that record's ID.
 - Sequential save (ADR-0072) leaves the header and each successful row change committed if a later step fails. Use **Retry save** to resume pending operations, or correct the flagged values and save the remaining changes. If read-back was withheld, reopen the existing record after read access is restored and verify the saved rows before continuing. Archive the lines before archiving their parent.
-- The visual form produces the same ordered change set as the plain-English path. Compiler and drafter refuse a link added after the source type's creation change. Recorded prefixes remain replayable.
+- The visual form produces the same ordered change set as the plain-English path. Compiler and drafter refuse a link added after the source type's creation change. Recorded prefixes remain replayable. Action permission changes retain standalone drafts and the workspace-role check.
 - The approved migration replaces the SQL kind allowlist with a bounded identifier and matches it to the JSON payload. The versioned parser still refuses unknown kinds at write and replay. The golden vocabulary check retains CUSTOMIZE-3's `saveListView` and `addMetricCard`.
 
 - Deploy rule: keep deployed code at or above the newest patch-parser and surface-reader floors any tenant has used.
 
 ## Gates
 
-- [CI 44485274087](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44485274087) passed the linked receipt, line editing and archive refusal steps before the command response lost the status badge. Composed record commands now refresh the declared record on its own URL. The [complete Inspection browser journey](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44489745075/job/135442045268) passed, and its suite exposed a surface-only stock replay regression and stale migration-tip assertions. The follow-up preserves replay read-back and corrects the assertions. Migration 0040 follows activation recovery. The PostgreSQL 16 snapshot was regenerated from all 40 migrations.
+- [CI 44485274087](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44485274087) passed the linked receipt, line editing and archive refusal steps before the command response lost the status badge. Composed record commands now refresh the declared record on its own URL. The [complete Inspection browser journey](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44489745075/job/135442045268) passed, and its suite exposed a surface-only stock replay regression and stale migration-tip assertions. The follow-up preserves replay read-back and corrects the assertions. Migration 0041 follows the permission directory. The PostgreSQL 16 snapshot was regenerated from all 41 migrations.
 
 - [CI 44480152260](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44480152260) passed compiler, PostgreSQL and schema checks. The browser activated one draft and saved the lines, then failed the receipt link assertion. The follow-up waits for server-confirmed selections and opens the exact linked receipt. Migration 0037 follows the workflow migration and the snapshot was regenerated on PostgreSQL 16.
 
 - [Hosted PostgreSQL](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44467955198) passed at `19e8d8e0`, including the one-request draft, linked records, owned lines and an assistant-confirmed Quarantine with unchanged stock movements. The source scan found no Inspection-specific first-party branches.
-- [CI 44505202353](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44505202353) passed all 16 jobs at `83d2d73f` over workflow review fixes, including the complete Inspection journey and first-party stock replay. Activation recovery on main then took migration 0039.
+- [CI 44505202353](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44505202353) passed all 16 jobs at `83d2d73f` over workflow review fixes, including the complete Inspection journey and first-party stock replay. The [Inspection journey](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44511278322/job/135515854756) passed again with activation recovery before the browser job hit its time limit. Permission narrowing was then merged into the candidate.
 - The first-party release uses an ADR-0066 re-baseline. The prior pushed checkpoint is preserved by an annotated tag and remains in branch history.
 
 ## Gaps
@@ -41,8 +41,8 @@ Status — Candidate for integration. The orchestrator approved the patch-kind m
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-4",
-  "base": "bae7e49e88bfde2257b4a0cb499af9fb9f121e74",
-  "head": "7a3f6f4f3f6c50a1a66fa15e60ade2baa8b3ced0",
+  "base": "fc56f4a0af8b4dfbff4692906c5b45c34eae4bbc",
+  "head": "63714b41f03759ea4dcdf1f3218087a3de8eac17",
   "changedPaths": [
     "apps/web/package.json", "apps/web/src/component-registry.ts",
     "apps/web/src/customize-screen.ts", "apps/web/src/document-editor.ts",
@@ -50,7 +50,7 @@ Status — Candidate for integration. The orchestrator approved the patch-kind m
     "apps/web/src/message-catalog.ts", "apps/web/src/surface-composition.ts",
     "apps/web/src/surface-runtime.ts", "apps/web/test/browser/customize.composed-application.spec.ts",
     "apps/web/test/browser/message-catalog.spec.ts", "apps/web/test/surface-runtime-contract.test.ts",
-    "db/migrations/0040_customization_patch_kind_identifier.sql", "db/schema.snapshot.json",
+    "db/migrations/0041_customization_patch_kind_identifier.sql", "db/schema.snapshot.json",
     "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-list.ts",
     "packages/canonical-model/src/surface-workspace.ts", "packages/compiler/src/conformance.ts",
     "packages/compiler/src/projections.ts", "packages/compiler/src/storage.ts",
