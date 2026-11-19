@@ -100,6 +100,7 @@ const suiteDefinitions = [
       'test/integration/table-behavior.test.ts',
       'test/integration/toolchain-contract.test.ts',
       'test/integration/trust-substrate.test.ts',
+      'test/integration/workflow-host.test.ts',
     ],
     script: 'test:integration',
   },
