@@ -2551,7 +2551,7 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
 
     // Replay the exact issued confirmation, including its prepared identity.
     const replay = await page.request.post(confirmationUrl, {
-      headers: { 'x-rain-fragment': 'task' },
+      headers: { 'x-rain-fragment': 'task', origin: new URL(baseUrl).origin },
       form: preservedSubmission,
     });
     expect(replay.status()).toBe(200);
