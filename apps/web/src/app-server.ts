@@ -10,10 +10,8 @@ import {
   AuthenticationRequiredError,
   UntrustedIdentityInputError,
 } from '@north-star/runtime/request-context';
-import {
-  RequestRuntimeViewRefusalError,
-  trustedContextForRequestRuntimeView,
-} from '@north-star/runtime/request-runtime-view';
+import { RequestRuntimeViewRefusalError } from '@north-star/runtime/request-runtime-view';
+import { trustedContextForRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
 import type { AuthenticatedRequestRuntimeEntryAdapter } from '@north-star/runtime/request-runtime-view';
 import { SURFACE_CLIENT_CSP_HASH } from './surface-client.js';
 import {
