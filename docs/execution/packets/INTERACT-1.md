@@ -19,7 +19,7 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 - 2: merged `ca9812e7`, PR #96, [CI 44488258241](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44488258241) green.
 - 3: merged `b21f3851`, PR #106, [CI 44522209346](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44522209346) green.
 - 4: merged `e0242bc9`, PR #108, [CI 44529083449](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44529083449) green.
-- 5: ready for full CI. Focused units pass; GitHub CI is the acceptance gate.
+- 5: merged `7dd75115`, PR #109, [CI 44552179864](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44552179864) green.
 
 ## Decisions
 
