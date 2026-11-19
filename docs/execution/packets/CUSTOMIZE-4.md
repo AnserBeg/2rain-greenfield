@@ -36,7 +36,7 @@ Status — rebased from checkpoint `c8110053` over CUSTOMIZE-3 and CRITFIX-B. Th
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-4",
   "base": "5f12be07640e5bade0937d3bc7c1bc26b08d4c87",
-  "head": "2fd86fef7272294b6d388d89b42a6dc076947f3b",
+  "head": "caba259177bdc1e44fb225a1e31ccf240ad19262",
   "changedPaths": [
     "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts",
     "apps/web/src/customize-screen.ts", "apps/web/src/document-editor.ts",
