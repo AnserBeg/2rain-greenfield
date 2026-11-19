@@ -505,6 +505,7 @@ test('release admission requires the formula projection and its mandatory reader
     operator: 'subtract',
     leftFieldId: 'northstar.app:field.item_price_cad',
     rightFieldId: 'northstar.app:field.item_standard_cost_cad',
+    listSurfaceId: 'northstar.app:surface.item_list',
   });
   const plainBytes = canonicalizeAndHash(base).bytes;
   const declaringBytes = canonicalizeAndHash(
