@@ -3,7 +3,7 @@ set -euo pipefail
 
 readonly gitleaks_image='ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f'
 readonly synthetic_rule_id='north-star-synthetic-test-secret'
-readonly history_cutoff='fe97b63baedf8bdd42146318bb89d4be1aa948f6'
+readonly history_cutoff='c870dd5fc6d37dd0a45cf61be1b802bcdc4f3e36'
 
 repository_root=$(git rev-parse --show-toplevel)
 common_git_directory=$(git rev-parse --path-format=absolute --git-common-dir)
