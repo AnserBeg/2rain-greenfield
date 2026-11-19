@@ -1,5 +1,6 @@
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
 import type { SurfaceLauncher } from '../../../packages/canonical-model/src/index.js';
+import type { SharedListCoverage } from '../../../packages/runtime/src/list-behavior/index.js';
 import {
   registeredSemanticQueryFromPinnedView,
   SEMANTIC_QUERY_REQUEST_VERSION,
@@ -52,6 +53,21 @@ export interface LauncherRenderData {
     readonly code: string;
     readonly outcome: ScanOutcomeCode;
   } | null;
+}
+
+/** Read queue or tab counts through the request's pinned query and read snapshot. */
+export async function loadDeclaredListCounts(
+  view: RuntimeViewContract.RequestRuntimeView,
+  queryGateway: SemanticQueryGateway,
+  queryId: string,
+  listArguments: RuntimeViewContract.ImmutableJsonValue,
+): Promise<SharedListCoverage | undefined> {
+  const result = await queryGateway.invoke(view, {
+    arguments: listArguments,
+    queryId,
+    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+  });
+  return result.listCoverage;
 }
 
 /** The longest code a scan box accepts; longer input is no barcode. */
@@ -141,12 +157,13 @@ export async function launcherTiles(
           );
           if (!eligible && omitIneligible) continue;
           if (eligible && (!counted || counted.has(tile.tileId))) {
-            const result = await queryGateway.invoke(view, {
-              arguments: listArguments,
-              queryId: binding.query.queryId,
-              schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-            });
-            count = result.listCoverage?.totalCount ?? null;
+            const coverage = await loadDeclaredListCounts(
+              view,
+              queryGateway,
+              binding.query.queryId,
+              listArguments,
+            );
+            count = coverage?.totalCount ?? null;
           }
         }
       } catch {

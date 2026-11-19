@@ -37,6 +37,19 @@ interface CustomizationTargets {
     }[];
     readonly label: string;
     readonly surfaceId: string;
+    readonly savedView?: {
+      readonly columns: readonly {
+        readonly columnId: string;
+        readonly label: string;
+        readonly title: boolean;
+        readonly sortable: boolean;
+      }[];
+      readonly filters: readonly {
+        readonly field: string;
+        readonly label: string;
+        readonly options: readonly { value: string; label: string }[];
+      }[];
+    };
   }[];
   readonly recordTypes: readonly {
     readonly entityId: string;
@@ -76,7 +89,7 @@ type CustomizeScreenSubmission = Readonly<Record<string, string>>;
 
 /**
  * The Customize screen (CUSTOMIZE slice 3): the same loop as the command line
- * -- describe a change of one of the four kinds, read its plain diff, Approve,
+ * -- describe a change, read its plain diff, Approve,
  * Activate -- and a Roll back button on the live release. It is reached at
  * `/?customize`. Every change is a typed patch built from the form and checked
  * again by the service; the screen holds no state of its own.
@@ -129,9 +142,12 @@ export async function renderCustomizeScreen(
           '<h1>Activating your change</h1><p role="status">Activation is still running. This takes about a minute.</p><a href="/?customize">Check progress</a>',
         );
       const arrange = url.searchParams.get('arrange');
-      return arrange
-        ? page('Arrange a list', await arrangeForm(service, arrange))
-        : page('Customize', await overview(service));
+      if (arrange)
+        return page('Arrange a list', await arrangeForm(service, arrange));
+      const saveView = url.searchParams.get('saveView');
+      if (saveView)
+        return page('Save a list view', await savedViewForm(service, saveView));
+      return page('Customize', await overview(service));
     }
     switch (submission.action) {
       case 'draft':
@@ -226,6 +242,7 @@ async function overview(service: CustomizeScreenService): Promise<string> {
     fieldForm(targets),
     choiceForm(targets),
     arrangePicker(targets),
+    savedViewPicker(targets),
     ...(targets.forms ?? []).map(
       (form) =>
         `<form method="post"><fieldset><legend>Show fields up front on ${escapeHtml(form.label)}</legend><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="arrangeLayout"><input type="hidden" name="surface" value="${escapeHtml(form.surfaceId)}"><input type="hidden" name="formLayout" value="1">${form.fields.map((f) => `<label><input type="checkbox" name="front:${escapeHtml(f.fieldId)}"${f.upFront ? ' checked' : ''}> ${escapeHtml(f.label)}</label>`).join(' ')}<button>Draft form arrangement</button></fieldset></form>`,
@@ -298,6 +315,62 @@ async function arrangeForm(
   return `<p class="eyebrow">Customize</p><h1>Arrange ${escapeHtml(list.label)}</h1><form method="post" data-customize-form="arrangeColumns"><table><thead><tr><th>Position</th><th>Heading</th><th>Hide</th></tr></thead><tbody>${rows}</tbody></table><input type="hidden" name="surface" value="${escapeHtml(list.surfaceId)}"><input type="hidden" name="columns" value="${String(list.columns.length)}"><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="arrangeLayout"><p><button type="submit">Draft this arrangement</button></p></form>${backLink()}`;
 }
 
+function savedViewPicker(targets: CustomizationTargets): string {
+  const options = targets.lists
+    .filter((list) => list.savedView)
+    .map(
+      (list) =>
+        `<option value="${escapeHtml(list.surfaceId)}">${escapeHtml(list.label)}</option>`,
+    )
+    .join('');
+  return options
+    ? `<form method="get" data-customize-form="saveListView"><fieldset><legend>Save a list view</legend><input type="hidden" name="customize" value=""><label for="saved-view-list">List</label> <select id="saved-view-list" name="saveView" required>${options}</select><p><button>Set up view</button></p></fieldset></form>`
+    : '';
+}
+
+async function savedViewForm(
+  service: CustomizeScreenService,
+  surfaceId: string,
+): Promise<string> {
+  const list = (await service.targets()).lists.find(
+    (candidate) => candidate.surfaceId === surfaceId,
+  );
+  const view = list?.savedView;
+  if (!view)
+    return `<h1>Save a list view</h1><p>Choose a list that can take another view.</p>${backLink()}`;
+  const rows = view.columns
+    .map((column, index) => {
+      const n = index + 1;
+      const heading = escapeHtml(column.label);
+      return `<tr><th scope="row">${heading}</th><td><input type="hidden" name="view_column_${n}" value="${escapeHtml(column.columnId)}"><input type="number" name="view_position_${n}" min="1" max="${view.columns.length}" value="${n}" aria-label="Position of ${heading}"></td><td><input type="checkbox" name="view_hide_${n}" aria-label="Hide ${heading}"${column.title ? ' disabled' : ''}></td></tr>`;
+    })
+    .join('');
+  const sortable = view.columns
+    .filter((column) => column.sortable)
+    .map(
+      (column) =>
+        `<option value="${escapeHtml(column.columnId)}">${escapeHtml(column.label)}</option>`,
+    )
+    .join('');
+  const sorts = sortable
+    ? `<fieldset><legend>Sort</legend>${Array.from(
+        { length: 3 },
+        (_, index) => {
+          const n = index + 1;
+          const label = index === 0 ? 'Sort by' : `Then by (${n})`;
+          return `<p><label for="saved-view-sort-${n}">${label}</label> <select id="saved-view-sort-${n}" name="view_sort_${n}"><option value="">No column</option>${sortable}</select> <label for="saved-view-sort-direction-${n}">Order</label> <select id="saved-view-sort-direction-${n}" name="view_sort_direction_${n}"><option value="ascending">Ascending</option><option value="descending">Descending</option></select></p>`;
+        },
+      ).join('')}</fieldset>`
+    : '';
+  const filters = view.filters
+    .map(
+      (filter, index) =>
+        `<label for="saved-view-filter-${index}">${escapeHtml(filter.label)}</label> <select id="saved-view-filter-${index}" name="view_filter:${escapeHtml(filter.field)}"><option value="">All</option>${filter.options.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join('')}</select>`,
+    )
+    .join(' ');
+  return `<h1>Save a view for ${escapeHtml(list.label)}</h1><form method="post" data-customize-form="savedView"><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="saveListView"><input type="hidden" name="surface" value="${escapeHtml(surfaceId)}"><label>View name <input name="label" required maxlength="80"></label><fieldset><legend>Columns</legend><table><thead><tr><th>Heading</th><th>Position</th><th>Hide</th></tr></thead><tbody>${rows}</tbody></table></fieldset>${sorts}${filters ? `<fieldset><legend>Filters</legend>${filters}</fieldset>` : ''}<p><button>Draft view</button></p></form>${backLink()}`;
+}
+
 /** The typed patch a form describes; the service validates it. */
 export function patchFromForm(form: CustomizeScreenSubmission): unknown {
   const field = (n: number) => {
@@ -333,6 +406,37 @@ export function patchFromForm(form: CustomizeScreenSubmission): unknown {
         enumField: form.enumField,
         kind: 'addChoice',
         option: String(form.option ?? '').trim(),
+      };
+    case 'saveListView':
+      return {
+        kind: 'saveListView',
+        surface: form.surface,
+        label: form.label,
+        columns: Array.from({ length: 16 }, (_, index) => index + 1)
+          .filter(
+            (n) => form[`view_column_${n}`] && form[`view_hide_${n}`] !== 'on',
+          )
+          .sort(
+            (left, right) =>
+              Number(form[`view_position_${left}`]) -
+              Number(form[`view_position_${right}`]),
+          )
+          .map((n) => form[`view_column_${n}`]),
+        sort: [1, 2, 3].flatMap((n) =>
+          form[`view_sort_${n}`]
+            ? [
+                {
+                  column: form[`view_sort_${n}`],
+                  direction: form[`view_sort_direction_${n}`],
+                },
+              ]
+            : [],
+        ),
+        filters: Object.entries(form).flatMap(([key, value]) =>
+          key.startsWith('view_filter:') && value
+            ? [{ field: key.slice('view_filter:'.length), value }]
+            : [],
+        ),
       };
     case 'arrangeLayout': {
       if (form.formLayout)
@@ -424,6 +528,8 @@ function describe(patch: Record<string, unknown>): string {
       return `New choice "${String(patch.option)}"`;
     case 'arrangeLayout':
       return patch.upFront ? 'Arranged form fields' : 'Arranged list columns';
+    case 'saveListView':
+      return `Saved list view "${String(patch.label)}"`;
     default:
       return String(patch.kind);
   }

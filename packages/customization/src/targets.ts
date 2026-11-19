@@ -1,4 +1,8 @@
-import { CUSTOMIZABLE_FIRST_PARTY_ENTITY_LOCALS, isTenantId } from './apply.js';
+import {
+  CUSTOMIZABLE_FIRST_PARTY_ENTITY_LOCALS,
+  isTenantId,
+  listColumnId,
+} from './apply.js';
 
 /**
  * What a person may point a change at, read from the live release's own
@@ -30,6 +34,19 @@ export interface CustomizationTargets {
     }[];
     readonly label: string;
     readonly surfaceId: string;
+    readonly savedView?: {
+      readonly columns: readonly {
+        readonly columnId: string;
+        readonly label: string;
+        readonly title: boolean;
+        readonly sortable: boolean;
+      }[];
+      readonly filters: readonly {
+        readonly field: string;
+        readonly label: string;
+        readonly options: readonly { value: string; label: string }[];
+      }[];
+    };
   }[];
   readonly recordTypes: readonly {
     readonly entityId: string;
@@ -110,12 +127,19 @@ export function customizationTargets(definition: {
     const query = definition.queries.find(
       (q) => q.queryId === (surface.dataSource as Json).targetId,
     );
-    const selected = new Set(
-      ((query?.selections ?? []) as Json[]).map(
-        (s) => (s.field as Json).targetId,
-      ),
-    );
-    const columns = ((surface.list as Json).columns as Json[])
+    const entityId = (query?.sourceEntity as Json | undefined)?.targetId;
+    const columns = (
+      ((surface.list as Json | undefined)?.columns ??
+        ((query?.selections ?? []) as Json[]).map((selection) => {
+          const fieldId = (selection.field as Json).targetId;
+          return {
+            field: fieldId,
+            label: definition.fields.find((field) => field.fieldId === fieldId)
+              ?.label,
+            orderKey: selection.orderKey,
+          };
+        })) as Json[]
+    )
       .slice()
       .sort((a, b) => Number(a.orderKey) - Number(b.orderKey))
       .map((c) => ({ fieldId: String(c.field), label: String(c.label) }));
@@ -124,8 +148,7 @@ export function customizationTargets(definition: {
       ...definition.fields
         .filter(
           (f) =>
-            isTenantId(String(f.fieldId)) &&
-            selected.has(f.fieldId) &&
+            (f.entity as Json).targetId === entityId &&
             !columns.some((c) => c.fieldId === f.fieldId),
         )
         .map((f) => ({
@@ -139,16 +162,55 @@ export function customizationTargets(definition: {
     .filter(
       (surface) =>
         surface.surfaceRole === 'list' &&
-        surface.list !== undefined &&
         eligible(
           queryEntity.get(String((surface.dataSource as Json).targetId)) ?? '',
         ),
     )
-    .map((surface) => ({
-      columns: availableColumns(surface),
-      label: String(surface.label),
-      surfaceId: String(surface.surfaceId),
-    }))
+    .map((surface) => {
+      const surfaceId = String(surface.surfaceId);
+      const columns = availableColumns(surface);
+      const declared = surface.list as Json | undefined;
+      const entity = queryEntity.get(
+        String((surface.dataSource as Json).targetId),
+      )!;
+      const [namespace, entityName] = entity.split(':');
+      const declaredColumns = declared?.columns as Json[] | undefined;
+      const visible = declaredColumns
+        ? declaredColumns
+            .slice()
+            .sort((a, b) => Number(a.orderKey) - Number(b.orderKey))
+            .map((column) => ({
+              columnId: String(column.columnId),
+              label: String(column.label),
+              title: column.role === 'title',
+              sortable: column.sortable === true,
+            }))
+        : columns
+            .filter((column) => !('hidden' in column))
+            .map((column, index) => ({
+              columnId: listColumnId(
+                namespace!,
+                entityName!.slice('entity.'.length),
+                column.fieldId,
+              ),
+              label: column.label,
+              title: index === 0,
+              sortable: true,
+            }));
+      const filters = (declared?.filters ?? []) as NonNullable<
+        CustomizationTargets['lists'][number]['savedView']
+      >['filters'];
+      return {
+        columns,
+        label: String(surface.label),
+        surfaceId,
+        ...(((declared?.views as Json[] | undefined)?.filter(
+          (view) => view.layout,
+        ).length ?? 0) < 8 && visible.length > 0
+          ? { savedView: { columns: visible, filters } }
+          : {}),
+      };
+    })
     .sort((left, right) => left.label.localeCompare(right.label));
   return Object.freeze({ choiceFields, forms, lists, recordTypes });
 }
