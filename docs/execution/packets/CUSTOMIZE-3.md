@@ -10,6 +10,8 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 4. Migration 0034 adds the planned patch kinds to the closed vocabulary. Its check requires a valid digest, lineage and channel.
 5. Today cards count a declared direct list or sum its declared numeric measure before pagination. The UI drill-through and assistant use the same list and saved-view conditions. Approval, replay and rollback preserve the card definition.
 
+6. An operation restriction subtracts one role’s grants. Other roles keep their existing grants. Release activation and replay check the role in the destination environment.
+
 ## Decisions
 
 - Each saved view keeps the record title. It pins filter choices from the list's declared options. The list keeps its standard tabs, and the first saved view adds an All tab when needed.
@@ -22,14 +24,10 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 
 ## Gates
 
-- Slice 0 passed all 16 jobs at `81e5937b`. [CI 44429125715](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44429125715). The candidate refreshed on UPGRADE-1 is in [CI 44434963983](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44434963983).
-- Slice 1 passed 24 focused tests, typecheck, lint and format. Regenerating the snapshot from 34 migrations reproduced the checked-in bytes.
-- Combined candidate `e5d2c82b` passed all CI jobs, including the PostgreSQL replay and browser journeys. [CI 44457971677](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44457971677).
-- Earlier CI passed the live saved-view PostgreSQL test and exposed the missing boot replay admission. The updated test passed locally and with all 71 shard-2 tests in [CI 44445972885](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44445972885).
-- CI attempt 2 exposed an ambiguous form label. Saved-view selects now have explicit label associations. The browser journey checks the order of data columns outside the bulk-selection header and passed locally in 3.8 minutes on the combined UPGRADE-1 tree.
-- `unrecognized-patch-kind-admitted` at `e5d2c82bbcc6`: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (1 passing). [Controls 44457971797](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44457971797).
-- Today metrics passed the hosted matrix at `5df9c9c8`. [CI 44471090769](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44471090769). Local scripted drafting passed. The local compiler sandbox hit its existing timeout.
-- The silent-sum control checks the actual aggregate across both witness rows when only one row is on the page. [Controls 44472880285](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44472880285).
+- Saved views and columns passed [CI 44457971677](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44457971677) and the closed patch-kind [control 44457971797](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44457971797).
+- Today metrics passed [CI 44471090769](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44471090769) and the sum-before-pagination [control 44472880285](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44472880285).
+- The ADR amendment passed [CI 44481530303](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44481530303) and the record checker. GitHub canceled the merge run when CRITFIX-C advanced main.
+- Slice 5 candidate uses migration 0038, a snapshot rebuilt from 38 migrations and the re-derived v6 ledger. The scripted assistant unit test passed. The hosted matrix and controls gate integration.
 
 ## Filed
 
@@ -39,30 +37,31 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
-  "base": "b62cbb9c753ab62fde2a46a7a028ff217fbd4f46",
-  "head": "5df9c9c8d64001983805df98c8a80f8cd771fec4",
+  "base": "421bd8b82882ee24cbff87bb72914640e600aa6e",
+  "head": "784647dac6da0d9ad48b31e51607accf4ab08b1a",
   "changedPaths": [
-    "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json",
-    "apps/web/src/customize-screen.ts", "apps/web/src/list-declaration.ts",
-    "apps/web/src/surface-launcher.ts", "apps/web/src/surface-runtime.ts",
-    "apps/web/test/browser/customize.composed-application.spec.ts", "packages/canonical-model/src/normalize.ts",
-    "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-launcher.ts",
-    "packages/compiler/src/compiler.ts", "packages/compiler/src/projections.ts",
-    "packages/customization/src/ai-draft.ts", "packages/customization/src/apply.ts",
+    "apps/api/src/assistant-endpoint.ts", "apps/api/src/composition-root.ts",
+    "apps/web/src/app-server.ts", "apps/web/src/customize-screen.ts",
+    "apps/web/test/browser/customize.composed-application.spec.ts", "db/migrations/0038_customization_permission_directory.sql",
+    "db/schema.snapshot.json", "packages/canonical-model/src/index.ts",
+    "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts",
+    "packages/compiler/src/projections.ts", "packages/customization/src/ai-draft.ts",
+    "packages/customization/src/apply.ts", "packages/customization/src/candidate.ts",
     "packages/customization/src/patch.ts", "packages/customization/src/render.ts",
-    "packages/customization/src/targets.ts", "packages/domain/src/app/builder.ts",
-    "packages/operations-agent/src/catalog.ts", "packages/operations-agent/src/session.ts",
-    "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts",
-    "packages/runtime/src/list-behavior/index.ts", "packages/runtime/src/request-runtime-view.ts",
-    "packages/runtime/src/semantic-query-gateway.ts", "test/evidence/CUSTOMIZE-3.expected-red.json",
-    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/postgres/customization.test.ts",
-    "test/postgres/request-runtime-view.test.ts", "test/unit/customization-ai-draft.test.ts",
+    "packages/customization/src/targets.ts", "packages/postgres-provider/src/composed-application-runtime.ts",
+    "packages/postgres-provider/src/current-policy.ts", "packages/postgres-provider/src/customization-service.ts",
+    "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts",
+    "test/architecture/release-persistence-boundary.test.ts", "test/evidence/CUSTOMIZE-3.expected-red.json",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/postgres/current-policy.test.ts",
+    "test/postgres/customization.test.ts", "test/postgres/inventory-storage.test.ts",
+    "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts",
+    "test/postgres/trust-substrate.test.ts", "test/unit/customization-ai-draft.test.ts",
     "test/unit/customization.test.ts"
   ],
   "symbols": [
-    {"path":"packages/customization/src/apply.ts","name":"addMetricCard"},
-    {"path":"packages/canonical-model/src/surface-launcher.ts","name":"validateSurfaceLaunchers"},
-    {"path":"packages/postgres-provider/src/customization-service.ts","name":"UPGRADE_PATCH_KINDS"}
+    {"path":"packages/postgres-provider/src/current-policy.ts","name":"PostgresCurrentPolicyGateway"},
+    {"path":"packages/postgres-provider/src/customization-service.ts","name":"UPGRADE_PATCH_KINDS"},
+    {"path":"packages/canonical-model/src/schemas.ts","name":"OperationRoleNarrowingSchema"}
   ]
 }
 ```
