@@ -1818,6 +1818,11 @@ test(
             'SELECT pg_advisory_xact_lock(hashtextextended($1,0))',
             [`northstar.release-scope:${tenantId}:${environmentId}`],
           );
+          const holderPid = (
+            await holder.query<{ pid: number }>(
+              'SELECT pg_backend_pid() AS pid',
+            )
+          ).rows[0]!.pid;
           opening = createComposedApplicationRuntime({
             ...options,
             compiledApplication: next.envelope,
@@ -1836,9 +1841,12 @@ test(
           void opening.catch(() => undefined);
           const deadline = performance.now() + 120_000;
           while (
-            !(
-              await holder.query(
-                `SELECT 1 FROM pg_stat_activity WHERE pg_backend_pid()=ANY(pg_blocking_pids(pid))`,
+            !// Observe from a separate autocommit session so a statistics
+            // snapshot taken before the boot connected cannot hide it.
+            (
+              await pool.query(
+                'SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))',
+                [holderPid],
               )
             ).rowCount
           ) {
