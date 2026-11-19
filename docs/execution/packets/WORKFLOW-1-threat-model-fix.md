@@ -32,7 +32,7 @@ The ledger and review log link the acceptance run for the integrated packet.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WORKFLOW-1-threat-model-fix",
   "base": "9ac017b915d24b058a35450db92433c97486a2f7",
-  "head": "2d2db41bc241e49b621e24de1b25e2cd3b13b7ce",
+  "head": "d6149efcc7f4a730778719aa2569a8eebb27ae79",
   "changedPaths": [
     "packages/postgres-provider/src/workflow-execution.ts",
     "test/evidence/WORKFLOW-1-threat-model-fix.expected-red.json",
