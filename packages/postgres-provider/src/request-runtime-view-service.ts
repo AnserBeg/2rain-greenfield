@@ -25,6 +25,7 @@ import {
 import {
   PIN_VALIDATION_RESULT_VERSION,
   PINNED_RUNTIME_CONTEXT_VERSION,
+  REQUEST_RUNTIME_FORMULA_RULE_FAMILY,
   REQUEST_RUNTIME_PROJECTION_FAMILIES,
   parsePinnedRuntimeContextEnvelope,
   unsupportedRuntimeCapability,
@@ -38,6 +39,7 @@ import {
   type RuntimeProjection,
 } from '@north-star/runtime/request-runtime-view';
 import type { Pool, PoolClient } from 'pg';
+import { parseFormulaValidationBindings } from '../../canonical-model/src/formula-validation-projection.js';
 
 import {
   withTrustedRequestRead,
@@ -186,6 +188,10 @@ const supportedProjectionSchemas = Object.freeze({
     payloadSchemaVersions: Object.freeze([
       'northstar.semantic-model-payload/v0-provisional',
     ]),
+  }),
+  [REQUEST_RUNTIME_FORMULA_RULE_FAMILY]: Object.freeze({
+    payloadKind: 'formulaRulePayload',
+    payloadSchemaVersions: Object.freeze(['northstar.formula-rule-payload/v1']),
   }),
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.operation]: Object.freeze({
     payloadKind: 'operationCatalogPayload',
@@ -815,13 +821,44 @@ function definitionFromSnapshotRows(
     });
   };
 
+  const operation = projectionFor(
+    REQUEST_RUNTIME_PROJECTION_FAMILIES.operation,
+  );
+  const declaresRuleProjection = references.some(
+    (entry) =>
+      isRecord(entry) && entry.familyId === REQUEST_RUNTIME_FORMULA_RULE_FAMILY,
+  );
+  const hasRuleProjectionLink = projectionLinks.some(
+    ({ familyId }) => familyId === REQUEST_RUNTIME_FORMULA_RULE_FAMILY,
+  );
+  const consumesRules =
+    (operation.requiredRuntimeCapability?.minimumVersion ?? 0) >= 3;
+  if (
+    declaresRuleProjection !== consumesRules ||
+    hasRuleProjectionLink !== consumesRules
+  ) {
+    throw malformedProjection(
+      'formula/rule projection and the mandatory operation capability disagree',
+    );
+  }
+  const formulaRule = consumesRules
+    ? projectionFor(REQUEST_RUNTIME_FORMULA_RULE_FAMILY)
+    : null;
+  if (formulaRule) {
+    try {
+      parseFormulaValidationBindings(formulaRule.payload);
+    } catch {
+      throw malformedProjection('formula/rule projection has invalid bindings');
+    }
+  }
   return Object.freeze({
     environmentId: context.environmentId,
     pointer: Object.freeze({ fence, pointerId: first.pointer_id }),
     projections: Object.freeze({
       agent: projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.agent),
       catalog: projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.catalog),
-      operation: projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.operation),
+      ...(formulaRule ? { formulaRule } : {}),
+      operation,
       query: projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.query),
       surface: projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.surface),
     }),

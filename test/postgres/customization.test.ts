@@ -11,14 +11,8 @@ import test from 'node:test';
 import type pg from 'pg';
 
 import { readActiveRelease } from '../../packages/postgres-provider/src/active-release-root.js';
-import { scriptedModel } from '../../packages/operations-agent/src/model.js';
 import { OperationsAgentSession } from '../../packages/operations-agent/src/session.js';
 import { COMPANY, worldOver, seededId } from '../agent/agent-world.js';
-import {
-  inspection,
-  inspectionChange,
-  inspectionLinkRecords,
-} from '../fixtures/inspection-customization.js';
 import {
   COMPOSED_APPLICATION_INVENTORY_SCOPE,
   openComposedApplicationRuntime,
@@ -45,10 +39,7 @@ import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provi
 import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
-import {
-  DRAFT_CUSTOMIZATION_TOOL,
-  serializeRelease,
-} from '../../packages/customization/src/index.js';
+import { serializeRelease } from '../../packages/customization/src/index.js';
 import {
   canonicalize,
   normalizeApplicationPackage,
@@ -61,12 +52,12 @@ import {
 } from '../../packages/compiler/src/index.js';
 import { renderedDiffDigest } from '../../packages/customization/src/index.js';
 import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
-import { trustedContextForRequestRuntimeView } from '../../packages/runtime/src/request-runtime-view.js';
 import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   NoSuchRegisteredQueryError,
   SEMANTIC_QUERY_REQUEST_VERSION,
 } from '../../packages/runtime/src/semantic-query-gateway.js';
+import { recordedPatch } from '../helpers/customization-patch-record.js';
 import {
   LINEAGE_INSTALL_VOLUME,
   withEphemeralPostgres,
@@ -84,401 +75,6 @@ const equipment = JSON.parse(
   readFileSync(resolve('apps/api/scripts/examples/equipment.json'), 'utf8'),
 ) as unknown;
 const tenantSlug = 'customize-draft';
-
-test(
-  'a live saved view batches exact counts and the assistant reads its filtered order',
-  { timeout: 600_000 },
-  async () => {
-    await withEphemeralPostgres(
-      'customize-views',
-      async ({ connection }) => {
-        const options = {
-          databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
-          tenantSlug: 'customize-views',
-        };
-        const app = await startComposedApplication({
-          ...options,
-          seedProfile: 'distributor',
-          port: 0,
-        });
-        const opened = await openCustomizeService(options);
-        try {
-          const world = worldOver(app.runtime, String(connection.database));
-          const type = 'northstar.app:field.location_type';
-          const name = 'northstar.app:field.location_name';
-          const code = 'northstar.app:field.location_code';
-          const warehouse = 'northstar.app:option.warehouse';
-          const store = 'northstar.app:option.store';
-          for (const [suffix, value] of [
-            ['Alpha', warehouse],
-            ['Zulu', warehouse],
-            ['Store', store],
-          ] as const) {
-            const created = await world.invoke('location_create', {
-              recordId: randomUUID(),
-              relations: {},
-              values: {
-                [code]: `C3-${suffix.toUpperCase()}`,
-                [name]: `Customize view ${suffix}`,
-                [type]: value,
-              },
-            });
-            assert.equal(created.outcome, 'succeeded');
-          }
-          const draft = await opened.service.draft(
-            {
-              kind: 'saveListView',
-              surface: 'northstar.app:surface.location_list',
-              label: 'Warehouses',
-              columns: [
-                'northstar.app:list_column.location_list_name',
-                'northstar.app:list_column.location_list_code',
-              ],
-              sort: [
-                {
-                  column: 'northstar.app:list_column.location_list_name',
-                  direction: 'descending',
-                },
-              ],
-              filters: [{ field: type, value: warehouse }],
-            },
-            'visualBuilder',
-          );
-          assert.equal(draft.status, 'drafted');
-          await opened.service.approve(draft.patchId);
-          await opened.service.activate(draft.patchId);
-          const viewId =
-            'northstar.app:list_view.custom_location_list_warehouses';
-          const counts = await app.runtime.entry.run(
-            { headers: { cookie: 'northstar-demo-actor=manager' } },
-            (snapshot) =>
-              app.runtime.queryGateway.invoke(snapshot, {
-                schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-                queryId: 'northstar.app:query.location_list',
-                arguments: {
-                  includeArchived: false,
-                  list: {
-                    cursor: null,
-                    matchMode: 'substring',
-                    pageSize: 1,
-                    relationLabels: [],
-                    schemaVersion: SHARED_LIST_QUERY_VERSION,
-                    search: 'Customize view',
-                    sort: [],
-                    viewCounts: [
-                      {
-                        viewId,
-                        filters: [{ fieldId: type, value: warehouse }],
-                      },
-                      {
-                        viewId: 'northstar.app:list_view.test_store_count',
-                        filters: [{ fieldId: type, value: store }],
-                      },
-                    ],
-                  },
-                },
-              }),
-          );
-          assert.deepEqual(
-            counts.listCoverage?.viewCounts?.map((count) => [
-              count.viewId,
-              count.totalCount,
-            ]),
-            [
-              [viewId, 2],
-              ['northstar.app:list_view.test_store_count', 1],
-            ],
-          );
-
-          const agent = new OperationsAgentSession({
-            runtime: app.runtime,
-            companyId: COMPANY,
-            personHeaders: { cookie: 'northstar-demo-actor=manager' },
-            approve: () => Promise.resolve(true),
-          });
-          const read = () =>
-            agent.call('erp_query', {
-              queryId: 'location_list',
-              arguments: { view: viewId, search: 'Customize view' },
-            });
-          const answer = await read();
-          assert.equal(answer.isError, false, JSON.stringify(answer.content));
-          const records = (
-            answer.content as { records: { values: Record<string, string> }[] }
-          ).records;
-          assert.deepEqual(
-            records.map((row) => row.values),
-            [
-              { [code]: 'C3-ZULU', [name]: 'Customize view Zulu' },
-              { [code]: 'C3-ALPHA', [name]: 'Customize view Alpha' },
-            ],
-          );
-          await opened.service.rollback();
-          assert.equal((await read()).isError, true);
-        } finally {
-          await opened.close();
-          await app.close();
-        }
-      },
-      LINEAGE_INSTALL_VOLUME,
-    );
-  },
-);
-
-test(
-  'a role restriction denies the actual operation and rollback restores its permission',
-  { timeout: 600_000 },
-  async () => {
-    await withEphemeralPostgres(
-      'customize-role',
-      async ({ connection, pool }) => {
-        const options = {
-          databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
-          tenantSlug: 'customize-role',
-        };
-        const app = await startComposedApplication({
-          ...options,
-          seedProfile: 'distributor',
-          port: 0,
-        });
-        const opened = await openCustomizeService(options);
-        try {
-          const roleKey = 'local-demo-full-release';
-          const createId = 'northstar.app:operation.item_create';
-          const updateId = 'northstar.app:operation.item_update';
-          const headers = { cookie: 'northstar-demo-actor=manager' };
-          const preview = (operationId: string, asManager = false) =>
-            app.runtime.entry.run(
-              { headers: asManager ? headers : {} },
-              (view) =>
-                app.runtime.operationGateway.previewTaskEligibility(
-                  view,
-                  [operationId],
-                  null,
-                ),
-            );
-          const recordId = randomUUID();
-          const world = worldOver(app.runtime, String(connection.database));
-          const create = () =>
-            world.invoke(
-              'item_create',
-              {
-                recordId,
-                relations: {},
-                values: {
-                  'northstar.app:field.item_name': 'Role restriction witness',
-                  'northstar.app:field.item_sku': 'ROLE-RESTRICTION',
-                  'northstar.app:field.item_base_unit': 'EA',
-                },
-              },
-              { actor: 'buyer' },
-            );
-          const manager = await app.runtime.entry.run(
-            { headers },
-            async (view) => trustedContextForRequestRuntimeView(view),
-          );
-          assert.notEqual(
-            manager.principalId,
-            app.runtime.identity.principalId,
-          );
-          assert.ok(
-            (
-              await opened.service.targets(manager)
-            ).permissionRoleKeys?.includes(roleKey),
-          );
-          assert.equal(await preview(createId), 'eligible');
-          const draft = await opened.service.draft(
-            {
-              kind: 'narrowPermission',
-              roleKey,
-              target: { kind: 'operation', id: createId },
-            },
-            'visualBuilder',
-            undefined,
-            manager,
-          );
-          assert.ok(draft.status === 'drafted', JSON.stringify(draft));
-          assert.equal(
-            (await recordedPatch(pool, draft.patchId)).authored_by,
-            manager.principalId,
-          );
-          await opened.service.approve(draft.patchId);
-          const setRoleAvailability = (active: boolean) =>
-            pool.query(
-              `UPDATE platform.current_policy_roles
-                  SET revoked_at = CASE WHEN $4::boolean THEN NULL ELSE clock_timestamp() END
-                WHERE tenant_id = $1 AND environment_id = $2 AND role_key = $3`,
-              [
-                app.runtime.identity.tenantId,
-                app.runtime.identity.environmentId,
-                roleKey,
-                active,
-              ],
-            );
-          await setRoleAvailability(false);
-          await assert.rejects(() => opened.service.activate(draft.patchId), {
-            code: 'CUSTOMIZE_TARGET_NOT_FOUND',
-          });
-          await setRoleAvailability(true);
-          await opened.service.activate(draft.patchId);
-          await assert.rejects(
-            create,
-            { name: 'SemanticOperationPolicyDeniedError' },
-            'the selected role cannot perform the live operation',
-          );
-          assert.equal(await preview(createId), 'ineligible');
-          assert.equal(await preview(updateId), 'eligible');
-          assert.equal(await preview(createId, true), 'eligible');
-          const removal = await opened.service.draft(
-            {
-              kind: 'unNarrowPermission',
-              roleKey,
-              target: { kind: 'operation', id: createId },
-            },
-            'visualBuilder',
-          );
-          assert.ok(removal.status === 'drafted', JSON.stringify(removal));
-          await opened.service.approve(removal.patchId);
-          await opened.service.activate(removal.patchId);
-          assert.equal(await preview(createId), 'eligible');
-          await opened.service.rollback();
-          assert.equal(await preview(createId), 'ineligible');
-          await opened.service.approve(removal.patchId);
-          await opened.service.activate(removal.patchId);
-          assert.equal(await preview(createId), 'eligible');
-          assert.equal((await create()).outcome, 'succeeded');
-        } finally {
-          await opened.close();
-          await app.close();
-        }
-      },
-      LINEAGE_INSTALL_VOLUME,
-    );
-  },
-);
-
-test(
-  'an approved Today card reads the exact sum before pagination and disappears on rollback',
-  { timeout: 600_000 },
-  async () => {
-    await withEphemeralPostgres(
-      'customize-metric',
-      async ({ connection }) => {
-        const options = {
-          databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
-          tenantSlug: 'customize-metric',
-        };
-        const app = await startComposedApplication({
-          ...options,
-          seedProfile: 'distributor',
-          port: 0,
-        });
-        const opened = await openCustomizeService(options);
-        try {
-          const world = worldOver(app.runtime, String(connection.database));
-          const field = 'northstar.app:field.item_price_cad';
-          for (const [suffix, price] of [
-            ['A', '0.1'],
-            ['B', '0.2'],
-          ] as const) {
-            const created = await world.invoke('item_create', {
-              recordId: randomUUID(),
-              relations: {},
-              values: {
-                'northstar.app:field.item_name': `Metric witness ${suffix}`,
-                'northstar.app:field.item_sku': `METRIC-${suffix}`,
-                'northstar.app:field.item_base_unit': 'EA',
-                [field]: price,
-              },
-            });
-            assert.equal(created.outcome, 'succeeded');
-          }
-          const draft = await opened.service.draft(
-            {
-              kind: 'addMetricCard',
-              surface: 'northstar.app:surface.item_list',
-              label: 'Catalog prices in CAD',
-              sumField: field,
-            },
-            'visualBuilder',
-          );
-          assert.equal(draft.status, 'drafted', JSON.stringify(draft));
-          await opened.service.approve(draft.patchId);
-          await opened.service.activate(draft.patchId);
-          const actor = { cookie: 'northstar-demo-actor=manager' };
-          const readSum = (search: string) =>
-            app.runtime.entry.run({ headers: actor }, (view) =>
-              app.runtime.queryGateway.invoke(view, {
-                schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-                queryId: 'northstar.app:query.item_list',
-                arguments: {
-                  includeArchived: false,
-                  list: {
-                    cursor: null,
-                    matchMode: 'substring',
-                    pageSize: 1,
-                    relationLabels: [],
-                    schemaVersion: SHARED_LIST_QUERY_VERSION,
-                    search,
-                    sort: [],
-                    sumField: field,
-                  },
-                },
-              }),
-            );
-          const result = await readSum('Metric witness');
-          assert.equal(result.records.length, 1);
-          assert.equal(result.listCoverage?.totalCount, 2);
-          assert.deepEqual(
-            result.listCoverage?.sum,
-            { fieldId: field, value: '0.3' },
-            'the exact sum covers the matching rows beyond the first page',
-          );
-          const agent = new OperationsAgentSession({
-            runtime: app.runtime,
-            companyId: COMPANY,
-            personHeaders: actor,
-            approve: () => Promise.resolve(true),
-          });
-          const discover = () =>
-            agent.call('erp_discover', {
-              mode: 'contracts',
-              canonicalIds: ['northstar.app:query.item_list'],
-            });
-          assert.match(
-            JSON.stringify((await discover()).content),
-            /Catalog prices in CAD/u,
-          );
-          const metricId = 'northstar.app:metric.custom_catalog_prices_in_cad';
-          const readCard = () =>
-            agent.call('erp_query', {
-              queryId: 'northstar.app:query.item_list',
-              arguments: { metric: metricId },
-            });
-          const answer = await readCard();
-          assert.equal(answer.isError, false, JSON.stringify(answer.content));
-          assert.deepEqual(answer.content, {
-            queryId: 'northstar.app:query.item_list',
-            metricId,
-            label: 'Catalog prices in CAD',
-            outcome: 'exact',
-            value: (await readSum('')).listCoverage?.sum?.value,
-          });
-          await opened.service.rollback();
-          assert.doesNotMatch(
-            JSON.stringify((await discover()).content),
-            /Catalog prices in CAD/u,
-          );
-          assert.equal((await readCard()).isError, true);
-        } finally {
-          await opened.close();
-          await app.close();
-        }
-      },
-      LINEAGE_INSTALL_VOLUME,
-    );
-  },
-);
 
 test(
   'a drafted change is recorded append-only beside its tenant revision and staged release, and nothing goes live',
@@ -852,47 +448,6 @@ async function patchCount(pool: pg.Pool): Promise<number> {
     'SELECT count(*)::integer AS count FROM platform.customization_patches',
   );
   return result.rows[0]!.count;
-}
-
-async function recordedPatch(pool: pg.Pool, patchId: string) {
-  const result = await pool.query<{
-    active_revision_id: string;
-    authored_by: string;
-    base_release_root: string;
-    channel: string;
-    parent_revision_id: string;
-    patch_kind: string;
-    payload: Buffer;
-    payload_digest: string;
-    resulting_parent_revision_id: string;
-    resulting_provenance: string;
-    resulting_release_id: string;
-    resulting_release_root: string;
-    resulting_revision_id: string;
-  }>(
-    `SELECT patch.patch_kind, patch.channel, patch.authored_by,
-            patch.base_release_root, patch.payload, patch.payload_digest,
-            patch.parent_revision_id, patch.resulting_revision_id,
-            patch.resulting_release_id,
-            revision.provenance AS resulting_provenance,
-            revision.parent_revision_id AS resulting_parent_revision_id,
-            release.content_hash AS resulting_release_root,
-            active.app_package_revision_id AS active_revision_id
-       FROM platform.customization_patches AS patch
-       JOIN platform.app_package_revisions AS revision
-         ON revision.revision_id = patch.resulting_revision_id
-       JOIN platform.tenant_releases AS release
-         ON release.release_id = patch.resulting_release_id
-       JOIN platform.active_release_pointers AS pointer
-         ON pointer.tenant_id = patch.tenant_id
-        AND pointer.environment_id = patch.environment_id
-       JOIN platform.tenant_releases AS active
-         ON active.release_id = pointer.release_id
-      WHERE patch.patch_id = $1`,
-    [patchId],
-  );
-  assert.equal(result.rows.length, 1);
-  return result.rows[0]!;
 }
 
 const EQUIPMENT = Object.freeze({
@@ -1305,179 +860,6 @@ test(
             false,
           );
           assert.equal((await page()).values[field], 'Morgan');
-        } finally {
-          await opened.close();
-          await app.close();
-        }
-      },
-      LINEAGE_INSTALL_VOLUME,
-    );
-  },
-);
-
-test(
-  'one inspection change activates linked records and owned lines, and an assistant transition needs a yes',
-  { timeout: 600_000 },
-  async () => {
-    await withEphemeralPostgres(
-      'customize-inspection',
-      async ({ connection, pool }) => {
-        const options = {
-          databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
-          tenantSlug: 'customize-inspection',
-        };
-        const app = await startComposedApplication({
-          ...options,
-          port: 0,
-          seedProfile: 'distributor',
-        });
-        const request =
-          'Set up an inspection process for incoming goods with result lines and pass, fail, conditional and quarantine outcomes.';
-        const opened = await openCustomizeService({
-          ...options,
-          draftingProvider: () =>
-            Promise.resolve(
-              scriptedModel([
-                (conversation) => {
-                  assert.deepEqual(conversation, [
-                    { role: 'user', text: request },
-                  ]);
-                  return {
-                    toolCalls: [
-                      {
-                        name: DRAFT_CUSTOMIZATION_TOOL,
-                        input: inspectionChange,
-                      },
-                    ],
-                  };
-                },
-              ]),
-            ),
-        });
-        try {
-          const drafted = await opened.service.draftFromRequest(request);
-          assert.equal(
-            drafted.status,
-            'drafted',
-            JSON.stringify(drafted.status === 'drafted' ? [] : drafted),
-          );
-          assert.match(drafted.renderedDiff, /Inspection results/u);
-          assert.match(
-            drafted.renderedDiff,
-            /Quarantine changes "Pending" to "Quarantined"/u,
-          );
-          assert.equal(
-            (await recordedPatch(pool, drafted.patchId)).patch_kind,
-            'changeSet',
-          );
-          assert.equal((await opened.service.status()).patches.length, 1);
-          await opened.service.approve(drafted.patchId);
-          await opened.service.activate(drafted.patchId);
-          const world = worldOver(app.runtime, String(connection.database));
-          const { receipt, supplier, item, location } =
-            await inspectionLinkRecords(world.create, seededId);
-          const beforeMovements = await world.list(
-            'northstar.app:query.inventory_movement_list',
-          );
-          const header = await world.create(
-            inspection,
-            { name: 'Incoming lot' },
-            { goods_receipt: receipt.recordId, supplier, item, location },
-          );
-          const lineType = `${inspection}_lines`;
-          const line = await world.create(
-            lineType,
-            {
-              line_number: '1',
-              characteristic: 'Length',
-              measured_value: '21',
-              pass: true,
-            },
-            { parent: header.recordId },
-          );
-          const other = await world.create(inspection, { name: 'Another lot' });
-          await world.create(
-            lineType,
-            { line_number: '1', characteristic: 'Width' },
-            { parent: other.recordId },
-          );
-          const lines = await world.list(
-            `northstar.app:query.${lineType}_list`,
-            {
-              parentScope: {
-                relationId: `northstar.app:relation.${lineType}_parent`,
-                recordId: header.recordId,
-              },
-            },
-          );
-          assert.deepEqual(
-            lines.map((row) => row.recordId),
-            [line.recordId],
-          );
-          await assert.rejects(
-            world.invoke(`${inspection}_archive`, {
-              recordId: header.recordId,
-              expectedRevision: header.revision,
-            }),
-            /active dependent records/u,
-          );
-
-          const agent = new OperationsAgentSession({
-            runtime: app.runtime,
-            companyId: COMPANY,
-            personHeaders: { cookie: 'northstar-demo-actor=manager' },
-            autoApproveReversible: true,
-            approve: (plan) =>
-              Promise.resolve(plan.steps[0]?.operationLabel === 'Quarantine'),
-          });
-          const found = await agent.call('erp_query', {
-            queryId: `${inspection}_list`,
-            arguments: {
-              search:
-                receipt.values['northstar.app:field.goods_receipt_number'],
-            },
-          });
-          assert.equal(found.isError, false, JSON.stringify(found.content));
-          assert.deepEqual(
-            (found.content as { records: { recordId: string }[] }).records.map(
-              (record) => record.recordId,
-            ),
-            [header.recordId],
-          );
-          const plan = await agent.call('erp_plan', {
-            intents: [
-              {
-                operationId: `${inspection}_action_quarantine`,
-                target: header.recordId,
-              },
-            ],
-          });
-          assert.equal(plan.isError, false, JSON.stringify(plan.content));
-          assert.equal(agent.approvals.at(-1)?.riskClass, 'needsYes');
-          assert.equal(agent.approvals.at(-1)?.by, 'person');
-          const executed = await agent.call('erp_execute', {
-            planId: (plan.content as { planId: string }).planId,
-            executionIdempotencyKey: 'inspection-quarantine',
-          });
-          assert.equal(
-            executed.isError,
-            false,
-            JSON.stringify(executed.content),
-          );
-          const current = await world.read(inspection, header.recordId);
-          assert.equal(
-            current.values[
-              `northstar.app:derived_state_field.machine.${inspection}`
-            ],
-            `northstar.app:state.${inspection}_quarantined`,
-          );
-          const afterMovements = await world.list(
-            'northstar.app:query.inventory_movement_list',
-          );
-          assert.deepEqual(
-            afterMovements.map((row) => row.recordId),
-            beforeMovements.map((row) => row.recordId),
-          );
         } finally {
           await opened.close();
           await app.close();
@@ -2043,6 +1425,11 @@ test(
             'SELECT pg_advisory_xact_lock(hashtextextended($1,0))',
             [`northstar.release-scope:${tenantId}:${environmentId}`],
           );
+          const holderPid = (
+            await holder.query<{ pid: number }>(
+              'SELECT pg_backend_pid() AS pid',
+            )
+          ).rows[0]!.pid;
           opening = createComposedApplicationRuntime({
             ...options,
             compiledApplication: next.envelope,
@@ -2060,10 +1447,13 @@ test(
           });
           void opening.catch(() => undefined);
           const deadline = performance.now() + 120_000;
+          // Observe from a separate autocommit session so a statistics
+          // snapshot taken before the boot connected cannot hide it.
           while (
             !(
-              await holder.query(
-                `SELECT 1 FROM pg_stat_activity WHERE pg_backend_pid()=ANY(pg_blocking_pids(pid))`,
+              await pool.query(
+                'SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))',
+                [holderPid],
               )
             ).rowCount
           ) {

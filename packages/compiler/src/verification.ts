@@ -18,6 +18,7 @@ export interface VerificationScenario {
     | 'archiveRestrict'
     | 'declaredEvidence'
     | 'enumReject'
+    | 'formulaValidation'
     | 'resolverAuthority'
     | 'searchableExclusion'
     | 'typedErrorSurface'

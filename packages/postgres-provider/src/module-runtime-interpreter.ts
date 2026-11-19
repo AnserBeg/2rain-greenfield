@@ -22,6 +22,15 @@ import type {
   AcceptedMutationCommand,
 } from '../../platform-runtime/src/trust/contracts.js';
 import { POLICY_DECISION_EVIDENCE_VERSION } from '../../platform-runtime/src/trust/contracts.js';
+import {
+  BUSINESS_DATE_FIELD_ID,
+  type BoundFormulaValidation,
+} from '../../canonical-model/src/formula-validation-bindings.js';
+import {
+  formulaVerificationBusinessDate,
+  parseFormulaValidationBindings,
+} from '../../canonical-model/src/formula-validation-projection.js';
+import { observeValidationRefusals } from '../../runtime/src/formula-validation.js';
 import type {
   RegisteredOperationDefinition,
   RegisteredOperationInputContract,
@@ -445,6 +454,7 @@ export class PostgresModuleRuntimeInterpreter
               request,
               currentEntity,
               input,
+              this.#documentNumbers === 'verificationSentinel',
             );
             const ids = {
               changeDocumentId: randomUUID(),
@@ -614,8 +624,19 @@ async function prepareMutation(
   request: SemanticOperationExecutionRequest,
   entity: StorageEntity,
   input: MutationInput,
+  verifying: boolean,
 ): Promise<MutationPreparation> {
   const kind = request.definition.effect.kind;
+  const formula = request.view.projections.formulaRule;
+  const bindings = formula
+    ? parseFormulaValidationBindings(formula.payload).filter(({ rule }) =>
+        rule.boundOperationIds.includes(request.definition.operationId),
+      )
+    : [];
+  const pinnedBusinessDate =
+    formula && verifying
+      ? formulaVerificationBusinessDate(formula.payload)
+      : null;
   if (kind === 'createRecordEffect') {
     // Candidate image. A create that would forge a terminal state must refuse
     // on the record it is about to write, not on one that does not exist yet.
@@ -624,6 +645,15 @@ async function prepareMutation(
       input.patch,
       'candidate',
     );
+    if (bindings.length)
+      await requireFormulaValidation(
+        client,
+        request,
+        entity,
+        input,
+        bindings,
+        pinnedBusinessDate,
+      );
     return {
       changes: createChanges(request.definition.inputContract, input),
       expectedRevision: null,
@@ -631,7 +661,14 @@ async function prepareMutation(
       recordId: input.recordId,
     };
   }
-  const prior = await loadRawRecord(client, entity, input.recordId, true, []);
+  const prior = await loadRawRecord(
+    client,
+    entity,
+    input.recordId,
+    true,
+    [],
+    bindings.length > 0,
+  );
   if (!prior) {
     throw failure('MODULE_RECORD_NOT_FOUND', 'module record was not found');
   }
@@ -653,6 +690,16 @@ async function prepareMutation(
       { ...prior.values, ...input.patch },
       'projected',
     );
+    if (bindings.length)
+      await requireFormulaValidation(
+        client,
+        request,
+        entity,
+        input,
+        bindings,
+        pinnedBusinessDate,
+        prior,
+      );
     if (entity.periodLock)
       requirePeriodLockDirection(
         entity,
@@ -691,6 +738,97 @@ async function prepareMutation(
     projectedRevision: prior.revision + 1,
     recordId: input.recordId,
   };
+}
+
+async function requireFormulaValidation(
+  client: PoolClient,
+  request: SemanticOperationExecutionRequest,
+  entity: StorageEntity,
+  input: MutationInput,
+  bindings: readonly BoundFormulaValidation[],
+  pinnedBusinessDate: string | null,
+  prior?: RawRecord,
+): Promise<void> {
+  const watched = new Map(
+    bindings.flatMap(({ watchedFields }) => Object.entries(watchedFields)),
+  );
+  const columns = entity.columns.filter(({ canonicalFieldId }) =>
+    watched.has(canonicalFieldId),
+  );
+  const dateColumns = columns.filter(
+    ({ canonicalFieldId }) => watched.get(canonicalFieldId)?.kind === 'date',
+  );
+  let priorDates: Record<string, unknown> = {};
+  if (prior && dateColumns.length) {
+    // Cast calendar dates in PostgreSQL. The driver's local Date conversion
+    // would let the host time zone change the day on the locked record.
+    const dates = await client.query(
+      `SELECT ${dateColumns.map(({ physicalName }) => `to_char(${quoted(physicalName)}, 'YYYY-MM-DD') AS ${quoted(physicalName)}`).join(', ')}
+         FROM north_star_module.${quoted(entity.physicalTableName)}
+        WHERE ${quoted(entity.recordIdentity.column)} = $1`,
+      [input.recordId],
+    );
+    priorDates = dates.rows[0] ?? {};
+  }
+  const inputValue = (fieldId: string, value: unknown) =>
+    watched.get(fieldId)?.kind === 'integer' &&
+    typeof value === 'number' &&
+    Number.isSafeInteger(value)
+      ? String(value)
+      : value;
+  const previousValues = prior
+    ? Object.fromEntries(
+        columns.map(({ canonicalFieldId, physicalName }) => [
+          canonicalFieldId,
+          inputValue(
+            canonicalFieldId,
+            Object.hasOwn(priorDates, physicalName)
+              ? priorDates[physicalName]
+              : prior.values[canonicalFieldId],
+          ),
+        ]),
+      )
+    : undefined;
+  const values = Object.fromEntries(
+    columns.map(({ canonicalFieldId, defaultSemantics, defaultValue }) => {
+      const declared =
+        defaultSemantics === 'declaredDefault' ? defaultValue : null;
+      const value = Object.hasOwn(input.patch, canonicalFieldId)
+        ? input.patch[canonicalFieldId]
+        : previousValues
+          ? previousValues[canonicalFieldId]
+          : isRecord(declared)
+            ? declared.value
+            : declared;
+      return [canonicalFieldId, inputValue(canonicalFieldId, value)];
+    }),
+  );
+  const businessDate = bindings.some(({ contextDependencies }) =>
+    contextDependencies.includes(BUSINESS_DATE_FIELD_ID),
+  )
+    ? (pinnedBusinessDate ??
+      (
+        await client.query<{ business_date: string }>(
+          `SELECT to_char((transaction_timestamp() AT TIME ZONE time_zone) - business_day_boundary::interval, 'YYYY-MM-DD') AS business_date
+           FROM platform.inventory_tenant_calendars
+          WHERE tenant_id = $1`,
+          [request.context.tenantId],
+        )
+      ).rows[0]?.business_date ??
+      null)
+    : null;
+  const first = observeValidationRefusals(bindings, {
+    operationId: request.definition.operationId,
+    businessDate,
+    values,
+    ...(previousValues
+      ? { previousValues, updatedFieldIds: Object.keys(input.patch) }
+      : {}),
+  })[0];
+  if (first)
+    throw failure(first.code, first.message, first.ruleId, {
+      fieldAnchors: JSON.stringify(first.fieldAnchors),
+    });
 }
 
 /**
@@ -5276,6 +5414,7 @@ async function loadRawRecord(
   recordId: string,
   includeArchived: boolean,
   filterPlans: readonly QueryFilterLoweringPlan[],
+  lock = false,
 ): Promise<RawRecord | null> {
   const values: unknown[] = [];
   const predicates = archivePredicate(entity, includeArchived);
@@ -5284,7 +5423,7 @@ async function loadRawRecord(
   );
   appendQueryFilterPredicates(entity, filterPlans, values, predicates);
   const result = await client.query<QueryResultRow>(
-    selectSql(entity, predicates, 'LIMIT 1'),
+    selectSql(entity, predicates, lock ? 'LIMIT 1 FOR UPDATE' : 'LIMIT 1'),
     values,
   );
   return result.rows[0] ? rawRecord(entity, result.rows[0]) : null;

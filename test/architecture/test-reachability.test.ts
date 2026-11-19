@@ -8,7 +8,14 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join, matchesGlob, relative, resolve } from 'node:path';
+import {
+  basename,
+  dirname,
+  join,
+  matchesGlob,
+  relative,
+  resolve,
+} from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
@@ -558,8 +565,7 @@ test('the Playwright producers run every browser spec in exactly one job and rep
       `${relative(process.cwd(), spec)} would not run in the operations job`,
     );
   }
-  // The composed application's journeys run in a job of their own, beside the
-  // operations specs rather than after them.
+  // Customize journeys have their own job beside the other composed journeys.
   const composed = specs.filter((spec) =>
     spec.endsWith('composed-application.spec.ts'),
   );
@@ -567,8 +573,12 @@ test('the Playwright producers run every browser spec in exactly one job and rep
   for (const spec of composed) {
     assert.deepEqual(
       selectedBy.get(spec),
-      ['browser-composed'],
-      `${relative(process.cwd(), spec)} would not run in the composed job`,
+      [
+        basename(spec) === 'customize.composed-application.spec.ts'
+          ? 'browser-customization'
+          : 'browser-composed',
+      ],
+      `${relative(process.cwd(), spec)} would not run in its declared composed browser job`,
     );
   }
   // The inventory and item stock specs run in a job of their own, beside the

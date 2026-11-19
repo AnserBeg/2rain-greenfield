@@ -18,6 +18,11 @@ export interface DiffDefinition {
   readonly entities: readonly Json[];
   readonly fields: readonly Json[];
   readonly operations?: readonly Json[];
+  readonly formulaRules?: readonly {
+    readonly ruleId: string;
+    readonly targetId: string;
+    readonly message: string;
+  }[];
   readonly operationRoleNarrowings?: readonly {
     readonly operationId: string;
     readonly roleKey: string;
@@ -67,6 +72,18 @@ export function renderReleaseDiff(input: {
         ?.label ?? entityId,
     );
   const lines: string[] = [];
+  for (const rule of to.formulaRules ?? []) {
+    if (!from.formulaRules?.some(({ ruleId }) => ruleId === rule.ruleId))
+      lines.push(
+        `Checks ${entityLabel(to, rule.targetId)} on save. The form shows “${rule.message}” when the check fails. Existing records keep their values.`,
+      );
+  }
+  for (const rule of from.formulaRules ?? []) {
+    if (!to.formulaRules?.some(({ ruleId }) => ruleId === rule.ruleId))
+      lines.push(
+        `Removes the save check “${rule.message}” from ${entityLabel(from, rule.targetId)}.`,
+      );
+  }
   for (const entry of to.operationRoleNarrowings ?? []) {
     if (
       from.operationRoleNarrowings?.some(
