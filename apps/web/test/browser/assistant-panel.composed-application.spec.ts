@@ -560,6 +560,9 @@ test('a resized assistant follows the person onto the new PO and finishes a deta
         }
       }
       await page.setViewportSize({ width: 960, height: 900 });
+      // The resize handler restores the preferred desktop width after mobile.
+      // Observe it before measuring the handle and starting the drag.
+      await expect(separator).toHaveAttribute('aria-valuenow', String(width));
       const narrow = (await separator.boundingBox())!;
       await page.mouse.move(narrow.x + narrow.width / 2, narrow.y + 80);
       await page.mouse.down();
