@@ -40,7 +40,7 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
   "base": "129cb3019b86a0de06511c05c08978c8ee50a34e",
-  "head": "63f0891be5271d338641a91475ea6f6472974806",
+  "head": "aa29de05d58296d74f2abdb19cedd8ffd8292fc5",
   "changedPaths": [
     ".github/scripts/run-security-scans.sh", ".github/workflows/ci.yml", ".github/workflows/evidence.yml", "apps/web/playwright.composed.config.ts", "apps/web/playwright.customization.config.ts",
     "apps/web/playwright.shared.ts", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/document-editor.ts", "apps/web/src/surface-composition.ts",
@@ -50,10 +50,10 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
     "packages/compiler/src/formula-validation-witness.ts", "packages/compiler/src/projections.ts", "packages/compiler/src/protocol.ts", "packages/compiler/src/verification.ts", "packages/customization/src/ai-draft.ts",
     "packages/customization/src/apply.ts", "packages/customization/src/patch.ts", "packages/customization/src/render.ts", "packages/customization/src/targets.ts", "packages/customization/src/validation-draft.ts",
     "packages/operations-agent/src/catalog.ts", "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/release-repository.ts", "packages/postgres-provider/src/release-verification-service.ts",
-    "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/formula-validation.ts", "packages/runtime/src/request-runtime-view.ts", "test/architecture/repository-hygiene.test.ts", "test/architecture/test-reachability.test.ts",
-    "test/evidence/CUSTOMIZE-3.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts", "test/helpers/check-language-coverage.ts", "test/helpers/language-coverage-packages.ts",
-    "test/helpers/reachability-producers.ts", "test/integration/security-scan-contract.test.ts", "test/postgres/customization-validation.test.ts", "test/postgres/customization.test.ts", "test/unit/customization-ai-draft.test.ts",
-    "test/unit/formula-validation.test.ts"
+    "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/formula-validation.ts", "packages/runtime/src/request-runtime-view.ts", "scripts/run-matrix.sh", "test/architecture/repository-hygiene.test.ts",
+    "test/architecture/test-reachability.test.ts", "test/evidence/CUSTOMIZE-3.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts", "test/helpers/check-language-coverage.ts",
+    "test/helpers/language-coverage-packages.ts", "test/helpers/reachability-producers.ts", "test/integration/security-scan-contract.test.ts", "test/postgres/customization-validation.test.ts", "test/postgres/customization.test.ts",
+    "test/unit/customization-ai-draft.test.ts", "test/unit/formula-validation.test.ts"
   ],
   "symbols": [
     {"path":"packages/canonical-model/src/formula-validation-bindings.ts","name":"bindLiteralValidation"},
