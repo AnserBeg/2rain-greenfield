@@ -19,7 +19,7 @@ The orchestrator accepted ADR-0079 with Fable’s amendments on 2026-11-19.
 
 ## Gates and test it yourself
 
-Four focused tests fail on the preceding main and pass on slice 1a. They exercise persistent inventory, ordered replay, protected blocks and a generated Inspection with both reader requirements. The PostgreSQL journey runs the preceding serving reader and compares complete tenant compiler envelopes. The browser journey uses the Vendor picker in its new section at desktop and compact widths.
+Four focused tests fail on the preceding main and pass on slice 1a. They exercise persistent inventory, the before-and-after approval view, ordered replay, protected blocks and a generated Inspection with both reader requirements. The PostgreSQL journey runs the preceding serving reader and compares complete tenant compiler envelopes. The browser journey uses the Vendor picker in its new section at desktop and compact widths.
 
 In Customize, choose **Arrange a form or record page**, then the purchase order create form. Draft a section named **Delivery**, approve it and activate. Open the same arrangement and move **Vendor** into **Delivery**. Approve and activate. Open **Purchase orders → New**. Under **Delivery**, type a vendor name and select a result. Roll back the latest change to restore the vendor’s previous placement.
 
@@ -27,8 +27,8 @@ In Customize, choose **Arrange a form or record page**, then the purchase order 
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "UI-COMPOSE-1",
-  "base": "0028381dd31b8525af6dd7ff7835bc8445bcb25b",
-  "head": "de760276bcf27d1fbb84638cf131dbdb5e52bbb8",
+  "base": "d278b42d087f2209d2a4eaddb5ee3169c33309e4",
+  "head": "b9ff4e11e4e614ef0ab087bc9eb7eb01b31edb76",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/composed-sections.ts", "apps/web/src/customize-layout.ts",
     "apps/web/src/customize-screen.ts", "apps/web/src/document-editor.ts", "apps/web/src/ledger-styles.ts",
