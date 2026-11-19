@@ -31,6 +31,7 @@ import {
   diagnostic,
   type CanonicalDiagnostic,
 } from './diagnostics.js';
+import { bindCalculatedDisplayField } from './calculated-display-bindings.js';
 import { bindLiteralValidation } from './formula-validation-bindings.js';
 import {
   MIXED_NODE_VERSION_ISSUE,
@@ -155,6 +156,8 @@ export function parseNormalizedApplicationPackageJson(
   }
   enforceFamilyBounds(normalized);
   validateSemantics(normalized);
+  if (normalized.languageVersion === 'v6')
+    validateCalculatedDisplayFields(normalized);
   validateSurfaceCompositions(normalized);
   validateSurfaceWorkspaces(normalized);
   validateSurfaceLists(normalized);
@@ -211,6 +214,17 @@ export function normalizeApplicationPackage(
             fieldAnchors: sortedStrings(rule.fieldAnchors),
           }))
           .sort((left, right) => compareCodeUnits(left.ruleId, right.ruleId)),
+      }),
+    ...(authored.languageVersion === 'v6' &&
+      authored.calculatedDisplayFields && {
+        calculatedDisplayFields: authored.calculatedDisplayFields
+          .map((field) => ({
+            ...field,
+            displaySinks: [...field.displaySinks].sort((left, right) =>
+              compareCodeUnits(left.surfaceId, right.surfaceId),
+            ),
+          }))
+          .sort((left, right) => compareCodeUnits(left.fieldId, right.fieldId)),
       }),
     ...(roleNarrowings && {
       operationRoleNarrowings: [...roleNarrowings].sort((left, right) => {
@@ -542,6 +556,8 @@ export function normalizeApplicationPackage(
       seen.add(key);
     }
   }
+  if (normalized.languageVersion === 'v6')
+    validateCalculatedDisplayFields(normalized);
   validateSurfaceCompositions(normalized);
   validateSurfaceWorkspaces(normalized);
   validateSurfaceLists(normalized);
@@ -631,6 +647,55 @@ export function canonicalAuthoredProjection(
     }
   });
   return parseAuthoredValue(projected);
+}
+
+function validateCalculatedDisplayFields(
+  definition: V6NormalizedApplicationPackage,
+) {
+  const seen = new Set<string>(definition.fields.map(({ fieldId }) => fieldId));
+  const countBySurface = new Map<string, number>();
+  for (const [index, field] of (
+    definition.calculatedDisplayFields ?? []
+  ).entries()) {
+    const bound = bindCalculatedDisplayField(field, definition);
+    if (seen.has(field.fieldId) || bound.status === 'refused') {
+      throw new CanonicalModelError([
+        diagnostic(
+          'CANON_CALCULATED_DISPLAY_BINDING_UNSUPPORTED',
+          `$.calculatedDisplayFields[${index}]`,
+          bound.status === 'refused'
+            ? bound.message
+            : 'A calculated field ID must be unique.',
+          'Choose readable source fields and compatible decimal types.',
+          field.fieldId,
+        ),
+      ]);
+    }
+    seen.add(field.fieldId);
+    for (const { kind, surfaceId } of field.displaySinks) {
+      const count = (countBySurface.get(surfaceId) ?? 0) + 1;
+      countBySurface.set(surfaceId, count);
+      const target = definition.surfaces.find(
+        (surface) => surface.surfaceId === surfaceId,
+      );
+      const columns =
+        kind === 'record' ? target?.composition?.fields : target?.list?.columns;
+      if (
+        !columns ||
+        columns.length + count > (kind === 'record' ? 48 : 16) ||
+        columns.some(({ orderKey }) => orderKey + count > 1_000_000)
+      )
+        throw new CanonicalModelError([
+          diagnostic(
+            'CANON_CALCULATED_DISPLAY_BINDING_UNSUPPORTED',
+            `$.calculatedDisplayFields[${index}].displaySinks`,
+            'The selected page or list has no space for another calculated field.',
+            'Choose a sink with a free column position.',
+            surfaceId,
+          ),
+        ]);
+    }
+  }
 }
 
 function validateNormalizedDerivation(
