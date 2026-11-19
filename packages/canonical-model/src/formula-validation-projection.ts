@@ -51,25 +51,32 @@ const validationBinding = z.object({
   contextDependencies: z.array(z.string()),
 });
 
-const validationProjection = z.object({
-  kind: z.literal('formulaRulePayload'),
-  schemaVersion: z.literal('northstar.formula-rule-payload/v1'),
-  bindings: z.array(validationBinding).min(1),
-  verificationBusinessDate: z.iso.date(),
-});
+const validationProjection = z
+  .object({
+    kind: z.literal('formulaRulePayload'),
+    schemaVersion: z.literal('northstar.formula-rule-payload/v1'),
+    bindings: z.array(validationBinding).min(1).optional(),
+    verificationBusinessDate: z.iso.date().optional(),
+  })
+  .refine(
+    (value) =>
+      Boolean(value.bindings) === Boolean(value.verificationBusinessDate),
+  );
 
 export function parseFormulaValidationBindings(
   payload: unknown,
 ): readonly BoundFormulaValidation[] {
-  return validationProjection
-    .parse(payload)
-    .bindings.map(({ watchedRelationIds, paths, ...binding }) => ({
+  return (validationProjection.parse(payload).bindings ?? []).map(
+    ({ watchedRelationIds, paths, ...binding }) => ({
       ...binding,
       ...(watchedRelationIds ? { watchedRelationIds } : {}),
       ...(paths ? { paths } : {}),
-    }));
+    }),
+  );
 }
 
 export function formulaVerificationBusinessDate(payload: unknown): string {
-  return validationProjection.parse(payload).verificationBusinessDate;
+  return z.iso
+    .date()
+    .parse(validationProjection.parse(payload).verificationBusinessDate);
 }
