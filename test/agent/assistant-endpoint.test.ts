@@ -239,6 +239,51 @@ test("a conversation is its starter's; a cross-site or unmarked request is refus
   }
 });
 
+test('history replays the rendered exchange only to the person who asked', async () => {
+  const { url, server } = await serve(
+    scriptedModel([() => ({ text: 'One supplier.' })]),
+    [],
+  );
+  const post = (
+    action: string,
+    person: string,
+    body: Record<string, unknown>,
+  ) =>
+    fetch(`${url}/?assistant=${action}`, {
+      method: 'POST',
+      headers: headers(person, url),
+      body: JSON.stringify(body),
+    });
+  try {
+    const [opened] = await events(
+      await post('ask', 'buyer', { text: 'How many suppliers?' }),
+    );
+    const conversation = opened!.id;
+    const other = await post('history', 'manager', { conversation });
+    assert.equal(other.status, 204);
+    assert.equal(await other.text(), '');
+    const mine = await post('history', 'buyer', { conversation, page: '' });
+    const history = (await mine.json()) as {
+      transcript: { type: string; text: string }[];
+      pending: unknown;
+      running: boolean;
+      did: unknown;
+    };
+    assert.deepEqual(
+      history.transcript.map(({ type, text }) => [type, text]),
+      [
+        ['said', 'How many suppliers?'],
+        ['answer', 'One supplier.'],
+      ],
+    );
+    assert.equal(history.running, false);
+    assert.equal(history.pending, null);
+    assert.equal(history.did, null);
+  } finally {
+    server.close();
+  }
+});
+
 test('a plan waits for a yes bound to exactly that plan; a wrong digest decides nothing', async () => {
   let planResult: Record<string, unknown> = {};
   const model = scriptedModel([

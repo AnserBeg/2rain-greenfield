@@ -111,7 +111,10 @@ export interface CustomizeDrafter {
   >;
 }
 
+type PanelEvent = Record<string, unknown>;
+
 interface PendingPlan {
+  readonly card: PanelEvent;
   readonly planId: string;
   readonly digest: string;
   readonly decide: (approved: boolean) => void;
@@ -126,6 +129,9 @@ interface Conversation {
   readonly session: OperationsAgentSession;
   readonly meter: SpendMeter;
   history: readonly ConversationEntry[];
+  /** Events visible to the person. Model prompts, tool results and deltas stay out. */
+  readonly transcript: PanelEvent[];
+  step: string;
   /** When the person last used it, on the endpoint's clock. */
   lastUsed: number;
   recentStart: number;
@@ -200,14 +206,24 @@ export function createAssistantEndpoint(
     request: IncomingMessage,
     principalId: string,
     company: Conversation['company'],
+    startId: unknown,
   ) => {
     const conversation: Conversation = {
-      id: randomUUID(),
+      id:
+        typeof startId === 'string' &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+          startId,
+        ) &&
+        !conversations.has(startId)
+          ? startId
+          : randomUUID(),
       principalId,
       company,
       cookie: String(request.headers.cookie ?? ''),
       meter: new SpendMeter(prices, capUsd),
       history: [],
+      transcript: [],
+      step: 'Starting',
       lastUsed: now(),
       recentStart: 0,
       running: null,
@@ -272,7 +288,14 @@ export function createAssistantEndpoint(
           pending &&
           body.planId === pending.planId &&
           body.digest === pending.digest;
-        if (bound) pending.decide(body.approve === true);
+        if (bound) {
+          if (body.approve === true && typeof body.typed === 'string')
+            mine.emit({
+              type: 'confirmation',
+              text: body.typed.slice(0, 4_000),
+            });
+          pending.decide(body.approve === true);
+        }
         response.statusCode = bound ? 204 : 409;
         response.end();
         return true;
@@ -336,22 +359,52 @@ export function createAssistantEndpoint(
         }
         // Undo holds the conversation like a run: no ask or second Undo
         // interleaves with it.
+        mine.step = 'Undoing change';
         mine.running = new AbortController();
         const undone = await mine.session
           .undo(body.changeId, mine.running.signal)
           .finally(() => {
             mine.running = null;
           });
+        const result =
+          undone.outcome === 'undone'
+            ? {
+                outcome: 'undone',
+                text: `${undone.summary}${undone.verified ? ' (checked)' : ' (the check did not confirm it; look at the record)'}`,
+              }
+            : { outcome: 'refused', text: `Not undone: ${undone.reason}` };
+        mine.transcript.push({
+          type: 'undo',
+          changeId: body.changeId,
+          ...result,
+        });
         response.statusCode = 200;
+        response.end(JSON.stringify(result));
+        return true;
+      }
+      if (action === 'history') {
+        response.setHeader('cache-control', 'no-store');
+        if (!mine) {
+          response.statusCode = 204;
+          response.end();
+          return true;
+        }
+        const change = mine.session.latestChange();
+        const after =
+          typeof body.after === 'number' &&
+          Number.isSafeInteger(body.after) &&
+          body.after >= 0
+            ? body.after
+            : 0;
+        response.setHeader('content-type', 'application/json; charset=utf-8');
         response.end(
-          JSON.stringify(
-            undone.outcome === 'undone'
-              ? {
-                  outcome: 'undone',
-                  text: `${undone.summary}${undone.verified ? ' (checked)' : ' (the check did not confirm it; look at the record)'}`,
-                }
-              : { outcome: 'refused', text: `Not undone: ${undone.reason}` },
-          ),
+          JSON.stringify({
+            transcript: mine.transcript.slice(after),
+            pending: mine.pending?.card ?? null,
+            did: change?.undoable ? change : null,
+            running: Boolean(mine.running),
+            step: mine.running ? mine.step : null,
+          }),
         );
         return true;
       }
@@ -417,7 +470,8 @@ export function createAssistantEndpoint(
         response.end();
         return true;
       }
-      const conversation = same ?? open(request, principalId, company);
+      const conversation =
+        same ?? open(request, principalId, company, body.startId);
       if (conversation.running) {
         response.statusCode = 409;
         response.end();
@@ -425,20 +479,22 @@ export function createAssistantEndpoint(
       }
       response.statusCode = 200;
       response.setHeader('content-type', 'application/x-ndjson; charset=utf-8');
-      const emit = (event: Record<string, unknown>) => {
-        if (!response.writableEnded)
+      conversation.transcript.push({ type: 'said', text });
+      conversation.step = 'Starting';
+      const emit = (event: PanelEvent) => {
+        if (event.type === 'step') conversation.step = String(event.label);
+        if (
+          ['answer', 'error', 'plan', 'decided', 'confirmation'].includes(
+            String(event.type),
+          )
+        )
+          conversation.transcript.push(event);
+        if (!response.destroyed && !response.writableEnded)
           response.write(`${JSON.stringify(event)}\n`);
       };
       conversation.emit = emit;
       const controller = new AbortController();
       conversation.running = controller;
-      // Closing the panel's request is a Stop.
-      response.on('close', () => {
-        if (!response.writableFinished) {
-          controller.abort();
-          conversation.pending?.decide(false);
-        }
-      });
       emit({
         type: 'conversation',
         id: conversation.id,
@@ -460,6 +516,7 @@ export function createAssistantEndpoint(
           ...(await didSince(conversation, before)),
         });
       } finally {
+        conversation.emit = () => undefined;
         if (conversation.session.changes().length > before)
           conversation.recentStart = before;
         conversation.running = null;
@@ -618,8 +675,7 @@ export function createAssistantEndpoint(
         decide(false);
         return;
       }
-      conversation.pending = { planId: plan.planId, digest, decide };
-      conversation.emit({
+      const card = {
         type: 'plan',
         planId: plan.planId,
         digest,
@@ -637,7 +693,9 @@ export function createAssistantEndpoint(
             : step.target,
           inputs: inputRows(step.inputs, step.fieldKinds ?? {}),
         })),
-      });
+      };
+      conversation.pending = { planId: plan.planId, digest, card, decide };
+      conversation.emit(card);
     });
   }
 
