@@ -14,6 +14,7 @@ test('a rule drafted in Customize refuses an empty field on the live form until 
   page,
 }) => {
   test.setTimeout(600_000);
+  page.setDefaultTimeout(30_000);
   await withEphemeralPostgres(
     'customize-validation-browser',
     async ({ connection }) => {
@@ -55,21 +56,21 @@ test('a rule drafted in Customize refuses an empty field on the live form until 
           page.locator('[data-customize-result="activated"]'),
         ).toBeVisible({ timeout: 180_000 });
 
+        const itemField = (name: string) =>
+          page.locator(`[name="value:northstar.app:field.item_${name}"]`);
         const makeItem = async (sku: string) => {
           await page.goto(form);
-          await page.getByLabel('SKU').fill(sku);
-          await page
-            .getByLabel('Name', { exact: true })
-            .fill('Item with a validation witness');
-          await page.getByLabel('Base unit', { exact: true }).fill('EA');
+          await itemField('sku').fill(sku);
+          await itemField('name').fill('Item with a validation witness');
+          await itemField('base_unit').fill('EA');
           await page.getByRole('button', { name: 'Save', exact: true }).click();
         };
         await makeItem('GUARD-WEB');
         await expect(page.locator('[data-form-validation-refusal]')).toHaveText(
           message,
         );
-        await expect(page.getByLabel('SKU')).toHaveValue('GUARD-WEB');
-        const description = page.getByLabel('Description', { exact: true });
+        await expect(itemField('sku')).toHaveValue('GUARD-WEB');
+        const description = itemField('description');
         await expect(description).toHaveAttribute('aria-invalid', 'true');
         await description.fill('Reviewed at receiving.');
         await page.getByRole('button', { name: 'Save', exact: true }).click();
