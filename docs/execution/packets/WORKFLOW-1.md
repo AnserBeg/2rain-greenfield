@@ -29,7 +29,7 @@ Slices 1 and 2 and the first correction landed. Round 2 closes the five open ver
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WORKFLOW-1",
   "base": "fc56f4a0af8b4dfbff4692906c5b45c34eae4bbc",
-  "head": "4a34e0fea1777d75d658898de3c0e67c5c4c449d",
+  "head": "ceb4bae8c0d3f8ab221cfa2e8c87ae6df9306501",
   "changedPaths": [
     "db/migrations/0041_workflow_authority.sql",
     "db/schema.snapshot.json",
