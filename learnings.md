@@ -793,3 +793,9 @@ How to apply: Compute dependencies from the verified compiler artifacts, restric
 Date: 2026-11-19
 Why: A writable field with a company-like name supplied the policy operand for an update to another company’s record.
 How to apply: Read the compiler-declared owner under the write lock and evaluate the operation grant before mutation or idempotent read-back. Test both companies through the same gateway. [CRITFIX-E](docs/execution/packets/CRITFIX-E.md)
+
+## Derive workflow scope from trusted source events
+
+Date: 2026-11-19
+Why: A worker-written instance can cite a valid source event while supplying a different company and record.
+How to apply: Resolve scope from the event and its linked change document under the exact tenant, environment, and release before the guest or gateway sees it. [WORKFLOW-1](docs/execution/packets/WORKFLOW-1-threat-model-fix.md)
