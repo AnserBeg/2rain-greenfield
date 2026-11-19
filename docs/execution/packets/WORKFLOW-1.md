@@ -16,7 +16,7 @@ Status — slices 1 and 2 integrated at `8ffab635` and `5dc9c849`. Slice 2 corre
 - QuickJS Emscripten 0.32.0 won the bakeoff on fixed host-owned WASM memory. Both candidates passed isolation, dispatch, and limit probes. [ADR-0073](../../decisions/ADR-0073-workflow-isolate-and-authority.md)
 - Every Tier B operation, reachable intersection, and incomplete dependency or effect proof requires exact human confirmation. Only the owning capability can create a Tier B fact.
 - Admit unattended creates with exact release, operation, and input-contract digests plus verified reachable write evidence. The slice 2 fixture stages evidence with test privileges.
-- Maintain the unresolved receipt index at the trust outbox boundary. The occurrence journal remains append-only.
+- Maintain a partial index of unresolved source keys by event type. Resolving a key updates its state and leaves the append-only disposition intact.
 - Refuse capability read-model queries at SDK admission until workflow policy and pinned executors are wired together.
 - Canonical workflow projections, timers, the approvals worklist, and the Inspection browser journey remain later slices. Documents, communication and email, and connectors remain later N2 work.
 
@@ -30,8 +30,8 @@ Status — slices 1 and 2 integrated at `8ffab635` and `5dc9c849`. Slice 2 corre
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WORKFLOW-1",
-  "base": "421bd8b82882ee24cbff87bb72914640e600aa6e",
-  "head": "06870fbcc9d82e85a15b81cd61acad04f4528377",
+  "base": "d31e28314923c793a2f7458c86a8d682cf62b4b2",
+  "head": "7d46bed47c17f85867df5676a448070a14aba244",
   "changedPaths": [
     "apps/api/src/composition-root.ts",
     "apps/api/src/main.ts",
@@ -48,6 +48,7 @@ Status — slices 1 and 2 integrated at `8ffab635` and `5dc9c849`. Slice 2 corre
     "packages/postgres-provider/src/workflow-worker.ts",
     "test/architecture/release-persistence-boundary.test.ts",
     "test/architecture/tenant-completeness.manifest.json",
+    "test/architecture/tenant-completeness.test.ts",
     "test/integration/workflow-host.test.ts",
     "test/postgres/inventory-storage.test.ts",
     "test/postgres/migrations.test.ts",
