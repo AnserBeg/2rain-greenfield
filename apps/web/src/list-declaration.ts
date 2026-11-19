@@ -24,6 +24,7 @@ import {
  */
 export interface DeclaredListState {
   readonly filterValues: Readonly<Record<string, string>>;
+  readonly referenceScope?: SharedListQueryRequest['referenceScope'];
   readonly includeArchived: boolean;
   readonly page: number;
   readonly search: string;
@@ -94,8 +95,20 @@ export function readDeclaredListState(
       column.sortable && column.columnId === url.searchParams.get('sort'),
   );
   const page = Number(url.searchParams.get('page') ?? '1');
+  const relationId = url.searchParams.get('link');
+  const recordId = url.searchParams.get('linkedRecord');
+  const referenceScope =
+    relationId &&
+    recordId &&
+    /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/iu.test(recordId) &&
+    list.columns.some(
+      (column) => column.relation && column.field === relationId,
+    )
+      ? { relationId, recordId }
+      : undefined;
   return Object.freeze({
     filterValues: Object.freeze(filterValues),
+    ...(referenceScope ? { referenceScope } : {}),
     includeArchived: url.searchParams.get('archived') === 'yes',
     page:
       Number.isSafeInteger(page) && page >= 1 && page <= 1_000_000 ? page : 1,
@@ -129,6 +142,10 @@ export function declaredListParameters(
   if (next.viewId) parameters.set('view', next.viewId);
   for (const [filterId, value] of Object.entries(next.filterValues))
     parameters.set(filterId, value);
+  if (next.referenceScope) {
+    parameters.set('link', next.referenceScope.relationId);
+    parameters.set('linkedRecord', next.referenceScope.recordId);
+  }
   if (next.search.length > 0) parameters.set('q', next.search);
   if (next.includeArchived) parameters.set('archived', 'yes');
   if (next.sortIsExplicit && next.sort[0]) {
@@ -519,7 +536,7 @@ export function declaredListArguments(
   const fieldFilters = declaredViewFilters(list, state, view);
   const referenceLabels = Object.freeze(
     orderedColumns(list).flatMap((column) =>
-      column.reference
+      column.reference && !column.relation
         ? [
             Object.freeze({
               fieldId: column.reference.labelField.targetId,
@@ -530,6 +547,17 @@ export function declaredListArguments(
           ]
         : [],
     ),
+  );
+  const relationLabels = orderedColumns(list).flatMap((column) =>
+    column.relation && column.reference
+      ? [
+          {
+            fieldId: column.reference.labelField.targetId,
+            queryId: column.reference.query.targetId,
+            relationId: column.field,
+          },
+        ]
+      : [],
   );
   const columns = new Map<string, DeclaredListColumn>(
     list.columns.map((column) => [column.columnId, column]),
@@ -543,7 +571,10 @@ export function declaredListArguments(
             ? [
                 Object.freeze({
                   direction: entry.direction,
-                  fieldId: column.reference ? column.columnId : column.field,
+                  fieldId:
+                    column.reference && !column.relation
+                      ? column.columnId
+                      : column.field,
                 }),
               ]
             : [];
@@ -603,11 +634,12 @@ export function declaredListArguments(
     matchMode: 'substring',
     pageOffset: options.pageOffset ?? 0,
     parentScope: null,
+    ...(state.referenceScope ? { referenceScope: state.referenceScope } : {}),
     ...(fieldFilters.length > 0 ? { fieldFilters } : {}),
     ...(progress ? { progress } : {}),
     ...(figures ? { figures } : {}),
     ...(beforeFilters.length > 0 ? { beforeFilters } : {}),
-    relationLabels: [],
+    relationLabels,
     ...(referenceLabels.length > 0 ? { referenceLabels } : {}),
     requestedPageSize: pageSize,
     schemaVersion: SHARED_LIST_QUERY_VERSION,
@@ -633,8 +665,11 @@ export function declaredListArguments(
       matchMode: 'substring',
       ...(options.mode === 'export' ? { outputMode: 'export' } : {}),
       pageSize,
+      ...(state.referenceScope
+        ? { referenceScope: { ...state.referenceScope } }
+        : {}),
       ...(referenceLabels.length > 0 ? { referenceLabels } : {}),
-      relationLabels: [],
+      relationLabels,
       schemaVersion: SHARED_LIST_QUERY_VERSION,
       search: state.search,
       ...(searchChildren ? { searchChildren } : {}),
@@ -690,7 +725,10 @@ export function declaredCellText(
   present?: FieldPresenter,
 ): string | null {
   if (column.reference)
-    return record.relationLabels?.[column.columnId]?.label ?? null;
+    return (
+      record.relationLabels?.[column.relation ? column.field : column.columnId]
+        ?.label ?? null
+    );
   const value = record.values[column.field];
   if (value === null || value === undefined) return null;
   if (column.format === 'date' && typeof value === 'string') {

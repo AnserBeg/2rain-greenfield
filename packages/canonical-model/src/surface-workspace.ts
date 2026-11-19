@@ -193,6 +193,17 @@ export function validateSurfaceWorkspaces(
         surface.surfaceId,
         'editor parent must be the declared immutable owning relation',
       );
+    if (
+      editor.scope === 'tenantShared' &&
+      [headerQuery, recordQuery, lineFormQuery, lineQuery].some(
+        (query) =>
+          query && 'legalEntityScope' in query && query.legalEntityScope,
+      )
+    )
+      fail(
+        surface.surfaceId,
+        'a tenant-shared editor reads its header and lines without company scope',
+      );
     // The exact get must read the same entity as the list and select whatever
     // the picker shows or derives, so a selection never needs a list scan.
     const reads = (
@@ -841,43 +852,107 @@ export function validateSurfaceWorkspaces(
     };
     checkFields(editor.headerFields, headerQuery!.sourceEntity.targetId);
     checkFields(editor.lineFields, lineQuery!.sourceEntity.targetId);
+    const headerEntityId = headerQuery!.sourceEntity.targetId;
+    const declaredHeaderRelations = editor.headerRelations ?? [];
+    const createsHeader = model.operations.some(
+      (operation) =>
+        operation.effect.kind === 'createRecordEffect' &&
+        'entity' in operation.effect &&
+        operation.effect.entity.targetId === headerEntityId &&
+        operation.lifecycle === 'active',
+    );
+    const headerInputIds = new Set(
+      editor.headerFields.map((field) => String(field.fieldId)),
+    );
+    for (const input of declaredHeaderRelations) {
+      const relation = model.relations.find(
+        (candidate) => candidate.relationId === input.fieldId,
+      );
+      const picker = queries.get(input.reference.queryId);
+      const pickerFields = [
+        ...input.reference.labelFieldIds,
+        ...(input.reference.detailFieldIds ?? []),
+      ];
+      if (
+        headerInputIds.has(input.fieldId) ||
+        !createsHeader ||
+        relation?.sourceEntity.targetId !== headerEntityId ||
+        relation.ownership !== 'reference' ||
+        relation.lifecycle !== 'active' ||
+        picker?.sourceEntity.targetId !== relation.targetEntity.targetId ||
+        !selects(input.reference.queryId, pickerFields) ||
+        !reads(
+          input.reference.getQueryId,
+          input.reference.queryId,
+          pickerFields,
+        )
+      ) {
+        fail(
+          surface.surfaceId,
+          'an editor header relation must name an active create input and its target List and get',
+        );
+      }
+      headerInputIds.add(input.fieldId);
+    }
+    if (
+      (editor.headerRelations ||
+        editor.scope === 'tenantShared' ||
+        !editor.stateFieldId) &&
+      model.relations.some(
+        (candidate) =>
+          candidate.sourceEntity.targetId === headerEntityId &&
+          candidate.lifecycle === 'active' &&
+          candidate.required &&
+          !headerInputIds.has(candidate.relationId),
+      )
+    )
+      fail(
+        surface.surfaceId,
+        'an editor must offer a picker for each required header relation',
+      );
     if (
       fields.get(editor.lineNumberFieldId)?.entity.targetId !==
       lineQuery!.sourceEntity.targetId
     )
       fail(surface.surfaceId, 'line identity field must belong to the child');
-    const state = fields.get(editor.stateFieldId);
-    if (
-      state?.entity.targetId !== headerQuery!.sourceEntity.targetId ||
-      state.fieldType.kind !== 'enumFieldType' ||
-      !editor.editableStateIds.every(
-        (id) =>
-          state.fieldType.kind === 'enumFieldType' &&
-          state.fieldType.options.some((value) => value.optionId === id),
+    if (editor.stateFieldId || editor.editableStateIds) {
+      const state = editor.stateFieldId && fields.get(editor.stateFieldId);
+      if (
+        !state ||
+        state.entity.targetId !== headerQuery!.sourceEntity.targetId ||
+        state.fieldType.kind !== 'enumFieldType' ||
+        !editor.editableStateIds?.every(
+          (id) =>
+            state.fieldType.kind === 'enumFieldType' &&
+            state.fieldType.options.some((value) => value.optionId === id),
+        )
       )
-    )
+        fail(
+          surface.surfaceId,
+          'editable states must belong to the document state field',
+        );
+    } else if (
+      model.stateMachines.some(
+        (machine) =>
+          machine.entity.targetId === headerQuery!.sourceEntity.targetId,
+      )
+    ) {
       fail(
         surface.surfaceId,
-        'editable states must belong to the document state field',
+        'a document with a lifecycle must declare its editable states',
       );
+    }
     // What a never-saved document's first create also writes: header fields
     // the editor does not offer, each once, with a value the field admits --
     // text that fits, an option of its enumeration, the document's own record
     // id or the saving principal into text long enough to hold one, or the
     // save's instant into a UTC instant.
-    const headerEntity = headerQuery!.sourceEntity.targetId;
     const offered = new Set(
       [...editor.headerFields, ...editor.lineFields].map((value) =>
         String(value.fieldId),
       ),
     );
     const createValues = editor.createValues ?? [];
-    const createsHeader = model.operations.some(
-      (operation) =>
-        operation.effect.kind === 'createRecordEffect' &&
-        'entity' in operation.effect &&
-        operation.effect.entity.targetId === headerEntity,
-    );
     if (
       new Set(createValues.map((value) => value.fieldId)).size !==
       createValues.length
@@ -900,7 +975,7 @@ export function validateSurfaceWorkspaces(
                 type.options.some((option) => option.optionId === value.value);
       if (
         !createsHeader ||
-        fields.get(entry.fieldId)?.entity.targetId !== headerEntity ||
+        fields.get(entry.fieldId)?.entity.targetId !== headerEntityId ||
         offered.has(String(entry.fieldId)) ||
         !admissible
       )

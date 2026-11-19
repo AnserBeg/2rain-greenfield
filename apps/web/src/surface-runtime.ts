@@ -336,7 +336,8 @@ export async function renderSurfaceRuntimeWithData(
   if (
     selection.selected.documentEditor &&
     selection.selected.surfaceRole === 'form' &&
-    legalEntitySelection.length === 1
+    legalEntitySelection.length ===
+      (selection.selected.documentEditor.scope === 'tenantShared' ? 0 : 1)
   ) {
     let editor: Awaited<ReturnType<typeof documentEditor>>;
     try {
@@ -345,7 +346,7 @@ export async function renderSurfaceRuntimeWithData(
         selection.selected,
         selection.surfaces,
         url,
-        legalEntitySelection[0]!,
+        legalEntitySelection[0] ?? null,
         gateways,
       );
     } catch (error) {
@@ -1120,14 +1121,18 @@ export async function submitSurfaceRuntimeFragment(
   }
   const url = new URL(requestUrl, 'http://surface-runtime.local');
   const scope = legalEntitySelectionForSurface(binding, url);
-  if (scope.length !== 1) return fallback;
+  if (
+    scope.length !==
+    (selection.selected.documentEditor.scope === 'tenantShared' ? 0 : 1)
+  )
+    return fallback;
   try {
     const editor = await documentEditor(
       view,
       selection.selected,
       selection.surfaces,
       url,
-      scope[0]!,
+      scope[0] ?? null,
       gateways,
       submission,
       'fragment',
@@ -1282,7 +1287,10 @@ export async function submitSurfaceRuntimeIntent(
   if (selection.selected.documentEditor && submission.draftSession) {
     const url = new URL(requestUrl, 'http://surface-runtime.local');
     const scope = legalEntitySelectionForSurface(binding, url);
-    if (scope.length !== 1)
+    if (
+      scope.length !==
+      (selection.selected.documentEditor.scope === 'tenantShared' ? 0 : 1)
+    )
       return operationDiagnostic('OPERATION_INPUT_INVALID', 422);
     try {
       const editor = await documentEditor(
@@ -1290,7 +1298,7 @@ export async function submitSurfaceRuntimeIntent(
         selection.selected,
         selection.surfaces,
         url,
-        scope[0]!,
+        scope[0] ?? null,
         gateways,
         submission,
       );
@@ -1431,34 +1439,36 @@ export async function submitSurfaceRuntimeIntent(
     });
   }
 
+  const feedback = {
+    intent,
+    label: operation.label,
+    record: result.readBack,
+    trustLinked: result.trust !== null,
+  };
+  const pageRecordId = new URL(
+    requestUrl,
+    'http://surface-runtime.local',
+  ).searchParams.get('record');
   if (
     gateways.applicationExtension?.refreshAfterOperation({
       binding,
       intent,
       surface: selection.selected,
       surfaces: selection.surfaces,
-    }) === true
+    }) === true ||
+    (intent === 'command' &&
+      selection.selected.composition &&
+      pageRecordId === result.readBack.recordId)
   )
-    // An explicitly composed application contribution may request an
-    // authoritative refresh. Ordinary lifecycle results retain their read-back
-    // below: an archive must not query its now-inactive record as active.
-    return renderSurfaceRuntimeWithData(view, requestUrl, gateways, {
-      intent,
-      label: operation.label,
-      record: result.readBack,
-      trustLinked: result.trust !== null,
-    });
+    // A composed record page refreshes its bound reads. Commands sent without
+    // a record in the URL and archive responses use the operation read-back.
+    return renderSurfaceRuntimeWithData(view, requestUrl, gateways, feedback);
 
   return renderSelectedSurface(
     view,
     selection,
     { records: [result.readBack], status: 'READY' },
-    {
-      intent,
-      label: operation.label,
-      record: result.readBack,
-      trustLinked: result.trust !== null,
-    },
+    feedback,
     offeredOperations,
     200,
     legalEntitySelectionForSurface(
