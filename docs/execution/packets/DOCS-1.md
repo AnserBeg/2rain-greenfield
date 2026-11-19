@@ -14,6 +14,7 @@ Slice 1a implements [ADR-0078](../../decisions/ADR-0078-governed-documents-files
 - File-field requiredness applies to document task completion. Slice 1a allows attachments after saving and stores the flag for the later task.
 - Internal categories can accompany a field draft. Customer upload requests still require the external-identity ruling.
 - The server derives a scoped upload ID from the authenticated principal and the browser retry key.
+- Files and calculated displays share field-ID and label checks on the same record type.
 - The PDF content gate admits single-revision PDFs with a classic cross-reference table. PNG admission uses the single-image noninterlaced profile.
 
 ## Evidence
@@ -29,7 +30,7 @@ PostgreSQL tests cover byte reads, grants, company refusal, audit, quota, count,
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "DOCS-1",
-  "base": "5a2c283a170f48bc7f0c6fd06e4762da760a6190", "head": "9fd64116deb71816ab355a532c341343879391cc",
+  "base": "014fea1641953e41e49ccb642b3faf27c094a1a8", "head": "a21e0e7356cb263216af018e52e3a4cecac5ddf7",
   "changedPaths": [
     "apps/api/src/composition-root.ts", "apps/api/src/main.ts", "apps/web/src/app-server.ts",
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/document-http.ts",
