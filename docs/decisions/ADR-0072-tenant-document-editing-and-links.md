@@ -27,9 +27,10 @@ shared header or a lifecycle-less header, or a List declares a relation column.
 Floor-23 releases preserve their bytes and their behaviour. A reader capped
 at 23 refuses a release declaring floor 24. The authored change uses the
 optional-key rule in ADR-0047 §7. The ADR-0066 re-baseline of the first-party
-app produces the existing release byte for byte.
+app retains its authored definition and all projection semantics except the
+storage transition, which now creates the tables from the bootstrap.
 
-This extends the request-time surface contract under plan §5.11 without a new
-query or operation primitive. Tenant writes remain on the tenant's own
+This extends the request-time surface contract under plan §5.11 and reuses
+the current query and operation primitives. Tenant writes remain on the tenant's own
 record and its owned lines. Quarantine and release are changes to the
 Inspection record's state. Receiving event composition is a separate packet.

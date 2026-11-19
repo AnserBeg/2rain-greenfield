@@ -1,6 +1,6 @@
 # CUSTOMIZE-4 — tenant-authored Goods Receipt Inspection
 
-Status — build checkpoint over `99371b43`. Integration depends on CUSTOMIZE-3's 0033. No slice merged.
+Status — build checkpoint started at `99371b43` and synchronized with `8b61740a`. Integration depends on CUSTOMIZE-3's 0033.
 
 ## Claims to verify
 
@@ -12,7 +12,7 @@ Status — build checkpoint over `99371b43`. Integration depends on CUSTOMIZE-3'
 
 ## Decisions
 
-- Floor 24 admits create-time header links and shared or lifecycle-less editors, including their declared List relation columns. The first-party re-baseline reproduced the checked-in release byte for byte. See ADR-0072.
+- Floor 24 admits create-time header links and shared or lifecycle-less editors, including their declared List relation columns. The synchronized first-party release was re-baselined to one entry. See ADR-0072.
 - Links are chosen at creation and restrict archiving a target with active dependents. Multiple inspections can refer to the same receipt, so Inspection needs no new uniqueness rule.
 - List search matches linked labels. Selecting a linked value narrows the list by that record's ID.
 - The editor uses sequential per-row saves and refuses parent archive while there are active lines. Company ownership follows ADR-0015.
@@ -21,7 +21,8 @@ Status — build checkpoint over `99371b43`. Integration depends on CUSTOMIZE-3'
 
 ## Gates
 
-- Compiler checks passed for ownership, lifecycle and the first combined link-and-lines candidate before the latest edits. First-party re-baseline matched the checked-in release.
+- Typecheck, changed-file format and lint, record checks and compiled release freshness passed. Five focused tests passed for ordered drafting, ownership, lifecycle, lines, links and the floor-23/24 boundary.
+- The full Inspection change normalized against the synchronized trunk with four relations, owned lines and five transitions. The re-baseline retained the first-party authored definition and every projection digest except the bootstrap storage transition.
 - Hosted PostgreSQL, browser and scripted assistant evidence are pending. Migration 0033 is absent from trunk, so 0034 cannot yet enter the acceptance matrix.
 
 ## Gaps

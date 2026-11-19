@@ -121,11 +121,11 @@ test('a person builds Goods Receipt Inspection with the Customize screen and use
           ['Supplier', 'Cascade', 'Cascade Fastener Works'],
           ['Item', 'Field notebook', 'Field notebook'],
           ['Location', 'Calgary', 'Calgary warehouse'],
-        ]) {
+        ] as const) {
           await page
             .getByRole('combobox', { name: label, exact: true })
-            .fill(term!);
-          await page.getByRole('option').filter({ hasText: result! }).click();
+            .fill(term);
+          await page.getByRole('option').filter({ hasText: result }).click();
         }
         await page
           .getByLabel('Line 1 characteristic', { exact: true })

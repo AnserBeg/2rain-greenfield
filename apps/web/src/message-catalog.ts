@@ -579,6 +579,7 @@ export type QueryDiagnosticCode = (typeof QUERY_DIAGNOSTIC_CODES)[number];
 
 /** The write path's equivalent subset. */
 export const OPERATION_DIAGNOSTIC_CODES = Object.freeze([
+  'OPERATION_ARCHIVE_HAS_DEPENDENTS',
   'OPERATION_CONFIRMATION_REQUIRED',
   'OPERATION_CONFIRMATION_STALE',
   'OPERATION_INPUT_INVALID',
