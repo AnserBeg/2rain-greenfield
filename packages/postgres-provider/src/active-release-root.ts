@@ -70,9 +70,20 @@ export async function readActiveRelease(options: {
          SELECT parent.revision_id, parent.provenance,
                 parent.parent_revision_id
            FROM chain
+           LEFT JOIN platform.customization_upgrades AS upgrade
+             ON upgrade.tenant_id = (SELECT tenant_id FROM active)
+            AND upgrade.environment_id = (
+              SELECT environment_id FROM platform.tenant_releases
+               WHERE tenant_id = (SELECT tenant_id FROM active)
+                 AND release_id = (SELECT release_id FROM active))
+            AND upgrade.candidate_revision_id = chain.revision_id
+           LEFT JOIN platform.tenant_releases AS upgrade_base
+             ON upgrade_base.tenant_id = upgrade.tenant_id
+            AND upgrade_base.environment_id = upgrade.environment_id
+            AND upgrade_base.release_id = upgrade.base_release_id
            JOIN platform.app_package_revisions AS parent
              ON parent.tenant_id = (SELECT tenant_id FROM active)
-            AND parent.revision_id = chain.parent_revision_id
+            AND parent.revision_id = COALESCE(upgrade_base.app_package_revision_id, chain.parent_revision_id)
           WHERE chain.provenance = 'tenantAuthored'
        )
        SELECT active.content_hash,
