@@ -148,7 +148,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
 > = Object.freeze({
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.agent]: {
     capabilityId: 'northstar.runtime:capability.agent-discovery',
-    maximumSupportedVersion: 3,
+    maximumSupportedVersion: 4,
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.catalog]: {
     capabilityId: 'northstar.runtime:capability.semantic-model',
@@ -160,7 +160,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.query]: {
     capabilityId: 'northstar.runtime:capability.query-catalog',
-    maximumSupportedVersion: 2,
+    maximumSupportedVersion: 3,
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.surface]: {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
@@ -187,7 +187,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // up to twelve steps whose per-row steps read their row's read-backs
     // (SALES-EXTRAS, which numbered it 15 in parallel; renumbered by
     // INTEGRATION after its ADR-0066 re-baseline).
-    maximumSupportedVersion: 24,
+    maximumSupportedVersion: 25,
   },
 });
 

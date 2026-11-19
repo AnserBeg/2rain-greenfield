@@ -112,6 +112,68 @@ test('a saved Location view keeps its columns, ordering and filtered count until
   );
 });
 
+test('a person adds a count to Today, opens its list and rolls it back', async ({
+  page,
+}) => {
+  test.setTimeout(600_000);
+  await withEphemeralPostgres(
+    'customize-metric-browser',
+    async ({ connection }) => {
+      const app = await startComposedApplication({
+        databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+        tenantSlug: 'customize-metric-browser',
+        seedProfile: 'distributor',
+        port: 0,
+      });
+      try {
+        await page.goto(`${app.baseUrl}/?customize`);
+        const picker = page.locator('[data-customize-form="addMetricCard"]');
+        await picker
+          .getByLabel('List')
+          .selectOption('northstar.app:surface.location_list');
+        await picker.getByRole('button', { name: 'Set up metric' }).click();
+        await page.getByLabel('Card name').fill('Location count');
+        await page.getByRole('button', { name: 'Draft metric' }).click();
+        await expect(page.locator('[data-customize-diff]')).toContainText(
+          'counts records in Locations',
+        );
+        await page
+          .getByRole('button', { name: 'Approve', exact: true })
+          .click({ timeout: 180_000 });
+        await page
+          .getByRole('button', { name: 'Activate now' })
+          .click({ timeout: 180_000 });
+        await expect(
+          page.locator('[data-customize-result="activated"]'),
+        ).toBeVisible({ timeout: 180_000 });
+        await page.goto(app.baseUrl);
+        const metric = page.getByRole('link', { name: /^Location count/u });
+        const count = await metric
+          .locator('.launcher-tile__count')
+          .textContent();
+        expect(Number(count)).toBeGreaterThan(0);
+        await metric.click();
+        await expect(page.locator('[data-list-total]')).toHaveAttribute(
+          'data-list-total',
+          count!,
+        );
+        await page.goto(`${app.baseUrl}/?customize`);
+        await page
+          .getByRole('button', { name: 'Roll back the latest change' })
+          .click();
+        await expect(
+          page.locator('[data-customize-result="rolledBack"]'),
+        ).toBeVisible({ timeout: 180_000 });
+        await page.goto(app.baseUrl);
+        await expect(metric).toHaveCount(0);
+      } finally {
+        await app.close();
+      }
+    },
+    LINEAGE_INSTALL_VOLUME,
+  );
+});
+
 /**
  * The non-developer path (CUSTOMIZE slices 3 and 5): on the Customize screen a
  * person describes Equipment, reads the plain diff, approves and activates it,

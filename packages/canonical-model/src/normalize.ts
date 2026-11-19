@@ -1696,6 +1696,33 @@ function validateReferenceLocality(
         );
       }
     } else {
+      if (
+        'listSumFields' in query &&
+        query.listSumFields &&
+        (query.queryType !== 'list' ||
+          query.tier !== 'q0' ||
+          query.readModel ||
+          new Set(query.listSumFields).size !== query.listSumFields.length ||
+          query.listSumFields.some(
+            (id) =>
+              !query.selections.some(
+                (selection) => selection.field.targetId === id,
+              ) ||
+              !['exactDecimalFieldType', 'integerFieldType'].includes(
+                fieldDefinitions.get(id)?.fieldType.kind ?? '',
+              ),
+          ))
+      ) {
+        diagnostics.push(
+          diagnostic(
+            'CANON_LIST_SUM_FIELD_INVALID',
+            '$.queries.listSumFields',
+            'list sums require distinct selected exact-decimal or integer fields on a direct list query',
+            'declare sums over stored numeric values of the listed record type',
+            query.queryId,
+          ),
+        );
+      }
       for (const selection of query.selections) {
         if (
           fieldEntity.get(selection.field.targetId) !==

@@ -1460,6 +1460,9 @@ function decorateV3ProjectionPlans(
   const storage = storagePlan.payload;
   return plans.map((plan) => {
     if (plan.familyId === PROJECTION_FAMILY_IDS.queryCatalog) {
+      const hasListSums = packageRevision.queries.some(
+        (query) => 'listSumFields' in query && query.listSumFields,
+      );
       const hasReadModels = packageRevision.queries.some(
         (query) => 'readModel' in query && query.readModel,
       );
@@ -1470,11 +1473,11 @@ function decorateV3ProjectionPlans(
       };
       return {
         ...plan,
-        ...(hasReadModels
+        ...(hasReadModels || hasListSums
           ? {
               requiredRuntimeCapability: {
                 capabilityId: 'northstar.runtime:capability.query-catalog',
-                minimumVersion: 2,
+                minimumVersion: hasListSums ? 3 : 2,
               },
             }
           : {}),
@@ -1544,6 +1547,9 @@ function decorateV3ProjectionPlans(
                           exportMaximumResultCount:
                             query.exportMaximumResultCount,
                         }
+                      : {}),
+                    ...('listSumFields' in query && query.listSumFields
+                      ? { listSumFields: query.listSumFields }
                       : {}),
                     ...('parameters' in query
                       ? { parameters: queryParameterCatalogEntries(query) }
