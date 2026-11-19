@@ -170,6 +170,7 @@ interface RegisteredQueryDefinitionBase {
 export interface RegisteredQueryDefinition extends RegisteredQueryDefinitionBase {
   /** The most rows one declared export statement returns; absent = no export. */
   readonly exportMaximumResultCount?: number;
+  readonly listSumFields?: readonly string[];
   readonly readModel?: QueryReadModel;
   readonly parameters?: readonly RegisteredQueryParameterDefinition[];
   readonly infrastructure?: {
@@ -894,6 +895,16 @@ async function authorizeSharedListProjection(
     readonly parameterId: string;
   } | null = null,
 ): Promise<AuthorizedSharedListRequest | null> {
+  if (
+    query.sumField &&
+    !sourceDefinition.listSumFields?.includes(query.sumField)
+  ) {
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      'a list sum uses a field declared as a measure by its query',
+      query.sumField,
+    );
+  }
   authorizeSharedListFields(query, {
     selectedFieldIds: new Set(
       sourceDefinition.selections.map((selection) => selection.fieldId),
@@ -1626,11 +1637,13 @@ function parseQueryDefinition(
   const hasResolveMatchKeys = Object.hasOwn(value, 'resolveMatchKeys');
   const hasExportMaximum =
     !aggregate && Object.hasOwn(value, 'exportMaximumResultCount');
+  const hasSumFields = !aggregate && Object.hasOwn(value, 'listSumFields');
   assertExactKeys(
     value,
     [
       ...expectedKeys,
       ...(hasExportMaximum ? ['exportMaximumResultCount'] : []),
+      ...(hasSumFields ? ['listSumFields'] : []),
       ...(Object.hasOwn(value, 'readModel') ? ['readModel'] : []),
       ...(hasLegalEntityScope ? ['legalEntityScope'] : []),
       ...(hasParameters ? ['parameters'] : []),
@@ -1679,6 +1692,20 @@ function parseQueryDefinition(
   }
   if (hasParameters) {
     assertRowQueryParameters(value.parameters, invalid);
+  }
+  if (hasSumFields) {
+    if (
+      value.queryType !== 'list' ||
+      value.tier !== 'q0' ||
+      value.readModel !== undefined ||
+      !Array.isArray(value.listSumFields) ||
+      value.listSumFields.length === 0 ||
+      value.listSumFields.length > 8 ||
+      new Set(value.listSumFields).size !== value.listSumFields.length
+    )
+      throw invalid('pinned list measures require a direct list query');
+    for (const field of value.listSumFields)
+      assertCanonicalId(field, 'list sum field id', invalid);
   }
   if (hasLegalEntityScope) {
     assertLegalEntityScopeContract(value.legalEntityScope, value, invalid);

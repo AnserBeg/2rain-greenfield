@@ -573,6 +573,16 @@ function withDeclaredLists<
     queries: declareApprovalReadModels(
       APPLICATION_NAMESPACE,
       application.queries,
+    ).map((query) =>
+      query.queryId === `${APPLICATION_NAMESPACE}:query.item_list`
+        ? {
+            ...query,
+            listSumFields: ['cad', 'usd', 'eur'].map(
+              (currency) =>
+                `${APPLICATION_NAMESPACE}:field.item_price_${currency}`,
+            ),
+          }
+        : query,
     ),
     surfaces: declareLists(
       APPLICATION_NAMESPACE,

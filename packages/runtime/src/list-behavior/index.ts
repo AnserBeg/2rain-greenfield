@@ -182,6 +182,7 @@ export type SharedListViewCount = {
 };
 
 export interface SharedListQueryRequest {
+  readonly sumField?: string;
   readonly cursor: string | null;
   readonly effectivePageSize: number;
   readonly includeArchived: boolean;
@@ -253,6 +254,7 @@ export interface AuthorizedSharedListRequest {
 }
 
 export interface SharedListCoverage {
+  readonly sum?: { readonly fieldId: string; readonly value: string };
   readonly effectivePageSize: number;
   readonly hasMore: boolean;
   readonly includeArchived: boolean;
@@ -345,6 +347,7 @@ export function parseSharedListArguments(
     progress: progressValue,
     beforeFilters: beforeFiltersValue,
     viewCounts: viewCountsValue,
+    sumField,
     figures: figuresValue,
     searchChildren: searchChildrenValue,
     ...closedList
@@ -451,6 +454,21 @@ export function parseSharedListArguments(
       : parseViewCounts(viewCountsValue);
   if (viewCounts && (exporting || cursor !== null))
     throw malformed('view counts are requested without export or a cursor');
+  if (sumField !== undefined) {
+    assertCanonicalId(sumField, 'list sum field');
+    if (
+      exporting ||
+      cursor !== null ||
+      progress ||
+      figures ||
+      parentScope ||
+      referenceScope ||
+      includeArchived
+    )
+      throw malformed(
+        'a list sum reads active top-level rows without an export or cursor',
+      );
+  }
   if (exporting && cursor !== null)
     throw malformed('an export reads the whole set and takes no cursor');
   const requestedPageSize = Number(list.pageSize);
@@ -491,6 +509,7 @@ export function parseSharedListArguments(
     ...(figures ? { figures } : {}),
     ...(beforeFilters ? { beforeFilters } : {}),
     ...(viewCounts ? { viewCounts } : {}),
+    ...(typeof sumField === 'string' ? { sumField } : {}),
     relationLabels,
     ...(referenceLabels ? { referenceLabels } : {}),
     ...(exporting ? { outputMode: 'export' as const } : {}),
@@ -604,6 +623,15 @@ export function requireSharedListEcho(
     left === undefined || right === undefined
       ? left === right
       : canonicalize(left) === canonicalize(right);
+  if (
+    query.sumField !== listCoverage.sum?.fieldId ||
+    (listCoverage.sum &&
+      !/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/u.test(listCoverage.sum.value))
+  )
+    throw new SharedListContractError(
+      'LIST_RESULT_MALFORMED',
+      'the list result did not return the requested exact sum',
+    );
   if (
     !same(
       query.viewCounts as ImmutableJsonValue | undefined,

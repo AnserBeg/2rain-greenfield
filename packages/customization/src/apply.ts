@@ -143,7 +143,72 @@ function applyOne(
       return arrangeLayout(authored, patch);
     case 'saveListView':
       return saveListView(authored, patch);
+    case 'addMetricCard':
+      return addMetricCard(authored, patch);
   }
+}
+
+function addMetricCard(
+  authored: Json,
+  patch: Extract<CustomizationPatch, { kind: 'addMetricCard' }>,
+): Outcome | null {
+  const namespace = namespaceOf(authored);
+  const today = list(authored, 'surfaces').find(
+    (surface) => surface.surfaceId === `${namespace}:surface.inventory_today`,
+  );
+  const launcher = today?.launcher as Json | undefined;
+  const target = list(authored, 'surfaces').find(
+    (surface) =>
+      surface.surfaceId === patch.surface && surface.surfaceRole === 'list',
+  );
+  const targetList = target?.list as Json | undefined;
+  const query = list(authored, 'queries').find(
+    (candidate) =>
+      candidate.queryId === (target?.dataSource as Json | undefined)?.targetId,
+  );
+  if (!launcher || !targetList || query?.tier !== 'q0' || query.readModel)
+    return refusal(
+      'CUSTOMIZE_TARGET_NOT_FOUND',
+      'Choose a list that reads records directly.',
+    );
+  if (
+    patch.view &&
+    !(targetList.views as Json[]).some((view) => view.viewId === patch.view)
+  )
+    return refusal(
+      'CUSTOMIZE_TARGET_NOT_FOUND',
+      'Choose a saved view of this list.',
+    );
+  if (
+    patch.sumField &&
+    (targetList.progress ||
+      targetList.figures ||
+      !(query.listSumFields as string[] | undefined)?.includes(patch.sumField))
+  )
+    return refusal(
+      'CUSTOMIZE_TARGET_NOT_FOUND',
+      'Choose a sum declared for this list.',
+    );
+  const metrics = (launcher.metrics ??= []) as Json[];
+  const metricId = `${namespace}:metric.custom_${slug(patch.label)}`;
+  if (metrics.some((metric) => metric.metricId === metricId))
+    return refusal(
+      'CUSTOMIZE_DUPLICATE_LABEL',
+      'Today already has a metric card with that name.',
+    );
+  if (metrics.length >= 8)
+    return unsupported(
+      'addMetricCard.limit',
+      'Today already has eight metric cards.',
+    );
+  metrics.push({
+    metricId,
+    label: patch.label,
+    surface: patch.surface,
+    ...(patch.view ? { view: patch.view } : {}),
+    ...(patch.sumField ? { sumField: patch.sumField } : {}),
+  });
+  return null;
 }
 
 function addRecordType(
