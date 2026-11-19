@@ -17,6 +17,7 @@ carries the detail. No packet is chartered from this table without a user ruling
 
 | packet | date | finding (one sentence) | record |
 |---|---|---|---|
+| CRITFIX-D | 2026-11-19 | Finding 6. A legacy patch with a null compiler acknowledgement pin refuses replay onto a base that removes a permission. Pre-tenant development accepts `dev:reset`. | [Packet](packets/CRITFIX-D.md) |
 | `CUSTOMIZE-3` | 2026-11-18 | F5 child aggregation still needs a hard write-enforced cardinality bound, visibility and absence semantics, and a concurrency protocol before it can serve launch validations, guards or child sums. | [Packet](packets/CUSTOMIZE-3.md) |
 | `CUSTOMIZE-3` | 2026-11-18 | Saved list views and column selection leave record-detail composition and formatting open in the full §10.2 list/detail row. | [Packet](packets/CUSTOMIZE-3.md) |
 | `CUSTOMIZE-3` | 2026-11-19 | Field permission narrowing needs one compiled policy across queries, read-back, exports and assistant output. | [Packet](packets/CUSTOMIZE-3.md) |

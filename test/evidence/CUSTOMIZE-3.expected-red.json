@@ -5,7 +5,7 @@
     {
       "name": "unrecognized-patch-kind-admitted",
       "claim": "The database admits the launch patch kinds and still refuses an unrecognized kind with a valid digest.",
-      "file": "db/migrations/0039_customization_permission_directory.sql",
+      "file": "db/migrations/0040_customization_permission_directory.sql",
       "original": "      'narrowPermission', 'addMetricCard', 'unNarrowPermission'",
       "replacement": "      'narrowPermission', 'addMetricCard', 'unNarrowPermission', 'unrecognizedTestKind'",
       "test": {
@@ -59,7 +59,7 @@
     {
       "name": "customize-role-directory-shows-another-environment",
       "claim": "A Customize author's role directory is limited to their environment.",
-      "file": "db/migrations/0039_customization_permission_directory.sql",
+      "file": "db/migrations/0040_customization_permission_directory.sql",
       "original": "     AND role.environment_id = caller.environment_id",
       "replacement": "     AND true",
       "test": {
