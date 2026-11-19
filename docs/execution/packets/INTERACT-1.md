@@ -22,15 +22,15 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 - Normal git metadata is read-only; isolated metadata in `/tmp` tracks this chartered worktree.
 - Exact-minute browser fills canonicalize zero seconds without changing the instant (CI reproduction passed).
 - Task preview budgets: measured 2/46/3/0 in CI 44426260000; +5 statements buys governed stock/location reads. Confirmation unchanged.
-- Accepted saved views and list columns are synchronized; no owned Critical changes.
+- Accepted Today metrics and list sums are synchronized; shared release and coverage artifacts are re-derived.
 - Mid-packet checkpoint: no whole-app review trigger; no new correctness domain or fan-out.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "INTERACT-1",
-  "base": "4efe21f72b91dc51f1f9528dc47f600c05f0f3a3",
-  "head": "2b1bc6ee8e5a3e5e3c7a6a1186b404edf4ff1125",
+  "base": "81ba7405e7512a806882f9ea3cff51af8c7115d9",
+  "head": "5a8ea614a7a3627c4bbb320d42165cd04624c684",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
