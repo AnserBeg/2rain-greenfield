@@ -11,7 +11,7 @@ A decimal operand carries precision, scale and any declared currency or unit. Ad
 ## Binding and evidence
 
 - Admit a separate optional v6 `addCalculatedDisplayField` declaration. A declaring release projects the expression, typed dependencies, authorization and classification, admitted read sinks, result shape, exact evaluator version and assertion reference. Its mandatory query consumer raises an existing reader floor.
-- A record or list query may compute only a field elected for that sink and only through readable source operands. The record page, optional list column, CSV and assistant get the same server result. An ordinary create or update never writes the result. The product provides no filter or sort over the result in this slice.
+- A record or list query may compute only a field elected for that sink and only through readable source operands. The record page, optional list column, CSV on lists that declare export, and assistant get the same server result. An ordinary create or update never writes the result. The product provides no filter or sort over the result in this slice.
 - Approval identifies the operands, operation, result type and display sinks. Upgrade replay checks both the result's targets and the operand types, including currencies, at the authoritative destination. Rollback restores the prior display shape.
 - A calculated display uses its own draft and approval. A calculated member in a grouped draft gives a typed capability gap.
 - Prove v6 compile accept/refuse, the old serving reader's refusal, the typed result in PostgreSQL and the real UI, assistant visibility and rollback. Re-derive the conformance ledger and keep omitted declarations byte-identical.

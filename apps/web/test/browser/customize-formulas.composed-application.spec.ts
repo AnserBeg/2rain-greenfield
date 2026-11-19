@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 
 import { startComposedApplication } from '../../../api/src/composition-root.js';
 import {
@@ -121,7 +122,7 @@ test('Customize compares a location name with its declared parent on the live fo
   );
 });
 
-test('Customize shows exact margin on Items and the item page and removes it on rollback', async ({
+test('Customize shows exact margin on Stock by item, its CSV and the item page, and removes it on rollback', async ({
   page,
 }) => {
   test.setTimeout(600_000);
@@ -175,7 +176,7 @@ test('Customize shows exact margin on Items and the item page and removes it on 
           .selectOption('northstar.app:field.item_standard_cost_cad');
         await form
           .getByLabel('Also show on a list')
-          .selectOption('northstar.app:surface.item_list');
+          .selectOption('northstar.app:surface.item_stock_list');
         await form
           .getByRole('button', { name: 'Draft calculation' })
           .click({ timeout: 180_000 });
@@ -196,7 +197,7 @@ test('Customize shows exact margin on Items and the item page and removes it on 
           page.locator('[data-customize-result="activated"]'),
         ).toBeVisible({ timeout: 180_000 });
 
-        const list = surface('item_list');
+        const list = surface('item_stock_list');
         await page.goto(list);
         await expect(
           page.getByRole('columnheader', { name: title }),
@@ -205,9 +206,9 @@ test('Customize shows exact margin on Items and the item page and removes it on 
           .getByRole('row')
           .filter({ has: page.getByRole('link', { name: /MARGIN-WEB/u }) });
         await expect(row).toContainText(margin);
-        const exported = await page.request.get(`${list}&export=csv`);
-        expect(exported.ok()).toBe(true);
-        const csv = await exported.text();
+        const downloaded = page.waitForEvent('download');
+        await page.getByRole('link', { name: /^Export CSV/u }).click();
+        const csv = await readFile(await (await downloaded).path(), 'utf8');
         expect(csv).toContain(title);
         expect(csv).toContain(margin);
         await row.getByRole('link', { name: /MARGIN-WEB/u }).click();
