@@ -4,7 +4,7 @@ Slice 1a implements [ADR-0078](../../decisions/ADR-0078-governed-documents-files
 
 ## Claims
 
-1. Standard and tenant records use the same attachment control and the same live record, company and document permissions for list, preview and download.
+1. Standard and tenant records use the same attachment control and the same live record, company and document permissions for list, preview and download. Scanned uploads publish through the Semantic Operation gateway.
 2. Customize drafts, approves and activates files fields with explicit count, requiredness and allowed internal categories. Rollback retains existing versions and hides retired fields from ordinary reads.
 3. The provider publishes immutable bytes, versions and audit together. Tenant and environment quotas serialize publication. Dedupe also keys on stored company ownership.
 4. Byte reads and writes each have two process slots and a 30-second response deadline. The local demo scanner is opt-in. Serving without a real or explicitly enabled local scanner refuses uploads.
@@ -28,7 +28,7 @@ PostgreSQL tests cover byte reads, grants, company refusal, audit, quota, count,
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "DOCS-1",
-  "base": "b2b7877e58074b325c53c7b13f926535e83f39e5", "head": "aa0130efc95890d24e04d2828616960e13d543d1",
+  "base": "b2b7877e58074b325c53c7b13f926535e83f39e5", "head": "45cb00d2f669c69c981092a9e0c39ae1bc3a3b45",
   "changedPaths": [
     "apps/api/src/composition-root.ts", "apps/api/src/main.ts", "apps/web/src/app-server.ts",
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/document-http.ts",
@@ -39,11 +39,12 @@ PostgreSQL tests cover byte reads, grants, company refusal, audit, quota, count,
     "packages/compiler/src/protocol.ts", "packages/customization/src/apply.ts", "packages/customization/src/patch.ts",
     "packages/customization/src/render.ts", "packages/customization/src/targets.ts", "packages/postgres-provider/package.json",
     "packages/postgres-provider/src/composed-application-runtime.ts", "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/document-attachments.ts",
-    "packages/postgres-provider/src/document-content.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/document-gateway.ts",
-    "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts", "packages/runtime/src/semantic-query-gateway.ts",
-    "pnpm-lock.yaml", "test/architecture/release-persistence-boundary.test.ts", "test/integration/document-http.test.ts",
-    "test/postgres/document-attachments.test.ts", "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts",
-    "test/postgres/module-storage-transition.test.ts", "test/postgres/trust-substrate.test.ts"
+    "packages/postgres-provider/src/document-content.ts", "packages/postgres-provider/src/document-publication.ts", "packages/postgres-provider/src/request-runtime-view-service.ts",
+    "packages/runtime/src/document-gateway.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts",
+    "packages/runtime/src/semantic-query-gateway.ts", "pnpm-lock.yaml", "test/architecture/release-persistence-boundary.test.ts",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/integration/document-http.test.ts", "test/postgres/document-attachments.test.ts",
+    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts",
+    "test/postgres/trust-substrate.test.ts"
   ],
   "symbols": [
     {"path": "packages/postgres-provider/src/document-attachments.ts", "name": "PostgresDocumentGateway"},
