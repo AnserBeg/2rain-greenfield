@@ -63,6 +63,8 @@ carries the detail. No packet is chartered from this table without a user ruling
 | `AGENT` | 2026-11-17 | The agent is not given today's date or the company's default currency, so it guessed USD and yesterday's date for a PO in the terminal check. | [AGENT](packets/AGENT.md) |
 | `AGENT` | 2026-11-17 | Eval harness: a same-day rerun overwrites the dated result file, JSONL lines can land out of call order, and task 3's rule fails a correct answer naming the paid invoice as paid. | [AGENT](packets/AGENT.md) |
 | `AGENT` | 2026-11-17 | `corepack pnpm agent` from a checkout with a different compiled release installs and activates that release on the dev database instead of refusing. | [AGENT](packets/AGENT.md) |
+| CUSTOMIZE-3 | 2026-11-19 | The Sales order customer credit-limit rule needs a declared customer relation and a currency contract for the compared amounts. | [CUSTOMIZE-3](packets/CUSTOMIZE-3.md) |
+| CUSTOMIZE-3 | 2026-11-19 | The standard purchase order’s received quantity is a posting-derived read value. A tenant comparison against it needs a separately admitted aggregate or read binding under §5.12. | [CUSTOMIZE-3](packets/CUSTOMIZE-3.md) |
 
 ## TRIAGE — 2026-08-13. Read this before the queue.
 

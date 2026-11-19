@@ -1601,16 +1601,45 @@ class SemanticVerificationExecutor {
       satisfying.invocation.operationId,
     );
     const entityId = scenario.entityId;
+    const arrangeRelations = async (
+      witness: ValidationWitness,
+      fixtureToken: string,
+    ) => {
+      const references: Record<string, string> = {};
+      for (const [relationId, values] of Object.entries(
+        witness.relatedValues ?? {},
+      )) {
+        if (!values) continue;
+        const relation = this.#relations.find(
+          (candidate) =>
+            candidate.relationId === relationId &&
+            candidate.sourceEntityId === entityId,
+        );
+        if (!relation)
+          throw failure(
+            'VERIFICATION_FORMULA_RULE_MISMATCH',
+            'The example refers to an unavailable relation.',
+          );
+        const record = await this.#create(
+          relation.targetEntityId,
+          arrangementPathToken(fixtureToken, relationId),
+          formulaValues(values),
+        );
+        references[relationId] = record.recordId;
+      }
+      return references;
+    };
     const prepare = async (
       witness: ValidationWitness,
       fixtureToken: string,
     ) => {
+      const relations = await arrangeRelations(witness, fixtureToken);
       if (witness.invocation.kind === 'create')
         return this.#createInput(
           entityId,
           fixtureToken,
           formulaValues(witness.values),
-          {},
+          relations,
           [],
           operation,
         );
@@ -1618,6 +1647,7 @@ class SemanticVerificationExecutor {
         entityId,
         fixtureToken,
         formulaValues(witness.previousValues ?? {}),
+        relations,
       );
       return {
         recordId: prior.recordId,
@@ -1631,7 +1661,7 @@ class SemanticVerificationExecutor {
             entityId,
             `${token}-accept`,
             formulaValues(satisfying.values),
-            {},
+            await arrangeRelations(satisfying, `${token}-accept`),
             [],
             operation,
           )

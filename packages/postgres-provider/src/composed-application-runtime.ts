@@ -399,11 +399,18 @@ export async function createComposedApplicationRuntime(
     }
 
     const actorIssuer = humanActorIssuer();
-    const interpreter = new PostgresModuleRuntimeInterpreter(
-      runtimePool,
-      actorIssuer,
-      options.providerErrorMappings,
-    );
+    const interpreter: PostgresModuleRuntimeInterpreter =
+      new PostgresModuleRuntimeInterpreter(
+        runtimePool,
+        actorIssuer,
+        options.providerErrorMappings,
+        undefined,
+        undefined,
+        {
+          validationReadPolicy: async (releaseId) =>
+            (await servingFor(releaseId)).policy,
+        },
+      );
     const operationMediation = new SemanticOperationMediationAuthority();
     const denialRecorder = new PostgresSemanticQueryDenialRecorder(
       runtimePool,

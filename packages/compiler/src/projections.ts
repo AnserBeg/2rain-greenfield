@@ -13,6 +13,7 @@ import {
   type FieldNumbering,
   type VersionedNormalizedApplicationPackage,
 } from '@north-star/canonical-model';
+import { requiredFormulaValidationOperationReader } from '../../canonical-model/src/formula-validation-reader.js';
 
 import {
   FORMULA_RULE_PAYLOAD_VERSION,
@@ -213,7 +214,9 @@ export function lowerBaseProjectionPayloads(
     hasMetrics(verificationPackageRevision) ? 4 : 1,
   );
   const operationFloor = formulaRules
-    ? 3
+    ? requiredFormulaValidationOperationReader(
+        formulaRules.bindings.map(({ rule }) => rule),
+      )
     : 'operationRoleNarrowings' in verificationPackageRevision &&
         verificationPackageRevision.operationRoleNarrowings
       ? 2

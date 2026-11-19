@@ -5,13 +5,36 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 const execute = promisify(execFile);
+type ArchivedRunner = (source: string, input: unknown) => Promise<unknown>;
+
+export function archivedRuntimeRead(
+  run: ArchivedRunner,
+  input: { readonly databaseUrl: string; readonly identity: unknown },
+): Promise<{ outcome: string; code?: string; message?: string }> {
+  return run(
+    `
+    import { readFile } from 'node:fs/promises';
+    import { rolePool, trustedContext } from './packages/postgres-provider/src/composed-application-runtime.ts';
+    import { PostgresRequestRuntimeViewService } from './packages/postgres-provider/src/request-runtime-view-service.ts';
+    const { databaseUrl, identity } = JSON.parse(await readFile(process.argv[2], 'utf8'));
+    const pool = rolePool(databaseUrl, 'north_star_runtime', 1);
+    try {
+      const view = await new PostgresRequestRuntimeViewService(pool).load(await trustedContext(identity));
+      console.log(JSON.stringify({ outcome: 'loaded', root: view.release.contentHash }));
+    } catch (error) {
+      console.log(JSON.stringify({ outcome: 'refused', code: error.code, message: error.message }));
+    } finally {
+      await pool.end();
+    }
+  `,
+    input,
+  ) as Promise<{ outcome: string; code?: string; message?: string }>;
+}
 
 /** Runs the serving reader and tenant compiler from an unmodified prior tree. */
 export async function withArchivedCustomizationRuntime<T>(
   revision: string,
-  work: (
-    run: (source: string, input: unknown) => Promise<unknown>,
-  ) => Promise<T>,
+  work: (run: ArchivedRunner) => Promise<T>,
 ): Promise<T> {
   const temporary = await mkdtemp(join(tmpdir(), 'north-star-old-reader-'));
   const workspace = join(temporary, 'workspace');

@@ -10,6 +10,121 @@ import {
 
 const equipmentList = 'northstar.app:surface.custom_equipment_list';
 
+test('Customize compares a location name with its declared parent on the live form', async ({
+  page,
+}) => {
+  test.setTimeout(600_000);
+  await withEphemeralPostgres(
+    'customize-relation-guard-browser',
+    async ({ connection }) => {
+      const app = await startComposedApplication({
+        databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+        tenantSlug: 'customize-relation-guard-browser',
+        port: 0,
+      });
+      try {
+        const customize = `${app.baseUrl}/?customize`;
+        const form = `${app.baseUrl}/?surface=${encodeURIComponent('northstar.app:surface.location_form')}`;
+        const nameId = 'northstar.app:field.location_name';
+        const parentId = 'northstar.app:relation.location_parent';
+        const parentName = 'Northbound warehouse';
+        const message =
+          'Give the inside location a different name from its parent.';
+        const parent = page.locator(`[name="relation:${parentId}"]`);
+        const fillLocation = async (
+          code: string,
+          name: string,
+          inside?: string,
+        ) => {
+          await page.goto(form);
+          await page
+            .locator('[name="value:northstar.app:field.location_code"]')
+            .fill(code);
+          await page.locator(`[name="value:${nameId}"]`).fill(name);
+          await page
+            .locator('[name="value:northstar.app:field.location_type"]')
+            .selectOption('northstar.app:option.store');
+          if (inside) await parent.selectOption(inside);
+        };
+        const save = () =>
+          page.getByRole('button', { name: 'Save', exact: true }).click();
+        await fillLocation('GUARD-PARENT', parentName);
+        await save();
+        await expect(page.getByRole('status')).toContainText('Create complete');
+        await page.goto(
+          `${app.baseUrl}/?surface=${encodeURIComponent('northstar.app:surface.location_list')}`,
+        );
+        const parentRecord = await page
+          .getByRole('row')
+          .filter({ has: page.getByText(parentName, { exact: true }) })
+          .getAttribute('data-record-id');
+        if (!parentRecord)
+          throw new Error('The new parent location is missing from Locations.');
+
+        await page.goto(customize);
+        const picker = page.locator('[data-customize-form="addValidation"]');
+        await picker
+          .getByLabel('Record type')
+          .selectOption('northstar.app:entity.location');
+        await picker.getByRole('button', { name: 'Set up validation' }).click();
+        const comparison = page.locator(
+          '[data-customize-form="compareValidationFields"]',
+        );
+        await comparison.locator('select[name="fieldId"]').selectOption(nameId);
+        await comparison
+          .locator('select[name="operator"]')
+          .selectOption('notEqual');
+        await comparison
+          .locator('select[name="otherField"]')
+          .selectOption(`${parentId}/${nameId}`);
+        await comparison
+          .getByLabel('Message when the comparison fails')
+          .fill(message);
+        await comparison
+          .getByRole('button', { name: 'Draft field comparison' })
+          .click({ timeout: 180_000 });
+        await expect(page.locator('[data-customize-diff]')).toContainText(
+          message,
+        );
+        await page
+          .getByRole('button', { name: 'Approve', exact: true })
+          .click({ timeout: 180_000 });
+        await page
+          .getByRole('button', { name: 'Activate now' })
+          .click({ timeout: 180_000 });
+        await expect(
+          page.locator('[data-customize-result="activated"]'),
+        ).toBeVisible({ timeout: 180_000 });
+
+        await fillLocation('GUARD-CHILD', parentName, parentRecord);
+        const selected = await parent.inputValue();
+        await save();
+        await expect(page.locator('[data-form-validation-refusal]')).toHaveText(
+          message,
+        );
+        await expect(parent).toHaveValue(selected);
+        await page.locator(`[name="value:${nameId}"]`).fill('Northbound bin');
+        await save();
+        await expect(page.getByRole('status')).toContainText('Create complete');
+
+        await page.goto(customize);
+        await page
+          .getByRole('button', { name: 'Roll back the latest change' })
+          .click({ timeout: 180_000 });
+        await expect(
+          page.locator('[data-customize-result="rolledBack"]'),
+        ).toBeVisible({ timeout: 180_000 });
+        await fillLocation('GUARD-BACK', parentName, parentRecord);
+        await save();
+        await expect(page.getByRole('status')).toContainText('Create complete');
+      } finally {
+        await app.close();
+      }
+    },
+    LINEAGE_INSTALL_VOLUME,
+  );
+});
+
 test('a rule drafted in Customize refuses an empty field on the live form until rollback', async ({
   page,
 }) => {
@@ -35,12 +150,15 @@ test('a rule drafted in Customize refuses an empty field on the live form until 
         await builder
           .getByRole('button', { name: 'Set up validation' })
           .click();
-        await page
+        const literal = page.locator('form').filter({
+          has: page.getByRole('button', { name: 'Draft validation rule' }),
+        });
+        await literal
           .locator('select[name="fieldId"]')
           .selectOption('northstar.app:field.item_description');
-        await page.locator('select[name="check"]').selectOption('required');
-        await page.getByLabel('Message shown when saving').fill(message);
-        await page
+        await literal.locator('select[name="check"]').selectOption('required');
+        await literal.getByLabel('Message shown when saving').fill(message);
+        await literal
           .getByRole('button', { name: 'Draft validation rule' })
           .click({ timeout: 180_000 });
         await expect(page.locator('[data-customize-diff]')).toContainText(

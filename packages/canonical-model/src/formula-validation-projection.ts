@@ -33,6 +33,21 @@ const validationBinding = z.object({
   allowedSinks: z.tuple([z.literal('operationRefusal')]),
   explanation: z.literal('configuredMessageAndFieldAnchors'),
   watchedFields: z.record(z.string(), watchedField),
+  watchedRelationIds: z.array(z.string()).min(1).optional(),
+  paths: z
+    .array(
+      z.strictObject({
+        relationId: z.string(),
+        targetEntityId: z.string(),
+        fieldId: z.string(),
+        fieldType: watchedField,
+        fieldClassification: z.enum(['public', 'internal']),
+        readQueryId: z.string(),
+        readPermissionId: z.string(),
+      }),
+    )
+    .min(1)
+    .optional(),
   contextDependencies: z.array(z.string()),
 });
 
@@ -46,7 +61,13 @@ const validationProjection = z.object({
 export function parseFormulaValidationBindings(
   payload: unknown,
 ): readonly BoundFormulaValidation[] {
-  return validationProjection.parse(payload).bindings;
+  return validationProjection
+    .parse(payload)
+    .bindings.map(({ watchedRelationIds, paths, ...binding }) => ({
+      ...binding,
+      ...(watchedRelationIds ? { watchedRelationIds } : {}),
+      ...(paths ? { paths } : {}),
+    }));
 }
 
 export function formulaVerificationBusinessDate(payload: unknown): string {

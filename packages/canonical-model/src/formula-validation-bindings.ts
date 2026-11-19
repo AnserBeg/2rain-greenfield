@@ -1,4 +1,5 @@
 import type { FormulaValidationRule } from './formula-validation-schema.js';
+import { resolveValidationPath } from './formula-validation-path.js';
 import { canonicalize } from './canonicalize.js';
 import {
   VALIDATION_POSITION_PROFILE,
@@ -26,6 +27,16 @@ export type FormulaValidationFieldType =
       readonly unit: string | null;
     };
 
+export interface BoundValidationPath {
+  readonly relationId: string;
+  readonly targetEntityId: string;
+  readonly fieldId: string;
+  readonly fieldType: FormulaValidationFieldType;
+  readonly fieldClassification: 'public' | 'internal';
+  readonly readQueryId: string;
+  readonly readPermissionId: string;
+}
+
 export interface BoundFormulaValidation {
   readonly rule: FormulaValidationRule;
   readonly bindingPosition: 'validation';
@@ -39,6 +50,8 @@ export interface BoundFormulaValidation {
   readonly allowedSinks: readonly ['operationRefusal'];
   readonly explanation: 'configuredMessageAndFieldAnchors';
   readonly watchedFields: Readonly<Record<string, FormulaValidationFieldType>>;
+  readonly watchedRelationIds?: readonly string[];
+  readonly paths?: readonly BoundValidationPath[];
   readonly contextDependencies: readonly string[];
 }
 
@@ -93,10 +106,51 @@ export function retypedFormulaRule(
           ? { effect: operation.effect, permission: operation.permission }
           : null;
       });
+    const paths = before.binding.paths ?? [];
+    const inheritedPaths = inheritedFrom
+      ? paths.filter(
+          ({ fieldId, relationId }) =>
+            inheritedFrom.fields.some((field) => field.fieldId === fieldId) &&
+            inheritedFrom.relations.some(
+              (relation) => relation.relationId === relationId,
+            ),
+        )
+      : paths;
+    const pathTypes = (revision: Revision) =>
+      inheritedPaths.map((path) => {
+        const resolved = resolveValidationPath(
+          {
+            kind: 'path',
+            schemaVersion: rule.schemaVersion,
+            relationIds: [path.relationId],
+            fieldId: path.fieldId,
+          },
+          rule.targetId,
+          revision,
+        );
+        return resolved
+          ? {
+              fieldType: resolved.field.fieldType,
+              classification: resolved.field.classification,
+              relation: {
+                cardinality: resolved.relation.cardinality,
+                required: resolved.relation.required,
+                ownership: resolved.relation.ownership,
+                archiveBehavior: resolved.relation.archiveBehavior,
+                targetEntityId: resolved.relation.targetEntity.targetId,
+              },
+              readQueryId: resolved.reader.queryId,
+              readPermission: resolved.reader.permission,
+              legalEntityScope: resolved.reader.legalEntityScope ?? null,
+              filter: resolved.reader.filter,
+            }
+          : null;
+      });
     if (
       canonicalize(fieldTypes(source)) !== canonicalize(fieldTypes(target)) ||
       canonicalize(operationTypes(source)) !==
-        canonicalize(operationTypes(target))
+        canonicalize(operationTypes(target)) ||
+      canonicalize(pathTypes(source)) !== canonicalize(pathTypes(target))
     )
       return rule.ruleId;
   }
@@ -146,7 +200,10 @@ function sameType(
 
 export function bindLiteralValidation(
   rule: FormulaValidationRule,
-  revision: Pick<Revision, 'entities' | 'fields' | 'operations'>,
+  revision: Pick<
+    Revision,
+    'entities' | 'fields' | 'operations' | 'relations' | 'queries'
+  >,
 ): FormulaValidationBinding {
   if (
     !revision.entities.some(
@@ -193,6 +250,7 @@ export function bindLiteralValidation(
   );
   const dependencies = new Map<string, FormulaValidationFieldType>();
   const contextDependencies = new Set<string>();
+  const paths = new Map<string, BoundValidationPath>();
   const fieldType = (
     operand: ValidationOperand,
   ): FormulaValidationFieldType | null => {
@@ -243,8 +301,34 @@ export function bindLiteralValidation(
           contextDependencies.add(BUSINESS_DATE_FIELD_ID);
           return null;
         }
-        if (operand.kind !== 'literal')
-          return 'This slice accepts typed literals and the business date as bounds.';
+        if (operand.kind === 'field') {
+          const right = fieldType(operand);
+          return right && sameType(left, right)
+            ? null
+            : 'Compare fields with the same type, currency and unit.';
+        }
+        if (operand.kind === 'path') {
+          const resolved = resolveValidationPath(
+            operand,
+            rule.targetId,
+            revision,
+          );
+          const right = resolved && formulaFieldType(resolved.field);
+          if (!resolved || !right || !sameType(left, right))
+            return 'Choose a visible field of the same type, currency and unit through one declared relation.';
+          const { field, reader, relation } = resolved;
+          paths.set(`${relation.relationId}/${field.fieldId}`, {
+            relationId: relation.relationId,
+            targetEntityId: relation.targetEntity.targetId,
+            fieldId: field.fieldId,
+            fieldType: right,
+            fieldClassification:
+              field.classification === 'public' ? 'public' : 'internal',
+            readQueryId: reader.queryId,
+            readPermissionId: reader.permission.targetId,
+          });
+          return null;
+        }
         if (!sameType(left, operand.scalar))
           return 'The field and its bound must have the same type, currency and unit.';
         if (
@@ -290,6 +374,20 @@ export function bindLiteralValidation(
         ),
       ),
       contextDependencies: [...contextDependencies].sort(),
+      ...(paths.size
+        ? {
+            paths: [...paths]
+              .sort(([left], [right]) =>
+                left < right ? -1 : left > right ? 1 : 0,
+              )
+              .map(([, path]) => path),
+            watchedRelationIds: [
+              ...new Set(
+                [...paths.values()].map(({ relationId }) => relationId),
+              ),
+            ].sort(),
+          }
+        : {}),
     },
   };
 }

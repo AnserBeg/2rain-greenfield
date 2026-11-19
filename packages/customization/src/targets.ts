@@ -1,5 +1,7 @@
 import { isNarrowableOperationId } from '@north-star/canonical-model';
 import { formulaFieldType } from '../../canonical-model/src/formula-validation-bindings.js';
+import { resolveValidationPath } from '../../canonical-model/src/formula-validation-path.js';
+import { VALIDATION_NODE_VERSION } from '../../canonical-model/src/formula-validation.js';
 import {
   CUSTOMIZABLE_FIRST_PARTY_ENTITY_LOCALS,
   isTenantId,
@@ -92,6 +94,7 @@ export function customizationTargets(definition: {
   readonly operations?: readonly Json[];
   readonly operationRoleNarrowings?: CustomizationTargets['permissionRestrictions'];
   readonly queries: readonly Json[];
+  readonly relations?: readonly Json[];
   readonly surfaces: readonly Json[];
 }): CustomizationTargets {
   const eligible = (entityId: string) =>
@@ -150,8 +153,57 @@ export function customizationTargets(definition: {
                 ]
               : [];
           });
+          const relatedFields = (definition.relations ?? []).flatMap(
+            (relation) => {
+              if (
+                (relation.sourceEntity as Json | undefined)?.targetId !==
+                entityId
+              )
+                return [];
+              const relationId = String(relation.relationId);
+              const targetId = (relation.targetEntity as Json | undefined)
+                ?.targetId;
+              return definition.fields.flatMap((field) => {
+                if ((field.entity as Json | undefined)?.targetId !== targetId)
+                  return [];
+                const path = resolveValidationPath(
+                  {
+                    schemaVersion: VALIDATION_NODE_VERSION,
+                    kind: 'path',
+                    relationIds: [relationId],
+                    fieldId: String(field.fieldId),
+                  },
+                  entityId,
+                  definition as unknown as Parameters<
+                    typeof resolveValidationPath
+                  >[2],
+                );
+                const valueType = path && formulaFieldType(path.field);
+                if (!path || !valueType) return [];
+                const relationLabel = (
+                  relationId.split(':relation.')[1] ?? relationId
+                ).replaceAll('_', ' ');
+                return [
+                  {
+                    relationId,
+                    fieldId: path.field.fieldId,
+                    label: `${entityLabel.get(String(targetId)) ?? relationLabel} · ${path.field.label} (${relationLabel})`,
+                    valueType,
+                  },
+                ];
+              });
+            },
+          );
           return fields.length
-            ? [{ entityId, label, operationIds, fields }]
+            ? [
+                {
+                  entityId,
+                  label,
+                  operationIds,
+                  fields,
+                  ...(relatedFields.length ? { relatedFields } : {}),
+                },
+              ]
             : [];
         })
       : [];

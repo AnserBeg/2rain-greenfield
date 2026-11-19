@@ -11,10 +11,12 @@ import {
 } from '../../canonical-model/src/formula-validation.js';
 
 type Values = Readonly<Record<string, ValidationScalar | null>>;
+export type ValidationRelatedValues = Readonly<Record<string, Values | null>>;
 
 interface SynthesizedInput {
   readonly values: Values;
   readonly previousValues?: Values;
+  readonly relatedValues?: ValidationRelatedValues;
 }
 
 interface ValidationInvocation {
@@ -45,8 +47,15 @@ function readWitnessOperand(
   witness: ValidationWitness,
   operand: Exclude<ValidationOperand, { kind: 'literal' }>,
 ): ResolvedOperand {
-  if (operand.kind === 'path')
-    return { status: 'refused', code: 'VALIDATION_OPERAND_UNREADABLE' };
+  if (operand.kind === 'path') {
+    const [relationId] = operand.relationIds;
+    const row = relationId && witness.relatedValues?.[relationId];
+    if (row === null) return { status: 'absent' };
+    if (!row || !Object.hasOwn(row, operand.fieldId))
+      return { status: 'refused', code: 'VALIDATION_OPERAND_UNREADABLE' };
+    const value = row[operand.fieldId];
+    return value ? { status: 'present', scalar: value } : { status: 'absent' };
+  }
   if (operand.fieldId === BUSINESS_DATE_FIELD_ID) {
     return {
       status: 'present',

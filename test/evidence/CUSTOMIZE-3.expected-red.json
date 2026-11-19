@@ -91,6 +91,24 @@
           "expected": "the directory only returns roles from the caller’s environment"
         }
       ]
+    },
+    {
+      "name": "validation-related-row-read-ignored",
+      "claim": "An existing related record is checked and cannot be treated as an absent relation.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "    if (recordId === null) {\n      pathValues[relationId] = null;",
+      "replacement": "    if (recordId !== undefined) {\n      pathValues[relationId] = null;",
+      "test": {
+        "files": ["test/postgres/customization-formulas.test.ts"],
+        "namePattern": "a guarded location reads its declared parent under current policy and refuses a literal-only reader"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customization-formulas.test.ts",
+          "name": "a guarded location reads its declared parent under current policy and refuses a literal-only reader",
+          "expected": "verification negative probe unexpectedly succeeded"
+        }
+      ]
     }
   ]
 }
