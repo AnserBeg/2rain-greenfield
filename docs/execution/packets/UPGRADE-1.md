@@ -1,41 +1,80 @@
-# UPGRADE-1 — customized upgrades and a reliable first dev start
+# UPGRADE-1 — customized upgrades and a reliable first start
+
+Status — slice 0 integrated at `607e3941`; slice 1 integrated from `d4ff6816`; slice 2 follows.
+Critical path — `db/migrations/0032_customization_upgrades.sql`. Migration and RLS approved by the orchestrator on 2026-11-18.
 
 ## Claims
 
-1. On first start, the managed database must accept TCP on container loopback before migrations begin. The image starts its temporary initialization server on a Unix socket.
+1. The managed dev database accepts TCP before migration, after the image's socket-only initialization server.
+2. Boot replays a live tenant's `addField` and `arrangeLayout` chain against a moved first-party base, staging one compiled child of the prior live revision. Approval and activation are explicit.
+3. Missing targets and conflicts produce stable sandbox compiler diagnostics naming the tenant patch, first-party base and subject. A refused replay leaves the prior release serving.
+4. The append-only upgrade row binds the source, new base, candidate and ordered patch IDs. PostgreSQL checks its digest and scope/actor policies. Runtime grants are SELECT and INSERT.
+5. Every replay reproduces its original chain first. Retained immutable bases support a later baseline that omits them from the checked-in file. Rollback reverses the exact verified upgrade edge.
 
 ## Decisions
 
-- Use the same TCP readiness check for a new container and a restarted one. The dev entry point owns the check.
-- The service reports `CUSTOMIZE_BASE_STALE` for authored bytes that disagree with the compiled tip and `CUSTOMIZE_BASE_MOVED` for a customized release with a different first-party base.
+- Upgrade intent has its own data-plane relation. Original authored patch rows retain their identities and payloads, including CUSTOMIZE-2's `screens` and historical `legacy` interpretation.
+- Supported replay keeps the package, language and normalization profile. Other patch kinds retain `CUSTOMIZE_BASE_MOVED`; stale authored/compiled files retain `CUSTOMIZE_BASE_STALE`.
+- The checked-in new base can remain staged. Its retained artifacts are compiler input for subsequent replays. The tenant candidate passes the ordinary semantic admission and activation gates.
+- Git metadata under `/home/rvham/2rain-greenfield/.git/worktrees/2rain-greenfield-upgrade-1` is read-only. Commits use temporary metadata with this worktree as GIT_WORK_TREE.
+- Mechanical bridges update the migration inventory, tenant-completeness manifest and derived platform schema snapshot.
 
-## Slice 1 decision
+- Integration includes accepted panel/style changes at `c4438d56`, with no shared file in the upgrade diff. Combined merge CI is the final gate.
 
-- A focused sandbox probe renamed the Item SKU field on a test base, replayed an added Shelf code field and a Warehouse name list-column label, and observed all three in the normalized candidate. Its diff started at the replayed field-only release. The original two-patch release had a different root. This probe ran the compiler only.
-- Rollback checks the exact revision-parent edge and the verified forward swap at the live fence. A staged upgrade needs to bind the prior live tenant release and the new first-party base. Migration 0029 records an authored patch per row. A base upgrade introduces no new authored patch.
-- STOP before migration or grant edits. Choose an append-only upgrade relation or extend the existing lineage table with a distinct replay record. The separate relation preserves original patch authorship and the rollback edge. Slice 2 follows that decision.
-- Dependency collision observed at [CUSTOMIZE-2 `9646b4f3`](https://github.com/AnserBeg/2rain-greenfield/commit/9646b4f3b97fa5aa583e898528cd408faec261a8). Its writer changed both the stored `addField` payload and how `patchRecord` interprets historical payloads. Run the upgrade proof against the integrated contract.
+## Controls
+
+- [Manifest](../../../test/evidence/UPGRADE-1.expected-red.json) — omitted row/environment scope and digest validation each kill the upgrade journey. CI [44421999367](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44421999367) reproduced all three at `af424ffd`.
+- `upgrade-replayed-as-separate-drafts` — one local declared red and restored green prove that the compiler test detects a replay with the wrong parent.
 
 ## Gates
 
-- Slice 0 passed local format, typecheck, lint, and the focused readiness unit test. GitHub [CI run 44382708043](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44382708043) passed at packet tip `6d199dd3`. Critical paths touched in slice 0 — none. The agent fixes on the integration parent `62d34bd6` share no executable files with this slice.
+- Slice 0 merge [CI 44391066375](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44391066375) passed at `607e3941`.
+- Slice 1 [CI 44411290320](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44411290320) passed at `c65882b3`. Trunk-synchronized candidate [CI 44426978571](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44426978571) passed at `d4ff6816`. Its [controls 44421999367](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44421999367) passed.
+- Local format, typecheck, lint and focused compiler tests passed before the trunk merge. The initial CI typecheck red was corrected. Its schema drift red was reproduced and repaired with the generated 32-migration snapshot under the exclusive lock.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "UPGRADE-1",
-  "base": "fe5079d39277ba6d0e39946c23158888a4fe8ce2", "head": "6d199dd3d83f5cf3a19295369765b7e4dae6f465",
-  "changedPaths": ["apps/api/src/main.ts", "test/unit/dev-environment.test.ts"],
-  "symbols": [{"path": "apps/api/src/main.ts", "name": "ensureLocalPostgres"}]
+  "base": "c31f17df1ebc3bfca7819ef34e60e0fb43160cba",
+  "head": "d4ff6816295339d921dd7aa258e5f4eb060d4beb",
+  "changedPaths": [
+    "apps/api/scripts/customize-cli.ts",
+    "apps/api/src/composition-root.ts",
+    "apps/api/src/main.ts",
+    "db/migrations/0032_customization_upgrades.sql",
+    "db/schema.snapshot.json",
+    "packages/customization/src/sandbox-worker.ts",
+    "packages/customization/src/sandbox.ts",
+    "packages/postgres-provider/src/active-release-root.ts",
+    "packages/postgres-provider/src/composed-application-runtime.ts",
+    "packages/postgres-provider/src/customization-service.ts",
+    "test/architecture/release-persistence-boundary.test.ts",
+    "test/architecture/tenant-completeness.manifest.json",
+    "test/architecture/tenant-completeness.test.ts",
+    "test/evidence/UPGRADE-1.expected-red.json",
+    "test/postgres/customization.test.ts",
+    "test/postgres/inventory-storage.test.ts",
+    "test/postgres/migrations.test.ts",
+    "test/postgres/module-storage-transition.test.ts",
+    "test/postgres/trust-substrate.test.ts",
+    "test/unit/customization.test.ts"
+  ],
+  "symbols": [
+    {"path": "packages/postgres-provider/src/customization-service.ts", "name": "PostgresCustomizationService"},
+    {"path": "packages/customization/src/sandbox-worker.ts", "name": "compileChain"}
+  ]
 }
 ```
 
 ## Test it yourself
 
-Run `node --import tsx --test --test-name-pattern='dev readiness' test/unit/dev-environment.test.ts` to see the dev process probe container TCP. To exercise a fresh volume, run the following in one shell. Expect `COMPOSED_APPLICATION_READY` on the first invocation of `dev`. Press Ctrl-C to stop it.
+First start — expect READY on the first start, then Ctrl-C to stop it.
 
 ```bash
-export NORTH_STAR_DEV_DATABASE_CONTAINER=upgrade-1-readiness-demo
-export NORTH_STAR_DATABASE_PORT=55483 PORT=4183
+export NORTH_STAR_DEV_DATABASE_CONTAINER=upgrade-1-readiness-demo NORTH_STAR_DATABASE_PORT=55483 PORT=4183
 unset DATABASE_URL
 corepack pnpm --filter @north-star/api dev:reset && corepack pnpm dev
 ```
+
+- Upgrade — boot the new first-party release against the same tenant database, read `CUSTOMIZATION_UPGRADE`, then `corepack pnpm customize status`. Approve its upgrade ID, activate that ID, and `customize rollback` to return to the prior tenant release.
+- Isolated proof — after `timeout 15 docker info`, run `node scripts/run-with-test-lock.mjs exclusive -- node --import tsx --test --test-name-pattern='a platform label upgrade' test/postgres/customization.test.ts`. It uses its own ephemeral database and checks conflict, survival, explicit activation, a second baseline and rollback.

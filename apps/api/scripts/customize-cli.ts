@@ -93,6 +93,10 @@ try {
       status.patches.length === 0
         ? 'No changes recorded yet.'
         : 'Recorded changes:',
+      ...status.upgrades.map(
+        (upgrade) =>
+          `  ${upgrade.upgradeId}  platform upgrade  (${upgrade.state})`,
+      ),
       ...status.patches.map(
         (patch) =>
           `  ${patch.patchId}  ${patch.kind.padEnd(14)} ${summary(patch.patch)}${

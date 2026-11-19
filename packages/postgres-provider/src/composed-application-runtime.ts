@@ -27,7 +27,11 @@ import {
   STORAGE_TRANSITION_ENVELOPE_VERSION,
   diffCompiledReleases,
 } from '@north-star/compiler';
-import { renderCompiledDiff } from '@north-star/customization';
+import {
+  renderCompiledDiff,
+  type AcknowledgementInput,
+} from '@north-star/customization';
+import type { UpgradePreparation } from './customization-service.js';
 import {
   COMPILER_TRANSITION_FACTS_VERSION,
   EXECUTOR_APPLIED_STATE_EVIDENCE_VERSION,
@@ -122,6 +126,10 @@ export interface ComposedApplicationRuntimeOptions {
     observation: FreshTenantIntermediateActivationObservation,
   ) => Promise<void>;
   readonly compiledApplication: unknown;
+  readonly customization?: {
+    readonly acknowledgement: AcknowledgementInput;
+    readonly firstPartyAuthored: Readonly<Record<string, unknown>>;
+  };
   /** Verified non-demo identity integration. Absence fails request entry closed. */
   readonly authenticateRequest?: AuthenticateRequest;
   readonly capabilityOperationExecutorFactories?: readonly PostgresCapabilityOperationExecutorFactory[];
@@ -178,6 +186,7 @@ export interface InventoryScopeProvisioning {
 }
 
 export interface ComposedApplicationRuntime {
+  readonly customizationUpgrade: UpgradePreparation | null;
   readonly activeReleaseId: MintedUuid;
   readonly entry: AuthenticatedRequestRuntimeEntryAdapter;
   readonly freshTenantInstallEvidence: FreshTenantInstallEvidence | null;
@@ -411,6 +420,7 @@ export async function createComposedApplicationRuntime(
             runtimeContext,
             pointer.releaseId,
             lineage,
+            options.customization !== undefined,
           )
         : null;
     if (pointerLineageIndex < 0 && !tenantServing) {
@@ -427,7 +437,10 @@ export async function createComposedApplicationRuntime(
     const activeLineageIndex = tenantServing
       ? lineage.length - 1
       : pointerLineageIndex;
-    if (!freshInstall || activeLineageIndex === lineage.length - 1) {
+    if (
+      !tenantServing &&
+      (!freshInstall || activeLineageIndex === lineage.length - 1)
+    ) {
       await ensureReleaseAdmitted(
         runtimePool,
         runtimeContext,
@@ -713,6 +726,30 @@ export async function createComposedApplicationRuntime(
         serving.normalizedDefinitionBytes,
       );
     }
+    let customizationUpgrade: UpgradePreparation | null = null;
+    if (
+      tenantServing &&
+      options.customization &&
+      (await unprovenLivePointer(runtimePool, runtimeContext)) === null
+    ) {
+      const { PostgresCustomizationService } =
+        await import('./customization-service.js');
+      const customization = new PostgresCustomizationService(
+        { adminPool, runtimePool, materializerPool, modulePool, identities },
+        {
+          ...options.customization,
+          compiledApplication: options.compiledApplication,
+          ...(options.localDemoIdentity
+            ? { localDemoIdentity: true as const }
+            : {}),
+          providerErrorMappings: options.providerErrorMappings,
+          capabilityOperationExecutorFactories:
+            options.capabilityOperationExecutorFactories ?? [],
+        },
+      );
+      customizationUpgrade = await customization.prepareUpgrade();
+    }
+
     const actorIssuer = humanActorIssuer();
     const interpreter = new PostgresModuleRuntimeInterpreter(
       runtimePool,
@@ -839,6 +876,7 @@ export async function createComposedApplicationRuntime(
     let closed = false;
 
     return Object.freeze({
+      customizationUpgrade,
       activeReleaseId: serving.releaseId,
       async close() {
         if (closed) return;
@@ -965,6 +1003,7 @@ async function tenantDescendantOfLineageTip(
   context: TrustedRequestContext,
   releaseId: MintedUuid,
   lineage: readonly PersistedReleaseIdentity[],
+  allowMovedBase: boolean,
 ): Promise<ServingRelease | null> {
   const base = await withTrustedRequestTransaction(
     pool,
@@ -988,9 +1027,16 @@ async function tenantDescendantOfLineageTip(
            SELECT parent.revision_id, parent.provenance,
                   parent.parent_revision_id
              FROM chain
+             LEFT JOIN platform.customization_upgrades AS upgrade
+               ON upgrade.tenant_id = $1 AND upgrade.environment_id = $2
+              AND upgrade.candidate_revision_id = chain.revision_id
+             LEFT JOIN platform.tenant_releases AS upgrade_base
+               ON upgrade_base.tenant_id = upgrade.tenant_id
+              AND upgrade_base.environment_id = upgrade.environment_id
+              AND upgrade_base.release_id = upgrade.base_release_id
              JOIN platform.app_package_revisions AS parent
                ON parent.tenant_id = $1
-              AND parent.revision_id = chain.parent_revision_id
+              AND parent.revision_id = COALESCE(upgrade_base.app_package_revision_id, chain.parent_revision_id)
             WHERE chain.provenance = 'tenantAuthored'
          )
          SELECT bool_or(provenance = 'tenantAuthored') AS tenant_authored,
@@ -1007,7 +1053,7 @@ async function tenantDescendantOfLineageTip(
     },
   );
   if (!base?.tenant_authored) return null;
-  if (base.base_revision_id !== lineage.at(-1)!.revisionId) {
+  if (base.base_revision_id !== lineage.at(-1)!.revisionId && !allowMovedBase) {
     throw new Error(
       'the active release is a tenant customization of an earlier version of this application; ' +
         're-applying customizations to a new first-party release is not built yet. ' +

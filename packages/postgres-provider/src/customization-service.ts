@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 
 import {
+  canonicalAuthoredProjection,
   canonicalize,
-  canonicalizeAndHash,
   normalizeApplicationPackage,
   parseNormalizedApplicationPackageJson,
 } from '@north-star/canonical-model';
@@ -22,6 +22,10 @@ import {
   type SandboxRunnerOptions,
   type SandboxStep,
 } from '@north-star/customization';
+import type {
+  CompileSuccess,
+  ContentAddressedArtifact,
+} from '@north-star/compiler';
 import type { MintedUuid } from '@north-star/platform-runtime';
 import type { TrustedRequestContext } from '@north-star/runtime';
 import pg from 'pg';
@@ -179,6 +183,7 @@ export type DraftOutcome =
     };
 
 export interface PatchRecord {
+  readonly baseReleaseRoot: string;
   readonly channel: AuthoringChannel;
   readonly createdAt: string;
   readonly kind: CustomizationPatch['kind'];
@@ -192,20 +197,47 @@ export interface PatchRecord {
 
 export type PatchState = 'live' | 'approved' | 'drafted' | 'stale';
 
+export interface UpgradeRecord {
+  readonly upgradeId: MintedUuid;
+  readonly sourceReleaseId: MintedUuid;
+  readonly baseReleaseId: MintedUuid;
+  readonly candidateReleaseId: MintedUuid;
+  readonly candidateRevisionId: MintedUuid;
+  readonly patchIds: readonly MintedUuid[];
+}
+
+export type UpgradePreparation =
+  | { readonly status: 'current' }
+  | {
+      readonly status: 'drafted';
+      readonly upgradeId: MintedUuid;
+      readonly renderedDiff: string;
+      readonly releaseRoot: string;
+    }
+  | Exclude<DraftOutcome, { status: 'drafted' }>;
+
 export interface CustomizationStatus {
   readonly activeReleaseId: MintedUuid;
   readonly activeReleaseRoot: string;
   /** Applied patches of the active release, oldest first. */
   readonly activeChain: readonly PatchRecord[];
   readonly patches: readonly (PatchRecord & { readonly state: PatchState })[];
+  readonly upgrades: readonly (UpgradeRecord & {
+    readonly state: PatchState;
+  })[];
 }
 
-interface ActiveState {
+interface ReleaseState {
+  readonly baseReleaseId: MintedUuid;
+  readonly upgrade: UpgradeRecord | null;
   readonly chain: readonly PatchRecord[];
-  readonly pointer: Awaited<ReturnType<typeof readPointer>>;
   readonly releaseId: MintedUuid;
   readonly releaseRoot: string;
   readonly revisionId: MintedUuid;
+}
+
+interface ActiveState extends ReleaseState {
+  readonly pointer: Awaited<ReturnType<typeof readPointer>>;
 }
 
 export class PostgresCustomizationService {
@@ -222,6 +254,145 @@ export class PostgresCustomizationService {
     ).application;
     this.#baseBytes = new TextEncoder().encode(
       canonicalize(normalizeApplicationPackage(options.firstPartyAuthored)),
+    );
+  }
+
+  /** Boot stages a replay against the new base, under the same scope lock as
+   * approval and activation. Serving continues on the recorded live pointer. */
+  async prepareUpgrade(): Promise<UpgradePreparation> {
+    return this.#locked(async (_admin, context, active) => {
+      const baseReleaseId = await this.#releaseIdForRoot(
+        context,
+        this.#tip.compiled.releaseRoot,
+      );
+      if (active.baseReleaseId === baseReleaseId)
+        return { status: 'current' as const };
+      if (
+        !baseReleaseId ||
+        active.chain.length === 0 ||
+        active.chain.some(
+          (record) =>
+            record.kind !== 'addField' && record.kind !== 'arrangeLayout',
+        )
+      ) {
+        throw new CustomizationServiceRefusal(
+          'CUSTOMIZE_BASE_MOVED',
+          'this patch chain is outside the supported field and layout upgrade',
+        );
+      }
+      const sourceBase = parseNormalizedApplicationPackageJson(
+        (await this.#loadRelease(context, active.baseReleaseId))
+          .normalizedDefinitionBytes,
+      );
+      const targetBase = parseNormalizedApplicationPackageJson(this.#baseBytes);
+      if (
+        sourceBase.package.packageId !== targetBase.package.packageId ||
+        sourceBase.languageVersion !== targetBase.languageVersion ||
+        sourceBase.normalizationProfileVersion !==
+          targetBase.normalizationProfileVersion
+      ) {
+        throw new CustomizationServiceRefusal(
+          'CUSTOMIZE_BASE_MOVED',
+          'the upgrade changes the package or language identity',
+        );
+      }
+      const source = (await this.#reproduce(context, active)).candidate;
+      const replay = await this.#compile(
+        active.chain.map((record) => record.patch),
+        this.#tip,
+        source,
+        0,
+        true,
+      );
+      if (replay.status !== 'compiled') return replay;
+      const step = replay.steps[0]!;
+      const candidate = parseSerializedRelease(step.release);
+      const existing = (await this.#upgrades(context)).find(
+        (record) =>
+          record.sourceReleaseId === active.releaseId &&
+          record.baseReleaseId === baseReleaseId,
+      );
+      if (existing) {
+        if (
+          (await this.#root(context, existing.candidateReleaseId)) !==
+          candidate.compiled.releaseRoot
+        ) {
+          throw new CustomizationServiceRefusal(
+            'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+            'the recorded upgrade no longer reproduces',
+          );
+        }
+        return {
+          status: 'drafted' as const,
+          upgradeId: existing.upgradeId,
+          renderedDiff: step.rendered.text,
+          releaseRoot: candidate.compiled.releaseRoot,
+        };
+      }
+      const identity = await ensurePersistedRelease(
+        this.connection.runtimePool,
+        context,
+        candidate,
+        active.revisionId,
+        'tenantAuthored',
+      );
+      const upgradeId = randomUUID() as MintedUuid;
+      const payload = Buffer.from(
+        canonicalize({
+          version: 'northstar.customization-upgrade/v1',
+          sourceReleaseId: active.releaseId,
+          baseReleaseId,
+          candidateReleaseId: identity.releaseId,
+          candidateRevisionId: identity.revisionId,
+          patchIds: active.chain.map((record) => record.patchId),
+        }),
+      );
+      await withTrustedRequestTransaction(
+        this.connection.runtimePool,
+        context,
+        async (client) => {
+          await client.query(
+            `INSERT INTO platform.customization_upgrades (
+            tenant_id, environment_id, upgrade_id, source_release_id, base_release_id,
+            candidate_release_id, candidate_revision_id, payload, payload_digest, authored_by
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+            [
+              context.tenantId,
+              context.environmentId,
+              upgradeId,
+              active.releaseId,
+              baseReleaseId,
+              identity.releaseId,
+              identity.revisionId,
+              payload,
+              createHash('sha256').update(payload).digest('hex'),
+              context.principalId,
+            ],
+          );
+        },
+      );
+      return {
+        status: 'drafted' as const,
+        upgradeId,
+        renderedDiff: step.rendered.text,
+        releaseRoot: candidate.compiled.releaseRoot,
+      };
+    });
+  }
+
+  async #upgrades(
+    context: TrustedRequestContext,
+  ): Promise<readonly UpgradeRecord[]> {
+    return withTrustedRequestTransaction(
+      this.connection.runtimePool,
+      context,
+      async (client) => {
+        const result = await client.query<UpgradeRow>(
+          'SELECT * FROM platform.customization_upgrades WHERE tenant_id = $1 AND environment_id = $2 ORDER BY created_at, upgrade_id',
+          [context.tenantId, context.environmentId],
+        );
+        return result.rows.map(upgradeRecord);
+      },
     );
   }
 
@@ -260,6 +431,19 @@ export class PostgresCustomizationService {
             ? 'approved'
             : 'drafted';
     return Object.freeze({
+      upgrades: Object.freeze(
+        (await this.#upgrades(context)).map((upgrade) => ({
+          ...upgrade,
+          state:
+            active.upgrade?.upgradeId === upgrade.upgradeId
+              ? ('live' as const)
+              : active.releaseId !== upgrade.sourceReleaseId
+                ? ('stale' as const)
+                : approvedReleases.has(upgrade.candidateReleaseId)
+                  ? ('approved' as const)
+                  : ('drafted' as const),
+        })),
+      ),
       activeChain: active.chain,
       activeReleaseId: active.releaseId,
       activeReleaseRoot: active.releaseRoot,
@@ -359,13 +543,16 @@ export class PostgresCustomizationService {
     const context = await this.#context();
     const active = await this.#active(context);
     const patch = preparePatchForRecording(parsed.patch);
-    const compiled = await this.#compile([
-      ...active.chain.map((record) => record.patch),
-      patch,
-    ]);
+    await this.#assertCurrentBase(context, active);
+    const reproduced = await this.#reproduce(context, active);
+    const compiled = await this.#compile(
+      [...active.chain.map((record) => record.patch), patch],
+      await this.#loadRelease(context, active.baseReleaseId),
+      reproduced.candidate,
+      active.chain.length,
+    );
     if (compiled.status !== 'compiled') return compiled;
     const { steps } = compiled;
-    this.#assertReproduced(active.chain, steps);
     const step = steps.at(-1)!;
     const candidate = parseSerializedRelease(step.release);
     const payload = new TextEncoder().encode(canonicalize(patch));
@@ -374,8 +561,8 @@ export class PostgresCustomizationService {
       candidate.normalizedDefinitionBytes,
     );
     const firstParty = parseNormalizedApplicationPackageJson(this.#baseBytes);
-    const baseRevisionId =
-      active.chain[0]?.parentRevisionId ?? active.revisionId;
+    const baseRevisionId = (await this.#identity(context, active.baseReleaseId))
+      .revisionId;
     // Recording runs under the release-scope lock (review R4): two identical
     // drafts are serialized, so the second finds the first's patch and
     // returns the release and revision that patch recorded.
@@ -511,8 +698,19 @@ export class PostgresCustomizationService {
    */
   async approve(patchId: string): Promise<ApprovalOutcome> {
     return this.#locked(async (admin, context, active) => {
-      const record = await this.#patch(context, patchId);
-      if (active.chain.some((applied) => applied.patchId === record.patchId)) {
+      const upgrade = (await this.#upgrades(context)).find(
+        (entry) => entry.upgradeId === patchId,
+      );
+      const record = upgrade
+        ? {
+            resultingReleaseId: upgrade.candidateReleaseId,
+            resultingRevisionId: upgrade.candidateRevisionId,
+            parentRevisionId: (
+              await this.#identity(context, upgrade.sourceReleaseId)
+            ).revisionId,
+          }
+        : await this.#patch(context, patchId);
+      if (active.releaseId === record.resultingReleaseId) {
         throw new CustomizationServiceRefusal(
           'CUSTOMIZE_ALREADY_ACTIVE',
           'this change is already live',
@@ -524,10 +722,29 @@ export class PostgresCustomizationService {
           'the live application changed after this change was drafted; draft it again',
         );
       }
-      const { parent, candidate } = await this.#reproduce([
-        ...active.chain,
-        record,
-      ]);
+      const { parent, candidate } = upgrade
+        ? await this.#reproduce(
+            context,
+            await this.#state(context, upgrade.candidateReleaseId),
+          )
+        : await this.#reproduce(
+            context,
+            active,
+            await this.#patch(context, patchId),
+          );
+      if (
+        upgrade &&
+        upgrade.baseReleaseId !==
+          (await this.#releaseIdForRoot(
+            context,
+            this.#tip.compiled.releaseRoot,
+          ))
+      ) {
+        throw new CustomizationServiceRefusal(
+          'CUSTOMIZE_BASE_MOVED',
+          'the upgrade targets a different first-party base',
+        );
+      }
       const identity = await this.#identity(context, record.resultingReleaseId);
       const admit = () =>
         ensureReleaseAdmitted(
@@ -596,8 +813,20 @@ export class PostgresCustomizationService {
    */
   async activate(patchId: string): Promise<ActivationOutcome> {
     return this.#locked(async (admin, context, active) => {
-      const record = await this.#patch(context, patchId);
-      if (active.chain.some((applied) => applied.patchId === record.patchId)) {
+      const upgrade = (await this.#upgrades(context)).find(
+        (entry) => entry.upgradeId === patchId,
+      );
+      const record = upgrade
+        ? {
+            resultingReleaseId: upgrade.candidateReleaseId,
+            resultingRevisionId: upgrade.candidateRevisionId,
+          }
+        : await this.#patch(context, patchId);
+      if (
+        active.releaseId === record.resultingReleaseId ||
+        (!upgrade &&
+          active.chain.some((applied) => applied.patchId === patchId))
+      ) {
         // Already live, and `#locked` has proved its activation verified and
         // set the scopes to it (review R2): a cut-off activation is finished.
         return Object.freeze({
@@ -708,8 +937,13 @@ export class PostgresCustomizationService {
       // or the first-party release (review F5) -- not whatever the last swap
       // came from, which after an earlier rollback is a later change.
       const targetReleaseId =
-        active.chain.at(-2)?.resultingReleaseId ??
-        (await this.#releaseIdForRoot(context, this.#tip.compiled.releaseRoot));
+        active.upgrade?.candidateReleaseId === active.releaseId
+          ? active.upgrade.sourceReleaseId
+          : active.upgrade &&
+              active.chain.at(-1)?.parentRevisionId ===
+                active.upgrade.candidateRevisionId
+            ? active.upgrade.candidateReleaseId
+            : (active.chain.at(-2)?.resultingReleaseId ?? active.baseReleaseId);
       if (!targetReleaseId) {
         throw new CustomizationServiceRefusal(
           'CUSTOMIZE_NOTHING_TO_ROLL_BACK',
@@ -752,7 +986,7 @@ export class PostgresCustomizationService {
           'the previous release is not the exact parent of the live customization',
         );
       }
-      const { parent, candidate } = await this.#reproduce(active.chain);
+      const { parent, candidate } = await this.#reproduce(context, active);
       const target = await this.#identity(context, targetReleaseId);
       if (
         parent.compiled.releaseRoot !==
@@ -847,7 +1081,7 @@ export class PostgresCustomizationService {
     admin: pg.PoolClient,
     context: TrustedRequestContext,
     activationAttemptId: MintedUuid,
-    record: PatchRecord,
+    record: Pick<PatchRecord, 'resultingReleaseId'>,
     status: ActivationOutcome['status'],
     expectedReleaseId: MintedUuid = record.resultingReleaseId,
   ): Promise<ActivationOutcome> {
@@ -907,24 +1141,160 @@ export class PostgresCustomizationService {
    * Re-applies a recorded chain in the isolated worker and checks every link
    * against the release recorded for it; returns the last link and its parent.
    */
-  async #reproduce(chain: readonly PatchRecord[]): Promise<{
+  async #reproduce(
+    context: TrustedRequestContext,
+    state: ReleaseState,
+    extra?: PatchRecord,
+  ): Promise<{
     readonly candidate: ParsedRelease;
     readonly parent: ParsedRelease;
   }> {
-    const compiled = await this.#compile(chain.map((record) => record.patch));
+    const base = await this.#loadRelease(context, state.baseReleaseId);
+    const chain = [...state.chain, ...(extra ? [extra] : [])];
+    let parent = base;
+    let offset = 0;
+    if (state.upgrade) {
+      const upgrade = state.upgrade;
+      const source = await this.#state(context, upgrade.sourceReleaseId);
+      if (
+        canonicalize(source.chain.map((record) => record.patchId)) !==
+        canonicalize(upgrade.patchIds)
+      ) {
+        throw new CustomizationServiceRefusal(
+          'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+          'the upgrade patch chain differs from its source release',
+        );
+      }
+      const reproduced = await this.#reproduce(context, source);
+      const replay = await this.#compile(
+        source.chain.map((record) => record.patch),
+        base,
+        reproduced.candidate,
+        0,
+        true,
+      );
+      if (replay.status !== 'compiled') {
+        throw new CustomizationServiceRefusal(
+          'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+          replay.message,
+        );
+      }
+      parent = parseSerializedRelease(replay.steps[0]!.release);
+      if (
+        parent.compiled.releaseRoot !==
+        (await this.#root(context, upgrade.candidateReleaseId))
+      ) {
+        throw new CustomizationServiceRefusal(
+          'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+          'replaying the upgrade did not reproduce its recorded release',
+        );
+      }
+      offset = upgrade.patchIds.length;
+      if (chain.length === offset)
+        return { parent: reproduced.candidate, candidate: parent };
+    }
+    if (chain.length === 0) return { parent, candidate: parent };
+    const compiled = await this.#compile(
+      chain.map((record) => record.patch),
+      base,
+      parent,
+      offset,
+    );
     if (compiled.status !== 'compiled') {
       throw new CustomizationServiceRefusal(
         'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
-        `a recorded change no longer compiles: ${compiled.message}`,
+        compiled.message,
       );
     }
-    this.#assertReproduced(chain, compiled.steps);
+    this.#assertReproduced(chain.slice(offset), compiled.steps);
     const releases = compiled.steps.map((step) =>
       parseSerializedRelease(step.release),
     );
+    return { candidate: releases.at(-1)!, parent: releases.at(-2) ?? parent };
+  }
+
+  /** Read immutable first-party compiler input, including bases retained only in
+   * the database after a pre-tenant baseline. Admission belongs to the candidate. */
+  async #loadRelease(
+    context: TrustedRequestContext,
+    releaseId: MintedUuid,
+  ): Promise<ParsedRelease> {
+    const root = await this.#root(context, releaseId);
+    const parsed = parseCompiledApplication(this.options.compiledApplication);
+    const checkedIn = [parsed.bootstrap, ...parsed.applications].find(
+      (release) => release.compiled.releaseRoot === root,
+    );
+    if (checkedIn) return checkedIn;
+    const stored = await withTrustedRequestTransaction(
+      this.connection.runtimePool,
+      context,
+      async (client) => {
+        const metadata = await client.query<{
+          desired_state: Buffer;
+          output_protocol_version: string;
+        }>(
+          `SELECT revision.desired_state, release.output_protocol_version
+           FROM platform.tenant_releases AS release
+           JOIN platform.app_package_revisions AS revision
+             ON revision.tenant_id = release.tenant_id AND revision.revision_id = release.app_package_revision_id
+          WHERE release.tenant_id = $1 AND release.environment_id = $2 AND release.release_id = $3
+            AND revision.provenance = 'firstParty'`,
+          [context.tenantId, context.environmentId, releaseId],
+        );
+        const artifacts = await client.query<{
+          artifact_kind: ContentAddressedArtifact['artifactKind'];
+          content_hash: string;
+          domain_tag: string;
+          media_type: ContentAddressedArtifact['mediaType'];
+          canonical_bytes: Buffer;
+        }>('SELECT * FROM platform.read_tenant_release_artifacts($1)', [
+          releaseId,
+        ]);
+        return { metadata: metadata.rows[0], artifacts: artifacts.rows };
+      },
+    );
+    if (!stored.metadata) {
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+        'the recorded first-party base is missing',
+      );
+    }
+    const artifacts: ContentAddressedArtifact[] = stored.artifacts.map(
+      (artifact) => ({
+        artifactKind: artifact.artifact_kind,
+        contentHash: artifact.content_hash,
+        domainTag: artifact.domain_tag,
+        mediaType: artifact.media_type,
+        canonicalBytes: artifact.canonical_bytes,
+        kind: 'contentAddressedArtifact',
+      }),
+    );
+    const manifest = artifacts.find(
+      (artifact) => artifact.contentHash === root,
+    );
+    if (!manifest)
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+        'the first-party base has no manifest',
+      );
     return {
-      candidate: releases.at(-1)!,
-      parent: releases.at(-2) ?? this.#tip,
+      normalizedDefinitionBytes: stored.metadata.desired_state,
+      compiled: {
+        bundle: {
+          artifacts,
+          releaseManifest: JSON.parse(
+            new TextDecoder().decode(manifest.canonicalBytes),
+          ),
+          releaseManifestBytes: manifest.canonicalBytes,
+          outputProtocolVersion: stored.metadata.output_protocol_version,
+          nodeContracts: [],
+          kind: 'compiledReleaseBundle',
+        },
+        stagedArtifacts: artifacts,
+        status: 'compiled',
+        diagnostics: [],
+        releaseRoot: root,
+      } as unknown as CompileSuccess,
     };
   }
 
@@ -1022,6 +1392,10 @@ export class PostgresCustomizationService {
 
   async #compile(
     chain: readonly CustomizationPatch[],
+    base: ParsedRelease = this.#tip,
+    parent: ParsedRelease = base,
+    startAt = 0,
+    upgrade = false,
   ): Promise<
     | { readonly status: 'compiled'; readonly steps: readonly SandboxStep[] }
     | Exclude<DraftOutcome, { status: 'drafted' }>
@@ -1029,9 +1403,18 @@ export class PostgresCustomizationService {
     const response = await compileInSandbox(
       {
         acknowledgement: this.options.acknowledgement,
-        base: this.options.firstPartyAuthored,
+        base:
+          base.compiled.releaseRoot === this.#tip.compiled.releaseRoot
+            ? this.options.firstPartyAuthored
+            : (canonicalAuthoredProjection(
+                parseNormalizedApplicationPackageJson(
+                  base.normalizedDefinitionBytes,
+                ),
+              ) as unknown as Record<string, unknown>),
         chain,
-        tip: serializeRelease(this.#tip),
+        tip: serializeRelease(parent),
+        startAt,
+        ...(upgrade ? { upgradeBaseRoot: base.compiled.releaseRoot } : {}),
       },
       this.options.sandbox,
     );
@@ -1099,6 +1482,28 @@ export class PostgresCustomizationService {
       );
     }
     const releaseId = pointer.releaseId;
+    return { ...(await this.#state(context, releaseId)), pointer };
+  }
+
+  async #assertCurrentBase(
+    context: TrustedRequestContext,
+    state: ReleaseState,
+  ): Promise<void> {
+    if (
+      (await this.#root(context, state.baseReleaseId)) !==
+      this.#tip.compiled.releaseRoot
+    ) {
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_BASE_MOVED',
+        'approve and activate the pending platform upgrade before drafting another change',
+      );
+    }
+  }
+
+  async #state(
+    context: TrustedRequestContext,
+    releaseId: MintedUuid,
+  ): Promise<ReleaseState> {
     return withTrustedRequestTransaction(
       this.connection.runtimePool,
       context,
@@ -1128,7 +1533,66 @@ export class PostgresCustomizationService {
         const chain: PatchRecord[] = [];
         let revisionId = row.revision_id;
         let provenance = row.provenance;
+        let upgrade: UpgradeRecord | null = null;
         while (provenance === 'tenantAuthored') {
+          const upgraded = await client.query<UpgradeRow>(
+            'SELECT * FROM platform.customization_upgrades WHERE tenant_id = $1 AND environment_id = $2 AND candidate_revision_id = $3',
+            [context.tenantId, context.environmentId, revisionId],
+          );
+          if (upgraded.rows[0]) {
+            upgrade = upgradeRecord(upgraded.rows[0]);
+            const binding = await client.query<{ valid: boolean }>(
+              `SELECT candidate.app_package_revision_id = $4
+                      AND revision.parent_revision_id = source.app_package_revision_id
+                      AND base_revision.provenance = 'firstParty' AS valid
+                 FROM platform.tenant_releases AS candidate
+                 JOIN platform.app_package_revisions AS revision
+                   ON revision.tenant_id = candidate.tenant_id
+                  AND revision.revision_id = candidate.app_package_revision_id
+                 JOIN platform.tenant_releases AS source
+                   ON source.tenant_id = candidate.tenant_id AND source.environment_id = candidate.environment_id
+                  AND source.release_id = $5
+                 JOIN platform.tenant_releases AS base
+                   ON base.tenant_id = candidate.tenant_id AND base.environment_id = candidate.environment_id
+                  AND base.release_id = $6
+                 JOIN platform.app_package_revisions AS base_revision
+                   ON base_revision.tenant_id = base.tenant_id AND base_revision.revision_id = base.app_package_revision_id
+                WHERE candidate.tenant_id = $1 AND candidate.environment_id = $2 AND candidate.release_id = $3`,
+              [
+                context.tenantId,
+                context.environmentId,
+                upgrade.candidateReleaseId,
+                upgrade.candidateRevisionId,
+                upgrade.sourceReleaseId,
+                upgrade.baseReleaseId,
+              ],
+            );
+            if (binding.rows[0]?.valid !== true) {
+              throw new CustomizationServiceRefusal(
+                'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+                'the upgrade does not bind its source, base and candidate revisions',
+              );
+            }
+            const patches = await client.query<PatchRow>(
+              `${PATCH_SELECT} WHERE patch.tenant_id = $1 AND patch.environment_id = $2 AND patch.patch_id = ANY($3::uuid[])`,
+              [context.tenantId, context.environmentId, upgrade.patchIds],
+            );
+            const byId = new Map(
+              patches.rows.map((patch) => [patch.patch_id, patchRecord(patch)]),
+            );
+            chain.unshift(
+              ...upgrade.patchIds.map((id) => {
+                const patch = byId.get(id);
+                if (!patch)
+                  throw new CustomizationServiceRefusal(
+                    'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+                    'an upgrade names a missing patch',
+                  );
+                return patch;
+              }),
+            );
+            break;
+          }
           const patch = await client.query<PatchRow>(
             `${PATCH_SELECT}
               WHERE patch.tenant_id = $1 AND patch.environment_id = $2
@@ -1152,29 +1616,31 @@ export class PostgresCustomizationService {
           );
           provenance = parent.rows[0]?.provenance ?? 'firstParty';
         }
-        const base = await client.query<{ content_hash: string }>(
-          `SELECT content_hash FROM platform.app_package_revisions
-            WHERE tenant_id = $1 AND revision_id = $2`,
-          [context.tenantId, revisionId],
+        const base = await client.query<{ release_id: MintedUuid }>(
+          `SELECT release_id FROM platform.tenant_releases
+            WHERE tenant_id = $1 AND environment_id = $2
+              AND app_package_revision_id = $3
+              AND ($4::text IS NULL OR content_hash = $4)
+            ORDER BY created_at LIMIT 1`,
+          [
+            context.tenantId,
+            context.environmentId,
+            revisionId,
+            chain[0]?.baseReleaseRoot ?? null,
+          ],
         );
-        const tipHash = canonicalizeAndHash(
-          parseNormalizedApplicationPackageJson(
-            this.#tip.normalizedDefinitionBytes,
-          ),
-        ).contentHash;
-        if (base.rows[0]?.content_hash !== tipHash) {
+        const baseReleaseId =
+          upgrade?.baseReleaseId ??
+          (chain.length === 0 ? releaseId : base.rows[0]?.release_id);
+        if (!baseReleaseId)
           throw new CustomizationServiceRefusal(
-            chain.length > 0
-              ? 'CUSTOMIZE_BASE_MOVED'
-              : 'CUSTOMIZE_ACTIVE_RELEASE_UNKNOWN',
-            chain.length > 0
-              ? 'the first-party application moved under this customization; pre-tenant remedy: corepack pnpm --filter @north-star/api dev:reset'
-              : 'the active release is not the checked-in application; restart corepack pnpm dev',
+            'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+            'the first-party base release is missing',
           );
-        }
         return Object.freeze({
           chain: Object.freeze(chain),
-          pointer,
+          baseReleaseId,
+          upgrade,
           releaseId,
           releaseRoot: row.content_hash,
           revisionId: row.revision_id,
@@ -1258,6 +1724,7 @@ export async function openCustomizationService(
 }
 
 interface PatchRow {
+  base_release_root: string;
   channel: AuthoringChannel;
   created_at: Date | string;
   parent_revision_id: MintedUuid;
@@ -1271,7 +1738,8 @@ interface PatchRow {
   resulting_revision_id: MintedUuid;
 }
 
-const PATCH_SELECT = `SELECT patch.patch_id, patch.patch_kind, patch.patch_version, patch.payload,
+const PATCH_SELECT = `SELECT patch.base_release_root, patch.patch_id, patch.patch_kind,
+       patch.patch_version, patch.payload,
        patch.payload_digest, patch.channel, patch.parent_revision_id,
        patch.resulting_revision_id, patch.resulting_release_id,
        release.content_hash AS resulting_release_root, patch.created_at
@@ -1321,6 +1789,7 @@ function patchRecord(row: PatchRow): PatchRecord {
     );
   }
   return Object.freeze({
+    baseReleaseRoot: row.base_release_root,
     channel: row.channel,
     createdAt: new Date(row.created_at).toISOString(),
     kind: parsed.patch.kind,
@@ -1350,4 +1819,45 @@ function preparePatchForRecording(
   return patch.kind === 'changeSet'
     ? { ...patch, patches: patch.patches.map(bindFieldScreens) }
     : bindFieldScreens(patch);
+}
+
+interface UpgradeRow {
+  upgrade_id: MintedUuid;
+  source_release_id: MintedUuid;
+  base_release_id: MintedUuid;
+  candidate_release_id: MintedUuid;
+  candidate_revision_id: MintedUuid;
+  payload: Uint8Array;
+  payload_digest: string;
+}
+
+function upgradeRecord(row: UpgradeRow): UpgradeRecord {
+  const bytes = Buffer.from(row.payload);
+  const payload = JSON.parse(bytes.toString('utf8')) as Record<string, unknown>;
+  const patchIds = payload.patchIds;
+  if (
+    createHash('sha256').update(bytes).digest('hex') !== row.payload_digest ||
+    payload.version !== 'northstar.customization-upgrade/v1' ||
+    payload.sourceReleaseId !== row.source_release_id ||
+    payload.baseReleaseId !== row.base_release_id ||
+    payload.candidateReleaseId !== row.candidate_release_id ||
+    payload.candidateRevisionId !== row.candidate_revision_id ||
+    !Array.isArray(patchIds) ||
+    patchIds.length === 0 ||
+    patchIds.some((id) => typeof id !== 'string') ||
+    new Set(patchIds).size !== patchIds.length
+  ) {
+    throw new CustomizationServiceRefusal(
+      'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+      'the upgrade does not match its recorded binding',
+    );
+  }
+  return {
+    upgradeId: row.upgrade_id,
+    sourceReleaseId: row.source_release_id,
+    baseReleaseId: row.base_release_id,
+    candidateReleaseId: row.candidate_release_id,
+    candidateRevisionId: row.candidate_revision_id,
+    patchIds: patchIds as MintedUuid[],
+  };
 }
