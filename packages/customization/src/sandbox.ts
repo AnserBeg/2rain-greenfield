@@ -31,6 +31,8 @@ export interface SandboxRequest {
   readonly tip: SerializedRelease;
   /** Already reproduced chain prefix. The next step compiles its successor. */
   readonly startAt?: number;
+  /** Reproducing an already recorded revision uses its own permission census. */
+  readonly historical?: boolean;
   /** Replay the entire chain once against tip, the previously live release. */
   readonly upgradeBaseRoot?: string;
 }
