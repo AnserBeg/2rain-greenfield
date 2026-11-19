@@ -788,3 +788,9 @@ How to apply: Take the run lock inside the effect transaction and require the ex
 Date: 2026-11-19
 Why: Runtime-writable proof rows could change an approved definition set, and a worker-writable journal result could impersonate a human decision.
 How to apply: Compute dependencies from the verified compiler artifacts, restrict evidence writes to verification, freeze definitions at approval, and derive every approval replay value from the exact human decision. [WORKFLOW-1](docs/execution/packets/WORKFLOW-1.md)
+
+## Derive workflow scope from trusted source events
+
+Date: 2026-11-19
+Why: A worker-written instance can cite a valid source event while supplying a different company and record.
+How to apply: Resolve scope from the event and its linked change document under the exact tenant, environment, and release before the guest or gateway sees it. [WORKFLOW-1](docs/execution/packets/WORKFLOW-1-threat-model-fix.md)

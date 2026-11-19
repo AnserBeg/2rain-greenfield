@@ -4,11 +4,15 @@ Date 2026-11-18. Fable 5.2 approved the amended WORKFLOW-1 design to build in
 slices. The owner ruled on 2026-11-18 that Gate N2 v1 uses same-pin retry or
 cancel. The plan records this in §12.5.
 
-## Threat model
+## Authority boundaries
 
 The attackers in scope are tenant-authored guest code and a compromised
 `north_star_workflow_worker` role. Worker-authored state is untrusted as proof
-of human authority, verified code, or the scope of a source event.
+of human authority, verified code, or the scope of a source event. Receipt scope
+comes from the posting event and its linked change document. The workflow
+verifier's evidence, frozen at release approval, pins the executable. The
+Semantic gateways enforce the automation actor's current grants and the
+approver's authority. Release activation owns the pointer and fence.
 
 Until sign-in exists, the platform trusts the application runtime's principal
 assertion and the runtime's existing writes of release approvals and activation
@@ -25,12 +29,14 @@ writes the verification receipt under the same trusted request context.
 [0004 approval grant](../../db/migrations/0004_release_activation_contracts.sql#L1112) ·
 [0005 verification receipt grant](../../db/migrations/0005_release_activation_kernel.sql#L1025)
 
-- **I1.** A Tier B or unknown-dependency write requires a human decision bound
+- **R1.** A Tier B or unknown-dependency write requires a recorded human decision bound
   to the exact plan and execution fence.
-- **I2.** Only workflow code verified at approval may run.
-- **I3.** Every workflow effect stays within the automation actor's tenant and
+- **R2.** Only workflow code verified at approval may run.
+- **R3.** Every workflow effect stays within the automation actor's tenant and
   company grants.
-- **I4.** Workflows never block activation or rollback.
+- **R4.** Workflows never block activation or rollback. Release changes can
+  proceed while a workflow waits or runs guest code. The platform serializes
+  bounded claim and effect transactions against the active fence.
 
 The runtime's ability to fabricate a human decision or to fabricate activation
 evidence is filed under sign-in packet item 1. The workflow scheduler defaults
