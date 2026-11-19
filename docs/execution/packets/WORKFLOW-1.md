@@ -23,14 +23,15 @@ Slices 1 and 2 and the first correction landed. Round 2 addresses the five open 
 
 - Slice 1 [CI 44456002463](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44456002463), slice 2 [CI 44477729782](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44477729782), and round 1 [CI 44497680722](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44497680722).
 - Round 2's earlier CI at `c551826d` was cancelled after Actions minutes ran out while the repository was private. [CI 44539741235](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44539741235).
+- All 16 jobs passed at `f23882c3` before INTERACT-1 slice 5 landed. [CI 44552342929](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44552342929).
 - The full acceptance run at the synchronized packet tip is linked from the ledger and review log.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WORKFLOW-1",
-  "base": "129e59c4a5cfbefcad42b9c14efa164b18b797e7",
-  "head": "076ffde91b71378e57fdacda1c0df09b979dfc1e",
+  "base": "129cb3019b86a0de06511c05c08978c8ee50a34e",
+  "head": "10763e3b85bedfa1416754e6d7ef5108c79d6b85",
   "changedPaths": [
     "db/migrations/0041_workflow_authority.sql",
     "db/schema.snapshot.json",
