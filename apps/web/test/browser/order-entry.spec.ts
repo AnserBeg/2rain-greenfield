@@ -29,7 +29,7 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
           // Sales confirms (ruling F) once a ship-to is complete; Purchasing releases.
           const boundary = await page
             .getByText(
-              /^Saving keeps the order as a draft; stock does not change\. (Confirm it when it has a full ship-to address \(street, city, postal code and country\)|Place the order when it is ready)\.$/u,
+              /^Save draft keeps the order editable without changing stock\. Place the order when it is ready for (fulfillment|receiving)\.$/u,
             )
             .boundingBox();
           const save = await page
@@ -37,6 +37,9 @@ test('normal shared order workspace creates, edits, removes, saves and reopens S
             .boundingBox();
           expect(boundary).not.toBeNull();
           expect(save).not.toBeNull();
+          await expect(
+            page.getByRole('button', { name: 'Save and place', exact: true }),
+          ).toBeVisible();
           expect(boundary!.y + boundary!.height).toBeLessThanOrEqual(save!.y);
         }
         await page.screenshot({

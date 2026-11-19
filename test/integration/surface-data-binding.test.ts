@@ -5495,9 +5495,12 @@ async function orderEntryWitness(
   const scopes = [randomUUID(), randomUUID()];
   const allowed = new Set<string>(scopes);
   const deniedReads = new Set<string>();
+  const ineligibleOperationOffers = new Set<string>();
   const policy = new RecordingPolicy((request) => {
     const input = asRecord(request.decisionInput);
-    return deniedReads.has(request.permissionId) ||
+    return (input.kind === 'semanticOperationEligibilityPolicyInput' &&
+      ineligibleOperationOffers.has(String(input.operationId))) ||
+      deniedReads.has(request.permissionId) ||
       (input.kind === 'legalEntityReadScopePolicyInput' &&
         !allowed.has(String(input.legalEntityId)))
       ? 'DENY'
@@ -5640,6 +5643,7 @@ async function orderEntryWitness(
     scopes,
     allowed,
     deniedReads,
+    ineligibleOperationOffers,
     policy,
     entry,
     view,
@@ -5655,6 +5659,277 @@ async function orderEntryWitness(
 }
 
 type OrderEntryWitness = Awaited<ReturnType<typeof orderEntryWitness>>;
+
+for (const variant of [false, true]) {
+  test(`INTERACT-1 saveThen verifies the exact ${variant ? 'confirmed PO' : 'SO'} draft before placement and recovers after refusal`, async () => {
+    const f = await orderEntryWitness(variant);
+    const local = variant ? 'purchase_order' : 'sales_order';
+    const editor = (await f.open())!;
+    assert.match(editor.slots!.commandBar!, /Save draft[\s\S]*Save and place/u);
+    let placements = 0;
+    const definition = f.form.documentEditor!;
+    const followUp = readCompiledSurfaceDataBinding(
+      f.view,
+      f.surfaces.find(
+        (surface) => surface.surfaceId === definition.recordSurfaceId,
+      )!,
+    ).operations.find(
+      (operation) => operation.operationId === definition.saveThen!.operationId,
+    )!;
+    assert.ok(followUp.capabilityId);
+    assert.equal(followUp.confirmation, variant ? 'humanRequired' : 'none');
+    const placement: RegisteredCapabilityOperationExecutor = {
+      capabilityId: followUp.capabilityId,
+      async prepareAuthorization(request) {
+        return {
+          decisionInput: request.input,
+          legalEntityReadScopeIds: [f.scopes[0]!],
+          readBackArguments: {
+            recordId: asRecord(request.input).recordId as string,
+            includeArchived: false,
+            [request.readBackDefinition.legalEntityScope!.operand.parameterId]:
+              f.scopes[0]!,
+          },
+        };
+      },
+      async execute(request) {
+        assert.equal(request.definition.operationId, followUp.operationId);
+        const input = asRecord(request.input);
+        assert.deepEqual(
+          Object.keys(input).sort(),
+          definition.saveThen!.arguments?.length
+            ? ['arguments', 'expectedRevision', 'recordId']
+            : ['expectedRevision', 'recordId'],
+        );
+        const saved = f.executor.rows.get(String(input.recordId));
+        assert.ok(saved);
+        assert.equal(saved.entityId, `${f.ns}:entity.${local}`);
+        assert.equal(input.expectedRevision, saved.revision);
+        assert.deepEqual(
+          input.arguments ?? {},
+          Object.fromEntries(
+            (definition.saveThen!.arguments ?? []).map((binding) => [
+              binding.name,
+              saved.values[binding.fieldId] ?? null,
+            ]),
+          ),
+        );
+        placements++;
+        assert.equal(
+          f.executor.calls.filter((call) =>
+            call.definition.operationId.endsWith('_create'),
+          ).length,
+          2,
+        );
+        throw new Error('Controlled placement refusal');
+      },
+    };
+    const gateways: SurfaceRuntimeGateways = {
+      ...f.gateways,
+      operationGateway: new SemanticOperationGateway(
+        f.policy,
+        f.executor,
+        f.gateways.operationMediation,
+        undefined,
+        [placement],
+      ),
+    };
+    const body = {
+      draftSession: hiddenValue(editor.slots!.keyFacts!, 'draftSession'),
+      draftVersion: hiddenValue(editor.slots!.keyFacts!, 'draftVersion'),
+      draftAction: 'saveThen',
+      ...f.values(editor),
+    };
+    const result = await submitSurfaceRuntimeIntent(
+      f.view,
+      f.url.pathname + f.url.search,
+      body,
+      gateways,
+    );
+    assert.equal(result.statusCode, 200);
+    assert.match(result.html, /data-save-then-recovery/u);
+    assert.match(result.html, /Draft saved[\s\S]*Open saved draft/u);
+    const saved = [...f.executor.rows.values()].find(
+      (row) => row.entityId === `${f.ns}:entity.${local}`,
+    )!;
+    assert.equal(
+      saved.values[`${f.ns}:derived_state_field.machine.${local}_lifecycle`],
+      `${f.ns}:state.${local}_draft`,
+    );
+    assert.equal(placements, 1);
+    const count = f.executor.calls.length;
+    const replay = await submitSurfaceRuntimeIntent(
+      f.view,
+      f.url.pathname + f.url.search,
+      body,
+      gateways,
+    );
+    assert.equal(replay.statusCode, 303);
+    assert.match(replay.location!, new RegExp(saved.recordId, 'u'));
+    assert.equal(placements, 1);
+    assert.equal(f.executor.calls.length, count);
+  });
+}
+
+for (const variant of [false, true]) {
+  test(`INTERACT-1 Save draft cancels earlier placement intent after a correctable ${variant ? 'PO' : 'SO'} partial save`, async () => {
+    const f = await orderEntryWitness(variant);
+    const local = variant ? 'purchase_order' : 'sales_order';
+    const editor = (await f.open())!;
+    const definition = f.form.documentEditor!;
+    const followUp = readCompiledSurfaceDataBinding(
+      f.view,
+      f.surfaces.find(
+        (surface) => surface.surfaceId === definition.recordSurfaceId,
+      )!,
+    ).operations.find(
+      (operation) => operation.operationId === definition.saveThen!.operationId,
+    )!;
+    assert.ok(followUp.capabilityId);
+    let placements = 0;
+    const placement: RegisteredCapabilityOperationExecutor = {
+      capabilityId: followUp.capabilityId,
+      async prepareAuthorization(request) {
+        return {
+          decisionInput: request.input,
+          legalEntityReadScopeIds: [f.scopes[0]!],
+          readBackArguments: {
+            recordId: asRecord(request.input).recordId as string,
+            includeArchived: false,
+            [request.readBackDefinition.legalEntityScope!.operand.parameterId]:
+              f.scopes[0]!,
+          },
+        };
+      },
+      async execute() {
+        placements++;
+        throw new Error('Save draft must not attempt placement');
+      },
+    };
+    const gateways: SurfaceRuntimeGateways = {
+      ...f.gateways,
+      operationGateway: new SemanticOperationGateway(
+        f.policy,
+        f.executor,
+        f.gateways.operationMediation,
+        undefined,
+        [placement],
+      ),
+    };
+    const post = (
+      current: typeof editor,
+      action: string,
+      values: Record<string, string>,
+    ) =>
+      documentEditor(
+        f.view,
+        f.form,
+        f.surfaces,
+        f.url,
+        f.scopes[0]!,
+        gateways,
+        {
+          draftSession: hiddenValue(current.slots!.keyFacts!, 'draftSession'),
+          draftVersion: hiddenValue(current.slots!.keyFacts!, 'draftVersion'),
+          draftAction: action,
+          ...values,
+        },
+      );
+    const line = /data-draft-line="([^"]+)"/u.exec(
+      editor.slots!.sections!,
+    )![1]!;
+    const invalid = f.values(editor);
+    invalid[draftField(invalid, line, '_ordered_quantity')] =
+      PROVIDER_REFUSED_QUANTITY;
+    const failed = (await post(editor, 'saveThen', invalid))!;
+    assert.equal(failed.statusCode, 422);
+    assert.match(failed.slots!.commandBar!, /value="save">Save draft/u);
+    assert.equal(placements, 0);
+    const saved = [...f.executor.rows.values()].find(
+      (row) => row.entityId === `${f.ns}:entity.${local}`,
+    )!;
+    assert.ok(saved, 'the header committed before the line was refused');
+    const corrected = f.values(failed);
+    corrected[draftField(corrected, line, '_ordered_quantity')] = '4';
+    const completed = (await post(failed, 'save', corrected))!;
+    assert.equal(completed.statusCode, 303);
+    assert.equal(placements, 0);
+    assert.equal(
+      saved.values[`${f.ns}:derived_state_field.machine.${local}_lifecycle`],
+      `${f.ns}:state.${local}_draft`,
+    );
+    assert.equal(
+      f.executor.calls.filter(
+        (call) =>
+          call.definition.operationId === `${f.ns}:operation.${local}_create`,
+      ).length,
+      1,
+    );
+    const savedLine = [...f.executor.rows.values()].find(
+      (row) => row.entityId === `${f.ns}:entity.${local}_line`,
+    )!;
+    assert.equal(
+      savedLine.values[`${f.ns}:field.${local}_line_ordered_quantity`],
+      '4',
+    );
+  });
+}
+
+for (const variant of [false, true]) {
+  test(`INTERACT-1 Save and place follows current ${variant ? 'PO' : 'SO'} role offers while Save draft stays available`, async () => {
+    const local = variant ? 'purchase_order' : 'sales_order';
+    let operationId = '';
+    const f = await orderEntryWitness(variant, (source) => {
+      const form = (source.surfaces as Array<Record<string, unknown>>).find(
+        (surface) =>
+          String(surface.surfaceId).endsWith(`:surface.${local}_form`),
+      )!;
+      operationId = (
+        form.documentEditor as {
+          saveThen: { operationId: string };
+        }
+      ).saveThen.operationId;
+      Object.assign(source, {
+        operationRoleNarrowings: [{ operationId, roleKey: 'INTERACT_BUYER' }],
+      });
+    });
+    const definition = f.form.documentEditor!;
+    const followUp = readCompiledSurfaceDataBinding(
+      f.view,
+      f.surfaces.find(
+        (surface) => surface.surfaceId === definition.recordSurfaceId,
+      )!,
+    ).operations.find((operation) => operation.operationId === operationId)!;
+    assert.equal(followUp.roleRestricted, true);
+    const offered = (await f.open())!;
+    assert.match(offered.slots!.commandBar!, /Save and place/u);
+    assert.ok(
+      f.policy.calls.some((call) => {
+        const input = asRecord(call.decisionInput);
+        return (
+          input.kind === 'semanticOperationEligibilityPolicyInput' &&
+          input.operationId === operationId
+        );
+      }),
+    );
+    f.ineligibleOperationOffers.add(operationId);
+    const unavailable = (await f.open())!;
+    assert.match(unavailable.slots!.commandBar!, /Save draft/u);
+    assert.doesNotMatch(unavailable.slots!.commandBar!, /Save and place/u);
+    const saved = (await f.post(unavailable, 'save', f.values(unavailable)))!;
+    assert.equal(saved.statusCode, 303);
+    const record = [...f.executor.rows.values()].find(
+      (row) => row.entityId === `${f.ns}:entity.${local}`,
+    )!;
+    assert.equal(
+      record.values[`${f.ns}:derived_state_field.machine.${local}_lifecycle`],
+      `${f.ns}:state.${local}_draft`,
+    );
+    f.ineligibleOperationOffers.delete(operationId);
+    const restored = (await f.open())!;
+    assert.match(restored.slots!.commandBar!, /Save and place/u);
+  });
+}
 
 async function persistedDraft(f: OrderEntryWitness, lineCount = 1) {
   let editor = (await f.open())!;
