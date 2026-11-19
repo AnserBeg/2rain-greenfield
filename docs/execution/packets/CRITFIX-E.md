@@ -6,7 +6,7 @@ Saved views require surface reader 24, Today metrics 25 and Inspection metadata 
 ## Evidence
 
 The PostgreSQL ownership test failed on the baseline when the foreign update succeeded. Authorized updates, transitions, archive and restore exercise the same operations on the caller’s company. The control also checks owner immutability and replay after a grant change.
-The baseline compiler assigned Inspection 25. The activated Inspection release now requires 26 and its serving loader refuses a reader capped at 25. The compatibility test covers every pairing from 22 through 26.
+The baseline compiler assigned Inspection 25. The archived floor-25 Today binary loads the predecessor and refuses the activated Inspection release at its surface gate before serving it. The compatibility test covers every pairing from 22 through 26.
 Regenerated the pre-tenant release, migration schema and fresh-tenant replay schema. All three reproduced byte for byte. No migration is required. The integration row links the hosted gate.
 
 ## Test it yourself
@@ -16,8 +16,8 @@ Regenerated the pre-tenant release, migration schema and fresh-tenant replay sch
 
 ```record-claim
 {
-  "schemaVersion":"northstar.record-claim/v1","packet":"CRITFIX-E","base":"5a7daf8e64aa50aee56cbdf068f1fe78583a2321","head":"f8e9be4166fbc80e1e63bf3044e976ba25d8c1d7",
-  "changedPaths": ["packages/compiler/src/projections.ts", "packages/postgres-provider/src/current-policy.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/postgres-provider/src/trust/postgres-trust-service.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts", "test/agent/agent-world.ts", "test/evidence/auth.expected-red.json", "test/postgres/customization.test.ts", "test/postgres/request-runtime-view.test.ts", "test/unit/customization.test.ts"],
+  "schemaVersion":"northstar.record-claim/v1","packet":"CRITFIX-E","base":"d618fa3fa9f8ce51b3b05a70b990cdb411fe8909","head":"374a1f2609a7aae1ca55421ec07783e178937f05",
+  "changedPaths": [".github/workflows/ci.yml", "packages/compiler/src/projections.ts", "packages/postgres-provider/src/current-policy.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/trust/postgres-trust-service.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts", "test/agent/agent-world.ts", "test/evidence/auth.expected-red.json", "test/helpers/archived-customization-runtime.ts", "test/postgres/customization-inspection.test.ts", "test/postgres/customization-validation.test.ts", "test/postgres/customization.test.ts", "test/postgres/request-runtime-view.test.ts", "test/unit/customization.test.ts"],
   "symbols":[{"path":"packages/postgres-provider/src/module-runtime-interpreter.ts","name":"readRecordCompany"},{"path":"packages/runtime/src/request-runtime-view.ts","name":"SUPPORTED_RUNTIME_CAPABILITIES"}]
 }
 ```
