@@ -21,10 +21,10 @@ Deploy only versions at or above the newest patch-parser and surface-reader floo
 ```record-claim
 {
   "schemaVersion":"northstar.record-claim/v1","packet":"CRITFIX-B",
-  "base":"ef080dad017f0662bca31d7e3155d43d47922a4c","head":"17c53d4ff54e0ac93db289c00183770697c6260c",
+  "base":"4efe21f72b91dc51f1f9528dc47f600c05f0f3a3","head":"47ecf7ebfe65b4a85038247e2cbbc2595e884484",
   "changedPaths":[
     "apps/api/scripts/customize-cli.ts", "apps/api/src/main.ts", "apps/web/scripts/unbound-permission-acknowledgement.ts",
-    "apps/web/src/customize-screen.ts", "db/migrations/0034_customization_upgrade_bindings.sql", "db/schema.snapshot.json",
+    "apps/web/src/customize-screen.ts", "db/migrations/0035_customization_upgrade_bindings.sql", "db/schema.snapshot.json",
     "packages/compiler/src/compiler.ts", "packages/compiler/src/index.ts", "packages/compiler/src/protocol.ts",
     "packages/customization/src/candidate.ts", "packages/customization/src/sandbox-worker.ts", "packages/customization/src/sandbox.ts",
     "packages/postgres-provider/src/active-release-root.ts", "packages/postgres-provider/src/composed-application-runtime.ts", "packages/postgres-provider/src/customization-lineage.ts",
