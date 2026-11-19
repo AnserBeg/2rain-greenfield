@@ -686,7 +686,7 @@ export function validateSurfaceCompositions(
           const fill = input.perRow!.fillFrom;
           if (
             !['quantity', 'text'].includes(input.type) ||
-            input.defaultFrom ||
+            (input.defaultFrom && input.defaultFrom.source !== 'selected') ||
             (input.presentation && input.presentation.kind !== 'derived') ||
             (input.presentation && fill)
           )
@@ -759,6 +759,7 @@ export function validateSurfaceCompositions(
         // read from a field the surface's record query selects.
         if (
           input.defaultFrom &&
+          input.defaultFrom.source === 'record' &&
           (input.type !== 'reference' ||
             !fieldsFor(surface.dataSource.targetId).has(
               input.defaultFrom.field,
@@ -768,6 +769,31 @@ export function validateSurfaceCompositions(
             surface.surfaceId,
             'only reference inputs default from a declared record field',
           );
+        if (input.defaultFrom?.source === 'selected') {
+          const from = input.defaultFrom;
+          const dataset = children.get(
+            action.rows?.datasetId ?? action.datasetId ?? '',
+          );
+          const lookup = from.query
+            ? queries.get(from.query.targetId)
+            : undefined;
+          if (
+            !dataset ||
+            !fieldsFor(dataset.query.targetId).has(from.field) ||
+            Boolean(from.query) !== Boolean(from.valueField) ||
+            (from.query &&
+              (lookup?.queryType !== 'get' ||
+                !fieldsFor(from.query.targetId).has(
+                  from.valueField!.targetId,
+                ))) ||
+            input.presentation?.kind === 'derived' ||
+            input.perRow?.fillFrom
+          )
+            fail(
+              surface.surfaceId,
+              'row defaults require a declared row field and an optional exact lookup field',
+            );
+        }
         const presented = input.presentation;
         if (!presented) continue;
         if (input.type !== 'text')

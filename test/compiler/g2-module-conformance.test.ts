@@ -26,6 +26,7 @@ import {
   canonicalize,
   normalizeApplicationPackage,
   type SurfaceComposition,
+  type SurfaceDocumentEditor,
 } from '../../packages/canonical-model/src/index.js';
 import {
   DEFAULT_COMPILER_LIMITS,
@@ -145,6 +146,66 @@ test('INTERACT-1 compiles declared stock impacts and refuses an unavailable stoc
   itemImpact.datasetId =
     'northstar.app:dataset.missing_stock_lines' as typeof itemImpact.datasetId;
   assertCanonicalRefusal(compileApplication(inputNormalized(invalidRows)));
+});
+
+test('INTERACT-1 compiles row defaults and picker details and refuses missing sources', () => {
+  const normalized = normalizeApplicationPackage(
+    composedApplicationDefinition(),
+  );
+  const compiled = mustCompile(inputNormalized(normalized));
+  const surfaces = projectionPayload<{
+    surfaces: Array<{
+      surfaceId: string;
+      documentEditor?: SurfaceDocumentEditor;
+      composition?: SurfaceComposition;
+    }>;
+  }>(compiled, PROJECTION_FAMILY_IDS.surfaceManifest).surfaces;
+  const form = surfaces.find(
+    (surface) => surface.surfaceId === 'northstar.app:surface.sales_order_form',
+  )!;
+  assert.equal(
+    form.documentEditor?.lineFields.find((field) => field.reference?.details)
+      ?.reference?.details?.listSurfaceId,
+    'northstar.app:surface.item_stock_list',
+  );
+  const purchase = surfaces.find(
+    (surface) =>
+      surface.surfaceId === 'northstar.app:surface.purchase_order_detail',
+  )!;
+  assert.ok(
+    purchase.composition?.actions.some((action) =>
+      action.inputs.some((input) => input.defaultFrom?.source === 'selected'),
+    ),
+  );
+  for (const kind of ['details', 'default'] as const) {
+    const invalid = structuredClone(normalized);
+    if (kind === 'details') {
+      const surface = invalid.surfaces.find(
+        (candidate) =>
+          candidate.surfaceId === 'northstar.app:surface.sales_order_form',
+      )!;
+      assert.ok('documentEditor' in surface && surface.documentEditor);
+      const detail = (
+        surface.documentEditor as SurfaceDocumentEditor
+      ).lineFields.find((field) => field.reference?.details)!.reference!
+        .details!.values[0]!;
+      detail.fieldId =
+        'northstar.app:field.missing_picker_price' as typeof detail.fieldId;
+    } else {
+      const surface = invalid.surfaces.find(
+        (candidate) =>
+          candidate.surfaceId === 'northstar.app:surface.purchase_order_detail',
+      )!;
+      assert.ok('composition' in surface && surface.composition);
+      const input = (surface.composition as SurfaceComposition).actions
+        .flatMap((action) => action.inputs)
+        .find((input) => input.defaultFrom?.source === 'selected')!;
+      const from = input.defaultFrom!;
+      from.field =
+        'northstar.app:field.missing_row_default' as typeof from.field;
+    }
+    assertCanonicalRefusal(compileApplication(inputNormalized(invalid)));
+  }
 });
 
 test('ordinary v1 and v2 parent/child definitions compile cleanly and twice identically', () => {
@@ -1930,6 +1991,20 @@ function composedApplicationWithoutSales(): Record<string, unknown> {
     );
   });
   const cut = new Set(figured.map((surface) => String(surface.surfaceId)));
+  // The fixture removes figure Lists; its remaining editors cannot read them.
+  for (const surface of definition.surfaces as Array<Record<string, unknown>>) {
+    const editor = surface.documentEditor as SurfaceDocumentEditor | undefined;
+    for (const field of [
+      ...(editor?.headerFields ?? []),
+      ...(editor?.lineFields ?? []),
+    ]) {
+      if (
+        field.reference?.details &&
+        cut.has(field.reference.details.listSurfaceId)
+      )
+        delete field.reference.details;
+    }
+  }
   const cutQueries = new Set(
     figured.map((surface) => referenceTarget(surface.dataSource) ?? ''),
   );

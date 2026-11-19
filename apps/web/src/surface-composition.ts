@@ -1806,7 +1806,8 @@ function referenceDefault(
   data: CompositionData | null,
   choices: readonly SemanticRecordDto[],
 ): string {
-  if (!input.defaultFrom || !data) return '';
+  if (!input.defaultFrom || input.defaultFrom.source !== 'record' || !data)
+    return '';
   try {
     const stored = recordValue(data.record, input.defaultFrom.field);
     return typeof stored === 'string' &&
@@ -2096,6 +2097,87 @@ const identity = (view: RequestRuntimeView) =>
     view.principalId,
     view.release.releaseId,
   ]);
+
+/** Defaults are read once as a task opens. A shared input needs one common row value. */
+async function applyTaskDefaults(
+  view: RequestRuntimeView,
+  gateways: CompositionGateways,
+  session: TaskSession,
+): Promise<void> {
+  const data = session.data;
+  const datasetId = session.action.rows?.datasetId ?? session.action.datasetId;
+  const rows = session.action.rows
+    ? taskRows(session.action, data).map((row) => row.record)
+    : data.selected
+      ? [data.selected]
+      : [];
+  for (const input of session.action.inputs) {
+    const from = input.defaultFrom;
+    if (from?.source !== 'selected') continue;
+    const bound = boundInputField(view, session.action, input.inputId);
+    const numeric =
+      input.type === 'quantity' ||
+      Boolean(bound && DECIMAL_KINDS.includes(bound.kind));
+    const defaults = await Promise.all(
+      rows.map(async (row) => {
+        try {
+          let value = recordValue(row, from.field);
+          if (from.query && from.valueField && typeof value === 'string') {
+            const result = await query(
+              view,
+              gateways,
+              from.query.targetId,
+              data.scope,
+              { recordId: value, includeArchived: false },
+            );
+            if (
+              result.outcome !== 'exact' ||
+              result.records.length !== 1 ||
+              result.records[0]?.recordId !== value
+            )
+              return null;
+            value = recordValue(result.records[0], from.valueField.targetId);
+          }
+          if (
+            typeof value !== 'string' ||
+            (input.type === 'quantity' && !POSITIVE_DECIMAL.test(value))
+          )
+            return null;
+          return numeric ? canonicalDecimal(value) : value;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    if (input.perRow && datasetId) {
+      rows.forEach((row, index) => {
+        const value = defaults[index];
+        if (value !== null && value !== undefined)
+          (session.rowInputs[row.recordId] ??= {})[input.inputId] = value;
+      });
+      continue;
+    }
+    const value = defaults[0];
+    if (
+      value === null ||
+      value === undefined ||
+      !defaults.every((other) => other === value)
+    )
+      continue;
+    if (input.type === 'reference') {
+      const choices = await referenceChoices(
+        view,
+        gateways,
+        data.scope,
+        input,
+        data.record.recordId,
+      ).catch(() => []);
+      if (!choices.some((record) => record.recordId === value)) continue;
+    }
+    session.inputs[input.inputId] = value;
+  }
+}
+
 export async function submitCompositionAction(
   view: RequestRuntimeView,
   surface: CompiledSurfaceDefinition,
@@ -2402,6 +2484,7 @@ export async function submitCompositionAction(
       busy: false,
       committedWithheld: false,
     };
+    await applyTaskDefaults(view, gateways, session);
     sessions.set(token, session);
   }
   const current = session;
@@ -2427,6 +2510,14 @@ export async function submitCompositionAction(
   const typedPerRow = perRowInputs.filter(
     (input) => input.presentation?.kind !== 'derived',
   );
+  // A row's declared open-quantity control decides whether it is included.
+  // Auxiliary defaults, such as ordered cost, must not keep an empty line in.
+  const quantitySelectors = typedPerRow.filter(
+    (input) => input.perRow?.fillFrom,
+  );
+  const inclusionInputs = quantitySelectors.length
+    ? quantitySelectors
+    : typedPerRow;
   const rowField = (inputId: string, rowId: string) => `${inputId}@${rowId}`;
   // A Task that fills its rows from one declared column (what is still
   // open) shows that column as its figure; the rest of the line's figures
@@ -2613,8 +2704,8 @@ export async function submitCompositionAction(
         fieldErrors.set(input.inputId, 'Required.');
       collected[input.inputId] = value;
     }
-    // Each row the operator entered something on is included; a row left
-    // empty is skipped. Without inputs to type, every row is included.
+    // Without quantity selectors, preserve the ordinary all-empty-row rule.
+    // Without inputs to type, every row is included.
     const includedRows: string[] = [];
     const preparedRows: Record<string, Record<string, string>> = {};
     if (taskRowsDeclared) {
@@ -2624,8 +2715,8 @@ export async function submitCompositionAction(
         const values = entered[rowId]!;
         if (
           !row ||
-          (typedPerRow.length &&
-            typedPerRow.every((input) => !values[input.inputId]))
+          (inclusionInputs.length &&
+            inclusionInputs.every((input) => !values[input.inputId]))
         )
           continue;
         const canonical: Record<string, string> = {};

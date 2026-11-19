@@ -561,6 +561,7 @@ export async function renderSurfaceRuntimeWithData(
         url,
         gateways.queryGateway,
         declaredList.now,
+        selection.selected.surfaceId,
       );
     } else {
       const result = await gateways.queryGateway.invoke(view, request);
@@ -794,6 +795,7 @@ async function declaredListData(
   url: URL,
   queryGateway: SemanticQueryGateway,
   now: Date,
+  surfaceId: string,
 ): Promise<SurfaceDataRenderState> {
   const scopeArguments = legalEntityScopeArguments(binding, url);
   const argumentsFor = (
@@ -823,7 +825,34 @@ async function declaredListData(
     });
   const viewCounts = async (withheld: WithheldFigures) => {
     const counts: Record<string, number> = {};
-    const savedViews = list.views.filter((candidate) => candidate.layout);
+    const manifest = readCompiledSurfaceManifest(view);
+    const launcher = landingSurface(
+      manifest.navigation,
+      manifest.surfaces,
+    )?.launcher;
+    const queues = queueCountsFor(view);
+    const unfiltered =
+      !state.search &&
+      !state.includeArchived &&
+      Object.keys(state.filterValues).length === 0;
+    const cachedViews = new Set<string>();
+    for (const listView of list.views) {
+      if (!viewServes(list, withheld, listView.viewId)) continue;
+      const queue = unfiltered
+        ? launcher?.tiles.find(
+            (tile) =>
+              tile.surface === surfaceId && tile.view === listView.viewId,
+          )
+        : undefined;
+      const queueCount = queue ? queues?.get(queue.tileId) : undefined;
+      if (queueCount === undefined) continue;
+      // A withheld queue count stays unknown; it is not read a second time.
+      cachedViews.add(listView.viewId);
+      if (queueCount !== null) counts[listView.viewId] = queueCount;
+    }
+    const savedViews = list.views.filter(
+      (candidate) => candidate.layout && !cachedViews.has(candidate.viewId),
+    );
     if (savedViews.length > 0) {
       try {
         const groups = savedViews.map((candidate) => ({
@@ -852,7 +881,11 @@ async function declaredListData(
     for (const listView of list.views) {
       // A view needing withheld figures is never counted without them: its
       // tab shows no count, and its own page refuses.
-      if (listView.layout || !viewServes(list, withheld, listView.viewId))
+      if (
+        listView.layout ||
+        cachedViews.has(listView.viewId) ||
+        !viewServes(list, withheld, listView.viewId)
+      )
         continue;
       try {
         const args = argumentsFor('count', state, withheld, listView.viewId);
