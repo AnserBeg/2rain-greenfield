@@ -87,7 +87,7 @@ The three-valued operators use this truth table wherever composition is admitted
 
 The predicate is a structured AST with a `schemaVersion` on every node. A comparison has the same shape whether its operands are literals or references. The discriminated operand union is `literal | field | path`. Literals carry canonical types and values. Exact-decimal values are strings with declared precision, scale and currency where applicable. A field operand identifies a field by stable ID. A path carries a bounded sequence of declared to-one relation IDs and the terminal field ID. The first literal-validation slice admits only its contracted operand positions and refuses unsupported shapes explicitly. F2 and F4 add admitted bindings to that same contract.
 
-`addCalculatedField` is a separate versioned kind with a stable field ID, target record type ID, typed expression, result type, precision and scale, currency where applicable, and declared display sinks. Both patch kinds require explicit upgrade-replay admission and exact original-root reproduction. Replay refuses with a typed diagnostic when the new base retires or retypes a referenced field, relation, or operation contract.
+`addCalculatedDisplayField` is a separate versioned kind with a stable field ID, target record type ID, typed expression, result type, precision and scale, currency where applicable, and declared display sinks. Both patch kinds require explicit upgrade-replay admission and exact original-root reproduction. Replay refuses with a typed diagnostic when the new base retires or retypes a referenced field, relation, or operation contract.
 
 ## Scope and acceptance
 
