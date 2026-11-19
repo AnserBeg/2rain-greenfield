@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "packet": "CRITFIX-B",
+  "entries": [
+    {
+      "name": "upgrade-refusal-environment-omitted",
+      "claim": "Refusal details stay within their tenant and environment.",
+      "file": "db/migrations/0035_customization_upgrade_bindings.sql",
+      "original": "    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid\n",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/customization.test.ts"],
+        "namePattern": "a platform label upgrade"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customization.test.ts",
+          "name": "a platform label upgrade preserves the field and layout, waits for approval, activates and rolls back",
+          "expected": "upgrade refusals must be tenant and environment scoped"
+        }
+      ]
+    },
+    {
+      "name": "upgrade-base-provenance-unchecked",
+      "claim": "A stored upgrade must name a first-party base.",
+      "file": "db/migrations/0035_customization_upgrade_bindings.sql",
+      "original": " AND base_revision.provenance = 'firstParty'",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/customization.test.ts"],
+        "namePattern": "a platform label upgrade"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customization.test.ts",
+          "name": "a platform label upgrade preserves the field and layout, waits for approval, activates and rolls back",
+          "expected": "a valid digest cannot substitute another base or revision"
+        }
+      ]
+    },
+    {
+      "name": "upgrade-candidate-revision-unchecked",
+      "claim": "A stored upgrade must name the candidate’s actual revision.",
+      "file": "db/migrations/0035_customization_upgrade_bindings.sql",
+      "original": " AND revision.revision_id = NEW.candidate_revision_id",
+      "replacement": "",
+      "test": {
+        "files": ["test/postgres/customization.test.ts"],
+        "namePattern": "a platform label upgrade"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customization.test.ts",
+          "name": "a platform label upgrade preserves the field and layout, waits for approval, activates and rolls back",
+          "expected": "a valid digest cannot substitute another base or revision"
+        }
+      ]
+    },
+    {
+      "name": "upgrade-approval-selected-by-release",
+      "claim": "Two equal candidates never share approval by accident.",
+      "file": "packages/postgres-provider/src/customization-service.ts",
+      "original": "AND customization_upgrade_id IS NOT DISTINCT FROM $7::uuid",
+      "replacement": "AND ($7::uuid IS NULL OR customization_upgrade_id IS NOT NULL)",
+      "test": {
+        "files": ["test/postgres/customization.test.ts"],
+        "namePattern": "a platform label upgrade"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customization.test.ts",
+          "name": "a platform label upgrade preserves the field and layout, waits for approval, activates and rolls back",
+          "expected": "approval must select the requested upgrade"
+        }
+      ]
+    },
+    {
+      "name": "rollback-ignores-displayed-release",
+      "claim": "A stale form cannot reverse a different release.",
+      "file": "packages/postgres-provider/src/customization-service.ts",
+      "original": "active.releaseId !== expectedReleaseId",
+      "replacement": "false",
+      "test": {
+        "files": ["test/postgres/customization.test.ts"],
+        "namePattern": "a platform label upgrade"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customization.test.ts",
+          "name": "a platform label upgrade preserves the field and layout, waits for approval, activates and rolls back",
+          "expected": "rollback must match the displayed release"
+        }
+      ]
+    },
+    {
+      "name": "upgrade-log-includes-tenant-diagnostic",
+      "claim": "Process logs exclude tenant-authored labels and values.",
+      "file": "packages/postgres-provider/src/customization-service.ts",
+      "original": "    code: upgrade.code,",
+      "replacement": "    ...upgrade,\n    code: upgrade.code,",
+      "test": {
+        "files": ["test/postgres/customization.test.ts"],
+        "namePattern": "a platform label upgrade"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customization.test.ts",
+          "name": "a platform label upgrade preserves the field and layout, waits for approval, activates and rolls back",
+          "expected": "bootstrap logs must contain only opaque identifiers and diagnostic codes"
+        }
+      ]
+    }
+  ]
+}

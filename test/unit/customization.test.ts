@@ -1321,3 +1321,102 @@ test('an upgrade compiles field and layout intent as one transition from the pri
       ?.list?.columns.some((column) => column.label === 'Warehouse name'),
   );
 });
+
+test('a whole-package upgrade rejection keeps the compiler subject without attributing a patch', async () => {
+  const request = sandboxRequest([
+    patch({
+      kind: 'arrangeLayout',
+      surface: 'northstar.app:surface.item_list',
+      relabel: [
+        {
+          field: 'northstar.app:field.item_name',
+          label: 'Private tenant heading',
+        },
+      ],
+    }),
+  ]);
+  const permissionId = 'northstar.app:permission.future_read';
+  const response = await compileInSandbox({
+    ...request,
+    upgradeBaseRoot: tip.compiled.releaseRoot,
+    acknowledgement: {
+      ...acknowledgement,
+      evaluatorBindings: [
+        ...(acknowledgement.evaluatorBindings ?? []),
+        { ...acknowledgement.evaluatorBindings![0]!, permissionId },
+      ],
+    },
+  });
+  assert.ok(response.status === 'rejected', JSON.stringify(response));
+  assert.equal('patchIndex' in response, false);
+  const diagnostics = response.diagnostics as {
+    firstPartySubject?: string;
+    tenantPatch?: unknown;
+    patchIndex?: number;
+  }[];
+  assert.ok(
+    diagnostics.some((d) => d.firstPartySubject === permissionId),
+    JSON.stringify(diagnostics),
+  );
+  assert.ok(
+    diagnostics.every((d) => !('tenantPatch' in d) && !('patchIndex' in d)),
+  );
+});
+
+test('a field-only chain reproduces with historical bindings and upgrades onto an added permission', async () => {
+  const request = sandboxRequest([
+    patch({
+      kind: 'addField',
+      entity: 'northstar.app:entity.item',
+      field: { label: 'Shelf code', type: 'text' },
+      screens: 'record',
+    }),
+  ]);
+  const old = await compileInSandbox(request);
+  assert.ok(old.status === 'compiled');
+  const base = structuredClone(authored);
+  const permissions = base.permissions as { permissionId: string }[];
+  const permission = {
+    ...permissions.find(
+      (p) =>
+        p.permissionId === acknowledgement.evaluatorBindings![0]!.permissionId,
+    )!,
+    permissionId: 'northstar.app:permission.future_create',
+  };
+  permissions.push(permission);
+  const additional = {
+    ...acknowledgement.evaluatorBindings![0]!,
+    permissionId: permission.permissionId,
+  };
+  const nextAcknowledgement = {
+    ...acknowledgement,
+    evaluatorBindings: [
+      ...(acknowledgement.evaluatorBindings ?? []),
+      additional,
+    ],
+  };
+  const history = await compileInSandbox({
+    ...request,
+    acknowledgement: nextAcknowledgement,
+    historical: true,
+  });
+  assert.ok(
+    history.status === 'compiled',
+    JSON.stringify(history.status !== 'compiled' && history.diagnostics),
+  );
+  assert.equal(
+    history.steps[0]!.release.releaseRoot,
+    old.steps[0]!.release.releaseRoot,
+  );
+  const upgraded = await compileInSandbox({
+    ...request,
+    base,
+    acknowledgement: nextAcknowledgement,
+    tip: history.steps[0]!.release,
+    upgradeBaseRoot: tip.compiled.releaseRoot,
+  });
+  assert.ok(
+    upgraded.status === 'compiled',
+    JSON.stringify(upgraded.status !== 'compiled' && upgraded.diagnostics),
+  );
+});

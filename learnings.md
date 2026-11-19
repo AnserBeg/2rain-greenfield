@@ -767,3 +767,9 @@ How to apply: when filling a seconds-precision datetime-local control, omit only
 Date: 2026-11-18
 Why: [CI 44400146615](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44400146615) and a focused reproduction lost receipt edits when a pending Fill response replaced the form after typing began.
 How to apply: capture the submitted values, disable the task's controls while its stage response is pending, and restore them on transport failure or page fallback. Live read-only preparation keeps its generation check. [INTERACT-1](docs/execution/packets/INTERACT-1.md).
+
+## Keep rollback readable across parser versions
+
+Date: 2026-11-18
+Why: Recompiling a historical patch made an unreadable kind prevent rollback of an already verified release.
+How to apply: Reverse the approved release pair using its stored artifacts and digests. Exercise status, boot and rollback with a future patch kind. The deployment floor is the newest patch parser or surface reader a tenant has used. [CRITFIX-B](docs/execution/packets/CRITFIX-B.md)

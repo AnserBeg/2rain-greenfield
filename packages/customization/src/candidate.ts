@@ -6,6 +6,7 @@ import {
 import {
   DEFAULT_COMPILER_LIMITS,
   MODULE_COMPILER_PROFILE,
+  narrowAcknowledgementToDeclared,
   PROJECTION_FAMILY_IDS,
   compileApplicationRelease,
   diffCompiledReleases,
@@ -59,6 +60,7 @@ export type CustomizationCandidateResult =
  */
 export function compileCustomizationCandidate(input: {
   readonly acknowledgement: AcknowledgementInput;
+  readonly historical?: boolean;
   readonly base: Readonly<Record<string, unknown>>;
   readonly chain: readonly CustomizationPatch[];
   readonly parent: CompiledCustomization;
@@ -81,6 +83,12 @@ export function compileCustomizationCandidate(input: {
   const normalized = parseNormalizedApplicationPackageJson(
     normalizedDefinitionBytes,
   );
+  const acknowledgement = input.historical
+    ? narrowAcknowledgementToDeclared(
+        input.acknowledgement,
+        new Set(normalized.permissions.map((p) => p.permissionId)),
+      )
+    : input.acknowledgement;
   let result: ReturnType<typeof compileApplicationRelease>;
   try {
     result = compileApplicationRelease(
@@ -97,9 +105,9 @@ export function compileCustomizationCandidate(input: {
         },
       },
       {
-        ...input.acknowledgement,
+        ...acknowledgement,
         evaluatorBindings: [
-          ...(input.acknowledgement.evaluatorBindings ?? []),
+          ...(acknowledgement.evaluatorBindings ?? []),
           ...applied.permissionBindings,
         ],
       },

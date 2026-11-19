@@ -64,11 +64,28 @@ function compileChain(
       base: request.base,
       chain: request.chain.slice(0, length),
       parent,
+      ...(request.historical ? { historical: true } : {}),
       sandbox,
     });
     if (request.upgradeBaseRoot && result.status !== 'compiled') {
-      const patchIndex =
-        'patchIndex' in result ? result.patchIndex : length - 1;
+      if (!('patchIndex' in result)) {
+        const details = result.diagnostics.length ? result.diagnostics : [null];
+        return {
+          code: 'CUSTOMIZE_UPGRADE_CONFLICT',
+          status: 'rejected',
+          message: result.message,
+          diagnostics: details.map((detail) => ({
+            code: 'CUSTOMIZE_UPGRADE_CONFLICT',
+            firstPartyBase: request.upgradeBaseRoot,
+            ...(detail && typeof detail === 'object' && 'subjectId' in detail
+              ? { firstPartySubject: detail.subjectId }
+              : {}),
+            reason: result.message,
+            details: detail ? [detail] : [],
+          })),
+        };
+      }
+      const patchIndex = result.patchIndex;
       const tenantPatch = request.chain[patchIndex]!;
       let firstPartySubject: string | undefined;
       if (tenantPatch.kind === 'addField') {
@@ -95,7 +112,7 @@ function compileChain(
             tenantPatch,
             patchIndex,
             reason: result.message,
-            details: 'diagnostics' in result ? result.diagnostics : [],
+            details: [],
           },
         ],
         message:

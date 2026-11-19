@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-import type { CompilerExecutionOptions } from '@north-star/compiler';
+import {
+  narrowAcknowledgementToDeclared as narrowRecordedPermissions,
+  type CompilerExecutionOptions,
+} from '@north-star/compiler';
 
 /** The option type the compiler exposes, named once here rather than exported from its index. */
 export type UnboundPermissionAcknowledgementInput = NonNullable<
@@ -256,19 +259,7 @@ export function narrowAcknowledgementToDeclared(
   acknowledgement: UnboundPermissionAcknowledgementInput,
   declaredPermissionIds: ReadonlySet<string>,
 ): UnboundPermissionAcknowledgementInput {
-  return {
-    ...(acknowledgement.evaluatorBindings
-      ? {
-          evaluatorBindings: acknowledgement.evaluatorBindings.filter((entry) =>
-            declaredPermissionIds.has(entry.permissionId),
-          ),
-        }
-      : {}),
-    entries: acknowledgement.entries.filter((entry) =>
-      declaredPermissionIds.has(entry.permissionId),
-    ),
-    packageId: acknowledgement.packageId,
-  };
+  return narrowRecordedPermissions(acknowledgement, declaredPermissionIds);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
