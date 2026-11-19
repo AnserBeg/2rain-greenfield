@@ -47,6 +47,25 @@ test("INTERACT-1 queue previews use the listed entity's active record page", () 
   );
 });
 
+test('INTERACT-1 saveThen binds an active operation of the editor document', () => {
+  const app = application();
+  const form = surfaceOf(app, id('surface', 'purchase_order_form'));
+  const editor = form.documentEditor as { saveThen: { operationId: string } };
+  assert.equal(
+    editor.saveThen.operationId,
+    id('operation', 'purchase_order_release'),
+  );
+  normalizeApplicationPackage(app as never);
+  assert.match(
+    refused((value) => {
+      const other = surfaceOf(value, id('surface', 'purchase_order_form'))
+        .documentEditor as typeof editor;
+      other.saveThen.operationId = id('operation', 'sales_order_release');
+    }),
+    /saveThen requires one active document operation and declared scalar record arguments/u,
+  );
+});
+
 function application(): Json & { surfaces: Json[] } {
   return structuredClone(composedApplicationDefinition()) as Json & {
     surfaces: Json[];
