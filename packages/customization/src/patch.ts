@@ -95,7 +95,17 @@ const declareLifecycle = z.strictObject({
   kind: z.literal('declareLifecycle'),
   entity: canonicalId,
   initial: label,
-  states: z.array(z.strictObject({ label })).min(2).max(8),
+  states: z
+    .array(
+      z.strictObject({
+        label,
+        role: z
+          .enum(['success', 'attention', 'blocked', 'inProgress'])
+          .optional(),
+      }),
+    )
+    .min(2)
+    .max(8),
   transitions: z
     .array(
       z.strictObject({
@@ -106,6 +116,13 @@ const declareLifecycle = z.strictObject({
     )
     .min(1)
     .max(12),
+});
+
+const addLineTable = z.strictObject({
+  kind: z.literal('addLineTable'),
+  entity: canonicalId,
+  label,
+  fields: z.array(CustomFieldSchema).min(1).max(15),
 });
 
 const arrangeLayout = z
@@ -133,6 +150,7 @@ const SinglePatchSchema = z.discriminatedUnion('kind', [
   addRecordType,
   addField,
   addChoice,
+  addLineTable,
   declareLifecycle,
   arrangeLayout,
 ]);
@@ -159,6 +177,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'addRecordType',
   'addField',
   'addChoice',
+  'addLineTable',
   'declareLifecycle',
   'arrangeLayout',
   'changeSet',

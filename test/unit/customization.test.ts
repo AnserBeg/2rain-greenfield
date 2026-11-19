@@ -356,6 +356,93 @@ test('a tenant lifecycle compiles guarded operations and refuses an undeclared s
   assert.equal(refused.status, 'unsupported');
 });
 
+test('tenant line tables use the company-scoped document editor and refuse unsupported parents', async () => {
+  const entity = 'northstar.app:entity.custom_quality_review';
+  const header = {
+    companyOwnership: 'entityOwned',
+    fields: [{ label: 'Name', type: 'text' }],
+    kind: 'addRecordType',
+    label: 'Quality review',
+  };
+  const lifecycle = {
+    entity,
+    initial: 'Pending',
+    kind: 'declareLifecycle',
+    states: [
+      { label: 'Pending', role: 'inProgress' },
+      { label: 'Passed', role: 'success' },
+    ],
+    transitions: [{ from: 'Pending', label: 'Pass', to: 'Passed' }],
+  };
+  const lines = {
+    entity,
+    fields: [
+      { label: 'Characteristic', required: true, type: 'text' },
+      { label: 'Measured value', type: 'number' },
+      { label: 'Pass', type: 'yesNo' },
+    ],
+    kind: 'addLineTable',
+    label: 'Results',
+  };
+  const change = (members: object[]) =>
+    patch({ kind: 'changeSet', patches: members });
+  const accepted = await compileInSandbox(
+    sandboxRequest([change([header, lifecycle, lines])]),
+  );
+  assert.equal(
+    accepted.status,
+    'compiled',
+    JSON.stringify(accepted.status === 'compiled' ? [] : accepted),
+  );
+  if (accepted.status === 'compiled') {
+    const projections = accepted.steps[0]!.release.artifacts.map(
+      (artifact) =>
+        JSON.parse(
+          Buffer.from(String(artifact.canonicalBytesBase64), 'base64').toString(
+            'utf8',
+          ),
+        ) as {
+          kind: string;
+          surfaces?: CompiledSurfaceDefinition[];
+        },
+    );
+    const surfaces = projections.find(
+      (artifact) => artifact.kind === 'surfaceManifestPayload',
+    )!.surfaces!;
+    const form = surfaces.find((surface) =>
+      surface.surfaceId.endsWith('.custom_quality_review_form'),
+    )!;
+    assert.equal(
+      form.documentEditor?.parentRelationId,
+      'northstar.app:relation.custom_quality_review_lines_parent',
+    );
+    assert.deepEqual(form.documentEditor?.editableStateIds, [
+      'northstar.app:state.custom_quality_review_pending',
+    ]);
+    const detail = surfaces.find((surface) =>
+      surface.surfaceId.endsWith('.custom_quality_review_detail'),
+    )!;
+    assert.equal(detail.composition?.children[0]?.label, 'Results');
+    assert.deepEqual(
+      detail.composition?.presentation?.progression?.steps.map(
+        (step) => step.label,
+      ),
+      ['Pending', 'Passed'],
+    );
+  }
+  for (const members of [
+    [header, lines],
+    [{ ...header, companyOwnership: 'tenantShared' }, lifecycle, lines],
+  ]) {
+    const refused = applyCustomizationPatches(authored, [change(members)]);
+    assert.equal(refused.status, 'unsupported');
+    assert.match(
+      JSON.stringify(refused),
+      /company-owned tenant record type with a declared lifecycle/u,
+    );
+  }
+});
+
 test('a chain re-applies its recorded prefix exactly and the next patch builds on it', async () => {
   const choice = patch({
     enumField: 'northstar.app:field.custom_equipment_status',
