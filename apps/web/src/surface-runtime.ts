@@ -831,7 +831,9 @@ async function declaredListData(
       manifest.surfaces,
     )?.launcher;
     const queues = queueCountsFor(view);
-    const countedQueues = launcher ? countedQueueTileIds(launcher) : new Set<string>();
+    const countedQueues = launcher
+      ? countedQueueTileIds(launcher)
+      : new Set<string>();
     const unfiltered =
       !state.search &&
       !state.includeArchived &&
@@ -843,7 +845,8 @@ async function declaredListData(
         ? launcher?.tiles.find(
             (tile) =>
               countedQueues.has(tile.tileId) &&
-              tile.surface === surfaceId && tile.view === listView.viewId,
+              tile.surface === surfaceId &&
+              tile.view === listView.viewId,
           )
         : undefined;
       const queueCount = queue ? queues?.get(queue.tileId) : undefined;
