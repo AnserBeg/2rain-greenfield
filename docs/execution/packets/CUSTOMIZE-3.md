@@ -39,8 +39,8 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
-  "base": "fc56f4a0af8b4dfbff4692906c5b45c34eae4bbc",
-  "head": "fc536bede8759398f1ff3ed3d1d0b35dba639737",
+  "base": "feffa1b9390e867c5f36f3005bbd70e8bc551bde",
+  "head": "be0e685a67f1ac4f437dc9b65c4eeb2cb0682f81",
   "changedPaths": [
     ".github/workflows/ci.yml", ".github/workflows/evidence.yml", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
     "apps/web/src/document-editor.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-runtime.ts", "apps/web/src/validation-refusal.ts",
@@ -53,7 +53,8 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
     "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/release-repository.ts", "packages/postgres-provider/src/release-verification-service.ts",
     "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/formula-validation.ts", "packages/runtime/src/request-runtime-view.ts", "test/architecture/repository-hygiene.test.ts",
     "test/evidence/CUSTOMIZE-3.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts", "test/helpers/check-language-coverage.ts",
-    "test/helpers/language-coverage-packages.ts", "test/postgres/customization.test.ts", "test/unit/customization-ai-draft.test.ts", "test/unit/formula-validation.test.ts"
+    "test/helpers/language-coverage-packages.ts", "test/helpers/reachability-producers.ts", "test/postgres/customization.test.ts", "test/unit/customization-ai-draft.test.ts",
+    "test/unit/formula-validation.test.ts"
   ],
   "symbols": [
     {"path":"packages/canonical-model/src/formula-validation-bindings.ts","name":"bindLiteralValidation"},
