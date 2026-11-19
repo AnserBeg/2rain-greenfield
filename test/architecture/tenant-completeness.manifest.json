@@ -1,7 +1,7 @@
 {
   "schemaVersion": "northstar.tenant-completeness-manifest/v1",
   "tenantIndependentDefinition": "A table is tenant-independent only when its rows represent a database-wide kernel mechanism or immutable content deliberately shared across tenants; business records are never tenant-independent, and absence of a tenant column is not evidence.",
-  "expectedTableCount": 76,
+  "expectedTableCount": 78,
   "tables": [
     {
       "schema": "north_star_internal",
@@ -432,6 +432,12 @@
     },
     {
       "schema": "platform",
+      "table": "workflow_event_sources",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
       "table": "workflow_instances",
       "classification": "tenant-scoped",
       "tenantColumn": "tenant_id"
@@ -445,6 +451,12 @@
     {
       "schema": "platform",
       "table": "workflow_pending_approvals",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "workflow_receipt_scan_positions",
       "classification": "tenant-scoped",
       "tenantColumn": "tenant_id"
     },
