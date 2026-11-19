@@ -97,6 +97,7 @@ export {
   type VersionedAuthoredApplicationPackage,
   type VersionedNormalizedApplicationPackage,
   type VersionedPredicateExpression,
+  FormulaValidationRuleDefinitionSchema,
   OperationRoleKeySchema,
   isNarrowableOperationId,
 } from './schemas.js';
@@ -171,3 +172,4 @@ export const platformContract = Object.freeze({
   authority: 'canonical-model',
   product: 'greenfield-north-star-erp',
 });
+export type { FormulaValidationRule } from './formula-validation-schema.js';

@@ -38,6 +38,7 @@ import {
   renderChoice,
 } from './control-semantics.js';
 import { operationMessageRef } from './gateway-error-codes.js';
+import { validationRefusalForOperation } from './validation-refusal.js';
 import { messageAttributes, messageBody } from './message-render.js';
 import type { SurfaceMessageCode } from './message-catalog.js';
 const compositionMessage = (
@@ -2880,6 +2881,7 @@ export async function submitCompositionAction(
     }
     current.confirmed = true;
     current.busy = true;
+    let runningOperationId: string | null = null;
     try {
       const catalog = parsePinnedOperationCatalog(
         view.projections.operation.payload,
@@ -2963,6 +2965,7 @@ export async function submitCompositionAction(
                 input,
               )
             : null;
+        runningOperationId = operation.operationId;
         const result = await gateways.operationGateway.invoke(
           view,
           {
@@ -3002,11 +3005,14 @@ export async function submitCompositionAction(
       );
     } catch (failure) {
       const ref = operationMessageRef(failure);
+      const rule = runningOperationId
+        ? validationRefusalForOperation(view, runningOperationId, failure)
+        : undefined;
       error =
         'The operation could not be verified. Earlier steps may have committed. Retry uses the same inputs and request keys; inspect the order if needed.';
       return taskDocument(
         () =>
-          `<div role="alert" ${messageAttributes(ref)}>${messageBody(ref, 'Operation', 'h2')}</div>${compositionMessage('COMPOSITION_UNCERTAIN', 'alert')}${previewInputs()}<form class="composition-task-footer" method="post" action="${h(url)}">${hidden}<button name="taskStage" value="retry">Retry same request</button></form>${back}`,
+          `<div role="alert" ${rule ? 'data-form-validation-refusal' : messageAttributes(ref)}>${rule ? `<p>${h(rule.message)}</p>` : messageBody(ref, 'Operation', 'h2')}</div>${rule && current.next === 0 ? '' : compositionMessage('COMPOSITION_UNCERTAIN', 'alert')}${previewInputs()}${rule ? '' : `<form class="composition-task-footer" method="post" action="${h(url)}">${hidden}<button name="taskStage" value="retry">Retry same request</button></form>`}${back}`,
       );
     } finally {
       current.busy = false;

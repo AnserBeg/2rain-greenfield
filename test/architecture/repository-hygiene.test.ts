@@ -38,6 +38,7 @@ const suiteDefinitions = [
       'test/unit/customization.test.ts',
       'test/unit/customize-screen.test.ts',
       'test/unit/dev-environment.test.ts',
+      'test/unit/formula-validation.test.ts',
       'test/unit/inventory-definition.test.ts',
       'test/unit/inventory-valuation.test.ts',
       'test/unit/language-conformance-ledger.test.ts',
@@ -182,6 +183,9 @@ const suiteDefinitions = [
       'test/postgres/catalog-extras.test.ts',
       'test/postgres/catalog-runtime.test.ts',
       'test/postgres/current-policy.test.ts',
+      'test/postgres/customization-governed-reads.test.ts',
+      'test/postgres/customization-inspection.test.ts',
+      'test/postgres/customization-validation.test.ts',
       'test/postgres/customization-world.test.ts',
       'test/postgres/customization.test.ts',
       'test/postgres/declared-list.test.ts',
@@ -761,6 +765,7 @@ test('CI runs every scaffold gate from a frozen install', () => {
     'corepack pnpm test:browser:operations',
     'corepack pnpm test:browser:inventory',
     'corepack pnpm test:browser:composed',
+    'corepack pnpm test:browser:customization',
     'corepack pnpm check:reachability',
   ];
 
@@ -779,6 +784,7 @@ test('CI runs every scaffold gate from a frozen install', () => {
   assert.match(workflow, /^ {2}browser-operations:$/mu);
   assert.match(workflow, /^ {2}browser-inventory:$/mu);
   assert.match(workflow, /^ {2}browser-composed:$/mu);
+  assert.match(workflow, /^ {2}browser-customization:$/mu);
   assert.match(workflow, /uses: actions\/upload-artifact@/u);
   assert.match(workflow, /retention-days: 7/u);
 });
