@@ -13,6 +13,10 @@ interface ScreenPatch extends PatchSummary {
   readonly state: 'live' | 'approved' | 'drafted' | 'stale';
 }
 interface CustomizationStatus {
+  readonly failedActivation?: {
+    readonly attemptId: string;
+    readonly fence: string;
+  };
   readonly activeFence: number;
   readonly historyUnavailable?: true;
   readonly rollbackAvailable: boolean;
@@ -134,6 +138,10 @@ export interface CustomizeScreenService {
   ): Promise<DraftOutcome>;
   /** Present once AI drafting is composed: plain English to one typed patch. */
   draftFromRequest?(request: string): Promise<DraftOutcome>;
+  recover(
+    mode: 'reverify' | 'revert',
+    expected: { attemptId: string; fence: string },
+  ): Promise<ActivationOutcome>;
   rollback(
     expectedReleaseId: string,
     expectedFence: string,
@@ -217,6 +225,20 @@ export async function renderCustomizeScreen(
           'data-customize-result="activated"',
         );
       }
+      case 'reverify':
+      case 'revert':
+        if (!submission.attemptId || !submission.fence)
+          return failure(
+            'Open Customize again to review the failed activation.',
+          );
+        await service.recover(submission.action, {
+          attemptId: submission.attemptId,
+          fence: submission.fence,
+        });
+        return page(
+          'Activation recovered',
+          `<h1>${submission.action === 'revert' ? 'Previous release restored and verified' : 'Activation verified'}</h1><p>Inventory posting can resume.</p>${backLink()}`,
+        );
       case 'rollback':
         if (!submission.releaseId || !submission.fence)
           return failure(
@@ -244,10 +266,18 @@ export async function renderCustomizeScreen(
 }
 
 async function overview(service: CustomizeScreenService): Promise<string> {
-  const [status, targets] = await Promise.all([
-    service.status(),
-    service.targets(),
-  ]);
+  const status = await service.status();
+  if (status.failedActivation)
+    return [
+      '<h1>Activation verification failed</h1><p>The previous verified release is still live. Inventory posting can resume once recovery succeeds.</p>',
+      button('reverify', 'Retry verification', status.failedActivation),
+      button(
+        'revert',
+        'Restore the previous verified release',
+        status.failedActivation,
+      ),
+    ].join('');
+  const targets = await service.targets();
   const latest = status.activeChain.at(-1);
   const activeUpgrade = status.upgrades.find(
     (u) =>

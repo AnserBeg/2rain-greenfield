@@ -13,6 +13,7 @@ import {
   parseCustomizationPatch,
   parseSerializedRelease,
   serializeRelease,
+  renderedDiffDigest,
   storageElements,
   customizationTargets,
   draftPatchFromRequest,
@@ -287,6 +288,10 @@ export async function recordUpgradeRefusal(
 }
 
 export interface CustomizationStatus {
+  readonly failedActivation?: {
+    readonly attemptId: MintedUuid;
+    readonly fence: string;
+  };
   readonly rollbackAvailable: boolean;
   readonly historyUnavailable?: true;
   readonly activeFence: number;
@@ -548,82 +553,157 @@ export class PostgresCustomizationService {
     );
   }
 
-  /** Finish only the verification belonging to the current pointer generation. */
-  async recover(): Promise<{
-    readonly status: 'recovered';
-    readonly activationAttemptId: MintedUuid;
-    readonly releaseId: MintedUuid;
-    readonly releaseRoot: string;
-  }> {
+  async #currentSwap(context: TrustedRequestContext) {
+    return withTrustedRequestTransaction(
+      this.connection.runtimePool,
+      context,
+      async (client) => {
+        const result = await client.query<{
+          activation_attempt_id: MintedUuid;
+          activated_release_id: MintedUuid;
+          previous_release_id: MintedUuid | null;
+          pointer_id: MintedUuid;
+          fence: string;
+          failed: boolean;
+          canonical_diff_digest: Buffer;
+          target_manifest_root: Buffer;
+        }>(
+          `SELECT swap.activation_attempt_id, swap.activated_release_id, swap.previous_release_id, swap.pointer_id, swap.fence,
+                approval.canonical_diff_digest, approval.target_manifest_root,
+                EXISTS (SELECT 1 FROM platform.release_activation_verification_receipts AS v
+                    WHERE (v.tenant_id, v.environment_id, v.activation_attempt_id, v.pointer_id, v.activated_release_id, v.fence)
+                        = (swap.tenant_id, swap.environment_id, swap.activation_attempt_id, swap.pointer_id, swap.activated_release_id, swap.fence)
+                      AND v.status = 'SWAPPED_VERIFICATION_FAILED')
+                AND NOT EXISTS (SELECT 1 FROM ${verifiedGenerationsSql} AS generation
+                    WHERE generation.tenant_id=swap.tenant_id AND generation.environment_id=swap.environment_id
+                      AND generation.activation_attempt_id=swap.activation_attempt_id) AS failed
+           FROM platform.active_release_pointers AS physical
+           JOIN platform.release_activation_swap_receipts AS swap USING (tenant_id, environment_id, pointer_id, fence)
+           JOIN platform.release_approvals AS approval USING (tenant_id, environment_id, approval_id, activation_attempt_id)
+          WHERE physical.tenant_id=$1 AND physical.environment_id=$2 AND physical.release_id=swap.activated_release_id`,
+          [context.tenantId, context.environmentId],
+        );
+        return result.rows[0];
+      },
+    );
+  }
+
+  /** Recover the selected physical generation. A stale form cannot select another attempt. */
+  async recover(
+    mode: 'reverify' | 'revert' = 'reverify',
+    expected?: { readonly attemptId: string; readonly fence: string },
+  ) {
     const context = await this.#context();
     return withReleaseScopeLock(
       this.connection.adminPool,
       this.connection.identities.runtime,
       async (admin) => {
-        const pointer = await readPointer(this.connection.runtimePool, context);
-        if (!pointer.releaseId) {
-          throw new CustomizationServiceRefusal(
-            'CUSTOMIZE_NOT_STARTED',
-            'there is no live release to recover',
-          );
-        }
-        const attemptId = await withTrustedRequestTransaction(
-          this.connection.runtimePool,
-          context,
-          async (client) => {
-            const result = await client.query<{
-              activation_attempt_id: MintedUuid;
-            }>(
-              `SELECT activation_attempt_id
-               FROM platform.release_activation_swap_receipts
-              WHERE tenant_id = $1 AND environment_id = $2 AND pointer_id = $3
-                AND activated_release_id = $4 AND fence = $5`,
-              [
-                context.tenantId,
-                context.environmentId,
-                pointer.pointerId,
-                pointer.releaseId,
-                pointer.fence,
-              ],
-            );
-            return result.rows[0]?.activation_attempt_id;
-          },
-        );
-        if (!attemptId) {
+        const swap = await this.#currentSwap(context);
+        if (!swap)
           throw new CustomizationServiceRefusal(
             'CUSTOMIZE_ACTIVATION_UNVERIFIED',
             'no swap receipt matches the live pointer and fence',
           );
+        if (
+          expected &&
+          (!swap.failed ||
+            expected.attemptId !== swap.activation_attempt_id ||
+            expected.fence !== swap.fence)
+        )
+          throw new CustomizationServiceRefusal(
+            'CUSTOMIZE_DRAFT_STALE',
+            'The activation changed. Open Customize again before recovering.',
+          );
+        const pointer = {
+          pointerId: swap.pointer_id,
+          releaseId: swap.activated_release_id,
+          fence: Number(swap.fence),
+        };
+        if (mode === 'revert') {
+          const targetReleaseId = swap.previous_release_id;
+          if (!swap.failed || !targetReleaseId)
+            throw new CustomizationServiceRefusal(
+              'CUSTOMIZE_ACTIVATION_UNVERIFIED',
+              'reverting requires a failed activation with a verified predecessor',
+            );
+          const reverse = await withTrustedRequestTransaction(
+            this.connection.runtimePool,
+            context,
+            (client) =>
+              authorizeReverseTransitionIfApplicable(client, context, {
+                recoveryOfAttemptId: swap.activation_attempt_id,
+                expectedFence: pointer.fence,
+                expectedPointerId: pointer.pointerId,
+                sourceReleaseId: pointer.releaseId,
+                targetReleaseId,
+              }),
+          );
+          if (!reverse)
+            throw new CustomizationServiceRefusal(
+              'CUSTOMIZE_ROLLBACK_NOT_REVERSIBLE',
+              'the recovery transition is unavailable',
+            );
+          // B's manifest may be the unavailable artifact. Its original approval
+          // already binds the canonical diff and root of this exact swap.
+          const target = await this.#loadRelease(context, targetReleaseId);
+          const renderedText = `Restore release ${target.compiled.releaseRoot} after failed activation ${swap.activation_attempt_id} at fence ${swap.fence}.`;
+          await assertExactSwapTriggerEnabled(admin);
+          const attemptId = await approveReleaseWithoutStorageTransition(
+            this.connection.runtimePool,
+            context,
+            await trustedContext(this.connection.identities.approver),
+            pointer,
+            swap.target_manifest_root.toString('hex'),
+            await this.#identity(context, targetReleaseId),
+            target.compiled,
+            {
+              canonicalDiffDigest: swap.canonical_diff_digest.toString('hex'),
+              renderedText,
+              renderedDigest: renderedDiffDigest(renderedText),
+              transitionPlanDigest: null,
+            },
+            reverse,
+          );
+          const restored = await this.#swap(
+            admin,
+            context,
+            attemptId,
+            targetReleaseId,
+            'rolledBack',
+          );
+          return {
+            ...restored,
+            status: 'recovered' as const,
+            activationAttemptId: attemptId,
+          };
         }
         const verified = await new PostgresReleaseActivationService(
           this.connection.runtimePool,
         ).verifyActivation(
           await trustedContext(this.connection.identities.system),
-          { activationAttemptId: attemptId },
+          { activationAttemptId: swap.activation_attempt_id },
+          pointer,
         );
-        if (verified.status !== 'SWAPPED_VERIFIED') {
+        if (verified.status !== 'SWAPPED_VERIFIED')
           throw new CustomizationServiceRefusal(
             'CUSTOMIZE_ACTIVATION_UNVERIFIED',
             `the live activation ended ${verified.status}`,
           );
-        }
-        const current = await readPointer(this.connection.runtimePool, context);
-        if (
-          current.pointerId !== pointer.pointerId ||
-          current.releaseId !== pointer.releaseId ||
-          current.fence !== pointer.fence
-        ) {
+        const releaseRoot = await reconcileInventoryScopeToPointer(
+          admin,
+          this.connection.identities.runtime,
+          pointer,
+        );
+        if (!releaseRoot)
           throw new CustomizationServiceRefusal(
             'CUSTOMIZE_ACTIVATION_UNVERIFIED',
-            'the live pointer generation changed during verification',
+            'the verified pointer changed during reconciliation',
           );
-        }
-        await this.#repair(admin, context);
         return {
           status: 'recovered' as const,
-          activationAttemptId: attemptId,
+          activationAttemptId: swap.activation_attempt_id,
           releaseId: pointer.releaseId,
-          releaseRoot: await this.#root(context, pointer.releaseId),
+          releaseRoot,
         };
       },
     );
@@ -632,6 +712,15 @@ export class PostgresCustomizationService {
   async status(): Promise<CustomizationStatus> {
     const context = await this.#context();
     const pointer = await this.#livePointer(context);
+    const swap = await this.#currentSwap(context);
+    const recovery = swap?.failed
+      ? {
+          failedActivation: {
+            attemptId: swap.activation_attempt_id,
+            fence: swap.fence,
+          },
+        }
+      : {};
     const rollbackAvailable = await this.#rollbackEdge(context, pointer).then(
       (edge) => !!edge,
       (error: unknown) => {
@@ -674,6 +763,7 @@ export class PostgresCustomizationService {
     });
     if (observed instanceof Error)
       return {
+        ...recovery,
         historyUnavailable: true,
         rollbackAvailable,
         activeFence: pointer.fence,
@@ -748,6 +838,7 @@ export class PostgresCustomizationService {
             ? 'approved'
             : 'drafted';
     return Object.freeze({
+      ...recovery,
       activeFence: pointer.fence,
       rollbackAvailable,
       upgradeRefusal:
@@ -1104,7 +1195,7 @@ export class PostgresCustomizationService {
           context,
           approver,
           active.pointer,
-          parent,
+          parent.compiled.releaseRoot,
           identity,
           candidate.compiled,
           binding,
@@ -1304,7 +1395,7 @@ export class PostgresCustomizationService {
           context,
           await trustedContext(this.connection.identities.approver),
           pointer,
-          candidate,
+          candidate.compiled.releaseRoot,
           target,
           parent.compiled,
           releaseDiffBinding(candidate, parent, 'reverse'),
