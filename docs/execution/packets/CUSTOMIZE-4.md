@@ -23,7 +23,7 @@ Status — Candidate for integration. The orchestrator approved the patch-kind m
 
 ## Gates
 
-- [CI 44485274087](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44485274087) passed the linked receipt, line editing and archive refusal steps before the command response lost the status badge. Composed record commands now refresh the declared record on its own URL. The [complete Inspection browser journey](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44489745075/job/135442045268) passed, and its suite exposed a surface-only stock replay regression and stale migration-tip assertions. The follow-up preserves replay read-back and corrects the assertions. Migration 0041 follows the permission directory. The PostgreSQL 16 snapshot was regenerated from all 41 migrations.
+- [CI 44485274087](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44485274087) passed the linked receipt, line editing and archive refusal steps before the command response lost the status badge. Composed record commands now refresh the declared record on its own URL. The [complete Inspection browser journey](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44489745075/job/135442045268) passed, and its suite exposed a surface-only stock replay regression and stale migration-tip assertions. The follow-up preserves replay read-back and corrects the assertions. Migration 0042 follows workflow authority. The PostgreSQL 16 snapshot was regenerated from all 42 migrations.
 
 - [CI 44480152260](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44480152260) passed compiler, PostgreSQL and schema checks. The browser activated one draft and saved the lines, then failed the receipt link assertion. The follow-up waits for server-confirmed selections and opens the exact linked receipt. Migration 0037 follows the workflow migration and the snapshot was regenerated on PostgreSQL 16.
 
@@ -41,8 +41,8 @@ Status — Candidate for integration. The orchestrator approved the patch-kind m
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-4",
-  "base": "129cb3019b86a0de06511c05c08978c8ee50a34e",
-  "head": "90651cc29f96494b6deb405b86c34803e3fdf239",
+  "base": "8839f668293dc06f9d9ba4def3611697323f3760",
+  "head": "c6d44f52ed5d7b228af9068b7d70a47182cb0542",
   "changedPaths": [
     ".github/workflows/ci.yml", "apps/web/package.json",
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
@@ -50,7 +50,7 @@ Status — Candidate for integration. The orchestrator approved the patch-kind m
     "apps/web/src/list-declaration.ts", "apps/web/src/message-catalog.ts",
     "apps/web/src/surface-composition.ts", "apps/web/src/surface-runtime.ts",
     "apps/web/test/browser/customize.composed-application.spec.ts", "apps/web/test/browser/message-catalog.spec.ts",
-    "apps/web/test/surface-runtime-contract.test.ts", "db/migrations/0041_customization_patch_kind_identifier.sql",
+    "apps/web/test/surface-runtime-contract.test.ts", "db/migrations/0042_customization_patch_kind_identifier.sql",
     "db/schema.snapshot.json", "packages/canonical-model/src/schemas.ts",
     "packages/canonical-model/src/surface-list.ts", "packages/canonical-model/src/surface-workspace.ts",
     "packages/compiler/src/conformance.ts", "packages/compiler/src/projections.ts",
