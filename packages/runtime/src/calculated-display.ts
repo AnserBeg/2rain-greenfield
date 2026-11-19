@@ -19,7 +19,10 @@ const byProjection = new WeakMap<
   ReadonlyMap<string, readonly CalculatedDisplayProjectionEntry[]>
 >();
 
-function fieldsForQuery(view: RequestRuntimeView, queryId: string) {
+export function calculatedDisplaysForQuery(
+  view: RequestRuntimeView,
+  queryId: string,
+): readonly CalculatedDisplayProjectionEntry[] {
   const payload = view.projections.formulaRule?.payload;
   if (
     typeof payload !== 'object' ||
@@ -54,7 +57,7 @@ export function withCalculatedDisplay(
   definition: RegisteredQueryDefinition,
   record: SemanticRecordDto,
 ): SemanticRecordDto {
-  const fields = fieldsForQuery(view, definition.queryId);
+  const fields = calculatedDisplaysForQuery(view, definition.queryId);
   if (!fields.length) return record;
   const selected = new Set(definition.selections.map(({ fieldId }) => fieldId));
   const read = (binding: BoundDisplayOperand): bigint | null => {

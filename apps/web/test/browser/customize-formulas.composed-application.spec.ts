@@ -211,8 +211,13 @@ test('Customize shows exact margin on Stock by item, its CSV and the item page, 
         const csv = await readFile(await (await downloaded).path(), 'utf8');
         expect(csv).toContain(title);
         expect(csv).toContain(margin);
-        await row.getByRole('link', { name: /MARGIN-WEB/u }).click();
+        await page.goto(surface('item_list'));
+        await page.getByRole('link', { name: /MARGIN-WEB/u }).click();
+        await expect(
+          page.getByRole('heading', { name: itemName, exact: true, level: 1 }),
+        ).toBeVisible();
         const marginLabel = page.getByText(title, { exact: true });
+        await expect(marginLabel).toHaveCount(1);
         if (!(await marginLabel.isVisible()))
           await page.locator('details.composition-more-fields summary').click();
         await expect(marginLabel).toBeVisible();

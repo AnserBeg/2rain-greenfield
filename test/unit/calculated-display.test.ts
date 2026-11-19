@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { compositionRelationTargets } from '../../apps/web/src/surface-composition.js';
+import type { CompiledSurfaceDefinition } from '../../apps/web/src/surface-contract.js';
 import {
   canonicalize,
   normalizeApplicationPackage,
@@ -15,13 +17,21 @@ import {
   evaluateDisplayArithmetic,
 } from '../../packages/canonical-model/src/calculated-display.js';
 import { compileApplication } from '../../packages/compiler/src/index.js';
-import { PROJECTION_FAMILY_IDS } from '../../packages/compiler/src/protocol.js';
+import {
+  PROJECTION_FAMILY_IDS,
+  type ProjectionFamilyId,
+} from '../../packages/compiler/src/protocol.js';
 import {
   applyCustomizationPatches,
   calculatedDisplayDraft,
   customizationTargets,
 } from '../../packages/customization/src/index.js';
-import { compilerInput, mustCompile } from '../compiler/helpers.js';
+import type { RequestRuntimeView } from '../../packages/runtime/src/request-runtime-view.js';
+import {
+  compilerInput,
+  mustCompile,
+  projectionPayload,
+} from '../compiler/helpers.js';
 
 const cad = { precision: 38, scale: 18, currency: 'CAD', unit: null };
 const quantity = {
@@ -136,6 +146,28 @@ test('v6 compiles a calculated display to its governed read sinks and refuses mi
     'northstar.formula-rule-payload/v1',
   );
   const fieldId = patch.field.fieldId;
+  const recordSurface = projectionPayload<{
+    surfaces: CompiledSurfaceDefinition[];
+  }>(compiled, PROJECTION_FAMILY_IDS.surfaceManifest).surfaces.find(
+    ({ surfaceId }) => surfaceId === record,
+  );
+  assert.ok(
+    recordSurface?.composition?.fields.some(({ field }) => field === fieldId),
+  );
+  const projection = (familyId: ProjectionFamilyId) => ({
+    ...references.find((reference) => reference.familyId === familyId),
+    payload: projectionPayload(compiled, familyId),
+  });
+  const pinned = {
+    projections: {
+      query: projection(PROJECTION_FAMILY_IDS.queryCatalog),
+      formulaRule: projection(PROJECTION_FAMILY_IDS.formulaRule),
+    },
+  } as RequestRuntimeView;
+  assert.ok(
+    !compositionRelationTargets(pinned, recordSurface).includes(fieldId),
+    'the record requests its calculated display as a result, without a relation lookup',
+  );
   assert.doesNotMatch(
     JSON.stringify(normalized.fields),
     new RegExp(fieldId, 'u'),
