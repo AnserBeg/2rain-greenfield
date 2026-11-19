@@ -21,16 +21,22 @@ REVOKE ALL ON FUNCTION platform.workflow_definition_digest(platform.workflow_def
 GRANT EXECUTE ON FUNCTION platform.workflow_definition_digest(platform.workflow_definitions)
   TO north_star_workflow_worker;
 
--- This projection contains only unresolved source keys. The trust rows and
--- their append-only dispositions remain the audit record.
-CREATE TABLE platform.workflow_unresolved_receipts (
+-- The partial index holds unresolved source keys by event type. The trust rows
+-- and append-only dispositions remain the audit record.
+CREATE TABLE platform.workflow_event_sources (
   tenant_id uuid NOT NULL,
   environment_id uuid NOT NULL,
   outbox_id uuid NOT NULL,
+  event_type text NOT NULL,
+  resolved boolean NOT NULL DEFAULT false,
   PRIMARY KEY (tenant_id, environment_id, outbox_id),
   FOREIGN KEY (tenant_id, environment_id, outbox_id)
     REFERENCES platform.trust_outbox (tenant_id, environment_id, outbox_id)
 );
+CREATE INDEX workflow_event_sources_pending_idx
+  ON platform.workflow_event_sources (tenant_id, environment_id, event_type, outbox_id)
+  WHERE NOT resolved;
+
 CREATE TABLE platform.workflow_receipt_scan_positions (
   tenant_id uuid NOT NULL,
   environment_id uuid NOT NULL,
@@ -44,38 +50,34 @@ CREATE TABLE platform.workflow_receipt_scan_positions (
 
 LOCK TABLE platform.trust_outbox, platform.workflow_event_occurrences IN SHARE ROW EXCLUSIVE MODE;
 
-INSERT INTO platform.workflow_unresolved_receipts (tenant_id, environment_id, outbox_id)
-SELECT o.tenant_id, o.environment_id, o.outbox_id
+INSERT INTO platform.workflow_event_sources (tenant_id, environment_id, outbox_id, event_type, resolved)
+SELECT o.tenant_id, o.environment_id, o.outbox_id, o.event_type, e.outbox_id IS NOT NULL
   FROM platform.trust_outbox AS o
- WHERE o.event_type = 'northstar.purchasing:event.receipt_posted'
-   AND NOT EXISTS (
-     SELECT 1 FROM platform.workflow_event_occurrences AS e
-      WHERE (e.tenant_id, e.environment_id, e.outbox_id) =
-            (o.tenant_id, o.environment_id, o.outbox_id)
-   );
+  LEFT JOIN platform.workflow_event_occurrences AS e USING (tenant_id, environment_id, outbox_id);
 
-CREATE FUNCTION platform.workflow_index_unresolved_receipt() RETURNS trigger
+CREATE FUNCTION platform.workflow_index_event_source() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp
 AS $$ BEGIN
-  INSERT INTO platform.workflow_unresolved_receipts VALUES (NEW.tenant_id, NEW.environment_id, NEW.outbox_id);
+  INSERT INTO platform.workflow_event_sources (tenant_id, environment_id, outbox_id, event_type)
+    VALUES (NEW.tenant_id, NEW.environment_id, NEW.outbox_id, NEW.event_type);
   RETURN NEW; END
 $$;
-REVOKE ALL ON FUNCTION platform.workflow_index_unresolved_receipt() FROM PUBLIC;
-CREATE TRIGGER workflow_index_unresolved_receipt
+REVOKE ALL ON FUNCTION platform.workflow_index_event_source() FROM PUBLIC;
+CREATE TRIGGER workflow_index_event_source
   AFTER INSERT ON platform.trust_outbox
-  FOR EACH ROW WHEN (NEW.event_type = 'northstar.purchasing:event.receipt_posted')
-  EXECUTE FUNCTION platform.workflow_index_unresolved_receipt();
+  FOR EACH ROW
+  EXECUTE FUNCTION platform.workflow_index_event_source();
 
-CREATE FUNCTION platform.workflow_resolve_receipt() RETURNS trigger
+CREATE FUNCTION platform.workflow_resolve_event_source() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp
 AS $$ BEGIN
-  DELETE FROM platform.workflow_unresolved_receipts
+  UPDATE platform.workflow_event_sources SET resolved = true
    WHERE (tenant_id, environment_id, outbox_id) = (NEW.tenant_id, NEW.environment_id, NEW.outbox_id);
   RETURN NEW; END
 $$;
-REVOKE ALL ON FUNCTION platform.workflow_resolve_receipt() FROM PUBLIC;
-CREATE TRIGGER workflow_resolve_receipt AFTER INSERT ON platform.workflow_event_occurrences
-  FOR EACH ROW EXECUTE FUNCTION platform.workflow_resolve_receipt();
+REVOKE ALL ON FUNCTION platform.workflow_resolve_event_source() FROM PUBLIC;
+CREATE TRIGGER workflow_resolve_event_source AFTER INSERT ON platform.workflow_event_occurrences
+  FOR EACH ROW EXECUTE FUNCTION platform.workflow_resolve_event_source();
 
 CREATE FUNCTION platform.workflow_subscribed_at_active_fence(
   requested_tenant uuid, requested_environment uuid, requested_event text
@@ -96,12 +98,12 @@ REVOKE ALL ON FUNCTION platform.workflow_subscribed_at_active_fence(uuid, uuid, 
 GRANT EXECUTE ON FUNCTION platform.workflow_subscribed_at_active_fence(uuid, uuid, text)
   TO north_star_workflow_worker;
 
-ALTER TABLE platform.workflow_unresolved_receipts ENABLE ROW LEVEL SECURITY;
-ALTER TABLE platform.workflow_unresolved_receipts FORCE ROW LEVEL SECURITY;
-CREATE POLICY workflow_worker_pending_sources ON platform.workflow_unresolved_receipts
+ALTER TABLE platform.workflow_event_sources ENABLE ROW LEVEL SECURITY;
+ALTER TABLE platform.workflow_event_sources FORCE ROW LEVEL SECURITY;
+CREATE POLICY workflow_worker_pending_sources ON platform.workflow_event_sources
   FOR SELECT TO north_star_workflow_worker
-  USING (platform.workflow_subscribed_at_active_fence(tenant_id, environment_id, 'northstar.purchasing:event.receipt_posted'));
-GRANT SELECT ON platform.workflow_unresolved_receipts TO north_star_workflow_worker;
+  USING (NOT resolved AND platform.workflow_subscribed_at_active_fence(tenant_id, environment_id, event_type));
+GRANT SELECT ON platform.workflow_event_sources TO north_star_workflow_worker;
 
 ALTER TABLE platform.workflow_receipt_scan_positions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE platform.workflow_receipt_scan_positions FORCE ROW LEVEL SECURITY;
@@ -241,7 +243,8 @@ SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
   incoming jsonb;
-  outgoing jsonb; BEGIN
+  outgoing jsonb;
+  subscribed_types text[]; BEGIN
   SELECT COALESCE(jsonb_object_agg(d.workflow_id, jsonb_build_object(
            'digest', e.binding_digest, 'eventType', d.event_type,
            'unattendedOperations', e.unattended_operations
@@ -264,11 +267,13 @@ DECLARE
    WHERE w.tenant_id = NEW.tenant_id AND w.environment_id = NEW.environment_id
      AND w.pointer_id = NEW.pointer_id AND w.fence = NEW.fence - 1;
 
-  IF NOT EXISTS (
-    SELECT 1 FROM jsonb_each(incoming) AS b WHERE b.value->>'eventType' = 'northstar.purchasing:event.receipt_posted'
-    UNION ALL
-    SELECT 1 FROM jsonb_each(outgoing) AS b WHERE b.value->>'eventType' = 'northstar.purchasing:event.receipt_posted'
-  ) THEN RETURN NEW; END IF;
+  SELECT array_agg(DISTINCT subscription.value->>'eventType') INTO subscribed_types
+    FROM (
+      SELECT value FROM jsonb_each(incoming)
+      UNION ALL
+      SELECT value FROM jsonb_each(outgoing)
+    ) AS subscription;
+  IF subscribed_types IS NULL THEN RETURN NEW; END IF;
 
   INSERT INTO platform.workflow_activation_watermarks (
     tenant_id, environment_id, pointer_id, fence, release_id, release_root,
@@ -297,8 +302,9 @@ DECLARE
   -- an earlier UUID or recorded time is still visible to a subsequent sweep.
   INSERT INTO platform.workflow_event_occurrences (tenant_id, environment_id, outbox_id, pointer_id, fence, disposition)
   SELECT o.tenant_id, o.environment_id, o.outbox_id, NEW.pointer_id, NEW.fence, 'PRE_ACTIVATION'
-    FROM platform.workflow_unresolved_receipts AS o
-   WHERE o.tenant_id = NEW.tenant_id AND o.environment_id = NEW.environment_id;
+    FROM platform.workflow_event_sources AS o
+   WHERE o.tenant_id = NEW.tenant_id AND o.environment_id = NEW.environment_id
+     AND o.event_type = ANY(subscribed_types) AND NOT o.resolved;
 
   RETURN NEW; END
 $$;

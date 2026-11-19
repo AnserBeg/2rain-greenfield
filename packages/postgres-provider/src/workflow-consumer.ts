@@ -43,8 +43,9 @@ interface ReceiptCandidate {
 export const WORKFLOW_RECEIPT_PAGE_SQL = `
   WITH page AS MATERIALIZED (
     SELECT tenant_id, environment_id, outbox_id
-      FROM platform.workflow_unresolved_receipts
+      FROM platform.workflow_event_sources
      WHERE tenant_id = $1 AND environment_id = $2 AND outbox_id >= $3
+       AND event_type = $8 AND NOT resolved
      ORDER BY outbox_id
      LIMIT $4
   )

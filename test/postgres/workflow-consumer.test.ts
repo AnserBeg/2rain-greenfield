@@ -805,12 +805,13 @@ async function assertBoundedPoll(
     assert.equal(
       (
         await client.query<{ count: number }>(
-          'SELECT count(*)::int AS count FROM platform.workflow_unresolved_receipts',
+          'SELECT count(*)::int AS count FROM platform.workflow_event_sources WHERE event_type = $1 AND NOT resolved',
+          [RECEIPT_POSTED_TYPE],
         )
       ).rows[0]?.count,
       80,
     );
-    await client.query('ANALYZE platform.workflow_unresolved_receipts');
+    await client.query('ANALYZE platform.workflow_event_sources');
     await client.query('ANALYZE platform.trust_outbox');
     await client.query('ANALYZE platform.workflow_event_occurrences');
     await client.query('SET LOCAL ROLE north_star_workflow_worker');
@@ -839,6 +840,12 @@ async function assertBoundedPoll(
       ...(node.Plans ?? []).flatMap(flatten),
     ];
     const nodes = flatten(plan);
+    assert.ok(
+      nodes.some(
+        (node) => node['Index Name'] === 'workflow_event_sources_pending_idx',
+      ),
+      JSON.stringify(plan),
+    );
     const scan = nodes.find((node) => node['Node Type'] === 'CTE Scan');
     assert.ok(scan, JSON.stringify(plan));
     assert.equal(scan['Actual Rows'], WORKFLOW_POLL_BATCH_SIZE + 1);
@@ -994,11 +1001,25 @@ async function stageOversizedReceipt(pool: pg.Pool, runId: string) {
   };
   const result = await pool.query(
     `INSERT INTO platform.semantic_operation_receipts
-     SELECT tenant_id, environment_id, principal_id, release_id, release_content_hash, action_id,
-            $2, $3, jsonb_build_object('large', repeat('x', 17000)), invocation_id,
-            correlation_id, change_document_id, domain_event_id, outbox_id, recorded_at
-       FROM platform.semantic_operation_receipts WHERE action_id = $1 LIMIT 1`,
-    [operation, rows[0]!.idempotency_key, sha256(canonicalize(request.input))],
+     SELECT receipt.tenant_id, receipt.environment_id, receipt.principal_id, receipt.release_id,
+            receipt.release_content_hash, receipt.action_id, $2, $3,
+            jsonb_build_object('large', repeat('x', 17000)), receipt.invocation_id,
+            receipt.correlation_id, receipt.change_document_id, receipt.domain_event_id,
+            receipt.outbox_id, receipt.recorded_at
+       FROM platform.workflow_runs AS r
+       JOIN platform.workflow_definitions AS d USING (tenant_id, environment_id, release_id, workflow_id)
+       JOIN platform.semantic_operation_receipts AS receipt
+         ON (receipt.tenant_id, receipt.environment_id, receipt.release_id,
+             receipt.release_content_hash, receipt.principal_id) =
+            (r.tenant_id, r.environment_id, r.release_id, r.release_root, d.automation_principal_id)
+      WHERE r.run_id = $4 AND receipt.action_id = $1
+      ORDER BY receipt.recorded_at LIMIT 1`,
+    [
+      operation,
+      rows[0]!.idempotency_key,
+      sha256(canonicalize(request.input)),
+      runId,
+    ],
   );
   assert.equal(result.rowCount, 1);
 }
