@@ -27290,14 +27290,6 @@
       "relation": "document_upload_staging",
       "grantor": "postgres",
       "grantee": "north_star_runtime",
-      "privilege_type": "DELETE",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "document_upload_staging",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
       "privilege_type": "INSERT",
       "is_grantable": false
     },
@@ -31807,6 +31799,25 @@
     },
     {
       "schema": "platform",
+      "name": "retire_document_upload_staging",
+      "identity_arguments": "published_upload uuid",
+      "kind": "f",
+      "language": "sql",
+      "owner": "postgres",
+      "result_type": "void",
+      "definition": "CREATE OR REPLACE FUNCTION platform.retire_document_upload_staging(published_upload uuid)\n RETURNS void\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$\n  DELETE FROM platform.document_upload_staging AS stage\n   WHERE stage.tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid\n     AND stage.environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid\n     AND nullif(current_setting('north_star.principal_id', true), '')::uuid IS NOT NULL\n     AND (\n       stage.expires_at <= clock_timestamp()\n       OR (\n         stage.upload_id = published_upload\n         AND stage.principal_id = nullif(current_setting('north_star.principal_id', true), '')::uuid\n         AND EXISTS (\n           SELECT 1 FROM platform.document_versions AS version\n            WHERE (version.tenant_id, version.environment_id, version.upload_id, version.digest, version.actor_id)\n                = (stage.tenant_id, stage.environment_id, stage.upload_id, stage.digest, stage.principal_id)\n         )\n       )\n     )\n$function$\n",
+      "security_definer": true,
+      "leakproof": false,
+      "strict": false,
+      "returns_set": false,
+      "volatility": "v",
+      "parallel_safety": "u",
+      "cost": 100,
+      "estimated_rows": 0,
+      "configuration": ["search_path=pg_catalog, pg_temp"]
+    },
+    {
+      "schema": "platform",
       "name": "set_release_activation_control",
       "identity_arguments": "changed_tenant_id uuid, changed_environment_id uuid, changed_rollout_id uuid, changed_live_policy_denied boolean, changed_rollout_paused boolean, changed_by uuid, changed_event_id uuid",
       "kind": "f",
@@ -32738,6 +32749,24 @@
       "schema": "platform",
       "name": "record_fresh_tenant_install_evidence",
       "identity_arguments": "requested_install_id uuid, requested_serving_release_id uuid, requested_serving_release_root text, requested_serving_scenario_count integer, requested_document jsonb",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "retire_document_upload_staging",
+      "identity_arguments": "published_upload uuid",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "retire_document_upload_staging",
+      "identity_arguments": "published_upload uuid",
       "grantor": "postgres",
       "grantee": "postgres",
       "privilege_type": "EXECUTE",

@@ -255,9 +255,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
           return existing.metadata;
         }
         await client.query(
-          `DELETE FROM platform.document_upload_staging
-          WHERE tenant_id = $1 AND environment_id = $2 AND expires_at <= clock_timestamp()`,
-          [view.tenantId, view.environmentId],
+          'SELECT platform.retire_document_upload_staging(NULL)',
         );
         const staged = await client.query<{
           principal_id: string;
@@ -463,8 +461,8 @@ export class PostgresDocumentGateway implements DocumentGateway {
               ],
             );
             await client.query(
-              'DELETE FROM platform.document_upload_staging WHERE tenant_id = $1 AND environment_id = $2 AND upload_id = $3',
-              [view.tenantId, view.environmentId, upload.uploadId],
+              'SELECT platform.retire_document_upload_staging($1)',
+              [upload.uploadId],
             );
             return {
               linkId,

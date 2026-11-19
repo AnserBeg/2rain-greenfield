@@ -122,5 +122,28 @@ CREATE POLICY document_trusted_scope ON platform.document_attachment_audit TO no
     AND nullif(current_setting('north_star.principal_id', true), '')::uuid IS NOT NULL
   );
 
--- Unpublished ingress is temporary. Published bytes, references and audit have no delete grant.
-GRANT DELETE ON platform.document_upload_staging TO north_star_runtime;
+-- Retire only expired ingress or the authenticated actor's exact published upload.
+CREATE FUNCTION platform.retire_document_upload_staging(published_upload uuid)
+RETURNS void
+LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, pg_temp
+AS $$
+  DELETE FROM platform.document_upload_staging AS stage
+   WHERE stage.tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
+     AND stage.environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
+     AND nullif(current_setting('north_star.principal_id', true), '')::uuid IS NOT NULL
+     AND (
+       stage.expires_at <= clock_timestamp()
+       OR (
+         stage.upload_id = published_upload
+         AND stage.principal_id = nullif(current_setting('north_star.principal_id', true), '')::uuid
+         AND EXISTS (
+           SELECT 1 FROM platform.document_versions AS version
+            WHERE (version.tenant_id, version.environment_id, version.upload_id, version.digest, version.actor_id)
+                = (stage.tenant_id, stage.environment_id, stage.upload_id, stage.digest, stage.principal_id)
+         )
+       )
+     )
+$$;
+
+REVOKE ALL ON FUNCTION platform.retire_document_upload_staging(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION platform.retire_document_upload_staging(uuid) TO north_star_runtime;

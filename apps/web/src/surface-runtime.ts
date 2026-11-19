@@ -57,6 +57,7 @@ import {
   FORM_EMPTY_INTENT_PREFIX,
   recordWorkspaceOwners,
   renderRegisteredSurfaceComponent,
+  renderDocumentSection,
   surfaceSupportsRuntimeIntent,
   type SurfaceDataRenderState,
   type SurfaceFormReferenceChoices,
@@ -69,7 +70,6 @@ import { DESIGN_TOKENS } from './design-tokens.js';
 import { LEDGER_STYLES } from './ledger-styles.js';
 import { SURFACE_CLIENT_SCRIPT } from './surface-client.js';
 import type { DocumentGateway } from '../../../packages/runtime/src/document-gateway.js';
-import { renderDocumentSection } from './document-section.js';
 import { FONT_STYLESHEET_HREF, registerStaticAsset } from './surface-assets.js';
 import { escapeHtml, shortIdentity } from './html.js';
 import {
