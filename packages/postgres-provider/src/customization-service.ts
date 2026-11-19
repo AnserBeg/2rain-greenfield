@@ -92,6 +92,7 @@ const UPGRADE_PATCH_KINDS: ReadonlySet<string> = new Set([
   'addField',
   'arrangeLayout',
   'saveListView',
+  'addMetricCard',
 ]);
 
 export type CustomizationRefusalCode =
@@ -2157,6 +2158,7 @@ function patchDisplayLabel(patch: CustomizationPatch): string | null {
       return patch.option;
     case 'addRecordType':
     case 'saveListView':
+    case 'addMetricCard':
       return patch.label;
     case 'arrangeLayout':
       return 'upFront' in patch ? 'form' : 'list';

@@ -214,6 +214,129 @@ test(
 );
 
 test(
+  'an approved Today card reads the exact sum before pagination and disappears on rollback',
+  { timeout: 600_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'customize-metric',
+      async ({ connection }) => {
+        const options = {
+          databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+          tenantSlug: 'customize-metric',
+        };
+        const app = await startComposedApplication({
+          ...options,
+          seedProfile: 'distributor',
+          port: 0,
+        });
+        const opened = await openCustomizeService(options);
+        try {
+          const world = worldOver(app.runtime, String(connection.database));
+          const field = 'northstar.app:field.item_price_cad';
+          for (const [suffix, price] of [
+            ['A', '0.1'],
+            ['B', '0.2'],
+          ] as const) {
+            const created = await world.invoke('item_create', {
+              recordId: randomUUID(),
+              relations: {},
+              values: {
+                'northstar.app:field.item_name': `Metric witness ${suffix}`,
+                'northstar.app:field.item_sku': `METRIC-${suffix}`,
+                'northstar.app:field.item_base_unit': 'EA',
+                [field]: price,
+              },
+            });
+            assert.equal(created.outcome, 'succeeded');
+          }
+          const draft = await opened.service.draft(
+            {
+              kind: 'addMetricCard',
+              surface: 'northstar.app:surface.item_list',
+              label: 'Catalog prices in CAD',
+              sumField: field,
+            },
+            'visualBuilder',
+          );
+          assert.equal(draft.status, 'drafted', JSON.stringify(draft));
+          await opened.service.approve(draft.patchId);
+          await opened.service.activate(draft.patchId);
+          const actor = { cookie: 'northstar-demo-actor=manager' };
+          const readSum = (search: string) =>
+            app.runtime.entry.run({ headers: actor }, (view) =>
+              app.runtime.queryGateway.invoke(view, {
+                schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+                queryId: 'northstar.app:query.item_list',
+                arguments: {
+                  includeArchived: false,
+                  list: {
+                    cursor: null,
+                    matchMode: 'substring',
+                    pageSize: 1,
+                    relationLabels: [],
+                    schemaVersion: SHARED_LIST_QUERY_VERSION,
+                    search,
+                    sort: [],
+                    sumField: field,
+                  },
+                },
+              }),
+            );
+          const result = await readSum('Metric witness');
+          assert.equal(result.records.length, 1);
+          assert.equal(result.listCoverage?.totalCount, 2);
+          assert.deepEqual(
+            result.listCoverage?.sum,
+            { fieldId: field, value: '0.3' },
+            'the exact sum covers the matching rows beyond the first page',
+          );
+          const agent = new OperationsAgentSession({
+            runtime: app.runtime,
+            companyId: COMPANY,
+            personHeaders: actor,
+            approve: () => Promise.resolve(true),
+          });
+          const discover = () =>
+            agent.call('erp_discover', {
+              mode: 'contracts',
+              canonicalIds: ['northstar.app:query.item_list'],
+            });
+          assert.match(
+            JSON.stringify((await discover()).content),
+            /Catalog prices in CAD/u,
+          );
+          const metricId = 'northstar.app:metric.custom_catalog_prices_in_cad';
+          const readCard = () =>
+            agent.call('erp_query', {
+              queryId: 'northstar.app:query.item_list',
+              arguments: { metric: metricId },
+            });
+          const answer = await readCard();
+          assert.equal(answer.isError, false, JSON.stringify(answer.content));
+          assert.deepEqual(answer.content, {
+            queryId: 'northstar.app:query.item_list',
+            metricId,
+            label: 'Catalog prices in CAD',
+            outcome: 'exact',
+            value: (await readSum('')).listCoverage?.sum?.value,
+          });
+          await opened.service.rollback();
+          assert.doesNotMatch(
+            JSON.stringify((await discover()).content),
+            /Catalog prices in CAD/u,
+          );
+          assert.equal((await readCard()).isError, true);
+        } finally {
+          await opened.close();
+          await app.close();
+        }
+      },
+      LINEAGE_INSTALL_VOLUME,
+    );
+  },
+);
+
+test(
   'a drafted change is recorded append-only beside its tenant revision and staged release, and nothing goes live',
   { timeout: 600_000 },
   async () => {
@@ -1049,6 +1172,12 @@ test(
               sort: [{ column: savedColumns[0]!, direction: 'ascending' }],
               filters: [],
             },
+            {
+              kind: 'addMetricCard',
+              surface: 'northstar.app:surface.item_list',
+              label: 'Catalog prices in CAD',
+              sumField: 'northstar.app:field.item_price_cad',
+            },
           ]) {
             const drafted = await old.service.draft(patch, 'declarativeEditor');
             assert.equal(drafted.status, 'drafted');
@@ -1211,6 +1340,9 @@ test(
                 columns: { label: string }[];
                 views: { label: string; layout?: { columns: string[] } }[];
               };
+              launcher?: {
+                metrics?: { label: string; sumField?: string }[];
+              };
             }[];
           };
           assert.equal(
@@ -1242,6 +1374,17 @@ test(
               ?.list?.views.find((view) => view.label === 'Warehouse lookup')
               ?.layout?.columns,
             savedColumns,
+          );
+          assert.equal(
+            definition.surfaces
+              .find(
+                (surface) =>
+                  surface.surfaceId === 'northstar.app:surface.inventory_today',
+              )
+              ?.launcher?.metrics?.find(
+                (metric) => metric.label === 'Catalog prices in CAD',
+              )?.sumField,
+            'northstar.app:field.item_price_cad',
           );
           await assertUpgradePersistence(
             pool,

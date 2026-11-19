@@ -2041,6 +2041,19 @@ export const SurfaceLauncherSchema = z.strictObject({
     )
     .min(1)
     .max(6),
+  metrics: z
+    .array(
+      z.strictObject({
+        metricId: CanonicalIdSchema,
+        label: LabelSchema,
+        surface: CanonicalIdSchema,
+        view: CanonicalIdSchema.optional(),
+        sumField: CanonicalIdSchema.optional(),
+      }),
+    )
+    .min(1)
+    .max(8)
+    .optional(),
   scan: z
     .strictObject({
       label: LabelSchema,
@@ -2574,10 +2587,12 @@ const authoredV6FieldDefinition = authoredV3FieldDefinition.extend({
 // A list query may declare the most rows one export statement returns. It is a
 // query property, not a screen one, because the agent path reads the query.
 const exportMaximumResultCount = z.int().min(1).max(10_000).optional();
+const listSumFields = z.array(CanonicalIdSchema).min(1).max(8).optional();
 const normalizedV6QueryDefinition = z.union([
   normalizedV4RowQueryDefinition.extend({
     readModel: QueryReadModelSchema.optional(),
     exportMaximumResultCount,
+    listSumFields,
   }),
   normalizedV4AggregateQueryDefinition,
 ]);
@@ -2585,6 +2600,7 @@ const authoredV6QueryDefinition = z.union([
   authoredV4RowQueryDefinition.extend({
     readModel: QueryReadModelSchema.optional(),
     exportMaximumResultCount,
+    listSumFields,
   }),
   authoredV4AggregateQueryDefinition,
 ]);

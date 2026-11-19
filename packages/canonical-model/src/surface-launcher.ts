@@ -66,6 +66,55 @@ export function validateSurfaceLaunchers(
         fail(tile.tileId, "a launcher tile's view is one its List declares");
     }
 
+    if (launcher.metrics) {
+      if (id !== `${model.package.namespace}:surface.inventory_today`)
+        fail(id, 'metric cards belong to Today');
+      unique(
+        launcher.metrics.map((metric) => metric.metricId),
+        id,
+        'metric ids',
+      );
+      for (const metric of launcher.metrics) {
+        const target = surfaces.get(metric.surface);
+        const list = target && 'list' in target ? target.list : undefined;
+        const query = target && queries.get(target.dataSource.targetId);
+        if (
+          !target ||
+          target.lifecycle !== 'active' ||
+          target.surfaceRole !== 'list' ||
+          !list ||
+          !query ||
+          query.lifecycle !== 'active' ||
+          query.queryType !== 'list' ||
+          query.tier !== 'q0' ||
+          ('readModel' in query && query.readModel)
+        )
+          fail(metric.metricId, 'a metric card opens an active direct List');
+        if (
+          metric.view &&
+          !list!.views.some((view) => view.viewId === metric.view)
+        )
+          fail(
+            metric.metricId,
+            'a metric card opens a view declared by its List',
+          );
+        if (
+          metric.sumField &&
+          (list!.progress ||
+            list!.figures ||
+            !(
+              query &&
+              'listSumFields' in query &&
+              query.listSumFields?.includes(metric.sumField)
+            ))
+        )
+          fail(
+            metric.metricId,
+            'a metric card sum uses a measure declared by its List query',
+          );
+      }
+    }
+
     if (!launcher.scan) continue;
     const entities: string[] = [];
     for (const target of launcher.scan.targets) {

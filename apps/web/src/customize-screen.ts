@@ -31,6 +31,18 @@ interface CustomizationStatus {
   readonly patches: readonly ScreenPatch[];
 }
 interface CustomizationTargets {
+  readonly metricLists?: readonly {
+    readonly surfaceId: string;
+    readonly label: string;
+    readonly views: readonly {
+      readonly viewId: string;
+      readonly label: string;
+    }[];
+    readonly measures: readonly {
+      readonly fieldId: string;
+      readonly label: string;
+    }[];
+  }[];
   readonly choiceFields: readonly {
     readonly fieldId: string;
     readonly label: string;
@@ -166,6 +178,9 @@ export async function renderCustomizeScreen(
       const saveView = url.searchParams.get('saveView');
       if (saveView)
         return page('Save a list view', await savedViewForm(service, saveView));
+      const metric = url.searchParams.get('metric');
+      if (metric)
+        return page('Add a metric card', await metricForm(service, metric));
       return page('Customize', await overview(service));
     }
     switch (submission.action) {
@@ -283,6 +298,7 @@ async function overview(service: CustomizeScreenService): Promise<string> {
     choiceForm(targets),
     arrangePicker(targets),
     savedViewPicker(targets),
+    metricPicker(targets),
     ...(targets.forms ?? []).map(
       (form) =>
         `<form method="post"><fieldset><legend>Show fields up front on ${escapeHtml(form.label)}</legend><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="arrangeLayout"><input type="hidden" name="surface" value="${escapeHtml(form.surfaceId)}"><input type="hidden" name="formLayout" value="1">${form.fields.map((f) => `<label><input type="checkbox" name="front:${escapeHtml(f.fieldId)}"${f.upFront ? ' checked' : ''}> ${escapeHtml(f.label)}</label>`).join(' ')}<button>Draft form arrangement</button></fieldset></form>`,
@@ -353,6 +369,40 @@ async function arrangeForm(
     })
     .join('');
   return `<p class="eyebrow">Customize</p><h1>Arrange ${escapeHtml(list.label)}</h1><form method="post" data-customize-form="arrangeColumns"><table><thead><tr><th>Position</th><th>Heading</th><th>Hide</th></tr></thead><tbody>${rows}</tbody></table><input type="hidden" name="surface" value="${escapeHtml(list.surfaceId)}"><input type="hidden" name="columns" value="${String(list.columns.length)}"><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="arrangeLayout"><p><button type="submit">Draft this arrangement</button></p></form>${backLink()}`;
+}
+
+function metricPicker(targets: CustomizationTargets): string {
+  if (!targets.metricLists?.length) return '';
+  const options = targets.metricLists
+    .map(
+      (target) =>
+        `<option value="${escapeHtml(target.surfaceId)}">${escapeHtml(target.label)}</option>`,
+    )
+    .join('');
+  return `<form method="get" data-customize-form="addMetricCard"><fieldset><legend>Add a metric card to Today</legend><input type="hidden" name="customize" value=""><label for="metric-list">List</label> <select id="metric-list" name="metric" required>${options}</select><p><button>Set up metric</button></p></fieldset></form>`;
+}
+
+async function metricForm(
+  service: CustomizeScreenService,
+  surfaceId: string,
+): Promise<string> {
+  const { metricLists } = await service.targets();
+  const target = metricLists?.find((list) => list.surfaceId === surfaceId);
+  if (!target)
+    return `<p>Choose a list that reads records directly.</p>${backLink()}`;
+  const views = target.views
+    .map(
+      (view) =>
+        `<option value="${escapeHtml(view.viewId)}">${escapeHtml(view.label)}</option>`,
+    )
+    .join('');
+  const measures = target.measures
+    .map(
+      (field) =>
+        `<option value="${escapeHtml(field.fieldId)}">Sum of ${escapeHtml(field.label)}</option>`,
+    )
+    .join('');
+  return `<h1>Add a metric for ${escapeHtml(target.label)}</h1><form method="post"><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addMetricCard"><input type="hidden" name="surface" value="${escapeHtml(surfaceId)}"><label>Card name <input name="label" required maxlength="80"></label><label for="metric-view">View</label> <select id="metric-view" name="view"><option value="">Default view</option>${views}</select><label for="metric-measure">Measure</label> <select id="metric-measure" name="sumField"><option value="">Count records</option>${measures}</select><p><button>Draft metric</button></p></form>${backLink()}`;
 }
 
 function savedViewPicker(targets: CustomizationTargets): string {
@@ -431,6 +481,14 @@ export function patchFromForm(form: CustomizeScreenSubmission): unknown {
     };
   };
   switch (form.kind) {
+    case 'addMetricCard':
+      return {
+        kind: 'addMetricCard',
+        surface: form.surface,
+        label: form.label,
+        ...(form.view ? { view: form.view } : {}),
+        ...(form.sumField ? { sumField: form.sumField } : {}),
+      };
     case 'addRecordType':
       return {
         fields: Array.from({ length: FIELD_ROWS }, (_, index) =>
@@ -573,6 +631,8 @@ function describe(patch: PatchSummary): string {
         : 'Arranged list columns';
     case 'saveListView':
       return `Saved list view "${label}"`;
+    case 'addMetricCard':
+      return `Metric card "${label}"`;
     default:
       return `${patch.kind} (${patch.patchId})`;
   }

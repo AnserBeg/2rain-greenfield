@@ -196,7 +196,7 @@ test('the capability comparison binds the family to its capability, then compare
   // capability on one side alone reds here rather than in production.
   assert.deepEqual(SUPPORTED_RUNTIME_CAPABILITIES[surface], {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
-    maximumSupportedVersion: 24,
+    maximumSupportedVersion: 25,
   });
 });
 
@@ -797,7 +797,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
               ],
               {
                 capabilityId: 'northstar.runtime:capability.surface-manifest',
-                maximumSupportedVersion: 24,
+                maximumSupportedVersion: 25,
               },
             );
           },
@@ -821,7 +821,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                   versionContext,
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
-              /requires version 999 and this runtime supports 24/,
+              /requires version 999 and this runtime supports 25/,
             );
           },
         );
@@ -850,7 +850,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                   versionContext,
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
-              /requires version 999 and this runtime supports 24/,
+              /requires version 999 and this runtime supports 25/,
             );
           },
         );

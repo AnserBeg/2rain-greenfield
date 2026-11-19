@@ -41,6 +41,7 @@ import {
   pinnedCatalog,
   queryContract,
   searchableText,
+  type MetricCard,
   type PinnedCatalog,
   type QueryCatalogEntry,
 } from './catalog.js';
@@ -852,7 +853,13 @@ export class OperationsAgentSession {
           ...queries.map((query) => ({
             id: query.queryId,
             kind: 'query' as const,
-            text: searchableText(query.queryId),
+            text: searchableText(
+              query.queryId,
+              catalog.metricCards
+                ?.filter((card) => card.queryId === query.queryId)
+                .map((card) => card.label)
+                .join(' '),
+            ),
             summary: {
               id: query.queryId,
               kind: 'query',
@@ -1026,6 +1033,17 @@ export class OperationsAgentSession {
         };
       }
       if (query.queryType === 'list') {
+        if (Object.hasOwn(args, 'metric')) {
+          const metricId = requiredText(args.metric, 'arguments.metric');
+          const metric = catalog.metricCards?.find(
+            (card) => card.metricId === metricId && card.queryId === queryId,
+          );
+          if (!metric || Object.keys(args).length !== 1)
+            throw new ToolInputError(
+              'Choose a declared Today metric without overriding its list arguments.',
+            );
+          return this.#metric(view, query, metric, catalog);
+        }
         const listed = await this.#list(
           view,
           query,
@@ -1100,6 +1118,94 @@ export class OperationsAgentSession {
           : {}),
       };
     });
+  }
+
+  async #metric(
+    view: RequestRuntimeView,
+    query: QueryCatalogEntry,
+    metric: MetricCard,
+    catalog: PinnedCatalog,
+  ): Promise<ImmutableJsonValue> {
+    const preset = catalog.presets.find(
+      (entry) => entry.surfaceId === metric.surface,
+    );
+    const selected = preset?.views?.find(
+      (entry) => entry.viewId === metric.view,
+    );
+    if (!preset || (metric.view && !selected))
+      throw new ToolInputError(
+        'The Today metric has no readable list declaration.',
+      );
+    const progress = isRecord(preset.progress) ? { ...preset.progress } : null;
+    if (progress) {
+      delete progress.whenDenied;
+      if (selected?.open) progress.openOnly = true;
+      if (isRecord(progress.supply)) {
+        const supply = { ...progress.supply };
+        delete supply.whenDenied;
+        if (selected?.supply) supply.keep = selected.supply;
+        progress.supply = supply;
+      }
+    }
+    const figures = isRecord(preset.figures) ? { ...preset.figures } : null;
+    if (figures && selected?.band) figures.keep = selected.band;
+    const now = this.#options.clock?.() ?? new Date();
+    const day = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
+    const result = await this.#options.runtime.queryGateway.invoke(view, {
+      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+      queryId: query.queryId,
+      arguments: withScope(
+        query,
+        {
+          includeArchived: false,
+          list: {
+            cursor: null,
+            matchMode: 'substring',
+            pageSize: 1,
+            relationLabels: [],
+            schemaVersion: SHARED_LIST_QUERY_VERSION,
+            search: '',
+            sort: [],
+            ...(preset.referenceLabels?.length
+              ? { referenceLabels: preset.referenceLabels }
+              : {}),
+            ...(preset.searchChildren
+              ? { searchChildren: preset.searchChildren }
+              : {}),
+            ...(selected?.fieldFilters.length
+              ? { fieldFilters: selected.fieldFilters }
+              : {}),
+            ...(selected?.before
+              ? {
+                  beforeFilters: [
+                    {
+                      fieldId: selected.before.fieldId,
+                      before: day.toISOString(),
+                    },
+                  ],
+                }
+              : {}),
+            ...(progress ? { progress } : {}),
+            ...(figures ? { figures } : {}),
+            ...(metric.sumField ? { sumField: metric.sumField } : {}),
+          },
+        },
+        this.#options.companyId,
+      ),
+    });
+    const coverage = result.listCoverage;
+    const value = metric.sumField ? coverage?.sum?.value : coverage?.totalCount;
+    if (value === undefined)
+      throw new ToolInputError('The list could not answer the Today metric.');
+    return {
+      queryId: query.queryId,
+      metricId: metric.metricId,
+      label: metric.label,
+      outcome: 'exact',
+      value,
+    };
   }
 
   async #list(

@@ -112,6 +112,31 @@ export function renderReleaseDiff(input: {
     const before = from.surfaces.find((s) => s.surfaceId === change.subjectId);
     const after = to.surfaces.find((s) => s.surfaceId === change.subjectId);
     if (!before || !after) continue;
+    const beforeMetrics = ((before.launcher as Json | undefined)?.metrics ??
+      []) as Json[];
+    const addedMetrics = (
+      ((after.launcher as Json | undefined)?.metrics ?? []) as Json[]
+    ).filter(
+      (metric) =>
+        !beforeMetrics.some((prior) => prior.metricId === metric.metricId),
+    );
+    if (addedMetrics.length) {
+      for (const metric of addedMetrics) {
+        const source = to.surfaces.find(
+          (surface) => surface.surfaceId === metric.surface,
+        );
+        const view = (
+          (source?.list as Json | undefined)?.views as Json[] | undefined
+        )?.find((view) => view.viewId === metric.view);
+        const field = to.fields.find(
+          (field) => field.fieldId === metric.sumField,
+        );
+        lines.push(
+          `Today gains the "${String(metric.label)}" card. It ${field ? `sums ${String(field.label)}` : 'counts records'} in ${String(source?.label)}${view ? ` → ${String(view.label)}` : ''}.`,
+        );
+      }
+      continue;
+    }
     const list = after.list as Json | undefined;
     const previousViews = new Set(
       ((before.list as Json | undefined)?.views as Json[] | undefined)?.map(

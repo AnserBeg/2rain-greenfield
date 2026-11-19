@@ -19,6 +19,24 @@
           "expected": "the database refuses an unrecognized patch kind with a valid digest"
         }
       ]
+    },
+    {
+      "name": "today-sum-ignores-matching-records",
+      "claim": "A Today sum reads the full filtered set before pagination.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "coalesce(sum(${qualified(sourceAlias, sumColumn.physicalName)}::numeric), 0)::text AS list_sum",
+      "replacement": "coalesce(sum(${qualified(sourceAlias, sumColumn.physicalName)}::numeric) FILTER (WHERE false), 0)::text AS list_sum",
+      "test": {
+        "files": ["test/postgres/customization.test.ts"],
+        "namePattern": "an approved Today card reads the exact sum before pagination and disappears on rollback"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customization.test.ts",
+          "name": "an approved Today card reads the exact sum before pagination and disappears on rollback",
+          "expected": "the exact sum covers the matching rows beyond the first page"
+        }
+      ]
     }
   ]
 }
