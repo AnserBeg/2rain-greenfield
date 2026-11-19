@@ -129,3 +129,4 @@ export {
   widensEnumDomain,
   type StorageTargetPayloadV1,
 } from './storage.js';
+export { workflowTierBDependencies } from './workflow-dependencies.js';
