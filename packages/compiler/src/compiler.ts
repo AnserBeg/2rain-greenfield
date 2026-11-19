@@ -625,15 +625,9 @@ function compileApplicationInternal(
   const nodeContracts = emitted
     .map((entry) => entry.nodeContract)
     .sort((left, right) => compare(left.stableNodeId, right.stableNodeId));
-  const attestation = buildAttestation(
-    {
-      cacheInputDigest,
-      dependencyClosureDigest,
-      inputDefinitionDigest: normalizedDefinitionDigest,
-      limitsDigest,
-      releaseRoot,
-    },
-    input.profile.compilerSemanticProfileVersion,
+  const attestation = compilerAttestationFromManifest(
+    releaseManifest,
+    releaseRoot,
   );
 
   return {
@@ -2318,27 +2312,22 @@ function buildCapabilityFacts(
     .sort((left, right) => compare(left.capabilityId, right.capabilityId));
 }
 
-function buildAttestation(
-  core: Omit<
-    CompilerAttestation,
-    | 'attestationDigest'
-    | 'attestationVersion'
-    | 'compileMode'
-    | 'compilerSemanticProfileVersion'
-    | 'compilerVersion'
-    | 'incrementalEquivalenceInvariant'
-    | 'kind'
-  >,
-  // The durable per-entry discriminator. Taken from the selected profile and
-  // kept a separate parameter so the serialized key order is unchanged.
-  compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
+/** The compiler attestation can be recovered from an immutable manifest.
+ * A persistence reader checks the resulting digest against the registered one. */
+export function compilerAttestationFromManifest(
+  manifest: ReleaseManifestEnvelope,
+  releaseRoot: string,
 ): CompilerAttestation {
   const value = {
     attestationVersion: COMPILER_ATTESTATION_VERSION,
-    ...core,
+    cacheInputDigest: manifest.cacheInputDigest,
+    dependencyClosureDigest: manifest.dependencyClosureDigest,
+    inputDefinitionDigest: manifest.normalizedDefinitionDigest,
+    limitsDigest: manifest.limitsDigest,
+    releaseRoot,
     compileMode: 'coldFull' as const,
-    compilerSemanticProfileVersion,
-    compilerVersion: COMPILER_VERSION,
+    compilerSemanticProfileVersion: manifest.compilerSemanticProfileVersion,
+    compilerVersion: manifest.compilerVersion,
     incrementalEquivalenceInvariant: INCREMENTAL_EQUIVALENCE_INVARIANT,
     kind: 'compilerAttestation' as const,
   };

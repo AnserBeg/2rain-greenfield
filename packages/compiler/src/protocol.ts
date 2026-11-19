@@ -650,3 +650,24 @@ export interface CompilerTelemetryAttestation {
   releaseRoot: string | null;
   transitionPreparationMilliseconds: number | null;
 }
+
+export function narrowAcknowledgementToDeclared(
+  acknowledgement: NonNullable<
+    CompilerExecutionOptions['unboundPermissionAcknowledgement']
+  >,
+  declaredPermissionIds: ReadonlySet<string>,
+): NonNullable<CompilerExecutionOptions['unboundPermissionAcknowledgement']> {
+  return {
+    ...(acknowledgement.evaluatorBindings
+      ? {
+          evaluatorBindings: acknowledgement.evaluatorBindings.filter((entry) =>
+            declaredPermissionIds.has(entry.permissionId),
+          ),
+        }
+      : {}),
+    entries: acknowledgement.entries.filter((entry) =>
+      declaredPermissionIds.has(entry.permissionId),
+    ),
+    packageId: acknowledgement.packageId,
+  };
+}

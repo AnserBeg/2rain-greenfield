@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { readCustomizationLineage } from './customization-lineage.js';
 
 /**
  * What the database is serving, read without changing anything: the release
@@ -41,70 +42,30 @@ export async function readActiveRelease(options: {
     );
     if (present.rows[0]?.ready !== true) return null;
     const result = await pool.query<{
-      content_hash: string;
-      customized: boolean;
-      base_root: string | null;
+      tenant_id: string;
+      environment_id: string;
+      release_id: string;
+      fence: string;
     }>(
-      `WITH RECURSIVE active AS (
-         SELECT release.tenant_id, release.release_id, release.content_hash,
-                release.app_package_revision_id
-           FROM platform.tenants AS tenant
-           JOIN platform.environments AS environment
-             ON environment.tenant_id = tenant.id AND environment.slug = $2
-           JOIN platform.active_release_pointers AS pointer
-             ON pointer.tenant_id = tenant.id
-            AND pointer.environment_id = environment.id
-           JOIN platform.tenant_releases AS release
-             ON release.tenant_id = pointer.tenant_id
-            AND release.environment_id = pointer.environment_id
-            AND release.release_id = pointer.release_id
-          WHERE tenant.slug = $1
-       ), chain(revision_id, provenance, parent_revision_id) AS (
-         SELECT revision.revision_id, revision.provenance,
-                revision.parent_revision_id
-           FROM active
-           JOIN platform.app_package_revisions AS revision
-             ON revision.tenant_id = active.tenant_id
-            AND revision.revision_id = active.app_package_revision_id
-         UNION ALL
-         SELECT parent.revision_id, parent.provenance,
-                parent.parent_revision_id
-           FROM chain
-           LEFT JOIN platform.customization_upgrades AS upgrade
-             ON upgrade.tenant_id = (SELECT tenant_id FROM active)
-            AND upgrade.environment_id = (
-              SELECT environment_id FROM platform.tenant_releases
-               WHERE tenant_id = (SELECT tenant_id FROM active)
-                 AND release_id = (SELECT release_id FROM active))
-            AND upgrade.candidate_revision_id = chain.revision_id
-           LEFT JOIN platform.tenant_releases AS upgrade_base
-             ON upgrade_base.tenant_id = upgrade.tenant_id
-            AND upgrade_base.environment_id = upgrade.environment_id
-            AND upgrade_base.release_id = upgrade.base_release_id
-           JOIN platform.app_package_revisions AS parent
-             ON parent.tenant_id = (SELECT tenant_id FROM active)
-            AND parent.revision_id = COALESCE(upgrade_base.app_package_revision_id, chain.parent_revision_id)
-          WHERE chain.provenance = 'tenantAuthored'
-       )
-       SELECT active.content_hash,
-              COALESCE((SELECT bool_or(provenance = 'tenantAuthored')
-                          FROM chain), false) AS customized,
-              (SELECT base.content_hash
-                 FROM platform.tenant_releases AS base
-                WHERE base.tenant_id = active.tenant_id
-                  AND base.app_package_revision_id = (
-                        SELECT revision_id FROM chain
-                         WHERE provenance <> 'tenantAuthored' LIMIT 1)
-                ORDER BY base.created_at LIMIT 1) AS base_root
-         FROM active`,
+      `SELECT pointer.tenant_id, pointer.environment_id, pointer.release_id, pointer.fence
+         FROM platform.tenants AS tenant
+         JOIN platform.environments AS env ON env.tenant_id = tenant.id AND env.slug = $2
+         JOIN platform.active_release_pointers AS pointer ON pointer.tenant_id = tenant.id AND pointer.environment_id = env.id
+        WHERE tenant.slug = $1 AND pointer.release_id IS NOT NULL`,
       [options.tenantSlug, options.environmentSlug ?? 'production'],
     );
-    const row = result.rows[0];
-    if (!row) return null;
+    const pointer = result.rows[0];
+    if (!pointer) return null;
+    const chain = await readCustomizationLineage(pool, {
+      tenantId: pointer.tenant_id,
+      environmentId: pointer.environment_id,
+      releaseId: pointer.release_id,
+      beforeFence: String(BigInt(pointer.fence) + 1n),
+    });
     return {
-      releaseRoot: row.content_hash,
-      customized: row.customized,
-      baseReleaseRoot: row.customized ? row.base_root : row.content_hash,
+      releaseRoot: chain[0]!.content_hash,
+      customized: chain[0]!.provenance === 'tenantAuthored',
+      baseReleaseRoot: chain.at(-1)!.content_hash,
     };
   } finally {
     await pool.end();

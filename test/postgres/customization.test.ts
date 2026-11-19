@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -24,7 +25,10 @@ import {
   trustedContext,
   type ComposedApplicationRuntime,
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
-import { openCustomizationService } from '../../packages/postgres-provider/src/customization-service.js';
+import {
+  openCustomizationService,
+  upgradeLogFields,
+} from '../../packages/postgres-provider/src/customization-service.js';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
 import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provider/src/inventory-provider-error-mappings.js';
 import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
@@ -771,14 +775,21 @@ test(
   },
 );
 
-function startRuntime(databaseUrl: string, slug: string) {
+function startRuntime(
+  databaseUrl: string,
+  slug: string,
+  inputs: Pick<
+    Parameters<typeof createComposedApplicationRuntime>[0],
+    'compiledApplication' | 'customization'
+  > = { compiledApplication },
+) {
   return createComposedApplicationRuntime({
     capabilityOperationExecutorFactories: [
       INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
       RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
       PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY,
     ],
-    compiledApplication,
+    ...inputs,
     databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
     localDemoIdentity: true,
@@ -1041,6 +1052,32 @@ test(
             if (drafted.status !== 'drafted') return;
             await old.service.approve(drafted.patchId);
             await old.service.activate(drafted.patchId);
+            if (patch.kind === 'addField') {
+              const extended = platformLabelVariant(
+                'Stock code',
+                false,
+                undefined,
+                compiledApplication,
+                true,
+              );
+              const newer = await startRuntime(databaseUrl, tenantSlug, {
+                compiledApplication: extended.envelope,
+                customization: {
+                  acknowledgement: extended.acknowledgement,
+                  firstPartyAuthored: extended.authored,
+                },
+              });
+              try {
+                assert.equal(newer.activeReleaseId, drafted.releaseId);
+                assert.equal(
+                  newer.customizationUpgrade?.status,
+                  'drafted',
+                  'a new active permission must allow the field-only historical chain to upgrade',
+                );
+              } finally {
+                await newer.close();
+              }
+            }
           }
           sourceRoot = (await old.service.status()).activeReleaseRoot;
           sourceFence = await pointerFence(pool, runtime.identity.tenantId);
@@ -1068,6 +1105,17 @@ test(
             JSON.stringify(diagnostic.issues),
             /firstPartyBase.*tenantPatch.*Shelf code/u,
           );
+          assert.deepEqual(
+            upgradeLogFields(diagnostic),
+            {
+              status: 'rejected',
+              code: 'CUSTOMIZE_UPGRADE_CONFLICT',
+              sourceReleaseId: runtime.activeReleaseId,
+              baseReleaseRoot: parseCompiledApplication(conflict.envelope)
+                .application.compiled.releaseRoot,
+            },
+            'bootstrap logs must contain only opaque identifiers and diagnostic codes',
+          );
           assert.equal(
             await pointerFence(pool, runtime.identity.tenantId),
             sourceFence,
@@ -1085,7 +1133,32 @@ test(
           await runtime.close();
         }
 
-        const upgraded = platformLabelVariant('Stock number');
+        // The tenant relabels this column. Both proposed platform labels
+        // disappear in the replay, leaving one candidate for different bases.
+        const discardedBase = platformLabelVariant(
+          'Stock number',
+          false,
+          'Office item',
+        );
+        const discarded = await openComposedApplicationRuntime({
+          ...options,
+          compiledApplication: discardedBase.envelope,
+        });
+        const pending = discarded.customizationUpgrade;
+        await discarded.close();
+        assert.ok(pending?.status === 'drafted');
+        const intermediate = platformLabelVariant(
+          'Stock number',
+          false,
+          'Catalog item',
+        );
+        // Two distinct first-party releases carry this same package revision.
+        const upgraded = platformLabelVariant(
+          'Stock number',
+          false,
+          'Catalog item',
+          intermediate.envelope,
+        );
         runtime = await openComposedApplicationRuntime({
           ...options,
           compiledApplication: upgraded.envelope,
@@ -1103,8 +1176,18 @@ test(
             'boot must not activate a replay',
           );
           const state = await service.service.status();
-          assert.equal(state.upgrades.length, 1);
-          const upgrade = state.upgrades[0]!;
+          assert.equal(
+            state.upgrades.filter((u) => u.state === 'drafted').length,
+            2,
+          );
+          const upgrade = state.upgrades.find(
+            (u) => u.upgradeId === prepared.upgradeId,
+          )!;
+          const other = state.upgrades.find(
+            (u) => u.upgradeId === pending.upgradeId,
+          )!;
+          assert.equal(other.candidateRevisionId, upgrade.candidateRevisionId);
+          assert.notEqual(other.baseReleaseId, upgrade.baseReleaseId);
           assert.equal(upgrade.upgradeId, prepared.upgradeId);
           assert.equal(upgrade.state, 'drafted');
           await assert.rejects(
@@ -1166,6 +1249,25 @@ test(
           const approval = await service.service.approve(upgrade.upgradeId);
           assert.match(approval.renderedDiff, /Stock number/u);
           assert.equal(
+            (
+              await pool.query(
+                'SELECT customization_upgrade_id FROM platform.release_approvals WHERE activation_attempt_id=$1',
+                [approval.activationAttemptId],
+              )
+            ).rows[0]?.customization_upgrade_id,
+            upgrade.upgradeId,
+          );
+          await assert.rejects(
+            service.service.activate(other.upgradeId),
+            /no current approval/,
+            'approval must select the requested upgrade',
+          );
+          await assert.rejects(
+            service.service.rollback(upgrade.candidateReleaseId),
+            /live release changed/iu,
+            'rollback must match the displayed release',
+          );
+          assert.equal(
             await pointerFence(pool, runtime.identity.tenantId),
             sourceFence,
           );
@@ -1179,6 +1281,30 @@ test(
             parseCompiledApplication(upgraded.envelope).application.compiled
               .releaseRoot,
             'the agent guard follows the new first-party base after activation',
+          );
+          const roots = await pool.query<{ content_hash: string }>(
+            `SELECT content_hash FROM platform.tenant_releases
+            WHERE tenant_id=$1 AND environment_id=$2 AND app_package_revision_id =
+            (SELECT app_package_revision_id FROM platform.tenant_releases WHERE release_id=$3)`,
+            [
+              runtime.identity.tenantId,
+              runtime.identity.environmentId,
+              upgrade.baseReleaseId,
+            ],
+          );
+          assert.ok(
+            roots.rows.some(
+              (row) =>
+                row.content_hash ===
+                parseCompiledApplication(intermediate.envelope).application
+                  .compiled.releaseRoot,
+            ),
+          );
+          assert.notEqual(
+            parseCompiledApplication(intermediate.envelope).application.compiled
+              .releaseRoot,
+            parseCompiledApplication(upgraded.envelope).application.compiled
+              .releaseRoot,
           );
           const restarted = await openComposedApplicationRuntime({
             ...options,
@@ -1207,6 +1333,12 @@ test(
               (await nextService.service.status()).activeReleaseRoot,
               prepared.releaseRoot,
             );
+            await assertCycleRejected(
+              pool,
+              options,
+              upgraded.envelope,
+              upgrade.upgradeId,
+            );
             await nextService.service.rollback();
           } finally {
             await nextService.close();
@@ -1232,7 +1364,13 @@ test(
   },
 );
 
-function platformLabelVariant(label: string, baseline = false) {
+function platformLabelVariant(
+  label: string,
+  baseline = false,
+  columnLabel?: string,
+  previous: unknown = compiledApplication,
+  addPermission = false,
+) {
   const authored = structuredClone(firstPartyAuthored) as Record<
     string,
     unknown
@@ -1241,8 +1379,41 @@ function platformLabelVariant(label: string, baseline = false) {
   fields.find(
     (field) => field.fieldId === 'northstar.app:field.item_sku',
   )!.label = label;
-  const original = parseCompiledApplication(compiledApplication);
+  if (columnLabel) {
+    const list = (
+      authored.surfaces as {
+        surfaceId: string;
+        list?: { columns: { field: string; label: string }[] };
+      }[]
+    ).find((s) => s.surfaceId === 'northstar.app:surface.item_list')!;
+    list.list!.columns.find(
+      (c) => c.field === 'northstar.app:field.item_name',
+    )!.label = columnLabel;
+  }
+  const original = parseCompiledApplication(previous);
   const parent = baseline ? original.bootstrap : original.application;
+  const checkedIn = readUnboundPermissionAcknowledgementFor(
+    authoredPath,
+    'northstar.app:package.application',
+  );
+  const originalBinding = checkedIn.evaluatorBindings![0]!;
+  const newId = 'northstar.app:permission.upgrade_review';
+  const acknowledgement = addPermission
+    ? {
+        ...checkedIn,
+        evaluatorBindings: [
+          ...checkedIn.evaluatorBindings!,
+          { ...originalBinding, permissionId: newId },
+        ],
+      }
+    : checkedIn;
+  if (addPermission) {
+    const permissions = authored.permissions as { permissionId: string }[];
+    const declared = permissions.find(
+      (p) => p.permissionId === originalBinding.permissionId,
+    )!;
+    permissions.push({ ...declared, permissionId: newId });
+  }
   const normalized = normalizeApplicationPackage(authored);
   const normalizedDefinitionBytes = new TextEncoder().encode(
     canonicalize(normalized),
@@ -1260,10 +1431,7 @@ function platformLabelVariant(label: string, baseline = false) {
         normalizationProfileVersion: normalized.normalizationProfileVersion,
       },
     },
-    readUnboundPermissionAcknowledgementFor(
-      authoredPath,
-      'northstar.app:package.application',
-    ),
+    acknowledgement,
   );
   assert.equal(
     compiled.status,
@@ -1271,9 +1439,10 @@ function platformLabelVariant(label: string, baseline = false) {
     JSON.stringify(compiled.diagnostics),
   );
   if (compiled.status !== 'compiled') throw new Error('base did not compile');
-  const parsed = parseCompiledApplication(compiledApplication);
+  const parsed = original;
   return {
     authored,
+    acknowledgement,
     envelope: {
       schemaVersion: 'northstar.web:compiled-application-release/v2',
       bootstrap: serializeRelease(parsed.bootstrap),
@@ -1296,11 +1465,31 @@ async function assertUpgradePersistence(
   const otherEnvironment = await ensureScope(pool, tenantSlug, 'staging');
   const runtimePool = rolePool(databaseUrl, 'north_star_runtime', 2);
   try {
+    const refusals = await withTrustedRequestTransaction(
+      runtimePool,
+      await trustedContext(identities.runtime),
+      (client) =>
+        client.query(
+          'SELECT diagnostic FROM platform.customization_upgrade_refusals',
+        ),
+    );
+    assert.equal(
+      refusals.rows[0]?.diagnostic.code,
+      'CUSTOMIZE_UPGRADE_CONFLICT',
+    );
     for (const identity of [foreign.runtime, otherEnvironment.runtime]) {
       await withTrustedRequestTransaction(
         runtimePool,
         await trustedContext(identity),
         async (client) => {
+          const refused = await client.query(
+            'SELECT diagnostic FROM platform.customization_upgrade_refusals',
+          );
+          assert.equal(
+            refused.rowCount,
+            0,
+            'upgrade refusals must be tenant and environment scoped',
+          );
           const rows = await client.query(
             'SELECT * FROM platform.customization_upgrades',
           );
@@ -1388,6 +1577,50 @@ async function assertUpgradePersistence(
       ),
       /customization_upgrades_binding/u,
     );
+    const firstParty = await pool.query<{ release_id: string }>(
+      `SELECT r.release_id FROM platform.tenant_releases r JOIN platform.app_package_revisions v ON v.tenant_id=r.tenant_id AND v.revision_id=r.app_package_revision_id WHERE r.tenant_id=$1 AND r.environment_id=$2 AND v.provenance='firstParty' AND NOT EXISTS (SELECT 1 FROM platform.customization_upgrades u WHERE u.tenant_id=r.tenant_id AND u.environment_id=r.environment_id AND u.base_release_id=r.release_id) LIMIT 1`,
+      [row.tenant_id, row.environment_id],
+    );
+    const firstPartyId = firstParty.rows[0]!.release_id;
+    for (const [baseId, revisionId] of [
+      [row.source_release_id, row.candidate_revision_id],
+      [
+        firstPartyId,
+        (
+          await pool.query(
+            'SELECT app_package_revision_id FROM platform.tenant_releases WHERE release_id=$1',
+            [firstPartyId],
+          )
+        ).rows[0]!.app_package_revision_id as string,
+      ],
+    ]) {
+      const payload = Buffer.from(
+        canonicalize({
+          ...(JSON.parse(row.payload.toString('utf8')) as object),
+          baseReleaseId: baseId,
+          candidateRevisionId: revisionId,
+        }),
+      );
+      await assert.rejects(
+        pool.query(
+          `INSERT INTO platform.customization_upgrades(tenant_id, environment_id, upgrade_id, source_release_id, base_release_id, candidate_release_id, candidate_revision_id, payload, payload_digest, authored_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [
+            row.tenant_id,
+            row.environment_id,
+            randomUUID(),
+            row.source_release_id,
+            baseId,
+            row.candidate_release_id,
+            revisionId,
+            payload,
+            createHash('sha256').update(payload).digest('hex'),
+            row.authored_by,
+          ],
+        ),
+        /customization upgrade release binding is invalid/u,
+        'a valid digest cannot substitute another base or revision',
+      );
+    }
     const grants = await pool.query<{ privilege_type: string }>(
       `SELECT privilege_type FROM information_schema.role_table_grants
         WHERE table_schema = 'platform' AND table_name = 'customization_upgrades' AND grantee = 'north_star_runtime'
@@ -1399,5 +1632,212 @@ async function assertUpgradePersistence(
     );
   } finally {
     await runtimePool.end();
+  }
+}
+
+test(
+  'a refused record-type upgrade serves verified records and an unknown live kind can roll back',
+  { timeout: 900_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'refused-upgrade',
+      async ({ connection, pool }) => {
+        const options = {
+          databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+          tenantSlug: 'refused-record-type',
+        };
+        const installed = {
+          ...options,
+          compiledApplication: platformLabelVariant(
+            'Original stock identifier',
+            true,
+          ).envelope,
+        };
+        const runtime = await openComposedApplicationRuntime(installed);
+        const original = await openCustomizeService(installed);
+        const recordId = randomUUID();
+        const base = runtime.activeReleaseId;
+        let source: string;
+        let patchId: string;
+        try {
+          const change = await original.service.draft(
+            equipment,
+            'declarativeEditor',
+          );
+          assert.ok(change.status === 'drafted');
+          patchId = change.patchId;
+          await original.service.approve(patchId);
+          source = (await original.service.activate(patchId)).releaseId;
+          assert.equal(
+            (await createEquipment(runtime, recordId)).outcome,
+            'succeeded',
+          );
+        } finally {
+          await original.close();
+          await runtime.close();
+        }
+        const next = options;
+        for (const kind of ['addRecordType', 'futurePatchKind']) {
+          if (kind === 'futurePatchKind') {
+            // Model a row written by a newer parser in this disposable tenant.
+            await pool.query(
+              'ALTER TABLE platform.customization_patches DROP CONSTRAINT customization_patches_shape',
+            );
+            await pool.query(
+              'ALTER TABLE platform.customization_patches DISABLE RULE customization_patches_reject_update',
+            );
+            const payload = Buffer.from(JSON.stringify({ kind }));
+            await pool.query(
+              'UPDATE platform.customization_patches SET patch_kind=$1,payload=$2,payload_digest=$3 WHERE patch_id=$4',
+              [
+                kind,
+                payload,
+                createHash('sha256').update(payload).digest('hex'),
+                patchId,
+              ],
+            );
+            await pool.query(
+              'ALTER TABLE platform.customization_patches ENABLE RULE customization_patches_reject_update',
+            );
+          }
+          const boot = await openComposedApplicationRuntime(next);
+          const opened = await openCustomizeService(next);
+          try {
+            assert.equal(boot.activeReleaseId, source);
+            assert.deepEqual(
+              (await listEquipment(boot)).records.map((r) => r.recordId),
+              [recordId],
+            );
+            assert.equal(boot.customizationUpgrade?.status, 'refused');
+            const status = await opened.service.status();
+            assert.equal(status.upgradeRefusal?.code, 'CUSTOMIZE_BASE_MOVED');
+            assert.equal(status.activeChain[0]?.kind, kind);
+            if (kind === 'futurePatchKind') {
+              const cli = execFileSync(
+                process.execPath,
+                [
+                  '--import',
+                  'tsx',
+                  'apps/api/scripts/customize-cli.ts',
+                  'status',
+                ],
+                {
+                  encoding: 'utf8',
+                  env: {
+                    ...process.env,
+                    DATABASE_URL: options.databaseUrl,
+                    NORTH_STAR_TENANT_SLUG: options.tenantSlug,
+                  },
+                },
+              );
+              assert.match(
+                cli,
+                /Platform upgrade refused: CUSTOMIZE_BASE_MOVED/u,
+              );
+              assert.match(cli, /futurePatchKind/u);
+              await assert.rejects(
+                opened.service.rollback(base),
+                /live release changed/iu,
+              );
+              await assert.rejects(
+                opened.service.rollback(source, String(status.activeFence - 1)),
+                /live release changed/iu,
+              );
+              assert.equal(
+                (
+                  await opened.service.rollback(
+                    source,
+                    String(status.activeFence),
+                  )
+                ).releaseId,
+                base,
+              );
+              assert.equal(
+                (await opened.service.status()).activeChain.length,
+                0,
+              );
+            }
+          } finally {
+            await opened.close();
+            await boot.close();
+          }
+        }
+      },
+      LINEAGE_INSTALL_VOLUME,
+    );
+  },
+);
+
+async function assertCycleRejected(
+  pool: pg.Pool,
+  options: { databaseUrl: string; tenantSlug: string },
+  envelope: unknown,
+  id: string,
+) {
+  // Corrupt just the historical edge in the disposable database. Restore the
+  // same immutable bytes and constraints before exercising normal rollback.
+  const original = (
+    await pool.query<{
+      base_release_id: string;
+      payload: Buffer;
+      payload_digest: string;
+    }>(`SELECT * FROM platform.customization_upgrades WHERE upgrade_id=$1`, [
+      id,
+    ])
+  ).rows[0]!;
+  const constraint = (
+    await pool.query<{ definition: string }>(
+      `SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid='platform.customization_upgrades'::regclass AND conname='customization_upgrades_binding'`,
+    )
+  ).rows[0]!.definition;
+  await pool.query(
+    'ALTER TABLE platform.customization_upgrades DISABLE RULE customization_upgrades_reject_update',
+  );
+  await pool.query(
+    'ALTER TABLE platform.customization_upgrades DROP CONSTRAINT customization_upgrades_binding',
+  );
+  try {
+    await pool.query(
+      'UPDATE platform.customization_upgrades SET base_release_id=candidate_release_id WHERE upgrade_id=$1',
+      [id],
+    );
+    await assert.rejects(
+      readActiveRelease(options),
+      /lineage contains a cycle/u,
+    );
+    const runtime = await openComposedApplicationRuntime({
+      ...options,
+      compiledApplication: envelope,
+    });
+    const service = await openCustomizeService({
+      ...options,
+      compiledApplication: envelope,
+    });
+    try {
+      const diagnostic = runtime.customizationUpgrade;
+      assert.ok(diagnostic?.status === 'refused');
+      assert.match(diagnostic.message, /lineage contains a cycle/u);
+      const status = await service.service.status();
+      assert.equal(
+        status.upgradeRefusal?.code,
+        'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+      );
+      assert.equal(status.activeReleaseId, runtime.activeReleaseId);
+      assert.equal(status.historyUnavailable, true);
+    } finally {
+      await service.close();
+      await runtime.close();
+    }
+  } finally {
+    await pool.query(
+      'UPDATE platform.customization_upgrades SET base_release_id=$1 WHERE upgrade_id=$2',
+      [original.base_release_id, id],
+    );
+    await pool.query(
+      `ALTER TABLE platform.customization_upgrades ADD CONSTRAINT customization_upgrades_binding ${constraint}`,
+    );
+    await pool.query(
+      'ALTER TABLE platform.customization_upgrades ENABLE RULE customization_upgrades_reject_update',
+    );
   }
 }

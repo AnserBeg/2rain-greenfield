@@ -197,7 +197,9 @@ export class PostgresReleaseApprovalService {
 
   async createApproval(
     context: TrustedRequestContext,
-    command: CreateReleaseApprovalCommand,
+    command: CreateReleaseApprovalCommand & {
+      readonly customizationUpgradeId?: MintedUuid;
+    },
   ): Promise<CreatedReleaseApproval> {
     validateCommandIdentity(context, command);
     const decidedAt = validNow(this.now());
@@ -275,7 +277,8 @@ export class PostgresReleaseApprovalService {
            rollout_id,
            decided_at,
            expires_at,
-           expiry_policy_version
+           expiry_policy_version,
+           customization_upgrade_id
          )
          SELECT $1,
                 $2,
@@ -318,7 +321,8 @@ export class PostgresReleaseApprovalService {
                 $12,
                 $13,
                 $14,
-                $15
+                $15,
+                $17
            FROM platform.release_activation_preparations AS preparation
            JOIN platform.transition_preparation_receipts AS receipt
              ON receipt.tenant_id = preparation.tenant_id
@@ -346,6 +350,7 @@ export class PostgresReleaseApprovalService {
           expiresAt,
           APPROVAL_EXPIRY_POLICY_VERSION,
           command.preparationId,
+          command.customizationUpgradeId ?? null,
         ],
       );
       const approvalRow = requiredRow(
