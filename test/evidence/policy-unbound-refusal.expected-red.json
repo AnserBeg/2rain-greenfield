@@ -229,7 +229,7 @@
     {
       "name": "recorded-revision-binding-narrowing-removed",
       "claim": "Narrowing checked-in evaluator bindings to a recorded revision's own census prevents current active bindings from being treated as implementation evidence for permissions an older revision did not declare.",
-      "file": "apps/web/scripts/unbound-permission-acknowledgement.ts",
+      "file": "packages/compiler/src/protocol.ts",
       "original": "          evaluatorBindings: acknowledgement.evaluatorBindings.filter((entry) =>\n            declaredPermissionIds.has(entry.permissionId),\n          ),",
       "replacement": "          evaluatorBindings: acknowledgement.evaluatorBindings,",
       "test": {
@@ -250,7 +250,7 @@
     {
       "name": "recorded-revision-acknowledgement-narrowing-removed",
       "claim": "Narrowing legacy acknowledgement entries to a recorded revision's census is load-bearing on the truncation route: without it, a valid older prefix is refused as stale against a newer listed permission.",
-      "file": "apps/web/scripts/unbound-permission-acknowledgement.ts",
+      "file": "packages/compiler/src/protocol.ts",
       "original": "    entries: acknowledgement.entries.filter((entry) =>\n      declaredPermissionIds.has(entry.permissionId),\n    ),",
       "replacement": "    entries: acknowledgement.entries,",
       "test": {
