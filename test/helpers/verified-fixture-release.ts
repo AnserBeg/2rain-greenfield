@@ -1,3 +1,13 @@
+import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '@north-star/postgres-provider/inventory-provider-error-mappings';
+import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/inventory-posting-capability-executor';
+import { FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/fulfillment-capability-executor';
+import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/receiving-capability-executor';
+import { RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/receivables-capability-executor';
+import { PAYABLES_CAPABILITY_EXECUTOR_FACTORY } from '@north-star/postgres-provider/payables-capability-executor';
+import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '@north-star/postgres-provider/purchase-order-approval-executor';
+import { PostgresImmutableReleaseRepository } from '../../packages/postgres-provider/src/release-repository.js';
+import { PostgresReleaseVerificationService } from '../../packages/postgres-provider/src/release-verification-service.js';
+import type { CompileSuccess } from '../../packages/compiler/src/index.js';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import type pg from 'pg';
@@ -20,6 +30,64 @@ import {
   readPointer,
   trustedContext,
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
+
+const CAPABILITY_EXECUTOR_FACTORIES = Object.freeze([
+  INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+  RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+  FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY,
+  RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY,
+  PAYABLES_CAPABILITY_EXECUTOR_FACTORY,
+  PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY,
+]);
+
+// Verification runs the release's declared scenarios before the fixture
+// issues a genuine approval and activates the admitted artifacts.
+export async function activateInventoryFixture(
+  admin: pg.Pool,
+  runtime: pg.Pool,
+  context: TrustedRequestContext,
+  releaseId: MintedUuid,
+  compiledRelease: CompileSuccess,
+): Promise<void> {
+  const repository = new PostgresImmutableReleaseRepository(runtime);
+  if (!(await repository.getTenantRelease(context, releaseId))) {
+    const result = await admin.query<{
+      app_package_revision_id: MintedUuid;
+      verification_evidence_id: MintedUuid;
+    }>(
+      `SELECT app_package_revision_id, verification_evidence_id FROM platform.tenant_releases
+        WHERE tenant_id=$1 AND environment_id=$2 AND release_id=$3`,
+      [context.tenantId, context.environmentId, releaseId],
+    );
+    const row = result.rows[0];
+    assert.ok(row);
+    await new PostgresReleaseVerificationService(
+      runtime,
+      INVENTORY_PROVIDER_ERROR_MAPPINGS,
+      CAPABILITY_EXECUTOR_FACTORIES,
+    ).executeSemanticCandidateAndPersist(context, {
+      releaseId,
+      compiledRelease,
+      evidenceId: row.verification_evidence_id,
+    });
+    await repository.registerTenantRelease(context, {
+      releaseId,
+      compiledRelease,
+      appPackageRevisionId: row.app_package_revision_id,
+      verificationEvidenceId: row.verification_evidence_id,
+      tenantId: context.tenantId,
+      environmentId: context.environmentId,
+      createdBy: context.principalId,
+    });
+  }
+  await activateFixtureRelease(
+    admin,
+    runtime,
+    context.tenantId,
+    context.environmentId,
+    releaseId,
+  );
+}
 
 export async function activateFixtureRelease(
   admin: pg.Pool,

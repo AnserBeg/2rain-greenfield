@@ -1526,13 +1526,20 @@ test(
             await restarted.close();
           }
           const predecessorReceipt = (
-            await pool.query<{ verification_receipt_id: string }>(
-              'SELECT verification_receipt_id FROM platform.release_activation_verification_receipts WHERE tenant_id=$1 AND environment_id=$2 AND activated_release_id=$3 AND fence=$4',
+            await pool.query<{
+              verification_receipt_id: string;
+              fence: string;
+            }>(
+              `SELECT proof.verification_receipt_id, proof.fence FROM platform.release_activation_verification_receipts AS proof
+                JOIN platform.release_approvals AS approval USING (tenant_id, environment_id)
+               WHERE proof.tenant_id=$1 AND proof.environment_id=$2 AND proof.activated_release_id=$3
+                 AND approval.activation_attempt_id=$4 AND approval.expected_pointer_id=proof.pointer_id
+                 AND approval.expected_release_id=proof.activated_release_id AND approval.expected_fence=proof.fence`,
               [
                 runtime.identity.tenantId,
                 runtime.identity.environmentId,
                 upgrade.sourceReleaseId,
-                sourceFence,
+                approval.activationAttemptId,
               ],
             )
           ).rows[0]!;
@@ -1550,7 +1557,10 @@ test(
           } finally {
             await pool.query(
               'UPDATE platform.release_activation_verification_receipts SET fence=$2 WHERE verification_receipt_id=$1',
-              [predecessorReceipt.verification_receipt_id, sourceFence],
+              [
+                predecessorReceipt.verification_receipt_id,
+                predecessorReceipt.fence,
+              ],
             );
             await pool.query(
               'ALTER TABLE platform.release_activation_verification_receipts ENABLE RULE release_activation_verification_receipts_reject_update',

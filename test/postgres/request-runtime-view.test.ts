@@ -45,7 +45,6 @@ import {
   loadMigrations,
   runMigrations,
 } from '../../packages/postgres-provider/src/migrations.js';
-import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
 import {
   PostgresRequestRuntimeViewService,
   RequestRuntimeViewLoadError,
