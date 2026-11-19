@@ -19,6 +19,28 @@ import {
   type ModelAdapter,
 } from '../../packages/operations-agent/src/index.js';
 
+import {
+  assistantRoute,
+  DEFAULT_ANTHROPIC_MODEL,
+  SONNET_MODEL,
+} from '../../packages/operations-agent/src/anthropic-model.js';
+
+test('the measured create route is independent of the module and honours overrides', () => {
+  assert.deepEqual(assistantRoute('Create a delivery slip named Ridge.'), {
+    modelId: SONNET_MODEL,
+    effort: 'low',
+  });
+  for (const text of ['What is its name?', 'Create a slip then post it.'])
+    assert.deepEqual(assistantRoute(text), {
+      modelId: DEFAULT_ANTHROPIC_MODEL,
+      effort: 'high',
+    });
+  assert.deepEqual(assistantRoute('Create a slip.', 'chosen'), {
+    modelId: 'chosen',
+    effort: 'high',
+  });
+});
+
 const PLANTED = 'sk-planted-test-value-0123456789';
 
 test('the model sees exactly the compiled five tools, in order', () => {
@@ -333,4 +355,32 @@ test('task 3 rule v2: a paid invoice may be named as paid, never as unpaid', () 
       (failure) => /52.5/u.test(failure),
     ),
   );
+});
+
+test('switching model prices retains the spend, including subsequent expensive turns', () => {
+  const original = new SpendMeter(
+    { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 },
+    1,
+  );
+  const fast = original.atPrices({
+    input: 2,
+    output: 10,
+    cacheRead: 0.1,
+    cacheWrite: 2.5,
+  });
+  fast.charge({
+    inputTokens: 200_000,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  });
+  assert.equal(original.usd, 0.4);
+  assert.equal(original.outputBudget(130_000), 0);
+  original.charge({
+    inputTokens: 150_000,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  });
+  assert.equal(fast.exhausted(), true);
 });
