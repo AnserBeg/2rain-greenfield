@@ -236,8 +236,12 @@ workflow projection, evidence or added floor for these releases.
 
 ## Migration
 
-Assign the single forward migration the next free number at merge after
-CUSTOMIZE-4. Assign the reader floor at merge after the latest allocated rung. The
+Follow the migration numbering rule. At merge time, fetch `origin/main` and
+assign the single forward migration the next free number after its highest
+migration. Regenerate the schema snapshot and migration-list tests and rerun CI.
+Fetch again immediately before pushing `main` and repeat if another migration
+landed. Coordinate with other lanes so only one migration merge proceeds at a
+time. Assign the reader floor at merge after the latest allocated rung. The
 migration declares these relations in `platform`:
 
 | Table | Responsibility |

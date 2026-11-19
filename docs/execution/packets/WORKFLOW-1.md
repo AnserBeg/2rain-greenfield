@@ -1,6 +1,6 @@
 # WORKFLOW-1 — goods receipt workflows
 
-Status — slice 1 integrated at `8ffab635`. Slice 2 passed all 16 hosted CI jobs at `0e1e581c` and awaits the migration sequence in ADR-0073. The migration and verified activation receipt hook are Critical. The orchestrator owns the trunk read and slice 3 authorization.
+Status — slice 1 integrated at `8ffab635`. Slice 2 passed all 16 hosted CI jobs at `0e1e581c`. Integration requires fresh CI after synchronization with `main`. The migration and verified activation receipt hook are Critical. The orchestrator owns the trunk read and slice 3 authorization.
 
 ## Claims
 
@@ -28,8 +28,8 @@ Status — slice 1 integrated at `8ffab635`. Slice 2 passed all 16 hosted CI job
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WORKFLOW-1",
-  "base": "b62cbb9c753ab62fde2a46a7a028ff217fbd4f46",
-  "head": "0b32c7636620be778e710b090c7acf46b3862232",
+  "base": "81ba7405e7512a806882f9ea3cff51af8c7115d9",
+  "head": "b361c9848932c74050014e0bcd0d50073d999674",
   "changedPaths": [
     "db/migrations/0036_workflow_substrate.sql",
     "db/schema.snapshot.json",
