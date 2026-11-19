@@ -1,6 +1,7 @@
 import {
   FormulaValidationRuleDefinitionSchema,
   OperationRoleKeySchema,
+  type FormulaValidationRule,
 } from '@north-star/canonical-model';
 import { z } from 'zod';
 
@@ -138,6 +139,9 @@ const saveListView = z.strictObject({
     .max(3),
 });
 
+const validationRule: z.ZodType<FormulaValidationRule> =
+  FormulaValidationRuleDefinitionSchema;
+
 export const CustomizationPatchSchema = z.discriminatedUnion('kind', [
   addRecordType,
   addField,
@@ -146,7 +150,7 @@ export const CustomizationPatchSchema = z.discriminatedUnion('kind', [
   saveListView,
   z.strictObject({
     kind: z.literal('addValidation'),
-    rule: FormulaValidationRuleDefinitionSchema,
+    rule: validationRule,
   }),
   z.strictObject({
     kind: z.literal('narrowPermission'),
