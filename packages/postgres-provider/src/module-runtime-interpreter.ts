@@ -787,7 +787,7 @@ async function prepareMutation(
   const formula = request.view.projections.formulaRule;
   const bindings = validationBindingsFor(request, input);
   const pinnedBusinessDate =
-    formula && verifying
+    formula && verifying && bindings.length > 0
       ? formulaVerificationBusinessDate(formula.payload)
       : null;
   if (kind === 'createRecordEffect') {

@@ -11,6 +11,7 @@ import { OperationsAgentSession } from '../../packages/operations-agent/src/sess
 import { COMPANY, worldOver } from '../agent/agent-world.js';
 import {
   archivedRuntimeRead,
+  assertArchivedTenantEnvelope,
   withArchivedCustomizationRuntime,
 } from '../helpers/archived-customization-runtime.js';
 import {
@@ -70,6 +71,7 @@ test(
           await withArchivedCustomizationRuntime(
             '61c8afb1dd760c854bc5bc33890f1e85fc2a0e99',
             async (run) => {
+              await assertArchivedTenantEnvelope(run);
               const read = () =>
                 archivedRuntimeRead(run, {
                   databaseUrl: options.databaseUrl,

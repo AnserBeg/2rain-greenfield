@@ -185,6 +185,10 @@ test('Customize shows exact margin on Items and the item page and removes it on 
         await page
           .getByRole('button', { name: 'Approve', exact: true })
           .click({ timeout: 180_000 });
+        await expect(page.locator('[data-customize-screen]')).toContainText(
+          'Activate now',
+          { timeout: 180_000 },
+        );
         await page
           .getByRole('button', { name: 'Activate now' })
           .click({ timeout: 180_000 });
