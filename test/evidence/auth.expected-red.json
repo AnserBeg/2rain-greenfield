@@ -24,8 +24,8 @@
       "name": "unknown-permission-allowed",
       "claim": "An unknown permission contract must return DENY before consulting grants.",
       "file": "packages/postgres-provider/src/current-policy.ts",
-      "original": "    if (!binding || scope.status === 'invalid') {\n      return Object.freeze({\n        decision: 'DENY' as const,",
-      "replacement": "    if (!binding || scope.status === 'invalid') {\n      return Object.freeze({\n        decision: 'ALLOW' as const,",
+      "original": "    if (!binding || missingOperation || scope.status === 'invalid') {\n      return Object.freeze({\n        decision: 'DENY' as const,",
+      "replacement": "    if (!binding || missingOperation || scope.status === 'invalid') {\n      return Object.freeze({\n        decision: 'ALLOW' as const,",
       "test": {
         "files": ["test/postgres/current-policy.test.ts"],
         "namePattern": "current policy evaluates live grants and scope"

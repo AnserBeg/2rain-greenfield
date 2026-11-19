@@ -356,6 +356,7 @@ export interface CompiledSurfaceOperationBinding {
   readonly intent: SurfaceOperationIntent;
   readonly label: string;
   readonly operationId: string;
+  readonly roleRestricted?: true;
   readonly precondition: Readonly<
     Record<string, RuntimeViewContract.ImmutableJsonValue>
   >;
@@ -630,6 +631,7 @@ function bindSurfaceData(
         intent: operation.intent,
         label: operation.label ?? operationLabel(operation.operationId),
         operationId: operation.operationId,
+        ...(value.excludedRoleKeys ? { roleRestricted: true as const } : {}),
         precondition: operation.precondition,
         systemInputArgumentKey: operation.systemInputArgumentKey,
       }),

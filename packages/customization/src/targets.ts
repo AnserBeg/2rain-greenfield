@@ -1,3 +1,4 @@
+import { isNarrowableOperationId } from '@north-star/canonical-model';
 import {
   CUSTOMIZABLE_FIRST_PARTY_ENTITY_LOCALS,
   isTenantId,
@@ -13,6 +14,16 @@ import {
  */
 export interface CustomizationTargets {
   readonly metricLists?: readonly MetricListTarget[];
+  readonly permissionRoleKeys?: readonly string[];
+  readonly permissionRoleLabels?: Readonly<Record<string, string>>;
+  readonly permissionRestrictions?: readonly {
+    readonly operationId: string;
+    readonly roleKey: string;
+  }[];
+  readonly permissionActions?: readonly {
+    readonly id: string;
+    readonly label: string;
+  }[];
   readonly choiceFields: readonly {
     readonly fieldId: string;
     readonly label: string;
@@ -74,6 +85,8 @@ type Json = Record<string, unknown>;
 export function customizationTargets(definition: {
   readonly entities: readonly Json[];
   readonly fields: readonly Json[];
+  readonly operations?: readonly Json[];
+  readonly operationRoleNarrowings?: CustomizationTargets['permissionRestrictions'];
   readonly queries: readonly Json[];
   readonly surfaces: readonly Json[];
 }): CustomizationTargets {
@@ -276,6 +289,28 @@ export function customizationTargets(definition: {
         .sort((left, right) => left.label.localeCompare(right.label))
     : [];
   return Object.freeze({
+    ...(definition.operationRoleNarrowings && {
+      permissionRestrictions: definition.operationRoleNarrowings,
+    }),
+    ...(definition.operations && {
+      permissionActions: definition.operations
+        .filter(
+          (operation) =>
+            operation.lifecycle === 'active' &&
+            isNarrowableOperationId(String(operation.operationId)),
+        )
+        .map((operation) => ({
+          id: String(operation.operationId),
+          label: String(
+            operation.label ??
+              String(operation.operationId)
+                .split(':operation.')
+                .at(-1)!
+                .replaceAll('_', ' '),
+          ),
+        }))
+        .sort((left, right) => left.label.localeCompare(right.label)),
+    }),
     choiceFields,
     forms,
     lists,

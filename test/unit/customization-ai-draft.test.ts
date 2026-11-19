@@ -90,6 +90,32 @@ test('a plain-English request becomes exactly the typed patch the model proposed
   assert.match(seen[0]!.system, /Never answer in text/u);
 });
 
+test('the scripted assistant uses the exact role and operation for a restriction', async () => {
+  const roleKey = 'warehouse-clerk';
+  const id = 'northstar.app:operation.purchase_order_close';
+  const change = {
+    kind: 'narrowPermission',
+    roleKey,
+    target: { kind: 'operation', id },
+  };
+  const seen: { system: string; toolNames: string[]; turns: number }[] = [];
+  const result = await draftPatchFromRequest(
+    scripted([{ toolInput: change }], seen),
+    'Keep warehouse clerks from closing a purchase order.',
+    {
+      ...targets,
+      permissionRoleKeys: [roleKey],
+      permissionActions: [{ id, label: 'Close purchase order' }],
+    },
+  );
+  assert.match(seen[0]!.system, /warehouse-clerk/u);
+  assert.match(
+    seen[0]!.system,
+    /northstar\.app:operation\.purchase_order_close — Close purchase order/u,
+  );
+  assert.deepEqual(result.status === 'parsed' && result.patch, change);
+});
+
 test('the scripted assistant drafts a Today metric from the declared list measures', async () => {
   const definition = normalizeApplicationPackage(
     JSON.parse(readFileSync('apps/web/release/app.authored.json', 'utf8')),

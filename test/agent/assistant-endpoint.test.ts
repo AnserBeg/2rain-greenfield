@@ -28,7 +28,10 @@ import {
 } from '../../packages/operations-agent/src/index.js';
 import { createHash } from 'node:crypto';
 
-import { compiledAppView } from './compiled-view.js';
+import {
+  authenticatedCompiledAppEntry,
+  compiledAppView,
+} from './compiled-view.js';
 
 const NS = 'northstar.app';
 const RECORD = '0d9c6f2e-3a1b-4c5d-8e7f-001122334455';
@@ -841,7 +844,7 @@ test('X15: the suggested customize command quotes the request as one shell word;
   const { createSurfaceRuntimeServer } =
     await import('../../apps/web/src/app-server.js');
   const page = createSurfaceRuntimeServer(
-    { run: (_r: unknown, work: (v: unknown) => unknown) => work({}) } as never,
+    await authenticatedCompiledAppEntry(),
     {} as never,
     null,
     () =>
