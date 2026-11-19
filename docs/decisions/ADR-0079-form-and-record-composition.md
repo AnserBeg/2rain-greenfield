@@ -123,8 +123,9 @@ distinct hues, labels and glyphs. [Ledger tokens](../design/ledger-spec.md) · [
 Use DOCS-1’s scoped, scanned and sanitized PNG/JPEG asset version for the logo. Validate
 scope and admission before activation and recheck access when serving the asset. The
 company display name remains visible alongside the logo. For a generated document,
-resolve the issuing company from its governed record under the same
-pinned release as the template and data. Pass the resolved name, checked bytes and print
+resolve the issuing company through the template’s governed source under the same
+pinned release as the data. A shared record needs a declared, authorized issuer binding
+to generate a company-branded document. Pass the resolved name, checked bytes and print
 colours from the light palette to DOCS-1’s renderer. Preview and generation must agree.
 A configured asset that is missing, quarantined or unauthorized refuses generation.
 Record the brand revision, logo digest and palette version with the document version.
@@ -162,14 +163,19 @@ source release active until the owner reviews a fresh draft. Admit each kind to 
 replay only after reproducing its original release root. Pointer rollback uses the
 verified compatible predecessor and restores its presentation. [ADR-0074](ADR-0074-formula-rule-and-workflow-projection-admission.md)
 
-Use optional v6 declarations in the existing Surface family. The compiler raises the
-**mandatory surface-manifest reader floor to 29** for the first layout-bearing release.
-Main serves through 26, WORKFLOW-1 reserves 27 and DOCS-1 reserves 28. The release floor
-is the maximum owed by its features. Since the current reader advertises a scalar
-maximum, a binary claiming 29 must also honor or explicitly refuse every unsupported
-lower-rung feature before serving. Prove this on mixed releases as well as layout alone.
-Allocate the next free higher floor when pop-ups and then branding ship, so even a
-layout-only reader refuses those releases. Verify both directions between declarations,
+Use optional v6 declarations in the existing Surface family. Each implementation slice
+raises the **mandatory surface-manifest reader floor** for releases declaring its feature.
+The proposed layout rung is **29 if workflow and file fields land at 27 and 28**. On
+main at `6b2d28da` the implemented maximum is 26. ADR-0078’s Fable amendment assigns
+numbers in integration order. At each executable merge, fetch main and take the next
+rung above the implemented maximum. Regenerate affected artifacts and tests, run CI,
+and fetch again before pushing. If the maximum moved, renumber and repeat. This docs
+merge reserves no rung. [ADR-0078, surface admission](ADR-0078-governed-documents-files-templates-and-signatures.md#customize-and-surface-admission)
+
+The release floor is the maximum owed by its features. A serving binary claiming a rung
+must implement every lower rung. Prove compatibility on mixed releases as well as layout
+alone. Allocate a fresh rung each for pop-ups and branding, so even a layout-only
+reader refuses those releases. Verify both directions between declarations,
 compiled content, resolved consumer bindings and advertised requirements. Run the
 actual preceding serving reader against each declaring release and observe refusal
 before serving any request. Also prove missing bindings and understated floors refuse.

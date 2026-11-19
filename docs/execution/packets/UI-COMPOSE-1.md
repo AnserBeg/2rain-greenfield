@@ -8,7 +8,7 @@ Slice 0 is a docs-only proposal. Implementation awaits the orchestrator’s Fabl
 2. A custom button opens one native Task with a full-page fallback. Its bound target supplies its rules, confirmation and approval requirements.
 3. A company brand revision supplies the Ledger palette, display name and governed logo for both the shell and DOCS-1 generation.
 4. Append versioned patches with stable IDs and source expectations. A moved field can break an upgrade even when its ID still exists.
-5. The proposed first surface floor is 29. Predecessor-reader refusal and release reproduction are gates for implementation.
+5. Layout takes the next implemented surface rung at merge, 29 if workflow and file fields land at 27 and 28. This follows the DOCS-1 Fable ruling at `6b2d28da`. Predecessor-reader refusal and release reproduction gate implementation.
 
 ## Slices
 
