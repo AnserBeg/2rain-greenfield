@@ -1430,6 +1430,15 @@ export async function submitSurfaceRuntimeIntent(
               proposedValues: proposedValues as Readonly<
                 Record<string, unknown>
               >,
+              ...(input.relations &&
+              typeof input.relations === 'object' &&
+              !Array.isArray(input.relations)
+                ? {
+                    proposedRelations: input.relations as Readonly<
+                      Record<string, unknown>
+                    >,
+                  }
+                : {}),
             },
           },
         );

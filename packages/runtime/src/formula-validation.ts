@@ -18,6 +18,9 @@ interface ValidationMutation {
   readonly values: RawValues;
   readonly previousValues?: RawValues;
   readonly updatedFieldIds?: readonly string[];
+  readonly previousRelationKeys?: Readonly<Record<string, string | null>>;
+  readonly relationKeys?: Readonly<Record<string, string | null>>;
+  readonly pathValues?: Readonly<Record<string, RawValues | null>>;
 }
 
 interface RuleRefusal {
@@ -78,7 +81,13 @@ export function observeValidationRefusals(
   for (const binding of bindings) {
     const rule = binding.rule;
     if (!rule.boundOperationIds.includes(mutation.operationId)) continue;
-    let watchedValueChanged = mutation.previousValues === undefined;
+    let watchedValueChanged =
+      mutation.previousValues === undefined ||
+      (binding.watchedRelationIds ?? []).some(
+        (relationId) =>
+          (mutation.previousRelationKeys?.[relationId] ?? null) !==
+          (mutation.relationKeys?.[relationId] ?? null),
+      );
     const resolved = new Map<string, ResolvedOperand>();
     for (const [fieldId, type] of Object.entries(binding.watchedFields)) {
       const next = readField(mutation.values, fieldId, type);
@@ -96,7 +105,20 @@ export function observeValidationRefusals(
     if (!watchedValueChanged) continue;
 
     const evaluated = inspectValidation(rule.predicate, (operand) => {
-      if (operand.kind === 'path') return unreadable;
+      if (operand.kind === 'path') {
+        const [relationId] = operand.relationIds;
+        const path = binding.paths?.find(
+          (candidate) =>
+            candidate.relationId === relationId &&
+            candidate.fieldId === operand.fieldId,
+        );
+        if (!path || operand.relationIds.length !== 1) return unreadable;
+        const related = mutation.pathValues?.[path.relationId];
+        if (related === null) return { status: 'absent' };
+        return related
+          ? readField(related, path.fieldId, path.fieldType)
+          : unreadable;
+      }
       if (operand.fieldId === BUSINESS_DATE_FIELD_ID) {
         return mutation.businessDate === null
           ? unreadable

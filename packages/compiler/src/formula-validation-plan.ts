@@ -4,10 +4,15 @@ import {
 } from '../../canonical-model/src/formula-validation-bindings.js';
 import type { VersionedNormalizedApplicationPackage } from '../../canonical-model/src/schemas.js';
 
-import { synthesizeLiteralRows } from './formula-validation-examples.js';
+import {
+  synthesizeLiteralRows,
+  synthesizeRelatedRows,
+} from './formula-validation-examples.js';
 import {
   proveJointValidationWitnesses,
   type JointValidationWitnesses,
+  type ValidationRelatedValues,
+  type ValidationWitness,
 } from './formula-validation-witness.js';
 import { hashCanonical } from './hash.js';
 
@@ -79,6 +84,8 @@ export function compileLiteralFormulaRules(
         };
       permissionIds.add(operation.permission.targetId);
     }
+    for (const path of result.binding.paths ?? [])
+      permissionIds.add(path.readPermissionId);
     const fieldClassifications = Object.fromEntries(
       Object.keys(result.binding.watchedFields).map((fieldId) => [
         fieldId,
@@ -115,58 +122,41 @@ export function compileLiteralFormulaRules(
     const updates = ids.filter(
       (id) => operations.get(id)?.effect.kind === 'updateRecordEffect',
     );
-    let createFixture: (typeof rows)[number] | undefined;
-    for (const operationId of creates) {
-      const proof = proveJointValidationWitnesses(
-        {
-          operationId,
-          kind: 'create',
-          businessDate: VERIFICATION_BUSINESS_DATE,
-        },
+    const related = synthesizeRelatedRows(
+      entityBindings,
+      revision.fields,
+      VERIFICATION_BUSINESS_DATE,
+    );
+    const fixtures = entityBindings.some(({ paths }) => paths?.length)
+      ? related
+      : [undefined];
+    let lastRefusal:
+      Extract<FormulaValidationPlan, { status: 'refused' }> | undefined;
+    let proved = false;
+    for (const fixture of fixtures) {
+      const result = proveInvocations(
         entityBindings,
-        rows.map((values) => ({ values })),
+        creates,
+        updates,
+        rows,
+        fixture,
       );
-      if (proof.status === 'unproved') {
-        return {
-          status: 'refused',
-          subjectId: proof.ruleIds[0] ?? operationId,
-          message:
-            'The compiler could not prove both a satisfying and violating create example.',
-        };
+      if (result.status === 'proved') {
+        witnesses.push(...result.witnesses);
+        proved = true;
+        break;
       }
-      createFixture ??= proof.satisfying.values;
-      witnesses.push(proof);
+      lastRefusal = result;
     }
-    createFixture ??= rows[0];
-    if (!createFixture) {
-      return {
-        status: 'refused',
-        subjectId: ids[0] ?? entityBindings[0]!.rule.ruleId,
-        message:
-          'The compiler could not synthesize a valid fixture for this record type.',
-      };
-    }
-    const previousValues = createFixture;
-    for (const operationId of updates) {
-      const proof = proveJointValidationWitnesses(
-        {
-          operationId,
-          kind: 'update',
-          businessDate: VERIFICATION_BUSINESS_DATE,
-        },
-        entityBindings,
-        rows.map((values) => ({ previousValues, values })),
+    if (!proved)
+      return (
+        lastRefusal ?? {
+          status: 'refused',
+          subjectId: ids[0] ?? entityBindings[0]!.rule.ruleId,
+          message:
+            'The compiler could not synthesize a visible related record fixture.',
+        }
       );
-      if (proof.status === 'unproved') {
-        return {
-          status: 'refused',
-          subjectId: proof.ruleIds[0] ?? operationId,
-          message:
-            'The compiler could not prove both a satisfying and violating changed-field update.',
-        };
-      }
-      witnesses.push(proof);
-    }
   }
 
   return {
@@ -179,4 +169,64 @@ export function compileLiteralFormulaRules(
       witnesses,
     },
   };
+}
+
+function proveInvocations(
+  bindings: readonly BoundFormulaValidation[],
+  creates: readonly string[],
+  updates: readonly string[],
+  rows: readonly ValidationWitness['values'][],
+  relatedValues?: ValidationRelatedValues,
+):
+  | Extract<FormulaValidationPlan, { status: 'refused' }>
+  | {
+      readonly status: 'proved';
+      readonly witnesses: readonly ProvedWitnesses[];
+    } {
+  const witnesses: ProvedWitnesses[] = [];
+  const candidates = rows.map((values) => ({
+    values,
+    ...(relatedValues ? { relatedValues } : {}),
+  }));
+  let createFixture: ValidationWitness['values'] | undefined;
+  for (const operationId of creates) {
+    const proof = proveJointValidationWitnesses(
+      { operationId, kind: 'create', businessDate: VERIFICATION_BUSINESS_DATE },
+      bindings,
+      candidates,
+    );
+    if (proof.status === 'unproved')
+      return {
+        status: 'refused',
+        subjectId: proof.ruleIds[0] ?? operationId,
+        message:
+          'The compiler could not prove both a satisfying and violating create example.',
+      };
+    createFixture ??= proof.satisfying.values;
+    witnesses.push(proof);
+  }
+  const previousValues = createFixture ?? rows[0];
+  if (!previousValues)
+    return {
+      status: 'refused',
+      subjectId: creates[0] ?? updates[0] ?? bindings[0]!.rule.ruleId,
+      message:
+        'The compiler could not synthesize a valid fixture for this record type.',
+    };
+  for (const operationId of updates) {
+    const proof = proveJointValidationWitnesses(
+      { operationId, kind: 'update', businessDate: VERIFICATION_BUSINESS_DATE },
+      bindings,
+      candidates.map((candidate) => ({ ...candidate, previousValues })),
+    );
+    if (proof.status === 'unproved')
+      return {
+        status: 'refused',
+        subjectId: proof.ruleIds[0] ?? operationId,
+        message:
+          'The compiler could not prove both a satisfying and violating changed-field update.',
+      };
+    witnesses.push(proof);
+  }
+  return { status: 'proved', witnesses };
 }
