@@ -762,7 +762,6 @@ async function selectBootRelease(
       const source = releaseLineage[activeLineageIndex]!;
       const target = releaseLineage[targetIndex]!;
       const targetIdentity = lineage[targetIndex]!;
-      assertAgentOperationsPlannable(target);
       await ensureReleaseAdmitted(
         runtimePool,
         runtimeContext,
@@ -816,6 +815,7 @@ async function selectBootRelease(
           'rollback target does not reverse an exact compiled lineage edge',
         );
       }
+      assertAgentOperationsPlannable(target);
       await assertExactSwapTriggerEnabled(admin);
       const attemptId = await approveReleaseWithoutStorageTransition(
         runtimePool,
