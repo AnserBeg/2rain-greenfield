@@ -57,7 +57,12 @@ export const PAGE_BUDGETS: Readonly<Record<PageBudgetName, PageBudget>> =
     // snapshot, +5 statements and no transaction; home's tiles are the same
     // reads, answered once. A snapshot sends an identical statement once, so
     // the sales order detail's queues and its own five repeats cost nothing.
-    home: budget([4, 42, 6, 0], [0, 0, 0, 49]),
+    // INTERACT-1 slice 4: five To receive rows use the existing List page
+    // query in this snapshot: +1 statement and +1 record-surface binding.
+    // CI 44510567072 / job 135513434195 measured both warm loads at
+    // 4 transactions, 43 statements, 6 authorization reads, 0 repeats and
+    // 50 bindings. The registry-only formatting repair changes no reads.
+    home: budget([4, 43, 6, 0], [0, 0, 0, 50]),
     'purchase order list': budget([2, 35, 3, 0], [0, 0, 0, 92]),
     'purchase order detail': budget([2, 38, 3, 0], [0, 0, 0, 95]),
     'new purchase order': budget([2, 23, 3, 0], [0, 0, 0, 100]),
