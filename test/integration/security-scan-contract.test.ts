@@ -12,7 +12,13 @@ test('CI runs dependency and secret gates and always retains their evidence', ()
   assert.match(workflow, /^ {2}security:$/mu);
   assert.ok(workflow.includes('.github/scripts/run-security-scans.sh'));
   assert.ok(workflow.includes('SECURITY_EVIDENCE_DIR'));
-  assert.ok(workflow.includes('name: security-evidence-${{ github.sha }}'));
+  assert.match(workflow, /^ {8}history: \[ancestry, remainder\]$/mu);
+  assert.ok(workflow.includes('SECURITY_HISTORY_SCOPE: ${{ matrix.history }}'));
+  assert.ok(
+    workflow.includes(
+      'name: security-evidence-${{ matrix.history }}-${{ github.sha }}',
+    ),
+  );
   assert.ok(workflow.includes('path: test-results/security/'));
   assert.match(
     workflow,
