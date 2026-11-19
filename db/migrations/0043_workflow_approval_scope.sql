@@ -44,9 +44,20 @@ AS $$
          (r.tenant_id, r.environment_id, i.event_id, i.outbox_id)
      AND (event.release_id, event.release_content_hash) = (r.release_id, r.release_root)
      AND event.event_type = d.event_type
-     AND event.event_type = 'northstar.purchasing:event.receipt_posted'
-     AND event.action_id = 'northstar.purchasing:capability.receiving'
-     AND event.event_schema_version = 'northstar.purchasing-receipt-posted/v1'
+    JOIN platform.trust_outbox AS source
+      ON (source.tenant_id, source.environment_id, source.outbox_id, source.domain_event_id) =
+         (event.tenant_id, event.environment_id, event.outbox_id, event.domain_event_id)
+     AND (source.invocation_id, source.change_document_id, source.action_id) =
+         (event.invocation_id, event.change_document_id, event.action_id)
+     AND (source.release_id, source.release_content_hash, source.event_type, source.event_schema_version) =
+         (event.release_id, event.release_content_hash, event.event_type, event.event_schema_version)
+    JOIN platform.trust_action_invocations AS invocation
+      ON (invocation.tenant_id, invocation.environment_id, invocation.invocation_id, invocation.action_id) =
+         (event.tenant_id, event.environment_id, event.invocation_id, event.action_id)
+     AND (invocation.release_id, invocation.release_content_hash) = (event.release_id, event.release_content_hash)
+     AND invocation.outcome = 'SUCCEEDED'
+     AND invocation.policy_inputs #>> '{legalEntityId,representation}' = 'VALUE'
+     AND invocation.policy_inputs #>> '{legalEntityId,value}' = event.payload #>> '{legalEntityId,value}'
     JOIN platform.trust_business_change_documents AS change
       ON (change.tenant_id, change.environment_id, change.change_document_id) =
          (event.tenant_id, event.environment_id, event.change_document_id)
@@ -54,7 +65,6 @@ AS $$
          (event.invocation_id, event.outbox_id, event.domain_event_id)
      AND (change.release_id, change.release_content_hash, change.action_id) =
          (event.release_id, event.release_content_hash, event.action_id)
-     AND change.record_type = 'northstar.purchasing:record.goods_receipt'
     JOIN platform.tenant_releases AS release
       ON (release.tenant_id, release.environment_id, release.release_id, release.content_hash) =
          (r.tenant_id, r.environment_id, r.release_id, r.release_root)
