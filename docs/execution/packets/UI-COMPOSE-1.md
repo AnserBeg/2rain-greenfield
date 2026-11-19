@@ -19,7 +19,7 @@ The orchestrator accepted ADR-0079 with Fable’s amendments on 2026-11-19.
 
 ## Gates and test it yourself
 
-Five focused tests fail on the preceding main and pass on slice 1a. They exercise persistent inventory, the before-and-after approval view, ordered replay, protected blocks a generated Inspection with both reader requirements, and a calculated value whose read binding survives rearrangement. The PostgreSQL journey runs the preceding serving reader and compares complete tenant compiler envelopes. The browser journey uses the Vendor picker in its new section at desktop and compact widths.
+Five focused tests fail on the preceding main and pass on slice 1a. They exercise persistent inventory, the before-and-after approval view, ordered replay, protected blocks, a generated Inspection with both reader requirements, and a calculated value whose read binding survives rearrangement. The PostgreSQL journey runs the preceding serving reader and compares complete tenant compiler envelopes. The browser journey uses the Vendor picker in its new section at desktop and compact widths.
 
 In Customize, choose **Arrange a form or record page**, then the purchase order create form. Draft a section named **Delivery**, approve it and activate. Open the same arrangement and move **Vendor** into **Delivery**. Approve and activate. Open **Purchase orders → New**. Under **Delivery**, type a vendor name and select a result. Roll back the latest change to restore the vendor’s previous placement.
 
@@ -28,7 +28,7 @@ In Customize, choose **Arrange a form or record page**, then the purchase order 
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "UI-COMPOSE-1",
   "base": "014fea1641953e41e49ccb642b3faf27c094a1a8",
-  "head": "87221d8691da99f9bb55d368227851161a27393e",
+  "head": "525e47404bd2898b6691df3f08b12bfe05d9025c",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/document-editor.ts",
     "apps/web/src/ledger-styles.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-contract.ts",
