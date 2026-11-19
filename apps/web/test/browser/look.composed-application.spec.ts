@@ -239,7 +239,11 @@ async function requireLedgerParts(
   else await expect.soft(page.locator('.shell-menu > summary')).toBeVisible();
   const parts: Readonly<Record<Screen, readonly string[]>> = {
     // Searched from the top bar (round 3): no find box of its own.
-    home: ['.launcher-tiles .launcher-tile', '.shell-search input'],
+    home: [
+      '.launcher-tiles .launcher-tile',
+      '.shell-search input',
+      '.launcher-queue-preview',
+    ],
     'po-list': ['[data-declared-list]', '.list-controls'],
     po: [
       '.composition-header h1',
@@ -269,6 +273,19 @@ async function requireLedgerParts(
     await expect
       .soft(page.locator(selector).first(), `${screen} shows ${selector}`)
       .toBeAttached();
+  if (screen === 'home') {
+    const preview = page.getByRole('region', {
+      name: 'To receive',
+      exact: true,
+    });
+    const rows = preview.locator('tbody tr');
+    expect(await rows.count()).toBeGreaterThan(0);
+    expect(await rows.count()).toBeLessThanOrEqual(5);
+    await expect(rows.first().getByRole('link')).toHaveAttribute(
+      'href',
+      /purchase_order_detail.*record=/u,
+    );
+  }
 }
 
 /** Measure the painted text and controls as well as their enclosing sheets. */

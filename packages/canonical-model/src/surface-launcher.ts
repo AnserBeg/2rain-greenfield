@@ -64,6 +64,22 @@ export function validateSurfaceLaunchers(
         !list!.views.some((view) => view.viewId === tile.view)
       )
         fail(tile.tileId, "a launcher tile's view is one its List declares");
+      if (tile.preview) {
+        const page = surfaces.get(tile.preview.recordSurface);
+        const pageQuery = page && queries.get(page.dataSource.targetId);
+        const listQuery = target && queries.get(target.dataSource.targetId);
+        if (
+          page?.surfaceRole !== 'record' ||
+          page.lifecycle !== 'active' ||
+          !pageQuery ||
+          !listQuery ||
+          pageQuery.sourceEntity.targetId !== listQuery.sourceEntity.targetId
+        )
+          fail(
+            tile.tileId,
+            'a queue preview opens an active record page of its listed entity',
+          );
+      }
     }
 
     if (launcher.metrics) {
