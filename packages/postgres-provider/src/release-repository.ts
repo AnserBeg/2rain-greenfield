@@ -28,6 +28,12 @@ import {
   type ProjectionReference,
   type ReleaseManifestEnvelope,
 } from '@north-star/compiler';
+import { bindCalculatedDisplayField } from '../../canonical-model/src/calculated-display-bindings.js';
+import {
+  CALCULATED_DISPLAY_QUERY_READER,
+  parseCalculatedDisplayProjection,
+  projectCalculatedDisplay,
+} from '../../canonical-model/src/calculated-display-projection.js';
 import { bindLiteralValidation } from '../../canonical-model/src/formula-validation-bindings.js';
 import { parseFormulaValidationBindings } from '../../canonical-model/src/formula-validation-projection.js';
 import {
@@ -660,16 +666,23 @@ function verifyCompiledRelease(
         if (projectionPayloadBytes.length !== 1 || !payload) {
           throw new Error('invalid formula projection chunk count');
         }
-        const actual = parseFormulaValidationBindings(
-          decodeCanonicalObject(payload, 'PROJECTION_CHUNK_NOT_CANONICAL'),
+        const decoded = decodeCanonicalObject(
+          payload,
+          'PROJECTION_CHUNK_NOT_CANONICAL',
         );
+        const actual = {
+          rules: parseFormulaValidationBindings(decoded),
+          displays: Object.hasOwn(decoded, 'calculatedFields')
+            ? parseCalculatedDisplayProjection(decoded)
+            : [],
+        };
         if (canonicalize(actual) === canonicalize(formulaBindings)) continue;
       } catch {
         // Both malformed chunks and mismatched declarations fail admission.
       }
       throw integrity(
         'FORMULA_PROJECTION_CONTRACT_MISMATCH',
-        'the formula/rule projection does not bind the declared validation rules',
+        'the formula/rule projection disagrees with the declared validation rules or calculated displays',
       );
     }
   }
@@ -714,27 +727,31 @@ function verifyFormulaProjectionReference(
       ? JSON.parse(new TextDecoder().decode(revision.desiredState))
       : null;
   const definition =
-    isRecord(normalized) && Object.hasOwn(normalized, 'formulaRules')
+    isRecord(normalized) &&
+    (Object.hasOwn(normalized, 'formulaRules') ||
+      Object.hasOwn(normalized, 'calculatedDisplayFields'))
       ? parseNormalizedApplicationPackageJson(revision.desiredState)
       : null;
-  const declaring =
-    definition?.languageVersion === 'v6' && definition.formulaRules
-      ? definition
-      : null;
+  const declaring = definition?.languageVersion === 'v6' ? definition : null;
+  const rules = declaring?.formulaRules ?? [];
+  const displays = declaring?.calculatedDisplayFields ?? [];
   const references = manifest.projections.filter(
     ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.formulaRule,
   );
-  const operation = manifest.projections.find(
-    ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.operationCatalog,
-  );
-  const floor = operation?.requiredRuntimeCapability.minimumVersion ?? 0;
+  const floorOf = (id: string) =>
+    manifest.projections.find(({ familyId }) => familyId === id)
+      ?.requiredRuntimeCapability.minimumVersion ?? 0;
+  const operationFloor = floorOf(PROJECTION_FAMILY_IDS.operationCatalog);
+  const queryFloor = floorOf(PROJECTION_FAMILY_IDS.queryCatalog);
   const reference = references[0];
   if (
     references.length !== Number(Boolean(declaring)) ||
-    (declaring
-      ? floor !==
-        requiredFormulaValidationOperationReader(declaring.formulaRules!)
-      : floor >= LITERAL_VALIDATION_OPERATION_READER) ||
+    (rules.length
+      ? operationFloor !== requiredFormulaValidationOperationReader(rules)
+      : operationFloor >= LITERAL_VALIDATION_OPERATION_READER) ||
+    (displays.length
+      ? queryFloor !== CALCULATED_DISPLAY_QUERY_READER
+      : queryFloor >= CALCULATED_DISPLAY_QUERY_READER) ||
     (declaring &&
       (reference?.instanceId !==
         `${declaring.package.namespace}:projection.formula-rule` ||
@@ -746,17 +763,30 @@ function verifyFormulaProjectionReference(
   ) {
     throw integrity(
       'FORMULA_PROJECTION_CONTRACT_MISMATCH',
-      'the formula/rule declaration and mandatory operation reader floor disagree',
+      'the formula/rule declaration and mandatory reader floors disagree',
     );
   }
-  if (!declaring) return [];
-  return declaring.formulaRules!.map((rule) => {
-    const binding = bindLiteralValidation(rule, declaring);
-    if (binding.status === 'refused') {
-      throw integrity('FORMULA_PROJECTION_CONTRACT_MISMATCH', binding.message);
-    }
-    return binding.binding;
-  });
+  if (!declaring) return { rules: [], displays: [] };
+  return {
+    rules: rules.map((rule) => {
+      const binding = bindLiteralValidation(rule, declaring);
+      if (binding.status === 'refused')
+        throw integrity(
+          'FORMULA_PROJECTION_CONTRACT_MISMATCH',
+          binding.message,
+        );
+      return binding.binding;
+    }),
+    displays: displays.map((display) => {
+      const binding = bindCalculatedDisplayField(display, declaring);
+      if (binding.status === 'refused')
+        throw integrity(
+          'FORMULA_PROJECTION_CONTRACT_MISMATCH',
+          binding.message,
+        );
+      return projectCalculatedDisplay(binding.binding);
+    }),
+  };
 }
 
 function verifyReleaseManifestEnvelope(

@@ -1,4 +1,5 @@
 import { composedApplicationDefinition } from '../../packages/domain/src/app/builder.js';
+import { calculatedDisplayDraft } from '../../packages/customization/src/calculated-display-draft.js';
 import { platformModuleDefinition } from '../../packages/domain/src/platform/definition.js';
 import {
   fieldComparisonValidationDraft,
@@ -81,8 +82,54 @@ export function languageCoverageApplicationPackages() {
       }).rule,
     ],
   };
+  const valueType = { precision: 38, scale: 18, currency: 'CAD', unit: null };
+  const price = 'northstar.app:field.item_price_cad';
+  const cost = 'northstar.app:field.item_standard_cost_cad';
+  const itemList = 'northstar.app:surface.item_list';
+  const margin = calculatedDisplayDraft(
+    {
+      entityId: target.entityId,
+      label: target.label,
+      recordSurfaceId: 'northstar.app:surface.item_detail',
+      fields: [
+        { fieldId: price, label: 'Price (CAD)', valueType },
+        { fieldId: cost, label: 'Standard cost (CAD)', valueType },
+      ],
+      lists: [{ surfaceId: itemList, label: 'Items', fields: [price, cost] }],
+    },
+    {
+      label: 'Margin CAD',
+      operator: 'subtract',
+      leftFieldId: price,
+      rightFieldId: cost,
+      listSurfaceId: itemList,
+    },
+  ).field;
+  const displayFixture = {
+    ...application,
+    calculatedDisplayFields: [
+      margin,
+      {
+        ...margin,
+        fieldId: 'northstar.app:field.custom_item_price_multiple',
+        label: 'Twice the CAD price',
+        expression: {
+          ...margin.expression,
+          operator: 'multiply' as const,
+          right: {
+            kind: 'decimalLiteral' as const,
+            schemaVersion: 'v6' as const,
+            value: '2',
+            decimalType: { precision: 1, scale: 0, currency: null, unit: null },
+          },
+        },
+        resultType: { ...valueType, precision: 39 },
+      },
+    ],
+  };
   return [
     application,
+    displayFixture,
     platformModuleDefinition(),
     validationFixture,
     fieldComparisonFixture,

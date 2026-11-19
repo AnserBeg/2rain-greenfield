@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { SurfaceComposition } from '../../../packages/canonical-model/src/index.js';
+import { calculatedDisplaysForQuery } from '../../../packages/runtime/src/calculated-display.js';
 import {
   registeredSemanticQueryFromPinnedView,
   SEMANTIC_QUERY_REQUEST_VERSION,
@@ -145,6 +146,9 @@ export function compositionRelationTargets(
     'revision',
     ...definition.selections.map((selection) => selection.fieldId),
     ...Object.values(definition.readModel?.resultFields ?? {}),
+    ...calculatedDisplaysForQuery(view, definition.queryId).map(
+      ({ declaration }) => declaration.fieldId,
+    ),
   ]);
   return [
     ...new Set(

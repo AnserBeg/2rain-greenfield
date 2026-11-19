@@ -88,7 +88,7 @@
         {
           "file": "test/postgres/current-policy.test.ts",
           "name": "current policy evaluates live grants and scope under the non-admin runtime role",
-          "expected": "the directory only returns roles from the caller’s environment"
+          "expected": "the directory only returns roles from the caller\u2019s environment"
         }
       ]
     },
@@ -107,6 +107,24 @@
           "file": "test/postgres/customization-formulas.test.ts",
           "name": "a guarded location reads its declared parent under current policy and refuses a literal-only reader",
           "expected": "verification negative probe unexpectedly succeeded"
+        }
+      ]
+    },
+    {
+      "name": "calculated-display-multiplies-without-rounding",
+      "claim": "Decimal display multiplication preserves the full expanded scale.",
+      "file": "packages/canonical-model/src/calculated-display.ts",
+      "original": "  if (operator === 'multiply') return left * right;",
+      "replacement": "  if (operator === 'multiply') return left + right;",
+      "test": {
+        "files": ["test/unit/calculated-display.test.ts"],
+        "namePattern": "calculated display arithmetic keeps exact signed decimals at the propagated scale"
+      },
+      "kills": [
+        {
+          "file": "test/unit/calculated-display.test.ts",
+          "name": "calculated display arithmetic keeps exact signed decimals at the propagated scale",
+          "expected": "multiplication must preserve both factors and all 36 decimal places"
         }
       ]
     }

@@ -172,4 +172,6 @@ export const platformContract = Object.freeze({
   authority: 'canonical-model',
   product: 'greenfield-north-star-erp',
 });
+export { CalculatedDisplayFieldDefinitionSchema } from './schemas.js';
+export type { CalculatedDisplayField } from './calculated-display-schema.js';
 export type { FormulaValidationRule } from './formula-validation-schema.js';
