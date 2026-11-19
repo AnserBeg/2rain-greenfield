@@ -90,6 +90,33 @@ const singlePatchSchema = {
     label: { type: 'string' },
     fields: { type: 'array', items: fieldSchema },
     entity: { type: 'string' },
+    target: { type: 'string' },
+    required: { type: 'boolean' },
+    companyOwnership: { enum: ['entityOwned', 'tenantShared'] },
+    initial: { type: 'string' },
+    states: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          label: { type: 'string' },
+          role: { enum: ['success', 'attention', 'blocked', 'inProgress'] },
+        },
+        required: ['label'],
+      },
+    },
+    transitions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          from: { type: 'string' },
+          to: { type: 'string' },
+          label: { type: 'string' },
+        },
+        required: ['from', 'to', 'label'],
+      },
+    },
     field: fieldSchema,
     enumField: { type: 'string' },
     option: { type: 'string' },
@@ -140,9 +167,13 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
     `Answer ONLY by calling the ${DRAFT_CUSTOMIZATION_TOOL} tool, exactly once. Never answer in text.`,
     'The kinds, with exactly these keys:',
     `- changeSet {kind, patches}: two to ${String(MAX_CUSTOMIZATION_CHANGE_PATCHES)} patches in dependency order, reviewed and approved together. Do not nest change sets.`,
-    '- addRecordType {kind, label, fields:[{label, type, required?, options?}]}: a new kind of record with its own list, page and form. The first field is its name and must be type "text". type is one of text, number (whole number), date, yesNo, choice; a choice field lists options. At most 24 fields.',
+    '- addRecordType {kind, label, companyOwnership?, fields:[{label, type, required?, options?}]}: a new kind of record with its own list, page and form. The first field is its name and must be type "text". type is one of text, number (whole number), date, yesNo, choice; a choice field lists options. At most 24 fields. Use entityOwned for company-scoped documents or links to a company-owned target.',
     '- addField {kind, entity, field:{label, type, required?, options?}}: a new field on an existing record type. entity is one of the record type ids below.',
     '- addChoice {kind, enumField, option}: a new choice on a choice field. enumField is one of the choice field ids below.',
+    '- addLineTable {kind, entity, label, fields:[{label, type, required?, options?}]}: one child collection on a tenant record type, edited with the header. Include a text field naming a row.',
+    '- addLink {kind, entity, label, target, required?}: a create-time link from a tenant record type. Default is optional. Choose a target from the linkable types below or from an earlier patch in the change set.',
+    '- declareLifecycle {kind, entity, initial, states:[{label, role?}], transitions:[{from, to, label}]}: declare named states and actions on a tenant record type. Roles are success, attention, blocked, inProgress. Actions change the record’s own status only.',
+    'A record type created in this change set can be referenced by a later member as northstar.app:entity.custom_<label in lowercase with punctuation and spaces replaced by underscores>.',
     "- arrangeLayout {kind, surface, order?, hide?, relabel?}: reorder, hide or rename the columns of a list. surface is one of the list ids below; order, hide and relabel[].field use that list's column field ids.",
     'If any requested part needs an unsupported capability, call the tool with {kind: "unsupported", missingCapability: "<name the exact missing capability>"}. Never omit or approximate part of a request. For example, name "goods receipt event subscription" for starting an inspection automatically when goods are received.',
     'Write labels the way the person would read them, with an initial capital. Do not invent ids.',
@@ -150,6 +181,11 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
     'Record types you can add a field to:',
     ...targets.recordTypes.map(
       (entity) => `- ${entity.entityId} — ${entity.label}`,
+    ),
+    'Linkable record types:',
+    ...(targets.linkTargets ?? []).map(
+      (target) =>
+        `- ${target.entityId} — ${target.label}${target.companyOwned ? ' (company owned)' : ''}`,
     ),
     'Choice fields you can add a choice to:',
     ...(targets.choiceFields.length === 0

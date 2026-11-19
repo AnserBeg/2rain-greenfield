@@ -3,12 +3,112 @@ import { performance } from 'node:perf_hooks';
 import { expect, test } from '@playwright/test';
 
 import { startComposedApplication } from '../../../api/src/composition-root.js';
+import { worldOver } from '../../../../test/agent/agent-world.js';
+import { inspection, inspectionEntity, inspectionFields, inspectionLinks, inspectionLinkRecords, inspectionStates, inspectionTransitions } from '../../../../test/fixtures/inspection-customization.js';
 import {
   LINEAGE_INSTALL_VOLUME,
   withEphemeralPostgres,
 } from '../../../../test/helpers/postgres.js';
 
 const equipmentList = 'northstar.app:surface.custom_equipment_list';
+
+test('a person builds Goods Receipt Inspection with the Customize screen and uses the generated editor', async ({ page }) => {
+  test.setTimeout(900_000);
+  await withEphemeralPostgres('customize-inspection-browser', async ({ connection }) => {
+    const app = await startComposedApplication({
+      databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+      tenantSlug: 'customize-inspection-browser',
+      port: 0,
+      seedProfile: 'distributor',
+    });
+    try {
+      const { receipt } = await inspectionLinkRecords(worldOver(app.runtime, String(connection.database)));
+      const receiptNumber = String(receipt.values['northstar.app:field.goods_receipt_number']);
+      const publish = async () => {
+        await page.getByRole('button', { name: 'Approve', exact: true }).click({ timeout: 180_000 });
+        await page.getByRole('button', { name: 'Activate now' }).click({ timeout: 180_000 });
+        await expect(page.locator('[data-customize-result="activated"]')).toBeVisible({ timeout: 180_000 });
+      };
+      await page.goto(`${app.baseUrl}/?customize`);
+      const create = page.locator('[data-customize-form="addRecordType"]');
+      await create.locator('[name="label"]').fill('Goods Receipt Inspection');
+      await create.locator('[name="companyOwnership"]').selectOption('entityOwned');
+      await create.getByRole('button', { name: 'Draft this record type' }).click();
+      await publish();
+      await page.goto(`${app.baseUrl}/?customize`);
+      const extend = page.locator('[data-customize-form="extendRecordType"]');
+      await extend.locator('[name="entity"]').selectOption(inspectionEntity);
+      await extend.getByText('Line table', { exact: true }).click();
+      await extend.locator('[name="lines_label"]').fill('Inspection results');
+      for (const [index, field] of inspectionFields.entries()) {
+        await extend.locator(`[name="line_${index + 1}_label"]`).fill(field.label);
+        await extend.locator(`[name="line_${index + 1}_type"]`).selectOption(field.type);
+      }
+      await extend.locator('[name="line_1_required"]').check();
+      await extend.getByText('Links', { exact: true }).click();
+      for (const [index, link] of inspectionLinks.entries()) {
+        await extend.locator(`[name="link_${index + 1}_label"]`).fill(link.label);
+        await extend.locator(`[name="link_${index + 1}_target"]`).selectOption(`northstar.app:entity.${link.target}`);
+      }
+      await extend.getByText('States and actions', { exact: true }).click();
+      await extend.locator('[name="initial"]').fill('Pending');
+      for (const [index, state] of inspectionStates.entries()) {
+        await extend.locator(`[name="state_${index + 1}_label"]`).fill(state.label);
+        await extend.locator(`[name="state_${index + 1}_role"]`).selectOption(state.role);
+      }
+      for (const [index, transition] of inspectionTransitions.entries()) {
+        for (const key of ['label', 'from', 'to'] as const)
+          await extend.locator(`[name="transition_${index + 1}_${key}"]`).fill(transition[key]);
+      }
+      await extend.getByRole('button', { name: 'Draft changes' }).click();
+      await expect(page.locator('[data-customize-diff] pre')).toContainText('Quarantine changes', { timeout: 180_000 });
+      await publish();
+      await page.getByRole('link', { name: 'Open Goods Receipt Inspection', exact: true }).click();
+      const listUrl = page.url();
+      await page.getByRole('link', { name: 'New', exact: true }).click();
+      await page.locator(`[name$=":field.${inspection}_name"]`).fill('Incoming lot');
+      for (const [label, term, result] of [
+        ['Goods receipt', receiptNumber, receiptNumber],
+        ['Supplier', 'Cascade', 'Cascade Fastener Works'],
+        ['Item', 'Field notebook', 'Field notebook'],
+        ['Location', 'Calgary', 'Calgary warehouse'],
+      ]) {
+        await page.getByRole('combobox', { name: label, exact: true }).fill(term!);
+        await page.getByRole('option').filter({ hasText: result! }).click();
+      }
+      await page.getByLabel('Line 1 characteristic', { exact: true }).fill('Length');
+      await page.getByLabel('Line 1 measured value', { exact: true }).fill('21');
+      await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`${inspection}_detail`, 'u'));
+      const detailUrl = page.url();
+      await expect(page.getByRole('cell', { name: 'Length', exact: true })).toBeVisible();
+      await page.getByLabel('Record actions', { exact: true }).click();
+      await expect(page.getByRole('link', { name: 'Open Goods receipt', exact: true })).toBeVisible();
+      await page.getByLabel('More actions', { exact: true }).click();
+      await page.getByRole('button', { name: 'Archive', exact: true }).click();
+      await page.getByRole('button', { name: 'Confirm Archive', exact: true }).click();
+      await expect(page.locator('[data-diagnostic-code="OPERATION_ARCHIVE_HAS_DEPENDENTS"]')).toBeVisible();
+      await page.goto(detailUrl);
+      await page.getByLabel('Record actions', { exact: true }).click();
+      await expect(page.getByRole('button', { name: 'Quarantine', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Release', exact: true })).toHaveCount(0);
+      await page.getByRole('button', { name: 'Quarantine', exact: true }).click();
+      await page.getByRole('button', { name: 'Confirm Quarantine', exact: true }).click();
+      await expect(page.locator('.composition-business-status')).toHaveText('Quarantined');
+      await page.getByLabel('Record actions', { exact: true }).click();
+      await expect(page.getByRole('button', { name: 'Release', exact: true })).toBeVisible();
+      await page.goto(listUrl);
+      await page.getByRole('searchbox').last().fill(receiptNumber);
+      await page.getByRole('button', { name: 'Apply', exact: true }).click();
+      await expect(page.getByRole('link', { name: /Open .*Incoming lot/u })).toBeVisible();
+      await page.getByRole('link', { name: `Filter by Goods receipt ${receiptNumber}` }).click();
+      await expect(page).toHaveURL(/linkedRecord=/u);
+      await expect(page.getByRole('link', { name: /Open .*Incoming lot/u })).toBeVisible();
+    } finally {
+      await app.close();
+    }
+  }, LINEAGE_INSTALL_VOLUME);
+});
 
 /**
  * The non-developer path (CUSTOMIZE slices 3 and 5): on the Customize screen a

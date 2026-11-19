@@ -12,6 +12,7 @@ import {
   expectedActiveReleaseFrom,
   DEFAULT_COMPILER_LIMITS,
   MODULE_COMPILER_PROFILE,
+  PROJECTION_FAMILY_IDS,
 } from '../../packages/compiler/src/index.js';
 import {
   canonicalize,
@@ -38,6 +39,7 @@ import {
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { SemanticOperationGateway } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import { SemanticQueryGateway } from '../../packages/runtime/src/semantic-query-gateway.js';
+import { unsupportedRuntimeCapability } from '../../packages/runtime/src/request-runtime-view.js';
 
 const authoredPath = resolve('apps/web/release/app.authored.json');
 const authored = JSON.parse(readFileSync(authoredPath, 'utf8')) as Record<
@@ -356,7 +358,7 @@ test('a tenant lifecycle compiles guarded operations and refuses an undeclared s
   assert.equal(refused.status, 'unsupported');
 });
 
-test('tenant line tables use the company-scoped document editor and refuse unsupported parents', async () => {
+test('tenant line tables use the document editor with or without company scope and lifecycle', async () => {
   const entity = 'northstar.app:entity.custom_quality_review';
   const header = {
     companyOwnership: 'entityOwned',
@@ -386,6 +388,12 @@ test('tenant line tables use the company-scoped document editor and refuse unsup
   };
   const change = (members: object[]) =>
     patch({ kind: 'changeSet', patches: members });
+  const link = {
+    entity,
+    kind: 'addLink',
+    label: 'Goods receipt',
+    target: 'northstar.app:entity.goods_receipt',
+  };
   const accepted = await compileInSandbox(
     sandboxRequest([change([header, lifecycle, lines])]),
   );
@@ -395,6 +403,23 @@ test('tenant line tables use the company-scoped document editor and refuse unsup
     JSON.stringify(accepted.status === 'compiled' ? [] : accepted),
   );
   if (accepted.status === 'compiled') {
+    const family = PROJECTION_FAMILY_IDS.surfaceManifest;
+    const surfaceRequirement = parseSerializedRelease(
+      accepted.steps[0]!.release,
+    ).compiled.bundle.releaseManifest.projections.find(
+      (projection) => projection.familyId === family,
+    )!.requiredRuntimeCapability;
+    const reader23 = {
+      [family]: {
+        capabilityId: surfaceRequirement.capabilityId,
+        maximumSupportedVersion: 23,
+      },
+    };
+    assert.equal(surfaceRequirement.minimumVersion, 23);
+    assert.equal(
+      unsupportedRuntimeCapability(family, surfaceRequirement, reader23),
+      null,
+    );
     const projections = accepted.steps[0]!.release.artifacts.map(
       (artifact) =>
         JSON.parse(
@@ -433,14 +458,42 @@ test('tenant line tables use the company-scoped document editor and refuse unsup
   for (const members of [
     [header, lines],
     [{ ...header, companyOwnership: 'tenantShared' }, lifecycle, lines],
+    [{ ...header, companyOwnership: 'tenantShared' }, lines],
+    [header, link, lines, lifecycle],
   ]) {
-    const refused = applyCustomizationPatches(authored, [change(members)]);
-    assert.equal(refused.status, 'unsupported');
-    assert.match(
-      JSON.stringify(refused),
-      /company-owned tenant record type with a declared lifecycle/u,
+    const extended = await compileInSandbox(sandboxRequest([change(members)]));
+    assert.equal(
+      extended.status,
+      'compiled',
+      JSON.stringify(extended.status === 'compiled' ? [] : extended),
     );
+    if (extended.status !== 'compiled') continue;
+    const family = PROJECTION_FAMILY_IDS.surfaceManifest;
+    const requirement = parseSerializedRelease(
+      extended.steps[0]!.release,
+    ).compiled.bundle.releaseManifest.projections.find(
+      (projection) => projection.familyId === family,
+    )!.requiredRuntimeCapability;
+    assert.equal(requirement.minimumVersion, 24);
+    assert.match(
+      unsupportedRuntimeCapability(family, requirement, {
+        [family]: {
+          capabilityId: requirement.capabilityId,
+          maximumSupportedVersion: 23,
+        },
+      }) ?? '',
+      /24/u,
+    );
+    assert.equal(unsupportedRuntimeCapability(family, requirement), null);
   }
+  const visual = await compileInSandbox(
+    sandboxRequest([patch(header), change([link, lines, lifecycle])]),
+  );
+  assert.equal(
+    visual.status,
+    'compiled',
+    JSON.stringify(visual.status === 'compiled' ? [] : visual),
+  );
 });
 
 test('a chain re-applies its recorded prefix exactly and the next patch builds on it', async () => {

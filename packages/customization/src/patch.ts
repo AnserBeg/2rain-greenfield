@@ -125,6 +125,14 @@ const addLineTable = z.strictObject({
   fields: z.array(CustomFieldSchema).min(1).max(15),
 });
 
+const addLink = z.strictObject({
+  kind: z.literal('addLink'),
+  entity: canonicalId,
+  label,
+  target: canonicalId,
+  required: z.boolean().optional(),
+});
+
 const arrangeLayout = z
   .strictObject({
     kind: z.literal('arrangeLayout'),
@@ -150,6 +158,7 @@ const SinglePatchSchema = z.discriminatedUnion('kind', [
   addRecordType,
   addField,
   addChoice,
+  addLink,
   addLineTable,
   declareLifecycle,
   arrangeLayout,
@@ -177,6 +186,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'addRecordType',
   'addField',
   'addChoice',
+  'addLink',
   'addLineTable',
   'declareLifecycle',
   'arrangeLayout',

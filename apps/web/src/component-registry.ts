@@ -1065,10 +1065,10 @@ function renderCommandBar(context: SurfaceComponentContext): string {
       : '';
   const editor = context.surface.documentEditor;
   const documentEditable =
-    !editor ||
+    !editor?.stateFieldId ||
     (record &&
-      editor.editableStateIds.some(
-        (state) => record.values[editor.stateFieldId] === state,
+      editor.editableStateIds?.some(
+        (state) => record.values[editor.stateFieldId!] === state,
       ));
   const actions = [
     record &&
@@ -2717,7 +2717,9 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
     coverage.returnedCount === 0 ? 0 : coverage.pageOffset + 1;
   const lastVisible = coverage.pageOffset + coverage.returnedCount;
   const narrowed =
-    state.search.length > 0 || Object.keys(state.filterValues).length > 0;
+    state.search.length > 0 ||
+    Object.keys(state.filterValues).length > 0 ||
+    state.referenceScope !== undefined;
   const formHidden = [
     ...declaredListParameters(state, base, { page: 1 }).entries(),
   ]
@@ -2762,7 +2764,7 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
             '',
           )}</select></div><div class="form-field"><label for="${controlId('dir')}">Order</label><select id="${controlId('dir')}" name="dir"><option value="asc"${current?.direction === 'descending' ? '' : ' selected'}>Ascending</option><option value="desc"${current?.direction === 'descending' ? ' selected' : ''}>Descending</option></select></div>`
       : '';
-  const clearHref = `/?${declaredListParameters(state, base, { filterValues: {}, page: 1, search: '' }).toString()}`;
+  const clearHref = `/?${declaredListParameters(state, base, { filterValues: {}, referenceScope: undefined, page: 1, search: '' }).toString()}`;
   const controls = `<form class="list-controls" data-list-search method="get" action="/">${formHidden}<div class="form-field list-controls__search"><label><span>Search ${escapeHtml(input.recordLabel.toLowerCase())}</span><input type="search" name="q" value="${escapeHtml(state.search)}" maxlength="240" autocomplete="off" placeholder="Search ${escapeHtml(input.recordLabel.toLowerCase())}"></label></div>${filterControls}${sortControls}<div class="list-controls__actions"><button type="submit">Apply</button>${narrowed ? `<a class="secondary-action" href="${escapeHtml(clearHref)}">Clear</a>` : ''}</div></form>`;
   const sortState = new Map(
     state.sort.map((sort) => [sort.columnId, sort.direction]),
@@ -2830,6 +2832,13 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
           if (column.role === 'status') {
             const role = declaredStatusRole(column, record);
             return `<td ${label}>${text === null ? '<span class="muted">—</span>' : `<span class="status-pill"${role ? ` data-status-role="${escapeHtml(role)}"` : ''}>${escapeHtml(text)}</span>`}</td>`;
+          }
+          if (column.relation && text !== null) {
+            const recordId = record.relationLabels?.[column.field]?.recordId;
+            if (recordId) {
+              const href = `/?${declaredListParameters(state, base, { page: 1, referenceScope: { relationId: column.field, recordId } })}`;
+              return `<td ${label}><a href="${escapeHtml(href)}" aria-label="${escapeHtml(`Filter by ${column.label} ${text}`)}">${escapeHtml(text)}</a></td>`;
+            }
           }
           // A declared overdue date reads "N days late" when the row meets its
           // view's conditions -- the same ones its tab was counted by.

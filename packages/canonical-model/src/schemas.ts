@@ -1462,8 +1462,23 @@ export const SurfaceDocumentEditorSchema = z.strictObject({
   lineFormSurfaceId: CanonicalIdSchema,
   lineQueryId: CanonicalIdSchema,
   parentRelationId: CanonicalIdSchema,
-  stateFieldId: CanonicalIdSchema,
-  editableStateIds: z.array(CanonicalIdSchema).min(1),
+  scope: z.literal('tenantShared').optional(),
+  stateFieldId: CanonicalIdSchema.optional(),
+  editableStateIds: z.array(CanonicalIdSchema).min(1).optional(),
+  /** Create-only links, backed by the header operation's relation inputs. */
+  headerRelations: z
+    .array(
+      z.strictObject({
+        fieldId: CanonicalIdSchema,
+        label: LabelSchema,
+        reference: editorField.shape.reference.unwrap().required({
+          getQueryId: true,
+        }),
+      }),
+    )
+    .min(1)
+    .max(12)
+    .optional(),
   // 30, widened from 20 (a document the narrower bound admitted is still
   // admitted): a sales order's header carries its ship-to and its charges.
   headerFields: z.array(editorField).min(1).max(30),
@@ -1527,6 +1542,8 @@ const listColumn = z.strictObject({
   label: LabelSchema,
   orderKey: boundedOrderKey,
   field: CanonicalIdSchema,
+  /** The column names a declared relation instead of a stored field. */
+  relation: z.literal(true).optional(),
   role: z.enum(['title', 'value', 'status']),
   priority: boundedOrderKey,
   sortable: z.boolean(),

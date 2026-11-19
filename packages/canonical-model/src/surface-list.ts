@@ -126,7 +126,45 @@ export function validateSurfaceLists(
         ? Object.values(query.readModel.resultFields)
         : [],
     );
+    unique(
+      list.columns
+        .filter((column) => column.relation)
+        .map((column) => column.field),
+      id,
+      'relation columns',
+    );
     for (const column of list.columns) {
+      if (column.relation) {
+        const relation = relations.get(column.field);
+        const labelQuery =
+          column.reference && queries.get(column.reference.query.targetId);
+        if (
+          !relation ||
+          relation.sourceEntity.targetId !== query.sourceEntity.targetId ||
+          relation.ownership !== 'reference' ||
+          relation.lifecycle !== 'active' ||
+          relation.joinEligibility !== 'query' ||
+          column.role !== 'value' ||
+          column.format ||
+          column.statusRoles ||
+          column.overdue ||
+          !labelQuery ||
+          labelQuery.queryType !== 'list' ||
+          labelQuery.tier !== 'q0' ||
+          labelQuery.lifecycle !== 'active' ||
+          labelQuery.sourceEntity.targetId !== relation.targetEntity.targetId ||
+          !labelQuery.selections.some(
+            (selection) =>
+              selection.field.targetId ===
+              column.reference!.labelField.targetId,
+          )
+        )
+          fail(
+            column.columnId,
+            'a relation column reads its active relation target through its declared List',
+          );
+        continue;
+      }
       const figure = figureKinds.get(column.field);
       if (figure) {
         // Computed in the statement: shown as it is, never sorted, formatted
