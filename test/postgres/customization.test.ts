@@ -23,6 +23,8 @@ import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/
 import {
   createComposedApplicationRuntime,
   ensureScope,
+  reconcileInventoryScopeToPointer,
+  type PointerState,
   parseCompiledApplication,
   rolePool,
   trustedContext,
@@ -1730,6 +1732,49 @@ test(
                 boot.releaseRoot,
                 next.envelope.applications.at(-1)!.releaseRoot,
               );
+              const client = await pool.connect();
+              try {
+                await client.query('BEGIN');
+                const current = (
+                  await client.query<PointerState>(
+                    `SELECT pointer_id AS "pointerId", release_id AS "releaseId", fence::int AS fence
+                     FROM platform.active_release_pointers WHERE tenant_id=$1 AND environment_id=$2`,
+                    [tenantId, environmentId],
+                  )
+                ).rows[0]!;
+                await client.query(
+                  'UPDATE platform.inventory_posting_configurations SET contract_release_root=$3 WHERE tenant_id=$1 AND environment_id=$2',
+                  [tenantId, environmentId, installed.releaseRoot],
+                );
+                assert.equal(
+                  await reconcileInventoryScopeToPointer(
+                    client,
+                    boot.identity,
+                    { ...current, fence: current.fence - 1 },
+                  ),
+                  null,
+                );
+                const scopes = await client.query<{
+                  contract_release_root: string;
+                }>(
+                  'SELECT DISTINCT contract_release_root FROM platform.inventory_posting_configurations WHERE tenant_id=$1 AND environment_id=$2',
+                  [tenantId, environmentId],
+                );
+                assert.deepEqual(scopes.rows, [
+                  { contract_release_root: installed.releaseRoot },
+                ]);
+                assert.equal(
+                  await reconcileInventoryScopeToPointer(
+                    client,
+                    boot.identity,
+                    current,
+                  ),
+                  boot.releaseRoot,
+                );
+              } finally {
+                await client.query('ROLLBACK');
+                client.release();
+              }
             } finally {
               await boot.close();
             }

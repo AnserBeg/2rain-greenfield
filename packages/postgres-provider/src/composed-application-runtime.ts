@@ -311,7 +311,6 @@ export async function createComposedApplicationRuntime(
       options.tenantSlug,
       options.environmentSlug ?? 'production',
     );
-    await ensureAuthority(adminPool, identities);
 
     runtimePool = rolePool(options.databaseUrl, 'north_star_runtime', 6);
     materializerPool = rolePool(
@@ -592,6 +591,7 @@ async function selectBootRelease(
       previous.fence !== initialPointer.fence
     )
       throw new Error('the latest swap awaits activation recovery');
+    await ensureAuthority(admin, identities);
     const compiledApplication = options.loadCompiledApplication
       ? await options.loadCompiledApplication()
       : options.compiledApplication;
@@ -1928,7 +1928,7 @@ async function provisionInventoryScopeOnClient(
 }
 
 async function ensureAuthority(
-  pool: pg.Pool,
+  pool: pg.PoolClient,
   identities: ScopeIdentities,
 ): Promise<void> {
   const tenantId = identities.runtime.tenantId;
