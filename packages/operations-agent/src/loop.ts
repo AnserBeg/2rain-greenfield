@@ -9,6 +9,7 @@ import type {
   ModelAdapter,
   ModelTurn,
   ModelUsage,
+  ToolCall,
 } from './model.js';
 import { toMessages } from './anthropic-model.js';
 import { isRecord } from './catalog.js';
@@ -422,17 +423,14 @@ export async function runOperationsAgent(
     if (turn.text) options.onEvent?.({ kind: 'text', text: turn.text });
     if (turn.stop === 'refusal') return finish('refusal', turn.text);
     if (turn.toolCalls.length === 0) return finish('answered', turn.text);
-    const results = [];
     let customization = false;
-    for (const call of turn.toolCalls) {
+    const answerCall = async (call: ToolCall) => {
       if (options.signal?.aborted) {
-        // Every tool_use needs its result before the next model call.
-        results.push({
+        return {
           id: call.id,
           content: JSON.stringify({ error: 'stopped by the person' }),
           isError: true,
-        });
-        continue;
+        };
       }
       const approvalIndex =
         options.executeAfterApproval && call.name === 'erp_plan'
@@ -474,11 +472,25 @@ export async function runOperationsAgent(
           verification: verification.content,
         };
       }
-      results.push({
+      return {
         id: call.id,
         content: JSON.stringify(content),
         isError: outcome.isError,
-      });
+      };
+    };
+    const results = [];
+    const readOnly = turn.toolCalls.every(
+      ({ name }) => name === 'erp_query' || name === 'erp_discover',
+    );
+    // A read retains its own gateway, typed provenance and tool-use ID.
+    // Keep a mixed turn ordered, including any approval and subsequent writes.
+    const width = readOnly ? 4 : 1;
+    for (let i = 0; i < turn.toolCalls.length; i += width) {
+      results.push(
+        ...(await Promise.all(
+          turn.toolCalls.slice(i, i + width).map(answerCall),
+        )),
+      );
     }
     conversation.push({ role: 'tool', results });
     if (customization && !options.signal?.aborted)
