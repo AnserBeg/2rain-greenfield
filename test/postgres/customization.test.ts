@@ -1840,10 +1840,10 @@ test(
           });
           void opening.catch(() => undefined);
           const deadline = performance.now() + 120_000;
+          // Observe from a separate autocommit session so a statistics
+          // snapshot taken before the boot connected cannot hide it.
           while (
-            !// Observe from a separate autocommit session so a statistics
-            // snapshot taken before the boot connected cannot hide it.
-            (
+            !(
               await pool.query(
                 'SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))',
                 [holderPid],
