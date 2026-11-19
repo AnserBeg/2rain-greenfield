@@ -1362,17 +1362,23 @@ export async function submitSurfaceRuntimeIntent(
     record: result.readBack,
     trustLinked: result.trust !== null,
   };
+  const pageRecordId = new URL(
+    requestUrl,
+    'http://surface-runtime.local',
+  ).searchParams.get('record');
   if (
-    (intent === 'command' && selection.selected.composition) ||
     gateways.applicationExtension?.refreshAfterOperation({
       binding,
       intent,
       surface: selection.selected,
       surfaces: selection.surfaces,
-    }) === true
+    }) === true ||
+    (intent === 'command' &&
+      selection.selected.composition &&
+      pageRecordId === result.readBack.recordId)
   )
-    // A composed record's status, links and child tables come from its bound
-    // reads. Archive responses use the operation read-back for the inactive row.
+    // A composed record page refreshes its bound reads. Commands sent without
+    // a record in the URL and archive responses use the operation read-back.
     return renderSurfaceRuntimeWithData(view, requestUrl, gateways, feedback);
 
   return renderSelectedSurface(
