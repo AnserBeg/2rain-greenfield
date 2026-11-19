@@ -431,6 +431,26 @@ test(
               /customization_patches_shape/u,
               'a payload whose digest does not match is refused by the database',
             );
+            const unknownPatchBytes = Buffer.from(
+              JSON.stringify({ kind: 'unrecognizedTestKind' }),
+            );
+            await assert.rejects(
+              pool.query(
+                `INSERT INTO platform.customization_patches
+                   SELECT tenant_id, environment_id, gen_random_uuid(),
+                          patch_version, 'unrecognizedTestKind', $1::bytea,
+                          encode(sha256($1::bytea), 'hex'), channel, authored_by,
+                          base_package_id, base_package_version,
+                          base_revision_id, base_release_root,
+                          parent_revision_id, resulting_revision_id,
+                          resulting_release_id, language_version,
+                          normalization_profile_version, created_at
+                     FROM platform.customization_patches`,
+                [unknownPatchBytes],
+              ),
+              /customization_patches_shape/u,
+              'the database refuses an unrecognized patch kind with a valid digest',
+            );
             assert.equal(await patchCount(pool), 1);
 
             // Review R4: two identical drafts at once record one change, and
@@ -984,6 +1004,10 @@ test(
         let runtime = await openComposedApplicationRuntime(options);
         const old = await openCustomizeService(options);
         const fieldId = 'northstar.app:field.custom_item_shelf_code';
+        const savedColumns = [
+          'northstar.app:list_column.item_list_item',
+          'northstar.app:list_column.item_list_sku',
+        ];
         let sourceRoot: string;
         let sourceFence: string;
         try {
@@ -1002,6 +1026,14 @@ test(
                   label: 'Warehouse name',
                 },
               ],
+            },
+            {
+              kind: 'saveListView',
+              surface: 'northstar.app:surface.item_list',
+              label: 'Warehouse lookup',
+              columns: savedColumns,
+              sort: [{ column: savedColumns[0]!, direction: 'ascending' }],
+              filters: [],
             },
           ]) {
             const drafted = await old.service.draft(patch, 'declarativeEditor');
@@ -1089,7 +1121,10 @@ test(
             fields: { fieldId: string; label: string }[];
             surfaces: {
               surfaceId: string;
-              list?: { columns: { label: string }[] };
+              list?: {
+                columns: { label: string }[];
+                views: { label: string; layout?: { columns: string[] } }[];
+              };
             }[];
           };
           assert.equal(
@@ -1111,6 +1146,16 @@ test(
               ?.list?.columns.some(
                 (column) => column.label === 'Warehouse name',
               ),
+          );
+          assert.deepEqual(
+            definition.surfaces
+              .find(
+                (surface) =>
+                  surface.surfaceId === 'northstar.app:surface.item_list',
+              )
+              ?.list?.views.find((view) => view.label === 'Warehouse lookup')
+              ?.layout?.columns,
+            savedColumns,
           );
           await assertUpgradePersistence(
             pool,

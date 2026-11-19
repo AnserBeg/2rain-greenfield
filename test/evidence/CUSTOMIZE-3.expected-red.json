@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "packet": "CUSTOMIZE-3",
+  "entries": [
+    {
+      "name": "unrecognized-patch-kind-admitted",
+      "claim": "The database admits the launch patch kinds and still refuses an unrecognized kind with a valid digest.",
+      "file": "db/migrations/0033_customization_launch_patch_kinds.sql",
+      "original": "      'narrowPermission', 'addMetricCard'",
+      "replacement": "      'narrowPermission', 'addMetricCard', 'unrecognizedTestKind'",
+      "test": {
+        "files": ["test/postgres/customization.test.ts"],
+        "namePattern": "a drafted change is recorded append-only"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customization.test.ts",
+          "name": "a drafted change is recorded append-only beside its tenant revision and staged release, and nothing goes live",
+          "expected": "the database refuses an unrecognized patch kind with a valid digest"
+        }
+      ]
+    }
+  ]
+}
