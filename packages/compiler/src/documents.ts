@@ -13,12 +13,18 @@ export function compileDocuments(
   const categories = definition.documentCategories ?? [];
   if (fields.length === 0 && categories.length === 0) return null;
 
-  const ids = new Set<string>(definition.fields.map(({ fieldId }) => fieldId));
-  const labels = new Set(
-    definition.fields.map((field) =>
-      JSON.stringify([field.entity.targetId, field.label.toLowerCase()]),
-    ),
+  const calculatedFields = definition.calculatedDisplayFields ?? [];
+  const ids = new Set(
+    [...definition.fields, ...calculatedFields].map(({ fieldId }) => fieldId),
   );
+  const labels = new Set([
+    ...definition.fields.map(({ entity, label }) =>
+      JSON.stringify([entity.targetId, label.toLowerCase()]),
+    ),
+    ...calculatedFields.map(({ entityId, label }) =>
+      JSON.stringify([entityId, label.toLowerCase()]),
+    ),
+  ]);
   const fieldsById = new Map(fields.map((field) => [field.fieldId, field]));
   const categoriesById = new Map(
     categories.map((category) => [category.categoryId, category]),

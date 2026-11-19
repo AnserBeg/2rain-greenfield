@@ -1,3 +1,4 @@
+import { CALCULATED_DISPLAY_QUERY_READER } from '../../canonical-model/src/calculated-display-projection.js';
 import {
   CANONICALIZATION_PROFILE_VERSION,
   LANGUAGE_VERSION,
@@ -26,6 +27,7 @@ import {
 import { compilerDiagnostic, finalizeDiagnostics } from './diagnostics.js';
 import { compileDocuments } from './documents.js';
 import { requiredFormulaValidationOperationReader } from '../../canonical-model/src/formula-validation-reader.js';
+import { compileCalculatedDisplayFields } from './calculated-display-plan.js';
 import {
   compileLiteralFormulaRules,
   FORMULA_RULE_PAYLOAD_VERSION,
@@ -433,6 +435,20 @@ function compileApplicationInternal(
     );
   }
 
+  const displays = compileCalculatedDisplayFields(packageRevision);
+  if (displays.status === 'refused') {
+    const diagnostic = compilerDiagnostic(
+      'COMPILER_TYPE_INVALID',
+      'typeCheck',
+      '$.calculatedDisplayFields',
+      displays.subjectId,
+    );
+    return failure(
+      [{ ...diagnostic, rule: displays.message }],
+      maximumDiagnostics,
+    );
+  }
+
   const semanticProfileDigest = hashCanonical(
     HASH_DOMAINS.profile,
     input.profile,
@@ -473,6 +489,7 @@ function compileApplicationInternal(
       packageRevision,
       input.profile.compilerSemanticProfileVersion,
       formula.status === 'compiled' ? formula.payload : null,
+      displays.fields,
       documents?.payload,
     ),
     packageRevision,
@@ -1516,7 +1533,10 @@ function decorateV3ProjectionPlans(
           ? {
               requiredRuntimeCapability: {
                 capabilityId: 'northstar.runtime:capability.query-catalog',
-                minimumVersion: hasListSums ? 3 : 2,
+                minimumVersion: Math.max(
+                  plan.requiredRuntimeCapability.minimumVersion,
+                  hasListSums ? 3 : 2,
+                ),
               },
             }
           : {}),
@@ -2195,22 +2215,30 @@ function verifyCompleteness(
     packageRevision.languageVersion === 'v6'
       ? packageRevision.formulaRules
       : undefined;
+  const declaredDisplays =
+    packageRevision.languageVersion === 'v6'
+      ? packageRevision.calculatedDisplayFields
+      : undefined;
   const ruleReference = ruleProjection[0]?.reference;
-  const operationReference = emitted.find(
-    ({ reference }) =>
-      reference.familyId === PROJECTION_FAMILY_IDS.operationCatalog,
-  )?.reference;
+  const floorFor = (familyId: string) =>
+    emitted.find(({ reference }) => reference.familyId === familyId)?.reference
+      .requiredRuntimeCapability.minimumVersion ?? 0;
+  const operationFloor = floorFor(PROJECTION_FAMILY_IDS.operationCatalog);
+  const queryFloor = floorFor(PROJECTION_FAMILY_IDS.queryCatalog);
   if (
-    ruleProjection.length !== Number(Boolean(declaredRules)) ||
+    ruleProjection.length !==
+      Number(Boolean(declaredRules || declaredDisplays)) ||
     (declaredRules &&
+      operationFloor !==
+        requiredFormulaValidationOperationReader(declaredRules)) ||
+    (declaredDisplays && queryFloor !== CALCULATED_DISPLAY_QUERY_READER) ||
+    ((declaredRules || declaredDisplays) &&
       (ruleReference?.instanceId !==
         `${packageRevision.package.namespace}:projection.formula-rule` ||
         ruleReference.payloadSchemaVersion !== FORMULA_RULE_PAYLOAD_VERSION ||
         ruleReference.requiredRuntimeCapability.capabilityId !==
           'northstar.runtime:capability.formula-rule' ||
-        ruleReference.requiredRuntimeCapability.minimumVersion !== 1 ||
-        operationReference?.requiredRuntimeCapability.minimumVersion !==
-          requiredFormulaValidationOperationReader(declaredRules)))
+        ruleReference.requiredRuntimeCapability.minimumVersion !== 1))
   ) {
     diagnostics.push(
       compilerDiagnostic(

@@ -45,6 +45,10 @@ import {
   type RuntimeProjection,
 } from '@north-star/runtime/request-runtime-view';
 import type { Pool, PoolClient } from 'pg';
+import {
+  CALCULATED_DISPLAY_QUERY_READER,
+  parseCalculatedDisplayProjection,
+} from '../../canonical-model/src/calculated-display-projection.js';
 import { parseFormulaValidationBindings } from '../../canonical-model/src/formula-validation-projection.js';
 import {
   LITERAL_VALIDATION_OPERATION_READER,
@@ -893,15 +897,18 @@ function definitionFromSnapshotRows(
   const operationFloor =
     operation.requiredRuntimeCapability?.minimumVersion ?? 0;
   const consumesRules = operationFloor >= LITERAL_VALIDATION_OPERATION_READER;
+  const queryFloor = query.requiredRuntimeCapability?.minimumVersion ?? 0;
+  const consumesDisplays = queryFloor === CALCULATED_DISPLAY_QUERY_READER;
+  const consumesFormula = consumesRules || consumesDisplays;
   if (
-    declaresRuleProjection !== consumesRules ||
-    hasRuleProjectionLink !== consumesRules
+    declaresRuleProjection !== consumesFormula ||
+    hasRuleProjectionLink !== consumesFormula
   ) {
     throw malformedProjection(
-      'formula/rule projection and the mandatory operation capability disagree',
+      'formula/rule projection and the mandatory reader capabilities disagree',
     );
   }
-  const formulaRule = consumesRules
+  const formulaRule = consumesFormula
     ? projectionFor(REQUEST_RUNTIME_FORMULA_RULE_FAMILY)
     : null;
   if (formulaRule) {
@@ -909,8 +916,19 @@ function definitionFromSnapshotRows(
       const rules = parseFormulaValidationBindings(formulaRule.payload).map(
         ({ rule }) => rule,
       );
-      if (operationFloor !== requiredFormulaValidationOperationReader(rules))
+      if (
+        Boolean(rules.length) !== consumesRules ||
+        (consumesRules &&
+          operationFloor !== requiredFormulaValidationOperationReader(rules))
+      )
         throw new Error('operation floor does not match bound operands');
+      if (consumesDisplays)
+        parseCalculatedDisplayProjection(formulaRule.payload);
+      else if (
+        isRecord(formulaRule.payload) &&
+        Object.hasOwn(formulaRule.payload, 'calculatedFields')
+      )
+        throw new Error('query floor does not match calculated displays');
     } catch {
       throw malformedProjection('formula/rule projection has invalid bindings');
     }

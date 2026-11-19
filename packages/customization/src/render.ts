@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 
+import type { CalculatedDisplayField } from '@north-star/canonical-model';
 import type { ReleaseDiffEnvelope } from '@north-star/compiler';
 
 /**
@@ -30,6 +31,7 @@ export interface DiffDefinition {
   readonly entities: readonly Json[];
   readonly fields: readonly Json[];
   readonly operations?: readonly Json[];
+  readonly calculatedDisplayFields?: readonly CalculatedDisplayField[];
   readonly formulaRules?: readonly {
     readonly ruleId: string;
     readonly targetId: string;
@@ -100,6 +102,45 @@ export function renderReleaseDiff(input: {
     if (!to.documentFields?.some(({ fieldId }) => fieldId === field.fieldId))
       lines.push(
         `Removes the files field “${field.label}” from ${entityLabel(from, field.entityId)}. Its files stay in retention.`,
+      );
+  }
+  const operandLabel = (
+    operand: CalculatedDisplayField['expression']['left'],
+  ) =>
+    operand.kind === 'decimalLiteral'
+      ? operand.value
+      : String(
+          to.fields.find(({ fieldId }) => fieldId === operand.fieldId)?.label ??
+            operand.fieldId,
+        );
+  for (const field of to.calculatedDisplayFields ?? []) {
+    if (
+      from.calculatedDisplayFields?.some(
+        ({ fieldId }) => fieldId === field.fieldId,
+      )
+    )
+      continue;
+    const { left, right, operator } = field.expression;
+    const type = field.resultType;
+    const sign = { add: '+', subtract: '−', multiply: '×' }[operator];
+    const destinations = field.displaySinks.map(({ surfaceId }) =>
+      String(
+        to.surfaces.find((surface) => surface.surfaceId === surfaceId)?.label ??
+          surfaceId,
+      ),
+    );
+    lines.push(
+      `Shows “${field.label}” on ${destinations.join(' and ')} as ${operandLabel(left)} ${sign} ${operandLabel(right)}. The exact value has up to ${type.precision} digits and ${type.scale} decimal places${type.currency ? ` in ${type.currency}` : ''}.`,
+    );
+  }
+  for (const field of from.calculatedDisplayFields ?? []) {
+    if (
+      !to.calculatedDisplayFields?.some(
+        ({ fieldId }) => fieldId === field.fieldId,
+      )
+    )
+      lines.push(
+        `Removes the calculated display field “${field.label}” from ${entityLabel(from, field.entityId)}.`,
       );
   }
   for (const rule of to.formulaRules ?? []) {

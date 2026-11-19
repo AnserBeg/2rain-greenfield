@@ -1,3 +1,5 @@
+import { displayTypeForField } from '../../canonical-model/src/calculated-display-bindings.js';
+import type { CalculatedDisplayTarget } from './calculated-display-draft.js';
 import { isNarrowableOperationId } from '@north-star/canonical-model';
 import { formulaFieldType } from '../../canonical-model/src/formula-validation-bindings.js';
 import { resolveValidationPath } from '../../canonical-model/src/formula-validation-path.js';
@@ -22,6 +24,7 @@ export interface CustomizationTargets {
     readonly entityId: string;
     readonly label: string;
   }[];
+  readonly calculatedDisplayTargets?: readonly CalculatedDisplayTarget[];
   readonly validationTargets?: readonly LiteralValidationTarget[];
   readonly linkTargets?: readonly {
     readonly entityId: string;
@@ -98,6 +101,8 @@ export interface MetricListTarget {
 type Json = Record<string, unknown>;
 
 export function customizationTargets(definition: {
+  readonly calculatedDisplayFields?:
+    readonly { displaySinks: readonly { surfaceId: string }[] }[] | undefined;
   readonly entities: readonly Json[];
   readonly fields: readonly Json[];
   readonly languageVersion?: string;
@@ -247,6 +252,88 @@ export function customizationTargets(definition: {
             : [];
         })
       : [];
+  const calculatedDisplayTargets: CalculatedDisplayTarget[] = [];
+  if (definition.languageVersion === 'v6') {
+    const surfaces = definition.surfaces.flatMap((surface) => {
+      const kind = surface.surfaceRole;
+      const columns =
+        kind === 'list'
+          ? (surface.list as Json | undefined)?.columns
+          : (surface.composition as Json | undefined)?.fields;
+      if (
+        (kind !== 'list' && kind !== 'record') ||
+        !Array.isArray(columns) ||
+        surface.lifecycle !== 'active'
+      )
+        return [];
+      const surfaceId = String(surface.surfaceId);
+      const used = (definition.calculatedDisplayFields ?? []).filter(
+        ({ displaySinks }) =>
+          displaySinks.some((sink) => sink.surfaceId === surfaceId),
+      ).length;
+      if (
+        columns.length + used >= (kind === 'list' ? 16 : 48) ||
+        columns.some(({ orderKey }) => Number(orderKey) + used >= 1_000_000)
+      )
+        return [];
+      const query = definition.queries.find(
+        (query) =>
+          query.lifecycle === 'active' &&
+          query.queryId ===
+            (surface.dataSource as Json | undefined)?.targetId &&
+          !query.readModel &&
+          query.tier === 'q0' &&
+          query.queryType === (kind === 'record' ? 'get' : 'list'),
+      );
+      if (!query) return [];
+      const fields = (
+        query.selections as readonly { field: { targetId: string } }[]
+      ).map(({ field }) => field.targetId);
+      return [
+        {
+          kind,
+          surfaceId,
+          label: String(surface.label),
+          entityId: String((query.sourceEntity as Json).targetId),
+          fields,
+        },
+      ];
+    });
+    for (const record of surfaces.filter(({ kind }) => kind === 'record')) {
+      const fields = definition.fields.flatMap((field) => {
+        if (
+          !record.fields.includes(String(field.fieldId)) ||
+          field.lifecycle !== 'active'
+        )
+          return [];
+        const valueType = displayTypeForField(
+          field as Parameters<typeof displayTypeForField>[0],
+        );
+        return valueType
+          ? [
+              {
+                fieldId: String(field.fieldId),
+                label: String(field.label),
+                valueType,
+              },
+            ]
+          : [];
+      });
+      if (fields.length)
+        calculatedDisplayTargets.push({
+          entityId: record.entityId,
+          label: record.label,
+          recordSurfaceId: record.surfaceId,
+          fields,
+          lists: surfaces.filter(
+            ({ kind, entityId, fields: listFields }) =>
+              kind === 'list' &&
+              entityId === record.entityId &&
+              fields.some(({ fieldId }) => listFields.includes(fieldId)),
+          ),
+        });
+    }
+  }
   const choiceFields = definition.fields
     .filter(
       (field) =>
@@ -443,6 +530,7 @@ export function customizationTargets(definition: {
     : [];
   return Object.freeze({
     ...(validationTargets.length ? { validationTargets } : {}),
+    ...(calculatedDisplayTargets.length ? { calculatedDisplayTargets } : {}),
     ...(definition.operationRoleNarrowings && {
       permissionRestrictions: definition.operationRoleNarrowings,
     }),
