@@ -3,6 +3,10 @@ import test from 'node:test';
 
 import {
   agentPreamble,
+  lastToolResult,
+  scriptedModel,
+  runOperationsAgent,
+  SpendMeter,
   businessMapStructure,
   OperationsAgentSession,
   renderBusinessMap,
@@ -1742,4 +1746,70 @@ test('AGENT-5 10: an offered currency before a document name authorizes that cur
   assert.match(String((await create('USD')).reason), /one the person named/u);
   session.noteRequest('Create an ABC purchase order');
   assert.match(String((await create('ABC')).reason), /not a currency code/u);
+});
+
+test('a personal yes executes and compares committed fields before the next model turn', async () => {
+  const { session, state } = guardedSession();
+  const trace: string[] = [];
+  const model = scriptedModel([
+    () => ({
+      toolCalls: [
+        {
+          name: 'erp_query',
+          input: { queryId: 'party_get', arguments: { recordId: PARTY } },
+        },
+      ],
+    }),
+    () => ({
+      toolCalls: [
+        {
+          name: 'erp_plan',
+          input: {
+            intents: [
+              {
+                operationId: 'party_update',
+                target: PARTY,
+                patch: { name: 'Proposed' },
+              },
+              {
+                operationId: 'party_update',
+                target: PARTY,
+                patch: { contact_summary: 'Proposed' },
+              },
+            ],
+          },
+        },
+      ],
+    }),
+    (conversation) => {
+      const result = lastToolResult(conversation);
+      assert.deepEqual(trace, [
+        'model',
+        'erp_query',
+        'model',
+        'erp_plan',
+        'erp_execute',
+        'erp_verify',
+      ]);
+      assert.equal(state.invoked.length, 2);
+      // The fake gateway acknowledges both writes but changes neither field.
+      assert.equal(
+        (result.verification as { verified: boolean }).verified,
+        false,
+      );
+      return { text: 'Read-back found a mismatch.' };
+    },
+  ]);
+  const result = await runOperationsAgent({
+    session,
+    model,
+    request: 'Make the two edits.',
+    executeAfterApproval: true,
+    meter: new SpendMeter(null, Infinity),
+    onEvent(event) {
+      if (event.kind === 'model') trace.push('model');
+      if (event.kind === 'tool') trace.push(event.name);
+    },
+  });
+  assert.equal(result.answer, 'Read-back found a mismatch.');
 });

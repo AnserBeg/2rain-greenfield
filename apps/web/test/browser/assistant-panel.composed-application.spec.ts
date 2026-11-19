@@ -128,18 +128,12 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
         },
       ],
     }),
-    (conversation) => ({
-      toolCalls: [
-        {
-          name: 'erp_execute',
-          input: {
-            planId: String(lastToolResult(conversation).planId),
-            executionIdempotencyKey: 'panel-browser-2',
-          },
-        },
-      ],
-    }),
-    () => ({ text: 'Archived.' }),
+    (conversation) => {
+      expect(lastToolResult(conversation).verification).toMatchObject({
+        verified: true,
+      });
+      return { text: 'Archived.' };
+    },
     // Turn 4 (X2): a typed "Okay, don't ship it" declines the plan; the
     // words go to the assistant as the next request.
     archivePlan(1),
