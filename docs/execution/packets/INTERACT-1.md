@@ -23,16 +23,16 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 - Additive v6 keys have compiler accept/refuse coverage; release lineage and coverage are re-derived (ADR-0066).
 - Normal git metadata is read-only; isolated metadata in `/tmp` tracks this chartered worktree.
 - Exact-minute browser fills canonicalize zero seconds without changing the instant (CI reproduction passed).
-- Task preview budgets: measured 2/46/3/0 in CI 44426260000; +5 statements buys governed stock/location reads. Confirmation unchanged.
-- Slice 2 main CI 44494956602 passed all 16 jobs, including record fidelity; the duplicate local read ended.
 - Mid-packet checkpoint: no whole-app review trigger; no new correctness domain or fan-out.
+
+- CI 44499550504: reuse only actually counted queues; unread tiles retain their independent stage counts.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "INTERACT-1",
   "base": "d31e28314923c793a2f7458c86a8d682cf62b4b2",
-  "head": "086af817cfd923766b362455766cfe3c56769eb6",
+  "head": "176f2d254d5f4daef110e188be2817cdfe3b98a9",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
@@ -53,6 +53,7 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
     "packages/domain/src/sales/workspace.ts",
     "test/compiler/g2-module-conformance.test.ts",
     "test/fixtures/g2/language-conformance/coverage-decisions.json",
+    "test/integration/surface-data-binding.test.ts",
     "test/unit/canonical-model/surface-composition.test.ts",
     "test/unit/canonical-model/surface-launcher.test.ts"
   ],
