@@ -30,14 +30,15 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 - Mid-packet checkpoint: no whole-app review trigger; no new correctness domain or fan-out.
 
 - Save draft resets earlier placement intent; narrowed-role offers are checked live and invocation still authorizes.
-- CI found line details intercepting Save draft; the save bar now stays above them, with both actions checked.
+- CI found line details intercepting Save draft; the save bar stays above them, with both actions checked.
+- Inherited docs-only DECLUTTER; canonical inputs and prepared release bytes are unchanged.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "INTERACT-1",
-  "base": "881768043d00d894b44a64486c43aa10b85ed7cb",
-  "head": "6b716296d3e112af82de32317ed2227128f45a8a",
+  "base": "129e59c4a5cfbefcad42b9c14efa164b18b797e7",
+  "head": "76cd99593132558f23394634408eb0bf25788d3c",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
