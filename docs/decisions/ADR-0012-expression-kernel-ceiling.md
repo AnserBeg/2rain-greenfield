@@ -171,6 +171,8 @@ target decision rather than an evaluator rewrite.
 
 ### Formula/rule projection-family answer
 
+**Amended 2026-11-19 by [ADR-0074](ADR-0074-formula-rule-and-workflow-projection-admission.md).** The formula/rule and workflow families register together as optional v6 declarations, subject to exact absence parity and mandatory reader floors. The v3 adoption deferred formula/rule. ADR-0074 governs the admission timing and preserves this ADR's expression ceiling. A new required key, materialized default or changed meaning of an existing v6 node requires v7.
+
 **Yes: a canonical `FormulaRuleDefinition` requires a dedicated compiled
 formula/rule projection family.** Existing query and operation catalogs can
 continue to own their embedded v0 predicates, but they cannot represent the
