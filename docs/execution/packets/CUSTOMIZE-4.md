@@ -23,6 +23,8 @@ Status — Candidate for integration. The orchestrator approved the patch-kind m
 
 ## Gates
 
+- [CI 44485274087](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44485274087) passed the linked receipt, line editing and archive refusal steps before the command response lost the status badge. Composed record commands now refresh the declared record. Migration 0038 follows verified release history, and the snapshot was regenerated on PostgreSQL 16.
+
 - [CI 44480152260](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44480152260) passed compiler, PostgreSQL and schema checks. The browser activated one draft and saved the lines, then failed the receipt link assertion. The follow-up waits for server-confirmed selections and opens the exact linked receipt. Migration 0037 follows the workflow migration and the snapshot was regenerated on PostgreSQL 16.
 
 - [Hosted PostgreSQL](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44467955198) passed at `19e8d8e0`, including the one-request draft, linked records, owned lines and an assistant-confirmed Quarantine with unchanged stock movements. The source scan found no Inspection-specific first-party branches.
@@ -39,8 +41,8 @@ Status — Candidate for integration. The orchestrator approved the patch-kind m
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-4",
-  "base": "af2594dd5cc8a9750619d0c7eed2295e3a6b2f8c",
-  "head": "e1ecf60eb4ed984625dd656b6d083d3702ea63f0",
+  "base": "421bd8b82882ee24cbff87bb72914640e600aa6e",
+  "head": "603be1972ef9faa029caa94c57d3600ab7b8cee3",
   "changedPaths": [
     "apps/web/package.json", "apps/web/src/component-registry.ts",
     "apps/web/src/customize-screen.ts", "apps/web/src/document-editor.ts",
@@ -48,7 +50,7 @@ Status — Candidate for integration. The orchestrator approved the patch-kind m
     "apps/web/src/message-catalog.ts", "apps/web/src/surface-composition.ts",
     "apps/web/src/surface-runtime.ts", "apps/web/test/browser/customize.composed-application.spec.ts",
     "apps/web/test/browser/message-catalog.spec.ts", "apps/web/test/surface-runtime-contract.test.ts",
-    "db/migrations/0037_customization_patch_kind_identifier.sql", "db/schema.snapshot.json",
+    "db/migrations/0038_customization_patch_kind_identifier.sql", "db/schema.snapshot.json",
     "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-list.ts",
     "packages/canonical-model/src/surface-workspace.ts", "packages/compiler/src/conformance.ts",
     "packages/compiler/src/projections.ts", "packages/compiler/src/storage.ts",
