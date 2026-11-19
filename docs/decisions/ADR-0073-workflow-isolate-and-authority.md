@@ -244,8 +244,8 @@ with workflows includes a workflow projection and raises the runtime floor on
 the existing required surface manifest that serving readers already check via
 `unsupportedRuntimeCapability`. Emit workflow facts only when declared. Refuse
 a missing, inconsistent or unsupported workflow projection for a
-workflow-bearing candidate. The version
-floor is allocated at merge after CUSTOMIZE-3 and CUSTOMIZE-4.
+workflow-bearing candidate. Workflow-bearing releases require surface reader 27, following Today metrics
+at 25 and Inspection metadata at 26.
 
 The proposed Critical verifier change is limited to
 `PostgresReleaseVerificationService` candidate verification and evidence
@@ -280,7 +280,7 @@ assign the single forward migration the next free number after its highest
 migration. Regenerate the schema snapshot and migration-list tests and rerun CI.
 Fetch again immediately before pushing `main` and repeat if another migration
 landed. Coordinate with other lanes so only one migration merge proceeds at a
-time. Assign the reader floor at merge after the latest allocated rung. The
+time. The
 migration declares these relations in `platform`:
 
 | Table | Responsibility |

@@ -235,6 +235,11 @@ export interface SemanticOperationResultEnvelope {
   readonly unsupportedReason: string | null;
 }
 
+/** Evaluates the registered permission for the company read under the record lock. */
+export type AuthorizeRecordCompany = (
+  company: string | null,
+) => Promise<string>;
+
 export interface SemanticOperationExecutionRequest {
   readonly channel: TrustedInvocationChannel;
   readonly context: TrustedRequestContext;
@@ -290,6 +295,10 @@ export interface SemanticOperationParentGuard {
 }
 
 export interface SemanticOperationExecutor {
+  executeWithRecordCompany?(
+    request: SemanticOperationExecutionRequest,
+    authorize: AuthorizeRecordCompany,
+  ): Promise<SemanticOperationResultEnvelope>;
   execute(
     request: SemanticOperationExecutionRequest,
   ): Promise<SemanticOperationResultEnvelope>;
@@ -929,15 +938,55 @@ export class SemanticOperationGateway {
         }
         return decision;
       };
-      const operationDecision = await authorizeRequired(
-        definition.permissionId,
-        Object.freeze({
-          input: capabilityAuthorization?.decisionInput ?? request.input,
-          kind: 'registeredSemanticOperationPolicyInput',
-          operationId: request.operationId,
-          requestId: view.requestId,
-          schemaVersion: OPERATION_POLICY_INPUT_VERSION,
-        }),
+      const authorizeOperation = (input: ImmutableJsonValue) =>
+        authorizeRequired(
+          definition.permissionId,
+          Object.freeze({
+            input,
+            kind: 'registeredSemanticOperationPolicyInput',
+            operationId: request.operationId,
+            requestId: view.requestId,
+            schemaVersion: OPERATION_POLICY_INPUT_VERSION,
+          }),
+        );
+      const commonExecution = {
+        channel: invocation.channel,
+        context: trustedContextForRequestRuntimeView(view),
+        idempotencyKey: request.idempotencyKey,
+        input: request.input,
+        inputDigest,
+        readBackDefinition,
+        view,
+      } as const;
+      if (
+        !isRegisteredCapabilityOperation(definition) &&
+        definition.effect.kind !== 'createRecordEffect' &&
+        this.executor?.executeWithRecordCompany
+      ) {
+        return await this.executor.executeWithRecordCompany(
+          Object.freeze({
+            ...commonExecution,
+            definition,
+            policyVersion,
+            parentGuards: parentGuardsFromCatalog(operationCatalog),
+          }),
+          async (company) =>
+            (
+              await authorizeOperation(
+                company === null ? {} : { legalEntityId: company },
+              )
+            ).policyVersion,
+        );
+      }
+      const createCompany =
+        definition.effect.kind === 'createRecordEffect' &&
+        definition.inputContract?.systemInput &&
+        isRecord(request.input)
+          ? request.input.legalEntityId
+          : undefined;
+      const operationDecision = await authorizeOperation(
+        capabilityAuthorization?.decisionInput ??
+          (createCompany === undefined ? {} : { legalEntityId: createCompany }),
       );
       if (capabilityAuthorization) {
         await authorizeRequired(
@@ -967,17 +1016,6 @@ export class SemanticOperationGateway {
           );
         }
       }
-      const commonExecution = {
-        channel: invocation.channel,
-        context: trustedContextForRequestRuntimeView(view),
-        definition,
-        idempotencyKey: request.idempotencyKey,
-        input: request.input,
-        inputDigest,
-        policyVersion: operationDecision.policyVersion,
-        readBackDefinition,
-        view,
-      } as const;
       if (isRegisteredCapabilityOperation(definition)) {
         if (!capabilityExecutor || !capabilityAuthorization) {
           throw new NoSuchRegisteredCapabilityError(
@@ -988,6 +1026,8 @@ export class SemanticOperationGateway {
         return await capabilityExecutor.execute(
           Object.freeze({
             ...commonExecution,
+            definition,
+            policyVersion: operationDecision.policyVersion,
             authorization: capabilityAuthorization,
             policyEvaluatorVersion: SEMANTIC_OPERATION_POLICY_EVALUATOR_VERSION,
           }) as RegisteredCapabilityOperationExecutionRequest,
@@ -1000,6 +1040,7 @@ export class SemanticOperationGateway {
         Object.freeze({
           ...commonExecution,
           definition,
+          policyVersion: operationDecision.policyVersion,
           parentGuards: parentGuardsFromCatalog(operationCatalog),
         }),
       );
