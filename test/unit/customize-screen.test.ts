@@ -51,6 +51,10 @@ function fakeService(calls: string[]): CustomizeScreenService {
         status: 'drafted',
       });
     },
+    recover: (mode, expected) => {
+      calls.push(`${mode} ${expected.attemptId} ${expected.fence}`);
+      return Promise.resolve({ releaseRoot: 'a'.repeat(64) });
+    },
     rollback: () => {
       calls.push('rollback');
       return Promise.resolve({
@@ -320,4 +324,36 @@ test('the live platform upgrade is the named and release-bound rollback target',
     fence: '2',
   });
   assert.deepEqual(calls, ['selected-release', '2']);
+});
+
+test('both failed activation actions submit the displayed attempt and fence', async () => {
+  const calls: string[] = [];
+  const service = fakeService(calls);
+  const status = await service.status();
+  service.status = async () => ({
+    ...status,
+    failedActivation: { attemptId: patchId, fence: '8' },
+  });
+  const page = await renderCustomizeScreen(service, '/?customize', null);
+  for (const action of ['reverify', 'revert']) {
+    const form = page.html.match(
+      new RegExp(
+        `<form method="post" data-customize-action="${action}">([^]*?)</form>`,
+        'u',
+      ),
+    )?.[1];
+    assert.ok(form);
+    assert.ok(form.includes(`name="attemptId" value="${patchId}"`));
+    assert.ok(form.includes('name="fence" value="8"'));
+    await renderCustomizeScreen(service, '/?customize', {
+      action,
+      attemptId: patchId,
+    });
+    await renderCustomizeScreen(service, '/?customize', {
+      action,
+      attemptId: patchId,
+      fence: '8',
+    });
+  }
+  assert.deepEqual(calls, [`reverify ${patchId} 8`, `revert ${patchId} 8`]);
 });

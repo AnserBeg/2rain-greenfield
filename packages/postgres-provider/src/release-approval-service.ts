@@ -199,6 +199,7 @@ export class PostgresReleaseApprovalService {
     context: TrustedRequestContext,
     command: CreateReleaseApprovalCommand & {
       readonly customizationUpgradeId?: MintedUuid;
+      readonly recoveryOfAttemptId?: MintedUuid;
     },
   ): Promise<CreatedReleaseApproval> {
     validateCommandIdentity(context, command);
@@ -232,6 +233,7 @@ export class PostgresReleaseApprovalService {
         pointer,
         release,
         preparation,
+        command.recoveryOfAttemptId ?? null,
       );
 
       const approvalResult = await client.query<ApprovalRow>(
@@ -278,7 +280,7 @@ export class PostgresReleaseApprovalService {
            decided_at,
            expires_at,
            expiry_policy_version,
-           customization_upgrade_id
+           customization_upgrade_id, recovery_of_attempt_id
          )
          SELECT $1,
                 $2,
@@ -322,7 +324,7 @@ export class PostgresReleaseApprovalService {
                 $13,
                 $14,
                 $15,
-                $17
+                $17, $18
            FROM platform.release_activation_preparations AS preparation
            JOIN platform.transition_preparation_receipts AS receipt
              ON receipt.tenant_id = preparation.tenant_id
@@ -351,6 +353,7 @@ export class PostgresReleaseApprovalService {
           APPROVAL_EXPIRY_POLICY_VERSION,
           command.preparationId,
           command.customizationUpgradeId ?? null,
+          command.recoveryOfAttemptId ?? null,
         ],
       );
       const approvalRow = requiredRow(
@@ -632,6 +635,7 @@ async function assertCanonicalBinding(
   pointer: PointerRow,
   release: ReleaseRow,
   preparation: PreparationRow,
+  recoveryOfAttemptId: MintedUuid | null,
 ): Promise<void> {
   const expectedFence = safeBigIntNumber(
     preparation.expected_fence,
@@ -716,6 +720,7 @@ async function assertCanonicalBinding(
   }
   if (pointer.release_id !== null) {
     await authorizeReverseTransitionIfApplicable(client, context, {
+      recoveryOfAttemptId,
       expectedPointerId: pointer.pointer_id,
       expectedFence: pointerFence,
       sourceReleaseId: pointer.release_id,
