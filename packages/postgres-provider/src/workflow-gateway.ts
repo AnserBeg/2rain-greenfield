@@ -302,7 +302,7 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
           policyVersion: actor.entryPolicyVersion,
           view: actor,
         });
-        throw new WorkflowEffectRefusal(denial.reason);
+        throw new WorkflowPermanentEffectFailure(denial.reason);
       }
       const mediation = new SemanticOperationMediationAuthority();
       const gateway = new SemanticOperationGateway(

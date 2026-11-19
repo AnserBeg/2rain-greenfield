@@ -213,7 +213,8 @@ DECLARE
   SELECT w.definition_bindings INTO outgoing
     FROM platform.workflow_activation_watermarks AS w
    WHERE w.tenant_id = NEW.tenant_id AND w.environment_id = NEW.environment_id
-     AND w.pointer_id = NEW.pointer_id AND w.fence = NEW.fence - 1;
+     AND w.pointer_id = NEW.pointer_id AND w.fence = NEW.fence - 1
+     AND w.verified_approval_binding;
 
   SELECT array_agg(DISTINCT subscription.value->>'eventType') INTO subscribed_types
     FROM (
