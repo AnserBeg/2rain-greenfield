@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "packet": "CRITFIX-A",
+  "entries": [
+    {
+      "name": "temporary-schema-implicit",
+      "claim": "Every migration-owned definer places the temporary schema last.",
+      "file": "db/migrations/0033_definer_search_paths.sql",
+      "original": "SET search_path = pg_catalog, north_star_internal, pg_temp",
+      "replacement": "SET search_path = pg_catalog, north_star_internal",
+      "test": {
+        "files": ["test/postgres/migrations.test.ts"],
+        "namePattern": "every application SECURITY DEFINER"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/migrations.test.ts",
+          "name": "every application SECURITY DEFINER puts pg_temp last",
+          "expected": "north_star_internal.advance_semantic_aggregate_generation"
+        }
+      ]
+    },
+    {
+      "name": "principal-omitted-from-epoch-lock",
+      "claim": "A runtime caller without a principal cannot acquire the epoch lock.",
+      "file": "db/migrations/0033_definer_search_paths.sql",
+      "original": "  IF nullif(current_setting('north_star.principal_id', true), '')::uuid IS NULL OR\n     requested_tenant_id IS DISTINCT FROM",
+      "replacement": "  IF requested_tenant_id IS DISTINCT FROM",
+      "test": {
+        "files": ["test/postgres/read-snapshot.test.ts"],
+        "namePattern": "SPEED-1 security fixes"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/read-snapshot.test.ts",
+          "name": "SPEED-1 security fixes: one scope per page, both scopes of a moved grant, denials after the reads, one connection per request, invocations live",
+          "expected": "Missing expected rejection"
+        }
+      ]
+    },
+    {
+      "name": "live-confirm-loses-denial",
+      "claim": "A failed read-back denial write takes precedence over a Confirm recovery response.",
+      "file": "packages/postgres-provider/src/request-context.ts",
+      "original": "requestEvidence.getStore()?.fail(error);",
+      "replacement": "heldSnapshots.getStore()?.fail(error);",
+      "test": {
+        "files": ["test/postgres/speed-fixes.test.ts"],
+        "namePattern": "SPEED-1 fix read: denials"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/speed-fixes.test.ts",
+          "name": "SPEED-1 fix read: denials committed by the real recorder before the answer, one snapshot kept; a task step under a revocation is discarded; a Confirm under a policy change offers its own retry",
+          "expected": "missing denial evidence must fail Confirm"
+        }
+      ]
+    },
+    {
+      "name": "unreviewed-field-auto-approved",
+      "claim": "A newly auto-approved catalog field must change the human-reviewed snapshot.",
+      "file": "packages/operations-agent/src/risk.ts",
+      "original": "'contact_summary', 'credit_hold', 'name', 'payment_terms'",
+      "replacement": "'contact_summary', 'credit_hold', 'name', 'number', 'payment_terms'",
+      "test": {
+        "files": ["test/agent/business-map.test.ts"],
+        "namePattern": "the compiled catalog auto-run snapshot"
+      },
+      "kills": [
+        {
+          "file": "test/agent/business-map.test.ts",
+          "name": "the compiled catalog auto-run snapshot covers every O0 update field",
+          "expected": "northstar.app:field.party_number"
+        }
+      ]
+    }
+  ]
+}

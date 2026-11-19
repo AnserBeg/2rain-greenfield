@@ -804,6 +804,19 @@ test('SPEED-1 security fixes: one scope per page, both scopes of a moved grant, 
           ),
           /trusted session scope/u,
         );
+        await assert.rejects(
+          withTrustedRequestTransaction(runtime, context, async (client) => {
+            await client.query(
+              "SELECT set_config('north_star.principal_id', '', true)",
+            );
+            await client.query(
+              'SELECT platform.lock_current_policy_epoch($1, $2)',
+              [tenantId, environmentId],
+            );
+          }),
+          { code: '42501' },
+          'epoch lock requires a principal',
+        );
         const epochNow = async () =>
           `northstar.current-policy/${String(await epochOf(environmentId))}`;
         let revoked = false;
