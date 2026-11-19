@@ -211,7 +211,12 @@ test('the period lock uses its declared confirmation stages and a closed period 
   // The refusal is a page of its own; the document is opened again, still
   // a draft.
   await page.goto(documentUrl);
-  await expect(page.getByText(/Active · revision 1/u)).toBeVisible();
+  await expect(
+    page
+      .locator('.record-technical dl > div')
+      .filter({ has: page.getByText('Revision', { exact: true }) })
+      .locator('dd'),
+  ).toHaveText('1');
 
   // Closing through an earlier time would reopen: refused by name.
   await openPeriodLock(page);
@@ -228,7 +233,7 @@ test('the period lock uses its declared confirmation stages and a closed period 
   await command(page, 'Reopen to', 'Reopen to', `${yesterday}T00:00`);
   await page.goto(documentUrl);
   await post(page);
-  await expect(page.getByRole('status')).toContainText('Post complete');
+  await expect(page.locator('[data-task-result]')).toContainText('Post: done');
 });
 
 /** Inventory -> Warehouse, from the menu. */
@@ -346,8 +351,11 @@ async function post(page: Page) {
   const secondary = page.locator(
     '.composition-record-actions:not([open]) > summary',
   );
-  if (await secondary.count()) await secondary.click();
-  await page.getByRole('button', { name: 'Post', exact: true }).click();
+  const post = page.getByRole('button', { name: 'Post', exact: true });
+  if (!(await post.isVisible()) && (await secondary.count()))
+    await secondary.click();
+  await post.click();
+  await reviewTask(page.getByRole('dialog'), 'Review Post');
   await page.getByRole('button', { name: 'Confirm Post', exact: true }).click();
 }
 

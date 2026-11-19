@@ -25,6 +25,7 @@ import {
   canonicalAuthoredProjection,
   canonicalize,
   normalizeApplicationPackage,
+  type SurfaceComposition,
 } from '../../packages/canonical-model/src/index.js';
 import {
   DEFAULT_COMPILER_LIMITS,
@@ -74,6 +75,77 @@ import {
 import { RECEIPT_AUTHORIZATION_DEPENDENCY_BINDINGS } from '../../packages/postgres-provider/src/current-policy.js';
 
 registerInventoryContractCases((name, run) => test(name, run));
+
+/** Canonical refusals are failed compilations with a decode diagnostic, not internal errors. */
+function assertCanonicalRefusal(result: CompileResult): void {
+  assert.equal(result.status, 'failed');
+  assert.ok(result.diagnostics.length > 0);
+  for (const diagnostic of result.diagnostics) {
+    assert.equal(diagnostic.code, 'CANON_SCHEMA_INVALID');
+    assert.equal(diagnostic.phase, 'decodeSchemaCheck');
+  }
+}
+
+test('INTERACT-1 compiles declared stock impacts and refuses an unavailable stock field', () => {
+  const normalized = normalizeApplicationPackage(
+    composedApplicationDefinition(),
+  );
+  const compiled = mustCompile(inputNormalized(normalized));
+  const surfaces = projectionPayload<{
+    surfaces: Array<{ surfaceId: string; composition?: SurfaceComposition }>;
+  }>(compiled, PROJECTION_FAMILY_IDS.surfaceManifest).surfaces;
+  const purchase = surfaces.find(
+    (surface) =>
+      surface.surfaceId === 'northstar.app:surface.purchase_order_detail',
+  );
+  assert.equal(
+    purchase?.composition?.actions.find(
+      (action) =>
+        action.actionId === 'northstar.app:action.receive_lines_known',
+    )?.stockImpacts?.[0]?.onHand,
+    'increase',
+  );
+  const invalid = structuredClone(normalized);
+  const surface = invalid.surfaces.find(
+    (candidate) =>
+      candidate.surfaceId === 'northstar.app:surface.purchase_order_detail',
+  );
+  assert.ok(surface && 'composition' in surface && surface.composition);
+  const action = (surface.composition as SurfaceComposition).actions.find(
+    (candidate) =>
+      candidate.actionId === 'northstar.app:action.receive_lines_known',
+  );
+  assert.ok(action?.stockImpacts?.[0]);
+  const impact = action.stockImpacts[0];
+  impact.fields.onHand =
+    'northstar.app:field.missing_stock_quantity' as typeof impact.fields.onHand;
+  assertCanonicalRefusal(compileApplication(inputNormalized(invalid)));
+  const invalidRows = structuredClone(normalized);
+  const stockDocument = invalidRows.surfaces.find(
+    (candidate) =>
+      candidate.surfaceId ===
+      'northstar.app:surface.inventory_transaction_detail',
+  );
+  assert.ok(
+    stockDocument &&
+      'composition' in stockDocument &&
+      stockDocument.composition,
+  );
+  const posting = (
+    stockDocument.composition as SurfaceComposition
+  ).actions.find(
+    (candidate) =>
+      candidate.actionId === 'northstar.app:action.inventory_post_adjustment',
+  )!;
+  assert.equal(
+    posting.stockImpacts?.[0]?.datasetId,
+    'northstar.app:dataset.inventory_transaction_inventory_transaction_line',
+  );
+  const itemImpact = posting.stockImpacts![0]!;
+  itemImpact.datasetId =
+    'northstar.app:dataset.missing_stock_lines' as typeof itemImpact.datasetId;
+  assertCanonicalRefusal(compileApplication(inputNormalized(invalidRows)));
+});
 
 test('ordinary v1 and v2 parent/child definitions compile cleanly and twice identically', () => {
   const first = mustCompile(input(ordinaryModuleV1()));
@@ -1834,6 +1906,17 @@ function composedApplicationWithoutSales(): Record<string, unknown> {
       String(query.queryId),
     ),
   );
+  // This partial fixture has no Sales reservation read model, so its stock
+  // previews cannot claim to read those absent query results.
+  for (const surface of definition.surfaces as Array<Record<string, unknown>>) {
+    const composition = surface.composition as SurfaceComposition | undefined;
+    for (const action of composition?.actions ?? []) {
+      if (
+        action.stockImpacts?.some((impact) => !kept.has(impact.query.targetId))
+      )
+        delete action.stockImpacts;
+    }
+  }
   const figured = (
     definition.surfaces as Array<Record<string, unknown>>
   ).filter((surface) => {
