@@ -105,6 +105,7 @@ try {
   out(`Agent (${model.modelId}) acting as the demo ${actor}, channel AGENT.`);
   const result = await runOperationsAgent({
     model,
+    executeAfterApproval: true,
     session,
     request,
     preamble: await agentPreamble(session),
