@@ -293,8 +293,9 @@ Every field and section declares one of a closed set:
   and **counted in the summary so its existence is never concealed**.
 - **`onDemand`** — fetched on expand. Genuinely large or expensive content only.
 
-The tier distinguishes **deferred** from **hidden**. Nothing a user should have is
-ever hidden; `progressive` and `onDemand` defer, and both remain discoverable.
+The tier distinguishes **deferred** from **hidden**. Progressive and on-demand
+content stays discoverable. Plan §10.2 lets tenants hide optional content within
+declared slots (ADR-0079).
 
 **`onDemand` is refused by name until a fetch-on-expand mechanism exists —
 2026-08-08.** It is spelled here because the vocabulary is closed and an unspelled
