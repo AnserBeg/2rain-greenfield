@@ -233,12 +233,7 @@ export class PostgresWorkflowExecution {
               sha256(plan),
             ],
           );
-          await setStatus(
-            client,
-            current,
-            'WAITING',
-            'human-approval-required',
-          );
+          await setStatus(client, current, 'WAITING', null);
           return null;
         }
         if (!isEffect(call)) {
