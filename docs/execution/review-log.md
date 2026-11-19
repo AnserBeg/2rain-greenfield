@@ -267,4 +267,4 @@ one line per round; the gate only requires that the SHA on `main` appears.
 | `8797cc6f0ed1ed1fd7a2219a7bbac0706b2ad934` | UI-COMPOSE-1 (slice 0) | integration | merged — no Critical path | 2026-11-19 | Docs-only ADR-0079 for the orchestrator’s Fable read. Packet tip is the second parent. |
 | `2a485ec839152f090898cfb9fe93140853a65394` | AGENT-SPEED-1 | host integration | merged — no Critical path | 2026-11-19 | [CI 44612076361](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44612076361). |
 | `1e01020fd35300a7d65a40c6956b9c424e7cea78` | CONNECT-1 (slice 0) | integration | merged — no Critical path | 2026-11-19 | Docs-only ADR-0080 for the orchestrator’s Fable read. Packet tip is the second parent. |
-| `5018c1e77f7bee1a04a2e73871f9668767cc8100` | UI-COMPOSE-1 (Fable amendment) | integration | merged — no Critical path | 2026-11-19 | Accepted ADR and UX grammar amendment. |
+| `fa2c3e7bae19eeea41b25676c43ced40183c687d` | UI-COMPOSE-1 (Fable amendment) | integration | merged — no Critical path | 2026-11-19 | Accepted ADR and UX grammar amendment. |
