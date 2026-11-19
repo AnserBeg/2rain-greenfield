@@ -416,12 +416,10 @@ export async function createComposedApplicationRuntime(
     // the first-party lineage has nothing to advance (CUSTOMIZE).
     const tenantServing =
       pointerLineageIndex < 0 && pointer.releaseId !== null
-        ? await tenantDescendantOfLineageTip(
+        ? await loadActiveTenantCustomization(
             runtimePool,
             runtimeContext,
             pointer.releaseId,
-            lineage,
-            options.customization !== undefined,
           )
         : null;
     if (pointerLineageIndex < 0 && !tenantServing) {
@@ -730,25 +728,40 @@ export async function createComposedApplicationRuntime(
     let customizationUpgrade: UpgradePreparation | null = null;
     if (
       tenantServing &&
-      options.customization &&
+      (options.customization ||
+        tenantServing.baseReleaseId !== lineage.at(-1)!.releaseId) &&
       (await unprovenLivePointer(runtimePool, runtimeContext)) === null
     ) {
-      const { PostgresCustomizationService } =
+      const { PostgresCustomizationService, recordUpgradeRefusal } =
         await import('./customization-service.js');
-      const customization = new PostgresCustomizationService(
-        { adminPool, runtimePool, materializerPool, modulePool, identities },
-        {
-          ...options.customization,
-          compiledApplication: options.compiledApplication,
-          ...(options.localDemoIdentity
-            ? { localDemoIdentity: true as const }
-            : {}),
-          providerErrorMappings: options.providerErrorMappings,
-          capabilityOperationExecutorFactories:
-            options.capabilityOperationExecutorFactories ?? [],
-        },
-      );
-      customizationUpgrade = await customization.prepareUpgrade().catch(() => ({
+      const preparation = options.customization
+        ? new PostgresCustomizationService(
+            {
+              adminPool,
+              runtimePool,
+              materializerPool,
+              modulePool,
+              identities,
+            },
+            {
+              ...options.customization,
+              compiledApplication: options.compiledApplication,
+              ...(options.localDemoIdentity
+                ? { localDemoIdentity: true as const }
+                : {}),
+              providerErrorMappings: options.providerErrorMappings,
+              capabilityOperationExecutorFactories:
+                options.capabilityOperationExecutorFactories ?? [],
+            },
+          ).prepareUpgrade()
+        : recordUpgradeRefusal(runtimePool, runtimeContext, {
+            status: 'refused',
+            code: 'CUSTOMIZE_UPGRADE_UNAVAILABLE',
+            message: 'This runtime cannot prepare a platform upgrade.',
+            sourceReleaseId: tenantServing.releaseId,
+            baseReleaseRoot: releases.application.compiled.releaseRoot,
+          });
+      customizationUpgrade = await preparation.catch(() => ({
         status: 'refused' as const,
         code: 'CUSTOMIZE_UPGRADE_RECORD_FAILED',
         message:
@@ -997,29 +1010,20 @@ async function loadServingRelease(
   });
 }
 
-/**
- * The active pointer may name a tenant-authored release whose revision chain
- * leads, through tenant-authored revisions only, to the lineage tip. A chain
- * that reaches an EARLIER first-party release means the application moved
- * under the customization: re-applying the patches to the new base is filed,
- * so this fails loudly with the pre-tenant remedy instead (ADR-0066).
- */
-async function tenantDescendantOfLineageTip(
+/** Resolve the active tenant release before attempting any replay. */
+async function loadActiveTenantCustomization(
   pool: pg.Pool,
   context: TrustedRequestContext,
   releaseId: MintedUuid,
-  lineage: readonly PersistedReleaseIdentity[],
-  allowMovedBase: boolean,
-): Promise<ServingRelease | null> {
+): Promise<(ServingRelease & { baseReleaseId: MintedUuid }) | null> {
   const chain = await withTrustedRequestTransaction(pool, context, (client) =>
     readCustomizationLineage(client, { ...context, releaseId }),
   );
   if (chain[0]?.provenance !== 'tenantAuthored') return null;
-  if (chain.at(-1)?.release_id !== lineage.at(-1)!.releaseId && !allowMovedBase)
-    throw new Error(
-      'the active release is a tenant customization of an earlier version of this application',
-    );
-  return loadServingRelease(pool, context, releaseId);
+  return {
+    ...(await loadServingRelease(pool, context, releaseId)),
+    baseReleaseId: chain.at(-1)!.release_id,
+  };
 }
 
 /**

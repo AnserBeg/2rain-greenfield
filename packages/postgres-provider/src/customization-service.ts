@@ -248,6 +248,30 @@ export function upgradeLogFields(upgrade: UpgradePreparation) {
   };
 }
 
+export async function recordUpgradeRefusal(
+  pool: pg.Pool,
+  context: TrustedRequestContext,
+  diagnostic: UpgradeRefusal,
+): Promise<UpgradeRefusal> {
+  await withTrustedRequestTransaction(pool, context, (client) =>
+    client.query(
+      `INSERT INTO platform.customization_upgrade_refusals
+          (tenant_id, environment_id, source_release_id, base_root, diagnostic) VALUES ($1,$2,$3,$4,$5)
+          ON CONFLICT (tenant_id, environment_id, source_release_id, base_root)
+          DO UPDATE SET diagnostic = EXCLUDED.diagnostic, recorded_at = clock_timestamp(), resolved = false
+          WHERE customization_upgrade_refusals.diagnostic IS DISTINCT FROM EXCLUDED.diagnostic OR customization_upgrade_refusals.resolved`,
+      [
+        context.tenantId,
+        context.environmentId,
+        diagnostic.sourceReleaseId,
+        diagnostic.baseReleaseRoot,
+        diagnostic,
+      ],
+    ),
+  );
+  return diagnostic;
+}
+
 export interface CustomizationStatus {
   readonly upgradeRefusal: UpgradeRefusal | null;
   readonly activeReleaseId: MintedUuid;
@@ -346,26 +370,11 @@ export class PostgresCustomizationService {
           sourceReleaseId,
           baseReleaseRoot,
         };
-        await withTrustedRequestTransaction(
+        return recordUpgradeRefusal(
           this.connection.runtimePool,
           context,
-          (client) =>
-            client.query(
-              `INSERT INTO platform.customization_upgrade_refusals
-          (tenant_id, environment_id, source_release_id, base_root, diagnostic) VALUES ($1,$2,$3,$4,$5)
-          ON CONFLICT (tenant_id, environment_id, source_release_id, base_root)
-          DO UPDATE SET diagnostic = EXCLUDED.diagnostic, recorded_at = clock_timestamp(), resolved = false
-          WHERE customization_upgrade_refusals.diagnostic IS DISTINCT FROM EXCLUDED.diagnostic OR customization_upgrade_refusals.resolved`,
-              [
-                context.tenantId,
-                context.environmentId,
-                sourceReleaseId,
-                baseReleaseRoot,
-                diagnostic,
-              ],
-            ),
+          diagnostic,
         );
-        return diagnostic;
       },
     );
   }
@@ -380,19 +389,19 @@ export class PostgresCustomizationService {
     );
     if (active.baseReleaseId === baseReleaseId)
       return { status: 'current' as const };
-    if (
-      !baseReleaseId ||
-      active.chain.length === 0 ||
-      active.chain.some(
-        (record) =>
-          record.kind !== 'addField' && record.kind !== 'arrangeLayout',
-      )
-    ) {
+    if (!baseReleaseId || !active.chain.length)
       throw new CustomizationServiceRefusal(
         'CUSTOMIZE_BASE_MOVED',
-        'this patch chain is outside the supported field and layout upgrade',
+        'The platform upgrade has no recorded base or patch chain.',
       );
-    }
+    const unsupported = active.chain.find(
+      (record) => record.kind !== 'addField' && record.kind !== 'arrangeLayout',
+    );
+    if (unsupported)
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_BASE_MOVED',
+        `The platform upgrade cannot replay ${unsupported.kind} (change ${unsupported.patchId}).`,
+      );
     this.#assertAuthoredBase();
     const sourceBase = parseNormalizedApplicationPackageJson(
       (await this.#loadRelease(context, active.baseReleaseId))
@@ -1456,8 +1465,7 @@ export class PostgresCustomizationService {
     return { candidate: releases.at(-1)!, parent: releases.at(-2) ?? parent };
   }
 
-  /** Read immutable first-party compiler input, including bases retained only in
-   * the database after a pre-tenant baseline. Admission belongs to the candidate. */
+  /** Read the immutable package and artifacts for an exact, scoped release. */
   async #loadRelease(
     context: TrustedRequestContext,
     releaseId: MintedUuid,
