@@ -90,6 +90,32 @@ test('a plain-English request becomes exactly the typed patch the model proposed
   assert.match(seen[0]!.system, /Never answer in text/u);
 });
 
+test('the scripted assistant drafts a Today metric from the declared list measures', async () => {
+  const definition = normalizeApplicationPackage(
+    JSON.parse(readFileSync('apps/web/release/app.authored.json', 'utf8')),
+  );
+  const choices = customizationTargets(
+    definition as unknown as Parameters<typeof customizationTargets>[0],
+  );
+  const measure = {
+    kind: 'addMetricCard',
+    surface: 'northstar.app:surface.item_list',
+    label: 'Catalog prices in CAD',
+    sumField: 'northstar.app:field.item_price_cad',
+  };
+  const seen: { system: string; toolNames: string[]; turns: number }[] = [];
+  const result = await draftPatchFromRequest(
+    scripted([{ toolInput: measure }], seen),
+    'On Today, sum the CAD prices of the items in the catalog.',
+    choices,
+  );
+  assert.match(
+    seen[0]!.system,
+    /sum northstar\.app:field\.item_price_cad "Price \(CAD\)"/u,
+  );
+  assert.deepEqual(result.status === 'parsed' && result.patch, measure);
+});
+
 test('text is never taken as a change, and a malformed patch gets one repair turn', async () => {
   const textOnly = await draftPatchFromRequest(
     scripted([{ text: JSON.stringify(equipment) }, { text: 'Done.' }]),
