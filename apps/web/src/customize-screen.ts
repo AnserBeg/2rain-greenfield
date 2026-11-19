@@ -324,7 +324,7 @@ function savedViewPicker(targets: CustomizationTargets): string {
     )
     .join('');
   return options
-    ? `<form method="get" data-customize-form="saveListView"><fieldset><legend>Save a list view</legend><input type="hidden" name="customize" value=""><label>List <select name="saveView" required>${options}</select></label><p><button>Set up view</button></p></fieldset></form>`
+    ? `<form method="get" data-customize-form="saveListView"><fieldset><legend>Save a list view</legend><input type="hidden" name="customize" value=""><label for="saved-view-list">List</label> <select id="saved-view-list" name="saveView" required>${options}</select><p><button>Set up view</button></p></fieldset></form>`
     : '';
 }
 
@@ -358,14 +358,14 @@ async function savedViewForm(
         (_, index) => {
           const n = index + 1;
           const label = index === 0 ? 'Sort by' : `Then by (${n})`;
-          return `<p><label>${label} <select name="view_sort_${n}"><option value="">No column</option>${sortable}</select></label> <label>Order <select name="view_sort_direction_${n}"><option value="ascending">Ascending</option><option value="descending">Descending</option></select></label></p>`;
+          return `<p><label for="saved-view-sort-${n}">${label}</label> <select id="saved-view-sort-${n}" name="view_sort_${n}"><option value="">No column</option>${sortable}</select> <label for="saved-view-sort-direction-${n}">Order</label> <select id="saved-view-sort-direction-${n}" name="view_sort_direction_${n}"><option value="ascending">Ascending</option><option value="descending">Descending</option></select></p>`;
         },
       ).join('')}</fieldset>`
     : '';
   const filters = view.filters
     .map(
-      (filter) =>
-        `<label>${escapeHtml(filter.label)} <select name="view_filter:${escapeHtml(filter.field)}"><option value="">All</option>${filter.options.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join('')}</select></label>`,
+      (filter, index) =>
+        `<label for="saved-view-filter-${index}">${escapeHtml(filter.label)}</label> <select id="saved-view-filter-${index}" name="view_filter:${escapeHtml(filter.field)}"><option value="">All</option>${filter.options.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join('')}</select>`,
     )
     .join(' ');
   return `<h1>Save a view for ${escapeHtml(list.label)}</h1><form method="post" data-customize-form="savedView"><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="saveListView"><input type="hidden" name="surface" value="${escapeHtml(surfaceId)}"><label>View name <input name="label" required maxlength="80"></label><fieldset><legend>Columns</legend><table><thead><tr><th>Heading</th><th>Position</th><th>Hide</th></tr></thead><tbody>${rows}</tbody></table></fieldset>${sorts}${filters ? `<fieldset><legend>Filters</legend>${filters}</fieldset>` : ''}<p><button>Draft view</button></p></form>${backLink()}`;

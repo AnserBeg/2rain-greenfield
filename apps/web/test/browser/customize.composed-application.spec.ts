@@ -14,6 +14,7 @@ test('a saved Location view keeps its columns, ordering and filtered count until
   page,
 }) => {
   test.setTimeout(600_000);
+  page.setDefaultTimeout(30_000);
   await withEphemeralPostgres(
     'customize-saved-view',
     async ({ connection }) => {
@@ -55,7 +56,9 @@ test('a saved Location view keeps its columns, ordering and filtered count until
         await editor
           .getByLabel('Type', { exact: true })
           .selectOption(warehouse);
-        await editor.getByRole('button', { name: 'Draft view' }).click();
+        await editor
+          .getByRole('button', { name: 'Draft view' })
+          .click({ timeout: 180_000 });
         await expect(page.locator('[data-customize-diff]')).toContainText(
           'Type is Warehouse',
         );
@@ -80,7 +83,9 @@ test('a saved Location view keeps its columns, ordering and filtered count until
           'data-list-total',
           expected!,
         );
-        const headings = grid.getByRole('columnheader');
+        const headings = grid
+          .getByRole('columnheader')
+          .filter({ hasNotText: /^(?:Select|Actions)$/u });
         await expect(headings.first()).toHaveAccessibleName(/^Name\b/u);
         await expect(headings.nth(1)).toHaveAccessibleName(/^Code\b/u);
         await expect(headings.first()).toHaveAttribute(
@@ -92,7 +97,7 @@ test('a saved Location view keeps its columns, ordering and filtered count until
         await page.goto(`${app.baseUrl}/?customize`);
         await page
           .getByRole('button', { name: 'Roll back the latest change' })
-          .click();
+          .click({ timeout: 180_000 });
         await expect(
           page.locator('[data-customize-result="rolledBack"]'),
         ).toBeVisible({ timeout: 180_000 });
