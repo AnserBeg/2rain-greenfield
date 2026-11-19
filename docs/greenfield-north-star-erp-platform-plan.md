@@ -3264,9 +3264,10 @@ The platform owns the **host and the SDK**, not a workflow language:
   are mocked, and an unmocked call fails immediately.
 - **Release pinning.** A body is package-revision content, compiled (type-check,
   lint, tests) during candidate verification and activated with the release. Each
-  run pins the release it started on, so in-flight runs finish on old code. This
-  is section 3 rule 7 applied to workflows, and it goes further than per-workflow
-  versioning.
+  run pins the release it started on. A change to the verified active fence
+  suspends in-flight runs. The v1 Gate N2 remedy below governs continuation.
+  This is section 3 rule 7 applied to workflows, and it goes further than
+  per-workflow versioning.
 - **Identity.** A run acts as its own automation principal. Its grants are the
   intersection of its declared grants and the approver's authority at
   activation, rechecked on every call under rule 8. The record shows both who
@@ -3284,8 +3285,15 @@ The platform owns the **host and the SDK**, not a workflow language:
 **Gate N2:** a generated approval workflow and a business-object-linked
 conversation survive retries, provider failure, release upgrade, permission
 changes, and recovery without duplicate external delivery. Every workflow in the
-proof passes the run-twice replay test. A run that started before an upgrade
-finishes on its pinned release.
+proof passes the run-twice replay test.
+
+**Gate N2 v1 release-change remedy (owner ruling, 2026-11-18).** A suspended
+run can be retried by a person once its original release is verified active
+again. Same-pin retry preserves the original release, body, SDK and engine
+and reconciles committed effects before resuming under the new execution
+fence. A person can also cancel a suspended run and retain its audit history
+and completed effects. Both actions support bulk selection and audit each
+result. Successor retry and automatic carry-over are deferred.
 
 ### 12.6 N3 - Inventory and commercial depth
 

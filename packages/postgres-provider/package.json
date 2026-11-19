@@ -22,7 +22,8 @@
     "./release-repository": "./src/release-repository.ts",
     "./request-runtime-view-service": "./src/request-runtime-view-service.ts",
     "./request-context": "./src/request-context.ts",
-    "./request-work-meter": "./src/request-work-meter.ts"
+    "./request-work-meter": "./src/request-work-meter.ts",
+    "./workflow-worker": "./src/workflow-worker.ts"
   },
   "dependencies": {
     "@north-star/canonical-model": "workspace:*",

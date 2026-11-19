@@ -590,6 +590,7 @@ export class PostgresReleaseActivationService {
       }
       if (record.expected_release_id !== null) {
         await authorizeReverseTransitionIfApplicable(client, context, {
+          expectedPointerId: record.expected_pointer_id,
           expectedFence: safeFence(record.expected_fence),
           sourceReleaseId: record.expected_release_id,
           targetReleaseId: record.target_release_id,
@@ -1511,7 +1512,8 @@ async function loadAttemptRecord(
             approval.expires_at,
             receipt.receipt_version = $7 AS module_transition,
             (
-              approval.preparation_id = preparation.preparation_id
+              NOT approval.customization_reconciliation_required
+              AND approval.preparation_id = preparation.preparation_id
               AND approval.target_release_id = preparation.target_release_id
               AND approval.target_manifest_root = preparation.target_manifest_root
               AND approval.expected_pointer_id = preparation.expected_pointer_id

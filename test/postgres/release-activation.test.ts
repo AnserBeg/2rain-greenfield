@@ -988,7 +988,7 @@ test('G1-P4b atomic activation, reconciliation, rollback, and invalidation', asy
         );
 
         await t.test(
-          'commit-response loss reconciles by receipt and verification supersession',
+          'commit-response loss requires verification before a successor can advance',
           async () => {
             const before = await pointer(pool, tenantA, environmentA);
             const target = releaseOtherThan(releasesA, before.releaseId, 4);
@@ -1032,22 +1032,26 @@ test('G1-P4b atomic activation, reconciliation, rollback, and invalidation', asy
               afterCommit.releaseId,
               5,
             );
-            const superseding = await prepareApproval(
-              webPool,
-              approverContextA,
-              makerContextA,
-              supersedingTarget,
-            );
-            assert.equal(
-              (await webService.activate(systemContextA, superseding)).status,
-              'SWAPPED_VERIFIED',
-            );
+            const approveNext = () =>
+              prepareApproval(
+                webPool,
+                approverContextA,
+                makerContextA,
+                supersedingTarget,
+              );
+            await assert.rejects(approveNext(), {
+              code: 'RELEASE_SOURCE_NOT_VERIFIED',
+            });
             const reconciled = await workerService.reconcileActivation(
               systemContextA,
               ambiguousAttempt,
             );
-            assert.equal(reconciled.status, 'SUPERSEDED');
-            assert.equal(reconciled.decisiveOutcomeCode, 'SWAPPED');
+            assert.equal(reconciled.status, 'SWAPPED_VERIFIED');
+            assert.equal(
+              (await webService.activate(systemContextA, await approveNext()))
+                .status,
+              'SWAPPED_VERIFIED',
+            );
           },
         );
 
