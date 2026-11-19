@@ -2,6 +2,7 @@ import {
   canonicalAuthoredProjection,
   parseNormalizedApplicationPackageJson,
 } from '@north-star/canonical-model';
+import { trustedContextForRequestRuntimeView } from '../../../packages/runtime/src/request-runtime-view.js';
 import { readFile } from 'node:fs/promises';
 import type { Server } from 'node:http';
 
@@ -228,12 +229,19 @@ export async function startComposedApplication(
             customize: async () => {
               const service = await customize();
               return {
-                draftFromRequest: (request, budget) =>
-                  budget
-                    ? DRAFT_BUDGET.run(budget, () =>
-                        service.draftFromRequest(request, budget.signal),
-                      )
-                    : service.draftFromRequest(request),
+                draftFromRequest: (request, budget, cookie) =>
+                  runtime.entry.run({ headers: { cookie } }, (view) => {
+                    const actor = trustedContextForRequestRuntimeView(view);
+                    return budget
+                      ? DRAFT_BUDGET.run(budget, () =>
+                          service.draftFromRequest(
+                            request,
+                            budget.signal,
+                            actor,
+                          ),
+                        )
+                      : service.draftFromRequest(request, undefined, actor);
+                  }),
               };
             },
           })

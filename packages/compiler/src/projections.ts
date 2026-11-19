@@ -229,6 +229,14 @@ export function lowerBaseProjectionPayloads(
         compilerSemanticProfileVersion,
         verificationPackageRevision,
       ),
+      undefined,
+      'operationRoleNarrowings' in verificationPackageRevision &&
+        verificationPackageRevision.operationRoleNarrowings
+        ? {
+            ...runtimeCapabilities[PROJECTION_FAMILY_IDS.operationCatalog],
+            minimumVersion: 2,
+          }
+        : undefined,
     ),
     plan(
       PROJECTION_FAMILY_IDS.surfaceManifest,
@@ -601,6 +609,12 @@ function operationCatalogPayload(
   const stateFieldIds = new Set(
     packageRevision.stateMachines.map((machine) => machine.stateField.fieldId),
   );
+  const excludedRoles = groupBy(
+    'operationRoleNarrowings' in original
+      ? (original.operationRoleNarrowings ?? [])
+      : [],
+    (restriction) => restriction.operationId,
+  );
   return {
     kind: 'operationCatalogPayload',
     operations: packageRevision.operations.map((operation) => ({
@@ -613,6 +627,13 @@ function operationCatalogPayload(
         : {}),
       lifecycle: operation.lifecycle,
       operationId: operation.operationId,
+      ...(excludedRoles.has(operation.operationId)
+        ? {
+            excludedRoleKeys: excludedRoles
+              .get(operation.operationId)!
+              .map((restriction) => restriction.roleKey),
+          }
+        : {}),
       permissionId: operation.permission.targetId,
       precondition: operation.precondition,
       readBackQueryId: operation.readBack.targetId,

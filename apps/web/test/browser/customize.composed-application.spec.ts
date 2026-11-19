@@ -24,6 +24,95 @@ import {
 
 const equipmentList = 'northstar.app:surface.custom_equipment_list';
 
+test('Customize restricts the Archive action on a Location and rollback restores it', async ({
+  page,
+}) => {
+  test.setTimeout(600_000);
+  page.setDefaultTimeout(30_000);
+  await withEphemeralPostgres(
+    'customize-role-browser',
+    async ({ connection }) => {
+      const app = await startComposedApplication({
+        databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+        tenantSlug: 'customize-role-browser',
+        seedProfile: 'distributor',
+        port: 0,
+      });
+      try {
+        const customize = `${app.baseUrl}/?customize`;
+        const locations = `${app.baseUrl}/?surface=${encodeURIComponent('northstar.app:surface.location_list')}`;
+        await page.goto(locations);
+        await page
+          .locator('[data-declared-list] tbody')
+          .getByRole('link')
+          .first()
+          .click();
+        await expect(page).toHaveURL(/location_detail/u);
+        const record = page.url();
+        const archive = page.getByRole('button', {
+          name: 'Archive',
+          exact: true,
+          includeHidden: true,
+        });
+        await expect(archive).toHaveCount(1);
+
+        await page.goto(customize);
+        const actor = page.getByLabel('Acting as');
+        await actor.selectOption('manager');
+        await page.getByRole('button', { name: 'Switch person' }).click();
+        await expect(actor).toHaveValue('manager');
+        const editor = page.locator('[data-customize-form="narrowPermission"]');
+        await editor
+          .getByLabel('Role', { exact: true })
+          .selectOption('local-demo-full-release');
+        await editor
+          .getByLabel('Action', { exact: true })
+          .selectOption('northstar.app:operation.location_archive');
+        await editor
+          .getByRole('button', { name: 'Draft permission restriction' })
+          .click({ timeout: 180_000 });
+        await expect(page.locator('[data-customize-diff]')).toContainText(
+          'local-demo-full-release',
+        );
+        await page
+          .getByRole('button', { name: 'Approve', exact: true })
+          .click({ timeout: 180_000 });
+        await page
+          .getByRole('button', { name: 'Activate now' })
+          .click({ timeout: 180_000 });
+        await expect(
+          page.locator('[data-customize-result="activated"]'),
+        ).toBeVisible({ timeout: 180_000 });
+        await page.goto(record);
+        await expect(archive).toHaveCount(1);
+        await page.goto(customize);
+        await actor.selectOption('buyer');
+        await page.getByRole('button', { name: 'Switch person' }).click();
+        await expect(actor).toHaveValue('buyer');
+        await page.goto(record);
+        await expect(archive).toHaveCount(0);
+
+        await page.goto(customize);
+        await actor.selectOption('manager');
+        await page.getByRole('button', { name: 'Switch person' }).click();
+        await page
+          .getByRole('button', { name: 'Roll back the latest change' })
+          .click({ timeout: 180_000 });
+        await expect(
+          page.locator('[data-customize-result="rolledBack"]'),
+        ).toBeVisible({ timeout: 180_000 });
+        await actor.selectOption('buyer');
+        await page.getByRole('button', { name: 'Switch person' }).click();
+        await page.goto(record);
+        await expect(archive).toHaveCount(1);
+      } finally {
+        await app.close();
+      }
+    },
+    LINEAGE_INSTALL_VOLUME,
+  );
+});
+
 test('a saved Location view keeps its columns, ordering and filtered count until rollback', async ({
   page,
 }) => {

@@ -17,6 +17,11 @@ type Json = Record<string, unknown>;
 export interface DiffDefinition {
   readonly entities: readonly Json[];
   readonly fields: readonly Json[];
+  readonly operations?: readonly Json[];
+  readonly operationRoleNarrowings?: readonly {
+    readonly operationId: string;
+    readonly roleKey: string;
+  }[];
   readonly surfaces: readonly Json[];
   readonly relations?: readonly Json[];
   readonly stateMachines?: readonly Json[];
@@ -62,6 +67,44 @@ export function renderReleaseDiff(input: {
         ?.label ?? entityId,
     );
   const lines: string[] = [];
+  for (const entry of to.operationRoleNarrowings ?? []) {
+    if (
+      from.operationRoleNarrowings?.some(
+        (before) =>
+          before.operationId === entry.operationId &&
+          before.roleKey === entry.roleKey,
+      )
+    )
+      continue;
+    const action = to.operations?.find(
+      (operation) => operation.operationId === entry.operationId,
+    );
+    const label =
+      action?.label ??
+      entry.operationId.split(':operation.').at(-1)!.replaceAll('_', ' ');
+    lines.push(
+      `Role "${entry.roleKey}" can no longer grant access to "${String(label)}".`,
+    );
+  }
+  for (const entry of from.operationRoleNarrowings ?? []) {
+    if (
+      to.operationRoleNarrowings?.some(
+        (after) =>
+          after.operationId === entry.operationId &&
+          after.roleKey === entry.roleKey,
+      )
+    )
+      continue;
+    const action = from.operations?.find(
+      (operation) => operation.operationId === entry.operationId,
+    );
+    const label =
+      action?.label ??
+      entry.operationId.split(':operation.').at(-1)!.replaceAll('_', ' ');
+    lines.push(
+      `Restores the usual policy for "${String(label)}" under role "${entry.roleKey}".`,
+    );
+  }
 
   const newEntities = new Set(
     added('entityDefinition').map((c) => c.subjectId),

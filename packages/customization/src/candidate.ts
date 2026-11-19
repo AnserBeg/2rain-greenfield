@@ -23,7 +23,11 @@ import {
   type CustomizationRefusal,
 } from './apply.js';
 import type { CustomizationPatch, UnsupportedCustomization } from './patch.js';
-import { renderReleaseDiff, type RenderedReleaseDiff } from './render.js';
+import {
+  renderReleaseDiff,
+  type DiffDefinition,
+  type RenderedReleaseDiff,
+} from './render.js';
 
 export type AcknowledgementInput = NonNullable<
   CompilerExecutionOptions['unboundPermissionAcknowledgement']
@@ -196,23 +200,10 @@ export function storageElements(
   );
 }
 
-function definitionOf(bytes: Uint8Array) {
-  const normalized = parseNormalizedApplicationPackageJson(
+function definitionOf(bytes: Uint8Array): DiffDefinition {
+  return parseNormalizedApplicationPackageJson(
     bytes,
-  ) as unknown as {
-    entities: Record<string, unknown>[];
-    fields: Record<string, unknown>[];
-    relations: Record<string, unknown>[];
-    stateMachines: Record<string, unknown>[];
-    surfaces: Record<string, unknown>[];
-  };
-  return {
-    entities: normalized.entities,
-    fields: normalized.fields,
-    relations: normalized.relations,
-    stateMachines: normalized.stateMachines,
-    surfaces: normalized.surfaces,
-  };
+  ) as unknown as DiffDefinition;
 }
 
 function rejected(error: unknown): CustomizationCompileFailure {

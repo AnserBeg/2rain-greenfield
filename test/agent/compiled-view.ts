@@ -80,3 +80,53 @@ export function compiledAppView(
   }
   return { ...loaded, principalId } as RequestRuntimeView;
 }
+
+export async function authenticatedCompiledAppEntry() {
+  const { AuthenticatedRequestEntryAdapter } =
+    await import('../../packages/runtime/src/request-context.js');
+  const {
+    AuthenticatedRequestRuntimeEntryAdapter,
+    CURRENT_POLICY_DECISION_VERSION,
+    REQUEST_RUNTIME_PROJECTION_FAMILIES,
+  } = await import('../../packages/runtime/src/request-runtime-view.js');
+  const identity = {
+    tenantId: 'c1000000-0000-4000-8000-000000000001',
+    environmentId: 'c2000000-0000-4000-8000-000000000002',
+    principalId: 'c3000000-0000-4000-8000-000000000003',
+  };
+  const view = compiledAppView();
+  const family = REQUEST_RUNTIME_PROJECTION_FAMILIES;
+  const projection = <Key extends keyof typeof family>(key: Key) => ({
+    artifactRoot: 'c'.repeat(64),
+    familyId: family[key],
+    instanceId: `northstar.test:projection.${key}`,
+    payload: view.projections[key].payload,
+    payloadSchemaVersion: 'test-payload/v1',
+    semanticDigest: 'd'.repeat(64),
+  });
+  return new AuthenticatedRequestRuntimeEntryAdapter(
+    new AuthenticatedRequestEntryAdapter(async () => identity),
+    {
+      load: async () => ({
+        ...identity,
+        pointer: { fence: 1, pointerId: 'test-pointer' },
+        projections: {
+          agent: projection('agent'),
+          catalog: projection('catalog'),
+          operation: projection('operation'),
+          query: projection('query'),
+          surface: projection('surface'),
+        },
+        release: view.release,
+      }),
+    },
+    {
+      authorize: async () => ({
+        decision: 'DENY',
+        decisionVersion: CURRENT_POLICY_DECISION_VERSION,
+        policyVersion: 'test-policy',
+      }),
+      readCurrentVersion: async () => ({ policyVersion: 'test-policy' }),
+    },
+  );
+}

@@ -1,3 +1,4 @@
+import { OperationRoleKeySchema } from '@north-star/canonical-model';
 import { z } from 'zod';
 
 /**
@@ -177,7 +178,7 @@ const saveListView = z.strictObject({
     .max(3),
 });
 
-const SinglePatchSchema = z.discriminatedUnion('kind', [
+const ChangeMemberSchema = z.discriminatedUnion('kind', [
   addRecordType,
   addField,
   addChoice,
@@ -194,6 +195,30 @@ const SinglePatchSchema = z.discriminatedUnion('kind', [
     sumField: canonicalId.optional(),
   }),
 ]);
+
+export const CUSTOMIZATION_CHANGE_MEMBER_KINDS = Object.freeze(
+  ChangeMemberSchema.options.map((schema) => schema.shape.kind.value),
+);
+
+const SinglePatchSchema = z.discriminatedUnion('kind', [
+  ...ChangeMemberSchema.options,
+  z.strictObject({
+    kind: z.literal('narrowPermission'),
+    target: z.strictObject({
+      kind: z.literal('operation'),
+      id: canonicalId,
+    }),
+    roleKey: OperationRoleKeySchema,
+  }),
+  z.strictObject({
+    kind: z.literal('unNarrowPermission'),
+    target: z.strictObject({
+      kind: z.literal('operation'),
+      id: canonicalId,
+    }),
+    roleKey: OperationRoleKeySchema,
+  }),
+]);
 type ParsedPatch = z.infer<typeof SinglePatchSchema>;
 export type SingleCustomizationPatch =
   ParsedPatch | (Extract<ParsedPatch, { kind: 'addField' }> & { legacy: true });
@@ -202,7 +227,7 @@ export const MAX_CUSTOMIZATION_CHANGE_PATCHES = 16;
 const changeSet = z.strictObject({
   kind: z.literal('changeSet'),
   patches: z
-    .array(SinglePatchSchema)
+    .array(ChangeMemberSchema)
     .min(2)
     .max(MAX_CUSTOMIZATION_CHANGE_PATCHES),
 });
@@ -223,6 +248,8 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'arrangeLayout',
   'saveListView',
   'addMetricCard',
+  'narrowPermission',
+  'unNarrowPermission',
   'changeSet',
 ] as const satisfies readonly CustomizationPatchKind[]);
 
@@ -261,6 +288,14 @@ export function parseCustomizationPatch(
     ) {
       for (const patch of patches) {
         const memberKind = patchKind(patch);
+        if (
+          memberKind === 'narrowPermission' ||
+          memberKind === 'unNarrowPermission'
+        )
+          return unsupported(
+            'action permission changes in a grouped draft',
+            'Action permission changes need their own draft.',
+          );
         if (
           typeof memberKind === 'string' &&
           !(CUSTOMIZATION_PATCH_KINDS as readonly string[]).includes(memberKind)

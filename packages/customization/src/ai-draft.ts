@@ -4,6 +4,7 @@ import {
   checkCreateTimeLinks,
 } from './apply.js';
 import {
+  CUSTOMIZATION_CHANGE_MEMBER_KINDS,
   CUSTOMIZATION_PATCH_KINDS,
   MAX_CUSTOMIZATION_CHANGE_PATCHES,
   parseCustomizationPatch,
@@ -90,7 +91,7 @@ const singlePatchSchema = {
   properties: {
     kind: {
       type: 'string',
-      enum: CUSTOMIZATION_PATCH_KINDS.filter((kind) => kind !== 'changeSet'),
+      enum: CUSTOMIZATION_CHANGE_MEMBER_KINDS,
     },
     label: { type: 'string' },
     fields: { type: 'array', items: fieldSchema },
@@ -171,6 +172,20 @@ const toolSchema = {
       type: 'string',
       enum: [...CUSTOMIZATION_PATCH_KINDS, 'unsupported'],
     },
+    roleKey: { type: 'string' },
+    target: {
+      anyOf: [
+        singlePatchSchema.properties.target,
+        {
+          type: 'object',
+          properties: {
+            kind: { type: 'string', enum: ['operation'] },
+            id: { type: 'string' },
+          },
+          required: ['kind', 'id'],
+        },
+      ],
+    },
     patches: {
       type: 'array',
       items: singlePatchSchema,
@@ -204,10 +219,36 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
     "- arrangeLayout {kind, surface, order?, hide?, relabel?}: add, reorder, hide or rename columns of a list. surface is one of the list ids below; order, hide and relabel[].field use that list's available field ids. Include an available hidden field in order to show it. At most 16 visible columns.",
     '- saveListView {kind, surface, label, columns:[column ID], sort:[{column, direction}], filters:[{field, value}]}: add a tab on one of the lists in Saved view targets below. List the columns in the desired order and include the required record title. Sort by at most three selected sortable columns using ascending or descending. Pin at most three of the declared filter values. Use an empty array for no filters or no sort.',
     '- addMetricCard {kind, surface, label, view?, sumField?}: add a card to Today using a list in Metric card targets below. Omit sumField to count rows. Use a declared sum field for a sum. Omit view to use the default list view.',
+    '- narrowPermission {kind, roleKey, target:{kind:"operation", id}}: remove the named role\'s grant for one action. Use an exact role key and an action id shown below.',
+    '- unNarrowPermission {kind, roleKey, target:{kind:"operation", id}}: remove an existing restriction for exactly the role key and action id listed below.',
+    'Action permission patches need their own draft. If a request combines one with any other patch, report missingCapability "action permission changes in a grouped draft".',
     `For links on an existing record type, report missingCapability "${ADD_LINK_LATER_CAPABILITY}".`,
     'If any requested part needs an unsupported capability, call the tool with {kind: "unsupported", missingCapability: "<name the exact missing capability>"}. Never omit or approximate part of a request. For example, name "goods receipt event subscription" for starting an inspection automatically when goods are received.',
     'Write labels the way the person would read them, with an initial capital. Do not invent ids.',
     '',
+    ...(targets.permissionRoleKeys?.length && targets.permissionActions?.length
+      ? [
+          'Role keys for action restrictions:',
+          ...targets.permissionRoleKeys.map(
+            (key) =>
+              `- ${key}${targets.permissionRoleLabels?.[key] ? ` — ${targets.permissionRoleLabels[key]}` : ''}`,
+          ),
+          'Actions for role restrictions:',
+          ...targets.permissionActions.map(
+            ({ id, label }) => `- ${id} — ${label}`,
+          ),
+          ...(targets.permissionRestrictions?.length
+            ? [
+                'Existing action restrictions:',
+                ...targets.permissionRestrictions.map(
+                  ({ operationId, roleKey }) =>
+                    `- ${operationId} for ${roleKey}`,
+                ),
+              ]
+            : []),
+          '',
+        ]
+      : []),
     ...(targets.metricLists?.length
       ? [
           'Metric card targets:',

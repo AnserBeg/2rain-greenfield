@@ -1,3 +1,4 @@
+import { isNarrowableOperationId } from '@north-star/canonical-model';
 import type {
   CustomField,
   CustomizationPatch,
@@ -190,6 +191,50 @@ function applyOne(
       return saveListView(authored, patch);
     case 'addMetricCard':
       return addMetricCard(authored, patch);
+    case 'narrowPermission':
+    case 'unNarrowPermission': {
+      if (
+        !isNarrowableOperationId(patch.target.id) ||
+        !list(authored, 'operations').some(
+          (operation) =>
+            operation.operationId === patch.target.id &&
+            operation.lifecycle !== 'retired',
+        )
+      )
+        return refusal(
+          'CUSTOMIZE_TARGET_NOT_FOUND',
+          'Choose an active action to restrict.',
+        );
+      const restrictions =
+        authored.operationRoleNarrowings === undefined
+          ? []
+          : list(authored, 'operationRoleNarrowings');
+      const matches = (existing: Json) =>
+        existing.operationId === patch.target.id &&
+        existing.roleKey === patch.roleKey;
+      const exists = restrictions.some(matches);
+      if (patch.kind === 'unNarrowPermission') {
+        if (!exists)
+          return refusal(
+            'CUSTOMIZE_TARGET_NOT_FOUND',
+            'Choose an existing action restriction to remove.',
+          );
+        const remaining = restrictions.filter((entry) => !matches(entry));
+        if (remaining.length) authored.operationRoleNarrowings = remaining;
+        else delete authored.operationRoleNarrowings;
+        return null;
+      }
+      if (exists)
+        return refusal(
+          'CUSTOMIZE_DUPLICATE_LABEL',
+          'This action is already restricted for that role.',
+        );
+      authored.operationRoleNarrowings = [
+        ...restrictions,
+        { operationId: patch.target.id, roleKey: patch.roleKey },
+      ];
+      return null;
+    }
   }
 }
 

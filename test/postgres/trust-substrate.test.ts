@@ -65,7 +65,7 @@ test('migrations upgrade accepted G1 and converge with the checked-in snapshot',
     const migrations = await loadMigrations(checkedInMigrations);
     assert.equal(
       migrations.at(-1)?.name,
-      '0040_customization_patch_kind_identifier.sql',
+      '0041_customization_patch_kind_identifier.sql',
     );
     const admin = await pool.connect();
     try {
@@ -116,7 +116,8 @@ test('migrations upgrade accepted G1 and converge with the checked-in snapshot',
         '0037_verified_release_history.sql',
         '0038_workflow_review_fixes.sql',
         '0039_activation_recovery.sql',
-        '0040_customization_patch_kind_identifier.sql',
+        '0040_customization_permission_directory.sql',
+        '0041_customization_patch_kind_identifier.sql',
       ]);
       assert.equal(upgraded.verified.length, migrations.length);
       await assertSchemaMatchesSnapshot(admin, checkedInSnapshot);

@@ -96,6 +96,8 @@ test('the v1 patch vocabulary is add-only', () => {
     'addLineTable',
     'declareLifecycle',
     'addMetricCard',
+    'narrowPermission',
+    'unNarrowPermission',
     'changeSet',
   ];
   const [singlePatch, changeSet] = CustomizationPatchSchema.options;
@@ -109,6 +111,28 @@ test('the v1 patch vocabulary is add-only', () => {
       schemaKinds.some((current) => current === kind),
       kind,
     );
+});
+
+test('action permission changes require the standalone authoring path', () => {
+  for (const kind of ['narrowPermission', 'unNarrowPermission']) {
+    const permission = {
+      kind,
+      roleKey: 'viewer',
+      target: { kind: 'operation', id: 'northstar.app:operation.party_update' },
+    };
+    assert.equal(parseCustomizationPatch(permission).status, 'parsed');
+    assert.deepEqual(
+      parseCustomizationPatch({
+        kind: 'changeSet',
+        patches: [equipment, permission],
+      }),
+      {
+        status: 'unsupported',
+        missingCapability: 'action permission changes in a grouped draft',
+        message: 'Action permission changes need their own draft.',
+      },
+    );
+  }
 });
 
 test('an unknown patch kind is unsupported and named, including inside a change set', () => {
@@ -986,6 +1010,102 @@ test('a generic Party list can be arranged through the same declared list runtim
   assert.equal(
     'list' in surface && (surface.list as SurfaceList).columns[0]?.field,
     'northstar.app:field.party_credit_limit',
+  );
+});
+
+test('permission narrowing compiles an exact active action on one role', async () => {
+  const action = 'northstar.app:operation.purchase_order_close';
+  const restriction = patch({
+    kind: 'narrowPermission',
+    roleKey: 'local-demo-full-release',
+    target: { kind: 'operation', id: action },
+  });
+  assert.equal(
+    applyCustomizationPatches(authored, [restriction, restriction]).status,
+    'refused',
+  );
+  assert.equal(
+    applyCustomizationPatches(authored, [
+      patch({
+        kind: 'narrowPermission',
+        roleKey: 'local-demo-full-release',
+        target: {
+          kind: 'operation',
+          id: 'northstar.app:operation.nonexistent',
+        },
+      }),
+    ]).status,
+    'refused',
+  );
+  const exactKey = ' local-demo-full-release ';
+  const spacedRole = parseCustomizationPatch({
+    kind: 'narrowPermission',
+    roleKey: exactKey,
+    target: { kind: 'operation', id: action },
+  });
+  assert.ok(
+    spacedRole.status === 'parsed' &&
+      spacedRole.patch.kind === 'narrowPermission',
+  );
+  assert.equal(spacedRole.patch.roleKey, exactKey);
+  const removal = patch({
+    kind: 'unNarrowPermission',
+    roleKey: 'local-demo-full-release',
+    target: { kind: 'operation', id: action },
+  });
+  assert.equal(
+    applyCustomizationPatches(authored, [removal]).status,
+    'refused',
+  );
+  const restored = applyCustomizationPatches(authored, [restriction, removal]);
+  assert.equal(restored.status, 'applied');
+  assert.ok(
+    restored.status === 'applied' &&
+      !('operationRoleNarrowings' in restored.authored),
+  );
+  assert.throws(
+    () =>
+      normalizeApplicationPackage({
+        ...authored,
+        operationRoleNarrowings: [
+          {
+            operationId: 'northstar.app:operation.customize_approve',
+            roleKey: 'local-demo-full-release',
+          },
+        ],
+      }),
+    (error: unknown) =>
+      error instanceof CanonicalModelError &&
+      error.diagnostics.some(
+        ({ code, path }) =>
+          code === 'CANON_SCHEMA_INVALID' &&
+          path === '$.operationRoleNarrowings[0].operationId',
+      ),
+  );
+  const compiled = await compileInSandbox(sandboxRequest([restriction]));
+  assert.ok(compiled.status === 'compiled', JSON.stringify(compiled));
+  const step = compiled.steps[0]!;
+  assert.match(
+    step.rendered.text,
+    /Role "local-demo-full-release" can no longer grant access/u,
+  );
+  const release = parseSerializedRelease(step.release);
+  const catalog = release.compiled.bundle.releaseManifest.projections.find(
+    (projection) =>
+      projection.familyId === PROJECTION_FAMILY_IDS.operationCatalog,
+  )!;
+  assert.equal(catalog.requiredRuntimeCapability.minimumVersion, 2);
+  assert.equal(
+    unsupportedRuntimeCapability(
+      catalog.familyId,
+      catalog.requiredRuntimeCapability,
+    ),
+    null,
+  );
+  assert.deepEqual(
+    JSON.parse(Buffer.from(release.normalizedDefinitionBytes).toString('utf8'))
+      .operationRoleNarrowings,
+    [{ operationId: action, roleKey: 'local-demo-full-release' }],
   );
 });
 

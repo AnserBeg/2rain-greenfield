@@ -11,6 +11,7 @@ import {
   UntrustedIdentityInputError,
 } from '@north-star/runtime/request-context';
 import { RequestRuntimeViewRefusalError } from '@north-star/runtime/request-runtime-view';
+import { trustedContextForRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
 import type { AuthenticatedRequestRuntimeEntryAdapter } from '@north-star/runtime/request-runtime-view';
 import { SURFACE_CLIENT_CSP_HASH } from './surface-client.js';
 import {
@@ -261,13 +262,16 @@ async function handleRequest(
         writeHtml(response, { statusCode: 403, html: '' });
         return;
       }
-      const result = await entry.run({ headers: request.headers }, async () =>
-        renderCustomizeScreen(
-          await customize(),
-          url.href,
-          submission,
-          SURFACE_STYLESHEET.href,
-        ),
+      const result = await entry.run(
+        { headers: request.headers },
+        async (view) =>
+          renderCustomizeScreen(
+            await customize(),
+            url.href,
+            submission,
+            SURFACE_STYLESHEET.href,
+            trustedContextForRequestRuntimeView(view),
+          ),
       );
       const customizePage = withLocalDemoIdentity(
         result,
