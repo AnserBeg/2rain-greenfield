@@ -11,6 +11,7 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 5. Today cards count a declared direct list or sum its declared numeric measure before pagination. The UI drill-through and assistant use the same list and saved-view conditions. Approval, replay and rollback preserve the card definition.
 6. An operation restriction subtracts one role’s grants. Other roles keep their existing grants. Release activation and replay check the role in the destination environment.
 7. Literal validation (F1/F3) adds a guard to bound create and update operations. Create checks after defaults. Update checks when a watched value changes. Form and assistant show the pinned message, and rollback restores the prior rules.
+8. Cross-field validation compares same-record values and one declared, authorized parent field. Its guard checks create and changes to watched values under the same transaction.
 
 ## Decisions
 
@@ -22,6 +23,7 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 - Slice 5 subtracts the selected role’s grant for a named operation. Other roles still grant access. The actual Customize author sees active role keys and labels in their environment. A removal restores evaluation against current policy. Field restrictions remain a gap across query, read-back, exports and assistant output.
 - [ADR-0075](../../decisions/ADR-0075-literal-validation-and-ordered-comparison.md) defines the optional v6 F1/F3 validation position. It keeps the existing inline predicate profile and uses the tenant business calendar. Declaring releases require operation reader 3. Validation keeps its own draft and approval alongside the Inspection builder’s grouped changes. The historical proof runs in PostgreSQL shard 3. Customize has its own browser job, and the release tests are spread across the existing PostgreSQL jobs. The secret scan covers the same Git history in two jobs. The boot-lock test polls from a fresh database snapshot.
 - Slice 6 restores the candidate preserved at `e97ebd9f` and adds a CRITFIX-B replay witness. Catalog measures are separate by currency. Re-baselined the pre-tenant first-party artifact. The surface, agent and query readers require 25, 4 and 3 when their projections carry the corresponding keys.
+- [ADR-0076](../../decisions/ADR-0076-cross-field-and-to-one-validation.md) admits the F2 and F4 positions on v6. Declaring releases require operation reader 4. The Sales order credit-limit example still needs a declared Customer relation and typed currency contract.
 
 ## Gates
 
@@ -30,6 +32,7 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 - The ADR amendment passed [CI 44481530303](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44481530303) and the record checker. GitHub canceled the merge run when CRITFIX-C advanced main.
 - Slice 2 passed [CI 44583050908](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44583050908) and [control 44583050933](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44583050933). PostgreSQL exercised the previous serving reader, tenant-runner envelope equality, grandfathering, and rollback. The browser and assistant exercised the same pinned rule.
 - Slice 5 passed [CI 44510381381](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44510381381) and [four mutation controls](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44510308624). Migration 0040 follows activation recovery and the snapshot was rebuilt from all 40 migrations. Standard surface actions check current permission before being offered. The service stages the release and the patch audit row records the author.
+- Slice 3 candidate evidence is pending.
 
 ## Filed
 
@@ -39,27 +42,22 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
-  "base": "5a7daf8e64aa50aee56cbdf068f1fe78583a2321",
-  "head": "69acef38d220a07f9a1a795e0a1b7b76e5cf8ba6",
+  "base": "d618fa3fa9f8ce51b3b05a70b990cdb411fe8909",
+  "head": "dcf0a731a00e65c1e96d5a151cdd60b49500caea",
   "changedPaths": [
-    ".github/scripts/run-security-scans.sh", ".github/workflows/ci.yml", ".github/workflows/evidence.yml", "apps/web/playwright.composed.config.ts", "apps/web/playwright.customization.config.ts",
-    "apps/web/playwright.shared.ts", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/document-editor.ts", "apps/web/src/surface-composition.ts",
-    "apps/web/src/surface-runtime.ts", "apps/web/src/validation-refusal.ts", "apps/web/test/browser/customize-inspection.composed-application.spec.ts", "apps/web/test/browser/customize.composed-application.spec.ts", "package.json",
-    "packages/canonical-model/src/formula-validation-bindings.ts", "packages/canonical-model/src/formula-validation-projection.ts", "packages/canonical-model/src/formula-validation-schema.ts", "packages/canonical-model/src/formula-validation.ts", "packages/canonical-model/src/index.ts",
-    "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts", "packages/compiler/src/diff.ts", "packages/compiler/src/formula-validation-examples.ts",
-    "packages/compiler/src/formula-validation-plan.ts", "packages/compiler/src/formula-validation-witness.ts", "packages/compiler/src/projections.ts", "packages/compiler/src/protocol.ts", "packages/compiler/src/verification.ts",
-    "packages/customization/src/ai-draft.ts", "packages/customization/src/apply.ts", "packages/customization/src/patch.ts", "packages/customization/src/render.ts", "packages/customization/src/targets.ts",
-    "packages/customization/src/validation-draft.ts", "packages/operations-agent/src/catalog.ts", "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/release-repository.ts",
-    "packages/postgres-provider/src/release-verification-service.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/formula-validation.ts", "packages/runtime/src/request-runtime-view.ts", "scripts/run-matrix.sh",
-    "test/architecture/repository-hygiene.test.ts", "test/architecture/test-reachability.test.ts", "test/evidence/CUSTOMIZE-3.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts",
-    "test/helpers/check-language-coverage.ts", "test/helpers/customization-patch-record.ts", "test/helpers/language-coverage-packages.ts", "test/helpers/reachability-producers.ts", "test/integration/security-scan-contract.test.ts",
-    "test/postgres/customization-governed-reads.test.ts", "test/postgres/customization-inspection.test.ts", "test/postgres/customization-validation.test.ts", "test/postgres/customization.test.ts", "test/unit/customization-ai-draft.test.ts",
-    "test/unit/formula-validation.test.ts"
+    ".github/workflows/evidence.yml", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/surface-runtime.ts", "apps/web/test/browser/customize-formulas.composed-application.spec.ts",
+    "apps/web/test/browser/customize.composed-application.spec.ts", "package.json", "packages/canonical-model/src/formula-validation-bindings.ts", "packages/canonical-model/src/formula-validation-path.ts", "packages/canonical-model/src/formula-validation-projection.ts",
+    "packages/canonical-model/src/formula-validation-reader.ts", "packages/compiler/src/compiler.ts", "packages/compiler/src/formula-validation-examples.ts", "packages/compiler/src/formula-validation-plan.ts", "packages/compiler/src/formula-validation-witness.ts",
+    "packages/compiler/src/projections.ts", "packages/customization/src/ai-draft.ts", "packages/customization/src/targets.ts", "packages/customization/src/validation-draft.ts", "packages/postgres-provider/src/composed-application-runtime.ts",
+    "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/release-repository.ts", "packages/postgres-provider/src/release-verification-service.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/formula-validation.ts",
+    "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/repository-hygiene.test.ts", "test/evidence/CUSTOMIZE-3.expected-red.json", "test/helpers/archived-customization-runtime.ts",
+    "test/helpers/language-coverage-packages.ts", "test/helpers/reachability-producers.ts", "test/postgres/customization-formulas.test.ts", "test/postgres/customization-validation.test.ts", "test/unit/customization-ai-draft.test.ts",
+    "test/unit/field-validation.test.ts"
   ],
   "symbols": [
-    {"path":"packages/canonical-model/src/formula-validation-bindings.ts","name":"bindLiteralValidation"},
+    {"path":"packages/canonical-model/src/formula-validation-path.ts","name":"resolveValidationPath"},
     {"path":"packages/compiler/src/formula-validation-plan.ts","name":"compileLiteralFormulaRules"},
-    {"path":"packages/runtime/src/formula-validation.ts","name":"observeValidationRefusals"}
+    {"path":"packages/postgres-provider/src/module-runtime-interpreter.ts","name":"loadFormulaPaths"}
   ]
 }
 ```
@@ -77,3 +75,5 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 **Slice 2.** In **Customize → Add validation → Item**, choose **Description** and **Require a value**, enter a message, then draft, approve and activate. Open **New item**, fill SKU, name and base unit, and save with Description blank. The form keeps your entries and shows your message. Fill Description and save. Roll back in Customize and verify that another item saves with Description blank.
 
 **Slice 6.** In **Customize → Add a metric card to Today**, choose **Locations**, select **Set up metric** and name it **Location count**. Draft, approve and activate. Select the card on Today and compare its count with the destination list. For a sum, choose **Items** and **Price (CAD)**, then use its card to open the governed list. Roll back from Customize and verify that the latest card disappears.
+
+**Slice 3.** In **Customize → Add validation → Location → Compare fields**, choose **Location name**, **Different from**, and the parent Location name. Draft, approve and activate. Create a Location with a parent, then try the parent’s exact name. Change the name, save, then roll back and verify that the original name is accepted.
