@@ -251,15 +251,19 @@ test(
           const recordId = randomUUID();
           const world = worldOver(app.runtime, String(connection.database));
           const create = () =>
-            world.invoke('item_create', {
-              recordId,
-              relations: {},
-              values: {
-                'northstar.app:field.item_name': 'Role restriction witness',
-                'northstar.app:field.item_sku': 'ROLE-RESTRICTION',
-                'northstar.app:field.item_base_unit': 'EA',
+            world.invoke(
+              'item_create',
+              {
+                recordId,
+                relations: {},
+                values: {
+                  'northstar.app:field.item_name': 'Role restriction witness',
+                  'northstar.app:field.item_sku': 'ROLE-RESTRICTION',
+                  'northstar.app:field.item_base_unit': 'EA',
+                },
               },
-            });
+              { actor: 'buyer' },
+            );
           const manager = await app.runtime.entry.run(
             { headers },
             async (view) => trustedContextForRequestRuntimeView(view),
@@ -285,12 +289,10 @@ test(
             manager,
           );
           assert.ok(draft.status === 'drafted', JSON.stringify(draft));
-          const audit = await pool.query<{ authored_by: string }>(
-            `SELECT authored_by FROM platform.customization_patches
-              WHERE tenant_id = $1 AND environment_id = $2 AND patch_id = $3`,
-            [manager.tenantId, manager.environmentId, draft.patchId],
+          assert.equal(
+            (await recordedPatch(pool, draft.patchId)).authored_by,
+            manager.principalId,
           );
-          assert.equal(audit.rows[0]?.authored_by, manager.principalId);
           await opened.service.approve(draft.patchId);
           const setRoleAvailability = (active: boolean) =>
             pool.query(

@@ -994,79 +994,78 @@ export class PostgresCustomizationService {
     // Recording runs under the release-scope lock (review R4): two identical
     // drafts are serialized, so the second finds the first's patch and
     // returns the release and revision that patch recorded.
-    const recorded = await this.#locked(
-      async (_admin, releaseContext, locked) => {
-        if (locked.revisionId !== active.revisionId) {
-          return Object.freeze({
-            code: 'CUSTOMIZE_DRAFT_STALE',
-            message:
-              'the live application changed while this change was drafted; draft it again',
-            status: 'refused' as const,
-          });
-        }
-        const existing = await withTrustedRequestTransaction(
-          this.connection.runtimePool,
-          context,
-          async (client) =>
-            client.query<{
-              patch_id: MintedUuid;
-              resulting_release_id: MintedUuid;
-              resulting_revision_id: MintedUuid;
-            }>(
-              // The table's append-only rules rule out ON CONFLICT, so a
-              // re-draft is found first.
-              `SELECT patch_id, resulting_release_id, resulting_revision_id
+    const recorded = await this.#locked(async (_admin, stager, locked) => {
+      if (locked.revisionId !== active.revisionId) {
+        return Object.freeze({
+          code: 'CUSTOMIZE_DRAFT_STALE',
+          message:
+            'the live application changed while this change was drafted; draft it again',
+          status: 'refused' as const,
+        });
+      }
+      const existing = await withTrustedRequestTransaction(
+        this.connection.runtimePool,
+        context,
+        async (client) =>
+          client.query<{
+            patch_id: MintedUuid;
+            resulting_release_id: MintedUuid;
+            resulting_revision_id: MintedUuid;
+          }>(
+            // The table's append-only rules rule out ON CONFLICT, so a
+            // re-draft is found first.
+            `SELECT patch_id, resulting_release_id, resulting_revision_id
                FROM platform.customization_patches
               WHERE tenant_id = $1 AND environment_id = $2
                 AND parent_revision_id = $3 AND payload_digest = $4`,
-              [
-                context.tenantId,
-                context.environmentId,
-                active.revisionId,
-                payloadDigest,
-              ],
-            ),
-        );
-        const reusedRow = existing.rows[0];
-        if (reusedRow) {
-          return {
-            patchId: reusedRow.patch_id,
-            releaseId: reusedRow.resulting_release_id,
-            reused: true,
-            revisionId: reusedRow.resulting_revision_id,
-            status: 'recorded' as const,
-          };
-        }
-        let identity: PersistedReleaseIdentity;
-        try {
-          signal?.throwIfAborted();
-          // Staging and later registration share the release service identity.
-          // The patch below separately records the authenticated author's identity.
-          identity = await ensurePersistedRelease(
-            this.connection.runtimePool,
-            releaseContext,
-            candidate,
-            active.revisionId,
-            'tenantAuthored',
-          );
-        } catch (error) {
-          if (error instanceof PersistedReleaseConflict) {
-            return Object.freeze({
-              code: error.code,
-              message: error.message,
-              status: 'refused' as const,
-            });
-          }
-          throw error;
-        }
-        const patchId = randomUUID() as MintedUuid;
-        await withTrustedRequestTransaction(
+            [
+              context.tenantId,
+              context.environmentId,
+              active.revisionId,
+              payloadDigest,
+            ],
+          ),
+      );
+      const reusedRow = existing.rows[0];
+      if (reusedRow) {
+        return {
+          patchId: reusedRow.patch_id,
+          releaseId: reusedRow.resulting_release_id,
+          reused: true,
+          revisionId: reusedRow.resulting_revision_id,
+          status: 'recorded' as const,
+        };
+      }
+      let identity: PersistedReleaseIdentity;
+      try {
+        signal?.throwIfAborted();
+        // Staging and later registration share the release service identity.
+        // The patch below separately records the authenticated author's identity.
+        identity = await ensurePersistedRelease(
           this.connection.runtimePool,
-          context,
-          async (client) => {
-            signal?.throwIfAborted();
-            await client.query(
-              `INSERT INTO platform.customization_patches (
+          stager,
+          candidate,
+          active.revisionId,
+          'tenantAuthored',
+        );
+      } catch (error) {
+        if (error instanceof PersistedReleaseConflict) {
+          return Object.freeze({
+            code: error.code,
+            message: error.message,
+            status: 'refused' as const,
+          });
+        }
+        throw error;
+      }
+      const patchId = randomUUID() as MintedUuid;
+      await withTrustedRequestTransaction(
+        this.connection.runtimePool,
+        context,
+        async (client) => {
+          signal?.throwIfAborted();
+          await client.query(
+            `INSERT INTO platform.customization_patches (
              tenant_id, environment_id, patch_id, patch_version, patch_kind,
              payload, payload_digest, channel, authored_by, base_package_id,
              base_package_version, base_revision_id, base_release_root,
@@ -1075,41 +1074,40 @@ export class PostgresCustomizationService {
            ) VALUES (
              $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20
            )`,
-              [
-                context.tenantId,
-                context.environmentId,
-                patchId,
-                CUSTOMIZATION_PATCH_VERSION,
-                parsed.patch.kind,
-                Buffer.from(payload),
-                payloadDigest,
-                channel,
-                context.principalId,
-                firstParty.package.packageId,
-                firstParty.package.version,
-                baseRevisionId,
-                this.#tip.compiled.releaseRoot,
-                active.revisionId,
-                identity.revisionId,
-                identity.releaseId,
-                normalized.languageVersion,
-                normalized.normalizationProfileVersion,
-                patchDisplayLabel(patch),
-                this.options.acknowledgement,
-              ],
-            );
-            signal?.throwIfAborted();
-          },
-        );
-        return {
-          patchId,
-          releaseId: identity.releaseId,
-          reused: false,
-          revisionId: identity.revisionId,
-          status: 'recorded' as const,
-        };
-      },
-    );
+            [
+              context.tenantId,
+              context.environmentId,
+              patchId,
+              CUSTOMIZATION_PATCH_VERSION,
+              parsed.patch.kind,
+              Buffer.from(payload),
+              payloadDigest,
+              channel,
+              context.principalId,
+              firstParty.package.packageId,
+              firstParty.package.version,
+              baseRevisionId,
+              this.#tip.compiled.releaseRoot,
+              active.revisionId,
+              identity.revisionId,
+              identity.releaseId,
+              normalized.languageVersion,
+              normalized.normalizationProfileVersion,
+              patchDisplayLabel(patch),
+              this.options.acknowledgement,
+            ],
+          );
+          signal?.throwIfAborted();
+        },
+      );
+      return {
+        patchId,
+        releaseId: identity.releaseId,
+        reused: false,
+        revisionId: identity.revisionId,
+        status: 'recorded' as const,
+      };
+    });
     if (recorded.status === 'refused') return recorded;
     return Object.freeze({
       canonicalDiffDigest: step.diff.canonicalDiffDigest,

@@ -4,6 +4,8 @@
  * already posted against it, and its order line -- read by the receiving read
  * model, so a reversal names exactly what the posting kernel will admit.
  */
+import { stockImpact } from '../inventory/workspace.js';
+
 export const RECEIVING_READ_MODEL_BINDINGS = Object.freeze({
   receiptLine: 'northstar.purchasing:read_model.receipt_line',
 });
@@ -165,6 +167,16 @@ export function purchasingWorkspace(
       description: known
         ? 'Post received quantity using the actual received cost and currency you enter.'
         : 'Post received quantity with actual cost explicitly recorded as absent. Order price is not received cost.',
+      stockImpacts: [
+        stockImpact(
+          namespace,
+          selected(f('purchase_order_line_item_id')),
+          { source: 'input', inputId: id('input', 'receive_location') },
+          { source: 'input', inputId: id('input', 'receive_quantity') },
+          'increase',
+          'unchanged',
+        ),
+      ],
       orderKey: known ? 10 : 20,
       datasetId: lines,
       presentation: { placement: 'selection' },
@@ -344,6 +356,16 @@ export function purchasingWorkspace(
       description: known
         ? 'Posts one receipt for every line given a quantity, at the actual unit cost and currency you enter. A line left empty is not received.'
         : 'Posts one receipt for every line given a quantity, with actual cost explicitly recorded as absent. A line left empty is not received.',
+      stockImpacts: [
+        stockImpact(
+          namespace,
+          selected(f('purchase_order_line_item_id')),
+          input('location'),
+          input('quantity'),
+          'increase',
+          'unchanged',
+        ),
+      ],
       orderKey: known ? 5 : 6,
       conditions: [released],
       // A withheld open quantity keeps its line offered, left empty by Fill.
@@ -508,6 +530,16 @@ export function purchasingWorkspace(
   const reverseReceipt = {
     actionId: id('action', 'reverse_receipt'),
     label: 'Reverse receipt',
+    stockImpacts: [
+      stockImpact(
+        namespace,
+        selected(f('goods_receipt_line_item_id')),
+        { ...selected(f('goods_receipt_location_id')), datasetId: receipts },
+        selected(metric('reversible')),
+        'decrease',
+        'unchanged',
+      ),
+    ],
     description:
       'Reverses every line of this receipt that still adds to stock, at exactly that quantity, with a posted reversal receipt. Refused if the stock has already left.',
     orderKey: 32,

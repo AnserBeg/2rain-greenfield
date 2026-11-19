@@ -1,3 +1,4 @@
+import { completeTask, returnToRecord } from './complete-task.js';
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 import type pg from 'pg';
@@ -93,8 +94,23 @@ async function journey(page: Page, baseUrl: string, pool: pg.Pool) {
     const secondary = page.locator(
       '.composition-record-actions:not([open]) > summary',
     );
-    if (await secondary.count()) await secondary.click();
-    await page.getByRole('button', { name: label, exact: true }).click();
+    const button = page.getByRole('button', { name: label, exact: true });
+    if (!(await button.isVisible()) && (await secondary.count()))
+      await secondary.click();
+    const task = await button.evaluate((element) =>
+      Boolean(
+        element.closest('form')?.querySelector('[name=compositionAction]'),
+      ),
+    );
+    await button.click();
+    if (task) {
+      await completeTask(page.getByRole('dialog'), label);
+      await expect(page.locator('[data-task-result]')).toContainText(
+        `${label}: done`,
+      );
+      await returnToRecord(page);
+      return;
+    }
     if (confirmed) {
       await expect(
         page.getByRole('heading', { name: `Confirm ${label}`, exact: true }),

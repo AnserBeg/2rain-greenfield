@@ -813,6 +813,42 @@ export function validateSurfaceCompositions(
         action.inputs.map((input) => input.inputId),
         surface.surfaceId,
       );
+      for (const impact of action.stockImpacts ?? []) {
+        const stock = queries.get(impact.query.targetId);
+        const location = queries.get(impact.locationStatus.query.targetId);
+        if (
+          !action.steps.length ||
+          (impact.datasetId !== undefined && !children.has(impact.datasetId)) ||
+          stock?.queryType !== 'list' ||
+          location?.queryType !== 'get' ||
+          !Object.values(impact.fields).every((field) =>
+            fieldsFor(impact.query.targetId).has(field),
+          ) ||
+          !fieldsFor(impact.locationStatus.query.targetId).has(
+            impact.locationStatus.field,
+          ) ||
+          !fieldsFor(impact.locationStatus.query.targetId).has(
+            impact.locationStatus.label,
+          )
+        )
+          fail(
+            surface.surfaceId,
+            'stock impacts require declared stock and location query results',
+          );
+        for (const value of [impact.item, impact.location, impact.quantity]) {
+          if (value.source === 'input') {
+            if (!action.inputs.some((input) => input.inputId === value.inputId))
+              fail(
+                surface.surfaceId,
+                'stock impacts require declared task inputs',
+              );
+          } else
+            contextValue(
+              value,
+              impact.datasetId ?? action.rows?.datasetId ?? action.datasetId,
+            );
+        }
+      }
       const task = action.presentation?.task;
       if (task) {
         if (

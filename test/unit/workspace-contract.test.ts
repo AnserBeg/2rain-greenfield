@@ -1344,8 +1344,14 @@ test('INVENTORY-PARITY: the item page lists its stock and movements by a field o
   refuse(scopedBy(`${ns}:metric.reserved`), fieldScopeRefusal);
   // Another entity's field.
   refuse(scopedBy(`${ns}:field.reservation_item_id`), fieldScopeRefusal);
-  // A field the dataset's list does not select.
+  // A field the dataset's list does not select. Stock previews also validate
+  // this shared query, so isolate the item-page scope guard in this case.
   refuse((candidate) => {
+    for (const page of candidate.surfaces as Loose[]) {
+      const actions =
+        (page.composition as { actions?: Loose[] } | undefined)?.actions ?? [];
+      for (const action of actions) delete action.stockImpacts;
+    }
     const copy = query(candidate, 'item_stock_positions');
     copy.selections = copy.selections.filter(
       (selection) =>
