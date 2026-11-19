@@ -24,6 +24,29 @@ const ns = 'northstar.app';
 const warehouse = `${ns}:surface.inventory_warehouse`;
 const id = (kind: string, local: string) => `${ns}:${kind}.${local}`;
 
+test("INTERACT-1 queue previews use the listed entity's active record page", () => {
+  const app = application();
+  const today = surfaceOf(app, id('surface', 'inventory_today')).launcher as {
+    tiles: Array<{ preview?: { recordSurface: string } }>;
+  };
+  assert.equal(
+    today.tiles[0]?.preview?.recordSurface,
+    id('surface', 'purchase_order_detail'),
+  );
+  normalizeApplicationPackage(app as never);
+  assert.match(
+    refused((value) => {
+      const launcher = surfaceOf(value, id('surface', 'inventory_today'))
+        .launcher as typeof today;
+      launcher.tiles[0]!.preview!.recordSurface = id(
+        'surface',
+        'sales_order_detail',
+      );
+    }),
+    /a queue preview opens an active record page of its listed entity/u,
+  );
+});
+
 function application(): Json & { surfaces: Json[] } {
   return structuredClone(composedApplicationDefinition()) as Json & {
     surfaces: Json[];
