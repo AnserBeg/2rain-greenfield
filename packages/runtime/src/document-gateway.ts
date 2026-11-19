@@ -17,7 +17,7 @@ export interface DocumentMetadata {
 }
 
 export interface DocumentUpload {
-  readonly uploadId: string;
+  readonly retryKey: string;
   readonly fieldId: string | null;
   readonly categoryId: string | null;
   readonly fileName: string;

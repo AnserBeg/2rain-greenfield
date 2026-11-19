@@ -3026,10 +3026,10 @@ export function renderDocumentSection(
     const label = escapeHtml(field?.label ?? 'Attachments');
     const id = escapeHtml(field?.fieldId ?? '');
     const categoryControl = categories.length
-      ? `<label>Category <select name="category" required><option value="">Choose a category</option>${categories.map((category) => `<option value="${escapeHtml(category.categoryId)}">${escapeHtml(category.label)}</option>`).join('')}</select></label>`
+      ? `<label>Category <select name="category" required><option value="">Choose a category</option>${categories.map((category) => `<option value="${escapeHtml(category.categoryId)}" data-image="${category.contentTypes.some((type) => type.startsWith('image/'))}">${escapeHtml(category.label)}</option>`).join('')}</select></label>`
       : '';
     const form = scannerLabel
-      ? `<form data-document-upload data-field="${id}">${categoryControl}<label>Choose file <input type="file" name="file" accept="application/pdf,image/jpeg,image/png" required></label><button type="submit">Attach</button></form>`
+      ? `<form data-document-upload data-field="${id}">${categoryControl}<label>Choose file <input type="file" name="file" accept="application/pdf,image/jpeg,image/png"></label><label data-document-camera hidden>Take photo <input type="file" name="photo" accept="image/jpeg,image/png" capture="environment"></label><button type="submit">Attach</button></form>`
       : '';
     return `<div data-document-field="${id}"><h3>${label}</h3>${field ? `<p>Up to ${field.maxCount} files${field.required ? ' · Required for document tasks' : ''}</p>` : ''}<ul data-document-rows></ul>${form}</div>`;
   };

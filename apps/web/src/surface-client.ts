@@ -671,20 +671,36 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
       if (panel.open) void refresh().catch(showError);
     });
     for (const form of panel.querySelectorAll('[data-document-upload]')) {
-      let uploadId = null;
-      form.addEventListener('change', () => { uploadId = null; });
+      let retryKey = null;
+      const input = form.elements.namedItem('file');
+      const photo = form.elements.namedItem('photo');
+      const category = form.elements.namedItem('category');
+      const camera = form.querySelector('[data-document-camera]');
+      const canCapture = 'capture' in photo && window.matchMedia('(pointer: coarse)').matches;
+      const refreshCamera = () => {
+        camera.hidden = !canCapture || (category && category.selectedOptions[0]?.dataset.image !== 'true');
+        if (camera.hidden) photo.value = '';
+      };
+      refreshCamera();
+      form.addEventListener('change', (event) => {
+        retryKey = null;
+        if (event.target === photo) input.value = '';
+        if (event.target === input) photo.value = '';
+        refreshCamera();
+      });
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
-        const input = form.elements.namedItem('file');
-        const file = input.files[0];
-        if (!file) return;
+        const file = input.files[0] || photo.files[0];
+        if (!file) {
+          status.textContent = 'Choose a file to attach.';
+          return;
+        }
         const url = requestURL('upload');
-        uploadId ??= window.crypto.randomUUID();
-        url.searchParams.set('uploadId', uploadId);
+        retryKey ??= window.crypto.randomUUID();
+        url.searchParams.set('retryKey', retryKey);
         url.searchParams.set('fileName', file.name);
         if (form.dataset.field) url.searchParams.set('field', form.dataset.field);
-        const category = form.elements.namedItem('category')?.value;
-        if (category) url.searchParams.set('category', category);
+        if (category?.value) url.searchParams.set('category', category.value);
         const button = form.querySelector('button');
         button.disabled = true;
         status.textContent = '';
@@ -695,7 +711,8 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
             throw new Error(refusal.message);
           }
           form.reset();
-          uploadId = null;
+          refreshCamera();
+          retryKey = null;
           await refresh();
           status.textContent = 'File attached.';
         } catch (error) {

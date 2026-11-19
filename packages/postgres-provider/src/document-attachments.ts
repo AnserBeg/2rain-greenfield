@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import type { StorageTargetPayloadV1 } from '@north-star/compiler';
 import {
@@ -175,8 +175,9 @@ export class PostgresDocumentGateway implements DocumentGateway {
         'File uploads are unavailable until a malware scanner is configured.',
       );
     const scanner = this.scanner;
-    if (!uuid.test(upload.uploadId))
-      throw new DocumentRequestError(400, 'Invalid upload ID.');
+    if (!uuid.test(upload.retryKey))
+      throw new DocumentRequestError(400, 'Invalid upload retry key.');
+    const uploadId = scopedUploadId(view, upload.retryKey);
     const fileName = upload.fileName.trim().replace(/[\\/\p{Cc}\p{Cf}]/gu, '_');
     if (!fileName || fileName.length > 180)
       throw new DocumentRequestError(
@@ -245,7 +246,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
         await this.authorizeAttach(client, view, record);
         signal.throwIfAborted();
         await lockDocumentQuota(client, view);
-        const existing = await readUploadReceipt(client, view, upload.uploadId);
+        const existing = await readUploadReceipt(client, view, uploadId);
         if (existing) {
           if (!matchesUpload(existing, view, record, upload, digest, fileName))
             throw new DocumentRequestError(
@@ -271,7 +272,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
           `SELECT principal_id, owner_scope, entity_id, record_id, field_id, category_id, digest, file_name, retired_at
            FROM platform.document_upload_staging
           WHERE tenant_id = $1 AND environment_id = $2 AND upload_id = $3`,
-          [view.tenantId, view.environmentId, upload.uploadId],
+          [view.tenantId, view.environmentId, uploadId],
         );
         if (staged.rows[0]) {
           if (staged.rows[0].retired_at)
@@ -310,7 +311,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
           [
             view.tenantId,
             view.environmentId,
-            upload.uploadId,
+            uploadId,
             view.principalId,
             record.scope,
             record.entity.entityId,
@@ -346,18 +347,14 @@ export class PostgresDocumentGateway implements DocumentGateway {
         record: targetRecord.record,
         query: targetRecord.query,
         companyId: target.companyId,
-        uploadId: upload.uploadId,
+        uploadId,
         commit: () =>
           this.withRecord(view, target, permissions, async (client, record) => {
             checkSameRecord(targetRecord, record);
             await this.authorizeAttach(client, view, record);
             signal.throwIfAborted();
             await lockDocumentQuota(client, view);
-            const existing = await readUploadReceipt(
-              client,
-              view,
-              upload.uploadId,
-            );
+            const existing = await readUploadReceipt(client, view, uploadId);
             if (existing) {
               if (
                 !matchesUpload(existing, view, record, upload, digest, fileName)
@@ -407,7 +404,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
               [
                 view.tenantId,
                 view.environmentId,
-                upload.uploadId,
+                uploadId,
                 view.principalId,
                 digest,
               ],
@@ -424,7 +421,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
            FROM platform.document_upload_staging
           WHERE tenant_id = $1 AND environment_id = $2 AND upload_id = $3
          ON CONFLICT (tenant_id, environment_id, owner_scope, digest) DO NOTHING`,
-              [view.tenantId, view.environmentId, upload.uploadId],
+              [view.tenantId, view.environmentId, uploadId],
             );
             const linkId = randomUUID();
             const versionId = randomUUID();
@@ -439,7 +436,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
                 view.environmentId,
                 linkId,
                 versionId,
-                upload.uploadId,
+                uploadId,
                 record.scope,
                 digest,
                 record.entity.entityId,
@@ -466,7 +463,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
             );
             await client.query(
               'SELECT platform.retire_document_upload_staging($1)',
-              [upload.uploadId],
+              [uploadId],
             );
             return {
               linkId,
@@ -694,6 +691,24 @@ export class PostgresDocumentGateway implements DocumentGateway {
       });
     });
   }
+}
+
+function scopedUploadId(view: RequestRuntimeView, retryKey: string): string {
+  const bytes = createHash('sha256')
+    .update('northstar.document-upload/v1\0')
+    .update(
+      JSON.stringify([
+        view.tenantId,
+        view.environmentId,
+        view.principalId,
+        retryKey,
+      ]),
+    )
+    .digest();
+  bytes[6] = (bytes[6]! & 0x0f) | 0x80;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.subarray(0, 16).toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function documentDefinition(view: RequestRuntimeView) {

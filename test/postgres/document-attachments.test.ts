@@ -87,7 +87,7 @@ test(
             app.runtime.documents?.scannerLabel,
             DOCUMENT_DEMO_SCANNER_LABEL,
           );
-          const uploadId = randomUUID();
+          const retryKey = randomUUID();
           await assert.rejects(
             app.runtime.entry.run({}, (view) =>
               app.runtime.operationGateway.invoke(
@@ -97,12 +97,12 @@ test(
                   operationId: documentAttachOperation(
                     'northstar.app:entity.item',
                   ),
-                  idempotencyKey: uploadId,
+                  idempotencyKey: retryKey,
                   confirmationGrant: null,
                   input: {
                     recordId: item.recordId,
                     expectedRevision: 1,
-                    uploadId,
+                    uploadId: retryKey,
                   },
                 },
                 app.runtime.operationMediation.issueInvocation(view, 'UI'),
@@ -111,10 +111,15 @@ test(
             { code: 'NO_SUCH_REGISTERED_OPERATION' },
           );
 
-          const first = await upload(itemUrl, pixel, { uploadId });
+          const first = await upload(itemUrl, pixel, { retryKey });
           assert.equal(first.status, 201, await first.clone().text());
           const attachment = (await first.json()) as DocumentMetadata;
-          const retry = await upload(itemUrl, pixel, { uploadId });
+          const persisted = await pool.query<{ upload_id: string }>(
+            'SELECT upload_id FROM platform.document_versions WHERE link_id = $1',
+            [attachment.linkId],
+          );
+          assert.notEqual(persisted.rows[0]!.upload_id, retryKey);
+          const retry = await upload(itemUrl, pixel, { retryKey });
           assert.deepEqual(await retry.json(), attachment);
           const second = await upload(itemUrl, pixel);
           assert.equal(second.status, 201, await second.clone().text());
@@ -428,6 +433,21 @@ test(
             equipment.recordId,
             COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId,
           );
+          const recordUrl = new URL('/', app.baseUrl);
+          recordUrl.searchParams.set(
+            'surface',
+            'northstar.app:surface.custom_equipment_detail',
+          );
+          recordUrl.searchParams.set('record', equipment.recordId);
+          recordUrl.searchParams.set(
+            'northstar.app:parameter.custom_equipment_get_legal_entity_scope',
+            COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId,
+          );
+          const record = await fetch(recordUrl);
+          assert.match(
+            await record.text(),
+            /name="photo" accept="image\/jpeg,image\/png" capture="environment"/u,
+          );
           const wrongCategory = await upload(fieldUrl, pixel, {
             fieldId,
             categoryId: 'northstar.app:category.unknown',
@@ -522,7 +542,7 @@ function upload(
   target: URL,
   bytes: Buffer,
   options: {
-    uploadId?: string;
+    retryKey?: string;
     fieldId?: string;
     categoryId?: string;
     contentType?: string;
@@ -531,7 +551,7 @@ function upload(
 ): Promise<Response> {
   const url = new URL(target);
   url.searchParams.set('mode', 'upload');
-  url.searchParams.set('uploadId', options.uploadId ?? randomUUID());
+  url.searchParams.set('retryKey', options.retryKey ?? randomUUID());
   url.searchParams.set('fileName', 'evidence.png');
   if (options.fieldId) url.searchParams.set('field', options.fieldId);
   if (options.categoryId) url.searchParams.set('category', options.categoryId);

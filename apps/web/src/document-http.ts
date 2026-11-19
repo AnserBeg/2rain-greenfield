@@ -85,7 +85,7 @@ export function mountDocumentHttp(
             view,
             target,
             {
-              uploadId: url.searchParams.get('uploadId') ?? '',
+              retryKey: url.searchParams.get('retryKey') ?? '',
               fieldId: url.searchParams.get('field'),
               categoryId: url.searchParams.get('category'),
               fileName: url.searchParams.get('fileName') ?? '',
