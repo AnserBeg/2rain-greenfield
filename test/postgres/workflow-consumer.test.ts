@@ -781,16 +781,20 @@ test(
               );
               assert.equal(await runStatus(pool, refusedRun), 'SUSPENDED');
               assert.equal(await journalCount(pool, refusedRun, 'RESULT'), 0);
+              assert.deepEqual(
+                await restarted.remedy(
+                  operator,
+                  [refusedRun, firstRun],
+                  'cancel',
+                ),
+                [
+                  { runId: refusedRun, outcome: 'cancelled' },
+                  { runId: firstRun, outcome: 'ineligible' },
+                ],
+              );
+              assert.equal(await runStatus(pool, refusedRun), 'CANCELLED');
             },
           );
-          assert.deepEqual(
-            await restarted.remedy(operator, [refusedRun, firstRun], 'cancel'),
-            [
-              { runId: refusedRun, outcome: 'cancelled' },
-              { runId: firstRun, outcome: 'ineligible' },
-            ],
-          );
-          assert.equal(await runStatus(pool, refusedRun), 'CANCELLED');
           const scheduled = await startComposedApplication({
             databaseUrl,
             tenantSlug,
