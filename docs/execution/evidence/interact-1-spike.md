@@ -37,6 +37,33 @@ with behaviour 7's bounded fragment responses and keep the regular page submit
 available. Receipt and shipment use `humanRequired` operations. Their explicit
 confirmation and the gateway's verified read-back are used in both paths.
 
+## Final production scorecard
+
+Counts start at the ready order form (PO/SO) or the record's Task opener and
+end at the verified result with the record ready for its next action. Full
+navigation and data-entry journeys are separate from this posting boundary.
+
+| Posting | Before, clicks / loads | After, clicks / loads |
+| --- | ---: | ---: |
+| Place purchase order | 5 / 5 | 1 / 1 |
+| Receive | 4 / 4 | 2 / 0 |
+| Place sales order | 2 / 2 | 1 / 1 |
+| Ship | 5 / 4 | 3 / 0 |
+| Invoice | 4 / 4 | 2 / 0 |
+| Record payment | 4 / 4 | 2 / 0 |
+
+After values are the six `INTERACT_POSTING` measurements from
+[Chromium CI 44552179864](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44552179864/job/135658777872).
+All six names and their limits are asserted; receive-in-full requires two clicks.
+The fixture also verifies the posted quantities, invoice and payment outcomes.
+
+PO's former ready-form path was Save draft, open Place order, Review, Confirm
+and Back (5 / 5); SO was Save draft and confirm the order (2 / 2). These actions
+are in the recorded baseline helper. The older whole create journeys were
+10 / 7 and 6 / 4, respectively; they include navigation and picker choices.
+Invoice and payment were four Task clicks and four loads each (8 / 8 together).
+[Recorded baseline job](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44368685795/job/135029254114).
+
 ## Test it yourself
 
 Open the composed application browser job in the linked CI run and find

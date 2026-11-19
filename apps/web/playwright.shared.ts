@@ -1,12 +1,12 @@
 import { devices, type PlaywrightTestConfig } from '@playwright/test';
 
 /**
- * The browser suite runs as four CI jobs under the same bound, split by file
+ * The browser suite runs as five CI jobs under the same bound, split by file
  * name. The browser job (playwright.config.ts) ignores every spec this rule
  * matches: purchasing, receiving and receivables, inventory, payables, the
  * order pages, price lists (SALES-EXTRAS) and every composed-application
- * journey. Of those, the composed job (playwright.composed.config.ts) runs the
- * composed-application journeys, the inventory job
+ * journey. Of those, the customization job owns the Customize journeys, and the composed job
+ * (playwright.composed.config.ts) owns the other composed journeys. The inventory job
  * (playwright.inventory.config.ts) the inventory and item stock specs, and the
  * operations job (playwright.operations.config.ts) the rest, so every spec
  * runs in exactly one job. The rule reads the file name only: nothing after
@@ -17,6 +17,8 @@ export const operationsBrowserSpecs =
 
 /** The composed-application journeys; every one also matches the rule above. */
 export const composedApplicationSpecs = /composed-application\.spec\.ts$/u;
+export const customizationBrowserSpecs =
+  /(?:^|\/)customize\.composed-application\.spec\.ts$/u;
 
 /**
  * The inventory and item stock specs; every one also matches the rule above.

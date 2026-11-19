@@ -66,6 +66,10 @@ test('a purchase order takes its supplier defaults, is discounted and taxed per 
     await openMoreDetails(page);
     await page.getByLabel('Freight', { exact: true }).fill('25');
     await capture(page, testInfo, 'purchase-pricing-editor');
+    // The line's More remains open; neither save action can sit beneath it.
+    await page
+      .getByRole('button', { name: 'Save and place', exact: true })
+      .click({ trial: true });
     await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     await expect(page).toHaveURL(/purchase_order_detail/u);
     const orderUrl = page.url();

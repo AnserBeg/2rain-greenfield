@@ -11,6 +11,7 @@ import {
   type SemanticRecordDto,
 } from '../../../packages/runtime/src/semantic-query-gateway.js';
 import {
+  parsePinnedOperationCatalog,
   SEMANTIC_OPERATION_REQUEST_VERSION,
   type SemanticOperationResultEnvelope,
 } from '../../../packages/runtime/src/semantic-operation-gateway.js';
@@ -102,6 +103,7 @@ type Buffer = {
   header: DraftRow;
   lines: DraftRow[];
   pending: SaveStep[] | null;
+  saveThen: { key: string; requested: boolean; step: SaveStep | null } | null;
   acknowledged: AcknowledgedStep[];
   busy: boolean;
   version: number;
@@ -412,6 +414,10 @@ async function editorResponse(
       header: withDefaults(row(current), definition.headerFields, now),
       lines: [],
       pending: null,
+      saveThen:
+        definition.saveThen && !recordId
+          ? { key: randomUUID(), requested: false, step: null }
+          : null,
       acknowledged: [],
       busy: false,
       version: 0,
@@ -2591,7 +2597,14 @@ async function editorResponse(
               if (line?.record) line.removed = true;
               else if (line)
                 buffer.lines = buffer.lines.filter((value) => value !== line);
-            } else if (submission.draftAction === 'save' && !refused) {
+            } else if (
+              ['save', 'saveThen'].includes(submission.draftAction ?? '') &&
+              !refused
+            ) {
+              if (submission.draftAction === 'saveThen' && !buffer.saveThen)
+                throw new Error(
+                  'This document offers no save-and-place action',
+                );
               const found = problems();
               if (found.length) {
                 for (const problem of found)
@@ -2608,7 +2621,12 @@ async function editorResponse(
                   .join('')}</ul></div>`;
                 buffer.focus = found[0]!.control;
                 statusCode = 422;
-              } else buffer.pending = plan(view, surfaces, buffer);
+              } else {
+                buffer.pending = plan(view, surfaces, buffer);
+                if (buffer.saveThen)
+                  buffer.saveThen.requested =
+                    submission.draftAction === 'saveThen';
+              }
             }
           }
           if (buffer.pending) {
@@ -2631,7 +2649,7 @@ async function editorResponse(
               buffer.notice =
                 '<p>Review the removed persisted lines below. Confirm removal and save to archive them through their governed lifecycle.</p>';
             } else if (
-              ['save', 'confirm', 'retry'].includes(
+              ['save', 'saveThen', 'confirm', 'retry'].includes(
                 submission.draftAction ?? '',
               )
             ) {
@@ -2718,7 +2736,116 @@ async function editorResponse(
                   binding.query.legalEntityScope!.operand.parameterId,
                   scope,
                 );
-                buffer.completedLocation = `/?${params}`;
+                const location = `/?${params}`;
+                if (buffer.saveThen?.requested) {
+                  try {
+                    const afterSave = buffer.saveThen;
+                    if (!afterSave.step) {
+                      const saved = await getRecord(
+                        view,
+                        gateways,
+                        recordRead,
+                        buffer.header.id,
+                        scope,
+                      );
+                      const declared = definition.saveThen!;
+                      const operation = binding.operations.find(
+                        (candidate) =>
+                          candidate.operationId === declared.operationId &&
+                          candidate.intent === 'command',
+                      );
+                      if (!operation)
+                        throw new Error(
+                          'The declared follow-up operation is unavailable',
+                        );
+                      const input: Values = {
+                        recordId: saved.recordId,
+                        expectedRevision: saved.revision,
+                        ...(operation.systemInputArgumentKey
+                          ? { [operation.systemInputArgumentKey]: scope }
+                          : {}),
+                      };
+                      if (declared.arguments?.length)
+                        input.arguments = Object.fromEntries(
+                          declared.arguments.map((argument) => [
+                            argument.name,
+                            saved.values[argument.fieldId] ?? null,
+                          ]),
+                        );
+                      afterSave.step = {
+                        label: declared.label,
+                        operation,
+                        input,
+                        key: afterSave.key,
+                        grant:
+                          operation.confirmation === 'humanRequired'
+                            ? gateways.operationMediation.issueConfirmationGrant(
+                                view,
+                                operation.operationId,
+                                input,
+                              )
+                            : null,
+                        row: buffer.header,
+                        done: false,
+                      };
+                    }
+                    const step = afterSave.step;
+                    const result = await gateways.operationGateway.invoke(
+                      view,
+                      {
+                        schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+                        operationId: step.operation.operationId,
+                        input: step.input,
+                        idempotencyKey: step.key,
+                        confirmationGrant: step.grant,
+                      },
+                      gateways.operationMediation.issueInvocation(view, 'UI'),
+                    );
+                    if (result.outcome !== 'succeeded')
+                      throw new Error(
+                        'The follow-up operation did not succeed',
+                      );
+                    step.done = true;
+                    acknowledge(buffer, step, result.trust);
+                    if (
+                      !result.readBack ||
+                      result.readBack.recordId !== buffer.header.id ||
+                      result.readBack.entityId !==
+                        buffer.header.record?.entityId
+                    ) {
+                      buffer.withheld = 'operation';
+                      return committed();
+                    }
+                    buffer.header.record = result.readBack;
+                  } catch {
+                    // The draft already committed. Read its current state before
+                    // naming the outcome, and retain the saved document for recovery.
+                    const latest = await requiredRead(buffer, () =>
+                      getRecord(
+                        view,
+                        gateways,
+                        recordRead,
+                        buffer.header.id,
+                        scope,
+                      ),
+                    );
+                    if (latest.outcome === 'redacted') return latest.response;
+                    const draft = editable(definition, latest.value);
+                    buffer.completedLocation = location;
+                    return {
+                      html: '',
+                      statusCode: 200,
+                      record: latest.value,
+                      slots: {
+                        titleStatus: '<h1>Document saved</h1>',
+                        keyFacts: `<section class="panel" role="status" data-save-then-recovery><p>${draft ? 'Draft saved. Placement could not be completed. Open the saved draft to try again.' : 'Your document was saved. Open it to check its current status.'}</p><a class="button" href="${h(location)}">${draft ? 'Open saved draft' : 'Open document'}</a></section>`,
+                        sections: '',
+                        commandBar: '',
+                      },
+                    };
+                  }
+                }
+                buffer.completedLocation = location;
                 return {
                   html: '',
                   statusCode: 303,
@@ -2942,9 +3069,33 @@ async function editorResponse(
     const steps = buffer.pending
       ? `<ol data-save-progress>${buffer.pending.map((step) => `<li>${h(step.label)} · ${step.done ? 'committed' : 'pending'}</li>`).join('')}</ol>`
       : '';
+    let saveThenOffered = buffer.saveThen !== null;
+    if (saveThenOffered && !buffer.pending) {
+      const followUp = parsePinnedOperationCatalog(
+        view.projections.operation.payload,
+      ).find(
+        (operation) =>
+          operation.operationId === definition.saveThen!.operationId,
+      );
+      saveThenOffered = followUp?.lifecycle === 'active';
+      if (followUp?.excludedRoleKeys?.length) {
+        try {
+          saveThenOffered =
+            (await gateways.operationGateway.previewTaskEligibility(
+              view,
+              [followUp.operationId],
+              scope,
+            )) === 'eligible';
+        } catch {
+          saveThenOffered = false;
+        }
+      }
+    }
     const commands = buffer.pending
       ? `<button form="draft-editor-form" name="draftAction" value="${buffer.pending.some((step) => step.grant && !step.done) ? 'confirm' : 'retry'}">${buffer.pending.some((step) => step.grant && !step.done) ? 'Confirm removal and save' : 'Retry save'}</button>`
-      : '<button form="draft-editor-form" name="draftAction" value="save">Save draft</button>';
+      : saveThenOffered
+        ? `<button form="draft-editor-form" class="secondary-action" name="draftAction" value="save">Save draft</button><button form="draft-editor-form" name="draftAction" value="saveThen">${h(definition.saveThen!.label)}</button>`
+        : '<button form="draft-editor-form" name="draftAction" value="save">Save draft</button>';
     const documentKind = recordSurface.label.replace(/ detail$/i, '');
     return {
       statusCode,
