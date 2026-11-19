@@ -1313,7 +1313,7 @@ export class OperationsAgentSession {
               cursor: request.cursor ?? null,
               matchMode: 'substring',
               pageSize: limit,
-              relationLabels: [],
+              relationLabels: catalog.relationLabels(query.queryId),
               schemaVersion: SHARED_LIST_QUERY_VERSION,
               search: request.search ?? '',
               sort: presetView?.sort ?? [],

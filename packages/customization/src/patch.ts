@@ -4,7 +4,7 @@ import { z } from 'zod';
 /**
  * The typed semantic patch a tenant customization is made of (ADR-0013). Every
  * channel -- the command line, the Customize screen and the model -- emits one
- * of these kinds. A request outside them is a typed
+ * typed change. A request outside the supported kinds is a typed
  * `unsupported` result naming the missing capability, never partial output.
  *
  * Targets are canonical ids, never labels, so re-applying a recorded patch to
@@ -66,6 +66,7 @@ const addRecordType = z
     kind: z.literal('addRecordType'),
     label,
     fields: z.array(CustomFieldSchema).min(1).max(24),
+    companyOwnership: z.enum(['entityOwned', 'tenantShared']).optional(),
   })
   .superRefine((patch, context) => {
     if (patch.fields[0]?.type !== 'text') {
@@ -89,6 +90,48 @@ const addChoice = z.strictObject({
   kind: z.literal('addChoice'),
   enumField: canonicalId,
   option: label,
+});
+
+const declareLifecycle = z.strictObject({
+  kind: z.literal('declareLifecycle'),
+  entity: canonicalId,
+  initial: label,
+  states: z
+    .array(
+      z.strictObject({
+        label,
+        role: z
+          .enum(['success', 'attention', 'blocked', 'inProgress'])
+          .optional(),
+      }),
+    )
+    .min(2)
+    .max(8),
+  transitions: z
+    .array(
+      z.strictObject({
+        label,
+        from: label,
+        to: label,
+      }),
+    )
+    .min(1)
+    .max(12),
+});
+
+const addLineTable = z.strictObject({
+  kind: z.literal('addLineTable'),
+  entity: canonicalId,
+  label,
+  fields: z.array(CustomFieldSchema).min(1).max(15),
+});
+
+const addLink = z.strictObject({
+  kind: z.literal('addLink'),
+  entity: canonicalId,
+  label,
+  target: canonicalId,
+  required: z.boolean().optional(),
 });
 
 const arrangeLayout = z
@@ -135,12 +178,30 @@ const saveListView = z.strictObject({
     .max(3),
 });
 
-export const CustomizationPatchSchema = z.discriminatedUnion('kind', [
+const ChangeMemberSchema = z.discriminatedUnion('kind', [
   addRecordType,
   addField,
   addChoice,
+  addLink,
+  addLineTable,
+  declareLifecycle,
   arrangeLayout,
   saveListView,
+  z.strictObject({
+    kind: z.literal('addMetricCard'),
+    surface: canonicalId,
+    label,
+    view: canonicalId.optional(),
+    sumField: canonicalId.optional(),
+  }),
+]);
+
+export const CUSTOMIZATION_CHANGE_MEMBER_KINDS = Object.freeze(
+  ChangeMemberSchema.options.map((schema) => schema.shape.kind.value),
+);
+
+const SinglePatchSchema = z.discriminatedUnion('kind', [
+  ...ChangeMemberSchema.options,
   z.strictObject({
     kind: z.literal('narrowPermission'),
     target: z.strictObject({
@@ -157,27 +218,39 @@ export const CustomizationPatchSchema = z.discriminatedUnion('kind', [
     }),
     roleKey: OperationRoleKeySchema,
   }),
-  z.strictObject({
-    kind: z.literal('addMetricCard'),
-    surface: canonicalId,
-    label,
-    view: canonicalId.optional(),
-    sumField: canonicalId.optional(),
-  }),
 ]);
-type ParsedPatch = z.infer<typeof CustomizationPatchSchema>;
-export type CustomizationPatch =
+type ParsedPatch = z.infer<typeof SinglePatchSchema>;
+export type SingleCustomizationPatch =
   ParsedPatch | (Extract<ParsedPatch, { kind: 'addField' }> & { legacy: true });
+
+export const MAX_CUSTOMIZATION_CHANGE_PATCHES = 16;
+const changeSet = z.strictObject({
+  kind: z.literal('changeSet'),
+  patches: z
+    .array(ChangeMemberSchema)
+    .min(2)
+    .max(MAX_CUSTOMIZATION_CHANGE_PATCHES),
+});
+export const CustomizationPatchSchema = z.discriminatedUnion('kind', [
+  SinglePatchSchema,
+  changeSet,
+]);
+export type CustomizationPatch =
+  SingleCustomizationPatch | z.infer<typeof changeSet>;
 export type CustomizationPatchKind = CustomizationPatch['kind'];
 export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'addRecordType',
   'addField',
   'addChoice',
+  'addLink',
+  'addLineTable',
+  'declareLifecycle',
   'arrangeLayout',
   'saveListView',
   'addMetricCard',
   'narrowPermission',
   'unNarrowPermission',
+  'changeSet',
 ] as const satisfies readonly CustomizationPatchKind[]);
 
 export interface UnsupportedCustomization {
@@ -200,18 +273,36 @@ export type ParsedCustomizationPatch =
 export function parseCustomizationPatch(
   input: unknown,
 ): ParsedCustomizationPatch {
-  const kind =
-    typeof input === 'object' && input !== null && 'kind' in input
-      ? (input as { kind: unknown }).kind
-      : undefined;
+  const kind = patchKind(input);
   if (
     typeof kind !== 'string' ||
     !(CUSTOMIZATION_PATCH_KINDS as readonly string[]).includes(kind)
   ) {
-    return unsupported(
-      typeof kind === 'string' && kind.trim() !== '' ? kind : 'unnamed',
-      `This version can add a record type, add a field, add a choice, arrange a layout or save a list view. "${typeof kind === 'string' ? kind : 'no kind'}" is not one of them.`,
-    );
+    return unsupportedKind(kind);
+  }
+  if (kind === 'changeSet') {
+    const patches = (input as { patches?: unknown }).patches;
+    if (
+      Array.isArray(patches) &&
+      patches.length <= MAX_CUSTOMIZATION_CHANGE_PATCHES
+    ) {
+      for (const patch of patches) {
+        const memberKind = patchKind(patch);
+        if (
+          memberKind === 'narrowPermission' ||
+          memberKind === 'unNarrowPermission'
+        )
+          return unsupported(
+            'action permission changes in a grouped draft',
+            'Action permission changes need their own draft.',
+          );
+        if (
+          typeof memberKind === 'string' &&
+          !(CUSTOMIZATION_PATCH_KINDS as readonly string[]).includes(memberKind)
+        )
+          return unsupportedKind(memberKind);
+      }
+    }
   }
   const parsed = CustomizationPatchSchema.safeParse(input);
   if (!parsed.success) {
@@ -226,6 +317,21 @@ export function parseCustomizationPatch(
     });
   }
   return Object.freeze({ patch: parsed.data, status: 'parsed' as const });
+}
+
+function patchKind(input: unknown): unknown {
+  return typeof input === 'object' && input !== null && 'kind' in input
+    ? input.kind
+    : undefined;
+}
+
+function unsupportedKind(kind: unknown): UnsupportedCustomization {
+  const name =
+    typeof kind === 'string' && kind.trim() !== '' ? kind : 'unnamed';
+  return unsupported(
+    name,
+    `This version does not support patch kind "${name}".`,
+  );
 }
 
 export function unsupported(
