@@ -2066,7 +2066,7 @@ async function stockImpactRows(
       }
     }
   } catch {
-    return '<p role="status">Stock impact is unavailable. Refresh the order to try again.</p>';
+    return '<p role="status">Stock impact is unavailable. Refresh the document to try again.</p>';
   }
   return (
     sections.join('') || '<p>Enter the line details to see stock impact.</p>'
