@@ -151,8 +151,9 @@ test('v6 compiles a calculated display to its governed read sinks and refuses mi
   }>(compiled, PROJECTION_FAMILY_IDS.surfaceManifest).surfaces.find(
     ({ surfaceId }) => surfaceId === record,
   );
+  assert.ok(recordSurface);
   assert.ok(
-    recordSurface?.composition?.fields.some(({ field }) => field === fieldId),
+    recordSurface.composition?.fields.some(({ field }) => field === fieldId),
   );
   const projection = (familyId: ProjectionFamilyId) => ({
     ...references.find((reference) => reference.familyId === familyId),
