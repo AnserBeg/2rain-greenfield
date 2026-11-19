@@ -1836,6 +1836,10 @@ test('layout revision replays an ordered first revision, binds each member and r
     compiled.status === 'compiled',
     JSON.stringify(compiled.status === 'compiled' ? null : compiled),
   );
+  assert.match(
+    compiled.steps[0]!.rendered.text,
+    /Previously [^\n]+\bVendor\b/u,
+  );
   assert.match(compiled.steps[0]!.rendered.text, /Shipping \(Instructions, /u);
   const replay = await compileInSandbox({
     ...sandboxRequest(chain),
