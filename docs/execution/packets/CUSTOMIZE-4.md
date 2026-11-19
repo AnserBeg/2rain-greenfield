@@ -28,7 +28,7 @@ Status — Candidate for integration. The orchestrator approved the patch-kind m
 - [CI 44480152260](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44480152260) passed compiler, PostgreSQL and schema checks. The browser activated one draft and saved the lines, then failed the receipt link assertion. The follow-up waits for server-confirmed selections and opens the exact linked receipt. Migration 0037 follows the workflow migration and the snapshot was regenerated on PostgreSQL 16.
 
 - [Hosted PostgreSQL](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44467955198) passed at `19e8d8e0`, including the one-request draft, linked records, owned lines and an assistant-confirmed Quarantine with unchanged stock movements. The source scan found no Inspection-specific first-party branches.
-- [Earlier CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44471387731) at `dca983be` passed quality and build. The [controls](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44471387669) passed at that SHA.
+- [CI 44493620240](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44493620240) passed all 16 jobs at `d41e1085`, including the complete Inspection journey and the first-party stock replay. The posting impact changes on main required a new compiled release and language coverage ledger.
 - The first-party release uses an ADR-0066 re-baseline. The prior pushed checkpoint is preserved by an annotated tag and remains in branch history.
 
 ## Gaps
@@ -41,8 +41,8 @@ Status — Candidate for integration. The orchestrator approved the patch-kind m
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-4",
-  "base": "421bd8b82882ee24cbff87bb72914640e600aa6e",
-  "head": "84a4ac14869aee5f7ce1b0b10aad488f7a9d6d33",
+  "base": "d31e28314923c793a2f7458c86a8d682cf62b4b2",
+  "head": "cc3ab10fb43e6227994d74c702b0ca358da0bbce",
   "changedPaths": [
     "apps/web/package.json", "apps/web/src/component-registry.ts",
     "apps/web/src/customize-screen.ts", "apps/web/src/document-editor.ts",
