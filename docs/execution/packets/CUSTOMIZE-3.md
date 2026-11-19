@@ -38,7 +38,7 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
   "base": "421bd8b82882ee24cbff87bb72914640e600aa6e",
-  "head": "d9f85fee8c5e729e12eabd007a6902ee68bc3500",
+  "head": "0db050408ae24de6b1f9348f8485bd0b1ad6c17a",
   "changedPaths": [
     "apps/api/src/assistant-endpoint.ts", "apps/api/src/composition-root.ts",
     "apps/web/src/app-server.ts", "apps/web/src/customize-screen.ts",
