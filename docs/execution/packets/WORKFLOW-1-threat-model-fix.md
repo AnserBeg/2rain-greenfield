@@ -25,6 +25,8 @@ Run `node --import tsx --test test/postgres/workflow-consumer.test.ts` with Dock
 
 ## Gates
 
+The receipt-scope regression failed on pre-fix main at `9ac017b9`. Dispatch used the substituted company and the operation committed the substituted receipt.
+
 The ledger and review log link the acceptance run for the integrated packet.
 
 ```record-claim
@@ -32,7 +34,7 @@ The ledger and review log link the acceptance run for the integrated packet.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WORKFLOW-1-threat-model-fix",
   "base": "9ac017b915d24b058a35450db92433c97486a2f7",
-  "head": "d6149efcc7f4a730778719aa2569a8eebb27ae79",
+  "head": "907037992066595dab6977cfd1434f27f9fb4136",
   "changedPaths": [
     "packages/postgres-provider/src/workflow-execution.ts",
     "test/evidence/WORKFLOW-1-threat-model-fix.expected-red.json",
