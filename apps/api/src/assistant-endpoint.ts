@@ -21,6 +21,8 @@ import {
   OperationsAgentSession,
   runOperationsAgent,
   SpendMeter,
+  SONNET_MODEL,
+  SONNET_PRICES,
   type AgentEvent,
   type BusinessCalendar,
   type ConversationEntry,
@@ -75,7 +77,9 @@ export interface AssistantEndpointOptions {
   }) => Promise<{ readonly companyId: string; readonly label: string } | null>;
   readonly businessCalendar?: BusinessCalendar;
   /** The model, or a sentence saying why there is none. */
-  readonly model: () => Promise<ModelAdapter | { unavailable: string }>;
+  readonly model: (
+    request: string,
+  ) => Promise<ModelAdapter | { unavailable: string }>;
   readonly prices?: ModelPrices;
   readonly capUsd?: number;
   /**
@@ -546,7 +550,7 @@ export function createAssistantEndpoint(
       });
       return;
     }
-    const model = await options.model();
+    const model = await options.model(text);
     if ('unavailable' in model) {
       emit({
         type: 'answer',
@@ -566,7 +570,10 @@ export function createAssistantEndpoint(
       executeAfterApproval: true,
       session: conversation.session,
       request: text,
-      meter: conversation.meter,
+      meter:
+        !options.prices && model.modelId === SONNET_MODEL
+          ? conversation.meter.atPrices(SONNET_PRICES)
+          : conversation.meter,
       preamble,
       history: conversation.history,
       signal: controller.signal,
