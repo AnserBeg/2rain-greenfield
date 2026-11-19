@@ -9,6 +9,7 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 - Existing live authorization, atomic posting and verified read-back remain authoritative.
 - Stock impact rows use existing server read models and exact decimal arithmetic.
 - Task defaults derive from selected rows; pickers show declared figures and stage counts share the batched loader.
+- Today reads five To receive rows in the page snapshot.
 
 ## Slices and gates
 
@@ -16,6 +17,7 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 - 1: merged `d775c078`, PR #93, [CI 44407145880](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44407145880) green.
 - 2: merged `ca9812e7`, PR #96, [CI 44488258241](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44488258241) green.
 - 3: merged `b21f3851`, PR #106, [CI 44522209346](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44522209346) green.
+- 4: ready for full CI. Focused units pass; GitHub CI is the acceptance gate.
 
 ## Decisions
 
@@ -25,43 +27,33 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 - Exact-minute browser fills canonicalize zero seconds without changing the instant (CI reproduction passed).
 - Mid-packet checkpoint: no whole-app review trigger; no new correctness domain or fan-out.
 
-- The unpublished integration was preserved when main advanced; published history is unchanged.
-- Action-permission narrowing and row defaults share the merged runtime; artifacts and coverage are re-derived.
+- Home: CI 44510567072/job 135513434195 measured 4/43/6/0 and 50 bindings; one page read and one record binding.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "INTERACT-1",
-  "base": "fc56f4a0af8b4dfbff4692906c5b45c34eae4bbc",
-  "head": "44ef1248e6d089db33255aa3b9e758307d81396f",
+  "base": "feffa1b9390e867c5f36f3005bbd70e8bc551bde",
+  "head": "986293901451914d6d8ed721c20880e73d19fe60",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
-    "apps/web/src/document-editor.ts",
-    "apps/web/src/editor-controls.ts",
-    "apps/web/src/list-declaration.ts",
-    "apps/web/src/surface-composition.ts",
+    "apps/web/src/component-registry.ts",
+    "apps/web/src/surface-launcher.ts",
     "apps/web/src/surface-runtime.ts",
-    "apps/web/src/workspace-entry.ts",
-    "apps/web/test/browser/loop-scorecard.ts",
-    "apps/web/test/browser/order-entry.spec.ts",
-    "apps/web/test/browser/order-pages.spec.ts",
+    "apps/web/test/browser/look.composed-application.spec.ts",
     "packages/canonical-model/src/schemas.ts",
-    "packages/canonical-model/src/surface-composition.ts",
-    "packages/canonical-model/src/surface-workspace.ts",
-    "packages/domain/src/app/order-entry.ts",
-    "packages/domain/src/purchasing/workspace.ts",
-    "packages/domain/src/sales/workspace.ts",
+    "packages/canonical-model/src/surface-launcher.ts",
+    "packages/domain/src/app/today.ts",
     "test/compiler/g2-module-conformance.test.ts",
     "test/fixtures/g2/language-conformance/coverage-decisions.json",
-    "test/integration/surface-data-binding.test.ts",
-    "test/unit/canonical-model/surface-composition.test.ts",
+    "test/performance/page-budgets.ts",
     "test/unit/canonical-model/surface-launcher.test.ts"
   ],
   "symbols": [
     {
-      "path": "apps/web/src/surface-composition.ts",
-      "name": "applyTaskDefaults"
+      "path": "apps/web/src/surface-launcher.ts",
+      "name": "launcherTiles"
     }
   ]
 }
@@ -73,3 +65,4 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 - 1: Receive on a released PO, enter actual cost, and confirm the server preparation; the record updates in place. Disable JavaScript to exercise Review and Confirm page forms.
 - 2: inspect each receipt line’s On hand, Reserved and Available changes; edit quantity and confirm the current prepared action. Try a signed adjustment.
 - 3: inspect ordered cost and preferred location defaults, picker price and availability, and worklist stage counts. Clear a receipt line’s quantity to omit it.
+- 4: open Today and follow a To receive row; compare it with the queue.
