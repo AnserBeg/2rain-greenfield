@@ -177,7 +177,8 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
           '0030_policy_epoch_bumps_both_scopes.sql',
           '0031_policy_epoch_lock_and_ordered_bumps.sql',
           '0032_customization_upgrades.sql',
-          '0033_customization_launch_patch_kinds.sql',
+          '0033_definer_search_paths.sql',
+          '0034_customization_launch_patch_kinds.sql',
         ]);
         assert.equal(migrationResult.verified.length, allMigrations.length);
         await seedScope(admin);
@@ -1486,7 +1487,9 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
             assert.equal(functions.rows.length, 5);
             for (const reader of functions.rows) {
               assert.equal(reader.security_definer, true, reader.name);
-              assert.deepEqual(reader.search_path, ['search_path=pg_catalog']);
+              assert.deepEqual(reader.search_path, [
+                'search_path=pg_catalog, pg_temp',
+              ]);
               assert.equal(reader.materializer_execute, true, reader.name);
               assert.equal(reader.runtime_execute, false, reader.name);
               assert.equal(reader.module_runtime_execute, false, reader.name);
@@ -1520,7 +1523,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
               materializer_execute: false,
               module_runtime_execute: true,
               runtime_execute: false,
-              search_path: ['search_path=pg_catalog'],
+              search_path: ['search_path=pg_catalog, pg_temp'],
               security_definer: true,
             });
             await assert.rejects(

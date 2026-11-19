@@ -5,7 +5,7 @@
     {
       "name": "unrecognized-patch-kind-admitted",
       "claim": "The database admits the launch patch kinds and still refuses an unrecognized kind with a valid digest.",
-      "file": "db/migrations/0033_customization_launch_patch_kinds.sql",
+      "file": "db/migrations/0034_customization_launch_patch_kinds.sql",
       "original": "      'narrowPermission', 'addMetricCard'",
       "replacement": "      'narrowPermission', 'addMetricCard', 'unrecognizedTestKind'",
       "test": {
