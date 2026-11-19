@@ -1,5 +1,6 @@
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
 import type { SurfaceLauncher } from '../../../packages/canonical-model/src/index.js';
+import type { SharedListCoverage } from '../../../packages/runtime/src/list-behavior/index.js';
 import {
   registeredSemanticQueryFromPinnedView,
   SEMANTIC_QUERY_REQUEST_VERSION,
@@ -60,7 +61,7 @@ export async function loadDeclaredListCounts(
   queryGateway: SemanticQueryGateway,
   queryId: string,
   listArguments: RuntimeViewContract.ImmutableJsonValue,
-) {
+): Promise<SharedListCoverage | undefined> {
   const result = await queryGateway.invoke(view, {
     arguments: listArguments,
     queryId,
