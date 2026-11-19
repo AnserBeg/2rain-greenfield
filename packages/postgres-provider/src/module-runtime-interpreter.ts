@@ -6454,7 +6454,9 @@ function optionalBoolean(
   return value;
 }
 
-export function requiredSearchText(value: ImmutableJsonValue | undefined): string {
+export function requiredSearchText(
+  value: ImmutableJsonValue | undefined,
+): string {
   if (typeof value !== 'string' || value.trim() === '' || value.length > 240) {
     throw failure('MODULE_INPUT_MALFORMED', 'text must be non-blank');
   }
