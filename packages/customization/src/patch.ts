@@ -139,19 +139,12 @@ const saveListView = z.strictObject({
     .max(3),
 });
 
-const validationRule: z.ZodType<FormulaValidationRule> =
-  FormulaValidationRuleDefinitionSchema;
-
-export const CustomizationPatchSchema = z.discriminatedUnion('kind', [
+const basePatchKinds = [
   addRecordType,
   addField,
   addChoice,
   arrangeLayout,
   saveListView,
-  z.strictObject({
-    kind: z.literal('addValidation'),
-    rule: validationRule,
-  }),
   z.strictObject({
     kind: z.literal('narrowPermission'),
     target: z.strictObject({
@@ -175,8 +168,19 @@ export const CustomizationPatchSchema = z.discriminatedUnion('kind', [
     view: canonicalId.optional(),
     sumField: canonicalId.optional(),
   }),
-]);
-type ParsedPatch = z.infer<typeof CustomizationPatchSchema>;
+] as const;
+type ParsedPatch =
+  | z.output<(typeof basePatchKinds)[number]>
+  | { kind: 'addValidation'; rule: FormulaValidationRule };
+
+export const CustomizationPatchSchema: z.ZodType<ParsedPatch> =
+  z.discriminatedUnion('kind', [
+    ...basePatchKinds,
+    z.strictObject({
+      kind: z.literal('addValidation'),
+      rule: FormulaValidationRuleDefinitionSchema,
+    }),
+  ]);
 export type CustomizationPatch =
   ParsedPatch | (Extract<ParsedPatch, { kind: 'addField' }> & { legacy: true });
 export type CustomizationPatchKind = CustomizationPatch['kind'];
