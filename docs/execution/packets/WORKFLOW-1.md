@@ -1,6 +1,6 @@
 # WORKFLOW-1 — goods receipt workflows
 
-Slices 1 and 2 and the first correction landed. Round 2 addresses the five open verification findings with Critical migration 0041. Hosted CI timeouts block integration. The orchestrator's narrow verification follows integration before slice 3.
+Slices 1 and 2 and the first correction landed. Round 2 addresses the five open verification findings with Critical migration 0041. The orchestrator's narrow verification follows integration before slice 3.
 
 ## Claims
 
@@ -22,14 +22,15 @@ Slices 1 and 2 and the first correction landed. Round 2 addresses the five open 
 ## Gates
 
 - Slice 1 [CI 44456002463](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44456002463), slice 2 [CI 44477729782](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44477729782), and round 1 [CI 44497680722](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44497680722).
-- Round 2's receipt journey and quality checks passed at `c551826d`. The dependency and secret scan, PostgreSQL inventory, PostgreSQL shard 2, and composed browser jobs timed out. [CI 44539741235](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44539741235).
+- Round 2's earlier CI at `c551826d` was cancelled after Actions minutes ran out while the repository was private. [CI 44539741235](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44539741235).
+- The full acceptance run at the synchronized packet tip is linked from the ledger and review log.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WORKFLOW-1",
-  "base": "881768043d00d894b44a64486c43aa10b85ed7cb",
-  "head": "d1bfc967240c60c3b8b2245d2c0eaf660636fb97",
+  "base": "129e59c4a5cfbefcad42b9c14efa164b18b797e7",
+  "head": "076ffde91b71378e57fdacda1c0df09b979dfc1e",
   "changedPaths": [
     "db/migrations/0041_workflow_authority.sql",
     "db/schema.snapshot.json",
