@@ -399,7 +399,7 @@ test(
             [name]: 'An unrelated edit',
           });
           assert.equal(unrelated.outcome, 'succeeded');
-          const sameValue = await apply(recordId, 2, { [price]: '1.0000' });
+          const sameValue = await apply(recordId, 2, { [price]: '1' });
           assert.equal(sameValue.outcome, 'succeeded');
           await assert.rejects(() => apply(recordId, 3, { [price]: '5' }), {
             code: 'MODULE_VALIDATION_REFUSED',
