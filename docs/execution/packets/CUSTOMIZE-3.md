@@ -39,8 +39,8 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
-  "base": "881768043d00d894b44a64486c43aa10b85ed7cb",
-  "head": "3e70b3a4c3f60042a2ee83258bc2ca7b4ff1aea6",
+  "base": "129e59c4a5cfbefcad42b9c14efa164b18b797e7",
+  "head": "f790e55f77d64748ebbb71a6ad1386be76e83b84",
   "changedPaths": [
     ".github/workflows/ci.yml", ".github/workflows/evidence.yml", "apps/web/playwright.composed.config.ts", "apps/web/playwright.customization.config.ts", "apps/web/playwright.shared.ts",
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/document-editor.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-runtime.ts",
