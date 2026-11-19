@@ -168,6 +168,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: ${{ matrix.shard == 2 && '1' || '0' }}
       - name: Set up pinned Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -425,8 +427,41 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  browser-customization:
+    name: Customization browser runner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install frozen dependencies
+        run: corepack pnpm install --frozen-lockfile --reporter=append-only
+      - name: Begin executed-file evidence run
+        run: node --import tsx test/helpers/begin-reachability-run.ts
+      - name: Install Chromium
+        uses: ./.github/actions/install-chromium
+      - name: Run customization browser tests
+        run: corepack pnpm test:browser:customization
+      - name: Retain customization browser executed-file evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: reachability-browser-customization-${{ github.sha }}
+          path: test-results/reachability/browser-customization.json
+          if-no-files-found: error
+          retention-days: 7
+
   security:
-    name: Dependency and secret scans
+    name: Dependency and secret scans (${{ matrix.history }})
+    strategy:
+      fail-fast: false
+      matrix:
+        history: [ancestry, remainder]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -445,12 +480,13 @@ jobs:
       - name: Run dependency and secret gates
         env:
           SECURITY_EVIDENCE_DIR: test-results/security
+          SECURITY_HISTORY_SCOPE: ${{ matrix.history }}
         run: .github/scripts/run-security-scans.sh
       - name: Retain security evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: security-evidence-${{ github.sha }}
+          name: security-evidence-${{ matrix.history }}-${{ github.sha }}
           path: test-results/security/
           if-no-files-found: error
           retention-days: 7
@@ -514,6 +550,7 @@ jobs:
       - browser-operations
       - browser-inventory
       - browser-composed
+      - browser-customization
       - observability
     runs-on: ubuntu-24.04
     timeout-minutes: 15

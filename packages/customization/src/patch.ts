@@ -1,4 +1,8 @@
-import { OperationRoleKeySchema } from '@north-star/canonical-model';
+import {
+  FormulaValidationRuleDefinitionSchema,
+  OperationRoleKeySchema,
+  type FormulaValidationRule,
+} from '@north-star/canonical-model';
 import { z } from 'zod';
 
 /**
@@ -200,7 +204,7 @@ export const CUSTOMIZATION_CHANGE_MEMBER_KINDS = Object.freeze(
   ChangeMemberSchema.options.map((schema) => schema.shape.kind.value),
 );
 
-const SinglePatchSchema = z.discriminatedUnion('kind', [
+const singlePatchKinds = [
   ...ChangeMemberSchema.options,
   z.strictObject({
     kind: z.literal('narrowPermission'),
@@ -218,7 +222,22 @@ const SinglePatchSchema = z.discriminatedUnion('kind', [
     }),
     roleKey: OperationRoleKeySchema,
   }),
-]);
+] as const;
+
+const validationPatch: z.ZodObject<
+  {
+    kind: z.ZodLiteral<'addValidation'>;
+    rule: z.ZodType<FormulaValidationRule>;
+  },
+  z.core.$strict
+> = z.strictObject({
+  kind: z.literal('addValidation'),
+  rule: FormulaValidationRuleDefinitionSchema,
+});
+const SinglePatchSchema: z.ZodDiscriminatedUnion<
+  [...typeof singlePatchKinds, typeof validationPatch],
+  'kind'
+> = z.discriminatedUnion('kind', [...singlePatchKinds, validationPatch]);
 type ParsedPatch = z.infer<typeof SinglePatchSchema>;
 export type SingleCustomizationPatch =
   ParsedPatch | (Extract<ParsedPatch, { kind: 'addField' }> & { legacy: true });
@@ -231,10 +250,10 @@ const changeSet = z.strictObject({
     .min(2)
     .max(MAX_CUSTOMIZATION_CHANGE_PATCHES),
 });
-export const CustomizationPatchSchema = z.discriminatedUnion('kind', [
-  SinglePatchSchema,
-  changeSet,
-]);
+export const CustomizationPatchSchema: z.ZodDiscriminatedUnion<
+  [typeof SinglePatchSchema, typeof changeSet],
+  'kind'
+> = z.discriminatedUnion('kind', [SinglePatchSchema, changeSet]);
 export type CustomizationPatch =
   SingleCustomizationPatch | z.infer<typeof changeSet>;
 export type CustomizationPatchKind = CustomizationPatch['kind'];
@@ -247,6 +266,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'declareLifecycle',
   'arrangeLayout',
   'saveListView',
+  'addValidation',
   'addMetricCard',
   'narrowPermission',
   'unNarrowPermission',
@@ -288,6 +308,11 @@ export function parseCustomizationPatch(
     ) {
       for (const patch of patches) {
         const memberKind = patchKind(patch);
+        if (memberKind === 'addValidation')
+          return unsupported(
+            'validation in a grouped draft',
+            'Validation needs its own draft.',
+          );
         if (
           memberKind === 'narrowPermission' ||
           memberKind === 'unNarrowPermission'

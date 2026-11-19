@@ -29,8 +29,12 @@ export const REQUEST_RUNTIME_PROJECTION_FAMILIES = Object.freeze({
   surface: 'northstar.compiler:projection-family.surface-manifest',
 } as const);
 
+export const REQUEST_RUNTIME_FORMULA_RULE_FAMILY =
+  'northstar.compiler:projection-family.formula-rule' as const;
+
 export type RequestRuntimeProjectionFamily =
-  (typeof REQUEST_RUNTIME_PROJECTION_FAMILIES)[keyof typeof REQUEST_RUNTIME_PROJECTION_FAMILIES];
+  | (typeof REQUEST_RUNTIME_PROJECTION_FAMILIES)[keyof typeof REQUEST_RUNTIME_PROJECTION_FAMILIES]
+  | typeof REQUEST_RUNTIME_FORMULA_RULE_FAMILY;
 
 export type ImmutableJsonValue =
   | boolean
@@ -156,7 +160,11 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.operation]: {
     capabilityId: 'northstar.runtime:capability.operation-catalog',
-    maximumSupportedVersion: 2,
+    maximumSupportedVersion: 3,
+  },
+  [REQUEST_RUNTIME_FORMULA_RULE_FAMILY]: {
+    capabilityId: 'northstar.runtime:capability.formula-rule',
+    maximumSupportedVersion: 1,
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.query]: {
     capabilityId: 'northstar.runtime:capability.query-catalog',
@@ -263,6 +271,9 @@ export interface LoadedRequestRuntimeDefinition {
     >;
     readonly catalog: RuntimeProjection<
       typeof REQUEST_RUNTIME_PROJECTION_FAMILIES.catalog
+    >;
+    readonly formulaRule?: RuntimeProjection<
+      typeof REQUEST_RUNTIME_FORMULA_RULE_FAMILY
     >;
     readonly operation: RuntimeProjection<
       typeof REQUEST_RUNTIME_PROJECTION_FAMILIES.operation
@@ -918,6 +929,14 @@ function constructRequestRuntimeView(
       definition.projections.catalog,
       REQUEST_RUNTIME_PROJECTION_FAMILIES.catalog,
     ),
+    ...(definition.projections.formulaRule === undefined
+      ? {}
+      : {
+          formulaRule: cloneProjection(
+            definition.projections.formulaRule,
+            REQUEST_RUNTIME_FORMULA_RULE_FAMILY,
+          ),
+        }),
     operation: cloneProjection(
       definition.projections.operation,
       REQUEST_RUNTIME_PROJECTION_FAMILIES.operation,

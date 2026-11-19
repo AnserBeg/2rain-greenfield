@@ -10,6 +10,7 @@ import {
   parseCustomizationPatch,
   unsupported,
 } from './patch.js';
+import { literalValidationDraft } from './validation-draft.js';
 import type { CustomizationPatch, UnsupportedCustomization } from './patch.js';
 import type { CustomizationTargets } from './targets.js';
 
@@ -172,6 +173,25 @@ const toolSchema = {
       type: 'string',
       enum: [...CUSTOMIZATION_PATCH_KINDS, 'unsupported'],
     },
+    validation: {
+      type: 'object',
+      properties: {
+        fieldId: { type: 'string' },
+        check: {
+          type: 'string',
+          enum: [
+            'required',
+            'minimum',
+            'maximum',
+            'maximumLength',
+            'notBeforeToday',
+          ],
+        },
+        limit: { type: 'string' },
+        message: { type: 'string' },
+      },
+      required: ['fieldId', 'check', 'message'],
+    },
     roleKey: { type: 'string' },
     target: {
       anyOf: [
@@ -219,8 +239,10 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
     "- arrangeLayout {kind, surface, order?, hide?, relabel?}: add, reorder, hide or rename columns of a list. surface is one of the list ids below; order, hide and relabel[].field use that list's available field ids. Include an available hidden field in order to show it. At most 16 visible columns.",
     '- saveListView {kind, surface, label, columns:[column ID], sort:[{column, direction}], filters:[{field, value}]}: add a tab on one of the lists in Saved view targets below. List the columns in the desired order and include the required record title. Sort by at most three selected sortable columns using ascending or descending. Pin at most three of the declared filter values. Use an empty array for no filters or no sort.',
     '- addMetricCard {kind, surface, label, view?, sumField?}: add a card to Today using a list in Metric card targets below. Omit sumField to count rows. Use a declared sum field for a sum. Omit view to use the default list view.',
+    '- addValidation {kind, entity, validation:{fieldId, check, limit?, message}}: check a field when creating or changing its value. Use a listed record type and field. Use required, minimum, maximum, maximumLength, or notBeforeToday. Supply an exact number or text length as a string in limit where applicable, and the message to show when saving.',
     '- narrowPermission {kind, roleKey, target:{kind:"operation", id}}: remove the named role\'s grant for one action. Use an exact role key and an action id shown below.',
     '- unNarrowPermission {kind, roleKey, target:{kind:"operation", id}}: remove an existing restriction for exactly the role key and action id listed below.',
+    'Validation needs its own draft. If a request combines validation with another patch, report missingCapability "validation in a grouped draft".',
     'Action permission patches need their own draft. If a request combines one with any other patch, report missingCapability "action permission changes in a grouped draft".',
     `For links on an existing record type, report missingCapability "${ADD_LINK_LATER_CAPABILITY}".`,
     'If any requested part needs an unsupported capability, call the tool with {kind: "unsupported", missingCapability: "<name the exact missing capability>"}. Never omit or approximate part of a request. For example, name "goods receipt event subscription" for starting an inspection automatically when goods are received.',
@@ -261,6 +283,15 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
                 .join('')}`,
           ),
           '',
+        ]
+      : []),
+    ...(targets.validationTargets?.length
+      ? [
+          'Record types and fields that support validation:',
+          ...targets.validationTargets.map(
+            ({ entityId, label, fields }) =>
+              `- ${entityId} — ${label}: ${fields.map(({ fieldId, label: fieldLabel, valueType }) => `${fieldId} "${fieldLabel}" (${valueType.kind})`).join(', ')}`,
+          ),
         ]
       : []),
     'Record types you can add a field to:',
@@ -345,7 +376,7 @@ export async function draftPatchFromRequest(
     }
     const outcome =
       answer.toolCalls.length === 1
-        ? readToolInput(call.input)
+        ? readToolInput(call.input, targets)
         : {
             status: 'invalid' as const,
             issues: ['propose the complete change in one tool call'],
@@ -369,7 +400,10 @@ export async function draftPatchFromRequest(
   return { issues, status: 'invalid' };
 }
 
-function readToolInput(input: unknown): DraftedRequest {
+function readToolInput(
+  input: unknown,
+  targets: CustomizationTargets,
+): DraftedRequest {
   if (
     typeof input === 'object' &&
     input !== null &&
@@ -384,6 +418,41 @@ function readToolInput(input: unknown): DraftedRequest {
         : 'unnamed',
       `Drafting requires ${typeof missing === 'string' && missing.trim() !== '' ? missing.trim().slice(0, 80) : 'an unnamed capability'}, which is not supported yet.`,
     );
+  }
+  if (
+    input &&
+    typeof input === 'object' &&
+    'kind' in input &&
+    input.kind === 'addValidation'
+  ) {
+    const selection = 'validation' in input ? input.validation : null;
+    const entity = 'entity' in input ? input.entity : null;
+    const target = targets.validationTargets?.find(
+      ({ entityId }) => entityId === entity,
+    );
+    if (!target || !selection || typeof selection !== 'object')
+      return {
+        status: 'invalid',
+        issues: ['Choose a record type and field available for validation.'],
+      };
+    try {
+      const choice = selection as Record<string, unknown>;
+      input = literalValidationDraft(target, {
+        fieldId: String(choice.fieldId ?? ''),
+        check: String(choice.check ?? ''),
+        limit: String(choice.limit ?? ''),
+        message: String(choice.message ?? ''),
+      });
+    } catch (error) {
+      return {
+        status: 'invalid',
+        issues: [
+          error instanceof Error
+            ? error.message
+            : 'The validation selection is invalid.',
+        ],
+      };
+    }
   }
   const parsed = parseCustomizationPatch(input);
   if (parsed.status === 'unsupported') return parsed;

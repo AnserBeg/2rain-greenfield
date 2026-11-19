@@ -31,6 +31,7 @@ import {
   diagnostic,
   type CanonicalDiagnostic,
 } from './diagnostics.js';
+import { bindLiteralValidation } from './formula-validation-bindings.js';
 import {
   MIXED_NODE_VERSION_ISSUE,
   VersionedAuthoredApplicationPackageSchema,
@@ -44,6 +45,7 @@ import {
   type V4AuthoredApplicationPackage,
   type V5AuthoredApplicationPackage,
   type V6AuthoredApplicationPackage,
+  type V6NormalizedApplicationPackage,
   type V4NormalizedApplicationPackage,
   type VersionedAuthoredApplicationPackage,
   type VersionedNormalizedApplicationPackage,
@@ -164,6 +166,9 @@ export function parseNormalizedApplicationPackageJson(
 }
 
 export function normalizeApplicationPackage(
+  input: V6AuthoredApplicationPackage,
+): V6NormalizedApplicationPackage;
+export function normalizeApplicationPackage(
   input: V3AuthoredApplicationPackage,
 ): V3NormalizedApplicationPackage;
 export function normalizeApplicationPackage(
@@ -197,6 +202,16 @@ export function normalizeApplicationPackage(
       : undefined;
 
   const normalizedCandidate = {
+    ...(authored.languageVersion === 'v6' &&
+      authored.formulaRules && {
+        formulaRules: authored.formulaRules
+          .map((rule) => ({
+            ...rule,
+            boundOperationIds: sortedStrings(rule.boundOperationIds),
+            fieldAnchors: sortedStrings(rule.fieldAnchors),
+          }))
+          .sort((left, right) => compareCodeUnits(left.ruleId, right.ruleId)),
+      }),
     ...(roleNarrowings && {
       operationRoleNarrowings: [...roleNarrowings].sort((left, right) => {
         const a = `${left.operationId}/${left.roleKey}`;
@@ -481,6 +496,26 @@ export function normalizeApplicationPackage(
     throw error;
   }
   validateSemantics(normalized);
+  if (normalized.languageVersion === 'v6' && normalized.formulaRules) {
+    const seenRuleIds = new Set<string>();
+    for (const [index, rule] of normalized.formulaRules.entries()) {
+      const bound = bindLiteralValidation(rule, normalized);
+      if (seenRuleIds.has(rule.ruleId) || bound.status === 'refused') {
+        throw new CanonicalModelError([
+          diagnostic(
+            'CANON_VALIDATION_BINDING_UNSUPPORTED',
+            `$.formulaRules[${index}]`,
+            bound.status === 'refused'
+              ? bound.message
+              : 'A validation rule ID must be unique.',
+            'Bind the rule to supported fields and operations with a distinct rule ID.',
+            rule.ruleId,
+          ),
+        ]);
+      }
+      seenRuleIds.add(rule.ruleId);
+    }
+  }
   if (
     normalized.languageVersion === 'v6' &&
     normalized.operationRoleNarrowings

@@ -3,8 +3,7 @@ import { dirname, resolve } from 'node:path';
 
 import { lowerStorageTargetV1 } from '../../packages/compiler/src/index.js';
 import { normalizeApplicationPackage } from '../../packages/canonical-model/src/index.js';
-import { composedApplicationDefinition } from '../../packages/domain/src/app/builder.js';
-import { platformModuleDefinition } from '../../packages/domain/src/platform/definition.js';
+import { languageCoverageApplicationPackages } from './language-coverage-packages.js';
 
 import {
   deriveLanguageCoverageLedger,
@@ -32,10 +31,7 @@ const receiptPattern = 'test-results/language-coverage/*.json';
 try {
   const repositoryRoot = findRepositoryRoot(process.cwd());
   const ledger = deriveLanguageCoverageLedger(repositoryRoot);
-  const applicationPackages = [
-    composedApplicationDefinition(),
-    platformModuleDefinition(),
-  ];
+  const applicationPackages = languageCoverageApplicationPackages();
   const storageTargets = applicationPackages.map((definition) =>
     lowerStorageTargetV1(
       normalizeApplicationPackage(definition) as Parameters<

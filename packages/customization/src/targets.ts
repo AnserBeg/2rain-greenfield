@@ -1,10 +1,12 @@
 import { isNarrowableOperationId } from '@north-star/canonical-model';
+import { formulaFieldType } from '../../canonical-model/src/formula-validation-bindings.js';
 import {
   CUSTOMIZABLE_FIRST_PARTY_ENTITY_LOCALS,
   isTenantId,
   linkTarget,
   listColumnId,
 } from './apply.js';
+import type { LiteralValidationTarget } from './validation-draft.js';
 
 /**
  * What a person may point a change at, read from the live release's own
@@ -14,6 +16,7 @@ import {
  * again when it is applied.
  */
 export interface CustomizationTargets {
+  readonly validationTargets?: readonly LiteralValidationTarget[];
   readonly linkTargets?: readonly {
     readonly entityId: string;
     readonly label: string;
@@ -91,6 +94,7 @@ type Json = Record<string, unknown>;
 export function customizationTargets(definition: {
   readonly entities: readonly Json[];
   readonly fields: readonly Json[];
+  readonly languageVersion?: string;
   readonly operations?: readonly Json[];
   readonly operationRoleNarrowings?: CustomizationTargets['permissionRestrictions'];
   readonly queries: readonly Json[];
@@ -115,6 +119,48 @@ export function customizationTargets(definition: {
       tenantAuthored: isTenantId(String(entity.entityId)),
     }))
     .sort((left, right) => left.label.localeCompare(right.label));
+  const validationTargets =
+    definition.languageVersion === 'v6'
+      ? recordTypes.flatMap(({ entityId, label }) => {
+          const operationIds = (definition.operations ?? []).flatMap(
+            (operation) => {
+              const effect = operation.effect as Json | undefined;
+              return operation.lifecycle === 'active' &&
+                operation.tier === 'o0' &&
+                (effect?.kind === 'createRecordEffect' ||
+                  effect?.kind === 'updateRecordEffect') &&
+                (effect.entity as Json | undefined)?.targetId === entityId
+                ? [String(operation.operationId)]
+                : [];
+            },
+          );
+          if (!operationIds.length) return [];
+          const fields = definition.fields.flatMap((field) => {
+            if (
+              (field.entity as Json | undefined)?.targetId !== entityId ||
+              field.lifecycle !== 'active' ||
+              (field.classification !== 'public' &&
+                field.classification !== 'internal')
+            )
+              return [];
+            const valueType = formulaFieldType(
+              field as Parameters<typeof formulaFieldType>[0],
+            );
+            return valueType
+              ? [
+                  {
+                    fieldId: String(field.fieldId),
+                    label: String(field.label),
+                    valueType,
+                  },
+                ]
+              : [];
+          });
+          return fields.length
+            ? [{ entityId, label, operationIds, fields }]
+            : [];
+        })
+      : [];
   const choiceFields = definition.fields
     .filter(
       (field) =>
@@ -310,6 +356,7 @@ export function customizationTargets(definition: {
         .sort((left, right) => left.label.localeCompare(right.label))
     : [];
   return Object.freeze({
+    ...(validationTargets.length ? { validationTargets } : {}),
     ...(definition.operationRoleNarrowings && {
       permissionRestrictions: definition.operationRoleNarrowings,
     }),
