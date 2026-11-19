@@ -23,6 +23,8 @@ Status — Candidate for integration. The orchestrator approved the patch-kind m
 
 ## Gates
 
+- [CI 44480152260](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44480152260) passed compiler, PostgreSQL and schema checks. The browser activated one draft and saved the lines, then failed the receipt link assertion. The follow-up waits for server-confirmed selections and opens the exact linked receipt. Migration 0037 follows the workflow migration and the snapshot was regenerated on PostgreSQL 16.
+
 - [Hosted PostgreSQL](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44467955198) passed at `19e8d8e0`, including the one-request draft, linked records, owned lines and an assistant-confirmed Quarantine with unchanged stock movements. The source scan found no Inspection-specific first-party branches.
 - [Earlier CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44471387731) at `dca983be` passed quality and build. The [controls](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44471387669) passed at that SHA.
 - The first-party release uses an ADR-0066 re-baseline. The prior pushed checkpoint is preserved by an annotated tag and remains in branch history.
@@ -37,30 +39,31 @@ Status — Candidate for integration. The orchestrator approved the patch-kind m
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-4",
-  "base": "81ba7405e7512a806882f9ea3cff51af8c7115d9",
-  "head": "d9445168f753115aec696ded740a2ccab1f8afd8",
+  "base": "af2594dd5cc8a9750619d0c7eed2295e3a6b2f8c",
+  "head": "e1ecf60eb4ed984625dd656b6d083d3702ea63f0",
   "changedPaths": [
     "apps/web/package.json", "apps/web/src/component-registry.ts",
     "apps/web/src/customize-screen.ts", "apps/web/src/document-editor.ts",
     "apps/web/src/gateway-error-codes.ts", "apps/web/src/list-declaration.ts",
-    "apps/web/src/message-catalog.ts", "apps/web/src/surface-runtime.ts",
-    "apps/web/test/browser/customize.composed-application.spec.ts", "apps/web/test/browser/message-catalog.spec.ts",
-    "apps/web/test/surface-runtime-contract.test.ts", "db/migrations/0036_customization_patch_kind_identifier.sql",
-    "db/schema.snapshot.json", "packages/canonical-model/src/schemas.ts",
-    "packages/canonical-model/src/surface-list.ts", "packages/canonical-model/src/surface-workspace.ts",
-    "packages/compiler/src/conformance.ts", "packages/compiler/src/projections.ts",
-    "packages/compiler/src/storage.ts", "packages/customization/src/ai-draft.ts",
-    "packages/customization/src/apply.ts", "packages/customization/src/candidate.ts",
-    "packages/customization/src/patch.ts", "packages/customization/src/render.ts",
-    "packages/customization/src/targets.ts", "packages/operations-agent/src/catalog.ts",
-    "packages/operations-agent/src/session.ts", "packages/postgres-provider/src/customization-service.ts",
-    "packages/runtime/src/request-runtime-view.ts", "pnpm-lock.yaml",
-    "test/architecture/release-persistence-boundary.test.ts", "test/evidence/CUSTOMIZE-3.expected-red.json",
-    "test/evidence/CUSTOMIZE-4.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json",
-    "test/fixtures/inspection-customization.ts", "test/postgres/customization.test.ts",
-    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts",
-    "test/postgres/module-storage-transition.test.ts", "test/postgres/trust-substrate.test.ts",
-    "test/unit/customization-ai-draft.test.ts", "test/unit/customization.test.ts"
+    "apps/web/src/message-catalog.ts", "apps/web/src/surface-composition.ts",
+    "apps/web/src/surface-runtime.ts", "apps/web/test/browser/customize.composed-application.spec.ts",
+    "apps/web/test/browser/message-catalog.spec.ts", "apps/web/test/surface-runtime-contract.test.ts",
+    "db/migrations/0037_customization_patch_kind_identifier.sql", "db/schema.snapshot.json",
+    "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-list.ts",
+    "packages/canonical-model/src/surface-workspace.ts", "packages/compiler/src/conformance.ts",
+    "packages/compiler/src/projections.ts", "packages/compiler/src/storage.ts",
+    "packages/customization/src/ai-draft.ts", "packages/customization/src/apply.ts",
+    "packages/customization/src/candidate.ts", "packages/customization/src/patch.ts",
+    "packages/customization/src/render.ts", "packages/customization/src/targets.ts",
+    "packages/operations-agent/src/catalog.ts", "packages/operations-agent/src/session.ts",
+    "packages/postgres-provider/src/customization-service.ts", "packages/runtime/src/request-runtime-view.ts",
+    "pnpm-lock.yaml", "test/architecture/release-persistence-boundary.test.ts",
+    "test/evidence/CUSTOMIZE-3.expected-red.json", "test/evidence/CUSTOMIZE-4.expected-red.json",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/fixtures/inspection-customization.ts",
+    "test/postgres/customization.test.ts", "test/postgres/inventory-storage.test.ts",
+    "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts",
+    "test/postgres/trust-substrate.test.ts", "test/unit/customization-ai-draft.test.ts",
+    "test/unit/customization.test.ts"
   ],
   "symbols": [
     {"path": "packages/customization/src/patch.ts", "name": "parseCustomizationPatch"},
