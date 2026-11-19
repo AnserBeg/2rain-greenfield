@@ -23,7 +23,7 @@ Status — build checkpoint started at `99371b43` and synchronized with `8b61740
 
 - Typecheck, changed-file format and lint, record checks and compiled release freshness passed. Five focused tests cover ordered drafting, ownership, lifecycle, lines, links and refusal by older surface readers.
 - The full Inspection change normalized against the synchronized trunk with four relations, owned lines and five transitions. The re-baseline retained the first-party authored definition and every projection digest except the bootstrap storage transition.
-- Hosted PostgreSQL, browser and scripted assistant evidence are pending. Migration 0033 is absent from trunk, so 0034 cannot yet enter the acceptance matrix.
+- Hosted PostgreSQL, browser and scripted assistant evidence are pending. Migration 0033 is on CUSTOMIZE-3's branch. Its [CI run](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44441030550) reached TS2742 in `loadDeclaredListCounts` during Build and was cancelled. Trunk still ends at 0032.
 
 ## Gaps
 
