@@ -945,6 +945,71 @@ export function resolvePinnedLegalEntityFamily(
   return { familyId, status: 'outsidePinnedContract' };
 }
 
+type OwnershipEntity = NormalizedApplicationPackage['entities'][number] & {
+  companyOwnership?: LegalEntityFamilyClassification;
+};
+
+function isTenantRecordFamily(entityId: string): boolean {
+  return canonicalFamilyId(entityId)?.startsWith('custom_') ?? false;
+}
+
+function declaredTenantOwnership(
+  entity: OwnershipEntity,
+): LegalEntityFamilyClassification {
+  return entity.companyOwnership ?? 'tenantShared';
+}
+
+export function resolveLegalEntityFamily(
+  packageId: string,
+  entity: OwnershipEntity,
+): PinnedLegalEntityFamilyResolution {
+  const pinned = resolvePinnedLegalEntityFamily(packageId, entity.entityId);
+  if (!isTenantRecordFamily(entity.entityId) || !entity.companyOwnership)
+    return pinned;
+  return {
+    classification: entity.companyOwnership,
+    familyId: canonicalFamilyId(entity.entityId)!,
+    status: 'classified',
+  };
+}
+
+export function resolveLegalEntityRelationSemantics(
+  packageId: string,
+  source: OwnershipEntity,
+  target: OwnershipEntity,
+): LegalEntityRelationSemantics | null {
+  if (isTenantRecordFamily(source.entityId)) {
+    const targetFamily = resolveLegalEntityFamily(packageId, target);
+    const targetOwnership = isTenantRecordFamily(target.entityId)
+      ? declaredTenantOwnership(target)
+      : targetFamily.status === 'classified'
+        ? targetFamily.classification
+        : null;
+    if (targetOwnership === 'tenantShared') return 'crossEntityAllowed';
+    if (
+      targetOwnership === 'entityOwned' &&
+      declaredTenantOwnership(source) === 'entityOwned'
+    )
+      return 'sameEntity';
+    return null;
+  }
+  const sourceFamily = resolvePinnedLegalEntityFamily(
+    packageId,
+    source.entityId,
+  );
+  const targetFamily = resolvePinnedLegalEntityFamily(
+    packageId,
+    target.entityId,
+  );
+  return sourceFamily.status === 'classified' &&
+    targetFamily.status === 'classified'
+    ? resolvePinnedLegalEntityRelationSemantics(
+        sourceFamily.familyId,
+        targetFamily.familyId,
+      )
+    : null;
+}
+
 export interface PinnedInventoryFactStorageRule {
   familyId: string;
   mutability: 'appendOnly';
@@ -2600,7 +2665,58 @@ export function validateModuleConformance(
       }
     }
   }
+  const entitiesById = new Map<string, OwnershipEntity>(
+    packageRevision.entities.map((entity) => [entity.entityId, entity]),
+  );
+  for (const entity of entitiesById.values()) {
+    if (entity.companyOwnership && !isTenantRecordFamily(entity.entityId)) {
+      diagnostics.push(
+        inventoryModuleDiagnostic(
+          'INVENTORY_CONTRACT_INVALID',
+          '$.entities.companyOwnership',
+          entity.entityId,
+        ),
+      );
+    }
+  }
   for (const relation of packageRevision.relations) {
+    const sourceEntity = entitiesById.get(relation.sourceEntity.targetId);
+    const targetEntity = entitiesById.get(relation.targetEntity.targetId);
+    if (
+      sourceEntity &&
+      targetEntity &&
+      isTenantRecordFamily(sourceEntity.entityId)
+    ) {
+      const semantics = resolveLegalEntityRelationSemantics(
+        packageRevision.package.packageId,
+        sourceEntity,
+        targetEntity,
+      );
+      if (
+        semantics === null ||
+        (relation.ownership === 'parentScopedChild' &&
+          (!isTenantRecordFamily(targetEntity.entityId) ||
+            declaredTenantOwnership(sourceEntity) !==
+              declaredTenantOwnership(targetEntity)))
+      ) {
+        diagnostics.push({
+          ...inventoryModuleDiagnostic(
+            'INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED',
+            '$.relations',
+            relation.relationId,
+          ),
+          acceptedAlternative:
+            relation.ownership === 'parentScopedChild'
+              ? 'declare the child under a tenant record type with the same company ownership'
+              : 'use a tenant-shared target or choose company ownership when creating the source type',
+          rule:
+            relation.ownership === 'parentScopedChild'
+              ? 'child lines inherit the company ownership of their parent'
+              : 'tenant links require a classified target, and tenant-shared sources can only link to tenant-shared targets',
+        });
+      }
+      continue;
+    }
     const source = resolvePinnedLegalEntityFamily(
       packageRevision.package.packageId,
       relation.sourceEntity.targetId,

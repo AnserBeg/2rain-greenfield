@@ -386,12 +386,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # The composed application's journeys run beside the operations specs rather
-  # than after them, under the same bound.
+  # The composed journeys include release promotion, recovery, and replay.
   browser-composed:
     name: Composed application browser runner
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

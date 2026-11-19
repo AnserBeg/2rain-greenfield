@@ -158,6 +158,8 @@ export function operationMessageRef(error: unknown): OperationMessageRef {
     typeof error.code === 'string' &&
     error.code.length > 0
   ) {
+    if (error.code === 'MODULE_ARCHIVE_RESTRICTED')
+      return { code: 'OPERATION_ARCHIVE_HAS_DEPENDENTS' };
     if (
       error.code === 'MODULE_LEGAL_ENTITY_CREATE_INACTIVE' &&
       'subjectId' in error &&

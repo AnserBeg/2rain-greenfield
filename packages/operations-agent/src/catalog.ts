@@ -18,6 +18,7 @@ import {
   parsePinnedOperationCatalog,
   type RegisteredOperationDefinition,
 } from '../../runtime/src/semantic-operation-gateway.js';
+import type { SurfaceList } from '../../canonical-model/src/index.js';
 
 export interface QueryCatalogEntry {
   readonly queryId: string;
@@ -107,6 +108,11 @@ export interface PinnedCatalog {
   operation(operationId: string): RegisteredOperationDefinition | undefined;
   query(queryId: string): QueryCatalogEntry | undefined;
   preset(queryId: string): ListPreset | undefined;
+  relationLabels(queryId: string): readonly {
+    readonly fieldId: string;
+    readonly queryId: string;
+    readonly relationId: string;
+  }[];
   /** The entity an operation acts on, read from its declared read-back. */
   operationEntity(operation: RegisteredOperationDefinition): string;
 }
@@ -148,18 +154,20 @@ export function pinnedCatalog(view: RequestRuntimeView): PinnedCatalog {
     (agent.listPresets ?? []).map((preset) => [preset.queryId, preset]),
   );
   // Older releases have no field declarations. Require confirmation for their setup records.
-  const setupSurfaces =
+  const surfaces =
     (
       view.projections.surface.payload as unknown as {
         surfaces?: readonly {
           workspace?: { membership?: string };
           dataSourceQueryId?: string;
+          surfaceId?: string;
+          list?: Pick<SurfaceList, 'columns'>;
         }[];
       }
     ).surfaces ?? [];
   const confirmationRequiredFor = new Set(
     agent.confirmationRequiredFor ??
-      setupSurfaces.flatMap((s) => {
+      surfaces.flatMap((s) => {
         const entity =
           s.workspace?.membership === 'setup' &&
           queryById.get(s.dataSourceQueryId ?? '')?.sourceEntityId;
@@ -185,6 +193,25 @@ export function pinnedCatalog(view: RequestRuntimeView): PinnedCatalog {
     query: (id) =>
       queryById.get(id) ?? queryById.get(matchId(id, queryById.keys()) ?? ''),
     preset: (id) => presetById.get(id),
+    relationLabels: (id) => {
+      const surfaceId = presetById.get(id)?.surfaceId;
+      if (!surfaceId) return [];
+      return (
+        surfaces
+          .find((surface) => surface.surfaceId === surfaceId)
+          ?.list?.columns.flatMap((column) =>
+            column.relation && column.reference
+              ? [
+                  {
+                    fieldId: column.reference.labelField.targetId,
+                    queryId: column.reference.query.targetId,
+                    relationId: column.field,
+                  },
+                ]
+              : [],
+          ) ?? []
+      );
+    },
     operationEntity: (operation) =>
       'entity' in operation.effect
         ? operation.effect.entity.targetId

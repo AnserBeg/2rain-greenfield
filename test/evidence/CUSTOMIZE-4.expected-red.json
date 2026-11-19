@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "packet": "CUSTOMIZE-4",
+  "entries": [
+    {
+      "name": "patch-kind-payload-binding-omitted",
+      "claim": "The lineage table refuses a structurally valid patch whose identifier differs from the kind in its digested payload.",
+      "file": "db/migrations/0042_customization_patch_kind_identifier.sql",
+      "original": "    AND (convert_from(payload, 'UTF8')::jsonb ->> 'kind') IS NOT DISTINCT FROM patch_kind",
+      "replacement": "    AND true",
+      "test": {
+        "files": ["test/postgres/customization.test.ts"],
+        "namePattern": "a drafted change is recorded append-only"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customization.test.ts",
+          "name": "a drafted change is recorded append-only beside its tenant revision and staged release, and nothing goes live",
+          "expected": "the database refuses an identifier that differs from the payload"
+        }
+      ]
+    }
+  ]
+}

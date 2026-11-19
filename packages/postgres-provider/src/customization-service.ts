@@ -914,7 +914,7 @@ export class PostgresCustomizationService {
   }
 
   /**
-   * Plain English to one typed patch through the drafting model, then the
+   * Plain English to one typed change through the drafting model, then the
    * same draft as every other channel. The model never sees records, only the
    * live release's customizable targets; it cannot record or activate.
    */
@@ -1032,7 +1032,7 @@ export class PostgresCustomizationService {
   }
 
   /**
-   * Drafts one patch on the active release. Refused, unsupported and
+   * Drafts one change on the active release. Refused, unsupported and
    * compiler-rejected requests leave nothing behind; a drafted one leaves its
    * patch record, its child revision and its staged release.
    */
@@ -1082,10 +1082,7 @@ export class PostgresCustomizationService {
           message: 'Choose an active role to restrict.',
         });
     }
-    const patch =
-      parsed.patch.kind === 'addField'
-        ? { ...parsed.patch, screens: 'record' as const }
-        : parsed.patch;
+    const patch = preparePatchForRecording(parsed.patch);
     await this.#assertCurrentBase(context, active);
     const reproduced = await this.#reproduce(context, active);
     const compiled = await this.#compile(
@@ -2270,7 +2267,7 @@ export class PostgresCustomizationService {
           }
           throw new CustomizationServiceRefusal(
             'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
-            `patch ${record.patchId} cannot be read with its recorded kind and digest`,
+            `patch ${record.patchId} (${record.kind}) cannot be read with its recorded kind and digest`,
           );
         });
       },
@@ -2385,9 +2382,13 @@ function patchDisplayLabel(patch: CustomizationPatch): string | null {
     case 'addValidation':
       return patch.rule.message;
     case 'addRecordType':
+    case 'addLink':
+    case 'addLineTable':
     case 'saveListView':
     case 'addMetricCard':
       return patch.label;
+    case 'changeSet':
+      return `${patch.patches.length} changes together`;
     case 'narrowPermission':
     case 'unNarrowPermission':
       return patch.roleKey;
@@ -2413,6 +2414,22 @@ function patchRecord(row: PatchRow): PatchRecord {
     resultingReleaseRoot: row.resulting_release_root,
     resultingRevisionId: row.resulting_revision_id,
   });
+}
+
+function preparePatchForRecording(
+  patch: CustomizationPatch,
+): CustomizationPatch {
+  const bindFieldScreens = <
+    T extends Exclude<CustomizationPatch, { kind: 'changeSet' }>,
+  >(
+    member: T,
+  ): T =>
+    member.kind === 'addField'
+      ? { ...member, screens: 'record' as const }
+      : member;
+  return patch.kind === 'changeSet'
+    ? { ...patch, patches: patch.patches.map(bindFieldScreens) }
+    : bindFieldScreens(patch);
 }
 
 interface UpgradeRow {

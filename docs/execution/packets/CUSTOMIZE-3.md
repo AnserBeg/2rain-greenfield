@@ -7,7 +7,7 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 1. Arrange a list offers stored standard and custom fields, and the list query selects newly visible values. This includes Party's generic list.
 2. Customize and plain-English drafting prepare a saved view with its own columns, default sort and declared filter choices. Approval shows those choices before activation.
 3. Saved tabs batch counts through the list query under current policy. The page, CSV and assistant use the view's declared settings. Rollback restores the prior list.
-4. Migration 0034 adds the planned patch kinds to the closed vocabulary. Its check requires a valid digest, lineage and channel.
+4. Migration 0034 adds the planned patch kinds to the closed vocabulary. Its check requires a valid digest, lineage and channel. CUSTOMIZE-4 moved kind admission to the versioned parser and bound the stored identifier to the digested payload.
 5. Today cards count a declared direct list or sum its declared numeric measure before pagination. The UI drill-through and assistant use the same list and saved-view conditions. Approval, replay and rollback preserve the card definition.
 6. An operation restriction subtracts one role’s grants. Other roles keep their existing grants. Release activation and replay check the role in the destination environment.
 7. Literal validation (F1/F3) adds a guard to bound create and update operations. Create checks after defaults. Update checks when a watched value changes. Form and assistant show the pinned message, and rollback restores the prior rules.
@@ -20,7 +20,7 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 - STOP at slice 2 for canonical language admission. The orchestrator approved compiler-proved validation examples and the verifier change that reads them. Plan §5.12 and ADR-0012 still require the dedicated Formula Rule projection for tenant validation and calculated fields. The v3 adoption explicitly deferred that family to a tenant-customization language event ([4c](4c.md#adoption-boundary)).
 - [ADR-0074](../../decisions/ADR-0074-formula-rule-and-workflow-projection-admission.md) accepts joint optional v6 admission with mandatory reader floors, tenant-runner byte parity, and explicit validation and replay contracts. Slices 2–4 must prove these gates before serving either family.
 - Slice 5 subtracts the selected role’s grant for a named operation. Other roles still grant access. The actual Customize author sees active role keys and labels in their environment. A removal restores evaluation against current policy. Field restrictions remain a gap across query, read-back, exports and assistant output.
-- [ADR-0075](../../decisions/ADR-0075-literal-validation-and-ordered-comparison.md) defines the optional v6 F1/F3 validation position. It keeps the existing inline predicate profile and uses the tenant business calendar. Declaring releases require operation reader 3. The historical proof runs in PostgreSQL shard 3. Customize has its own browser job, and the release tests are spread across the existing PostgreSQL jobs. The secret scan covers the same Git history in two jobs. The boot-lock test polls from a fresh database snapshot.
+- [ADR-0075](../../decisions/ADR-0075-literal-validation-and-ordered-comparison.md) defines the optional v6 F1/F3 validation position. It keeps the existing inline predicate profile and uses the tenant business calendar. Declaring releases require operation reader 3. Validation keeps its own draft and approval alongside the Inspection builder’s grouped changes. The historical proof runs in PostgreSQL shard 3. Customize has its own browser job, and the release tests are spread across the existing PostgreSQL jobs. The secret scan covers the same Git history in two jobs. The boot-lock test polls from a fresh database snapshot.
 - Slice 6 restores the candidate preserved at `e97ebd9f` and adds a CRITFIX-B replay witness. Catalog measures are separate by currency. Re-baselined the pre-tenant first-party artifact. The surface, agent and query readers require 25, 4 and 3 when their projections carry the corresponding keys.
 
 ## Gates
@@ -39,21 +39,22 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
-  "base": "8839f668293dc06f9d9ba4def3611697323f3760",
-  "head": "052136aff7391ea8b2bf864bc386cb7757a3ba8e",
+  "base": "9ac017b915d24b058a35450db92433c97486a2f7",
+  "head": "9784fe116be4af568b3a0b73116b260de00d5e8f",
   "changedPaths": [
     ".github/scripts/run-security-scans.sh", ".github/workflows/ci.yml", ".github/workflows/evidence.yml", "apps/web/playwright.composed.config.ts", "apps/web/playwright.customization.config.ts",
     "apps/web/playwright.shared.ts", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/document-editor.ts", "apps/web/src/surface-composition.ts",
-    "apps/web/src/surface-runtime.ts", "apps/web/src/validation-refusal.ts", "apps/web/test/browser/customize.composed-application.spec.ts", "package.json", "packages/canonical-model/src/formula-validation-bindings.ts",
-    "packages/canonical-model/src/formula-validation-projection.ts", "packages/canonical-model/src/formula-validation-schema.ts", "packages/canonical-model/src/formula-validation.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts",
-    "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts", "packages/compiler/src/diff.ts", "packages/compiler/src/formula-validation-examples.ts", "packages/compiler/src/formula-validation-plan.ts",
-    "packages/compiler/src/formula-validation-witness.ts", "packages/compiler/src/projections.ts", "packages/compiler/src/protocol.ts", "packages/compiler/src/verification.ts", "packages/customization/src/ai-draft.ts",
-    "packages/customization/src/apply.ts", "packages/customization/src/patch.ts", "packages/customization/src/render.ts", "packages/customization/src/targets.ts", "packages/customization/src/validation-draft.ts",
-    "packages/operations-agent/src/catalog.ts", "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/release-repository.ts", "packages/postgres-provider/src/release-verification-service.ts",
-    "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/formula-validation.ts", "packages/runtime/src/request-runtime-view.ts", "scripts/run-matrix.sh", "test/architecture/repository-hygiene.test.ts",
-    "test/architecture/test-reachability.test.ts", "test/evidence/CUSTOMIZE-3.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts", "test/helpers/check-language-coverage.ts",
-    "test/helpers/customization-patch-record.ts", "test/helpers/language-coverage-packages.ts", "test/helpers/reachability-producers.ts", "test/integration/security-scan-contract.test.ts", "test/postgres/customization-governed-reads.test.ts",
-    "test/postgres/customization-validation.test.ts", "test/postgres/customization.test.ts", "test/unit/customization-ai-draft.test.ts", "test/unit/formula-validation.test.ts"
+    "apps/web/src/surface-runtime.ts", "apps/web/src/validation-refusal.ts", "apps/web/test/browser/customize-inspection.composed-application.spec.ts", "apps/web/test/browser/customize.composed-application.spec.ts", "package.json",
+    "packages/canonical-model/src/formula-validation-bindings.ts", "packages/canonical-model/src/formula-validation-projection.ts", "packages/canonical-model/src/formula-validation-schema.ts", "packages/canonical-model/src/formula-validation.ts", "packages/canonical-model/src/index.ts",
+    "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts", "packages/compiler/src/diff.ts", "packages/compiler/src/formula-validation-examples.ts",
+    "packages/compiler/src/formula-validation-plan.ts", "packages/compiler/src/formula-validation-witness.ts", "packages/compiler/src/projections.ts", "packages/compiler/src/protocol.ts", "packages/compiler/src/verification.ts",
+    "packages/customization/src/ai-draft.ts", "packages/customization/src/apply.ts", "packages/customization/src/patch.ts", "packages/customization/src/render.ts", "packages/customization/src/targets.ts",
+    "packages/customization/src/validation-draft.ts", "packages/operations-agent/src/catalog.ts", "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/release-repository.ts",
+    "packages/postgres-provider/src/release-verification-service.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/formula-validation.ts", "packages/runtime/src/request-runtime-view.ts", "scripts/run-matrix.sh",
+    "test/architecture/repository-hygiene.test.ts", "test/architecture/test-reachability.test.ts", "test/evidence/CUSTOMIZE-3.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts",
+    "test/helpers/check-language-coverage.ts", "test/helpers/customization-patch-record.ts", "test/helpers/language-coverage-packages.ts", "test/helpers/reachability-producers.ts", "test/integration/security-scan-contract.test.ts",
+    "test/postgres/customization-governed-reads.test.ts", "test/postgres/customization-inspection.test.ts", "test/postgres/customization-validation.test.ts", "test/postgres/customization.test.ts", "test/unit/customization-ai-draft.test.ts",
+    "test/unit/formula-validation.test.ts"
   ],
   "symbols": [
     {"path":"packages/canonical-model/src/formula-validation-bindings.ts","name":"bindLiteralValidation"},
