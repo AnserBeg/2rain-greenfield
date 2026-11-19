@@ -32,6 +32,8 @@ import {
   applyCustomizationPatches,
   compileCustomizationCandidate,
   customizationTargets,
+  CUSTOMIZATION_PATCH_KINDS,
+  CustomizationPatchSchema,
   compileInSandbox,
   parseCustomizationPatch,
   parseSerializedRelease,
@@ -83,7 +85,57 @@ const equipment = patch({
   label: 'Equipment',
 });
 
-test('a request outside the supported patch kinds is unsupported and names what is missing', () => {
+test('the v1 patch vocabulary is add-only', () => {
+  const releasedKinds = [
+    'addRecordType',
+    'addField',
+    'addChoice',
+    'arrangeLayout',
+    'saveListView',
+    'addLink',
+    'addLineTable',
+    'declareLifecycle',
+    'addMetricCard',
+    'narrowPermission',
+    'unNarrowPermission',
+    'changeSet',
+  ];
+  const [singlePatch, changeSet] = CustomizationPatchSchema.options;
+  const schemaKinds = [
+    ...singlePatch.options.map((schema) => schema.shape.kind.value),
+    changeSet.shape.kind.value,
+  ];
+  assert.deepEqual([...CUSTOMIZATION_PATCH_KINDS].sort(), schemaKinds.sort());
+  for (const kind of releasedKinds)
+    assert.ok(
+      schemaKinds.some((current) => current === kind),
+      kind,
+    );
+});
+
+test('action permission changes require the standalone authoring path', () => {
+  for (const kind of ['narrowPermission', 'unNarrowPermission']) {
+    const permission = {
+      kind,
+      roleKey: 'viewer',
+      target: { kind: 'operation', id: 'northstar.app:operation.party_update' },
+    };
+    assert.equal(parseCustomizationPatch(permission).status, 'parsed');
+    assert.deepEqual(
+      parseCustomizationPatch({
+        kind: 'changeSet',
+        patches: [equipment, permission],
+      }),
+      {
+        status: 'unsupported',
+        missingCapability: 'action permission changes in a grouped draft',
+        message: 'Action permission changes need their own draft.',
+      },
+    );
+  }
+});
+
+test('an unknown patch kind is unsupported and named, including inside a change set', () => {
   const outcome = parseCustomizationPatch({
     kind: 'addWorkflow',
     label: 'Approve equipment purchases',
@@ -99,6 +151,26 @@ test('a request outside the supported patch kinds is unsupported and names what 
     label: 'Equipment',
   });
   assert.equal(malformed.status, 'invalid');
+  const batch = parseCustomizationPatch({
+    kind: 'changeSet',
+    patches: [equipment, { kind: 'subscribeToGoodsReceipt' }],
+  });
+  assert.equal(batch.status, 'unsupported');
+  assert.equal(
+    batch.status === 'unsupported' && batch.missingCapability,
+    'subscribeToGoodsReceipt',
+  );
+  for (const patches of [
+    [],
+    [equipment],
+    Array(17).fill(equipment),
+    [equipment, { kind: 'changeSet', patches: [equipment, equipment] }],
+  ]) {
+    assert.equal(
+      parseCustomizationPatch({ kind: 'changeSet', patches }).status,
+      'invalid',
+    );
+  }
 });
 
 test('patch application refuses the §10.6 boundary with stable codes, never partially', () => {
@@ -253,6 +325,281 @@ test('Equipment drafts deterministically into a new table and a plain diff namin
   assert.equal(candidate.compiled.releaseRoot, step.release.releaseRoot);
 });
 
+test('a company-owned tenant record compiles scoped queries and explains the choice in the diff', async () => {
+  const outcome = await compileInSandbox(
+    sandboxRequest([
+      patch({
+        companyOwnership: 'entityOwned',
+        fields: [{ label: 'Name', type: 'text' }],
+        kind: 'addRecordType',
+        label: 'Site review',
+      }),
+    ]),
+  );
+  assert.equal(
+    outcome.status,
+    'compiled',
+    JSON.stringify(outcome.status === 'compiled' ? [] : outcome),
+  );
+  if (outcome.status !== 'compiled') return;
+  assert.match(
+    outcome.steps[0]!.rendered.text,
+    /each record belongs to one company/iu,
+  );
+});
+
+test('a tenant-shared source cannot compile a link to a company-owned receipt', async () => {
+  const relationId = 'northstar.app:relation.custom_site_review_receipt';
+  const reference = (targetId: string) => ({
+    kind: 'entityReference',
+    schemaVersion: 'v6',
+    targetId,
+  });
+  const base = structuredClone(authored);
+  (base.relations as unknown[]).push({
+    archiveBehavior: 'retainReference',
+    cardinality: 'manyToOne',
+    joinEligibility: 'query',
+    kind: 'relationDefinition',
+    orderKey: 10,
+    ownership: 'reference',
+    relationId,
+    required: false,
+    schemaVersion: 'v6',
+    sourceEntity: reference('northstar.app:entity.custom_site_review'),
+    targetEntity: reference('northstar.app:entity.goods_receipt'),
+  });
+  const compile = (companyOwnership: 'entityOwned' | 'tenantShared') =>
+    compileInSandbox({
+      ...sandboxRequest([
+        patch({
+          companyOwnership,
+          fields: [{ label: 'Name', type: 'text' }],
+          kind: 'addRecordType',
+          label: 'Site review',
+        }),
+      ]),
+      base,
+    });
+  const [accepted, rejected] = await Promise.all([
+    compile('entityOwned'),
+    compile('tenantShared'),
+  ]);
+  assert.equal(
+    accepted.status,
+    'compiled',
+    JSON.stringify(accepted.status === 'compiled' ? [] : accepted),
+  );
+  assert.match(
+    JSON.stringify(rejected),
+    /INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED/u,
+  );
+  assert.match(JSON.stringify(rejected), new RegExp(relationId, 'u'));
+});
+
+test('a tenant lifecycle compiles guarded operations and refuses an undeclared state', async () => {
+  const lifecycle = {
+    entity: 'northstar.app:entity.custom_equipment',
+    initial: 'Pending',
+    kind: 'declareLifecycle',
+    states: [{ label: 'Pending' }, { label: 'Passed' }],
+    transitions: [{ from: 'Pending', label: 'Pass', to: 'Passed' }],
+  };
+  const accepted = await compileInSandbox(
+    sandboxRequest([
+      patch({ kind: 'changeSet', patches: [equipment, lifecycle] }),
+    ]),
+  );
+  assert.equal(
+    accepted.status,
+    'compiled',
+    JSON.stringify(accepted.status === 'compiled' ? [] : accepted),
+  );
+  const refused = applyCustomizationPatches(authored, [
+    equipment,
+    patch({ ...lifecycle, initial: 'Undeclared' }),
+  ]);
+  assert.equal(refused.status, 'unsupported');
+});
+
+test('tenant line tables use the document editor with or without company scope and lifecycle', async () => {
+  const entity = 'northstar.app:entity.custom_quality_review';
+  const header = {
+    companyOwnership: 'entityOwned',
+    fields: [{ label: 'Name', type: 'text' }],
+    kind: 'addRecordType',
+    label: 'Quality review',
+  };
+  const lifecycle = {
+    entity,
+    initial: 'Pending',
+    kind: 'declareLifecycle',
+    states: [
+      { label: 'Pending', role: 'inProgress' },
+      { label: 'Passed', role: 'success' },
+    ],
+    transitions: [{ from: 'Pending', label: 'Pass', to: 'Passed' }],
+  };
+  const lines = {
+    entity,
+    fields: [
+      { label: 'Characteristic', required: true, type: 'text' },
+      { label: 'Measured value', type: 'number' },
+      { label: 'Pass', type: 'yesNo' },
+    ],
+    kind: 'addLineTable',
+    label: 'Results',
+  };
+  const change = (members: object[]) =>
+    patch({ kind: 'changeSet', patches: members });
+  const link = {
+    entity,
+    kind: 'addLink',
+    label: 'Goods receipt',
+    target: 'northstar.app:entity.goods_receipt',
+  };
+  const links = [
+    link,
+    ...(['party', 'item', 'location'] as const).map((target) => ({
+      ...link,
+      label: target,
+      target: `northstar.app:entity.${target}`,
+    })),
+  ];
+  const sharedTarget = {
+    ...header,
+    companyOwnership: 'tenantShared',
+    label: 'Review source',
+  };
+  const accepted = await compileInSandbox(
+    sandboxRequest([change([header, lifecycle, lines])]),
+  );
+  assert.equal(
+    accepted.status,
+    'compiled',
+    JSON.stringify(accepted.status === 'compiled' ? [] : accepted),
+  );
+  if (accepted.status === 'compiled') {
+    const family = PROJECTION_FAMILY_IDS.surfaceManifest;
+    const surfaceRequirement = parseSerializedRelease(
+      accepted.steps[0]!.release,
+    ).compiled.bundle.releaseManifest.projections.find(
+      (projection) => projection.familyId === family,
+    )!.requiredRuntimeCapability;
+    const reader23 = {
+      [family]: {
+        capabilityId: surfaceRequirement.capabilityId,
+        maximumSupportedVersion: 23,
+      },
+    };
+    assert.equal(surfaceRequirement.minimumVersion, 23);
+    assert.equal(
+      unsupportedRuntimeCapability(family, surfaceRequirement, reader23),
+      null,
+    );
+    const projections = accepted.steps[0]!.release.artifacts.map(
+      (artifact) =>
+        JSON.parse(
+          Buffer.from(String(artifact.canonicalBytesBase64), 'base64').toString(
+            'utf8',
+          ),
+        ) as {
+          kind: string;
+          surfaces?: CompiledSurfaceDefinition[];
+        },
+    );
+    const surfaces = projections.find(
+      (artifact) => artifact.kind === 'surfaceManifestPayload',
+    )!.surfaces!;
+    const form = surfaces.find((surface) =>
+      surface.surfaceId.endsWith('.custom_quality_review_form'),
+    )!;
+    assert.equal(
+      form.documentEditor?.parentRelationId,
+      'northstar.app:relation.custom_quality_review_lines_parent',
+    );
+    assert.deepEqual(form.documentEditor?.editableStateIds, [
+      'northstar.app:state.custom_quality_review_pending',
+    ]);
+    const detail = surfaces.find((surface) =>
+      surface.surfaceId.endsWith('.custom_quality_review_detail'),
+    )!;
+    assert.equal(detail.composition?.children[0]?.label, 'Results');
+    assert.deepEqual(
+      detail.composition?.presentation?.progression?.steps.map(
+        (step) => step.label,
+      ),
+      ['Pending', 'Passed'],
+    );
+  }
+  for (const members of [
+    [header, lines],
+    [{ ...header, companyOwnership: 'tenantShared' }, lifecycle, lines],
+    [
+      sharedTarget,
+      { ...header, companyOwnership: 'tenantShared' },
+      {
+        ...link,
+        target: 'northstar.app:entity.custom_review_source',
+        label: 'Source',
+      },
+      lines,
+    ],
+    [header, ...links, lines, lifecycle],
+  ]) {
+    const extended = await compileInSandbox(sandboxRequest([change(members)]));
+    assert.equal(
+      extended.status,
+      'compiled',
+      JSON.stringify(extended.status === 'compiled' ? [] : extended),
+    );
+    if (extended.status !== 'compiled') continue;
+    const family = PROJECTION_FAMILY_IDS.surfaceManifest;
+    const requirement = parseSerializedRelease(
+      extended.steps[0]!.release,
+    ).compiled.bundle.releaseManifest.projections.find(
+      (projection) => projection.familyId === family,
+    )!.requiredRuntimeCapability;
+    assert.equal(requirement.minimumVersion, 25);
+    for (const maximumSupportedVersion of [23, 24]) {
+      assert.match(
+        unsupportedRuntimeCapability(family, requirement, {
+          [family]: {
+            capabilityId: requirement.capabilityId,
+            maximumSupportedVersion,
+          },
+        }) ?? '',
+        /25/u,
+      );
+    }
+    assert.equal(unsupportedRuntimeCapability(family, requirement), null);
+  }
+  const visual = await compileInSandbox(
+    sandboxRequest([patch(header), change([...links, lines, lifecycle])]),
+  );
+  assert.deepEqual(visual, {
+    message:
+      'Links can be added when the record type is first created; adding one later is coming soon',
+    missingCapability: 'links on a published record type',
+    patchIndex: 1,
+    status: 'unsupported',
+  });
+  const uncovered = applyCustomizationPatches(authored, [
+    change([header, { ...link, required: true }, lines]),
+  ]);
+  assert.equal(uncovered.status, 'applied');
+  const form = (uncovered.authored.surfaces as Record<string, unknown>[]).find(
+    (surface) =>
+      String(surface.surfaceId).endsWith('.custom_quality_review_form'),
+  )!;
+  delete (form.documentEditor as Record<string, unknown>).headerRelations;
+  assert.throws(
+    () => normalizeApplicationPackage(uncovered.authored),
+    (error: unknown) =>
+      /picker for each required header relation/u.test(JSON.stringify(error)),
+  );
+});
+
 test('a chain re-applies its recorded prefix exactly and the next patch builds on it', async () => {
   const choice = patch({
     enumField: 'northstar.app:field.custom_equipment_status',
@@ -286,6 +633,40 @@ function sandboxRequest(chain: readonly CustomizationPatch[]) {
     tip: serializeRelease(tip),
   };
 }
+
+test('a change set compiles only its final definition and refuses a broken dependency order', async () => {
+  const addSerial = patch({
+    entity: 'northstar.app:entity.custom_equipment',
+    field: { label: 'Inspection date', type: 'date' },
+    kind: 'addField',
+    screens: 'record',
+  });
+  const change = patch({ kind: 'changeSet', patches: [equipment, addSerial] });
+  const result = await compileInSandbox(sandboxRequest([change]));
+  assert.equal(result.status, 'compiled');
+  if (result.status !== 'compiled') return;
+  assert.equal(result.steps.length, 1);
+  const step = result.steps[0]!;
+  assert.match(step.rendered.text, /Equipment/u);
+  const definition = parseSerializedRelease(
+    step.release,
+  ).normalizedDefinitionBytes;
+  assert.match(
+    new TextDecoder().decode(definition),
+    /custom_equipment_inspection_date/u,
+  );
+  const reversed = patch({
+    kind: 'changeSet',
+    patches: [addSerial, equipment],
+  });
+  assert.deepEqual(await compileInSandbox(sandboxRequest([reversed])), {
+    code: 'CUSTOMIZE_TARGET_NOT_FOUND',
+    message:
+      'There is no record type northstar.app:entity.custom_equipment to add a field to.',
+    patchIndex: 0,
+    status: 'refused',
+  });
+});
 
 function patch(input: unknown): CustomizationPatch {
   const parsed = parseCustomizationPatch(input);

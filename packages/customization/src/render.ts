@@ -23,6 +23,8 @@ export interface DiffDefinition {
     readonly roleKey: string;
   }[];
   readonly surfaces: readonly Json[];
+  readonly relations?: readonly Json[];
+  readonly stateMachines?: readonly Json[];
 }
 
 export interface StorageChange {
@@ -107,19 +109,87 @@ export function renderReleaseDiff(input: {
   const newEntities = new Set(
     added('entityDefinition').map((c) => c.subjectId),
   );
+  const parentByChild = new Map(
+    (to.relations ?? [])
+      .filter((relation) => relation.ownership === 'parentScopedChild')
+      .map((relation) => [
+        String((relation.sourceEntity as Json).targetId),
+        String((relation.targetEntity as Json).targetId),
+      ]),
+  );
   for (const entityId of [...newEntities].sort()) {
     const label = entityLabel(to, entityId);
+    const ownership = to.entities.find(
+      (entity) => entity.entityId === entityId,
+    )?.companyOwnership;
     const fields = to.fields
       .filter((field) => (field.entity as Json).targetId === entityId)
       .sort((left, right) => Number(left.orderKey) - Number(right.orderKey));
+    const parent = parentByChild.get(entityId);
     lines.push(
-      `New record type "${label}" with ${String(fields.length)} field${fields.length === 1 ? '' : 's'}:`,
+      parent
+        ? `New line table "${label}" on ${entityLabel(to, parent)}:`
+        : `New record type "${label}" with ${String(fields.length)} field${fields.length === 1 ? '' : 's'}:`,
     );
     for (const field of fields) lines.push(`  - ${describeField(field)}`);
-    lines.push(
-      `  It gets its own menu entry "${label}" with a list, a record page and a form.`,
-      `  People who can use the rest of the application can create, change, archive and restore ${label} records.`,
+    if (ownership === 'entityOwned')
+      lines.push('  Each record belongs to one company.');
+    if (ownership === 'tenantShared')
+      lines.push('  Records are shared by all companies in this tenant.');
+    if (!parent)
+      lines.push(
+        `  It gets its own menu entry "${label}" with a list, a record page and a form.`,
+        `  People who can use the rest of the application can create, change, archive and restore ${label} records.`,
+      );
+  }
+
+  const fieldsByRelation = new Map(
+    to.surfaces.flatMap((surface) =>
+      (((surface.composition as Json | undefined)?.fields ?? []) as Json[])
+        .filter((column) => column.reference)
+        .map((column) => [column.field, String(column.label)] as const),
+    ),
+  );
+  const originalRelations = new Set(
+    (from.relations ?? []).map((relation) => relation.relationId),
+  );
+  for (const relation of to.relations ?? []) {
+    const label = fieldsByRelation.get(relation.relationId);
+    if (!label || originalRelations.has(relation.relationId)) continue;
+    const source = entityLabel(
+      to,
+      String((relation.sourceEntity as Json).targetId),
     );
+    const target = entityLabel(
+      to,
+      String((relation.targetEntity as Json).targetId),
+    );
+    lines.push(
+      `New ${relation.required ? 'required' : 'optional'} link "${label}" from ${source} to ${target}. Choose it when creating a record.`,
+    );
+  }
+  const originalMachines = new Set(
+    (from.stateMachines ?? []).map((machine) => machine.machineId),
+  );
+  for (const machine of to.stateMachines ?? []) {
+    if (originalMachines.has(machine.machineId)) continue;
+    const states = new Map(
+      (machine.states as Json[]).map((state) => [
+        state.stateId,
+        String(state.label),
+      ]),
+    );
+    const initial = states.get((machine.initialState as Json).targetId);
+    lines.push(
+      `New lifecycle for ${entityLabel(to, String((machine.entity as Json).targetId))}. Records start at "${initial}".`,
+    );
+    for (const transition of machine.transitions as Json[]) {
+      const fromState = states.get((transition.fromState as Json).targetId);
+      const toState = states.get((transition.toState as Json).targetId);
+      lines.push(
+        `  - ${String(transition.label)} changes "${fromState}" to "${toState}" after confirmation.`,
+      );
+    }
   }
 
   for (const change of added('fieldDefinition')) {

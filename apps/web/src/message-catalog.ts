@@ -90,6 +90,15 @@ export interface SurfaceMessage {
 }
 
 export const SURFACE_MESSAGE_CATALOG = Object.freeze({
+  OPERATION_ARCHIVE_HAS_DEPENDENTS: {
+    sentence: 'Active records still depend on this record',
+    detail:
+      'Archive the active lines or dependent records before archiving this record.',
+    nextAction: null,
+    consequence: 'blocking',
+    placements: ['page', 'slot'],
+    subject: null,
+  },
   DRAFT_EDITOR_CONFLICT: {
     sentence: 'Draft changed',
     detail:
@@ -570,6 +579,7 @@ export type QueryDiagnosticCode = (typeof QUERY_DIAGNOSTIC_CODES)[number];
 
 /** The write path's equivalent subset. */
 export const OPERATION_DIAGNOSTIC_CODES = Object.freeze([
+  'OPERATION_ARCHIVE_HAS_DEPENDENTS',
   'OPERATION_CONFIRMATION_REQUIRED',
   'OPERATION_CONFIRMATION_STALE',
   'OPERATION_INPUT_INVALID',

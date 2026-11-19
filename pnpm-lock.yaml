@@ -74,6 +74,9 @@ importers:
       '@fontsource/ibm-plex-serif':
         specifier: 5.3.0
         version: 5.3.0
+      '@north-star/customization':
+        specifier: workspace:*
+        version: link:../../packages/customization
       '@north-star/observability':
         specifier: workspace:*
         version: link:../../packages/observability
