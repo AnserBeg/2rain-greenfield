@@ -1246,7 +1246,14 @@ function parseOperationCatalogPayload(
   }
   assertExactKeys(
     payload,
-    ['kind', 'operations', 'schemaVersion'],
+    [
+      'kind',
+      'operations',
+      'schemaVersion',
+      ...(Object.hasOwn(payload, 'documentBindings')
+        ? ['documentBindings']
+        : []),
+    ],
     (message) => new MalformedPinnedOperationCatalogError(message),
   );
   if (

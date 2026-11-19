@@ -24,6 +24,7 @@ import {
   validateUnboundPermissionAcknowledgement,
 } from './conformance.js';
 import { compilerDiagnostic, finalizeDiagnostics } from './diagnostics.js';
+import { compileDocuments } from './documents.js';
 import { requiredFormulaValidationOperationReader } from '../../canonical-model/src/formula-validation-reader.js';
 import {
   compileLiteralFormulaRules,
@@ -402,6 +403,23 @@ function compileApplicationInternal(
   }
 
   const formula = compileLiteralFormulaRules(packageRevision);
+  const documents = compileDocuments(packageRevision);
+  if (documents?.message) {
+    return failure(
+      [
+        {
+          ...compilerDiagnostic(
+            'COMPILER_TYPE_INVALID',
+            'typeCheck',
+            '$.documentFields',
+            documents.subjectId ?? null,
+          ),
+          rule: documents.message,
+        },
+      ],
+      maximumDiagnostics,
+    );
+  }
   if (formula.status === 'refused') {
     const diagnostic = compilerDiagnostic(
       'COMPILER_TYPE_INVALID',
@@ -455,6 +473,7 @@ function compileApplicationInternal(
       packageRevision,
       input.profile.compilerSemanticProfileVersion,
       formula.status === 'compiled' ? formula.payload : null,
+      documents?.payload,
     ),
     packageRevision,
   );

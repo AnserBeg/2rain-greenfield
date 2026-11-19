@@ -180,6 +180,7 @@ export type SurfaceDataRenderState =
   | {
       readonly records: readonly SemanticRecordDto[];
       readonly documentEditorSlots?: Readonly<Record<string, string>>;
+      readonly documentsSection?: string;
       readonly receiving?: ReceivingSection;
       readonly receivingNavigation?: ReceivingNavigation;
       readonly composition?: CompositionData;
@@ -1252,7 +1253,10 @@ function renderKeyFacts(context: SurfaceComponentContext): string {
 
 function renderSections(context: SurfaceComponentContext): string {
   if (context.data?.status === 'READY' && context.data.composition)
-    return renderCompositionFields(context.surface, context.data.composition);
+    return (
+      renderCompositionFields(context.surface, context.data.composition) +
+      (context.data.documentsSection ?? '')
+    );
   const data = context.data ?? { status: 'UNBOUND' as const };
   if (data.status === 'UNBOUND') {
     return slotPanel(context, '', 'sections-slot');
@@ -1270,12 +1274,14 @@ function renderSections(context: SurfaceComponentContext): string {
         'form',
       )?.form?.fields?.map((field) => [String(field.fieldId), field.label]),
     );
-    return slotPanel(
-      context,
-      record
-        ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}<section class="panel data-panel" data-data-state="exact"><details class="record-section-group" open><summary><h2>Details</h2></summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(labels.get(fieldId) ?? fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`
-        : dataDiagnostic('QUERY_NOT_FOUND'),
-      'sections-slot',
+    return (
+      slotPanel(
+        context,
+        record
+          ? `${data.status === 'READY' && data.receiving ? renderReceivingSection(data.receiving) : ''}${data.status === 'READY' && data.receivingNavigation ? renderReceivingNavigation(data.receivingNavigation) : ''}${data.status === 'READY' && data.salesOrder ? renderSalesOrderSection(data.salesOrder) : ''}${data.status === 'READY' && data.packingDocument ? renderPackingDocument(data.packingDocument) : ''}<section class="panel data-panel" data-data-state="exact"><details class="record-section-group" open><summary><h2>Details</h2></summary><dl class="record-fields">${context.surface.fieldIds.map((fieldId) => `<div data-field-id="${escapeHtml(fieldId)}"><dt>${escapeHtml(labels.get(fieldId) ?? fieldLabel(fieldId, surfaceEntityId(context)))}</dt><dd>${recordFieldValue(context, record, fieldId)}</dd></div>`).join('')}</dl></details></section>`
+          : dataDiagnostic('QUERY_NOT_FOUND'),
+        'sections-slot',
+      ) + (data.status === 'READY' ? (data.documentsSection ?? '') : '')
     );
   }
   const admission = resolveFormAdmission(context, record);

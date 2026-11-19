@@ -4,6 +4,10 @@ import {
   type FormulaValidationRule,
 } from '@north-star/canonical-model';
 import { z } from 'zod';
+import {
+  DocumentCategoryDefinitionSchema,
+  DocumentFieldDefinitionSchema,
+} from '../../canonical-model/src/schemas.js';
 
 /**
  * The typed semantic patch a tenant customization is made of (ADR-0013). Every
@@ -191,6 +195,14 @@ const ChangeMemberSchema = z.discriminatedUnion('kind', [
   declareLifecycle,
   arrangeLayout,
   saveListView,
+  DocumentFieldDefinitionSchema.extend({
+    kind: z.literal('addDocumentField'),
+    schemaVersion: z.literal('northstar.document-field/v1'),
+  }),
+  DocumentCategoryDefinitionSchema.extend({
+    kind: z.literal('addUploadCategory'),
+    schemaVersion: z.literal('northstar.document-category/v1'),
+  }),
   z.strictObject({
     kind: z.literal('addMetricCard'),
     surface: canonicalId,
@@ -268,6 +280,8 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'saveListView',
   'addValidation',
   'addMetricCard',
+  'addDocumentField',
+  'addUploadCategory',
   'narrowPermission',
   'unNarrowPermission',
   'changeSet',

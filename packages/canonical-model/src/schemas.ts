@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DOCUMENTS_PAYLOAD_VERSION } from './documents.js';
 
 import {
   CANONICALIZATION_PROFILE_VERSION,
@@ -2752,11 +2753,78 @@ const formulaRules = z
   .max(128)
   .optional();
 
+export const DocumentContentTypeV1Schema = z.enum([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+]);
+
+export const DocumentFieldDefinitionSchema = z.strictObject({
+  schemaVersion: z.literal('v6'),
+  type: z.literal('files'),
+  entityId: CanonicalIdSchema,
+  fieldId: CanonicalIdSchema,
+  label: z.string().trim().min(1).max(80),
+  maxCount: z.number().int().min(1).max(20),
+  required: z.boolean(),
+  allowedCategoryIds: z.array(CanonicalIdSchema).max(20),
+});
+
+export const DocumentCategoryDefinitionSchema = z.strictObject({
+  schemaVersion: z.literal('v6'),
+  categoryId: CanonicalIdSchema,
+  entityId: CanonicalIdSchema,
+  fieldId: CanonicalIdSchema,
+  label: z.string().trim().min(1).max(80),
+  contentTypes: z.array(DocumentContentTypeV1Schema).min(1).max(3),
+  maxBytes: z
+    .number()
+    .int()
+    .min(1)
+    .max(20 * 1024 * 1024),
+  maxCount: z.number().int().min(1).max(20),
+  required: z.boolean(),
+  retentionClass: CanonicalIdSchema,
+  visibility: z.literal('internal'),
+  documentExpiryDate: IsoDateValueSchema.nullable(),
+});
+
+const documentFields = z
+  .array(DocumentFieldDefinitionSchema)
+  .min(1)
+  .max(128)
+  .optional();
+const documentCategories = z
+  .array(DocumentCategoryDefinitionSchema)
+  .min(1)
+  .max(128)
+  .optional();
+
+export const DocumentsProjectionSchema = z.strictObject({
+  kind: z.literal('documentsPayload'),
+  schemaVersion: z.literal(DOCUMENTS_PAYLOAD_VERSION),
+  fields: z.array(DocumentFieldDefinitionSchema).min(1).max(128),
+  categories: z.array(DocumentCategoryDefinitionSchema).max(128),
+  bindings: z
+    .array(
+      z.strictObject({
+        entityId: CanonicalIdSchema,
+        queryId: CanonicalIdSchema,
+        attachPermissionId: CanonicalIdSchema,
+        surfaceIds: z.array(CanonicalIdSchema).min(1),
+      }),
+    )
+    .min(1)
+    .max(128),
+});
+
 const v6NormalizedShape = {
   ...v5NormalizedShape,
   entities: z.array(normalizedV6EntityDefinition),
   fields: z.array(normalizedV6FieldDefinition),
   operations: z.array(normalizedV6OperationDefinition),
+  documentFields,
+  documentCategories,
   formulaRules,
   operationRoleNarrowings,
   queries: z.array(normalizedV6QueryDefinition),
@@ -2887,6 +2955,8 @@ const v6AuthoredShape = {
   entities: z.array(authoredV6EntityDefinition),
   fields: z.array(authoredV6FieldDefinition),
   operations: z.array(authoredV6OperationDefinition),
+  documentFields,
+  documentCategories,
   formulaRules,
   operationRoleNarrowings,
   queries: z.array(authoredV6QueryDefinition),

@@ -14,6 +14,11 @@ import {
   type VersionedNormalizedApplicationPackage,
 } from '@north-star/canonical-model';
 import { requiredFormulaValidationOperationReader } from '../../canonical-model/src/formula-validation-reader.js';
+import {
+  DOCUMENT_FILES_SURFACE_FLOOR,
+  DOCUMENTS_PAYLOAD_VERSION,
+} from '../../canonical-model/src/documents.js';
+import type { compileDocuments } from './documents.js';
 
 import {
   FORMULA_RULE_PAYLOAD_VERSION,
@@ -84,6 +89,7 @@ type LoweredProjectionFamily = Exclude<
 >;
 
 const payloadSchemaVersions: Record<LoweredProjectionFamily, string> = {
+  [PROJECTION_FAMILY_IDS.documents]: DOCUMENTS_PAYLOAD_VERSION,
   [PROJECTION_FAMILY_IDS.agentDiscovery]:
     'northstar.agent-discovery-payload/v0-provisional',
   [PROJECTION_FAMILY_IDS.formulaRule]: FORMULA_RULE_PAYLOAD_VERSION,
@@ -109,6 +115,10 @@ const runtimeCapabilities: Record<
   LoweredProjectionFamily,
   RuntimeCapabilityRequirement
 > = {
+  [PROJECTION_FAMILY_IDS.documents]: {
+    capabilityId: 'northstar.runtime:capability.documents',
+    minimumVersion: 1,
+  },
   [PROJECTION_FAMILY_IDS.agentDiscovery]: {
     capabilityId: 'northstar.runtime:capability.agent-discovery',
     minimumVersion: 1,
@@ -160,6 +170,10 @@ export function lowerBaseProjectionPayloads(
   // caller that does not pass one gets the oldest shape rather than the newest.
   compilerSemanticProfileVersion: CompilerSemanticProfileVersion = COMPILER_SEMANTIC_PROFILE_VERSION,
   formulaRules: FormulaRulePayload | null = null,
+  documents?: Extract<
+    NonNullable<ReturnType<typeof compileDocuments>>,
+    { payload: unknown }
+  >['payload'],
 ): ProjectionPayloadPlan[] {
   const namespace = packageRevision.package.namespace;
   const packageScope: LogicalScope = {
@@ -312,6 +326,34 @@ export function lowerBaseProjectionPayloads(
         packageScope,
         formulaRules,
       ),
+    );
+  }
+  if (documents) {
+    const catalogs = new Set<ProjectionFamilyId>([
+      PROJECTION_FAMILY_IDS.agentDiscovery,
+      PROJECTION_FAMILY_IDS.queryCatalog,
+      PROJECTION_FAMILY_IDS.operationCatalog,
+      PROJECTION_FAMILY_IDS.surfaceManifest,
+    ]);
+    for (const projection of plans) {
+      if (catalogs.has(projection.familyId)) {
+        projection.payload = {
+          ...(projection.payload as object),
+          documentBindings: documents.bindings,
+        };
+      }
+      if (projection.familyId === PROJECTION_FAMILY_IDS.surfaceManifest) {
+        projection.requiredRuntimeCapability = {
+          ...projection.requiredRuntimeCapability,
+          minimumVersion: Math.max(
+            projection.requiredRuntimeCapability.minimumVersion,
+            DOCUMENT_FILES_SURFACE_FLOOR,
+          ),
+        };
+      }
+    }
+    plans.push(
+      plan(PROJECTION_FAMILY_IDS.documents, namespace, packageScope, documents),
     );
   }
   return plans;

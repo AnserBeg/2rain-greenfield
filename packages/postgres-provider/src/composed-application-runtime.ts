@@ -1,6 +1,19 @@
 import { servingPointersSql } from './verified-release-generation.js';
 import { VALUATION_CAPABILITY_ID } from '../../domain/src/inventory/valuation.js';
 import {
+  SUPPORTED_STORAGE_TARGET_PAYLOAD_VERSIONS,
+  type StorageTargetPayloadV1,
+} from '@north-star/compiler';
+import type { DocumentGateway } from '../../runtime/src/document-gateway.js';
+import {
+  PostgresDocumentGateway,
+  documentPermissionBindings,
+} from './document-attachments.js';
+import {
+  DEMO_DOCUMENT_SCANNER,
+  type DocumentScanner,
+} from './document-content.js';
+import {
   inventoryValuationReadModel,
   commercialReadModelWithInventoryCost,
 } from './inventory-valuation-read-model.js';
@@ -148,6 +161,10 @@ export type ComposedApplicationRuntimeOptions = (
   readonly authenticateRequest?: AuthenticateRequest;
   readonly capabilityOperationExecutorFactories?: readonly PostgresCapabilityOperationExecutorFactory[];
   readonly databaseUrl: string;
+  readonly documents?: {
+    readonly scanner?: DocumentScanner;
+    readonly demo?: true;
+  };
   readonly environmentSlug?: string;
   readonly inventoryScopeProvisioning?: InventoryScopeProvisioning;
   readonly metrics?: ObservabilityMetrics;
@@ -203,6 +220,7 @@ export interface ComposedApplicationRuntime {
   readonly customizationUpgrade: UpgradePreparation | null;
   readonly activeReleaseId: MintedUuid;
   readonly entry: AuthenticatedRequestRuntimeEntryAdapter;
+  readonly documents: DocumentGateway | null;
   readonly freshTenantInstallEvidence: FreshTenantInstallEvidence | null;
   readonly identity: AuthenticatedIdentity;
   readonly identityMode: 'FAIL_CLOSED' | 'LOCAL_DEMO' | 'VERIFIED_EXTERNAL';
@@ -441,10 +459,9 @@ export async function createComposedApplicationRuntime(
     const policyFor = (release: ServingRelease) =>
       new PostgresCurrentPolicyGateway(
         runtimePool!,
-        currentPolicyBindingsFromPermissions(
-          parseNormalizedApplicationPackageJson(
-            release.normalizedDefinitionBytes,
-          ).permissions,
+        releasePolicyBindings(
+          release.normalizedDefinitionBytes,
+          options.documents !== undefined,
         ),
         parsePinnedOperationCatalog(
           release.projection(PROJECTION_FAMILY_IDS.operationCatalog).payload,
@@ -492,6 +509,20 @@ export async function createComposedApplicationRuntime(
         ),
         policy,
         queryGateway,
+        storage: (() => {
+          if (!options.documents) return null;
+          const payload = release.projection(
+            PROJECTION_FAMILY_IDS.storageTarget,
+          ).payload;
+          return typeof payload === 'object' &&
+            payload !== null &&
+            'schemaVersion' in payload &&
+            SUPPORTED_STORAGE_TARGET_PAYLOAD_VERSIONS.some(
+              (version) => version === payload.schemaVersion,
+            )
+            ? (payload as unknown as StorageTargetPayloadV1)
+            : null;
+        })(),
       });
     };
     const servingFor = releaseServingRoute(
@@ -532,6 +563,12 @@ export async function createComposedApplicationRuntime(
       adminPool,
     ];
     let closed = false;
+    const scanner =
+      options.documents?.scanner?.mode === 'real'
+        ? options.documents.scanner
+        : options.documents?.demo && options.localDemoIdentity
+          ? DEMO_DOCUMENT_SCANNER
+          : undefined;
 
     return Object.freeze({
       customizationUpgrade,
@@ -542,6 +579,14 @@ export async function createComposedApplicationRuntime(
         await Promise.all(pools.map((pool) => pool.end()));
       },
       entry,
+      documents: options.documents
+        ? new PostgresDocumentGateway(
+            runtimePool,
+            queryGateway,
+            servingFor,
+            scanner,
+          )
+        : null,
       freshTenantInstallEvidence,
       identity: identities.runtime,
       localDemoActors: options.localDemoIdentity
@@ -1083,6 +1128,7 @@ interface ReleaseServing {
   readonly operationGateway: SemanticOperationGateway;
   readonly policy: PostgresCurrentPolicyGateway;
   readonly queryGateway: SemanticQueryGateway;
+  readonly storage: StorageTargetPayloadV1 | null;
 }
 
 function servingReleaseFromParsed(
@@ -1180,10 +1226,7 @@ export async function provisionLocalDemoReleaseAuthorization(
   normalizedDefinitionBytes: Uint8Array,
 ): Promise<void> {
   const bindings = [
-    ...currentPolicyBindingsFromPermissions(
-      parseNormalizedApplicationPackageJson(normalizedDefinitionBytes)
-        .permissions,
-    ),
+    ...releasePolicyBindings(normalizedDefinitionBytes, true),
     {
       action: 'author',
       permissionId: 'northstar.runtime:permission.customize_author',
@@ -1207,6 +1250,17 @@ export async function provisionLocalDemoReleaseAuthorization(
     bindings,
     'local-demo-manager',
   );
+}
+
+function releasePolicyBindings(
+  definitionBytes: Uint8Array,
+  documents: boolean,
+) {
+  const definition = parseNormalizedApplicationPackageJson(definitionBytes);
+  return [
+    ...currentPolicyBindingsFromPermissions(definition.permissions),
+    ...(documents ? documentPermissionBindings(definition.entities) : []),
+  ];
 }
 
 /**

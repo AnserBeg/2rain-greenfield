@@ -203,6 +203,26 @@ export function normalizeApplicationPackage(
 
   const normalizedCandidate = {
     ...(authored.languageVersion === 'v6' &&
+      authored.documentFields && {
+        documentFields: authored.documentFields
+          .map((field) => ({
+            ...field,
+            allowedCategoryIds: sortedStrings(field.allowedCategoryIds),
+          }))
+          .sort((left, right) => compareCodeUnits(left.fieldId, right.fieldId)),
+      }),
+    ...(authored.languageVersion === 'v6' &&
+      authored.documentCategories && {
+        documentCategories: authored.documentCategories
+          .map((category) => ({
+            ...category,
+            contentTypes: sortedStrings(category.contentTypes),
+          }))
+          .sort((left, right) =>
+            compareCodeUnits(left.categoryId, right.categoryId),
+          ),
+      }),
+    ...(authored.languageVersion === 'v6' &&
       authored.formulaRules && {
         formulaRules: authored.formulaRules
           .map((rule) => ({
