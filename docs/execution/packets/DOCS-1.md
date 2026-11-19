@@ -28,7 +28,7 @@ PostgreSQL tests cover byte reads, grants, company refusal, audit, quota, count,
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "DOCS-1",
-  "base": "b2b7877e58074b325c53c7b13f926535e83f39e5", "head": "45cb00d2f669c69c981092a9e0c39ae1bc3a3b45",
+  "base": "5402386557abd00c633b1930724e91e1fe586762", "head": "5e83b83448631823d201fd5c1838486a25b78c28",
   "changedPaths": [
     "apps/api/src/composition-root.ts", "apps/api/src/main.ts", "apps/web/src/app-server.ts",
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/document-http.ts",
@@ -49,6 +49,7 @@ PostgreSQL tests cover byte reads, grants, company refusal, audit, quota, count,
   "symbols": [
     {"path": "packages/postgres-provider/src/document-attachments.ts", "name": "PostgresDocumentGateway"},
     {"path": "packages/compiler/src/documents.ts", "name": "compileDocuments"},
+    {"path": "packages/postgres-provider/src/document-publication.ts", "name": "PostgresDocumentPublication"},
     {"path": "apps/web/src/document-http.ts", "name": "mountDocumentHttp"}
   ]
 }
