@@ -5707,7 +5707,7 @@ test('order entry: unrelated metadata renders the shared editor; partial save fr
   }))!;
   assert.match(
     form.slots!.sections!,
-    /<strong>Readable product<\/strong><small>SKU-WITNESS · EA<\/small>/,
+    /<strong>Readable product<\/strong><small>SKU-WITNESS · EA · Price \(CAD\): — · Price \(USD\): — · Price \(EUR\): — · Available: 0<\/small>/,
   );
   form = (await f.post(form, 'add', f.values(form)))!;
   const values = f.values(form);
@@ -9416,10 +9416,10 @@ test('ORDER-PARITY: order Lists sum their lines, link each row to its work, and 
       id('permission', 'sales_order_shipped_read'),
     ],
   );
-  // One page, eight tab counts and the two queues that sum lines (To receive,
-  // To ship): each passed both reads. Counter sales (SALES-EXTRAS) are a
-  // worklist of their own (INTEGRATION, I-M8(a)).
-  assert.equal(progressCalls.length, 2 * 9 + 2 * 2);
+  // One page, seven independent tab counts and the two queues that sum
+  // lines: To receive's count is reused by its matching tab (INTERACT-1).
+  // Counter sales remain a worklist of their own (INTEGRATION, I-M8(a)).
+  assert.equal(progressCalls.length, 2 * 8 + 2 * 2);
   const toShip = await renderSurfaceRuntimeWithData(
     f.view,
     salesUrl({ view: salesView('to_ship') }),
@@ -10031,7 +10031,8 @@ test('SUPPLY-WARNINGS: the Sales orders List counts Blocked by supply and Reserv
       id('permission', 'reservation_read'),
     ],
   );
-  assert.equal(calls.length, 5 * 10);
+  // To ship's already-read queue count also answers its unfiltered tab.
+  assert.equal(calls.length, 5 * 9);
   const scopeParameter = id('parameter', 'sales_order_list_legal_entity_scope');
   for (const call of calls) {
     const input = call.decisionInput as {
@@ -10800,7 +10801,7 @@ test('ORDER-PARITY: a truck receipt receives several lines in one receipt, fille
   assert.equal(controlValue(start.html, quantity(lineD!)), '3');
   assert.equal(controlValue(start.html, quantity(lineC!)), '');
   for (const line of [lineA!, lineC!, lineD!])
-    assert.equal(controlValue(start.html, cost(line)), '');
+    assert.equal(controlValue(start.html, cost(line)), '2.4');
   // Each row's inputs are named with the line they belong to.
   assert.match(
     start.html,

@@ -20,6 +20,7 @@ import type {
 } from '../../../packages/canonical-model/src/schemas.js';
 import {
   readCompiledSurfaceDataBinding,
+  readCompiledSurfaceManifest,
   type CompiledSurfaceDefinition,
   type CompiledSurfaceField,
   type CompiledSurfaceInputField,
@@ -60,6 +61,7 @@ import {
   type ReferenceLookup,
 } from './editor-controls.js';
 import { escapeHtml as h } from './html.js';
+import { figuresArgument } from './list-declaration.js';
 import { validationRefusalForOperation } from './validation-refusal.js';
 import { operationMessageRef } from './gateway-error-codes.js';
 import {
@@ -1296,6 +1298,14 @@ async function editorResponse(
     if (!state || !field.reference) return null;
     const records: SemanticRecordDto[] = [];
     let cursor: string | null = null;
+    let detailsCursor: string | null = null;
+    let detailsContinue = true;
+    const details = field.reference.details;
+    const detailSurface = details
+      ? readCompiledSurfaceManifest(view).surfaces.find(
+          (surface) => surface.surfaceId === details.listSurfaceId,
+        )
+      : undefined;
     // Query continuation and the display limit are separate facts: only this
     // request's authorized read says whether the query continues.
     let queryContinues = false;
@@ -1315,7 +1325,45 @@ async function editorResponse(
         parent ?? undefined,
         field.reference.searchChildren,
       );
-      records.push(...result.records);
+      let shown = result.records;
+      if (details && detailSurface?.list && detailsContinue) {
+        try {
+          const extra = await workspaceSearch(
+            view,
+            gateways.queryGateway,
+            detailSurface.dataSourceQueryId,
+            scope,
+            state.term,
+            detailsCursor,
+            field.reference.eligibility,
+            parent ?? undefined,
+            field.reference.searchChildren,
+            figuresArgument(detailSurface.list, undefined),
+          );
+          const byId = new Map(
+            extra.records.map((record) => [record.recordId, record]),
+          );
+          shown = result.records.map((record) => ({
+            ...record,
+            values: {
+              ...record.values,
+              ...Object.fromEntries(
+                details.values.flatMap(({ fieldId }) => {
+                  const value = byId.get(record.recordId)?.values[fieldId];
+                  return value === undefined ? [] : [[fieldId, value]];
+                }),
+              ),
+            },
+          }));
+          detailsCursor = extra.nextCursor;
+          detailsContinue = extra.hasMore && detailsCursor !== null;
+        } catch {
+          // Supplementary availability may be withheld. The original List
+          // still decides which records can be selected; missing is never zero.
+          detailsContinue = false;
+        }
+      }
+      records.push(...shown);
       cursor = result.nextCursor;
       queryContinues = result.hasMore && cursor !== null;
       if (!queryContinues) {
