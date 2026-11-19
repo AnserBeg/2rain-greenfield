@@ -76,6 +76,16 @@ import { RECEIPT_AUTHORIZATION_DEPENDENCY_BINDINGS } from '../../packages/postgr
 
 registerInventoryContractCases((name, run) => test(name, run));
 
+/** Canonical refusals are failed compilations with a decode diagnostic, not internal errors. */
+function assertCanonicalRefusal(result: CompileResult): void {
+  assert.equal(result.status, 'failed');
+  assert.ok(result.diagnostics.length > 0);
+  for (const diagnostic of result.diagnostics) {
+    assert.equal(diagnostic.code, 'CANON_SCHEMA_INVALID');
+    assert.equal(diagnostic.phase, 'decodeSchemaCheck');
+  }
+}
+
 test('INTERACT-1 compiles declared stock impacts and refuses an unavailable stock field', () => {
   const normalized = normalizeApplicationPackage(
     composedApplicationDefinition(),
@@ -109,7 +119,7 @@ test('INTERACT-1 compiles declared stock impacts and refuses an unavailable stoc
   const impact = action.stockImpacts[0];
   impact.fields.onHand =
     'northstar.app:field.missing_stock_quantity' as typeof impact.fields.onHand;
-  assert.equal(compileApplication(inputNormalized(invalid)).status, 'refused');
+  assertCanonicalRefusal(compileApplication(inputNormalized(invalid)));
   const invalidRows = structuredClone(normalized);
   const stockDocument = invalidRows.surfaces.find(
     (candidate) =>
@@ -134,10 +144,7 @@ test('INTERACT-1 compiles declared stock impacts and refuses an unavailable stoc
   const itemImpact = posting.stockImpacts![0]!;
   itemImpact.datasetId =
     'northstar.app:dataset.missing_stock_lines' as typeof itemImpact.datasetId;
-  assert.equal(
-    compileApplication(inputNormalized(invalidRows)).status,
-    'refused',
-  );
+  assertCanonicalRefusal(compileApplication(inputNormalized(invalidRows)));
 });
 
 test('ordinary v1 and v2 parent/child definitions compile cleanly and twice identically', () => {
