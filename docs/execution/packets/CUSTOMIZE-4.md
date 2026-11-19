@@ -1,6 +1,6 @@
 # CUSTOMIZE-4 — tenant-authored Goods Receipt Inspection
 
-Status — rebased from checkpoint `c8110053` over CUSTOMIZE-3 and CRITFIX-B. The approved patch-lineage migration is the Critical path.
+Status — STOP before integration. The visual flow’s second activation refuses the Inspection → Location foreign key. Fixing verification across a staged foreign key needs a Critical-path ruling.
 
 ## Claims to verify
 
@@ -23,7 +23,9 @@ Status — rebased from checkpoint `c8110053` over CUSTOMIZE-3 and CRITFIX-B. Th
 
 ## Gates
 
-- The hosted PostgreSQL journey drafts Inspection from one scripted request and verifies the assistant’s confirmation and governed Quarantine write. The browser journey builds it through Customize and uses the generated form and record. Results pending.
+- [Hosted PostgreSQL](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44467955198) passed at `19e8d8e0`, including the one-request draft, linked records, owned lines and an assistant-confirmed Quarantine with unchanged stock movements. The source scan found no Inspection-specific first-party branches.
+- [CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44471387731) at `dca983be` passed the clean quality and build job. The browser reached the second visual activation and reported PostgreSQL’s foreign-key refusal for `custom_goods_receipt_inspection_location`. [Controls](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44471387669) passed at that SHA.
+- Approval runs the archive-restriction verifier after inert preparation. The verifier arranges and archives linked witnesses. For a new link on a published table the foreign key is installed in the approved attempt. The failing row was not captured. No verifier change or integration was made.
 - The first-party release uses an ADR-0066 re-baseline. The prior pushed checkpoint is preserved by an annotated tag and remains in branch history.
 
 ## Gaps
@@ -70,4 +72,4 @@ Status — rebased from checkpoint `c8110053` over CUSTOMIZE-3 and CRITFIX-B. Th
 
 ## Test it yourself
 
-After integration, open Customize, add a company-owned **Goods Receipt Inspection** with a **Name** field, approve and activate it. From **Lines, links and actions**, give it an **Inspection results** table and add **Goods receipt**, **Supplier**, **Item** and **Location** links. Declare **Pending**, **Quarantined** and **Released**, then add **Quarantine** and **Release** with those endpoints. Approve and activate. Create an inspection with a receipt and a result line. The record shows the linked receipt and result. Confirm **Quarantine** and check that **Release** appears.
+On an isolated test instance of the candidate, open Customize, add a company-owned **Goods Receipt Inspection** with a **Name** field, approve and activate it. From **Lines, links and actions**, give it an **Inspection results** table and add **Goods receipt**, **Supplier**, **Item** and **Location** links. Declare **Pending**, **Quarantined** and **Released**, then add **Quarantine** and **Release** with those endpoints. Approve and activate. The second activation currently stops at the Location link. Once fixed, create an inspection with a receipt and a result line. The record shows the linked receipt and result. Confirm **Quarantine** and check that **Release** appears.
