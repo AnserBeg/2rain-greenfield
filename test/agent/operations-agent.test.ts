@@ -1,3 +1,4 @@
+import { measureParity } from './proof-metrics.js';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -383,4 +384,58 @@ test('switching model prices retains the spend, including subsequent expensive t
     cacheWriteTokens: 0,
   });
   assert.equal(fast.exhausted(), true);
+});
+
+test('module parity uses within-task spread and requires three timed attempts on every declaration', () => {
+  const declarations = [
+    { id: 1, group: 'first-party' },
+    { id: 2, group: 'generated' },
+    { id: 3, group: 'first-party' },
+    { id: 4, group: 'generated' },
+  ] as const;
+  const rows = declarations.flatMap(({ id }) =>
+    [1, 2, 3].map((attempt) => {
+      const seconds = (id <= 2 ? 1 : 20) + attempt;
+      return {
+        task: id,
+        attempt,
+        pass: true,
+        timing: { cardSeconds: seconds, elapsedSeconds: seconds + 2 },
+      };
+    }),
+  );
+  const shifted = (card: number, elapsed: number) =>
+    rows.map((r) =>
+      r.task % 2
+        ? r
+        : {
+            ...r,
+            timing: {
+              cardSeconds: r.timing.cardSeconds + card,
+              elapsedSeconds: r.timing.elapsedSeconds + elapsed,
+            },
+          },
+    );
+  const within = measureParity(declarations, shifted(1, 1));
+  assert.deepEqual(within.spread, { card: 1, elapsed: 1 });
+  assert.equal(within.pass, true);
+  assert.equal(measureParity(declarations, shifted(1.1, 1)).pass, false);
+  assert.equal(measureParity(declarations, shifted(0, 1.1)).pass, false);
+  assert.equal(measureParity(declarations, rows.slice(1)).pass, false);
+  assert.equal(
+    measureParity(
+      declarations,
+      rows.map((r, i) => (i === 3 ? { ...r, pass: false } : r)),
+    ).pass,
+    false,
+  );
+  assert.equal(
+    measureParity(
+      declarations,
+      rows.map((r, i) =>
+        i ? r : { ...r, timing: { cardSeconds: null, elapsedSeconds: 2 } },
+      ),
+    ).pass,
+    false,
+  );
 });

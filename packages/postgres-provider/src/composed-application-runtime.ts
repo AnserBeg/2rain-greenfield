@@ -822,6 +822,7 @@ async function selectBootRelease(
           'rollback target does not reverse an exact compiled lineage edge',
         );
       }
+      assertAgentOperationsPlannable(target);
       await assertExactSwapTriggerEnabled(admin);
       const attemptId = await approveReleaseWithoutStorageTransition(
         runtimePool,
@@ -869,6 +870,8 @@ async function selectBootRelease(
         const preparationId = minted(randomUUID());
         let attemptId: MintedUuid;
         const servingTarget = targetIndex === lineage.length - 1;
+        if (!freshInstall || servingTarget)
+          assertAgentOperationsPlannable(target);
         if (transition.elements.length === 0) {
           if (!freshInstall || servingTarget) {
             await ensureReleaseAdmitted(
@@ -2128,6 +2131,86 @@ export async function ensurePersistedRelease(
     releaseId,
     revisionId,
   });
+}
+
+/** Structural parity for the registered business operations independent of
+ * the acting person's permissions. The gateways still decide every request. */
+export function assertAgentOperationsPlannable(release: ParsedRelease): void {
+  const definition = parseNormalizedApplicationPackageJson(
+    release.normalizedDefinitionBytes,
+  );
+  const actions = definition.operations.filter(
+    (op) => op.lifecycle === 'active',
+  );
+  if (!actions.length) return;
+  const payload = (family: string) =>
+    projectionPayload(release.compiled, family);
+  const profile = payload(PROJECTION_FAMILY_IDS.agentDiscovery) as {
+    operations: { operationId: string; readBackQueryId: string }[];
+    queries: { queryId: string }[];
+  };
+  const operations = new Map(
+    parsePinnedOperationCatalog(payload(PROJECTION_FAMILY_IDS.operationCatalog))
+      .filter((op) => op.lifecycle === 'active')
+      .map((op) => [op.operationId, op]),
+  );
+  const exposed = new Map(
+    profile.operations.map((op) => [op.operationId, op.readBackQueryId]),
+  );
+  const reads = new Set(profile.queries.map((q) => q.queryId));
+  const queryCatalog = payload(PROJECTION_FAMILY_IDS.queryCatalog) as {
+    queries: {
+      queryId: string;
+      lifecycle: string;
+      queryType: string;
+      sourceEntityId: string;
+    }[];
+  };
+  const gets = queryCatalog.queries.filter(
+    (q) =>
+      q.lifecycle === 'active' && q.queryType === 'get' && reads.has(q.queryId),
+  );
+  const readBacks = new Map(gets.map((q) => [q.queryId, q.sourceEntityId]));
+  const readableEntities = new Set(readBacks.values());
+  for (const action of actions) {
+    const op = operations.get(action.operationId);
+    const query = action.readBack.targetId;
+    const entity = readBacks.get(query);
+    if (
+      !op ||
+      !entity ||
+      op.readBackQueryId !== query ||
+      exposed.get(action.operationId) !== query ||
+      ('entity' in op.effect && op.effect.entity.targetId !== entity)
+    ) {
+      throw new Error(
+        `Assistant cannot plan and read back declared operation ${action.operationId}`,
+      );
+    }
+    const contract = op.inputContract;
+    if (
+      !contract ||
+      contract.relationInputs.some(
+        (r) =>
+          r.required &&
+          (!r.targetEntityId ||
+            !readableEntities.has(r.targetEntityId) ||
+            !contract.closedArgumentKeys.includes('relations')),
+      ) ||
+      (op.effect.kind === 'createRecordEffect' &&
+        contract.fields.some(
+          (f) =>
+            f.required &&
+            !contract.assignedFields?.some((a) => a.fieldId === f.fieldId) &&
+            (!contract.closedArgumentKeys.includes('values') ||
+              !contract.writableFieldIds.includes(f.fieldId)),
+        ))
+    ) {
+      throw new Error(
+        `Assistant cannot bind the required inputs of ${action.operationId}`,
+      );
+    }
+  }
 }
 
 export async function ensureReleaseAdmitted(
