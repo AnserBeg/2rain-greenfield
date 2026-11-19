@@ -1,7 +1,8 @@
 # ADR-0073. Workflow isolation, replay and authority
 
 Date 2026-11-18. Fable 5.2 approved the amended WORKFLOW-1 design to build in
-slices. The Gate N2 wording still needs an owner ruling or a plan amendment.
+slices. The owner ruled on 2026-11-18 that Gate N2 v1 uses same-pin retry or
+cancel. The plan records this in §12.5.
 
 ## Host and SDK
 
@@ -165,10 +166,10 @@ fence before resuming. Outstanding confirmation needs a fresh plan and human
 decision. Cancellation preserves completed effects and evidence. Successor
 retry against a different release is deferred.
 
-The proposed Gate N2 proof starts a run before an upgrade, shows it suspending
-while stale, then restores the original release and demonstrates that a person's
+The Gate N2 v1 proof starts a run before an upgrade, shows it suspending while
+stale, then restores the original release and demonstrates that a person's
 same-pin retry finishes the run. While a different release is active, the
-operator can cancel the suspended run. The Gate N2 wording is with the owner.
+operator can cancel the suspended run.
 
 ## Timers, signals and external delivery
 
@@ -235,8 +236,12 @@ workflow projection, evidence or added floor for these releases.
 
 ## Migration
 
-Assign the single forward migration the next free number at merge after
-CUSTOMIZE-4. Assign the reader floor at merge after the latest allocated rung. The
+Follow the migration numbering rule. At merge time, fetch `origin/main` and
+assign the single forward migration the next free number after its highest
+migration. Regenerate the schema snapshot and migration-list tests and rerun CI.
+Fetch again immediately before pushing `main` and repeat if another migration
+landed. Coordinate with other lanes so only one migration merge proceeds at a
+time. Assign the reader floor at merge after the latest allocated rung. The
 migration declares these relations in `platform`:
 
 | Table | Responsibility |
