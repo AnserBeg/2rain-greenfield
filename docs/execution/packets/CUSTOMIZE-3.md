@@ -16,21 +16,27 @@ Slice 1 includes the tested list-column work and saved list views in [PR #95](ht
 - The orchestrator approved 0033 after 0032. The migration retains the patch table's existing policies, grants and append-only rules. Integration will be logged as merged — unread.
 - Slice 2 needs a Critical ruling. The approval verifier's `#createInput` supplies fixed generated values through the real create operation. Literal bounds need a satisfying witness, and a no-past-date rule needs the same captured business date as the gateway.
 - Slice 4 needs the Formula IR projection admission in ADR-0012. A calculated display value requires resolved dependencies and server, query, reporting and assistant projections.
-- Slice 6's independent candidate `a55107b1` uses the governed list count and exact top-level sums. CAD, USD and EUR are separate Items measures. F5 still needs a hard cardinality bound and a concurrency protocol for child writes.
+- Slice 5 is open. First-party operations such as Close and Reopen share a permission ID, so an action restriction must identify the operation. Field visibility must also govern query and read-back results.
+- Slice 6's independent candidate `f606d596` uses the governed list count and exact top-level sums. CAD, USD and EUR are separate Items measures. Its focused compiler, assistant and upgrade-replay tests pass. PostgreSQL and browser evidence is pending.
 
 ## Gates
 
 - Slice 0 passed all 16 jobs at `81e5937b`. [CI 44429125715](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44429125715). The candidate refreshed on UPGRADE-1 is in [CI 44434963983](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44434963983).
 - Slice 1 passed focused compiler, reader refusal, export and scripted drafting tests, typecheck and lint. GitHub CI will run the PostgreSQL and browser journeys and upgrade replay.
 - [CI 44441030550](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44441030550) caught a declaration emit error in the list-count helper. The explicit return type passed local declaration emit.
+- [CI 44442711383](https://github.com/rainerp-com/2rain-greenfield/actions/runs/44442711383) passed the live saved-view PostgreSQL test and found that boot's UPGRADE-1 admission omitted `saveListView`. The replay gate now admits that kind.
 - The migration control `unrecognized-patch-kind-admitted` checks that the database refuses a new unknown kind even with a matching digest.
+
+## Filed
+
+- The full list/detail row also needs tenant controls for record-detail composition and formatting. F5 child aggregation remains pending a hard cardinality bound, visibility and absence rules, and a write concurrency protocol. [Archive](../current-plan-archive.md#filed-during-the-freeze).
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
   "base": "8b61740a17c18a6201f01c4345c0e6c215ee91d3",
-  "head": "f2f3b637241c3693f40076688575252411f2a764",
+  "head": "5cbf7973222abaead7446590206408c2188dc06d",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
     "apps/web/src/list-declaration.ts", "apps/web/src/surface-launcher.ts",
@@ -41,7 +47,8 @@ Slice 1 includes the tested list-column work and saved list views in [PR #95](ht
     "packages/customization/src/apply.ts", "packages/customization/src/patch.ts",
     "packages/customization/src/render.ts", "packages/customization/src/targets.ts",
     "packages/operations-agent/src/catalog.ts", "packages/operations-agent/src/session.ts",
-    "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/runtime/src/list-behavior/index.ts",
+    "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts",
+    "packages/runtime/src/list-behavior/index.ts",
     "packages/runtime/src/request-runtime-view.ts", "test/architecture/release-persistence-boundary.test.ts",
     "test/evidence/CUSTOMIZE-3.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json",
     "test/postgres/customization.test.ts", "test/postgres/inventory-storage.test.ts",
@@ -51,6 +58,7 @@ Slice 1 includes the tested list-column work and saved list views in [PR #95](ht
   ],
   "symbols": [
     {"path": "packages/customization/src/apply.ts", "name": "saveListView"},
+    {"path": "packages/postgres-provider/src/customization-service.ts", "name": "UPGRADE_PATCH_KINDS"},
     {"path": "apps/web/src/surface-launcher.ts", "name": "loadDeclaredListCounts"},
     {"path": "packages/runtime/src/list-behavior/index.ts", "name": "requireSharedListEcho"}
   ]
