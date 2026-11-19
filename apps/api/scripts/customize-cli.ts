@@ -19,6 +19,7 @@ import { openCustomizeService } from '../src/composition-root.js';
  *   customize activate <change-id> make an approved change live; no restart
  *   customize rollback             hide the live change again; its records stay
  *   customize recover              verify an interrupted activation and reconcile scopes
+ *   customize recover --revert    restore and verify the failed swap’s predecessor
  *   customize status               the active release and every drafted change
  */
 const usage = [
@@ -29,6 +30,7 @@ const usage = [
   '  activate <change-id>   make an approved change live (no restart)',
   '  rollback               hide the live change; its records are kept',
   '  recover                verify the live activation and reconcile scopes',
+  '  recover --revert       restore the failed activation’s verified predecessor',
   '  status                 show the active release and every recorded change',
 ].join('\n');
 
@@ -46,6 +48,9 @@ const argument = command === 'ask' ? rest.join(' ').trim() : rest[0];
 if (
   !command ||
   !commands.includes(command) ||
+  (command === 'recover' &&
+    rest.length > 0 &&
+    (rest.length !== 1 || argument !== '--revert')) ||
   (['draft', 'ask', 'approve', 'activate'].includes(command) && !argument)
 ) {
   process.stderr.write(`${usage}\n`);
@@ -91,7 +96,9 @@ try {
       `Live: release ${activated.releaseRoot.slice(0, 12)}. A running corepack pnpm dev shows it on the next page load.\n`,
     );
   } else if (command === 'recover') {
-    const recovered = await opened.service.recover();
+    const recovered = await opened.service.recover(
+      argument === '--revert' ? 'revert' : 'reverify',
+    );
     process.stdout.write(
       `Recovered live release ${recovered.releaseRoot.slice(0, 12)}. Its activation is verified and inventory scopes are reconciled.\n`,
     );
@@ -105,9 +112,19 @@ try {
     const lines = [
       `Active release ${status.activeReleaseRoot.slice(0, 12)} (${status.historyUnavailable ? 'customization history unavailable' : status.activeChain.length === 0 ? 'the standard application' : `${String(status.activeChain.length)} change${status.activeChain.length === 1 ? '' : 's'} applied`})`,
       '',
+      ...(status.failedActivation
+        ? [
+            'Activation verification failed. Run customize recover to retry or customize recover --revert to restore the previous release.',
+          ]
+        : []),
       ...(status.upgradeRefusal
         ? [
             `Platform upgrade refused: ${status.upgradeRefusal.code} — ${status.upgradeRefusal.message}`,
+            ...(status.failedActivation
+              ? [
+                  'Activation verification failed. Run customize recover to retry or customize recover --revert to restore the previous release.',
+                ]
+              : []),
             ...(status.upgradeRefusal.issues ?? []),
           ]
         : []),

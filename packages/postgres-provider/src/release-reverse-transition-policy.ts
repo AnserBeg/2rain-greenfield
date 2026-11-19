@@ -40,6 +40,7 @@ export interface ReleaseReverseTransitionAuthorization {
   readonly forwardRecoveryMode: RecoveryMode;
   readonly forwardTransitionClass: CompilerTransitionClass;
   readonly policyVersion: typeof RELEASE_REVERSE_TRANSITION_POLICY_VERSION;
+  readonly recoveryOfAttemptId?: MintedUuid;
   readonly sourceReleaseId: MintedUuid;
   readonly targetReleaseId: MintedUuid;
 }
@@ -80,6 +81,7 @@ export async function authorizeReverseTransitionIfApplicable(
   client: PoolClient,
   context: TrustedRequestContext,
   input: Readonly<{
+    recoveryOfAttemptId?: MintedUuid | null;
     expectedPointerId: MintedUuid;
     expectedFence: number;
     sourceReleaseId: MintedUuid;
@@ -157,6 +159,7 @@ export async function authorizeReverseTransitionIfApplicable(
          ON verification.tenant_id = swap.tenant_id
         AND verification.environment_id = swap.environment_id
         AND verification.activation_attempt_id = swap.activation_attempt_id
+        AND verification.status = CASE WHEN $7::uuid IS NULL THEN 'SWAPPED_VERIFIED' ELSE 'SWAPPED_VERIFICATION_FAILED' END
         AND verification.activated_release_id = source.release_id
         AND verification.fence = swap.fence AND verification.pointer_id = swap.pointer_id
        LEFT JOIN platform.release_approvals AS approval
@@ -178,6 +181,7 @@ export async function authorizeReverseTransitionIfApplicable(
       input.targetReleaseId,
       input.expectedFence,
       input.expectedPointerId,
+      input.recoveryOfAttemptId ?? null,
     ],
   );
   const row = result.rows[0];
@@ -188,15 +192,27 @@ export async function authorizeReverseTransitionIfApplicable(
       'release transition pair is not visible in the trusted environment',
     );
   }
-  if (!row.source_verified)
+  const recovering = input.recoveryOfAttemptId != null;
+  if (
+    recovering &&
+    (row.source_verified ||
+      row.forward_activation_attempt_id !== input.recoveryOfAttemptId ||
+      row.forward_verification_status !== 'SWAPPED_VERIFICATION_FAILED')
+  ) {
+    refuse(
+      'ROLLBACK_FORWARD_EVIDENCE_INVALID',
+      'recovery must reverse the current failed swap to its exact verified predecessor',
+    );
+  }
+  if (!recovering && !row.source_verified)
     refuse(
       row.exact_reverse_lineage
         ? 'ROLLBACK_FORWARD_ACTIVATION_NOT_VERIFIED'
         : 'RELEASE_SOURCE_NOT_VERIFIED',
       'activation requires a verified source pointer generation',
     );
-  if (row.exact_forward_lineage) return null;
-  if (!row.exact_reverse_lineage) {
+  if (!recovering && row.exact_forward_lineage) return null;
+  if (!recovering && !row.exact_reverse_lineage) {
     if (row.target_is_ancestor) {
       refuse(
         'RELEASE_TRANSITION_NOT_EXACT_LINEAGE_EDGE',
@@ -209,11 +225,11 @@ export async function authorizeReverseTransitionIfApplicable(
   if (
     !row.predecessor_verified ||
     row.forward_activation_attempt_id === null ||
-    row.forward_verification_status !== 'SWAPPED_VERIFIED'
+    (!recovering && row.forward_verification_status !== 'SWAPPED_VERIFIED')
   ) {
     refuse(
       'ROLLBACK_FORWARD_ACTIVATION_NOT_VERIFIED',
-      'rollback requires the verified forward activation that established the current release',
+      'reversal requires the exact verified predecessor of the current generation',
     );
   }
   if (
@@ -253,6 +269,9 @@ export async function authorizeReverseTransitionIfApplicable(
     );
   }
   return Object.freeze({
+    ...(recovering
+      ? { recoveryOfAttemptId: row.forward_activation_attempt_id }
+      : {}),
     forwardActivationAttemptId: row.forward_activation_attempt_id,
     forwardReceiptId: row.forward_receipt_id,
     forwardRecoveryMode: row.forward_recovery_mode,

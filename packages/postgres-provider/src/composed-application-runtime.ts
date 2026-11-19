@@ -817,7 +817,7 @@ async function selectBootRelease(
         runtimeContext,
         approverContext,
         pointer,
-        source,
+        source.compiled.releaseRoot,
         targetIdentity,
         target.compiled,
         releaseDiffBinding(source, target, 'reverse'),
@@ -884,7 +884,7 @@ async function selectBootRelease(
             runtimeContext,
             approverContext,
             pointer,
-            source,
+            source.compiled.releaseRoot,
             targetIdentity,
             target.compiled,
             releaseDiffBinding(source, target),
@@ -2729,7 +2729,7 @@ export async function approveReleaseWithoutStorageTransition(
   context: TrustedRequestContext,
   approverContext: TrustedRequestContext,
   pointer: PointerState,
-  source: ParsedRelease,
+  sourceReleaseRoot: string,
   target: PersistedReleaseIdentity,
   compiled: CompileSuccess,
   diffBinding: ReleaseDiffBinding,
@@ -2742,7 +2742,7 @@ export async function approveReleaseWithoutStorageTransition(
   }
   const receiptId = minted(randomUUID());
   const preparationId = minted(randomUUID());
-  const sourceRoot = Buffer.from(source.compiled.releaseRoot, 'hex');
+  const sourceRoot = Buffer.from(sourceReleaseRoot, 'hex');
   const targetRoot = Buffer.from(compiled.releaseRoot, 'hex');
   await withTrustedRequestTransaction(pool, context, async (client) => {
     await client.query(
@@ -2779,12 +2779,12 @@ export async function approveReleaseWithoutStorageTransition(
               reverseAuthorization.forwardReceiptId,
               reverseAuthorization.forwardTransitionClass,
               reverseAuthorization.forwardRecoveryMode,
-              source.compiled.releaseRoot,
+              sourceReleaseRoot,
               compiled.releaseRoot,
             )
           : digest(
               'no-storage-compiler-facts',
-              source.compiled.releaseRoot,
+              sourceReleaseRoot,
               compiled.releaseRoot,
             ),
         EXECUTOR_APPLIED_STATE_EVIDENCE_VERSION,
@@ -2794,12 +2794,12 @@ export async function approveReleaseWithoutStorageTransition(
               reverseAuthorization.policyVersion,
               reverseAuthorization.forwardActivationAttemptId,
               reverseAuthorization.forwardReceiptId,
-              source.compiled.releaseRoot,
+              sourceReleaseRoot,
               compiled.releaseRoot,
             )
           : digest(
               'no-storage-executor-evidence',
-              source.compiled.releaseRoot,
+              sourceReleaseRoot,
               compiled.releaseRoot,
             ),
         TRANSITION_COMPATIBILITY_POLICY_VERSION,
@@ -2828,6 +2828,7 @@ export async function approveReleaseWithoutStorageTransition(
     preparationId,
     target.releaseId,
     customizationUpgradeId,
+    reverseAuthorization?.recoveryOfAttemptId,
   );
 }
 
@@ -2993,12 +2994,14 @@ async function createApproval(
   preparationId: MintedUuid,
   targetReleaseId: MintedUuid,
   customizationUpgradeId?: MintedUuid,
+  recoveryOfAttemptId?: MintedUuid,
 ): Promise<MintedUuid> {
   const activationAttemptId = minted(randomUUID());
   const created = await new PostgresReleaseApprovalService(pool).createApproval(
     approverContext,
     {
       activationAttemptId,
+      ...(recoveryOfAttemptId ? { recoveryOfAttemptId } : {}),
       ...(customizationUpgradeId
         ? { customizationUpgradeId, sourceDecisionId: customizationUpgradeId }
         : {}),

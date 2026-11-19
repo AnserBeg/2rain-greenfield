@@ -560,16 +560,71 @@ for (const mode of ['reverify', 'revert'] as const) {
                 releaseId: view.release.releaseId,
                 fence: view.pointer.fence,
               }));
-            assert.deepEqual(await served(), {
-              releaseId: before.activeReleaseId,
-              fence: before.activeFence,
-            });
+            assert.deepEqual(
+              await served(),
+              {
+                releaseId: before.activeReleaseId,
+                fence: before.activeFence,
+              },
+              'requests must still serve the verified predecessor',
+            );
             await assert.rejects(openingStock(world, notebook, calgary, '3'));
             await assert.rejects(
               service.recover(),
               /SWAPPED_VERIFICATION_FAILED/u,
             );
             await assert.rejects(service.rollback());
+            assert.deepEqual(
+              (await service.status()).failedActivation,
+              expected,
+            );
+            for (const stale of [
+              { ...expected, fence: String(before.activeFence) },
+              { ...expected, attemptId: randomUUID() },
+            ]) {
+              await assert.rejects(
+                service.recover(mode, stale),
+                /activation changed/iu,
+                'a stale attempt or fence must leave the failed swap untouched',
+              );
+            }
+            if (mode === 'revert') {
+              // Move A's historical proof off the immediate predecessor fence.
+              const proof = await pool.query<{
+                verification_receipt_id: string;
+              }>(
+                `SELECT verification_receipt_id FROM platform.release_activation_verification_receipts
+                   WHERE tenant_id=$1 AND activated_release_id=$2 AND fence=$3 AND status='SWAPPED_VERIFIED'`,
+                [
+                  app.runtime.identity.tenantId,
+                  before.activeReleaseId,
+                  before.activeFence,
+                ],
+              );
+              const id = proof.rows[0]!.verification_receipt_id;
+              await pool.query(
+                'ALTER TABLE platform.release_activation_verification_receipts DISABLE RULE release_activation_verification_receipts_reject_update',
+              );
+              try {
+                await pool.query(
+                  'UPDATE platform.release_activation_verification_receipts SET fence=fence+100 WHERE verification_receipt_id=$1',
+                  [id],
+                );
+                await assert.rejects(
+                  service.recover('revert', expected),
+                  /verified predecessor/u,
+                  'a release ID without its exact predecessor verification cannot authorize revert',
+                );
+              } finally {
+                await pool.query(
+                  'UPDATE platform.release_activation_verification_receipts SET fence=$2 WHERE verification_receipt_id=$1',
+                  [id, before.activeFence],
+                );
+                await pool.query(
+                  'ALTER TABLE platform.release_activation_verification_receipts ENABLE RULE release_activation_verification_receipts_reject_update',
+                );
+              }
+            }
             if (mode === 'reverify') {
               await pool.query(`DROP FUNCTION platform.read_tenant_release_artifacts(uuid);
             ALTER FUNCTION platform.read_all_test_artifacts(uuid) RENAME TO read_tenant_release_artifacts`);

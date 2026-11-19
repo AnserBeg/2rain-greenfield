@@ -74,6 +74,7 @@ export interface ReleaseActivationReconciliationClock {
 
 interface AttemptRecordRow {
   activation_attempt_id: MintedUuid;
+  recovery_of_attempt_id: MintedUuid | null;
   approval_id: MintedUuid;
   approving_human_id: string;
   authority_policy_version: string;
@@ -334,6 +335,11 @@ export class PostgresReleaseActivationService {
   async verifyActivation(
     context: TrustedRequestContext,
     command: ActivateReleaseCommand,
+    retryGeneration?: {
+      pointerId: MintedUuid;
+      releaseId: MintedUuid;
+      fence: number;
+    },
   ): Promise<ActivationKernelResult> {
     assertTrustedRequestContext(context);
     assertAttemptIdentity(command.activationAttemptId);
@@ -353,7 +359,7 @@ export class PostgresReleaseActivationService {
             client,
             command.activationAttemptId,
           );
-          if (existing)
+          if (existing && !retryGeneration)
             return resultFromVerification(context, record, existing);
 
           const receipt = await loadSwapReceipt(
@@ -379,6 +385,25 @@ export class PostgresReleaseActivationService {
             pointer.pointer_id === receipt.pointer_id &&
             pointer.release_id === receipt.activated_release_id &&
             pointer.fence === receipt.fence;
+          if (
+            retryGeneration &&
+            (!pointerIsGeneration ||
+              retryGeneration.pointerId !== receipt.pointer_id ||
+              retryGeneration.releaseId !== receipt.activated_release_id ||
+              retryGeneration.fence !== safeFence(receipt.fence) ||
+              (existing &&
+                (existing.pointer_id !== receipt.pointer_id ||
+                  existing.activated_release_id !==
+                    receipt.activated_release_id ||
+                  existing.fence !== receipt.fence)))
+          ) {
+            throw new ReleaseActivationError(
+              'RECOVERY_GENERATION_CHANGED',
+              'the failed verification no longer matches the active generation',
+            );
+          }
+          if (existing && existing.status !== 'SWAPPED_VERIFICATION_FAILED')
+            return resultFromVerification(context, record, existing);
           const verification = await loadVerificationFacts(
             client,
             receipt,
@@ -391,6 +416,8 @@ export class PostgresReleaseActivationService {
                 verification.moduleSchemaConformancePassed
               ? 'SWAPPED_VERIFIED'
               : 'SWAPPED_VERIFICATION_FAILED';
+          if (existing && status !== 'SWAPPED_VERIFIED')
+            return resultFromVerification(context, record, existing);
           const completionClock = await sampleReconciliationClock(
             client,
             this.#reconciliationClock,
@@ -412,10 +439,10 @@ export class PostgresReleaseActivationService {
                module_schema_conformance_passed,
                warning_count,
                status,
-               recorded_at
+               recorded_at, retry_of_status
              ) VALUES (
                $1, $2, $3, $4, $5, $6, $7, $8,
-               $9, $10, $11, $12, 0, $13, $14
+               $9, $10, $11, $12, 0, $13, $14, $15
              )
              RETURNING pointer_id, activated_release_id, fence, status`,
             [
@@ -437,6 +464,7 @@ export class PostgresReleaseActivationService {
                 : null,
               status,
               completionClock.wallTime,
+              existing?.status ?? null,
             ],
           );
           await insertPhaseReceipt(
@@ -588,8 +616,11 @@ export class PostgresReleaseActivationService {
           swapped: existingOutcome.outcome_code === 'SWAPPED',
         };
       }
+      if (record.recovery_of_attempt_id)
+        await lockPointerForReconciliation(client, context);
       if (record.expected_release_id !== null) {
         await authorizeReverseTransitionIfApplicable(client, context, {
+          recoveryOfAttemptId: record.recovery_of_attempt_id,
           expectedPointerId: record.expected_pointer_id,
           expectedFence: safeFence(record.expected_fence),
           sourceReleaseId: record.expected_release_id,
@@ -1127,10 +1158,12 @@ async function loadReconciliationInspection(
            ON outcome.tenant_id = attempt.tenant_id
           AND outcome.environment_id = attempt.environment_id
           AND outcome.activation_attempt_id = attempt.activation_attempt_id
-         LEFT JOIN platform.release_activation_verification_receipts AS verification
-           ON verification.tenant_id = attempt.tenant_id
-          AND verification.environment_id = attempt.environment_id
-          AND verification.activation_attempt_id = attempt.activation_attempt_id
+         LEFT JOIN LATERAL (
+           SELECT receipt.recorded_at FROM platform.release_activation_verification_receipts AS receipt
+            WHERE receipt.tenant_id = attempt.tenant_id AND receipt.environment_id = attempt.environment_id
+              AND receipt.activation_attempt_id = attempt.activation_attempt_id
+            ORDER BY (receipt.status = 'SWAPPED_VERIFICATION_FAILED') DESC LIMIT 1
+         ) AS verification ON true
          LEFT JOIN platform.release_activation_reconciliation_alarms AS alarm
            ON alarm.tenant_id = attempt.tenant_id
           AND alarm.environment_id = attempt.environment_id
@@ -1493,6 +1526,7 @@ async function loadAttemptRecord(
             attempt.approval_id,
             attempt.execution_principal_kind,
             attempt.execution_principal_id,
+            approval.recovery_of_attempt_id,
             approval.approving_human_id,
             approval.issuing_actor_id,
             approval.initiating_human_id,
@@ -1922,7 +1956,8 @@ async function loadVerification(
   const result = await client.query<VerificationRow>(
     `SELECT pointer_id, activated_release_id, fence, status
        FROM platform.release_activation_verification_receipts
-      WHERE activation_attempt_id = $1`,
+      WHERE activation_attempt_id = $1
+      ORDER BY (status = 'SWAPPED_VERIFIED') DESC LIMIT 1`,
     [activationAttemptId],
   );
   return result.rows[0] ?? null;
