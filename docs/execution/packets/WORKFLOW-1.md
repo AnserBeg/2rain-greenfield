@@ -1,49 +1,54 @@
 # WORKFLOW-1 — goods receipt workflows
 
-Status — slice 1 integrated at `8ffab635`. Slice 2 integrated from `ad81cb91` after [CI 44477729782](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44477729782) passed. The migration and verified activation receipt hook are Critical. The orchestrator owns the trunk read. Slice 3 waits for the CUSTOMIZE-3 formula-family ADR and orchestrator authorization.
+Status — slices 1 and 2 integrated at `8ffab635` and `5dc9c849`. Slice 2 corrective candidate covers the 14 findings in the orchestrator's independent read. The forward migration is Critical. Slice 3 awaits the narrow re-read.
 
 ## Claims
 
-1. A fresh bounded isolate yields one admitted SDK call at a time. It refuses ambient I/O, the real clock and randomness. Run-twice verification exercises deterministic replay.
-2. A verified activation captures visible receipt outbox IDs in one statement. The worker joins posted receipts, validates their scope and source pin, and commits each disposition and its starts together.
-3. Scoped outbox pages have a measured row bound. A scan wraps for out-of-order commits and durable dispositions prevent duplicate starts after restart.
-4. The original engine, host, SDK, executable, release and fence bind a run. A request and outbox commit together. The exact semantic receipt recovers a write committed before the result journal.
-5. The automation principal and activation approver's captured and current authority govern Tier A effects. A stale pin suspends the run. Bulk same-pin retry and cancel preserve evidence.
+1. Verified activation captures exact definition digests and unattended-operation proofs. Later definition inserts do not change an active fence's subscriptions.
+2. Only the authenticated request role can decide a plan, with current human eligibility and the exact pending digest and fence. The worker can propose pending plans.
+3. Semantic mutations lock the runnable run through commit. Cancellation and same-pin retry each recheck operator authority under lock.
+4. Worker scan positions and receipt dispositions commit together. The activation hook seeds from indexed unresolved receipt keys. Source reads use claiming columns and current subscriptions.
+5. Replay runs outside the pointer lock. Permanent guest errors quarantine one run. Oversized committed results park with a bounded receipt reference.
+6. The supervised scheduler uses dedicated worker and runtime pools and defaults off. Semantic query denials record the automation principal and the WORKFLOW channel.
 
 ## Decisions
 
-- [ADR-0073](../../decisions/ADR-0073-workflow-isolate-and-authority.md) selected QuickJS Emscripten 0.32.0. Both candidates passed isolation, dispatch and limit probes. Emscripten also accepted fixed host-owned WASM memory.
-- Every Tier B operation, reachable dependency intersection and unknown input or effect intersection needs exact human confirmation. Only the owning operation can produce a Tier B fact.
-- Plan §12.5 records the owner's v1 remedy. A person retries only after the original pin is verified active again or cancels the run.
-- A tenant-authored Receipt Review with a stored receipt UUID proves the first Tier A run. CUSTOMIZE-4's Inspection and typed link are scheduled for a later slice.
-- The verifier and floor belong to slice 3. Timers, approvals and the browser journey belong to slice 4. Documents, communication and email, and connectors remain later N2 work.
+- QuickJS Emscripten 0.32.0 won the bakeoff on fixed host-owned WASM memory. Both candidates passed isolation, dispatch, and limit probes. [ADR-0073](../../decisions/ADR-0073-workflow-isolate-and-authority.md)
+- Every Tier B operation, reachable intersection, and incomplete dependency or effect proof requires exact human confirmation. Only the owning capability can create a Tier B fact.
+- Admit unattended creates with exact release, operation, and input-contract digests plus verified reachable write evidence. The slice 2 fixture stages evidence with test privileges.
+- Maintain the unresolved receipt index at the trust outbox boundary. The occurrence journal remains append-only.
+- Refuse capability read-model queries at SDK admission until workflow policy and pinned executors are wired together.
+- Canonical workflow projections, timers, the approvals worklist, and the Inspection browser journey remain later slices. Documents, communication and email, and connectors remain later N2 work.
 
 ## Gates
 
 - Slice 1 [CI 44456002463](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44456002463) passed 16 jobs at `7daf2a52`, including dependency and secret scans.
-- Slice 2 [CI 44469719873](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44469719873) covers the migration, recorded receipt identity, crash after the outbox and operation commits, grants, and rollback and same-pin remedy. The PostgreSQL fixture stages its definition with test privileges. It passed in 104 seconds.
-- `0036_workflow_substrate.sql` regenerates the platform snapshot. The receipt fixture measures the no-workflow hook against the same unhooked receipt insert.
+- Slice 2 [CI 44477729782](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44477729782) passed before the independent read.
+- The correction adds regression assertions to the PostgreSQL receipt journey and a focused scheduler supervision test. CI on the corrective packet tip gates integration.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WORKFLOW-1",
-  "base": "81ba7405e7512a806882f9ea3cff51af8c7115d9",
-  "head": "b361c9848932c74050014e0bcd0d50073d999674",
+  "base": "421bd8b82882ee24cbff87bb72914640e600aa6e",
+  "head": "06870fbcc9d82e85a15b81cd61acad04f4528377",
   "changedPaths": [
-    "db/migrations/0036_workflow_substrate.sql",
+    "apps/api/src/composition-root.ts",
+    "apps/api/src/main.ts",
+    "db/migrations/0038_workflow_review_fixes.sql",
     "db/schema.snapshot.json",
-    "packages/domain/src/purchasing/receipt-posted-event.ts",
-    "packages/postgres-provider/package.json",
+    "packages/postgres-provider/src/current-policy.ts",
     "packages/postgres-provider/src/module-runtime-interpreter.ts",
     "packages/postgres-provider/src/workflow-consumer.ts",
     "packages/postgres-provider/src/workflow-execution.ts",
     "packages/postgres-provider/src/workflow-gateway.ts",
+    "packages/postgres-provider/src/workflow-isolate.ts",
+    "packages/postgres-provider/src/workflow-run.ts",
+    "packages/postgres-provider/src/workflow-sdk.ts",
     "packages/postgres-provider/src/workflow-worker.ts",
     "test/architecture/release-persistence-boundary.test.ts",
-    "test/architecture/repository-hygiene.test.ts",
     "test/architecture/tenant-completeness.manifest.json",
-    "test/architecture/tenant-completeness.test.ts",
+    "test/integration/workflow-host.test.ts",
     "test/postgres/inventory-storage.test.ts",
     "test/postgres/migrations.test.ts",
     "test/postgres/module-storage-transition.test.ts",
@@ -51,23 +56,15 @@ Status — slice 1 integrated at `8ffab635`. Slice 2 integrated from `ad81cb91` 
     "test/postgres/workflow-consumer.test.ts"
   ],
   "symbols": [
-    {
-      "path": "packages/postgres-provider/src/workflow-consumer.ts",
-      "name": "PostgresWorkflowConsumer"
-    },
-    {
-      "path": "packages/postgres-provider/src/workflow-execution.ts",
-      "name": "PostgresWorkflowExecution"
-    },
-    {
-      "path": "packages/postgres-provider/src/workflow-worker.ts",
-      "name": "PostgresWorkflowWorker"
-    }
+    {"path": "packages/postgres-provider/src/workflow-consumer.ts", "name": "PostgresWorkflowConsumer"},
+    {"path": "packages/postgres-provider/src/workflow-execution.ts", "name": "PostgresWorkflowExecution"},
+    {"path": "packages/postgres-provider/src/workflow-gateway.ts", "name": "PostgresWorkflowGateway"},
+    {"path": "packages/postgres-provider/src/workflow-worker.ts", "name": "startWorkflowScheduler"}
   ]
 }
 ```
 
 ## Test it yourself
 
-- Slice 1. Run `node --import tsx --test test/integration/workflow-host.test.ts`. Expect nine passing tests, including the independent watchdog and replay quarantine.
-- Slice 2. Run `node scripts/run-with-test-lock.mjs exclusive -- node --import tsx --test test/postgres/workflow-consumer.test.ts`. Expect one linked Receipt Review across restart, a suspended run that retries only on the same pin, and a refused grant that leaves no result.
+- Run `node --import tsx --test --test-name-pattern='workflow scheduling' test/integration/workflow-host.test.ts`. Expect the default-off check and a successful poll after a failed pass.
+- Run `node scripts/run-with-test-lock.mjs exclusive -- node --import tsx --test test/postgres/workflow-consumer.test.ts`. Expect only verified starts, a write refused after cancellation, an auditable parked receipt, exact human approval, and a later run progressing after an earlier run fails.
