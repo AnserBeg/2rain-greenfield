@@ -268,6 +268,15 @@ export function validateSurfaceLists(
       id,
       'view ids',
     );
+    const savedViewCount = list.views.filter((view) => view.layout).length;
+    if (savedViewCount > 8 || list.views.length - savedViewCount > 8)
+      fail(
+        id,
+        'a List allows up to eight saved views and eight standard views',
+      );
+    const declaredFilters = new Map(
+      list.filters.map((filter) => [filter.field, filter]),
+    );
     for (const view of list.views) {
       unique(
         view.filters.map((filter) => filter.field),
@@ -276,6 +285,56 @@ export function validateSurfaceLists(
       );
       for (const filter of view.filters)
         filterable(filter.field, filter.value, view.viewId);
+      if (view.layout) {
+        if (view.open || view.before || view.band || view.supply)
+          fail(
+            view.viewId,
+            'a saved view uses declared filters without a derived view condition',
+          );
+        const visible = new Set(view.layout.columns);
+        unique(view.layout.columns, view.viewId, 'view columns');
+        if (
+          view.layout.columns.some((columnId) => !columns.has(columnId)) ||
+          !view.layout.columns.some(
+            (columnId) => columns.get(columnId)?.role === 'title',
+          )
+        )
+          fail(
+            view.viewId,
+            "a saved view uses the List's columns and keeps its title",
+          );
+        unique(
+          view.layout.sort.map(({ columnId }) => {
+            const column = columns.get(columnId);
+            return column?.reference ? columnId : (column?.field ?? columnId);
+          }),
+          view.viewId,
+          'view sort fields',
+        );
+        if (
+          view.layout.sort.some(
+            (sort) =>
+              !visible.has(sort.columnId) ||
+              !columns.get(sort.columnId)?.sortable,
+          )
+        )
+          fail(
+            view.viewId,
+            'a saved view sorts by one of its sortable columns',
+          );
+        if (
+          view.filters.some(
+            (filter) =>
+              !declaredFilters
+                .get(filter.field)
+                ?.options.some((option) => option.value === filter.value),
+          )
+        )
+          fail(
+            view.viewId,
+            'a saved view pins values from the declared List filters',
+          );
+      }
       if (view.open && !list.progress)
         fail(view.viewId, "an open view needs the List's declared progress");
       if (view.supply && !list.progress?.supply)
@@ -941,13 +1000,18 @@ export function validateSurfaceLists(
     // The gateway accepts at most four exact filters per request: the busiest
     // view's filters plus every declared filter must fit, or some would drop.
     if (
-      Math.max(0, ...list.views.map((view) => view.filters.length)) +
+      Math.max(
+        0,
+        ...list.views.map((view) => (view.layout ? 0 : view.filters.length)),
+      ) +
         list.filters.length >
       4
     )
       fail(id, 'a view and the list filters together use at most four fields');
     const viewFields = new Set(
-      list.views.flatMap((view) => view.filters.map((filter) => filter.field)),
+      list.views.flatMap((view) =>
+        view.layout ? [] : view.filters.map((filter) => filter.field),
+      ),
     );
     unique(
       list.filters.map((filter) => filter.filterId),

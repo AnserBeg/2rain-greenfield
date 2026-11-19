@@ -71,6 +71,146 @@ const equipment = JSON.parse(
 const tenantSlug = 'customize-draft';
 
 test(
+  'a live saved view batches exact counts and the assistant reads its filtered order',
+  { timeout: 600_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'customize-views',
+      async ({ connection }) => {
+        const options = {
+          databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+          tenantSlug: 'customize-views',
+        };
+        const app = await startComposedApplication({
+          ...options,
+          seedProfile: 'distributor',
+          port: 0,
+        });
+        const opened = await openCustomizeService(options);
+        try {
+          const world = worldOver(app.runtime, String(connection.database));
+          const type = 'northstar.app:field.location_type';
+          const name = 'northstar.app:field.location_name';
+          const code = 'northstar.app:field.location_code';
+          const warehouse = 'northstar.app:option.warehouse';
+          const store = 'northstar.app:option.store';
+          for (const [suffix, value] of [
+            ['Alpha', warehouse],
+            ['Zulu', warehouse],
+            ['Store', store],
+          ] as const) {
+            const created = await world.invoke('location_create', {
+              recordId: randomUUID(),
+              relations: {},
+              values: {
+                [code]: `C3-${suffix.toUpperCase()}`,
+                [name]: `Customize view ${suffix}`,
+                [type]: value,
+              },
+            });
+            assert.equal(created.outcome, 'succeeded');
+          }
+          const draft = await opened.service.draft(
+            {
+              kind: 'saveListView',
+              surface: 'northstar.app:surface.location_list',
+              label: 'Warehouses',
+              columns: [
+                'northstar.app:list_column.location_list_name',
+                'northstar.app:list_column.location_list_code',
+              ],
+              sort: [
+                {
+                  column: 'northstar.app:list_column.location_list_name',
+                  direction: 'descending',
+                },
+              ],
+              filters: [{ field: type, value: warehouse }],
+            },
+            'visualBuilder',
+          );
+          assert.equal(draft.status, 'drafted');
+          await opened.service.approve(draft.patchId);
+          await opened.service.activate(draft.patchId);
+          const viewId =
+            'northstar.app:list_view.custom_location_list_warehouses';
+          const counts = await app.runtime.entry.run(
+            { headers: { cookie: 'northstar-demo-actor=manager' } },
+            (snapshot) =>
+              app.runtime.queryGateway.invoke(snapshot, {
+                schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+                queryId: 'northstar.app:query.location_list',
+                arguments: {
+                  includeArchived: false,
+                  list: {
+                    cursor: null,
+                    matchMode: 'substring',
+                    pageSize: 1,
+                    relationLabels: [],
+                    schemaVersion: SHARED_LIST_QUERY_VERSION,
+                    search: 'Customize view',
+                    sort: [],
+                    viewCounts: [
+                      {
+                        viewId,
+                        filters: [{ fieldId: type, value: warehouse }],
+                      },
+                      {
+                        viewId: 'northstar.app:list_view.test_store_count',
+                        filters: [{ fieldId: type, value: store }],
+                      },
+                    ],
+                  },
+                },
+              }),
+          );
+          assert.deepEqual(
+            counts.listCoverage?.viewCounts?.map((count) => [
+              count.viewId,
+              count.totalCount,
+            ]),
+            [
+              [viewId, 2],
+              ['northstar.app:list_view.test_store_count', 1],
+            ],
+          );
+
+          const agent = new OperationsAgentSession({
+            runtime: app.runtime,
+            companyId: COMPANY,
+            personHeaders: { cookie: 'northstar-demo-actor=manager' },
+            approve: () => Promise.resolve(true),
+          });
+          const read = () =>
+            agent.call('erp_query', {
+              queryId: 'location_list',
+              arguments: { view: viewId, search: 'Customize view' },
+            });
+          const answer = await read();
+          assert.equal(answer.isError, false, JSON.stringify(answer.content));
+          const records = (
+            answer.content as { records: { values: Record<string, string> }[] }
+          ).records;
+          assert.deepEqual(
+            records.map((row) => row.values),
+            [
+              { [code]: 'C3-ZULU', [name]: 'Customize view Zulu' },
+              { [code]: 'C3-ALPHA', [name]: 'Customize view Alpha' },
+            ],
+          );
+          await opened.service.rollback();
+          assert.equal((await read()).isError, true);
+        } finally {
+          await opened.close();
+          await app.close();
+        }
+      },
+      LINEAGE_INSTALL_VOLUME,
+    );
+  },
+);
+
+test(
   'a drafted change is recorded append-only beside its tenant revision and staged release, and nothing goes live',
   { timeout: 600_000 },
   async () => {
@@ -294,6 +434,26 @@ test(
               ),
               /customization_patches_shape/u,
               'a payload whose digest does not match is refused by the database',
+            );
+            const unknownPatchBytes = Buffer.from(
+              JSON.stringify({ kind: 'unrecognizedTestKind' }),
+            );
+            await assert.rejects(
+              pool.query(
+                `INSERT INTO platform.customization_patches
+                   SELECT tenant_id, environment_id, gen_random_uuid(),
+                          patch_version, 'unrecognizedTestKind', $1::bytea,
+                          encode(sha256($1::bytea), 'hex'), channel, authored_by,
+                          base_package_id, base_package_version,
+                          base_revision_id, base_release_root,
+                          parent_revision_id, resulting_revision_id,
+                          resulting_release_id, language_version,
+                          normalization_profile_version, created_at
+                     FROM platform.customization_patches`,
+                [unknownPatchBytes],
+              ),
+              /customization_patches_shape/u,
+              'the database refuses an unrecognized patch kind with a valid digest',
             );
             assert.equal(await patchCount(pool), 1);
 
@@ -780,6 +940,58 @@ test(
           await opened.service.approve(draft.patchId);
           await opened.service.activate(draft.patchId);
           assert.equal((await page()).values[field], 'Morgan');
+          const arrangement = await opened.service.draft(
+            {
+              kind: 'arrangeLayout',
+              surface: 'northstar.app:surface.purchase_order_list',
+              order: [field, 'northstar.app:field.purchase_order_notes'],
+            },
+            'visualBuilder',
+          );
+          assert.equal(arrangement.status, 'drafted');
+          if (arrangement.status !== 'drafted') return;
+          await opened.service.approve(arrangement.patchId);
+          await opened.service.activate(arrangement.patchId);
+          const columns = () =>
+            app.runtime.entry.run(
+              { headers: { cookie: 'northstar-demo-actor=manager' } },
+              (view) => {
+                const manifest = view.projections.surface
+                  .payload as unknown as {
+                  surfaces: {
+                    surfaceId: string;
+                    list?: { columns: { field: string }[] };
+                  }[];
+                };
+                return manifest.surfaces
+                  .find(
+                    (s) =>
+                      s.surfaceId ===
+                      'northstar.app:surface.purchase_order_list',
+                  )!
+                  .list!.columns.map((c) => c.field);
+              },
+            );
+          assert.deepEqual((await columns()).slice(0, 2), [
+            field,
+            'northstar.app:field.purchase_order_notes',
+          ]);
+          const rows = await world.list(
+            'northstar.app:query.commercial_purchase_order_list',
+          );
+          assert.equal(
+            rows.find((row) => row.recordId === recordId)?.values[field],
+            'Morgan',
+          );
+          await opened.service.rollback();
+          assert.equal((await columns()).includes(field), false);
+          assert.equal(
+            (await columns()).includes(
+              'northstar.app:field.purchase_order_notes',
+            ),
+            false,
+          );
+          assert.equal((await page()).values[field], 'Morgan');
         } finally {
           await opened.close();
           await app.close();
@@ -803,6 +1015,10 @@ test(
         let runtime = await openComposedApplicationRuntime(options);
         const old = await openCustomizeService(options);
         const fieldId = 'northstar.app:field.custom_item_shelf_code';
+        const savedColumns = [
+          'northstar.app:list_column.item_list_item',
+          'northstar.app:list_column.item_list_sku',
+        ];
         let sourceRoot: string;
         let sourceFence: string;
         try {
@@ -821,6 +1037,14 @@ test(
                   label: 'Warehouse name',
                 },
               ],
+            },
+            {
+              kind: 'saveListView',
+              surface: 'northstar.app:surface.item_list',
+              label: 'Warehouse lookup',
+              columns: savedColumns,
+              sort: [{ column: savedColumns[0]!, direction: 'ascending' }],
+              filters: [],
             },
           ]) {
             const drafted = await old.service.draft(patch, 'declarativeEditor');
@@ -980,7 +1204,10 @@ test(
             fields: { fieldId: string; label: string }[];
             surfaces: {
               surfaceId: string;
-              list?: { columns: { label: string }[] };
+              list?: {
+                columns: { label: string }[];
+                views: { label: string; layout?: { columns: string[] } }[];
+              };
             }[];
           };
           assert.equal(
@@ -1002,6 +1229,16 @@ test(
               ?.list?.columns.some(
                 (column) => column.label === 'Warehouse name',
               ),
+          );
+          assert.deepEqual(
+            definition.surfaces
+              .find(
+                (surface) =>
+                  surface.surfaceId === 'northstar.app:surface.item_list',
+              )
+              ?.list?.views.find((view) => view.label === 'Warehouse lookup')
+              ?.layout?.columns,
+            savedColumns,
           );
           await assertUpgradePersistence(
             pool,

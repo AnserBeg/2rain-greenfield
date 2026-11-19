@@ -4014,7 +4014,10 @@ async function listSharedRecords(
             .join('')})`,
     );
   }
-  for (const filter of list.query.fieldFilters ?? []) {
+  const exactFilter = (
+    filter: { fieldId: string; value: string },
+    operands: unknown[],
+  ) => {
     const column = selectedColumns.find(
       (column) => column.canonicalFieldId === filter.fieldId,
     );
@@ -4024,10 +4027,10 @@ async function listSharedRecords(
         'Exact filters must name a selected field',
         filter.fieldId,
       );
-    predicates.push(
-      `${qualified(sourceAlias, column.physicalName)}::text = ${parameter(values, filter.value)}`,
-    );
-  }
+    return `${qualified(sourceAlias, column.physicalName)}::text = ${parameter(operands, filter.value)}`;
+  };
+  for (const filter of list.query.fieldFilters ?? [])
+    predicates.push(exactFilter(filter, values));
   // Ahead of the count and the page window, like every filter above: a tab of
   // orders with something still to arrive, or arriving late, counts and pages
   // exactly that set.
@@ -4085,17 +4088,27 @@ async function listSharedRecords(
   // The first page holding every row (same FROM and WHERE) is its own count;
   // any other page asks the database (SPEED-1: one statement, not two, for
   // every short list on a page).
-  const totalCount =
-    list.query.pageOffset === 0 && !hasMore
-      ? rows.rows.length
-      : Number(
-          (
-            await client.query<{ total_count: string }>(
-              `SELECT count(*)::text AS total_count ${fromSql} WHERE ${whereSql}`,
-              values,
-            )
-          ).rows[0]?.total_count ?? '0',
-        );
+  const shortFirstPage = list.query.pageOffset === 0 && !hasMore;
+  const viewCounts = list.query.viewCounts;
+  const countValues = [...values];
+  const countColumns = (viewCounts ?? []).map(({ filters }, index) => {
+    const where = filters
+      .map((filter) => exactFilter(filter, countValues))
+      .join(' AND ');
+    return `count(*) FILTER (WHERE ${where || 'true'})::text AS view_count_${index}`;
+  });
+  const countRow =
+    !shortFirstPage || viewCounts
+      ? (
+          await client.query<Record<string, string>>(
+            `SELECT ${['count(*)::text AS total_count', ...countColumns].join(', ')} ${fromSql} WHERE ${whereSql}`,
+            countValues,
+          )
+        ).rows[0]
+      : undefined;
+  const totalCount = shortFirstPage
+    ? rows.rows.length
+    : Number(countRow?.total_count ?? '0');
   if (!Number.isSafeInteger(totalCount) || totalCount < 0) {
     throw failure(
       'MODULE_LIST_RESULT_INVALID',
@@ -4145,6 +4158,18 @@ async function listSharedRecords(
       : {}),
     ...(list.query.beforeFilters
       ? { beforeFilters: list.query.beforeFilters }
+      : {}),
+    ...(viewCounts
+      ? {
+          viewCounts: Object.freeze(
+            viewCounts.map((view, index) =>
+              Object.freeze({
+                ...view,
+                totalCount: Number(countRow?.[`view_count_${index}`]),
+              }),
+            ),
+          ),
+        }
       : {}),
     ...(list.query.outputMode ? { outputMode: list.query.outputMode } : {}),
     projectedSearchValueCount:

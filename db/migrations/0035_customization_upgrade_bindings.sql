@@ -61,7 +61,7 @@ DECLARE
       body := convert_from(p.payload, 'UTF8')::jsonb;
     EXCEPTION WHEN data_exception THEN CONTINUE; END;
     UPDATE platform.customization_patches SET display_label =
-      CASE patch_kind WHEN 'addRecordType' THEN body->>'label'
+      CASE patch_kind WHEN 'addRecordType' THEN body->>'label' WHEN 'saveListView' THEN body->>'label'
         WHEN 'addField' THEN body#>>'{field,label}' WHEN 'addChoice' THEN body->>'option'
         WHEN 'arrangeLayout' THEN CASE WHEN body ? 'upFront' THEN 'form' ELSE 'list' END END
       WHERE patch_id = p.patch_id; END LOOP; END

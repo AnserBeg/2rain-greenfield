@@ -87,6 +87,12 @@ export const AUTHORING_CHANNELS = [
 ] as const;
 export type AuthoringChannel = (typeof AUTHORING_CHANNELS)[number];
 
+const UPGRADE_PATCH_KINDS: ReadonlySet<string> = new Set([
+  'addField',
+  'arrangeLayout',
+  'saveListView',
+]);
+
 export type CustomizationRefusalCode =
   | 'CUSTOMIZE_NOT_STARTED'
   | 'CUSTOMIZE_BASE_STALE'
@@ -402,7 +408,7 @@ export class PostgresCustomizationService {
         'The platform upgrade has no recorded base or patch chain.',
       );
     const unsupported = active.chain.find(
-      (record) => record.kind !== 'addField' && record.kind !== 'arrangeLayout',
+      (record) => !UPGRADE_PATCH_KINDS.has(record.kind),
     );
     if (unsupported)
       throw new CustomizationServiceRefusal(
@@ -2057,6 +2063,7 @@ function patchDisplayLabel(patch: CustomizationPatch): string | null {
     case 'addChoice':
       return patch.option;
     case 'addRecordType':
+    case 'saveListView':
       return patch.label;
     case 'arrangeLayout':
       return 'upFront' in patch ? 'form' : 'list';

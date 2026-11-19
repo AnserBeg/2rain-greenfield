@@ -1,0 +1,78 @@
+# CUSTOMIZE-3 — the launch customization set
+
+Slice 1 integrated the list-column work and saved list views from [PR #95](https://github.com/AnserBeg/2rain-greenfield/pull/95). Critical path: the approved patch-kind migration. The orchestrator resolved the numbering collision with CRITFIX-A.
+
+## Claims
+
+1. Arrange a list offers stored standard and custom fields, and the list query selects newly visible values. This includes Party's generic list.
+2. Customize and plain-English drafting prepare a saved view with its own columns, default sort and declared filter choices. Approval shows those choices before activation.
+3. Saved tabs batch counts through the list query under current policy. The page, CSV and assistant use the view's declared settings. Rollback restores the prior list.
+4. Migration 0034 adds the planned patch kinds to the closed vocabulary. Its check continues to require a valid digest, lineage and channel. The replay test applies the saved-view patch to a new first-party base.
+
+## Decisions
+
+- Each saved view keeps the record title. It pins filter choices from the list's declared options. The list keeps its standard tabs, and the first saved view adds an All tab when needed.
+- The optional view layout rides v6 under ADR-0047 §7. Surfaces require reader 24 and the assistant projection requires reader 3 for releases carrying it (reader 2 already serves assistant confirmation). The first-party re-baseline reproduced the checked-in release byte for byte.
+- The next-free migration rule assigns 0034 after CRITFIX-A at the candidate base. The migration retains the patch table's existing policies, grants and append-only rules.
+- STOP at slice 2 for canonical language admission. The orchestrator approved compiler-proved validation examples and the verifier change that reads them. Plan §5.12 and ADR-0012 still require the dedicated Formula Rule projection for tenant validation and calculated fields. The v3 adoption explicitly deferred that family to a tenant-customization language event ([4c](4c.md#adoption-boundary)).
+- Slice 5 is open. First-party operations such as Close and Reopen share a permission ID, so an action restriction must identify the operation. Field visibility must also govern query and read-back results.
+- Slice 6's preserved candidate `e97ebd9f` uses governed list counts and exact top-level sums, with separate CAD, USD and EUR measures. It requires surface reader 25. PostgreSQL and browser evidence is pending.
+
+## Gates
+
+- Slice 0 passed all 16 jobs at `81e5937b`. [CI 44429125715](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44429125715). The candidate refreshed on UPGRADE-1 is in [CI 44434963983](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44434963983).
+- Slice 1 passed 24 focused tests, typecheck, lint and format. Regenerating the snapshot from 34 migrations reproduced the checked-in bytes.
+- Combined candidate `e5d2c82b` passed all CI jobs, including the PostgreSQL replay and browser journeys. [CI 44457971677](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44457971677).
+- Earlier CI passed the live saved-view PostgreSQL test and exposed the missing boot replay admission. The updated test passed locally and with all 71 shard-2 tests in [CI 44445972885](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44445972885).
+- CI attempt 2 exposed an ambiguous form label. Saved-view selects now have explicit label associations. The browser journey checks the order of data columns outside the bulk-selection header and passed locally in 3.8 minutes on the combined UPGRADE-1 tree.
+- `unrecognized-patch-kind-admitted` at `e5d2c82bbcc6`: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (1 passing). [Controls 44457971797](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44457971797).
+
+## Filed
+
+- The full list/detail row also needs tenant controls for record-detail composition and formatting. F5 child aggregation remains pending a hard cardinality bound, visibility and absence rules, and a write concurrency protocol. [Archive](../current-plan-archive.md#filed-during-the-freeze).
+
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1",
+  "packet": "CUSTOMIZE-3",
+  "base": "8ffab635ac7e6ca5c288ed4e3265bebf79654141",
+  "head": "ad901f54b5392cfd59657e435447d325f842499c",
+  "changedPaths": [
+    "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/list-declaration.ts",
+    "apps/web/src/surface-launcher.ts", "apps/web/src/surface-runtime.ts", "apps/web/test/browser/customize.composed-application.spec.ts",
+    "db/migrations/0034_customization_launch_patch_kinds.sql", "db/schema.snapshot.json", "packages/canonical-model/src/schemas.ts",
+    "packages/canonical-model/src/surface-list.ts", "packages/compiler/src/projections.ts", "packages/customization/src/ai-draft.ts",
+    "packages/customization/src/apply.ts", "packages/customization/src/patch.ts", "packages/customization/src/render.ts",
+    "packages/customization/src/targets.ts", "packages/operations-agent/src/catalog.ts", "packages/operations-agent/src/session.ts",
+    "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/runtime/src/list-behavior/index.ts",
+    "packages/runtime/src/request-runtime-view.ts", "test/architecture/release-persistence-boundary.test.ts", "test/evidence/CUSTOMIZE-3.expected-red.json",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/postgres/customization.test.ts", "test/postgres/inventory-storage.test.ts",
+    "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts", "test/postgres/request-runtime-view.test.ts",
+    "test/postgres/trust-substrate.test.ts", "test/unit/customization-ai-draft.test.ts", "test/unit/customization.test.ts"
+  ],
+  "symbols": [
+    {
+      "path": "packages/customization/src/apply.ts",
+      "name": "saveListView"
+    },
+    {
+      "path": "packages/postgres-provider/src/customization-service.ts",
+      "name": "UPGRADE_PATCH_KINDS"
+    },
+    {
+      "path": "apps/web/src/surface-launcher.ts",
+      "name": "loadDeclaredListCounts"
+    },
+    {
+      "path": "packages/runtime/src/list-behavior/index.ts",
+      "name": "requireSharedListEcho"
+    }
+  ]
+}
+```
+
+## Test it yourself
+
+**Slice 0.** In Customize, add **Person ordering** to **Purchase order**, then draft, approve and activate. Save an order with that field filled. In **Arrange a list → Purchase orders → Choose columns**, clear **Hide Person ordering** and **Hide Notes**, then draft, approve and activate. The Purchase orders list shows both headings and the entered name. Roll back the arrangement and inspect the order to see its saved value.
+
+**Slice 1.** In **Customize → Save a list view → Locations**, name the view **Warehouses**. Keep Code, move Name first and sort names descending. Set **Type** to **Warehouse**, then draft, review the diff, approve and activate. Open Locations and select **Warehouses**. Its count matches the filtered rows, Name is first and the rows are sorted. Roll back the view and reopen Locations to see its standard list.
