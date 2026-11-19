@@ -1462,8 +1462,29 @@ export const SurfaceDocumentEditorSchema = z.strictObject({
   lineFormSurfaceId: CanonicalIdSchema,
   lineQueryId: CanonicalIdSchema,
   parentRelationId: CanonicalIdSchema,
-  stateFieldId: CanonicalIdSchema,
-  editableStateIds: z.array(CanonicalIdSchema).min(1),
+  scope: z.literal('tenantShared').optional(),
+  stateFieldId: CanonicalIdSchema.optional(),
+  editableStateIds: z.array(CanonicalIdSchema).min(1).optional(),
+  /** Create-only links, backed by the header operation's relation inputs. */
+  headerRelations: z
+    .array(
+      z.strictObject({
+        fieldId: CanonicalIdSchema,
+        label: LabelSchema,
+        reference: editorField.shape.reference
+          .unwrap()
+          .pick({
+            queryId: true,
+            getQueryId: true,
+            labelFieldIds: true,
+            detailFieldIds: true,
+          })
+          .required({ getQueryId: true }),
+      }),
+    )
+    .min(1)
+    .max(12)
+    .optional(),
   // 30, widened from 20 (a document the narrower bound admitted is still
   // admitted): a sales order's header carries its ship-to and its charges.
   headerFields: z.array(editorField).min(1).max(30),
@@ -1527,6 +1548,8 @@ const listColumn = z.strictObject({
   label: LabelSchema,
   orderKey: boundedOrderKey,
   field: CanonicalIdSchema,
+  /** The column names a declared relation instead of a stored field. */
+  relation: z.literal(true).optional(),
   role: z.enum(['title', 'value', 'status']),
   priority: boundedOrderKey,
   sortable: z.boolean(),
@@ -2571,6 +2594,15 @@ const authoredV6FieldDefinition = authoredV3FieldDefinition.extend({
   ...assistantConfirmation,
   numbering: FieldNumberingSchema.optional(),
 });
+const companyOwnership = z.enum(['entityOwned', 'tenantShared']).optional();
+const normalizedV6EntityDefinition = normalizedEntityDefinition.extend({
+  ...assistantConfirmation,
+  companyOwnership,
+});
+const authoredV6EntityDefinition = authoredEntityDefinition.extend({
+  ...assistantConfirmation,
+  companyOwnership,
+});
 // A list query may declare the most rows one export statement returns. It is a
 // query property, not a screen one, because the agent path reads the query.
 const exportMaximumResultCount = z.int().min(1).max(10_000).optional();
@@ -2591,7 +2623,7 @@ const authoredV6QueryDefinition = z.union([
 
 const v6NormalizedShape = {
   ...v5NormalizedShape,
-  entities: z.array(normalizedEntityDefinition.extend(assistantConfirmation)),
+  entities: z.array(normalizedV6EntityDefinition),
   fields: z.array(normalizedV6FieldDefinition),
   operations: z.array(normalizedV6OperationDefinition),
   queries: z.array(normalizedV6QueryDefinition),
@@ -2719,7 +2751,7 @@ const v5AuthoredShape = {
 
 const v6AuthoredShape = {
   ...v5AuthoredShape,
-  entities: z.array(authoredEntityDefinition.extend(assistantConfirmation)),
+  entities: z.array(authoredV6EntityDefinition),
   fields: z.array(authoredV6FieldDefinition),
   operations: z.array(authoredV6OperationDefinition),
   queries: z.array(authoredV6QueryDefinition),

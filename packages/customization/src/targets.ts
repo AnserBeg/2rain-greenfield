@@ -1,6 +1,7 @@
 import {
   CUSTOMIZABLE_FIRST_PARTY_ENTITY_LOCALS,
   isTenantId,
+  linkTarget,
   listColumnId,
 } from './apply.js';
 
@@ -12,6 +13,11 @@ import {
  * again when it is applied.
  */
 export interface CustomizationTargets {
+  readonly linkTargets?: readonly {
+    readonly entityId: string;
+    readonly label: string;
+    readonly companyOwned: boolean;
+  }[];
   readonly choiceFields: readonly {
     readonly fieldId: string;
     readonly label: string;
@@ -212,5 +218,26 @@ export function customizationTargets(definition: {
       };
     })
     .sort((left, right) => left.label.localeCompare(right.label));
-  return Object.freeze({ choiceFields, forms, lists, recordTypes });
+  const linkTargets = definition.entities
+    .flatMap((entity) => {
+      const entityId = String(entity.entityId);
+      const target = linkTarget(definition, entityId);
+      return target
+        ? [
+            {
+              entityId,
+              label: String(entity.label),
+              companyOwned: target.companyOwned,
+            },
+          ]
+        : [];
+    })
+    .sort((left, right) => left.label.localeCompare(right.label));
+  return Object.freeze({
+    choiceFields,
+    forms,
+    linkTargets,
+    lists,
+    recordTypes,
+  });
 }

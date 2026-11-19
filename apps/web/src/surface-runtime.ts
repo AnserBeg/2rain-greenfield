@@ -329,7 +329,8 @@ export async function renderSurfaceRuntimeWithData(
   if (
     selection.selected.documentEditor &&
     selection.selected.surfaceRole === 'form' &&
-    legalEntitySelection.length === 1
+    legalEntitySelection.length ===
+      (selection.selected.documentEditor.scope === 'tenantShared' ? 0 : 1)
   ) {
     let editor: Awaited<ReturnType<typeof documentEditor>>;
     try {
@@ -338,7 +339,7 @@ export async function renderSurfaceRuntimeWithData(
         selection.selected,
         selection.surfaces,
         url,
-        legalEntitySelection[0]!,
+        legalEntitySelection[0] ?? null,
         gateways,
       );
     } catch (error) {
@@ -1033,14 +1034,18 @@ export async function submitSurfaceRuntimeFragment(
   }
   const url = new URL(requestUrl, 'http://surface-runtime.local');
   const scope = legalEntitySelectionForSurface(binding, url);
-  if (scope.length !== 1) return fallback;
+  if (
+    scope.length !==
+    (selection.selected.documentEditor.scope === 'tenantShared' ? 0 : 1)
+  )
+    return fallback;
   try {
     const editor = await documentEditor(
       view,
       selection.selected,
       selection.surfaces,
       url,
-      scope[0]!,
+      scope[0] ?? null,
       gateways,
       submission,
       'fragment',
@@ -1186,7 +1191,10 @@ export async function submitSurfaceRuntimeIntent(
   if (selection.selected.documentEditor && submission.draftSession) {
     const url = new URL(requestUrl, 'http://surface-runtime.local');
     const scope = legalEntitySelectionForSurface(binding, url);
-    if (scope.length !== 1)
+    if (
+      scope.length !==
+      (selection.selected.documentEditor.scope === 'tenantShared' ? 0 : 1)
+    )
       return operationDiagnostic('OPERATION_INPUT_INVALID', 422);
     try {
       const editor = await documentEditor(
@@ -1194,7 +1202,7 @@ export async function submitSurfaceRuntimeIntent(
         selection.selected,
         selection.surfaces,
         url,
-        scope[0]!,
+        scope[0] ?? null,
         gateways,
         submission,
       );

@@ -812,13 +812,32 @@ function surfaceManifestPayload(
         'form' in surface &&
         (surface.form as SurfaceForm | undefined)?.fields !== undefined,
     );
-  const surfaceFloor = hasSavedListLayouts(original)
-    ? 24
-    : recordFieldPresentation
-      ? 23
-      : rankedDefaultsOrChainedTasks
-        ? 22
-        : null;
+  const extendedEditor = original.surfaces.some((surface) => {
+    if (!('documentEditor' in surface) || !surface.documentEditor) return false;
+    const editor = surface.documentEditor as SurfaceDocumentEditor;
+    return (
+      editor.headerRelations !== undefined ||
+      editor.stateFieldId === undefined ||
+      editor.scope === 'tenantShared'
+    );
+  });
+  const declaredRelationList = original.surfaces.some(
+    (surface) =>
+      'list' in surface &&
+      (surface.list as SurfaceList | undefined)?.columns.some(
+        (column) => column.relation,
+      ),
+  );
+  const surfaceFloor =
+    extendedEditor || declaredRelationList
+      ? 25
+      : hasSavedListLayouts(original)
+        ? 24
+        : recordFieldPresentation
+          ? 23
+          : rankedDefaultsOrChainedTasks
+            ? 22
+            : null;
   const payloadSchemaVersion = composed
     ? COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION
     : navigation
@@ -1471,7 +1490,9 @@ function agentListPresets(original: VersionedNormalizedApplicationPackage) {
     );
     const sortKey = (columnId: string) => {
       const column = columns.get(columnId);
-      return column?.reference ? columnId : (column?.field ?? columnId);
+      return column?.reference && !column.relation
+        ? columnId
+        : (column?.field ?? columnId);
     };
     return [
       {
@@ -1488,7 +1509,7 @@ function agentListPresets(original: VersionedNormalizedApplicationPackage) {
         })),
         queryId: surface.dataSource.targetId,
         referenceLabels: list.columns.flatMap((column) =>
-          column.reference
+          column.reference && !column.relation
             ? [
                 {
                   fieldId: column.reference.labelField.targetId,

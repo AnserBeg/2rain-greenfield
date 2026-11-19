@@ -124,6 +124,44 @@ test('text is never taken as a change, and a malformed patch gets one repair tur
   assert.equal(stillWrong.status, 'invalid');
 });
 
+test('one tool call drafts an ordered change set and separate proposals cannot discard a requested edit', async () => {
+  const change = {
+    kind: 'changeSet',
+    patches: [
+      equipment,
+      {
+        kind: 'addField',
+        entity: 'northstar.app:entity.custom_equipment',
+        field: { label: 'Inspection date', type: 'date' },
+      },
+    ],
+  };
+  const request = 'Add Equipment and give it an inspection date';
+  assert.deepEqual(
+    await draftPatchFromRequest(
+      scripted([{ toolInput: change }]),
+      request,
+      targets,
+    ),
+    { status: 'parsed', patch: change },
+  );
+  const separate: DraftingModel = {
+    modelId: 'scripted',
+    next: async () => ({
+      text: '',
+      toolCalls: change.patches.map((input, index) => ({
+        id: String(index),
+        input,
+        name: DRAFT_CUSTOMIZATION_TOOL,
+      })),
+    }),
+  };
+  assert.deepEqual(await draftPatchFromRequest(separate, request, targets), {
+    status: 'invalid',
+    issues: ['propose the complete change in one tool call'],
+  });
+});
+
 test('a request outside the four kinds comes back unsupported, naming what is missing', async () => {
   const outcome = await draftPatchFromRequest(
     scripted([

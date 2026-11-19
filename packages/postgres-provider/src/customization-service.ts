@@ -540,7 +540,7 @@ export class PostgresCustomizationService {
   }
 
   /**
-   * Plain English to one typed patch through the drafting model, then the
+   * Plain English to one typed change through the drafting model, then the
    * same draft as every other channel. The model never sees records, only the
    * live release's customizable targets; it cannot record or activate.
    */
@@ -600,7 +600,7 @@ export class PostgresCustomizationService {
   }
 
   /**
-   * Drafts one patch on the active release. Refused, unsupported and
+   * Drafts one change on the active release. Refused, unsupported and
    * compiler-rejected requests leave nothing behind; a drafted one leaves its
    * patch record, its child revision and its staged release.
    */
@@ -626,10 +626,7 @@ export class PostgresCustomizationService {
     }
     const context = await this.#context();
     const active = await this.#active(context);
-    const patch =
-      parsed.patch.kind === 'addField'
-        ? { ...parsed.patch, screens: 'record' as const }
-        : parsed.patch;
+    const patch = preparePatchForRecording(parsed.patch);
     await this.#assertCurrentBase(context, active);
     const reproduced = await this.#reproduce(context, active);
     const compiled = await this.#compile(
@@ -1816,7 +1813,8 @@ interface PatchRow {
   created_at: Date | string;
   parent_revision_id: MintedUuid;
   patch_id: MintedUuid;
-  patch_kind: CustomizationPatch['kind'];
+  patch_kind: string;
+  patch_version: string;
   payload: Uint8Array;
   payload_digest: string;
   resulting_release_id: MintedUuid;
@@ -1824,7 +1822,8 @@ interface PatchRow {
   resulting_revision_id: MintedUuid;
 }
 
-const PATCH_SELECT = `SELECT patch.base_release_root, patch.patch_id, patch.patch_kind, patch.payload,
+const PATCH_SELECT = `SELECT patch.base_release_root, patch.patch_id, patch.patch_kind,
+       patch.patch_version, patch.payload,
        patch.payload_digest, patch.channel, patch.parent_revision_id,
        patch.resulting_revision_id, patch.resulting_release_id,
        release.content_hash AS resulting_release_root, patch.created_at
@@ -1845,11 +1844,32 @@ function patchRecord(row: PatchRow): PatchRecord {
       `patch ${row.patch_id} does not match its recorded digest`,
     );
   }
-  const parsed = parseCustomizationPatch(JSON.parse(payload.toString('utf8')));
-  if (parsed.status !== 'parsed' || parsed.patch.kind !== row.patch_kind) {
+  if (row.patch_version !== CUSTOMIZATION_PATCH_VERSION) {
     throw new CustomizationServiceRefusal(
       'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
-      `patch ${row.patch_id} no longer reads as a supported patch`,
+      `patch ${row.patch_id} uses unsupported version ${row.patch_version}`,
+    );
+  }
+  let input: unknown;
+  try {
+    input = JSON.parse(payload.toString('utf8'));
+  } catch {
+    throw new CustomizationServiceRefusal(
+      'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+      `patch ${row.patch_id} (${row.patch_kind}) contains invalid JSON`,
+    );
+  }
+  const parsed = parseCustomizationPatch(input);
+  if (parsed.status !== 'parsed' || parsed.patch.kind !== row.patch_kind) {
+    const reason =
+      parsed.status === 'parsed'
+        ? `payload declares ${parsed.patch.kind}`
+        : parsed.status === 'unsupported'
+          ? parsed.message
+          : parsed.issues.join('; ');
+    throw new CustomizationServiceRefusal(
+      'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+      `patch ${row.patch_id} (${row.patch_kind}) cannot be replayed: ${reason}`,
     );
   }
   return Object.freeze({
@@ -1867,6 +1887,22 @@ function patchRecord(row: PatchRow): PatchRecord {
     resultingReleaseRoot: row.resulting_release_root,
     resultingRevisionId: row.resulting_revision_id,
   });
+}
+
+function preparePatchForRecording(
+  patch: CustomizationPatch,
+): CustomizationPatch {
+  const bindFieldScreens = <
+    T extends Exclude<CustomizationPatch, { kind: 'changeSet' }>,
+  >(
+    member: T,
+  ): T =>
+    member.kind === 'addField'
+      ? { ...member, screens: 'record' as const }
+      : member;
+  return patch.kind === 'changeSet'
+    ? { ...patch, patches: patch.patches.map(bindFieldScreens) }
+    : bindFieldScreens(patch);
 }
 
 interface UpgradeRow {

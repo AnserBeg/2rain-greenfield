@@ -187,11 +187,15 @@ function definitionOf(bytes: Uint8Array) {
   ) as unknown as {
     entities: Record<string, unknown>[];
     fields: Record<string, unknown>[];
+    relations: Record<string, unknown>[];
+    stateMachines: Record<string, unknown>[];
     surfaces: Record<string, unknown>[];
   };
   return {
     entities: normalized.entities,
     fields: normalized.fields,
+    relations: normalized.relations,
+    stateMachines: normalized.stateMachines,
     surfaces: normalized.surfaces,
   };
 }

@@ -66,6 +66,7 @@ test('migrations upgrade accepted G1 and converge with the checked-in snapshot',
     assert.equal(
       migrations.at(-1)?.name,
       '0034_customization_launch_patch_kinds.sql',
+      '0035_customization_patch_kind_identifier.sql',
     );
     const admin = await pool.connect();
     try {
@@ -111,6 +112,7 @@ test('migrations upgrade accepted G1 and converge with the checked-in snapshot',
         '0032_customization_upgrades.sql',
         '0033_definer_search_paths.sql',
         '0034_customization_launch_patch_kinds.sql',
+        '0035_customization_patch_kind_identifier.sql',
       ]);
       assert.equal(upgraded.verified.length, migrations.length);
       await assertSchemaMatchesSnapshot(admin, checkedInSnapshot);
