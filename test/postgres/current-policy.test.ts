@@ -210,6 +210,146 @@ test('current policy evaluates live grants and scope under the non-admin runtime
             ),
         );
         assert.deepEqual(directlyVisible.rows, [{ principal_id: principalId }]);
+
+        const otherRoleId = 'a4000000-0000-4000-8000-000000000005';
+        const otherMembershipId = 'a5000000-0000-4000-8000-000000000006';
+        const nonMemberRoleId = 'a4000000-0000-4000-8000-000000000006';
+        await pool.query(
+          `INSERT INTO platform.current_policy_roles
+             (tenant_id, environment_id, role_id, role_key)
+           VALUES ($1,$2,$3,'non-member')`,
+          [tenantId, environmentId, nonMemberRoleId],
+        );
+        await pool.query(
+          `INSERT INTO platform.current_policy_roles
+             (tenant_id, environment_id, role_id, role_key)
+           VALUES ($1,$2,$3,'other-reader')`,
+          [tenantId, environmentId, otherRoleId],
+        );
+        const otherEnvironmentId = 'a2000000-0000-4000-8000-000000000003';
+        await pool.query(
+          `INSERT INTO platform.environments (tenant_id, id, slug)
+           VALUES ($1,$2,'other-environment')`,
+          [tenantId, otherEnvironmentId],
+        );
+        await pool.query(
+          `INSERT INTO platform.current_policy_roles
+             (tenant_id, environment_id, role_id, role_key)
+           VALUES ($1,$2,$3,'elsewhere')`,
+          [tenantId, otherEnvironmentId, otherRoleId],
+        );
+        const directory = (context: typeof trusted) =>
+          withTrustedRequestTransaction(
+            runtimePool,
+            context,
+            async (client) =>
+              (
+                await client.query(
+                  'SELECT * FROM platform.customization_permission_roles()',
+                )
+              ).rows,
+          );
+        assert.deepEqual(await directory(trusted), []);
+        await pool.query(
+          `INSERT INTO platform.current_policy_memberships
+             (tenant_id, environment_id, membership_id, principal_id, role_id)
+           VALUES ($1,$2,$3,$4,$5)`,
+          [
+            tenantId,
+            environmentId,
+            otherMembershipId,
+            principalId,
+            otherRoleId,
+          ],
+        );
+        await pool.query(
+          `INSERT INTO platform.current_policy_permission_grants
+             (tenant_id, environment_id, role_id, permission_id, resource_id)
+           VALUES ($1,$2,$3,'northstar.runtime:permission.customize_author',
+                   'northstar.runtime:customization.application')`,
+          [tenantId, environmentId, otherRoleId],
+        );
+        assert.deepEqual(
+          await directory(trusted),
+          [
+            { role_key: 'non-member', label: 'Non Member' },
+            { role_key: 'other-reader', label: 'Other Reader' },
+            { role_key: 'reader', label: 'Reader' },
+          ],
+          'the directory only returns roles from the caller’s environment',
+        );
+        assert.deepEqual(
+          await directory(
+            await new AuthenticatedRequestEntryAdapter(async () => ({
+              ...identity,
+              principalId: ungrantedPrincipalId,
+            })).enter({}),
+          ),
+          [],
+        );
+        assert.deepEqual(
+          await withTrustedRequestTransaction(
+            runtimePool,
+            trusted,
+            async (client) =>
+              (
+                await client.query(
+                  'SELECT role_key FROM platform.current_policy_roles ORDER BY role_key',
+                )
+              ).rows,
+          ),
+          [{ role_key: 'other-reader' }, { role_key: 'reader' }],
+        );
+        const operationId = 'northstar.app:operation.goods_receipt_create';
+        const narrowed = new PostgresCurrentPolicyGateway(
+          runtimePool,
+          RECEIPT_AUTHORIZATION_DEPENDENCY_BINDINGS,
+          [
+            {
+              operationId,
+              permissionId,
+              excludedRoleKeys: ['reader'],
+              tier: 'o0',
+              lifecycle: 'active',
+              precondition: {},
+              confirmation: 'none',
+              readBackQueryId: 'northstar.app:query.goods_receipt_get',
+              effect: {
+                kind: 'createRecordEffect',
+                schemaVersion: 'v6',
+                entity: {
+                  kind: 'entityReference',
+                  schemaVersion: 'v6',
+                  targetId: 'northstar.app:entity.goods_receipt',
+                },
+              },
+            },
+          ],
+        );
+        await requestEntry(identity, narrowed).run({}, async (view) => {
+          const decide = (
+            input: Readonly<Record<string, ImmutableJsonValue>>,
+          ) => authorizeCurrentPolicy(narrowed, view, permissionId, input);
+          const decisionInput = { operationId, legalEntityId };
+          assert.equal((await decide(decisionInput)).decision, 'DENY');
+          await pool.query(
+            `INSERT INTO platform.current_policy_permission_grants
+               (tenant_id, environment_id, role_id, permission_id, resource_id)
+             VALUES ($1,$2,$3,$4,$5)`,
+            [tenantId, environmentId, otherRoleId, permissionId, resourceId],
+          );
+          assert.equal((await decide(decisionInput)).decision, 'ALLOW');
+          assert.equal((await decide({ legalEntityId })).decision, 'DENY');
+          assert.equal(
+            (
+              await decide({
+                legalEntityId,
+                operationId: 'northstar.app:operation.unknown',
+              })
+            ).decision,
+            'DENY',
+          );
+        });
       } finally {
         await runtimePool.end();
       }

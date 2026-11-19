@@ -97,6 +97,8 @@ export {
   type VersionedAuthoredApplicationPackage,
   type VersionedNormalizedApplicationPackage,
   type VersionedPredicateExpression,
+  OperationRoleKeySchema,
+  isNarrowableOperationId,
 } from './schemas.js';
 export {
   canonicalAuthoredProjection,

@@ -64,6 +64,7 @@ export interface SemanticOperationRequestEnvelope {
 
 interface RegisteredOperationDefinitionBase {
   readonly confirmation: 'humanRequired' | 'none';
+  readonly excludedRoleKeys?: readonly string[];
   readonly infrastructure?: {
     readonly archiveRepresentation: 'nullableArchivedAt';
     readonly optimisticRevision: 'compareAndIncrement';
@@ -1370,6 +1371,7 @@ export function assertPinnedOperationDefinition(
   const hasInfrastructure = Object.hasOwn(value, 'infrastructure');
   const hasInputContract = Object.hasOwn(value, 'inputContract');
   const hasLabel = Object.hasOwn(value, 'label');
+  const hasExcludedRoles = Object.hasOwn(value, 'excludedRoleKeys');
   assertExactKeys(
     value,
     [
@@ -1377,6 +1379,7 @@ export function assertPinnedOperationDefinition(
       ...(hasInfrastructure ? ['infrastructure'] : []),
       ...(hasInputContract ? ['inputContract'] : []),
       ...(hasLabel ? ['label'] : []),
+      ...(hasExcludedRoles ? ['excludedRoleKeys'] : []),
     ],
     invalid,
   );
@@ -1387,6 +1390,23 @@ export function assertPinnedOperationDefinition(
       value.label.length > 240)
   )
     throw invalid('pinned operation label must be a bounded non-blank string');
+  if (
+    hasExcludedRoles &&
+    (!Array.isArray(value.excludedRoleKeys) ||
+      value.excludedRoleKeys.length === 0 ||
+      value.excludedRoleKeys.length > 128 ||
+      new Set(value.excludedRoleKeys).size !== value.excludedRoleKeys.length ||
+      value.excludedRoleKeys.some(
+        (key) =>
+          typeof key !== 'string' ||
+          key.length === 0 ||
+          key.length > 128 ||
+          key.trim().length === 0,
+      ))
+  )
+    throw invalid(
+      'pinned operation role restrictions must be distinct role keys',
+    );
   assertCanonicalId(value.operationId, 'operationId', invalid);
   assertCanonicalId(value.permissionId, 'permissionId', invalid);
   assertCanonicalId(value.readBackQueryId, 'readBackQueryId', invalid);
