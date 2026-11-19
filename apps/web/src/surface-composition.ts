@@ -1565,7 +1565,7 @@ function recordTasksOf(
   );
 }
 
-/** What the Record actions menu adds for a document: its other tasks, then print. */
+/** The document's other tasks, record links without their own context, and print. */
 export function renderCompositionMenu(
   surface: CompiledSurfaceDefinition,
   data: CompositionData,
@@ -1573,7 +1573,13 @@ export function renderCompositionMenu(
 ): string {
   const presentation = surface.composition!.presentation;
   if (!presentation) return '';
-  const tasks = presentation.progression ? recordTasksOf(surface, data) : [];
+  const tasks = recordTasksOf(surface, data).filter(
+    (action) =>
+      presentation.progression ||
+      (action.navigate &&
+        presentation.recordActions === 'progressive' &&
+        !presentation.context),
+  );
   const printLink = presentation.print
     ? `<a class="secondary-action composition-print" href="${h(compositionPrintHref(data))}">Print ${h(presentation.print.label.toLowerCase())}</a>`
     : '';

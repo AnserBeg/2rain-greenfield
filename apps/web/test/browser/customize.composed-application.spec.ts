@@ -276,10 +276,13 @@ test('a person builds Goods Receipt Inspection with the Customize screen and use
           ['Item', 'Field notebook', 'Field notebook'],
           ['Location', 'Calgary', 'Calgary warehouse'],
         ] as const) {
-          await page
-            .getByRole('combobox', { name: label, exact: true })
-            .fill(term);
+          const picker = page.getByRole('combobox', {
+            name: label,
+            exact: true,
+          });
+          await picker.fill(term);
           await page.getByRole('option').filter({ hasText: result }).click();
+          await expect(picker).toHaveAttribute('data-selected-label', result);
         }
         await page
           .getByLabel('Line 1 characteristic', { exact: true })
@@ -305,9 +308,17 @@ test('a person builds Goods Receipt Inspection with the Customize screen and use
           page.getByRole('cell', { name: 'Width', exact: true }),
         ).toBeVisible();
         await page.getByLabel('Record actions', { exact: true }).click();
-        await expect(
-          page.getByRole('link', { name: 'Open Goods receipt', exact: true }),
-        ).toBeVisible();
+        const openReceipt = page.getByRole('link', {
+          name: 'Open Goods receipt',
+          exact: true,
+        });
+        await expect(openReceipt).toBeVisible();
+        await openReceipt.click();
+        await expect(page).toHaveURL(
+          (url) => url.searchParams.get('record') === receipt.recordId,
+        );
+        await page.goto(detailUrl);
+        await page.getByLabel('Record actions', { exact: true }).click();
         await page.getByLabel('More actions', { exact: true }).click();
         await page
           .getByRole('button', { name: 'Archive', exact: true })

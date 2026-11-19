@@ -1,70 +1,67 @@
-# WORKFLOW-1 — goods receipt inspection workflow
+# WORKFLOW-1 — goods receipt workflows
 
-Status — slice 1 integrated on 2026-11-18, host only. Fable 5.2 approved the amended ADR to build in slices. The next slices require an orchestrator go-ahead.
+Status — slice 1 integrated at `8ffab635`. Slice 2 integrated from `ad81cb91` after [CI 44477729782](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44477729782) passed. The migration and verified activation receipt hook are Critical. The orchestrator owns the trunk read. Slice 3 waits for the CUSTOMIZE-3 formula-family ADR and orchestrator authorization.
 
 ## Claims
 
-1. Each attempt uses a worker with 16 MiB fixed linear memory, a 4 MiB QuickJS heap ceiling, a cooperative CPU budget and an independent watchdog. The guest has no ambient network, filesystem, real clock or random APIs.
-2. The issued release view supplies the typed SDK and its callable catalog. The supervisor checks canonical JSON, target grants and inputs before exposing a request.
-3. Journal reload preserves the pending request and completed prefix through every mocked effect. An exact result retry is idempotent. Changed requests and unconsumed prefixes quarantine with the cursor preserved.
-4. Type-check and lint precede emission. The run-twice harness uses fixtures for the first run and a fresh replay that consumes the complete journal and yields no new effect.
+1. A fresh bounded isolate yields one admitted SDK call at a time. It refuses ambient I/O, the real clock and randomness. Run-twice verification exercises deterministic replay.
+2. A verified activation captures visible receipt outbox IDs in one statement. The worker joins posted receipts, validates their scope and source pin, and commits each disposition and its starts together.
+3. Scoped outbox pages have a measured row bound. A scan wraps for out-of-order commits and durable dispositions prevent duplicate starts after restart.
+4. The original engine, host, SDK, executable, release and fence bind a run. A request and outbox commit together. The exact semantic receipt recovers a write committed before the result journal.
+5. The automation principal and activation approver's captured and current authority govern Tier A effects. A stale pin suspends the run. Bulk same-pin retry and cancel preserve evidence.
 
 ## Decisions
 
-- [ADR-0073](../../decisions/ADR-0073-workflow-isolate-and-authority.md) records the 2026-11-18 bakeoff. Both QuickJS candidates passed isolation, effect and limit probes. Emscripten 0.32.0 also admitted host-owned fixed linear memory. The pin shipped on npm on 2026-02-16.
-- The pinned Party fixture exercises Q0 and O0 calls. Slice 1 admits SDK operations with supported compiled input contracts and uses the existing query and mutation input validators. TypeScript uses the repository's existing 5.9.3 pin for the compile gate.
-- Every Tier B operation, reachable intersection with a published Tier B dependency, or unknown input/effect intersection requires exact human confirmation. The owning Semantic Operation alone can produce a Tier B fact.
-- The later activation hook is a Critical touch of the 0005 receipts table. It runs only when the incoming or outgoing release declares workflows. The operator gets bulk cancel and same-pin retry. Successor retry is deferred and Gate N2 wording sits with the owner.
-- Earlier canonical-model, compiler, verifier, runtime-view and host prototype edits were preserved at `cd59ab9b` on `wip/WORKFLOW-1-later-slices`.
+- [ADR-0073](../../decisions/ADR-0073-workflow-isolate-and-authority.md) selected QuickJS Emscripten 0.32.0. Both candidates passed isolation, dispatch and limit probes. Emscripten also accepted fixed host-owned WASM memory.
+- Every Tier B operation, reachable dependency intersection and unknown input or effect intersection needs exact human confirmation. Only the owning operation can produce a Tier B fact.
+- Plan §12.5 records the owner's v1 remedy. A person retries only after the original pin is verified active again or cancels the run.
+- A tenant-authored Receipt Review with a stored receipt UUID proves the first Tier A run. CUSTOMIZE-4's Inspection and typed link are scheduled for a later slice.
+- The verifier and floor belong to slice 3. Timers, approvals and the browser journey belong to slice 4. Documents, communication and email, and connectors remain later N2 work.
 
 ## Gates
 
-- Nine focused host tests cover cooperative and watchdog pre-emption, heap and ambient API refusal, invalid and repeated dispatch, refused grants and inputs, journal reload, replay quarantine and unmocked calls.
-- The compiled-path smoke verified that a plain Node worker can load the supervisor-resolved engine and yield a call.
-- The host test is registered in the architecture test inventory for the integration suite.
-- [CI 44456002463](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44456002463) passed all 16 jobs on packet tip `7daf2a52` over `ef080dad`, including dependency and secret scans. Slice 1 changes no Critical path.
-- Slice 2 owns the migration and event consumer. Slice 3 owns verifier admission and reader floor. Slice 4 owns durable timers, approvals and the browser journey.
-- The rest of N2 includes document templates, business-object-linked communication and consent, and email behind a connector with deduplicated delivery and reconciliation.
+- Slice 1 [CI 44456002463](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44456002463) passed 16 jobs at `7daf2a52`, including dependency and secret scans.
+- Slice 2 [CI 44469719873](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44469719873) covers the migration, recorded receipt identity, crash after the outbox and operation commits, grants, and rollback and same-pin remedy. The PostgreSQL fixture stages its definition with test privileges. It passed in 104 seconds.
+- `0036_workflow_substrate.sql` regenerates the platform snapshot. The receipt fixture measures the no-workflow hook against the same unhooked receipt insert.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WORKFLOW-1",
-  "base": "7df1ea960f03528926be71e55cbbea7cfcbb77a3",
-  "head": "d12d0279d46497ac3885e36ef48ffa250159b814",
+  "base": "81ba7405e7512a806882f9ea3cff51af8c7115d9",
+  "head": "b361c9848932c74050014e0bcd0d50073d999674",
   "changedPaths": [
+    "db/migrations/0036_workflow_substrate.sql",
+    "db/schema.snapshot.json",
+    "packages/domain/src/purchasing/receipt-posted-event.ts",
     "packages/postgres-provider/package.json",
     "packages/postgres-provider/src/module-runtime-interpreter.ts",
-    "packages/postgres-provider/src/workflow-compile.ts",
-    "packages/postgres-provider/src/workflow-isolate-worker.ts",
-    "packages/postgres-provider/src/workflow-isolate.ts",
-    "packages/postgres-provider/src/workflow-run.ts",
-    "packages/postgres-provider/src/workflow-sdk.ts",
-    "packages/runtime/src/semantic-query-gateway.ts",
-    "pnpm-lock.yaml",
+    "packages/postgres-provider/src/workflow-consumer.ts",
+    "packages/postgres-provider/src/workflow-execution.ts",
+    "packages/postgres-provider/src/workflow-gateway.ts",
+    "packages/postgres-provider/src/workflow-worker.ts",
+    "test/architecture/release-persistence-boundary.test.ts",
     "test/architecture/repository-hygiene.test.ts",
-    "test/integration/workflow-host.test.ts"
+    "test/architecture/tenant-completeness.manifest.json",
+    "test/architecture/tenant-completeness.test.ts",
+    "test/postgres/inventory-storage.test.ts",
+    "test/postgres/migrations.test.ts",
+    "test/postgres/module-storage-transition.test.ts",
+    "test/postgres/trust-substrate.test.ts",
+    "test/postgres/workflow-consumer.test.ts"
   ],
   "symbols": [
     {
-      "path": "packages/postgres-provider/src/workflow-compile.ts",
-      "name": "compileWorkflowBody"
+      "path": "packages/postgres-provider/src/workflow-consumer.ts",
+      "name": "PostgresWorkflowConsumer"
     },
     {
-      "path": "packages/postgres-provider/src/workflow-isolate.ts",
-      "name": "runWorkflowIsolate"
+      "path": "packages/postgres-provider/src/workflow-execution.ts",
+      "name": "PostgresWorkflowExecution"
     },
     {
-      "path": "packages/postgres-provider/src/workflow-run.ts",
-      "name": "InMemoryWorkflowRun"
-    },
-    {
-      "path": "packages/postgres-provider/src/workflow-run.ts",
-      "name": "verifyWorkflowReplay"
-    },
-    {
-      "path": "packages/postgres-provider/src/workflow-sdk.ts",
-      "name": "generateWorkflowSdk"
+      "path": "packages/postgres-provider/src/workflow-worker.ts",
+      "name": "PostgresWorkflowWorker"
     }
   ]
 }
@@ -72,4 +69,5 @@ Status — slice 1 integrated on 2026-11-18, host only. Fable 5.2 approved the a
 
 ## Test it yourself
 
-Run `node --import tsx --test test/integration/workflow-host.test.ts`. Expect nine passing tests and observe the two distinct runtime budget refusals, journal restoration at each call, and quarantine after a replay mismatch. Run `scripts/check-records.sh` to validate the record.
+- Slice 1. Run `node --import tsx --test test/integration/workflow-host.test.ts`. Expect nine passing tests, including the independent watchdog and replay quarantine.
+- Slice 2. Run `node scripts/run-with-test-lock.mjs exclusive -- node --import tsx --test test/postgres/workflow-consumer.test.ts`. Expect one linked Receipt Review across restart, a suspended run that retries only on the same pin, and a refused grant that leaves no result.

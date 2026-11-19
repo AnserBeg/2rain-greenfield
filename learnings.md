@@ -773,3 +773,8 @@ How to apply: capture the submitted values, disable the task's controls while it
 Date: 2026-11-18
 Why: Recompiling a historical patch made an unreadable kind prevent rollback of an already verified release.
 How to apply: Reverse the approved release pair using its stored artifacts and digests. Exercise status, boot and rollback with a future patch kind. The deployment floor is the newest patch parser or surface reader a tenant has used. [CRITFIX-B](docs/execution/packets/CRITFIX-B.md)
+
+## Guard immutable inserts under the scope lock
+
+2026-11-19. PostgreSQL rejects `ON CONFLICT` on tables with INSERT or UPDATE rules, including an UPDATE rule that rejects changes to immutable workflow instances.
+Check for the existing key and insert while holding the scope lock. Keep the unique constraint as the final check. [WORKFLOW-1](docs/execution/packets/WORKFLOW-1.md)
