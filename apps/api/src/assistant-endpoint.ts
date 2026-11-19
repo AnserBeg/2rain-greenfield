@@ -563,6 +563,7 @@ export function createAssistantEndpoint(
     const preamble = await agentPreamble(conversation.session, screen);
     const run = await runOperationsAgent({
       model,
+      executeAfterApproval: true,
       session: conversation.session,
       request: text,
       meter: conversation.meter,
