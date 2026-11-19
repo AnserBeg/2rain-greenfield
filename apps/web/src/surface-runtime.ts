@@ -831,6 +831,7 @@ async function declaredListData(
       manifest.surfaces,
     )?.launcher;
     const queues = queueCountsFor(view);
+    const countedQueues = launcher ? countedQueueTileIds(launcher) : new Set<string>();
     const unfiltered =
       !state.search &&
       !state.includeArchived &&
@@ -841,6 +842,7 @@ async function declaredListData(
       const queue = unfiltered
         ? launcher?.tiles.find(
             (tile) =>
+              countedQueues.has(tile.tileId) &&
               tile.surface === surfaceId && tile.view === listView.viewId,
           )
         : undefined;
@@ -2965,19 +2967,11 @@ const loadedQueueCounts = new WeakMap<
   ReadonlyMap<string, number | null>
 >();
 
-async function loadQueueCounts(
-  view: RuntimeViewContract.RequestRuntimeView,
-  navigation: CompiledNavigationTree | null,
-  surfaces: readonly CompiledSurfaceDefinition[],
-  queryGateway: SemanticQueryGateway,
-  company: string | null,
-  now: Date,
-): Promise<void> {
-  // The landing launcher (the first in navigation order: Today) declares the
-  // day's queues. Without one, a page shows none.
-  const launcher = landingSurface(navigation, surfaces)?.launcher;
-  if (!launcher) return;
-  const counted = new Set(
+/** The bounded queues whose counts the batched loader actually reads. */
+function countedQueueTileIds(
+  launcher: NonNullable<CompiledSurfaceDefinition['launcher']>,
+): ReadonlySet<string> {
+  return new Set(
     [...launcher.tiles]
       .sort(
         (left, right) =>
@@ -2991,6 +2985,21 @@ async function loadQueueCounts(
       .slice(0, QUEUE_COUNT_LIMIT)
       .map((tile) => tile.tileId),
   );
+}
+
+async function loadQueueCounts(
+  view: RuntimeViewContract.RequestRuntimeView,
+  navigation: CompiledNavigationTree | null,
+  surfaces: readonly CompiledSurfaceDefinition[],
+  queryGateway: SemanticQueryGateway,
+  company: string | null,
+  now: Date,
+): Promise<void> {
+  // The landing launcher (the first in navigation order: Today) declares the
+  // day's queues. Without one, a page shows none.
+  const launcher = landingSurface(navigation, surfaces)?.launcher;
+  if (!launcher) return;
+  const counted = countedQueueTileIds(launcher);
   // Every tile is checked for eligibility (without a read or a denial); the
   // first three are counted. A tile left out is a queue not shown.
   const tiles = await launcherTiles(
