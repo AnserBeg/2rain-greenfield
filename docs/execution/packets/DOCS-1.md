@@ -1,45 +1,34 @@
 # DOCS-1 — documents, files, templates and signatures
 
-Slice 0 is a docs-only proposal for plan N2-02. Implementation stops pending the
-orchestrator's Fable ruling. No Critical path touched.
+Slice 0 and the binding Fable amendment are docs-only. Slice 1a is authorized.
 
-## Claims for the design read
+## Claims
 
-1. The Documents capability stores scoped immutable versions and governs access through an
-   actual business record.
-2. Business owners can add file and signature fields, upload categories and PDF templates
-   through the approved customization path.
-3. A signature attests to one exact PDF version. Retention and recovery preserve its
-   evidence or enforce an approved purge.
+1. Documents store immutable scoped versions and inherit live permission from an actual record.
+2. Customize adds file fields through an approved release.
+3. A signing receipt attests to an exact version and protects its bytes while retained.
 
 ## Decisions
 
-- [ADR-0078](../../decisions/ADR-0078-governed-documents-files-templates-and-signatures.md)
-  proposes bounded PostgreSQL `bytea` storage and a content gate before any link publishes.
-- Templates use pinned Semantic Queries and sandboxed PDFKit. Document writes use Semantic
-  Operations.
-- The first feature-bearing release proposes surface floor 28 and must reproduce existing
-  releases with Documents absent.
-- The charter named ADR-0075. Main already owns ADR-0075 and ADR-0076, and CUSTOMIZE-3
-  claims ADR-0077 in [PR #115](https://github.com/AnserBeg/2rain-greenfield/pull/115).
+- [ADR-0078](../../decisions/ADR-0078-governed-documents-files-templates-and-signatures.md) sets the design after the 2026-11-19 Fable read.
+- PostgreSQL stores bounded blobs. Production upload waits for a scanner. The local demo uses a labelled pass-through.
+- The first Documents slice takes the next free surface reader rung at integration. Templates and signatures each get their own rung.
+- Tenant-shared documents can link down to company records under live read checks on both targets.
+- Templates render with pinned PDFKit in an OS sandbox. Signing waits for sign-in.
 
 ## Slices
 
-0. Design and orchestrator read. See the check below.
-1. Storage, file fields and customer upload categories.
-2. Custom templates and server-rendered PDF.
-3. Signature fields, capture and verification.
+0. Design and Fable amendments.
+1a. Internal attachments and file fields.
+1b. Customer upload requests, following the external-identity ruling.
+2. Templates and PDF.
+3. Signatures, following sign-in.
 
 ## Gates
 
-- Run `scripts/check-records.sh` for the docs-only change. Hosted CI runs on the integrated
-  SHA.
-- The Fable read is the implementation gate. This slice makes no runtime claims.
+Run `scripts/check-records.sh` for the docs-only amendment. No runtime guarantee is claimed by this checkpoint.
 
 ## Test it yourself
 
-Run `scripts/check-records.sh` from the repository root. Expect exit status zero. Open
-[the proposal](../../decisions/ADR-0078-governed-documents-files-templates-and-signatures.md)
-and trace three cases. An upload must remain private until its scan passes. A user from a
-second company must be refused an existing version link. A signature must still verify
-against the original PDF after a successor is issued.
+Read ADR-0078 and confirm that production uploads wait for scanning, a shared document can
+link to a company without exposing the governing record, and signing waits for sign-in.
