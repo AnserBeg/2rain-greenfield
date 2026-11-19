@@ -174,6 +174,29 @@ export function lowerBaseProjectionPayloads(
     compilerSemanticProfileVersion,
     verificationPackageRevision,
   );
+  const confirmationRequiredFor = [
+    ...verificationPackageRevision.entities
+      .filter(
+        (e) =>
+          'requiresAssistantConfirmation' in e &&
+          e.requiresAssistantConfirmation,
+      )
+      .map((e) => e.entityId),
+    ...verificationPackageRevision.fields
+      .filter(
+        (f) =>
+          'requiresAssistantConfirmation' in f &&
+          f.requiresAssistantConfirmation,
+      )
+      .map((f) => f.fieldId),
+  ];
+  const agentCapability =
+    runtimeCapabilities[PROJECTION_FAMILY_IDS.agentDiscovery];
+  const agentFloor = Math.max(
+    agentCapability.minimumVersion,
+    confirmationRequiredFor.length > 0 ? 2 : 1,
+    hasSavedListLayouts(verificationPackageRevision) ? 3 : 1,
+  );
   const plans = [
     plan(
       PROJECTION_FAMILY_IDS.semanticModel,
@@ -223,13 +246,14 @@ export function lowerBaseProjectionPayloads(
       PROJECTION_FAMILY_IDS.agentDiscovery,
       namespace,
       packageScope,
-      agentDiscoveryPayload(packageRevision, verificationPackageRevision),
+      agentDiscoveryPayload(
+        packageRevision,
+        verificationPackageRevision,
+        confirmationRequiredFor,
+      ),
       undefined,
-      hasSavedListLayouts(verificationPackageRevision)
-        ? {
-            capabilityId: 'northstar.runtime:capability.agent-discovery',
-            minimumVersion: 2,
-          }
+      agentFloor > agentCapability.minimumVersion
+        ? { ...agentCapability, minimumVersion: agentFloor }
         : undefined,
     ),
     plan(
@@ -1389,6 +1413,7 @@ function policyReferencesPayload(
 function agentDiscoveryPayload(
   packageRevision: NormalizedApplicationPackage,
   original: VersionedNormalizedApplicationPackage,
+  confirmationRequiredFor: readonly string[],
 ): unknown {
   const declared = new Map(
     original.queries.map((query) => [String(query.queryId), query]),
@@ -1396,6 +1421,7 @@ function agentDiscoveryPayload(
   const listPresets = agentListPresets(original);
   return {
     kind: 'agentDiscoveryPayload',
+    ...(confirmationRequiredFor.length ? { confirmationRequiredFor } : {}),
     operations: packageRevision.operations.map((operation) => ({
       operationId: operation.operationId,
       readBackQueryId: operation.readBack.targetId,

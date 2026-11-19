@@ -661,7 +661,7 @@ test('a saved Location view compiles its own columns, sort and declared filter',
     .compiled.bundle.releaseManifest;
   for (const [familyId, version] of [
     [PROJECTION_FAMILY_IDS.surfaceManifest, 24],
-    [PROJECTION_FAMILY_IDS.agentDiscovery, 2],
+    [PROJECTION_FAMILY_IDS.agentDiscovery, 3],
   ] as const) {
     const requirement = projections.find(
       (projection) => projection.familyId === familyId,

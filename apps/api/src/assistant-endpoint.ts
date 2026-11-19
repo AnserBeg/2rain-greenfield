@@ -691,7 +691,7 @@ export function createAssistantEndpoint(
           target: step.targetLabel
             ? `${step.targetLabel} (${step.target})`
             : step.target,
-          inputs: plainInputs(step.inputs, step.optionFields ?? []),
+          inputs: inputRows(step.inputs, step.fieldKinds ?? {}),
         })),
       };
       conversation.pending = { planId: plan.planId, digest, card, decide };
@@ -851,42 +851,63 @@ export function stepLabel(event: AgentEvent): string | null {
   }
 }
 
-function plainInputs(
+function inputRows(
   inputs: Readonly<Record<string, unknown>>,
-  options: readonly string[],
-): string {
-  const parts: string[] = [];
-  for (const bag of ['values', 'patch', 'relations', 'arguments'] as const) {
+  fieldKinds: Readonly<Record<string, string>>,
+): { field: string; type: string; value: string }[] {
+  return ['values', 'patch', 'relations', 'arguments'].flatMap((bag) => {
     const values = inputs[bag];
-    if (values === undefined || values === null) continue;
-    if (typeof values !== 'object' || Array.isArray(values)) {
-      parts.push(`${bag}: ${shownValue(values)}`);
-      continue;
-    }
-    for (const [id, value] of Object.entries(values as object)) {
-      if (value === undefined) continue;
-      parts.push(
-        `${local(id).replaceAll('_', ' ')}: ${shownValue(value, options.includes(id))}`,
-      );
-    }
-  }
-  return parts.join(' · ');
-}
-
-/**
- * A bound value as the person reads it. Only a declared identifier (an id
- * with a namespace, `northstar.app:option.net_30`) is shortened; a number,
- * a date or free text is shown exactly as bound (10.25 stays 10.25).
- */
-function shownValue(value: unknown, option = false): string {
-  if (value === null) return 'clear';
-  if (typeof value === 'object' && value !== null) {
-    if (!Array.isArray(value) && 'fromStep' in value)
-      return `the record step ${String((value as { fromStep: number }).fromStep)} makes`;
-    return JSON.stringify(value);
-  }
-  const text = String(value);
-  return option ? local(text).replaceAll('_', ' ') : text;
+    if (!values || typeof values !== 'object' || Array.isArray(values))
+      return [];
+    return Object.entries(values).map(([id, value]) => {
+      const field = local(id)
+        .replaceAll('_', ' ')
+        .replace(/([a-z])([A-Z])/gu, '$1 $2')
+        .toLowerCase();
+      if (value === null) return { field, type: 'clear', value: 'clears' };
+      if (typeof value === 'object' && 'fromStep' in value)
+        return {
+          field,
+          type: 'record',
+          value: `the record step ${String(value.fromStep)} makes`,
+        };
+      const kind = fieldKinds[id];
+      if (kind === 'enumFieldType')
+        return {
+          field,
+          type: 'choice',
+          value: local(String(value)).replaceAll('_', ' '),
+        };
+      if (kind === 'reference' || bag === 'relations')
+        return { field, type: 'record', value: String(value) };
+      if (
+        [
+          'moneyFieldType',
+          'quantityFieldType',
+          'exactDecimalFieldType',
+          'integerFieldType',
+        ].includes(kind ?? '')
+      )
+        return {
+          field,
+          type: kind === 'integerFieldType' ? 'integer' : 'decimal',
+          value: String(value),
+        };
+      const type = kind
+        ? kind.replace(/FieldType$/u, '')
+        : typeof value === 'string'
+          ? 'text'
+          : typeof value;
+      return {
+        field,
+        type,
+        value: JSON.stringify(value).replace(
+          /[\p{Cf}\p{Zl}\p{Zp}]/gu,
+          (char) => `\\u{${char.codePointAt(0)!.toString(16)}}`,
+        ),
+      };
+    });
+  });
 }
 
 function planDigest(plan: PlanForApproval, companyId: string): string {
