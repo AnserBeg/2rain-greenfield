@@ -61,7 +61,12 @@ import {
 } from '../../packages/compiler/src/index.js';
 import { renderedDiffDigest } from '../../packages/customization/src/index.js';
 import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
-import { trustedContextForRequestRuntimeView } from '../../packages/runtime/src/request-runtime-view.js';
+import { loadAuthoritativeSnapshot } from '../../packages/postgres-provider/src/request-runtime-view-service.js';
+import {
+  SUPPORTED_RUNTIME_CAPABILITIES,
+  REQUEST_RUNTIME_PROJECTION_FAMILIES,
+  trustedContextForRequestRuntimeView,
+} from '../../packages/runtime/src/request-runtime-view.js';
 import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   NoSuchRegisteredQueryError,
@@ -1382,11 +1387,12 @@ test(
           const local = await world.create(type, { name: 'Local review' });
           const buyer = { actor: 'buyer' } as const;
           const { tenantId, environmentId, principalId } = app.runtime.identity;
-          const scoped = await pool.query(
-            'UPDATE platform.current_policy_memberships SET legal_entity_id=$4 WHERE tenant_id=$1 AND environment_id=$2 AND principal_id=$3 AND revoked_at IS NULL',
-            [tenantId, environmentId, principalId, COMPANY],
-          );
-          assert.ok(scoped.rowCount);
+          const setBuyerCompany = (company: string) =>
+            pool.query(
+              'UPDATE platform.current_policy_memberships SET legal_entity_id=$4 WHERE tenant_id=$1 AND environment_id=$2 AND principal_id=$3 AND revoked_at IS NULL',
+              [tenantId, environmentId, principalId, company],
+            );
+          assert.ok((await setBuyerCompany(COMPANY)).rowCount);
           const foreignInput = { recordId: foreign, expectedRevision: 1 };
           const denied = { name: 'SemanticOperationPolicyDeniedError' };
           await assert.rejects(
@@ -1416,16 +1422,20 @@ test(
             }),
             { code: 'MODULE_INPUT_MALFORMED' },
           );
-          const updated = await world.invoke(
-            `${type}_update`,
-            {
-              recordId: local.recordId,
-              expectedRevision: 1,
-              patch: { [field]: 'Edited review' },
-            },
-            buyer,
-          );
+          const idempotencyKey = randomUUID();
+          const updateLocal = () =>
+            world.invoke(
+              `${type}_update`,
+              {
+                recordId: local.recordId,
+                expectedRevision: 1,
+                patch: { [field]: 'Edited review' },
+              },
+              { ...buyer, idempotencyKey },
+            );
+          const updated = await updateLocal();
           assert.equal(updated.readBack?.revision, 2);
+          assert.deepEqual((await updateLocal()).trust, updated.trust);
           for (const [index, effect] of [
             'action_pass',
             'archive',
@@ -1441,6 +1451,12 @@ test(
             );
             assert.equal(result.readBack?.revision, index + 3);
           }
+          await setBuyerCompany(foreignCompany);
+          await assert.rejects(
+            updateLocal(),
+            denied,
+            'a replay also requires the stored company grant',
+          );
           // Revision one is still current after every refused foreign write.
           assert.equal(
             (
@@ -1519,6 +1535,33 @@ test(
           assert.equal((await opened.service.status()).patches.length, 1);
           await opened.service.approve(drafted.patchId);
           await opened.service.activate(drafted.patchId);
+          const surface = REQUEST_RUNTIME_PROJECTION_FAMILIES.surface;
+          const metricsReader = {
+            ...SUPPORTED_RUNTIME_CAPABILITIES,
+            [surface]: {
+              ...SUPPORTED_RUNTIME_CAPABILITIES[surface]!,
+              maximumSupportedVersion: 25,
+            },
+          };
+          const readerPool = rolePool(
+            options.databaseUrl,
+            'north_star_runtime',
+            1,
+          );
+          try {
+            const context = await trustedContext(app.runtime.identity);
+            await assert.rejects(
+              withTrustedRequestTransaction(readerPool, context, (client) =>
+                loadAuthoritativeSnapshot(client, context, metricsReader),
+              ),
+              {
+                code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
+                message: /requires version 26 and this runtime supports 25/u,
+              },
+            );
+          } finally {
+            await readerPool.end();
+          }
           const world = worldOver(app.runtime, String(connection.database));
           const { receipt, supplier, item, location } =
             await inspectionLinkRecords(world.create, seededId);

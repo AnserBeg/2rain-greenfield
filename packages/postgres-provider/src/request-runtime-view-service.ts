@@ -26,6 +26,7 @@ import {
   PIN_VALIDATION_RESULT_VERSION,
   PINNED_RUNTIME_CONTEXT_VERSION,
   REQUEST_RUNTIME_PROJECTION_FAMILIES,
+  SUPPORTED_RUNTIME_CAPABILITIES,
   parsePinnedRuntimeContextEnvelope,
   unsupportedRuntimeCapability,
   type ImmutableJsonValue,
@@ -512,9 +513,10 @@ export class PostgresRequestRuntimeViewService implements RequestRuntimeDefiniti
   }
 }
 
-async function loadAuthoritativeSnapshot(
+export async function loadAuthoritativeSnapshot(
   client: PoolClient,
   context: TrustedRequestContext,
+  readerCapabilities = SUPPORTED_RUNTIME_CAPABILITIES,
 ): Promise<LoadedRequestRuntimeDefinition> {
   // All mutable pointer and immutable release/artifact facts are read by this
   // one statement, so READ COMMITTED cannot split the fill across snapshots.
@@ -522,12 +524,13 @@ async function loadAuthoritativeSnapshot(
     context.tenantId,
     context.environmentId,
   ]);
-  return definitionFromSnapshotRows(context, result.rows);
+  return definitionFromSnapshotRows(context, result.rows, readerCapabilities);
 }
 
 function definitionFromSnapshotRows(
   context: TrustedRequestContext,
   rows: readonly SnapshotRow[],
+  readerCapabilities: typeof SUPPORTED_RUNTIME_CAPABILITIES,
 ): LoadedRequestRuntimeDefinition {
   const first = rows[0];
   if (!first) {
@@ -786,6 +789,7 @@ function definitionFromSnapshotRows(
     const unsupported = unsupportedRuntimeCapability(
       familyId,
       requiredRuntimeCapability,
+      readerCapabilities,
     );
     if (unsupported !== null) {
       throw loadError('UNSUPPORTED_RUNTIME_CAPABILITY', unsupported);
