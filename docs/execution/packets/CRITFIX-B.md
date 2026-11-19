@@ -21,18 +21,18 @@ Deploy only versions at or above the newest patch-parser and surface-reader floo
 ```record-claim
 {
   "schemaVersion":"northstar.record-claim/v1","packet":"CRITFIX-B",
-  "base":"ef080dad017f0662bca31d7e3155d43d47922a4c","head":"4668f4d7354e48f43bf21ac6124f4f914dbe8cf4",
+  "base":"ef080dad017f0662bca31d7e3155d43d47922a4c","head":"17c53d4ff54e0ac93db289c00183770697c6260c",
   "changedPaths":[
     "apps/api/scripts/customize-cli.ts", "apps/api/src/main.ts", "apps/web/scripts/unbound-permission-acknowledgement.ts",
     "apps/web/src/customize-screen.ts", "db/migrations/0034_customization_upgrade_bindings.sql", "db/schema.snapshot.json",
-    "packages/compiler/src/index.ts", "packages/compiler/src/protocol.ts", "packages/customization/src/candidate.ts",
-    "packages/customization/src/sandbox-worker.ts", "packages/customization/src/sandbox.ts", "packages/postgres-provider/src/active-release-root.ts",
-    "packages/postgres-provider/src/composed-application-runtime.ts", "packages/postgres-provider/src/customization-lineage.ts", "packages/postgres-provider/src/customization-service.ts",
-    "packages/postgres-provider/src/release-approval-service.ts", "test/agent/assistant-endpoint.test.ts", "test/architecture/release-persistence-boundary.test.ts",
-    "test/architecture/tenant-completeness.manifest.json", "test/architecture/tenant-completeness.test.ts", "test/evidence/CRITFIX-B.expected-red.json",
-    "test/evidence/policy-unbound-refusal.expected-red.json", "test/postgres/customization.test.ts", "test/postgres/inventory-storage.test.ts",
-    "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts", "test/postgres/trust-substrate.test.ts",
-    "test/unit/customization.test.ts", "test/unit/customize-screen.test.ts"
+    "packages/compiler/src/compiler.ts", "packages/compiler/src/index.ts", "packages/compiler/src/protocol.ts",
+    "packages/customization/src/candidate.ts", "packages/customization/src/sandbox-worker.ts", "packages/customization/src/sandbox.ts",
+    "packages/postgres-provider/src/active-release-root.ts", "packages/postgres-provider/src/composed-application-runtime.ts", "packages/postgres-provider/src/customization-lineage.ts",
+    "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/release-approval-service.ts", "test/agent/assistant-endpoint.test.ts",
+    "test/architecture/release-persistence-boundary.test.ts", "test/architecture/tenant-completeness.manifest.json", "test/architecture/tenant-completeness.test.ts",
+    "test/evidence/CRITFIX-B.expected-red.json", "test/evidence/policy-unbound-refusal.expected-red.json", "test/postgres/customization.test.ts",
+    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts",
+    "test/postgres/trust-substrate.test.ts", "test/unit/customization.test.ts", "test/unit/customize-screen.test.ts"
   ],
   "symbols":[{"path":"packages/postgres-provider/src/customization-lineage.ts","name":"readCustomizationLineage"}]
 }
