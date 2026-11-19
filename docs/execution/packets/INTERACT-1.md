@@ -13,7 +13,7 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 
 - 0: merged `b218bf03`, PR #88, [CI 44393050211](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44393050211) green.
 - 1: merged `d775c078`, PR #93, [CI 44407145880](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44407145880) green.
-- 2: ready for full CI. Local format, typecheck, lint and focused units pass.
+- 2: ready for full CI. Focused units pass; GitHub CI is the acceptance gate.
 
 ## Decisions
 
@@ -22,15 +22,15 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 - Normal git metadata is read-only; isolated metadata in `/tmp` tracks this chartered worktree.
 - Exact-minute browser fills canonicalize zero seconds without changing the instant (CI reproduction passed).
 - Task preview budgets: measured 2/46/3/0 in CI 44426260000; +5 statements buys governed stock/location reads. Confirmation unchanged.
-- Accepted recovery, CRITFIX-A and the standalone workflow host are synchronized; no owned Critical changes.
+- Accepted saved views and list columns are synchronized; no owned Critical changes.
 - Mid-packet checkpoint: no whole-app review trigger; no new correctness domain or fan-out.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "INTERACT-1",
-  "base": "8ffab635ac7e6ca5c288ed4e3265bebf79654141",
-  "head": "5523e62ffc42871271a2c8d51c381b6bba766b9f",
+  "base": "4efe21f72b91dc51f1f9528dc47f600c05f0f3a3",
+  "head": "2b1bc6ee8e5a3e5e3c7a6a1186b404edf4ff1125",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
