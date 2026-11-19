@@ -52,6 +52,7 @@ import {
 } from '../../packages/compiler/src/index.js';
 import { renderedDiffDigest } from '../../packages/customization/src/index.js';
 import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
+import { trustedContextForRequestRuntimeView } from '../../packages/runtime/src/request-runtime-view.js';
 import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   NoSuchRegisteredQueryError,
@@ -205,6 +206,138 @@ test(
           );
           await opened.service.rollback();
           assert.equal((await read()).isError, true);
+        } finally {
+          await opened.close();
+          await app.close();
+        }
+      },
+      LINEAGE_INSTALL_VOLUME,
+    );
+  },
+);
+
+test(
+  'a role restriction denies the actual operation and rollback restores its permission',
+  { timeout: 600_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'customize-role',
+      async ({ connection, pool }) => {
+        const options = {
+          databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+          tenantSlug: 'customize-role',
+        };
+        const app = await startComposedApplication({
+          ...options,
+          seedProfile: 'distributor',
+          port: 0,
+        });
+        const opened = await openCustomizeService(options);
+        try {
+          const roleKey = 'local-demo-full-release';
+          const createId = 'northstar.app:operation.item_create';
+          const updateId = 'northstar.app:operation.item_update';
+          const headers = { cookie: 'northstar-demo-actor=manager' };
+          const preview = (operationId: string, asManager = false) =>
+            app.runtime.entry.run(
+              { headers: asManager ? headers : {} },
+              (view) =>
+                app.runtime.operationGateway.previewTaskEligibility(
+                  view,
+                  [operationId],
+                  null,
+                ),
+            );
+          const recordId = randomUUID();
+          const world = worldOver(app.runtime, String(connection.database));
+          const create = () =>
+            world.invoke(
+              'item_create',
+              {
+                recordId,
+                relations: {},
+                values: {
+                  'northstar.app:field.item_name': 'Role restriction witness',
+                  'northstar.app:field.item_sku': 'ROLE-RESTRICTION',
+                  'northstar.app:field.item_base_unit': 'EA',
+                },
+              },
+              { actor: 'buyer' },
+            );
+          const manager = await app.runtime.entry.run(
+            { headers },
+            async (view) => trustedContextForRequestRuntimeView(view),
+          );
+          assert.notEqual(
+            manager.principalId,
+            app.runtime.identity.principalId,
+          );
+          assert.ok(
+            (
+              await opened.service.targets(manager)
+            ).permissionRoleKeys?.includes(roleKey),
+          );
+          assert.equal(await preview(createId), 'eligible');
+          const draft = await opened.service.draft(
+            {
+              kind: 'narrowPermission',
+              roleKey,
+              target: { kind: 'operation', id: createId },
+            },
+            'visualBuilder',
+            undefined,
+            manager,
+          );
+          assert.ok(draft.status === 'drafted', JSON.stringify(draft));
+          assert.equal(
+            (await recordedPatch(pool, draft.patchId)).authored_by,
+            manager.principalId,
+          );
+          await opened.service.approve(draft.patchId);
+          const setRoleAvailability = (active: boolean) =>
+            pool.query(
+              `UPDATE platform.current_policy_roles
+                  SET revoked_at = CASE WHEN $4::boolean THEN NULL ELSE clock_timestamp() END
+                WHERE tenant_id = $1 AND environment_id = $2 AND role_key = $3`,
+              [
+                app.runtime.identity.tenantId,
+                app.runtime.identity.environmentId,
+                roleKey,
+                active,
+              ],
+            );
+          await setRoleAvailability(false);
+          await assert.rejects(() => opened.service.activate(draft.patchId), {
+            code: 'CUSTOMIZE_TARGET_NOT_FOUND',
+          });
+          await setRoleAvailability(true);
+          await opened.service.activate(draft.patchId);
+          await assert.rejects(
+            create,
+            { name: 'SemanticOperationPolicyDeniedError' },
+            'the selected role cannot perform the live operation',
+          );
+          assert.equal(await preview(createId), 'ineligible');
+          assert.equal(await preview(updateId), 'eligible');
+          assert.equal(await preview(createId, true), 'eligible');
+          const removal = await opened.service.draft(
+            {
+              kind: 'unNarrowPermission',
+              roleKey,
+              target: { kind: 'operation', id: createId },
+            },
+            'visualBuilder',
+          );
+          assert.ok(removal.status === 'drafted', JSON.stringify(removal));
+          await opened.service.approve(removal.patchId);
+          await opened.service.activate(removal.patchId);
+          assert.equal(await preview(createId), 'eligible');
+          await opened.service.rollback();
+          assert.equal(await preview(createId), 'ineligible');
+          await opened.service.approve(removal.patchId);
+          await opened.service.activate(removal.patchId);
+          assert.equal(await preview(createId), 'eligible');
+          assert.equal((await create()).outcome, 'succeeded');
         } finally {
           await opened.close();
           await app.close();

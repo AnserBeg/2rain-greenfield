@@ -2653,11 +2653,40 @@ const authoredV6QueryDefinition = z.union([
   authoredV4AggregateQueryDefinition,
 ]);
 
+export function isNarrowableOperationId(operationId: string): boolean {
+  return !/:operation\.(?:customize|customization)[._-](?:approve|activate|rollback)(?:$|[._-])/u.test(
+    operationId,
+  );
+}
+
+export const OperationRoleKeySchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .refine((key) => key.trim().length > 0, 'Choose a nonblank role key');
+
+export const OperationRoleNarrowingSchema = z.strictObject({
+  operationId: CanonicalIdSchema.refine(isNarrowableOperationId, {
+    message: 'Customize approval, activation and rollback cannot be restricted',
+  }),
+  roleKey: OperationRoleKeySchema,
+});
+export type OperationRoleNarrowing = z.infer<
+  typeof OperationRoleNarrowingSchema
+>;
+
+const operationRoleNarrowings = z
+  .array(OperationRoleNarrowingSchema)
+  .min(1)
+  .max(128)
+  .optional();
+
 const v6NormalizedShape = {
   ...v5NormalizedShape,
   entities: z.array(normalizedEntityDefinition.extend(assistantConfirmation)),
   fields: z.array(normalizedV6FieldDefinition),
   operations: z.array(normalizedV6OperationDefinition),
+  operationRoleNarrowings,
   queries: z.array(normalizedV6QueryDefinition),
   languageVersion: v6NodeVersion,
   surfaces: z.array(normalizedV6SurfaceDefinition),
@@ -2786,6 +2815,7 @@ const v6AuthoredShape = {
   entities: z.array(authoredEntityDefinition.extend(assistantConfirmation)),
   fields: z.array(authoredV6FieldDefinition),
   operations: z.array(authoredV6OperationDefinition),
+  operationRoleNarrowings,
   queries: z.array(authoredV6QueryDefinition),
   languageVersion: v6NodeVersion,
   surfaces: z.array(authoredV6SurfaceDefinition),

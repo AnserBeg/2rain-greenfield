@@ -191,8 +191,19 @@ export function normalizeApplicationPackage(
     authored.fields.map((field) => [field.fieldId, field.fieldType] as const),
   );
   const queryContracts = deriveQueryContracts(authored);
+  const roleNarrowings =
+    authored.languageVersion === 'v6'
+      ? authored.operationRoleNarrowings
+      : undefined;
 
   const normalizedCandidate = {
+    ...(roleNarrowings && {
+      operationRoleNarrowings: [...roleNarrowings].sort((left, right) => {
+        const a = `${left.operationId}/${left.roleKey}`;
+        const b = `${right.operationId}/${right.roleKey}`;
+        return a < b ? -1 : a > b ? 1 : 0;
+      }),
+    }),
     assertions: authored.assertions.map((entry) => ({
       ...entry,
       evidenceKinds: sortedStrings(entry.evidenceKinds),
@@ -470,6 +481,32 @@ export function normalizeApplicationPackage(
     throw error;
   }
   validateSemantics(normalized);
+  if (
+    normalized.languageVersion === 'v6' &&
+    normalized.operationRoleNarrowings
+  ) {
+    const active = new Set(
+      normalized.operations
+        .filter((operation) => operation.lifecycle === 'active')
+        .map((operation) => operation.operationId),
+    );
+    const seen = new Set<string>();
+    for (const { operationId, roleKey } of normalized.operationRoleNarrowings) {
+      const key = `${operationId}/${roleKey}`;
+      if (!active.has(operationId) || seen.has(key)) {
+        throw new CanonicalModelError([
+          diagnostic(
+            'CANON_SCHEMA_INVALID',
+            '$.operationRoleNarrowings',
+            'an operation restriction names an active operation once per role',
+            'use one restriction for each active operation and role',
+            operationId,
+          ),
+        ]);
+      }
+      seen.add(key);
+    }
+  }
   validateSurfaceCompositions(normalized);
   validateSurfaceWorkspaces(normalized);
   validateSurfaceLists(normalized);

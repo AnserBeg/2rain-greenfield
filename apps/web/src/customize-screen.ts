@@ -35,6 +35,16 @@ interface CustomizationStatus {
   readonly patches: readonly ScreenPatch[];
 }
 interface CustomizationTargets {
+  readonly permissionRoleKeys?: readonly string[];
+  readonly permissionRoleLabels?: Readonly<Record<string, string>>;
+  readonly permissionRestrictions?: readonly {
+    operationId: string;
+    roleKey: string;
+  }[];
+  readonly permissionActions?: readonly {
+    readonly id: string;
+    readonly label: string;
+  }[];
   readonly metricLists?: readonly {
     readonly surfaceId: string;
     readonly label: string;
@@ -109,6 +119,8 @@ interface ActivationOutcome {
   readonly releaseRoot: string;
 }
 
+import type { TrustedRequestContext } from '@north-star/runtime';
+
 import { SURFACE_CLIENT_SCRIPT } from './surface-client.js';
 import { escapeHtml } from './html.js';
 
@@ -118,6 +130,7 @@ export interface CustomizeScreenResponse {
   readonly statusCode: number;
 }
 type CustomizeScreenSubmission = Readonly<Record<string, string>>;
+type LoadTargets = () => Promise<CustomizationTargets>;
 
 /**
  * The Customize screen (CUSTOMIZE slice 3): the same loop as the command line
@@ -135,9 +148,15 @@ export interface CustomizeScreenService {
   draft(
     input: unknown,
     channel: 'visualBuilder' | 'conversationalAi',
+    signal?: AbortSignal,
+    actor?: TrustedRequestContext,
   ): Promise<DraftOutcome>;
   /** Present once AI drafting is composed: plain English to one typed patch. */
-  draftFromRequest?(request: string): Promise<DraftOutcome>;
+  draftFromRequest?(
+    request: string,
+    signal?: AbortSignal,
+    actor?: TrustedRequestContext,
+  ): Promise<DraftOutcome>;
   recover(
     mode: 'reverify' | 'revert',
     expected: { attemptId: string; fence: string },
@@ -147,7 +166,7 @@ export interface CustomizeScreenService {
     expectedFence: string,
   ): Promise<ActivationOutcome>;
   status(): Promise<CustomizationStatus>;
-  targets(): Promise<CustomizationTargets>;
+  targets(actor?: TrustedRequestContext): Promise<CustomizationTargets>;
 }
 
 const FIELD_ROWS = 6;
@@ -168,11 +187,13 @@ export async function renderCustomizeScreen(
   submission: CustomizeScreenSubmission | null,
   /** The runtime stylesheet's route, handed in by the app server. */
   stylesheetHref = '',
+  actor?: TrustedRequestContext,
 ): Promise<CustomizeScreenResponse> {
   stylesheet = stylesheetHref
     ? `<link rel="stylesheet" href="${escapeHtml(stylesheetHref)}">`
     : '';
   const url = new URL(requestUrl, 'http://surface-runtime.local');
+  const loadTargets = () => service.targets(actor);
   try {
     if (!submission) {
       if (activating.has(service))
@@ -182,26 +203,38 @@ export async function renderCustomizeScreen(
         );
       const arrange = url.searchParams.get('arrange');
       if (arrange)
-        return page('Arrange a list', await arrangeForm(service, arrange));
+        return page('Arrange a list', await arrangeForm(loadTargets, arrange));
       const saveView = url.searchParams.get('saveView');
       if (saveView)
-        return page('Save a list view', await savedViewForm(service, saveView));
+        return page(
+          'Save a list view',
+          await savedViewForm(loadTargets, saveView),
+        );
       const metric = url.searchParams.get('metric');
       if (metric)
-        return page('Add a metric card', await metricForm(service, metric));
-      return page('Customize', await overview(service));
+        return page('Add a metric card', await metricForm(loadTargets, metric));
+      return page('Customize', await overview(service, loadTargets));
     }
     switch (submission.action) {
       case 'draft':
         return drafted(
-          await service.draft(patchFromForm(submission), 'visualBuilder'),
+          await service.draft(
+            patchFromForm(submission),
+            'visualBuilder',
+            undefined,
+            actor,
+          ),
         );
       case 'ask':
         if (!service.draftFromRequest) {
           return failure('Asking in plain English is not set up here.');
         }
         return drafted(
-          await service.draftFromRequest(String(submission.request ?? '')),
+          await service.draftFromRequest(
+            String(submission.request ?? ''),
+            undefined,
+            actor,
+          ),
         );
       case 'approve': {
         const approved = await service.approve(String(submission.patchId));
@@ -221,7 +254,7 @@ export async function renderCustomizeScreen(
         }
         return page(
           'Live',
-          `<p class="eyebrow">Live</p><h1>The change is live</h1><p>Every page shows it from now on. No restart was needed.</p>${await liveLinks(service)}${backLink()}`,
+          `<p class="eyebrow">Live</p><h1>The change is live</h1><p>Every page shows it from now on. No restart was needed.</p>${await liveLinks(loadTargets)}${backLink()}`,
           'data-customize-result="activated"',
         );
       }
@@ -265,7 +298,10 @@ export async function renderCustomizeScreen(
   }
 }
 
-async function overview(service: CustomizeScreenService): Promise<string> {
+async function overview(
+  service: CustomizeScreenService,
+  loadTargets: LoadTargets,
+): Promise<string> {
   const status = await service.status();
   if (status.failedActivation)
     return [
@@ -277,7 +313,7 @@ async function overview(service: CustomizeScreenService): Promise<string> {
         status.failedActivation,
       ),
     ].join('');
-  const targets = await service.targets();
+  const targets = await loadTargets();
   const latest = status.activeChain.at(-1);
   const activeUpgrade = status.upgrades.find(
     (u) =>
@@ -329,6 +365,7 @@ async function overview(service: CustomizeScreenService): Promise<string> {
     arrangePicker(targets),
     savedViewPicker(targets),
     metricPicker(targets),
+    permissionForm(targets),
     ...(targets.forms ?? []).map(
       (form) =>
         `<form method="post"><fieldset><legend>Show fields up front on ${escapeHtml(form.label)}</legend><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="arrangeLayout"><input type="hidden" name="surface" value="${escapeHtml(form.surfaceId)}"><input type="hidden" name="formLayout" value="1">${form.fields.map((f) => `<label><input type="checkbox" name="front:${escapeHtml(f.fieldId)}"${f.upFront ? ' checked' : ''}> ${escapeHtml(f.label)}</label>`).join(' ')}<button>Draft form arrangement</button></fieldset></form>`,
@@ -383,10 +420,10 @@ function arrangePicker(targets: CustomizationTargets): string {
 }
 
 async function arrangeForm(
-  service: CustomizeScreenService,
+  loadTargets: LoadTargets,
   surfaceId: string,
 ): Promise<string> {
-  const list = (await service.targets()).lists.find(
+  const list = (await loadTargets()).lists.find(
     (candidate) => candidate.surfaceId === surfaceId,
   );
   if (!list) {
@@ -401,6 +438,44 @@ async function arrangeForm(
   return `<p class="eyebrow">Customize</p><h1>Arrange ${escapeHtml(list.label)}</h1><form method="post" data-customize-form="arrangeColumns"><table><thead><tr><th>Position</th><th>Heading</th><th>Hide</th></tr></thead><tbody>${rows}</tbody></table><input type="hidden" name="surface" value="${escapeHtml(list.surfaceId)}"><input type="hidden" name="columns" value="${String(list.columns.length)}"><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="arrangeLayout"><p><button type="submit">Draft this arrangement</button></p></form>${backLink()}`;
 }
 
+function permissionForm(targets: CustomizationTargets): string {
+  if (!targets.permissionRoleKeys?.length || !targets.permissionActions?.length)
+    return '';
+  const labels = targets.permissionRoleLabels;
+  const roleLabel = (key: string) =>
+    labels && Object.hasOwn(labels, key) ? (labels[key] ?? key) : key;
+  const roles = targets.permissionRoleKeys
+    .map(
+      (role) =>
+        `<option value="${escapeHtml(role)}">${escapeHtml(roleLabel(role))}</option>`,
+    )
+    .join('');
+  const actions = targets.permissionActions
+    .map(
+      ({ id, label }) =>
+        `<option value="${escapeHtml(id)}">${escapeHtml(label)}</option>`,
+    )
+    .join('');
+  const existing = (targets.permissionRestrictions ?? [])
+    .map(({ operationId, roleKey }) => {
+      const action =
+        targets.permissionActions?.find(({ id }) => id === operationId)
+          ?.label ?? operationId;
+      const role = roleLabel(roleKey);
+      return `<li>${escapeHtml(action)} for ${escapeHtml(role)} ${button(
+        'draft',
+        'Draft removal',
+        {
+          kind: 'unNarrowPermission',
+          operation: operationId,
+          roleKey,
+        },
+      )}</li>`;
+    })
+    .join('');
+  return `<form method="post" data-customize-form="narrowPermission"><fieldset><legend>Restrict an action for a role</legend><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="narrowPermission"><label for="restriction-role">Role</label> <select id="restriction-role" name="roleKey" required><option value="">Choose a role</option>${roles}</select><label for="restriction-operation">Action</label> <select id="restriction-operation" name="operation" required><option value="">Choose an action</option>${actions}</select><p>A person can still use the action if one of their other roles grants it.</p><p><button>Draft permission restriction</button></p></fieldset></form>${existing ? `<h3>Current action restrictions</h3><ul>${existing}</ul>` : ''}`;
+}
+
 function metricPicker(targets: CustomizationTargets): string {
   if (!targets.metricLists?.length) return '';
   const options = targets.metricLists
@@ -413,10 +488,10 @@ function metricPicker(targets: CustomizationTargets): string {
 }
 
 async function metricForm(
-  service: CustomizeScreenService,
+  loadTargets: LoadTargets,
   surfaceId: string,
 ): Promise<string> {
-  const { metricLists } = await service.targets();
+  const { metricLists } = await loadTargets();
   const target = metricLists?.find((list) => list.surfaceId === surfaceId);
   if (!target)
     return `<p>Choose a list that reads records directly.</p>${backLink()}`;
@@ -449,10 +524,10 @@ function savedViewPicker(targets: CustomizationTargets): string {
 }
 
 async function savedViewForm(
-  service: CustomizeScreenService,
+  loadTargets: LoadTargets,
   surfaceId: string,
 ): Promise<string> {
-  const list = (await service.targets()).lists.find(
+  const list = (await loadTargets()).lists.find(
     (candidate) => candidate.surfaceId === surfaceId,
   );
   const view = list?.savedView;
@@ -511,6 +586,13 @@ export function patchFromForm(form: CustomizeScreenSubmission): unknown {
     };
   };
   switch (form.kind) {
+    case 'narrowPermission':
+    case 'unNarrowPermission':
+      return {
+        kind: form.kind,
+        roleKey: form.roleKey,
+        target: { kind: 'operation', id: form.operation },
+      };
     case 'addMetricCard':
       return {
         kind: 'addMetricCard',
@@ -632,8 +714,8 @@ function drafted(outcome: DraftOutcome): CustomizeScreenResponse {
   );
 }
 
-async function liveLinks(service: CustomizeScreenService): Promise<string> {
-  const lists = (await service.targets()).lists.filter((list) =>
+async function liveLinks(loadTargets: LoadTargets): Promise<string> {
+  const lists = (await loadTargets()).lists.filter((list) =>
     list.surfaceId.includes('.custom_'),
   );
   return lists.length === 0
@@ -663,6 +745,10 @@ function describe(patch: PatchSummary): string {
       return `Saved list view "${label}"`;
     case 'addMetricCard':
       return `Metric card "${label}"`;
+    case 'narrowPermission':
+      return `Action restriction for "${label}"`;
+    case 'unNarrowPermission':
+      return `Removed action restriction for "${label}"`;
     default:
       return `${patch.kind} (${patch.patchId})`;
   }

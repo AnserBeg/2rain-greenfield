@@ -1,3 +1,4 @@
+import { OperationRoleKeySchema } from '@north-star/canonical-model';
 import { z } from 'zod';
 
 /**
@@ -141,6 +142,22 @@ export const CustomizationPatchSchema = z.discriminatedUnion('kind', [
   arrangeLayout,
   saveListView,
   z.strictObject({
+    kind: z.literal('narrowPermission'),
+    target: z.strictObject({
+      kind: z.literal('operation'),
+      id: canonicalId,
+    }),
+    roleKey: OperationRoleKeySchema,
+  }),
+  z.strictObject({
+    kind: z.literal('unNarrowPermission'),
+    target: z.strictObject({
+      kind: z.literal('operation'),
+      id: canonicalId,
+    }),
+    roleKey: OperationRoleKeySchema,
+  }),
+  z.strictObject({
     kind: z.literal('addMetricCard'),
     surface: canonicalId,
     label,
@@ -159,6 +176,8 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'arrangeLayout',
   'saveListView',
   'addMetricCard',
+  'narrowPermission',
+  'unNarrowPermission',
 ] as const satisfies readonly CustomizationPatchKind[]);
 
 export interface UnsupportedCustomization {

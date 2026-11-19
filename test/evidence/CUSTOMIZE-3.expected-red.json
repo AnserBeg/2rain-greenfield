@@ -5,9 +5,9 @@
     {
       "name": "unrecognized-patch-kind-admitted",
       "claim": "The database admits the launch patch kinds and still refuses an unrecognized kind with a valid digest.",
-      "file": "db/migrations/0034_customization_launch_patch_kinds.sql",
-      "original": "      'narrowPermission', 'addMetricCard'",
-      "replacement": "      'narrowPermission', 'addMetricCard', 'unrecognizedTestKind'",
+      "file": "db/migrations/0040_customization_permission_directory.sql",
+      "original": "      'narrowPermission', 'addMetricCard', 'unNarrowPermission'",
+      "replacement": "      'narrowPermission', 'addMetricCard', 'unNarrowPermission', 'unrecognizedTestKind'",
       "test": {
         "files": ["test/postgres/customization.test.ts"],
         "namePattern": "a drafted change is recorded append-only"
@@ -35,6 +35,42 @@
           "file": "test/postgres/customization.test.ts",
           "name": "an approved Today card reads the exact sum before pagination and disappears on rollback",
           "expected": "the exact sum covers the matching rows beyond the first page"
+        }
+      ]
+    },
+    {
+      "name": "action-role-restriction-ignored",
+      "claim": "The governed operation refuses the selected role when its grant is restricted.",
+      "file": "packages/postgres-provider/src/current-policy.ts",
+      "original": "!excluded.includes(row.role_key)",
+      "replacement": "Boolean(row.role_key)",
+      "test": {
+        "files": ["test/postgres/customization.test.ts"],
+        "namePattern": "a role restriction denies the actual operation and rollback restores its permission"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customization.test.ts",
+          "name": "a role restriction denies the actual operation and rollback restores its permission",
+          "expected": "the selected role cannot perform the live operation"
+        }
+      ]
+    },
+    {
+      "name": "customize-role-directory-shows-another-environment",
+      "claim": "A Customize author's role directory is limited to their environment.",
+      "file": "db/migrations/0040_customization_permission_directory.sql",
+      "original": "     AND role.environment_id = caller.environment_id",
+      "replacement": "     AND true",
+      "test": {
+        "files": ["test/postgres/current-policy.test.ts"],
+        "namePattern": "current policy evaluates live grants and scope under the non-admin runtime role"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/current-policy.test.ts",
+          "name": "current policy evaluates live grants and scope under the non-admin runtime role",
+          "expected": "the directory only returns roles from the caller’s environment"
         }
       ]
     }

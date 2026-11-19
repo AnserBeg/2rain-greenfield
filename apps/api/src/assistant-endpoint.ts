@@ -105,6 +105,7 @@ export interface CustomizeDrafter {
   draftFromRequest(
     request: string,
     budget?: { readonly meter: SpendMeter; readonly signal?: AbortSignal },
+    cookie?: string,
   ): Promise<
     | { status: 'drafted'; renderedDiff: string; reused: boolean }
     | { status: string; message: string; missingCapability?: string }
@@ -634,7 +635,11 @@ export function createAssistantEndpoint(
     try {
       const drafted = await (
         await options.customize()
-      ).draftFromRequest(request, { meter: conversation.meter, signal });
+      ).draftFromRequest(
+        request,
+        { meter: conversation.meter, signal },
+        conversation.cookie,
+      );
       if (drafted.status === 'drafted' && 'renderedDiff' in drafted)
         return {
           text: `That is a change to the application. I drafted it${drafted.reused ? ' (the same draft already existed)' : ''}; nothing is live yet. Read the change below, then approve and activate it on the Customize screen.`,

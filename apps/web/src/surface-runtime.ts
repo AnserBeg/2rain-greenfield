@@ -115,7 +115,7 @@ export function withLocalDemoIdentity(
   if (!response.html.includes(menu))
     return {
       ...response,
-      html: response.html.replace('<body>', `<body>${bar}`),
+      html: response.html.replace(/<body\b[^>]*>/u, (body) => `${body}${bar}`),
     };
   return {
     ...response,
@@ -265,6 +265,12 @@ export async function renderSurfaceRuntimeWithData(
       code: 'WORKSPACE_COMPANY_UNAVAILABLE',
     });
   const legalEntitySelection = legalEntitySelectionForSurface(binding, url);
+  const offeredOperations = await offeredSurfaceOperations(
+    view,
+    binding.operations,
+    gateways.operationGateway,
+    legalEntitySelection,
+  );
   const queryParameterValues = queryParameterValuesForSurface(binding, url);
   const pageContext = await loadWorkspaceContextBar(
     view,
@@ -319,7 +325,7 @@ export async function renderSurfaceRuntimeWithData(
         status: 'DIAGNOSTIC',
       },
       feedback,
-      binding.operations,
+      offeredOperations,
       422,
       legalEntitySelection,
       workspaceContext,
@@ -365,7 +371,7 @@ export async function renderSurfaceRuntimeWithData(
                 documentEditorSlots: slots,
               },
               null,
-              binding.operations,
+              offeredOperations,
               statusCode,
               legalEntitySelection,
               workspaceContext,
@@ -438,7 +444,7 @@ export async function renderSurfaceRuntimeWithData(
           status: 'LAUNCHER_READY',
         },
         feedback,
-        binding.operations,
+        offeredOperations,
         scan ? 422 : 200,
         legalEntitySelection,
         workspaceContext,
@@ -461,7 +467,7 @@ export async function renderSurfaceRuntimeWithData(
         selection,
         { code: 'QUERY_PARAMETER_REQUIRED', status: 'DIAGNOSTIC' },
         feedback,
-        binding.operations,
+        offeredOperations,
         422,
         legalEntitySelection,
         workspaceContext,
@@ -529,7 +535,7 @@ export async function renderSurfaceRuntimeWithData(
         selection,
         state,
         feedback,
-        binding.operations,
+        offeredOperations,
         200,
         legalEntitySelection,
         workspaceContext,
@@ -631,7 +637,7 @@ export async function renderSurfaceRuntimeWithData(
       selection,
       data,
       feedback,
-      binding.operations,
+      offeredOperations,
       statusCode,
       legalEntitySelection,
       workspaceContext,
@@ -641,6 +647,35 @@ export async function renderSurfaceRuntimeWithData(
       formReferences,
     ),
   );
+}
+
+async function offeredSurfaceOperations(
+  view: RuntimeViewContract.RequestRuntimeView,
+  operations: CompiledSurfaceDataBinding['operations'],
+  gateway: SemanticOperationGateway,
+  legalEntitySelection: readonly string[],
+): Promise<CompiledSurfaceDataBinding['operations']> {
+  if (!operations.some((operation) => operation.roleRestricted))
+    return operations;
+  const company =
+    legalEntitySelection.length === 1 ? legalEntitySelection[0]! : null;
+  const decisions = await Promise.all(
+    operations.map(async (operation) => {
+      if (!operation.roleRestricted) return operation;
+      try {
+        return (await gateway.previewTaskEligibility(
+          view,
+          [operation.operationId],
+          company,
+        )) === 'eligible'
+          ? operation
+          : null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return decisions.filter((operation) => operation !== null);
 }
 
 /**
@@ -1160,6 +1195,15 @@ export async function submitSurfaceRuntimeIntent(
     return renderApplicationDiagnostic(422, {
       code: 'WORKSPACE_COMPANY_UNAVAILABLE',
     });
+  const offeredOperations = await offeredSurfaceOperations(
+    view,
+    binding.operations,
+    gateways.operationGateway,
+    legalEntitySelectionForSurface(
+      binding,
+      new URL(requestUrl, 'http://surface-runtime.local'),
+    ),
+  );
   if (selection.selected.composition && submission.compositionAction) {
     const workspaceContext = await loadWorkspaceContextBar(
       view,
@@ -1194,7 +1238,7 @@ export async function submitSurfaceRuntimeIntent(
               ...(fragment && outcome?.inline ? {} : { compositionTask: html }),
             },
             null,
-            binding.operations,
+            offeredOperations,
             statusCode,
             data.scope ? [data.scope] : [],
             workspaceContext,
@@ -1275,7 +1319,7 @@ export async function submitSurfaceRuntimeIntent(
               documentEditorSlots: editor.slots,
             },
             null,
-            binding.operations,
+            offeredOperations,
             editor.statusCode,
             scope,
             context,
@@ -1414,7 +1458,7 @@ export async function submitSurfaceRuntimeIntent(
       record: result.readBack,
       trustLinked: result.trust !== null,
     },
-    binding.operations,
+    offeredOperations,
     200,
     legalEntitySelectionForSurface(
       binding,
