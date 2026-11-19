@@ -8,6 +8,7 @@ import {
   lastToolResult,
   scriptedModel,
   type ConversationEntry,
+  type ModelAdapter,
 } from '../../../../packages/operations-agent/src/index.js';
 import { withEphemeralPostgres } from '../../../../test/helpers/postgres.js';
 
@@ -231,6 +232,13 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
           'Panel Test Customer',
         );
 
+        await link.click();
+        await expect(panel).toBeVisible();
+        await expect(reply(0).locator('table')).toContainText(
+          'Lethbridge Millwork',
+        );
+        await expect(did.locator('[data-assistant-undo]')).toBeEnabled();
+
         // Undo restores the previous name on the same record.
         await did.locator('[data-assistant-undo]').click();
         await expect(did).toContainText(
@@ -259,6 +267,8 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
         await expect(panel.locator('[data-assistant-status]')).toBeVisible();
         // LOOK-1: the panel in the Ledger look, wide and phone, light and
         // dark -- a reply's table, a change with Undo, a plan awaiting yes.
+        await page.reload();
+        await expect(plan.locator('[data-assistant-yes]')).toBeEnabled();
         await shootAssistant(page);
         await page.route('**/?assistant=decide', (route) => route.abort(), {
           times: 1,
@@ -375,6 +385,173 @@ test('the assistant panel answers, acts then offers Undo, and asks before a cons
       }
     },
   );
+});
+
+test('a resized assistant follows the person onto the new PO and finishes a detached reply', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const script = scriptedModel([
+    () => ({ text: 'First answer.' }),
+    () => ({ text: 'Slow reply finished.' }),
+  ]);
+  let calls = 0;
+  const model: ModelAdapter = {
+    modelId: script.modelId,
+    async next(request) {
+      if (++calls === 2) {
+        request.onText?.('Working on the slow reply');
+        await hold;
+      }
+      return script.next(request);
+    },
+  };
+  await withEphemeralPostgres('panel-navigation', async ({ connection }) => {
+    const app = await startComposedApplication({
+      databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+      port: 0,
+      tenantSlug: 'panel-navigation',
+      assistantModel: async () => model,
+    });
+    try {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto(app.baseUrl);
+      const panel = page.locator('[data-assistant-panel]');
+      const toggle = page.getByRole('button', {
+        name: 'Assistant',
+        exact: true,
+      });
+      await toggle.click();
+      await panel.locator('textarea').fill('First question');
+      await panel.getByRole('button', { name: 'Send' }).click();
+      await expect(panel).toContainText('First answer.');
+      const separator = panel.getByRole('separator');
+      const before = (await panel.boundingBox())!;
+      const handle = (await separator.boundingBox())!;
+      const x = handle.x + handle.width / 2;
+      await page.mouse.move(x, handle.y + 90);
+      await page.mouse.down();
+      await page.mouse.move(x - 70, handle.y + 90);
+      await page.mouse.up();
+      await expect(separator).toHaveAttribute(
+        'aria-valuenow',
+        String(before.width + 70),
+      );
+      await separator.focus();
+      await separator.press('ArrowRight');
+      const width = before.width + 54;
+      await expect(separator).toHaveAttribute('aria-valuenow', String(width));
+      await page
+        .getByRole('navigation', { name: 'Release navigation' })
+        .getByRole('link', { name: 'Purchase orders', exact: true })
+        .click();
+      await expect(panel).toBeVisible();
+      await expect(panel.locator('[data-assistant-said]')).toHaveText(
+        'First question',
+      );
+      await expect(panel.locator('[data-assistant-reply]')).toHaveText(
+        'First answer.',
+      );
+      expect((await panel.boundingBox())!.width).toBe(width);
+      await panel.locator('textarea').fill('Take your time');
+      await panel.getByRole('button', { name: 'Send' }).click();
+      await expect(panel).toContainText('Working on the slow reply');
+      await page.getByRole('link', { name: 'New', exact: true }).click();
+      await expect(panel.locator('[data-assistant-step]')).toHaveText(
+        'Thinking',
+      );
+      await expect(panel.locator('[data-assistant-status]')).toBeVisible();
+      release();
+      await expect(panel).toContainText('Slow reply finished.');
+      const save = page.getByRole('button', {
+        name: 'Save draft',
+        exact: true,
+      });
+      await save.click({ trial: true });
+      const dock = (await panel.boundingBox())!;
+      const button = (await save.boundingBox())!;
+      expect(button.x + button.width).toBeLessThanOrEqual(dock.x);
+      expect(
+        await page
+          .locator('main')
+          .evaluate((el) => el.getBoundingClientRect().right),
+      ).toBeLessThanOrEqual(dock.x);
+      expect(
+        await page
+          .locator('.topbar')
+          .evaluate((el) => el.getBoundingClientRect().right),
+      ).toBe(1440);
+      for (const scheme of ['light', 'dark'] as const) {
+        await page.emulateMedia({
+          colorScheme: scheme,
+          reducedMotion: 'reduce',
+        });
+        for (const viewport of [
+          { width: 1440, height: 900 },
+          { width: 390, height: 844 },
+        ]) {
+          await page.setViewportSize(viewport);
+          if (viewport.width === 390)
+            expect(await panel.boundingBox()).toEqual({
+              x: 0,
+              y: 0,
+              ...viewport,
+            });
+          expect(
+            await page.evaluate(() => document.documentElement.scrollWidth),
+          ).toBe(viewport.width);
+          if (process.env.LOOK_EVIDENCE_OUT) {
+            const out = resolve(process.env.LOOK_EVIDENCE_OUT, 'panel-2');
+            mkdirSync(out, { recursive: true });
+            await page.screenshot({
+              path: resolve(out, `po-${String(viewport.width)}-${scheme}.png`),
+            });
+          }
+        }
+      }
+      await page.setViewportSize({ width: 960, height: 900 });
+      const narrow = (await separator.boundingBox())!;
+      await page.mouse.move(narrow.x + narrow.width / 2, narrow.y + 80);
+      await page.mouse.down();
+      await page.mouse.move(10, narrow.y + 80);
+      await page.mouse.up();
+      await expect(separator).toHaveAttribute('aria-valuenow', '480');
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth),
+      ).toBe(960);
+      await page.setViewportSize({ width: 1440, height: 900 });
+      // A real click reaches the form even with the dock against its footer.
+      await Promise.all([
+        page.waitForRequest(
+          (request) =>
+            request.isNavigationRequest() &&
+            new URLSearchParams(request.postData() ?? '').get('draftAction') ===
+              'save',
+        ),
+        save.click(),
+      ]);
+      await expect(
+        page.locator('[data-document-editor] [aria-invalid=true]').first(),
+      ).toBeVisible();
+      await expect(panel).toBeVisible();
+      await panel.getByRole('button', { name: 'Close the assistant' }).click();
+      await page.goto(app.baseUrl);
+      await expect(panel).toBeHidden();
+      await toggle.click();
+      await expect(panel).toContainText('Slow reply finished.');
+      await panel.getByRole('button', { name: 'New conversation' }).click();
+      await page.reload();
+      await expect(panel).toBeVisible();
+      await expect(panel.locator('[data-assistant-log]')).toBeEmpty();
+    } finally {
+      release();
+      await app.close();
+    }
+  });
 });
 
 /**
