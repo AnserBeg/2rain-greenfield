@@ -1,30 +1,44 @@
-# AGENT-SPEED-1 — assistant speed in user-built modules
+# AGENT-SPEED-1 — assistant speed across user-built modules
 
-Base `9ac017b915d24b058a35450db92433c97486a2f7`. In progress.
+All four held-out module shapes passed. The packet changes no Critical path. The first integration candidate exposed a rollback-refusal ordering regression. The correction keeps ADR-0047 eligibility ahead of the structural activation check. [Candidate CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44582109972).
 
-## Measures registered before tuning
+## Results
 
-- Time to card starts before the assistant reads the screen and ends at the first presented card for that task. Yes-to-done runs from each granted human approval to its first successful declared read-back. Report medians, exclude tasks without the respective event, and report pass rate across all attempts.
-- Calls count invocations of the five tools, including host invocations. USD per task is total metered spend divided by attempted tasks. End-to-end elapsed time includes preamble and final model summary. The existing ten-task eval also reports model-loop time.
-- Route trials use tasks 1 and 14 (reads), 16 and 18 (single creates), three attempts each on Opus high, Opus low and Sonnet low. Compare read and single-operation tasks separately against Opus high on the same inputs. An adopted route must preserve each selected task's pass count.
-- Generate the proof set from declarations only after freezing the assistant. Run the identical generator on baseline and candidate. Compare the medians and end-state pass rates of matched first-party and generated journeys. Inspection is excluded.
+| Set and revision | To card (s) | Yes to verified (s) | Tool calls | Passed | USD/task |
+|---|---:|---:|---:|---:|---:|
+| Original ten, before | 14.17 | 3.45 | 5.5 | 10/10 | 0.0805 |
+| Original ten, after | 11.68 | 0.40 | 7 | 10/10 | 0.0712 |
+| Matched first-party, before | 4.05 | 3.03 | 4 | 12/12 | 0.0501 |
+| Matched first-party, after | 4.43 | 0.12 | 4.5 | 12/12 | 0.0274 |
+| Matched generated, before | 2.89 | 2.71 | 3 | 12/12 | 0.0357 |
+| Matched generated, after | 4.47 | 0.11 | 4 | 12/12 | 0.0205 |
 
-## Routing
+Times and calls are medians. Time to the first card includes the screen preamble. Yes ends at the first successful read-back for that plan. Only tasks presenting a card contribute split timings. Costs and pass rates include every attempt. The ten-task baseline used `9ac017b9` and its legacy trace timestamps. Other split timings use a monotonic clock.
 
-Three attempts per task (36 runs). Opus high, Opus low, Sonnet low each passed 6/6 reads and 6/6 creates. Median elapsed seconds in that order were 5.801, 5.829, 6.890 for reads and 5.963, 4.041, 3.122 for creates. Total USD by route was 0.3752, 0.2432, 0.1826. Short single-create requests use Sonnet low. Reads, compound requests and explicit model overrides retain high effort. Prices are from [Anthropic](https://platform.claude.com/docs/en/about-claude/pricing).
+The historical ten-task model-loop median was 15.0 s. The fresh baseline measured 11.1 s and the candidate 11.8 s. Model round trips fell from 4.5 to 4 while median discovery calls rose from 2 to 3. Total real-model spend was USD 3.9217 of USD 30. [Per-attempt measurements](../evidence/AGENT-SPEED-1.csv).
+
+Median end-to-end on the four matched journeys was 8.74 s first-party and 6.82 s generated on the baseline, then 5.77 s first-party and 5.66 s generated on the candidate. The gate compares candidate end-to-end medians and pass rates. On the candidate the generated card appeared 0.04 s later. Each attempt also requires the exact operation, one consent, successful read-back and independently observed record state.
+
+## Decisions and controls
+
+1. The host executes the approved plan and verifies it through the existing gateways before requesting the summary. A scripted run exercises a falsely reported write. The unchanged CRITFIX-A snapshot covers the auto-run decision.
+2. On tasks 1 and 14 (reads) and 16 and 18 (single creates), three attempts each, Opus high, Opus low and Sonnet low each passed 12/12. Median read seconds were 5.801, 5.829 and 6.890. Create seconds were 5.963, 4.041 and 3.122. Total USD by route was 0.3752, 0.2432 and 0.1826. Short single creates use Sonnet low. Reads, compound requests and explicit overrides stay at high effort. [Provider prices](https://platform.claude.com/docs/en/about-claude/pricing).
+3. Read-only turns run up to four calls concurrently, preserving tool-use IDs, order and the typed evidence for each result. A wrong-type reference is refused.
+4. Release-root caching stores only structure. Eligibility filters the summary and the requested detail. On a compiled release with 50 custom types, the initial map shrank from 55,482 to 21,863 characters and a sample detail used 409. The cold structure build took 28.7 ms.
+5. The holdout uses identical declarations, generated after the assistant was frozen at `333e9a6c`. Both revisions receive the same independently activated record, link, lines and lifecycle modules, with one matched first-party journey per shape and three attempts each. Inspection is excluded. Activation checks every active declared business operation against its input, discovery and exact read-back contracts. It makes no model call.
 
 ## Test it yourself
 
-1. Ask the panel to archive a record. Check the card, click Yes, and observe execution and read-back before the next model response. Decline another card and check the record remains active.
-
+1. Ask the panel to archive a record, confirm, and observe execution and verified read-back before the summary. Decline another card and check the record remains active.
 2. Run `node --import tsx --test --test-name-pattern="measured create route|switching model prices" test/agent/operations-agent.test.ts` to check routing and the shared cap.
-
-3. Run `node --import tsx --test --test-name-pattern="parallel reads" test/agent/business-map.test.ts`. It observes overlapping reads, ordered results and refusal of a wrong-type reference.
-
-4. Run `node --import tsx test/agent/map-size.ts`. The 50-type compiled release produced 55,482 characters in the previous map, 21,863 in the summary and 409 in a selected detail. The initial structure build took 28.7 ms on this host.
-
-5. Run `node --import tsx --test --test-name-pattern="an active action must be exposed" test/unit/customization.test.ts`. The compiled application passes, and removing Item create from assistant discovery refuses activation.
+3. Run `node --import tsx --test --test-name-pattern="parallel reads" test/agent/business-map.test.ts` to check concurrent lookup and typed-reference refusal.
+4. Run `node --import tsx test/agent/map-size.ts` for the 50-type measurement.
+5. Run `node --import tsx --test --test-name-pattern="an active action must be exposed" test/unit/customization.test.ts`. Removing Item create from assistant discovery must refuse activation.
 
 ## Filed
 
-Atomic create with lines (CUSTOMIZE-4 Option A), recipes after WORKFLOW-1, and habit-based shortcuts after durable run records.
+Atomic parent-and-lines creation requires CUSTOMIZE-4 Option A. Recipes depend on WORKFLOW-1 bodies. Habit shortcuts need durable run records. [Freeze filings](../current-plan-archive.md#filed-during-the-freeze).
+
+```record-claim
+{"schemaVersion": "northstar.record-claim/v1", "packet": "AGENT-SPEED-1", "base": "048cf713bc528c1c85385dfa84abdc6d506228b6", "head": "01bcd894828a76cd68a50484adaa4516917efd88", "changedPaths": ["apps/api/src/agent-cli.ts", "apps/api/src/assistant-endpoint.ts", "apps/api/src/composition-root.ts", "apps/web/test/browser/assistant-panel.composed-application.spec.ts", "packages/operations-agent/src/anthropic-model.ts", "packages/operations-agent/src/business-map.ts", "packages/operations-agent/src/index.ts", "packages/operations-agent/src/loop.ts", "packages/operations-agent/src/session.ts", "packages/operations-agent/src/tools.ts", "packages/postgres-provider/src/composed-application-runtime.ts", "packages/postgres-provider/src/customization-service.ts", "test/agent/agent-world.ts", "test/agent/assistant-endpoint.test.ts", "test/agent/business-map.test.ts", "test/agent/compiled-view.ts", "test/agent/dev-tasks.ts", "test/agent/eval-harness.ts", "test/agent/generated-modules.ts", "test/agent/map-size.ts", "test/agent/operations-agent.test.ts", "test/unit/customization.test.ts"], "symbols": [{"path": "packages/operations-agent/src/business-map.ts", "name": "businessMapSummary"}, {"path": "packages/postgres-provider/src/composed-application-runtime.ts", "name": "assertAgentOperationsPlannable"}, {"path": "test/agent/generated-modules.ts", "name": "generatedProof"}]}
+```
