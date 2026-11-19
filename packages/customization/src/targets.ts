@@ -3,6 +3,7 @@ import { formulaFieldType } from '../../canonical-model/src/formula-validation-b
 import {
   CUSTOMIZABLE_FIRST_PARTY_ENTITY_LOCALS,
   isTenantId,
+  linkTarget,
   listColumnId,
 } from './apply.js';
 import type { LiteralValidationTarget } from './validation-draft.js';
@@ -16,6 +17,11 @@ import type { LiteralValidationTarget } from './validation-draft.js';
  */
 export interface CustomizationTargets {
   readonly validationTargets?: readonly LiteralValidationTarget[];
+  readonly linkTargets?: readonly {
+    readonly entityId: string;
+    readonly label: string;
+    readonly companyOwned: boolean;
+  }[];
   readonly metricLists?: readonly MetricListTarget[];
   readonly permissionRoleKeys?: readonly string[];
   readonly permissionRoleLabels?: Readonly<Record<string, string>>;
@@ -285,6 +291,21 @@ export function customizationTargets(definition: {
       };
     })
     .sort((left, right) => left.label.localeCompare(right.label));
+  const linkTargets = definition.entities
+    .flatMap((entity) => {
+      const entityId = String(entity.entityId);
+      const target = linkTarget(definition, entityId);
+      return target
+        ? [
+            {
+              entityId,
+              label: String(entity.label),
+              companyOwned: target.companyOwned,
+            },
+          ]
+        : [];
+    })
+    .sort((left, right) => left.label.localeCompare(right.label));
   const metricLists = definition.surfaces.some(
     (surface) =>
       String(surface.surfaceId).endsWith(':surface.inventory_today') &&
@@ -360,6 +381,7 @@ export function customizationTargets(definition: {
     }),
     choiceFields,
     forms,
+    linkTargets,
     lists,
     recordTypes,
     ...(metricLists.length ? { metricLists } : {}),

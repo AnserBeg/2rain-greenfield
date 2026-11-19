@@ -19,6 +19,7 @@ The first authoring slice admits literal bounds, presence, text-length bounds, a
 ## Bindings and evidence
 
 - Each binding owns stable rule and target IDs, explicit create/update operation IDs, trigger, absence policy, refusal effect, existing-records policy, message and field anchors. The compiler derives watched fields, authorization closure, explanation and witnesses from the binding.
+- A rule uses its own draft and approval. A validation member in a grouped draft gives a typed capability gap.
 - Refusal can reveal information about a watched field. This position admits public and internal scalar fields. Confidential and restricted operands require a field visibility contract for both the operation and its explanation.
 - Create checks the proposed values after defaults. Update compares typed proposed values with the locked current row and checks the rule when a watched value changes. Activate grandfathers stored rows. An authorized recovery records a report-only outcome.
 - The compiler proves that its synthesized satisfying invocation passes all applicable constraints. For each rule it also proves that its violating invocation satisfies the base input contract and the other rules. Its update witnesses change a watched value. It pins the operation, fixture state, input, date, expected refusal code and message. The verifier passes through the witnesses and observes refusal before mutation.

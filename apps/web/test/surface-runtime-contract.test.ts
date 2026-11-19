@@ -2597,7 +2597,8 @@ test('the message catalog honours the vocabulary it declares', () => {
   // and the redacted partial-commit outcome.
   // SALES-PARITY adds the declared-List export refusal (never a partial file).
   // WAREHOUSE-MODE adds the two answers of a scan that opened nothing.
-  assert.equal(SURFACE_MESSAGE_CODES.length, 50);
+  // CUSTOMIZE-4 adds the archive refusal for active dependent records.
+  assert.equal(SURFACE_MESSAGE_CODES.length, 51);
 
   for (const code of SURFACE_MESSAGE_CODES) {
     const entry = SURFACE_MESSAGE_CATALOG[code];

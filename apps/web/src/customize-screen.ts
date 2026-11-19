@@ -1,3 +1,5 @@
+import { recordTypeEntityId } from '@north-star/customization';
+
 /*
  * The shapes this screen reads from the customization service, declared here:
  * apps/web never imports the provider (surface-data-binding gate); the
@@ -41,6 +43,11 @@ interface CustomizationStatus {
 }
 interface CustomizationTargets {
   readonly validationTargets?: readonly LiteralValidationTarget[];
+  readonly linkTargets?: readonly {
+    readonly entityId: string;
+    readonly label: string;
+    readonly companyOwned: boolean;
+  }[];
   readonly permissionRoleKeys?: readonly string[];
   readonly permissionRoleLabels?: Readonly<Record<string, string>>;
   readonly permissionRestrictions?: readonly {
@@ -378,7 +385,8 @@ async function overview(
     }</section>`,
     '<h2>Describe a change</h2>',
     askForm(service),
-    recordTypeForm(),
+    recordTypeForm(targets),
+    extendRecordTypeForm(targets),
     fieldForm(targets),
     choiceForm(targets),
     arrangePicker(targets),
@@ -398,12 +406,53 @@ function askForm(service: CustomizeScreenService): string {
   return `<form method="post" data-customize-form="ask"><fieldset><legend>Ask in plain English</legend><label>What should change?<br><textarea name="request" rows="3" cols="60" required placeholder="Add an Equipment record with name, serial number, purchase date and a status"></textarea></label><input type="hidden" name="action" value="ask"><p><button type="submit">Draft it</button></p></fieldset></form>`;
 }
 
-function recordTypeForm(): string {
+function fieldRows(prefix = 'field', firstNamesRecord = false): string {
   const rows = Array.from({ length: FIELD_ROWS }, (_, index) => {
     const n = String(index + 1);
-    return `<tr><td><input name="field_${n}_label" aria-label="Field ${n} name"${index === 0 ? ' required value="Name"' : ''}></td><td>${typeSelect(`field_${n}_type`, `Field ${n} type`, index === 0)}</td><td><input type="checkbox" name="field_${n}_required" aria-label="Field ${n} required"${index === 0 ? ' checked disabled' : ''}></td><td><input name="field_${n}_options" aria-label="Field ${n} choices" placeholder="for a choice: In service, Retired"></td></tr>`;
+    const first = firstNamesRecord && index === 0;
+    return `<tr><td><input name="${prefix}_${n}_label" aria-label="Field ${n} name"${first ? ' required value="Name"' : ''}></td><td>${typeSelect(`${prefix}_${n}_type`, `Field ${n} type`, first)}</td><td><input type="checkbox" name="${prefix}_${n}_required" aria-label="Field ${n} required"${first ? ' checked disabled' : ''}></td><td><input name="${prefix}_${n}_options" aria-label="Field ${n} choices" placeholder="For a choice, enter comma-separated options"></td></tr>`;
   }).join('');
-  return `<form method="post" data-customize-form="addRecordType"><fieldset><legend>A new record type</legend><label>Name of the record type <input name="label" required placeholder="Equipment"></label><table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Choices</th></tr></thead><tbody>${rows}</tbody></table><p>The first field names each record. Leave unused rows empty.</p><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addRecordType"><p><button type="submit">Draft this record type</button></p></fieldset></form>`;
+  return `<table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Choices</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function recordTypeForm(targets: CustomizationTargets): string {
+  return `<form method="post" data-customize-form="addRecordType"><fieldset><legend>A new record type</legend><label>Name of the record type <input name="label" required placeholder="Equipment"></label><label>Ownership <select name="companyOwnership"><option value="">Shared across companies</option><option value="entityOwned">Each record belongs to one company</option></select></label>${fieldRows('field', true)}<p>The first field names each record. Leave unused rows empty.</p>${recordTypeDetails(targets.linkTargets ?? [])}<input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addRecordType"><p><button type="submit">Draft this record type</button></p></fieldset></form>`;
+}
+
+function extendRecordTypeForm(targets: CustomizationTargets): string {
+  const options = targets.recordTypes
+    .filter((entity) => entity.tenantAuthored)
+    .map(
+      (entity) =>
+        `<option value="${escapeHtml(entity.entityId)}">${escapeHtml(entity.label)}</option>`,
+    )
+    .join('');
+  if (!options) return '';
+  return `<form method="post" data-customize-form="extendRecordType"><fieldset><legend>Lines and actions</legend><label>Record type <select name="entity" required>${options}</select></label>${recordTypeDetails()}<input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="extendRecordType"><button>Draft changes</button></fieldset></form>`;
+}
+
+function recordTypeDetails(
+  linkTargets?: CustomizationTargets['linkTargets'],
+): string {
+  const linkOptions = (linkTargets ?? [])
+    .map(
+      (target) =>
+        `<option value="${escapeHtml(target.entityId)}">${escapeHtml(target.label)}${target.companyOwned ? ' (company owned)' : ''}</option>`,
+    )
+    .join('');
+  const links = Array.from({ length: 4 }, (_, index) => {
+    const n = index + 1;
+    return `<div><label>Link ${n} name <input name="link_${n}_label"></label><label>Target <select name="link_${n}_target"><option value="">Choose a record type</option>${linkOptions}</select></label></div>`;
+  }).join('');
+  const states = Array.from({ length: 8 }, (_, index) => {
+    const n = index + 1;
+    return `<div><label>State ${n} name <input name="state_${n}_label"></label><label>Meaning <select name="state_${n}_role"><option value="">Neutral</option><option value="inProgress">In progress</option><option value="success">Success</option><option value="attention">Needs attention</option><option value="blocked">Blocked</option></select></label></div>`;
+  }).join('');
+  const actions = Array.from({ length: 12 }, (_, index) => {
+    const n = index + 1;
+    return `<div><label>Action ${n} name <input name="transition_${n}_label"></label><label>From <input name="transition_${n}_from"></label><label>To <input name="transition_${n}_to"></label></div>`;
+  }).join('');
+  return `<details><summary>Line table</summary><label>Table name <input name="lines_label"></label>${fieldRows('line')}</details>${linkTargets?.length ? `<details><summary>Links</summary>${links}</details>` : ''}<details><summary>States and actions</summary><label>Initial state <input name="initial"></label>${states}${actions}</details>`;
 }
 
 function fieldForm(targets: CustomizationTargets): string {
@@ -619,20 +668,19 @@ export function patchFromForm(
   form: CustomizeScreenSubmission,
   validationTarget?: LiteralValidationTarget,
 ): unknown {
-  const field = (n: number) => {
-    const label = String(form[`field_${String(n)}_label`] ?? '').trim();
+  const field = (n: number, prefix = 'field') => {
+    const key = `${prefix}_${n}`;
+    const label = String(form[`${key}_label`] ?? '').trim();
     if (!label) return null;
-    const type = String(form[`field_${String(n)}_type`] ?? 'text');
-    const options = String(form[`field_${String(n)}_options`] ?? '')
+    const type = String(form[`${key}_type`] ?? 'text');
+    const options = String(form[`${key}_options`] ?? '')
       .split(',')
       .map((option) => option.trim())
       .filter(Boolean);
     return {
       label,
       type,
-      ...(form[`field_${String(n)}_required`] === 'on'
-        ? { required: true }
-        : {}),
+      ...(form[`${key}_required`] === 'on' ? { required: true } : {}),
       ...(type === 'choice' ? { options } : {}),
     };
   };
@@ -661,13 +709,64 @@ export function patchFromForm(
         ...(form.sumField ? { sumField: form.sumField } : {}),
       };
     case 'addRecordType':
-      return {
-        fields: Array.from({ length: FIELD_ROWS }, (_, index) =>
-          field(index + 1),
-        ).filter((entry) => entry !== null),
-        kind: 'addRecordType',
-        label: String(form.label ?? '').trim(),
-      };
+    case 'extendRecordType': {
+      const label = (form.label ?? '').trim();
+      const header =
+        form.kind === 'addRecordType'
+          ? {
+              fields: Array.from({ length: FIELD_ROWS }, (_, index) =>
+                field(index + 1),
+              ).filter((entry) => entry !== null),
+              kind: 'addRecordType',
+              label,
+              ...(form.companyOwnership
+                ? { companyOwnership: form.companyOwnership }
+                : {}),
+            }
+          : null;
+      const entity = header
+        ? recordTypeEntityId('northstar.app', label)
+        : form.entity;
+      const value = (key: string) => (form[key] ?? '').trim();
+      const lines = Array.from({ length: FIELD_ROWS }, (_, index) =>
+        field(index + 1, 'line'),
+      ).filter((entry) => entry !== null);
+      const links = Array.from({ length: 4 }, (_, index) => {
+        const key = `link_${index + 1}`;
+        return {
+          kind: 'addLink',
+          entity,
+          label: value(`${key}_label`),
+          target: value(`${key}_target`),
+        };
+      }).filter((entry) => entry.label || entry.target);
+      const states = Array.from({ length: 8 }, (_, index) => {
+        const key = `state_${index + 1}`;
+        const role = value(`${key}_role`);
+        return { label: value(`${key}_label`), ...(role ? { role } : {}) };
+      }).filter((entry) => entry.label || entry.role);
+      const transitions = Array.from({ length: 12 }, (_, index) => {
+        const key = `transition_${index + 1}`;
+        return {
+          label: value(`${key}_label`),
+          from: value(`${key}_from`),
+          to: value(`${key}_to`),
+        };
+      }).filter((entry) => entry.from || entry.to || entry.label);
+      const tableLabel = value('lines_label');
+      const initial = value('initial');
+      const patches = [
+        ...(header ? [header] : []),
+        ...links,
+        ...(tableLabel || lines.length
+          ? [{ kind: 'addLineTable', entity, label: tableLabel, fields: lines }]
+          : []),
+        ...(initial || states.length || transitions.length
+          ? [{ kind: 'declareLifecycle', entity, initial, states, transitions }]
+          : []),
+      ];
+      return patches.length === 1 ? patches[0] : { kind: 'changeSet', patches };
+    }
     case 'addField':
       return { entity: form.entity, field: field(1), kind: 'addField' };
     case 'addChoice':
@@ -796,6 +895,14 @@ function describe(patch: PatchSummary): string {
       return `New field "${label}"`;
     case 'addChoice':
       return `New choice "${label}"`;
+    case 'addLink':
+      return `New link "${label}"`;
+    case 'addLineTable':
+      return `New line table "${label}"`;
+    case 'declareLifecycle':
+      return 'New states and actions';
+    case 'changeSet':
+      return patch.displayLabel ?? 'Grouped changes';
     case 'arrangeLayout':
       return label === 'form'
         ? 'Arranged form fields'

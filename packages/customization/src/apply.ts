@@ -2,6 +2,7 @@ import { isNarrowableOperationId } from '@north-star/canonical-model';
 import type {
   CustomField,
   CustomizationPatch,
+  SingleCustomizationPatch,
   UnsupportedCustomization,
 } from './patch.js';
 import { unsupported } from './patch.js';
@@ -83,9 +84,14 @@ export function applyCustomizationPatches(
   patches: readonly CustomizationPatch[],
 ): CustomizationApplication {
   const authored = structuredClone(base) as Json;
-  for (const [index, patch] of patches.entries()) {
-    const outcome = applyOne(authored, patch, patches.slice(0, index));
-    if (outcome) return Object.freeze({ ...outcome, patchIndex: index });
+  const previous: SingleCustomizationPatch[] = [];
+  for (const [index, change] of patches.entries()) {
+    const members = change.kind === 'changeSet' ? change.patches : [change];
+    for (const patch of members) {
+      const outcome = applyOne(authored, patch, previous);
+      if (outcome) return Object.freeze({ ...outcome, patchIndex: index });
+      previous.push(patch);
+    }
   }
   // A revision carrying a tenant patch is tenant-authored; the repository
   // checks the revision row against this value.
@@ -128,18 +134,57 @@ export function isTenantId(id: string): boolean {
 type Outcome =
   Omit<CustomizationRefusal, 'patchIndex'> | UnsupportedCustomization;
 
+export const ADD_LINK_LATER_CAPABILITY = 'links on a published record type';
+
+export function addLinkLaterRefusal(): UnsupportedCustomization {
+  return unsupported(
+    ADD_LINK_LATER_CAPABILITY,
+    'Links can be added when the record type is first created; adding one later is coming soon',
+  );
+}
+
+export function recordTypeEntityId(namespace: string, label: string): string {
+  return `${namespace}:entity.${TENANT_LOCAL_PREFIX}${slug(label)}`;
+}
+
+export function checkCreateTimeLinks(
+  change: CustomizationPatch,
+): UnsupportedCustomization | null {
+  const members = change.kind === 'changeSet' ? change.patches : [change];
+  const newTypes: string[] = [];
+  for (const member of members) {
+    if (member.kind === 'addRecordType') newTypes.push(member.label);
+    if (member.kind === 'addLink') {
+      const namespace = member.entity.split(':', 1)[0]!;
+      if (
+        !newTypes.some(
+          (label) => recordTypeEntityId(namespace, label) === member.entity,
+        )
+      )
+        return addLinkLaterRefusal();
+    }
+  }
+  return null;
+}
+
 function applyOne(
   authored: Json,
-  patch: CustomizationPatch,
-  previous: readonly CustomizationPatch[],
+  patch: SingleCustomizationPatch,
+  previous: readonly SingleCustomizationPatch[],
 ): Outcome | null {
   switch (patch.kind) {
     case 'addRecordType':
-      return addRecordType(authored, patch.label, patch.fields);
+      return addRecordType(authored, patch);
     case 'addField':
       return addField(authored, patch, previous);
     case 'addChoice':
       return addChoice(authored, patch.enumField, patch.option);
+    case 'addLink':
+      return addLink(authored, patch);
+    case 'addLineTable':
+      return addLineTable(authored, patch);
+    case 'declareLifecycle':
+      return declareLifecycle(authored, patch);
     case 'arrangeLayout':
       return arrangeLayout(authored, patch);
     case 'saveListView':
@@ -216,6 +261,435 @@ function applyOne(
   }
 }
 
+function addLink(
+  authored: Json,
+  patch: Extract<SingleCustomizationPatch, { kind: 'addLink' }>,
+): Outcome | null {
+  const entities = list(authored, 'entities');
+  const source = entities.find((entity) => entity.entityId === patch.entity);
+  const target = entities.find((entity) => entity.entityId === patch.target);
+  if (!source || !target)
+    return refusal(
+      'CUSTOMIZE_TARGET_NOT_FOUND',
+      'Both record types must exist before adding a link.',
+    );
+  const namespace = namespaceOf(authored);
+  const local = localOf(patch.entity);
+  const surfaces = list(authored, 'surfaces');
+  const surface = (role: string) =>
+    surfaces.find(
+      (candidate) =>
+        candidate.surfaceId === `${namespace}:surface.${local}_${role}`,
+    );
+  const form = surface('form');
+  const detail = surface('detail');
+  const listing = surface('list')?.list as Json | undefined;
+  if (!isTenantId(patch.entity) || !form || !detail || !listing)
+    return unsupported(
+      'links on this source record type',
+      'Choose a tenant record type with its own list and record page.',
+    );
+  if (patch.required && patch.entity === patch.target)
+    return unsupported(
+      'required links to the same record type',
+      'Make a link to the same record type optional so the first record can be created.',
+    );
+  const targetLabel = linkTarget(authored, patch.target);
+  if (!targetLabel)
+    return unsupported(
+      'link target without a readable list and record page',
+      `Choose a record type with a list and record page, such as ${String(source.label)}.`,
+    );
+  const relations = list(authored, 'relations');
+  const existing = relations.filter(
+    (relation) => (relation.sourceEntity as Json).targetId === patch.entity,
+  );
+  const relationId = `${namespace}:relation.${local}_${slug(patch.label)}`;
+  if (relations.some((relation) => relation.relationId === relationId))
+    return refusal(
+      'CUSTOMIZE_DUPLICATE_LABEL',
+      'This record type already has a link with that name.',
+    );
+  const columns = listing.columns as Json[];
+  if (existing.length >= 4 || columns.length >= 16)
+    return unsupported(
+      'additional links on this record type',
+      'A record page can show four links and a list can show sixteen columns.',
+    );
+  push(authored, 'relations', {
+    archiveBehavior: 'restrict',
+    cardinality: 'manyToOne',
+    joinEligibility: 'query',
+    kind: 'relationDefinition',
+    orderKey: nextOrder(existing),
+    ownership: 'reference',
+    relationId,
+    required: patch.required ?? false,
+    schemaVersion: version,
+    sourceEntity: {
+      kind: 'entityReference',
+      schemaVersion: version,
+      targetId: patch.entity,
+    },
+    targetEntity: {
+      kind: 'entityReference',
+      schemaVersion: version,
+      targetId: patch.target,
+    },
+  });
+  const composition = recordComposition(authored, detail, patch.entity);
+  const fields = composition.fields as Json[];
+  const column = {
+    columnId: `${namespace}:column.${local}_link_${slug(patch.label)}`,
+    field: relationId,
+    label: patch.label,
+    orderKey: nextOrder(fields),
+  };
+  const reference = (queryId: string) => ({
+    query: {
+      kind: 'queryReference',
+      schemaVersion: version,
+      targetId: queryId,
+    },
+    labelField: {
+      kind: 'fieldReference',
+      schemaVersion: version,
+      targetId: targetLabel.fieldId,
+    },
+  });
+  fields.push({ ...column, reference: reference(targetLabel.getQueryId) });
+  const actions = composition.actions as Json[];
+  actions.push({
+    actionId: `${namespace}:action.${local}_open_${slug(patch.label)}`,
+    label: `Open ${patch.label}`,
+    description: `Open the linked ${patch.label}.`,
+    orderKey: nextOrder(actions),
+    conditions: [],
+    inputs: [],
+    steps: [],
+    navigate: {
+      surface: {
+        kind: 'surfaceReference',
+        schemaVersion: version,
+        targetId: targetLabel.surfaceId,
+      },
+      query: reference(targetLabel.pageQueryId).query,
+      record: { source: 'record', field: relationId },
+    },
+  });
+  columns.push({
+    ...column,
+    orderKey: nextOrder(columns),
+    reference: reference(targetLabel.queryId),
+    relation: true,
+    priority: columns.length,
+    role: 'value',
+    sortable: true,
+  });
+  if (form.documentEditor)
+    appendEditorLink(
+      form.documentEditor as Json,
+      relationId,
+      patch.label,
+      targetLabel,
+    );
+  return null;
+}
+
+export function linkTarget(authored: Readonly<Json>, entityId: string) {
+  const namespace = entityId.split(':')[0];
+  const local = localOf(entityId);
+  const queries = list(authored, 'queries');
+  const query = queries.find(
+    (candidate) => candidate.queryId === `${namespace}:query.${local}_list`,
+  );
+  const get = queries.find(
+    (candidate) => candidate.queryId === `${namespace}:query.${local}_get`,
+  );
+  if (!query || !get) return null;
+  const recordQueries = new Set(
+    queries
+      .filter(
+        (candidate) =>
+          candidate.queryType === 'get' &&
+          (candidate.sourceEntity as Json).targetId === entityId,
+      )
+      .map((candidate) => candidate.queryId),
+  );
+  const detail = list(authored, 'surfaces').find(
+    (surface) =>
+      surface.surfaceRole === 'record' &&
+      recordQueries.has((surface.dataSource as Json).targetId),
+  );
+  if (!detail) return null;
+  const fields = new Map(
+    list(authored, 'fields').map((field) => [field.fieldId, field]),
+  );
+  const selected = (query.selections as Json[]).map((selection) =>
+    String((selection.field as Json).targetId),
+  );
+  const exactFields = new Set(
+    (get.selections as Json[]).map((selection) =>
+      String((selection.field as Json).targetId),
+    ),
+  );
+  const usable = selected.filter(
+    (fieldId) =>
+      exactFields.has(fieldId) &&
+      (fields.get(fieldId)?.fieldType as Json | undefined)?.kind ===
+        'textFieldType',
+  );
+  const fieldId = usable.find((id) => id.endsWith('_name')) ?? usable[0];
+  return fieldId
+    ? {
+        fieldId,
+        queryId: String(query.queryId),
+        getQueryId: String(get.queryId),
+        pageQueryId: String((detail.dataSource as Json).targetId),
+        surfaceId: String(detail.surfaceId),
+        companyOwned: get.legalEntityScope !== undefined,
+      }
+    : null;
+}
+
+function appendEditorLink(
+  editor: Json,
+  fieldId: string,
+  label: string,
+  target: NonNullable<ReturnType<typeof linkTarget>>,
+): void {
+  const links = (editor.headerRelations ??= []) as Json[];
+  links.push({
+    fieldId,
+    label,
+    reference: {
+      queryId: target.queryId,
+      getQueryId: target.getQueryId,
+      labelFieldIds: [target.fieldId],
+    },
+  });
+}
+
+function declareLifecycle(
+  authored: Json,
+  patch: Extract<SingleCustomizationPatch, { kind: 'declareLifecycle' }>,
+): Outcome | null {
+  const entity = list(authored, 'entities').find(
+    (candidate) => candidate.entityId === patch.entity,
+  );
+  if (!entity)
+    return refusal(
+      'CUSTOMIZE_TARGET_NOT_FOUND',
+      `There is no record type ${patch.entity}.`,
+    );
+  if (!isTenantId(patch.entity))
+    return unsupported(
+      'first-party lifecycle changes',
+      'Choose a tenant record type for this lifecycle.',
+    );
+  if (
+    list(authored, 'stateMachines').some(
+      (machine) => (machine.entity as Json).targetId === patch.entity,
+    )
+  ) {
+    return unsupported(
+      'editing a declared lifecycle',
+      'This record type already has a lifecycle.',
+    );
+  }
+  const stateSlugs = patch.states.map((state) => slug(state.label));
+  const transitionSlugs = patch.transitions.map((transition) =>
+    slug(transition.label),
+  );
+  if (firstDuplicate(stateSlugs) || firstDuplicate(transitionSlugs))
+    return refusal(
+      'CUSTOMIZE_DUPLICATE_LABEL',
+      'Use distinct names for the states and for the actions.',
+    );
+  const initial = slug(patch.initial);
+  const stateNames = new Set(stateSlugs);
+  if (
+    !stateNames.has(initial) ||
+    patch.transitions.some(
+      (transition) =>
+        !stateNames.has(slug(transition.from)) ||
+        !stateNames.has(slug(transition.to)) ||
+        slug(transition.from) === slug(transition.to),
+    )
+  ) {
+    return unsupported(
+      'invalid lifecycle state',
+      'The initial state and both ends of every action must be declared, and actions must move to a different state.',
+    );
+  }
+  const namespace = namespaceOf(authored);
+  const local = localOf(patch.entity);
+  const id = (kind: string, suffix = '') =>
+    `${namespace}:${kind}.${local}${suffix}`;
+  const reference = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: version,
+    targetId,
+  });
+  const stateRef = (name: string) =>
+    reference('stateReference', id('state', `_${name}`));
+  const machineId = id('machine');
+  const stateFieldId = `${namespace}:derived_state_field.${machineId.split(':')[1]}`;
+  const entityRef = reference('entityReference', patch.entity);
+  push(authored, 'stateMachines', {
+    entity: entityRef,
+    initialState: stateRef(initial),
+    kind: 'stateMachineDefinition',
+    machineId,
+    schemaVersion: version,
+    states: patch.states.map((state, index) => ({
+      kind: 'stateDefinition',
+      label: state.label,
+      orderKey: (index + 1) * 10,
+      schemaVersion: version,
+      stateId: stateRef(stateSlugs[index]!).targetId,
+      terminal: !patch.transitions.some(
+        (transition) => slug(transition.from) === stateSlugs[index],
+      ),
+    })),
+    transitions: patch.transitions.map((transition, index) => ({
+      fromState: stateRef(slug(transition.from)),
+      kind: 'transitionDefinition',
+      label: transition.label,
+      orderKey: (index + 1) * 10,
+      permission: reference(
+        'permissionReference',
+        id('permission', `_action_${transitionSlugs[index]}`),
+      ),
+      schemaVersion: version,
+      toState: stateRef(slug(transition.to)),
+      transitionId: id('transition', `_${transitionSlugs[index]}`),
+    })),
+  });
+  for (const [index, transition] of patch.transitions.entries()) {
+    const localAction = transitionSlugs[index]!;
+    const permissionId = id('permission', `_action_${localAction}`);
+    push(authored, 'permissions', {
+      action: 'transition',
+      kind: 'permissionDefinition',
+      label: transition.label,
+      permissionId,
+      resource: entityRef,
+      schemaVersion: version,
+    });
+    push(authored, 'operations', {
+      confirmation: 'humanRequired',
+      effect: {
+        kind: 'transitionStateEffect',
+        schemaVersion: version,
+        transition: reference(
+          'transitionReference',
+          id('transition', `_${localAction}`),
+        ),
+      },
+      kind: 'operationDefinition',
+      label: transition.label,
+      module: entity.module,
+      operationId: id('operation', `_action_${localAction}`),
+      permission: reference('permissionReference', permissionId),
+      precondition: statePrecondition(
+        stateFieldId,
+        stateRef(slug(transition.from)).targetId,
+      ),
+      readBack: reference('queryReference', id('query', '_get')),
+      schemaVersion: version,
+      tier: 'o0',
+    });
+  }
+  for (const query of list(authored, 'queries')) {
+    if ((query.sourceEntity as Json).targetId !== patch.entity) continue;
+    const selections = query.selections as Json[];
+    selections.push({
+      field: reference('fieldReference', stateFieldId),
+      kind: 'querySelection',
+      orderKey: nextOrder(selections),
+      schemaVersion: version,
+      selectionId: id('selection', `_${String(query.queryType)}_state`),
+    });
+  }
+  const surfaces = list(authored, 'surfaces');
+  const detail = surfaces.find(
+    (surface) => surface.surfaceId === id('surface', '_detail'),
+  )!;
+  const form = surfaces.find(
+    (surface) => surface.surfaceId === id('surface', '_form'),
+  )!;
+  if (form.documentEditor) {
+    const machine = list(authored, 'stateMachines').find(
+      (candidate) => candidate.machineId === machineId,
+    )!;
+    Object.assign(
+      form.documentEditor,
+      editorLifecycle(authored, patch.entity, machine),
+    );
+  }
+  const listing = surfaces.find(
+    (surface) => surface.surfaceId === id('surface', '_list'),
+  )!.list as Json;
+  const columns = listing.columns as Json[];
+  const statusColumn = {
+    columnId: id('column', '-status'),
+    field: stateFieldId,
+    label: 'Status',
+    orderKey: nextOrder(columns),
+  };
+  if (columns.length === 16)
+    return unsupported(
+      'a status column on a full list',
+      'Hide one list column before adding a lifecycle. A list can show up to 16 columns.',
+    );
+  columns.push({
+    ...statusColumn,
+    priority: columns.length,
+    role: 'status',
+    sortable: true,
+    statusRoles: patch.states.flatMap((state) =>
+      state.role
+        ? [
+            {
+              value: stateRef(slug(state.label)).targetId,
+              role: state.role,
+            },
+          ]
+        : [],
+    ),
+  });
+  const composition = recordComposition(authored, detail, patch.entity);
+  const fields = composition.fields as Json[];
+  const stateCondition = (state: string) => ({
+    value: { source: 'record', field: stateFieldId },
+    operator: 'equals',
+    compare: state,
+  });
+  fields.push({ ...statusColumn, orderKey: nextOrder(fields) });
+  composition.presentation = {
+    ...(composition.presentation as Json),
+    header: {
+      title: fields[0]!.columnId,
+      facts: [],
+      subtitle: [],
+      status: statusColumn.columnId,
+    },
+    recordActions: 'progressive',
+    technicalDetails: 'progressive',
+    progression: {
+      title: `${String(entity.label)} status`,
+      steps: patch.states.map((state, index) => ({
+        label: state.label,
+        current: [stateCondition(stateRef(stateSlugs[index]!).targetId)],
+        complete: [],
+      })),
+      next: [],
+    },
+  };
+  return null;
+}
+
 function addMetricCard(
   authored: Json,
   patch: Extract<CustomizationPatch, { kind: 'addMetricCard' }>,
@@ -281,14 +755,14 @@ function addMetricCard(
 
 function addRecordType(
   authored: Json,
-  label: string,
-  fields: readonly CustomField[],
+  patch: Extract<SingleCustomizationPatch, { kind: 'addRecordType' }>,
 ): Outcome | null {
+  const { companyOwnership, fields, label } = patch;
   const namespace = namespaceOf(authored);
   const local = `${TENANT_LOCAL_PREFIX}${slug(label)}`;
   const id = (kind: string, suffix = '') =>
     `${namespace}:${kind}.${local}${suffix}`;
-  const entityId = id('entity');
+  const entityId = recordTypeEntityId(namespace, label);
   // The one menu group every record type a tenant adds is listed under
   // (LOOK-1 round 2): declared by the expansion, never guessed from ids. Its
   // local id has a hyphen, which no record type's slug can produce.
@@ -364,6 +838,7 @@ function addRecordType(
     schemaVersion: version,
   });
   push(authored, 'entities', {
+    ...(companyOwnership === undefined ? {} : { companyOwnership }),
     entityId,
     kind: 'entityDefinition',
     label: label.trim(),
@@ -380,82 +855,13 @@ function addRecordType(
     storageClass: 'dedicatedTable',
     storageMappingId: id('storage'),
   });
-  push(
+  addRecordOperations(
     authored,
-    'permissions',
-    ...['create', 'read', 'update', 'archive', 'restore'].map((action) => ({
-      action,
-      kind: 'permissionDefinition',
-      label: `${label.trim()} ${action}`,
-      permissionId: id('permission', `_${action}`),
-      resource: reference('entityReference', entityId),
-      schemaVersion: version,
-    })),
-  );
-  push(
-    authored,
-    'queries',
-    ...['get', 'list', 'search', 'resolve'].map((queryType) => ({
-      kind: 'queryDefinition',
-      maximumResultCount: queryType === 'get' ? 1 : 100,
-      module: reference('moduleReference', moduleId),
-      permission: reference('permissionReference', id('permission', '_read')),
-      queryId: id('query', `_${queryType}`),
-      queryType,
-      ...(queryType === 'resolve'
-        ? {
-            resolveMatchKeys: [
-              {
-                authority: 'advisory',
-                field: reference('fieldReference', fieldIds[0]!),
-                kind: 'resolveMatchKey',
-                matchKeyId: id('resolve-key', '_name'),
-                orderKey: 10,
-                schemaVersion: version,
-              },
-            ],
-          }
-        : {}),
-      schemaVersion: version,
-      selections: fieldIds.map((fieldId, index) => ({
-        field: reference('fieldReference', fieldId),
-        kind: 'querySelection',
-        orderKey: (index + 1) * 10,
-        schemaVersion: version,
-        selectionId: id('selection', `_${queryType}_${String(index + 1)}`),
-      })),
-      sourceEntity: reference('entityReference', entityId),
-      tier: 'q0',
-    })),
-  );
-  push(
-    authored,
-    'operations',
-    ...(
-      [
-        ['create', 'createRecordEffect'],
-        ['update', 'updateRecordEffect'],
-        ['archive', 'archiveRecordEffect'],
-        ['restore', 'restoreRecordEffect'],
-      ] as const
-    ).map(([action, kind]) => ({
-      confirmation: action === 'archive' ? 'humanRequired' : 'none',
-      effect: {
-        entity: reference('entityReference', entityId),
-        kind,
-        schemaVersion: version,
-      },
-      kind: 'operationDefinition',
-      module: reference('moduleReference', moduleId),
-      operationId: id('operation', `_${action}`),
-      permission: reference(
-        'permissionReference',
-        id('permission', `_${action}`),
-      ),
-      readBack: reference('queryReference', id('query', '_get')),
-      schemaVersion: version,
-      tier: 'o0',
-    })),
+    entityId,
+    moduleId,
+    label,
+    fieldIds,
+    companyOwnership === 'entityOwned',
   );
   const contentCapability = `${namespace}:capability.standard_surface_content`;
   const surfaces = (
@@ -500,6 +906,18 @@ function addRecordType(
     surfaceRole,
     workspace: {
       membership: surfaceRole === 'list' ? 'operational' : 'contextual',
+      ...(companyOwnership === 'entityOwned'
+        ? {
+            entry: {
+              companyQueryId: `${namespace}:query.legal_entity_list`,
+              companyNameFieldId: `${namespace}:field.legal_entity_name`,
+              companyStateFieldId: `${namespace}:field.legal_entity_status`,
+              activeStateId: `${namespace}:option.legal_entity_status_active`,
+              policy: 'authorizedSingleOrPreference',
+              authorizationQueryId: id('query', '_list'),
+            },
+          }
+        : {}),
       // Listed in the Custom group, not a group of its own (LOOK-1 round 2).
       ...(surfaceRole === 'list' ? { navigationModuleId: groupId } : {}),
     },
@@ -556,10 +974,477 @@ function addRecordType(
   return null;
 }
 
+function addRecordOperations(
+  authored: Json,
+  entityId: string,
+  moduleId: string,
+  label: string,
+  fieldIds: readonly string[],
+  companyOwned: boolean,
+  nameFieldId = fieldIds[0]!,
+): void {
+  const namespace = namespaceOf(authored);
+  const id = (kind: string, suffix = '') =>
+    `${namespace}:${kind}.${localOf(entityId)}${suffix}`;
+  const reference = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: version,
+    targetId,
+  });
+  push(
+    authored,
+    'permissions',
+    ...['create', 'read', 'update', 'archive', 'restore'].map((action) => ({
+      action,
+      kind: 'permissionDefinition',
+      label: `${label.trim()} ${action}`,
+      permissionId: id('permission', `_${action}`),
+      resource: reference('entityReference', entityId),
+      schemaVersion: version,
+    })),
+  );
+  push(
+    authored,
+    'queries',
+    ...['get', 'list', 'search', 'resolve'].map((queryType) => {
+      const parameterId = id('parameter', `_${queryType}_legal_entity_scope`);
+      return {
+        kind: 'queryDefinition',
+        ...(companyOwned
+          ? {
+              legalEntityScope: {
+                cardinality: 'exactlyOne',
+                kind: 'queryLegalEntityScope',
+                operand: {
+                  kind: 'queryParameterReference',
+                  parameterId,
+                  schemaVersion: version,
+                },
+                schemaVersion: version,
+              },
+              parameters: [
+                {
+                  kind: 'queryParameterDefinition',
+                  orderKey: 10,
+                  parameterId,
+                  schemaVersion: version,
+                },
+              ],
+            }
+          : {}),
+        maximumResultCount: queryType === 'get' ? 1 : 100,
+        module: reference('moduleReference', moduleId),
+        permission: reference('permissionReference', id('permission', '_read')),
+        queryId: id('query', `_${queryType}`),
+        queryType,
+        ...(queryType === 'resolve'
+          ? {
+              resolveMatchKeys: [
+                {
+                  authority: 'advisory',
+                  field: reference('fieldReference', nameFieldId),
+                  kind: 'resolveMatchKey',
+                  matchKeyId: id('resolve-key', '_name'),
+                  orderKey: 10,
+                  schemaVersion: version,
+                },
+              ],
+            }
+          : {}),
+        schemaVersion: version,
+        selections: fieldIds.map((fieldId, index) => ({
+          field: reference('fieldReference', fieldId),
+          kind: 'querySelection',
+          orderKey: (index + 1) * 10,
+          schemaVersion: version,
+          selectionId: id('selection', `_${queryType}_${String(index + 1)}`),
+        })),
+        sourceEntity: reference('entityReference', entityId),
+        tier: 'q0',
+      };
+    }),
+  );
+  push(
+    authored,
+    'operations',
+    ...(
+      [
+        ['create', 'createRecordEffect'],
+        ['update', 'updateRecordEffect'],
+        ['archive', 'archiveRecordEffect'],
+        ['restore', 'restoreRecordEffect'],
+      ] as const
+    ).map(([action, kind]) => ({
+      confirmation: action === 'archive' ? 'humanRequired' : 'none',
+      effect: {
+        entity: reference('entityReference', entityId),
+        kind,
+        schemaVersion: version,
+      },
+      kind: 'operationDefinition',
+      module: reference('moduleReference', moduleId),
+      operationId: id('operation', `_${action}`),
+      permission: reference(
+        'permissionReference',
+        id('permission', `_${action}`),
+      ),
+      readBack: reference('queryReference', id('query', '_get')),
+      schemaVersion: version,
+      tier: 'o0',
+    })),
+  );
+}
+
+function addLineTable(
+  authored: Json,
+  patch: Extract<SingleCustomizationPatch, { kind: 'addLineTable' }>,
+): Outcome | null {
+  const parent = list(authored, 'entities').find(
+    (entity) => entity.entityId === patch.entity,
+  );
+  const machine = list(authored, 'stateMachines').find(
+    (candidate) => (candidate.entity as Json).targetId === patch.entity,
+  );
+  if (!parent || !isTenantId(patch.entity))
+    return unsupported(
+      'line tables on first-party record types',
+      'Choose a tenant record type for this line table.',
+    );
+
+  const namespace = namespaceOf(authored);
+  const parentLocal = localOf(patch.entity);
+  const local = `${parentLocal}_lines`;
+  const id = (kind: string, suffix = '') =>
+    `${namespace}:${kind}.${local}${suffix}`;
+  const reference = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: version,
+    targetId,
+  });
+  const entityId = id('entity');
+  const surfaces = list(authored, 'surfaces');
+  const parentForm = surfaces.find(
+    (surface) =>
+      surface.surfaceId === `${namespace}:surface.${parentLocal}_form`,
+  )!;
+  const parentDetail = surfaces.find(
+    (surface) =>
+      surface.surfaceId === `${namespace}:surface.${parentLocal}_detail`,
+  )!;
+  if (
+    parentForm.documentEditor ||
+    list(authored, 'entities').some((entity) => entity.entityId === entityId)
+  )
+    return unsupported(
+      'multiple line tables',
+      'This record type already has a line table, or its generated line type name is in use.',
+    );
+
+  const nameIndex = patch.fields.findIndex((field) => field.type === 'text');
+  if (nameIndex < 0)
+    return unsupported(
+      'line tables without a text field',
+      'Add a text field such as Characteristic to identify the line.',
+    );
+  const duplicate = firstDuplicate([
+    'line_number',
+    ...patch.fields.map((field) => slug(field.label)),
+  ]);
+  if (duplicate)
+    return refusal(
+      'CUSTOMIZE_DUPLICATE_LABEL',
+      `Two line fields would share the name "${duplicate}".`,
+    );
+
+  const moduleId = String((parent.module as Json).targetId);
+  const lineNumberId = id('field', '_line_number');
+  const fields = [
+    { label: 'Line number', type: 'number', required: true } as const,
+    ...patch.fields,
+  ];
+  const lineFields = fields.map((field, index) =>
+    fieldDefinition(namespace, entityId, `${local}_${slug(field.label)}`, {
+      ...field,
+      orderKey: (index + 1) * 10,
+      searchable: index === nameIndex + 1,
+    }),
+  );
+  push(authored, 'entities', {
+    ...(parent.companyOwnership === undefined
+      ? {}
+      : { companyOwnership: parent.companyOwnership }),
+    entityId,
+    kind: 'entityDefinition',
+    label: patch.label,
+    module: parent.module,
+    orderKey: nextOrder(
+      list(authored, 'entities').filter(
+        (entity) => (entity.module as Json).targetId === moduleId,
+      ),
+    ),
+    schemaVersion: version,
+    storage: reference('storageMappingReference', id('storage')),
+  });
+  push(authored, 'fields', ...lineFields);
+  push(authored, 'storageMappings', {
+    entity: reference('entityReference', entityId),
+    kind: 'storageMappingDefinition',
+    schemaVersion: version,
+    storageClass: 'dedicatedTable',
+    storageMappingId: id('storage'),
+  });
+  const parentRelationId = id('relation', '_parent');
+  push(authored, 'relations', {
+    archiveBehavior: 'restrict',
+    cardinality: 'manyToOne',
+    joinEligibility: 'query',
+    kind: 'relationDefinition',
+    orderKey: 10,
+    ownership: 'parentScopedChild',
+    relationId: parentRelationId,
+    required: true,
+    schemaVersion: version,
+    sourceEntity: reference('entityReference', entityId),
+    targetEntity: reference('entityReference', patch.entity),
+  });
+  addRecordOperations(
+    authored,
+    entityId,
+    moduleId,
+    patch.label,
+    lineFields.map((field) => String(field.fieldId)),
+    parent.companyOwnership === 'entityOwned',
+    String(lineFields[nameIndex + 1]!.fieldId),
+  );
+  // The gateway uses the parent's update precondition for child mutations.
+  const lifecycle = machine
+    ? editorLifecycle(authored, patch.entity, machine)
+    : {};
+  const lineFormId = id('surface', '_form');
+  for (const [role, suffix, source] of [
+    ['form', '_form', parentForm],
+    ['record', '_detail', parentDetail],
+    [
+      'list',
+      '_list',
+      surfaces.find(
+        (surface) =>
+          surface.surfaceId === `${namespace}:surface.${parentLocal}_list`,
+      )!,
+    ],
+  ] as const) {
+    push(authored, 'surfaces', {
+      archetype: role === 'list' ? 'list' : 'record',
+      dataSource: reference(
+        'queryReference',
+        id('query', role === 'list' ? '_list' : '_get'),
+      ),
+      kind: 'surfaceDefinition',
+      label: `${patch.label} ${suffix.slice(1)}`,
+      module: parent.module,
+      schemaVersion: version,
+      slots: (source.slots as Json[])
+        .filter((slot) => slot.slot !== 'childTables')
+        .map((slot) => ({
+          ...slot,
+          slotId: id(
+            'slot',
+            `${suffix}_${String(slot.slot).replace(/[A-Z]/gu, (character) => `_${character.toLowerCase()}`)}`,
+          ),
+        })),
+      statusRoles: [],
+      surfaceId: id('surface', suffix),
+      surfaceRole: role,
+      workspace: {
+        ...(parentForm.workspace as Json),
+        ownerSurfaceId: `${namespace}:surface.${parentLocal}_list`,
+      },
+    });
+  }
+  push(authored, 'assertions', {
+    assertionId: id('assertion', '_read_line'),
+    evidenceKinds: [
+      'structure',
+      'provider',
+      'userInterface',
+      'agent',
+      'migration',
+      'recovery',
+    ],
+    expectedDiagnosticCode: null,
+    expectedOutcome: 'succeeds',
+    invocation: {
+      kind: 'queryInvocation',
+      query: reference('queryReference', id('query', '_get')),
+      schemaVersion: version,
+    },
+    kind: 'assertionDefinition',
+    schemaVersion: version,
+  });
+  const headerFields = list(authored, 'fields').filter(
+    (field) => (field.entity as Json).targetId === patch.entity,
+  );
+  parentForm.documentEditor = {
+    ...lifecycle,
+    ...(parent.companyOwnership === 'entityOwned'
+      ? {}
+      : { scope: 'tenantShared' }),
+    headerFields: headerFields.map(editorField),
+    headerFormSurfaceId: parentForm.surfaceId,
+    kind: 'draftDocumentEditor',
+    lineFields: lineFields.slice(1).map(editorField),
+    lineFormSurfaceId: lineFormId,
+    lineNumberFieldId: lineNumberId,
+    lineQueryId: id('query', '_list'),
+    linesLabel: patch.label,
+    parentRelationId,
+    recordSurfaceId: parentDetail.surfaceId,
+    saveMode: 'sequential',
+  };
+  const composition = recordComposition(authored, parentDetail, patch.entity);
+  for (const column of composition.fields as Json[]) {
+    const relation = list(authored, 'relations').find(
+      (candidate) => candidate.relationId === column.field,
+    );
+    if (!relation || relation.ownership !== 'reference') continue;
+    const target = linkTarget(
+      authored,
+      String((relation.targetEntity as Json).targetId),
+    );
+    if (!target) throw new Error('A declared link has no picker target');
+    appendEditorLink(
+      parentForm.documentEditor as Json,
+      String(relation.relationId),
+      String(column.label),
+      target,
+    );
+  }
+  (composition.children as Json[]).push({
+    columns: lineFields.map((field) => ({
+      columnId: id('column', `_${slug(String(field.label))}`),
+      field: field.fieldId,
+      label: field.label,
+      orderKey: field.orderKey,
+    })),
+    datasetId: id('dataset'),
+    label: patch.label,
+    orderKey: 10,
+    parent: {
+      relationId: parentRelationId,
+      value: { source: 'record', field: 'recordId' },
+      ownership: 'parentScopedChild',
+    },
+    presentation: { selection: 'none', compact: 'scrollTable' },
+    query: reference('queryReference', id('query', '_list')),
+    sort: [{ fieldId: lineNumberId, direction: 'ascending' }],
+  });
+  return null;
+}
+
+function editorLifecycle(
+  authored: Json,
+  entityId: string,
+  machine: Json,
+): Json {
+  const namespace = namespaceOf(authored);
+  const editableState = String((machine.initialState as Json).targetId);
+  const stateFieldId = `${namespace}:derived_state_field.${String(machine.machineId).split(':')[1]}`;
+  const updateId = `${namespace}:operation.${localOf(entityId)}_update`;
+  const update = list(authored, 'operations').find(
+    (operation) => operation.operationId === updateId,
+  )!;
+  update.precondition = statePrecondition(stateFieldId, editableState);
+  return { stateFieldId, editableStateIds: [editableState] };
+}
+
+function recordComposition(
+  authored: Json,
+  surface: Json,
+  entityId: string,
+): Json {
+  if (surface.composition) return surface.composition as Json;
+  const namespace = namespaceOf(authored);
+  const fields = list(authored, 'fields')
+    .filter((field) => (field.entity as Json).targetId === entityId)
+    .map((field) => ({
+      columnId: `${namespace}:column.${localOf(String(field.fieldId))}`,
+      field: field.fieldId,
+      label: field.label,
+      orderKey: field.orderKey,
+      showWhenEmpty: true,
+    }));
+  ensureChildTables(authored, surface, localOf(entityId));
+  const composition = {
+    kind: 'surfaceComposition',
+    schemaVersion: version,
+    fields,
+    children: [],
+    actions: [],
+    presentation: {
+      header: { title: fields[0]!.columnId, facts: [], subtitle: [] },
+      recordActions: 'progressive',
+      technicalDetails: 'progressive',
+    },
+  };
+  surface.composition = composition;
+  return composition;
+}
+
+function ensureChildTables(authored: Json, surface: Json, local: string): void {
+  const slots = surface.slots as Json[];
+  if (slots.some((slot) => slot.slot === 'childTables')) return;
+  const namespace = namespaceOf(authored);
+  slots.push({
+    content: {
+      kind: 'opaqueSurfaceContentReference',
+      schemaVersion: version,
+      targetId: `${namespace}:capability.standard_surface_content`,
+    },
+    kind: 'surfaceSlot',
+    orderKey: nextOrder(slots),
+    schemaVersion: version,
+    slot: 'childTables',
+    slotId: `${namespace}:slot.${local}_detail_child_tables`,
+  });
+}
+
+function editorField(field: Json): Json {
+  const type = field.fieldType as Json;
+  return {
+    fieldId: field.fieldId,
+    label: field.label,
+    ...(type.kind === 'enumFieldType'
+      ? {
+          presentation: {
+            kind: 'choice',
+            options: (type.options as Json[]).map((option) => ({
+              label: option.label,
+              value: option.optionId,
+            })),
+          },
+        }
+      : {}),
+  };
+}
+
+function statePrecondition(fieldId: string, stateId: string): Json {
+  return {
+    field: {
+      kind: 'fieldReference',
+      schemaVersion: version,
+      targetId: fieldId,
+    },
+    kind: 'fieldComparisonPredicate',
+    operator: 'equals',
+    schemaVersion: version,
+    value: { kind: 'textValue', schemaVersion: version, value: stateId },
+  };
+}
+
 function addField(
   authored: Json,
   patch: Extract<CustomizationPatch, { kind: 'addField' }>,
-  previous: readonly CustomizationPatch[],
+  previous: readonly SingleCustomizationPatch[],
 ): Outcome | null {
   const { entity: entityId, field } = patch;
   const legacy = 'legacy' in patch;

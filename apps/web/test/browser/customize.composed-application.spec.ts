@@ -353,6 +353,13 @@ test('a person adds a count to Today, opens its list and rolls it back', async (
  * opening the screen to the live list is printed for the week-6 record and
  * must stay under ten minutes.
  */
+/**
+ * The non-developer path (CUSTOMIZE slices 3 and 5): on the Customize screen a
+ * person describes Equipment, reads the plain diff, approves and activates it,
+ * opens the new list with no restart, and rolls it back. The elapsed time from
+ * opening the screen to the live list is printed for the week-6 record and
+ * must stay under ten minutes.
+ */
 test('a person adds a record type on the Customize screen, uses it live, and rolls it back', async ({
   page,
 }) => {

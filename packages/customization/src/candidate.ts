@@ -19,6 +19,7 @@ import {
 
 import {
   applyCustomizationPatches,
+  checkCreateTimeLinks,
   type CustomizationRefusal,
 } from './apply.js';
 import type { CustomizationPatch, UnsupportedCustomization } from './patch.js';
@@ -74,6 +75,12 @@ export function compileCustomizationCandidate(input: {
    */
   readonly sandbox?: UntrustedDefinitionSandboxAttestation;
 }): CustomizationCandidateResult {
+  // Admission applies to the new change. A recorded prefix must still replay.
+  const change = input.chain.at(-1);
+  if (change && !input.historical) {
+    const refusal = checkCreateTimeLinks(change);
+    if (refusal) return { ...refusal, patchIndex: input.chain.length - 1 };
+  }
   const applied = applyCustomizationPatches(input.base, input.chain);
   if (applied.status !== 'applied') return applied;
   let normalizedDefinitionBytes: Uint8Array;
