@@ -28,7 +28,7 @@ Status — Candidate for integration. The orchestrator approved the patch-kind m
 - [CI 44480152260](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44480152260) passed compiler, PostgreSQL and schema checks. The browser activated one draft and saved the lines, then failed the receipt link assertion. The follow-up waits for server-confirmed selections and opens the exact linked receipt. Migration 0037 follows the workflow migration and the snapshot was regenerated on PostgreSQL 16.
 
 - [Hosted PostgreSQL](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44467955198) passed at `19e8d8e0`, including the one-request draft, linked records, owned lines and an assistant-confirmed Quarantine with unchanged stock movements. The source scan found no Inspection-specific first-party branches.
-- The composed browser job has 30 minutes after two timeout cancellations. All 34 browser tests passed in 20m56s with INTERACT-1 row defaults, including the visual Inspection journey and stock replay. The subsequent Today receiving queue required re-deriving the language coverage ledger. [Complete browser suite](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44530498631/job/135582355625)
+- The composed browser job has 30 minutes after two timeout cancellations. [CI 44553913300](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44553913300) passed all 16 jobs, including Inspection and stock replay. The save-and-place merge arrived before integration. The combined editor retains record links with optional scope and preserves the placement flow.
 - The first-party release uses an ADR-0066 re-baseline. The prior pushed checkpoint is preserved by an annotated tag and remains in branch history.
 
 ## Gaps
@@ -41,8 +41,8 @@ Status — Candidate for integration. The orchestrator approved the patch-kind m
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-4",
-  "base": "129e59c4a5cfbefcad42b9c14efa164b18b797e7",
-  "head": "a5c7e4dee1181dcec2d4557508095c327d8fc260",
+  "base": "129cb3019b86a0de06511c05c08978c8ee50a34e",
+  "head": "90651cc29f96494b6deb405b86c34803e3fdf239",
   "changedPaths": [
     ".github/workflows/ci.yml", "apps/web/package.json",
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
