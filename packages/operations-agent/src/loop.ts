@@ -235,12 +235,12 @@ export async function agentPreamble(
 /** The system prompt the model is given, with the map when there is one. */
 export function systemPrompt(preamble?: AgentPreamble): string {
   return preamble?.businessMap
-    ? `${OPERATIONS_AGENT_SYSTEM_PROMPT}\n\n# Business map (what you may read and do; ! = the person must confirm)\n${BUSINESS_MAP_LEGEND}\n${preamble.businessMap}`
+    ? `${OPERATIONS_AGENT_SYSTEM_PROMPT}\n\n# Business map (what you may read and do)\n${BUSINESS_MAP_LEGEND}\n${preamble.businessMap}`
     : OPERATIONS_AGENT_SYSTEM_PROMPT;
 }
 
 const BUSINESS_MAP_LEGEND =
-  'Each "## name" is a record type with its states. "read:" lists queries as id[type] (by = what resolve matches on; views = preset list views by id). Each "- id: does" is an operation; values/patch list writable fields (* required, (a|b) options, :kind otherwise text). A field, option, relation or view is written here without its record type\'s prefix; use it as written or as its full id. "screen" lines are the steps a screen button runs, with where each input comes from.';
+  'Each row is record type | label | query IDs | operation IDs. Use erp_discover contracts with the record type(s) to see fields, options, states, saved views and the steps its screen buttons run. For a particular query or operation, request its ID. Local IDs are accepted when unique.';
 
 export type AgentEvent =
   | {

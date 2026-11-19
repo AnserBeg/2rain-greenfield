@@ -184,6 +184,24 @@ test('each person gets their own filtered map through one cached structure, and 
   assert.ok(asked.some((entry) => entry.startsWith('manager:')));
 });
 
+test('summary and requested entity details filter through the current person', async () => {
+  const session = personSession('buyer', (id) => id.endsWith('.party_get'), []);
+  const summary = await session.businessMap();
+  assert.match(summary, /party_get/u);
+  assert.doesNotMatch(summary, /party_create|party_name|sales_order/u);
+  const details = await session.call('erp_discover', {
+    mode: 'contracts',
+    canonicalIds: ['party', 'sales_order'],
+  });
+  assert.equal(details.isError, false);
+  const contracts = (
+    details.content as { contracts: { detail?: string; outcome?: string }[] }
+  ).contracts;
+  assert.match(contracts[0]!.detail!, /party_get/u);
+  assert.doesNotMatch(contracts[0]!.detail!, /party_create/u);
+  assert.equal(contracts[1]!.outcome, 'not-found');
+});
+
 test('the turn context names a declared screen and never an unknown one', async () => {
   const session = personSession('buyer', () => true, []);
   const known = await session.turnContext({

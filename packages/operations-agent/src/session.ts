@@ -51,7 +51,11 @@ import {
   declaredCurrencyDefault,
   type BusinessCalendar,
 } from './business-context.js';
-import { businessMapStructure, renderBusinessMap } from './business-map.js';
+import {
+  businessMapStructure,
+  businessMapSummary,
+  renderBusinessMap,
+} from './business-map.js';
 import {
   businessEffect,
   businessWords,
@@ -467,7 +471,7 @@ export class OperationsAgentSession {
     return this.#run(async (view) => {
       const catalog = pinnedCatalog(view);
       const usable = await this.#usableIds(view, catalog);
-      return renderBusinessMap(businessMapStructure(view), usable);
+      return businessMapSummary(businessMapStructure(view), usable);
     });
   }
 
@@ -915,6 +919,21 @@ export class OperationsAgentSession {
               return usable.queries.has(query.queryId)
                 ? queryContract(catalog, query)
                 : { id, outcome: 'denied' };
+            const map = businessMapStructure(view);
+            const entityId = matchId(
+              id,
+              map.entities.map((entity) => entity.entityId),
+            );
+            const entity = map.entities.find(
+              (entry) => entry.entityId === entityId,
+            );
+            if (entity) {
+              const detail = renderBusinessMap(
+                { releaseRoot: map.releaseRoot, entities: [entity] },
+                usable,
+              );
+              if (detail) return { id: entity.entityId, detail };
+            }
             return { id, outcome: 'not-found' };
           }),
         };

@@ -21,6 +21,8 @@ Three attempts per task (36 runs). Opus high, Opus low, Sonnet low each passed 6
 
 3. Run `node --import tsx --test --test-name-pattern="parallel reads" test/agent/business-map.test.ts`. It observes overlapping reads, ordered results and refusal of a wrong-type reference.
 
+4. Run `node --import tsx test/agent/map-size.ts`. The 50-type compiled release produced 55,482 characters in the previous map, 21,863 in the summary and 409 in a selected detail. The initial structure build took 28.7 ms on this host.
+
 ## Filed
 
 Atomic create with lines (CUSTOMIZE-4 Option A), recipes after WORKFLOW-1, and habit-based shortcuts after durable run records.

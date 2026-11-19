@@ -41,44 +41,49 @@ export function compiledAppView(
     };
     const application = file.applications?.at(-1) ?? file.application;
     if (!application) throw new Error('missing compiled application head');
-    const artifacts = new Map(
-      application.artifacts.map((artifact) => [artifact.contentHash, artifact]),
-    );
-    const decode = (hash: string): unknown => {
-      const artifact = artifacts.get(hash);
-      if (!artifact) throw new Error(`missing artifact ${hash}`);
-      return JSON.parse(
-        Buffer.from(artifact.canonicalBytesBase64, 'base64').toString('utf8'),
-      ) as unknown;
-    };
-    const payload = (family: string): ImmutableJsonValue => {
-      const reference = application.releaseManifest.projections.find(
-        (candidate) =>
-          candidate.familyId ===
-          `northstar.compiler:projection-family.${family}`,
-      );
-      if (!reference) throw new Error(`missing projection ${family}`);
-      const manifest = decode(reference.artifactRoot) as {
-        chunks: readonly { contentHash: string }[];
-      };
-      return decode(manifest.chunks[0]!.contentHash) as ImmutableJsonValue;
-    };
-    const projection = (family: string) => ({ payload: payload(family) });
-    loaded = {
-      projections: {
-        agent: projection('agent-discovery'),
-        catalog: projection('semantic-model'),
-        operation: projection('operation-catalog'),
-        query: projection('query-catalog'),
-        surface: projection('surface-manifest'),
-      },
-      release: {
-        contentHash: application.releaseRoot,
-        releaseId: `release-${application.releaseRoot.slice(0, 12)}`,
-      },
-    } as unknown as RequestRuntimeView;
+    loaded = compiledProjectionView(application);
   }
   return { ...loaded, principalId } as RequestRuntimeView;
+}
+
+export function compiledProjectionView(
+  application: CompiledApplication,
+): RequestRuntimeView {
+  const artifacts = new Map(
+    application.artifacts.map((artifact) => [artifact.contentHash, artifact]),
+  );
+  const decode = (hash: string): unknown => {
+    const artifact = artifacts.get(hash);
+    if (!artifact) throw new Error(`missing artifact ${hash}`);
+    return JSON.parse(
+      Buffer.from(artifact.canonicalBytesBase64, 'base64').toString('utf8'),
+    ) as unknown;
+  };
+  const payload = (family: string): ImmutableJsonValue => {
+    const reference = application.releaseManifest.projections.find(
+      (candidate) =>
+        candidate.familyId === `northstar.compiler:projection-family.${family}`,
+    );
+    if (!reference) throw new Error(`missing projection ${family}`);
+    const manifest = decode(reference.artifactRoot) as {
+      chunks: readonly { contentHash: string }[];
+    };
+    return decode(manifest.chunks[0]!.contentHash) as ImmutableJsonValue;
+  };
+  const projection = (family: string) => ({ payload: payload(family) });
+  return {
+    projections: {
+      agent: projection('agent-discovery'),
+      catalog: projection('semantic-model'),
+      operation: projection('operation-catalog'),
+      query: projection('query-catalog'),
+      surface: projection('surface-manifest'),
+    },
+    release: {
+      contentHash: application.releaseRoot,
+      releaseId: `release-${application.releaseRoot.slice(0, 12)}`,
+    },
+  } as unknown as RequestRuntimeView;
 }
 
 export async function authenticatedCompiledAppEntry() {

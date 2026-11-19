@@ -349,6 +349,38 @@ function describeBindings(
   return parts.join(', ');
 }
 
+/** The first tier lists eligible IDs. Full fields, states and screen actions
+ * are available for a selected entity through discovery's contracts mode. */
+export function businessMapSummary(
+  structure: BusinessMapStructure,
+  usable: { operations: ReadonlySet<string>; queries: ReadonlySet<string> },
+): string {
+  const lines: string[] = [];
+  let length = 0;
+  for (const entity of structure.entities) {
+    const reads = entity.queries
+      .filter((q) => usable.queries.has(q.queryId))
+      .map((q) => localName(q.queryId));
+    const writes = entity.operations
+      .filter((op) => usable.operations.has(op.operationId))
+      .map((op) => localName(op.operationId));
+    if (!reads.length && !writes.length) continue;
+    const row = [
+      localName(entity.entityId),
+      entity.label,
+      reads.join(' '),
+      writes.join(' '),
+    ].join(' | ');
+    if (length + row.length > 22_000) {
+      lines.push('More types are available through erp_discover search.');
+      break;
+    }
+    lines.push(row);
+    length += row.length + 1;
+  }
+  return lines.join('\n');
+}
+
 /**
  * The map as the model reads it, keeping only what the person may use now.
  * A screen action naming an operation the person may not run is left out.
