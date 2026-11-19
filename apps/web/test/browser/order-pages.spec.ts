@@ -125,12 +125,14 @@ test('an order page names its short lines and its progress, receives a truck of 
     // Rows start with what is still open (LOOK-1 round 3, ruling); the fill
     // control still fills them again.
     await expect(lineInput('Quantity to receive', 1)).toHaveValue('5');
+    await expect(lineInput('Actual received unit cost', 1)).toHaveValue('2.5');
     await dialog
       .getByRole('button', { name: 'Fill open quantities', exact: true })
       .click();
     await expect(lineInput('Quantity to receive', 1)).toHaveValue('5');
     await expect(lineInput('Quantity to receive', 2)).toHaveValue('2');
     await expect(lineInput('Quantity to receive', 3)).toHaveValue('4');
+    await expect(lineInput('Actual received unit cost', 2)).toHaveValue('2.5');
     await lineInput('Quantity to receive', 2).fill('');
     await lineInput('Actual received unit cost', 1).fill('2.40');
     await lineInput('Actual received unit cost', 3).fill('2.5');

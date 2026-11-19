@@ -205,6 +205,7 @@ export function purchasingWorkspace(
           orderKey: 10,
           type: 'quantity',
           required: true,
+          defaultFrom: selected(metric('open_to_receive')),
         },
         {
           inputId: id('input', 'receive_unit'),
@@ -242,6 +243,7 @@ export function purchasingWorkspace(
                 orderKey: 40,
                 type: 'text',
                 required: true,
+                defaultFrom: selected(f('purchase_order_line_unit_price')),
               },
               {
                 inputId: id('input', 'receive_currency'),
@@ -419,6 +421,7 @@ export function purchasingWorkspace(
                 type: 'text',
                 required: true,
                 perRow: {},
+                defaultFrom: selected(f('purchase_order_line_unit_price')),
               },
             ]
           : []),
