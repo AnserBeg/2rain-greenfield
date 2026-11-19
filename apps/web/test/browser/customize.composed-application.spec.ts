@@ -88,14 +88,14 @@ test('Customize shows exact margin on Items and the item page and removes it on 
         ).toBeVisible();
         const row = page
           .getByRole('row')
-          .filter({ has: page.getByRole('link', { name: itemName }) });
+          .filter({ has: page.getByRole('link', { name: /MARGIN-WEB/u }) });
         await expect(row).toContainText(margin);
         const exported = await page.request.get(`${list}&export=csv`);
         expect(exported.ok()).toBe(true);
         const csv = await exported.text();
         expect(csv).toContain(title);
         expect(csv).toContain(margin);
-        await row.getByRole('link', { name: itemName }).click();
+        await row.getByRole('link', { name: /MARGIN-WEB/u }).click();
         const marginLabel = page.getByText(title, { exact: true });
         if (!(await marginLabel.isVisible()))
           await page.locator('details.composition-more-fields summary').click();

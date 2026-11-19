@@ -138,6 +138,15 @@ test(
             JSON.stringify((await discover()).content),
             /Margin CAD/u,
           );
+          const assistantRead = await agent.call('erp_query', {
+            queryId: 'northstar.app:query.item_get',
+            arguments: { recordId },
+            selection: [fieldId],
+          });
+          assert.match(
+            JSON.stringify(assistantRead.content),
+            /0\.999999999999999999/u,
+          );
           await opened.service.rollback();
           assert.equal(
             Object.hasOwn((await world.read('item', recordId)).values, fieldId),
