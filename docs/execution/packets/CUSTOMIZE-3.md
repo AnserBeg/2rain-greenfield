@@ -14,11 +14,15 @@ Slice 1 includes the tested list-column work and saved list views in [PR #95](ht
 - Each saved view keeps the record title. It pins filter choices from the list's declared options. The list keeps its standard tabs, and the first saved view adds an All tab when needed.
 - The optional view layout rides v6 under ADR-0047 §7. Surfaces require reader 24 and the assistant projection requires reader 3 for releases carrying it (reader 2 already serves assistant confirmation). The first-party re-baseline reproduced the checked-in release byte for byte.
 - The orchestrator approved 0033 after 0032. The migration retains the patch table's existing policies, grants and append-only rules. Integration will be logged as merged — unread.
+- Slice 2 needs a Critical ruling. The approval verifier's `#createInput` supplies fixed generated values through the real create operation. Literal bounds need a satisfying witness, and a no-past-date rule needs the same captured business date as the gateway.
+- Slice 4 needs the Formula IR projection admission in ADR-0012. A calculated display value requires resolved dependencies and server, query, reporting and assistant projections.
+- Slice 6's independent candidate `a55107b1` uses the governed list count and exact top-level sums. CAD, USD and EUR are separate Items measures. F5 still needs a hard cardinality bound and a concurrency protocol for child writes.
 
 ## Gates
 
 - Slice 0 passed all 16 jobs at `81e5937b`. [CI 44429125715](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44429125715). The candidate refreshed on UPGRADE-1 is in [CI 44434963983](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44434963983).
 - Slice 1 passed focused compiler, reader refusal, export and scripted drafting tests, typecheck and lint. GitHub CI will run the PostgreSQL and browser journeys and upgrade replay.
+- [CI 44441030550](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44441030550) caught a declaration emit error in the list-count helper. The explicit return type passed local declaration emit.
 - The migration control `unrecognized-patch-kind-admitted` checks that the database refuses a new unknown kind even with a matching digest.
 
 ```record-claim
@@ -26,7 +30,7 @@ Slice 1 includes the tested list-column work and saved list views in [PR #95](ht
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
   "base": "8b61740a17c18a6201f01c4345c0e6c215ee91d3",
-  "head": "c6296bfa3ab1ed9deb28d3212ee94375293c9bdf",
+  "head": "f2f3b637241c3693f40076688575252411f2a764",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
     "apps/web/src/list-declaration.ts", "apps/web/src/surface-launcher.ts",
