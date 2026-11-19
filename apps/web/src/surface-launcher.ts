@@ -43,6 +43,12 @@ export interface LauncherTile {
 
 export interface LauncherRenderData {
   readonly tiles: readonly LauncherTile[];
+  readonly metrics?: readonly {
+    readonly metricId: string;
+    readonly label: string;
+    readonly href: string;
+    readonly value: string | null;
+  }[];
   /** The company the page was entered in, carried by the scan form as the page carries it. */
   readonly scope: {
     readonly parameterId: string;
@@ -53,6 +59,67 @@ export interface LauncherRenderData {
     readonly code: string;
     readonly outcome: ScanOutcomeCode;
   } | null;
+}
+
+export async function launcherMetrics(
+  view: RuntimeViewContract.RequestRuntimeView,
+  metrics: NonNullable<SurfaceLauncher['metrics']>,
+  surfaces: readonly CompiledSurfaceDefinition[],
+  company: string | null,
+  queryGateway: SemanticQueryGateway,
+  now: Date,
+): Promise<NonNullable<LauncherRenderData['metrics']>> {
+  const cards = [];
+  for (const metric of metrics) {
+    const target = surfaces.find(
+      (surface) => surface.surfaceId === metric.surface,
+    );
+    if (!target?.list) continue;
+    const binding = readCompiledSurfaceDataBinding(view, target);
+    const scope = binding.query.legalEntityScope?.operand.parameterId;
+    if (scope && !company) continue;
+    const params = new URLSearchParams({ surface: metric.surface });
+    if (scope && company) params.set(scope, company);
+    if (metric.view) params.set('view', metric.view);
+    const href = `/?${params.toString()}`;
+    const state = readDeclaredListState(
+      target.list,
+      new URL(href, 'http://launcher.local'),
+    );
+    const args = declaredListArguments(target.list, state, {
+      mode: 'count',
+      now,
+      queryId: binding.query.queryId,
+      scopeArguments: scope ? { [scope]: company } : {},
+      ...(metric.sumField ? { sumField: metric.sumField } : {}),
+    });
+    if (
+      !(await countEligible(
+        view,
+        queryGateway,
+        [binding.query.queryId, ...namedQueries(args)],
+        scope ? company : null,
+      ))
+    )
+      continue;
+    let value: string | null = null;
+    try {
+      const coverage = await loadDeclaredListCounts(
+        view,
+        queryGateway,
+        binding.query.queryId,
+        args,
+      );
+      if (coverage)
+        value = metric.sumField
+          ? (coverage.sum?.value ?? null)
+          : String(coverage.totalCount);
+    } catch {
+      // Preserve the drill-through and surface the unavailable value.
+    }
+    cards.push({ metricId: metric.metricId, label: metric.label, href, value });
+  }
+  return cards;
 }
 
 /** Read queue or tab counts through the request's pinned query and read snapshot. */
@@ -314,6 +381,15 @@ export function renderLauncherTiles(
         `<li><a class="launcher-tile" href="${h(tile.href)}" data-launcher-tile="${h(tile.tileId)}"><strong class="launcher-tile__label">${declaredIcon(icons.get(tile.tileId)) ? `<span class="nav-icon" aria-hidden="true">${declaredIcon(icons.get(tile.tileId))}</span>` : ''}${h(tile.label)}</strong>${tile.count === null ? '' : `<span class="launcher-tile__count" data-launcher-count>${String(tile.count)}</span>`}${tile.viewLabel ? `<span class="launcher-tile__view">${h(tile.viewLabel)}</span>` : ''}<span class="launcher-tile__description">${h(tile.description)}</span></a></li>`,
     )
     .join('')}</ul></nav>${
+    data.metrics?.length
+      ? `<section aria-label="Metrics" class="launcher-tiles"><ul>${data.metrics
+          .map(
+            (card) =>
+              `<li><a class="launcher-tile" href="${h(card.href)}" data-launcher-metric="${h(card.metricId)}"><strong class="launcher-tile__label">${h(card.label)}</strong><span class="launcher-tile__count">${h(card.value ?? 'Unavailable')}</span></a></li>`,
+          )
+          .join('')}</ul></section>`
+      : ''
+  }${
     // A launcher searched from the top bar (Today) says where to start,
     // centred under its queues (LOOK-1 round 3, ruling: no list query here).
     declaresPrimaryAction(surface)

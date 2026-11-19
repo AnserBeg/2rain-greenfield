@@ -46,6 +46,16 @@ export interface ListPreset {
     readonly label: string;
     readonly fieldFilters: readonly { fieldId: string; value: string }[];
     readonly columns?: readonly string[];
+    readonly open?: true;
+    readonly before?: {
+      readonly anchor: 'startOfTodayUtc';
+      readonly fieldId: string;
+    };
+    readonly band?: {
+      readonly figureId: string;
+      readonly values: readonly string[];
+    };
+    readonly supply?: 'covered' | 'short';
     readonly sort?: readonly {
       readonly fieldId: string;
       readonly direction: 'ascending' | 'descending';
@@ -68,11 +78,21 @@ export interface ListPreset {
   }[];
 }
 
+export interface MetricCard {
+  readonly metricId: string;
+  readonly surface: string;
+  readonly label: string;
+  readonly queryId: string;
+  readonly view?: string;
+  readonly sumField?: string;
+}
+
 interface AgentDiscoveryPayload {
   readonly confirmationRequiredFor?: readonly string[];
   readonly operations: readonly { operationId: string }[];
   readonly queries: readonly { queryId: string; fieldIds: readonly string[] }[];
   readonly listPresets?: readonly ListPreset[];
+  readonly metricCards?: readonly MetricCard[];
   readonly toolIds: readonly string[];
 }
 
@@ -81,6 +101,7 @@ export interface PinnedCatalog {
   readonly operations: readonly RegisteredOperationDefinition[];
   readonly queries: readonly QueryCatalogEntry[];
   readonly presets: readonly ListPreset[];
+  readonly metricCards?: readonly MetricCard[];
   operation(operationId: string): RegisteredOperationDefinition | undefined;
   query(queryId: string): QueryCatalogEntry | undefined;
   preset(queryId: string): ListPreset | undefined;
@@ -155,6 +176,7 @@ export function pinnedCatalog(view: RequestRuntimeView): PinnedCatalog {
     operations,
     queries,
     presets: agent.listPresets ?? [],
+    ...(agent.metricCards ? { metricCards: agent.metricCards } : {}),
     operation: (id) =>
       operationById.get(id) ??
       operationById.get(matchId(id, operationById.keys()) ?? ''),
@@ -339,9 +361,14 @@ export function queryContract(
 ): Record<string, ImmutableJsonValue> {
   const scopeParameter = query.legalEntityScope?.operand.parameterId;
   const preset = catalog.preset(query.queryId);
+  const metrics = catalog.metricCards?.filter(
+    (card) => card.queryId === query.queryId,
+  );
   const argumentsHelp: Record<string, string> = {
     get: '{"recordId": "<uuid>"}',
-    list: '{"search"?: text, "view"?: viewId, "filters"?: [{"fieldId", "value"}] (exact match on a selected field, max 4), "parent"?: {"relationId", "recordId"} (rows belonging to that record)}',
+    list: metrics?.length
+      ? '{"metric": "<Today metric id>"} or {"search"?: text, "view"?: viewId, "filters"?: [{"fieldId", "value"}], "parent"?: {"relationId", "recordId"}}'
+      : '{"search"?: text, "view"?: viewId, "filters"?: [{"fieldId", "value"}] (exact match on a selected field, max 4), "parent"?: {"relationId", "recordId"} (rows belonging to that record)}',
     search: '{"text": "<words>"}',
     resolve: '{"text": "<number or name>"}',
     aggregate: '{} (or the declared parameters)',
@@ -352,6 +379,16 @@ export function queryContract(
     entity: query.sourceEntityId,
     arguments: argumentsHelp[query.queryType] ?? '{}',
     fields: query.selections.map((selection) => selection.fieldId),
+    ...(metrics?.length
+      ? {
+          todayMetrics: metrics.map(({ metricId, label, sumField, view }) => ({
+            metricId,
+            label,
+            ...(sumField ? { sumField } : { measure: 'count' as const }),
+            ...(view ? { view } : {}),
+          })),
+        }
+      : {}),
     ...(query.resolveMatchKeys && query.resolveMatchKeys.length > 0
       ? {
           matchesOn: query.resolveMatchKeys.map(

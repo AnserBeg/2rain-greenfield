@@ -90,6 +90,32 @@ test('a plain-English request becomes exactly the typed patch the model proposed
   assert.match(seen[0]!.system, /Never answer in text/u);
 });
 
+test('the scripted assistant drafts a Today metric from the declared list measures', async () => {
+  const definition = normalizeApplicationPackage(
+    JSON.parse(readFileSync('apps/web/release/app.authored.json', 'utf8')),
+  );
+  const choices = customizationTargets(
+    definition as unknown as Parameters<typeof customizationTargets>[0],
+  );
+  const measure = {
+    kind: 'addMetricCard',
+    surface: 'northstar.app:surface.item_list',
+    label: 'Catalog prices in CAD',
+    sumField: 'northstar.app:field.item_price_cad',
+  };
+  const seen: { system: string; toolNames: string[]; turns: number }[] = [];
+  const result = await draftPatchFromRequest(
+    scripted([{ toolInput: measure }], seen),
+    'On Today, sum the CAD prices of the items in the catalog.',
+    choices,
+  );
+  assert.match(
+    seen[0]!.system,
+    /sum northstar\.app:field\.item_price_cad "Price \(CAD\)"/u,
+  );
+  assert.deepEqual(result.status === 'parsed' && result.patch, measure);
+});
+
 test('text is never taken as a change, and a malformed patch gets one repair turn', async () => {
   const textOnly = await draftPatchFromRequest(
     scripted([{ text: JSON.stringify(equipment) }, { text: 'Done.' }]),
@@ -187,6 +213,45 @@ test('the prompt names only targets the §10.6 rules allow', () => {
   assert.match(prompt, /northstar\.app:surface\.party_list/u);
   assert.match(prompt, /\(none yet\)/u);
   assert.doesNotMatch(prompt, /inventory_movement/u);
+});
+
+test('drafting admits a link in the record creation change and refuses adding it later', async () => {
+  const link = {
+    kind: 'addLink',
+    entity: 'northstar.app:entity.custom_equipment',
+    label: 'Supplier',
+    target: 'northstar.app:entity.party',
+  };
+  const change = { kind: 'changeSet', patches: [equipment, link] };
+  assert.deepEqual(
+    await draftPatchFromRequest(
+      scripted([{ toolInput: change }]),
+      'Create Equipment with a supplier link',
+      targets,
+    ),
+    { patch: change, status: 'parsed' },
+  );
+  for (const toolInput of [
+    link,
+    {
+      kind: 'unsupported',
+      missingCapability: 'links on a published record type',
+    },
+  ]) {
+    assert.deepEqual(
+      await draftPatchFromRequest(
+        scripted([{ toolInput }]),
+        'Add a supplier link to our existing Equipment records',
+        targets,
+      ),
+      {
+        message:
+          'Links can be added when the record type is first created; adding one later is coming soon',
+        missingCapability: 'links on a published record type',
+        status: 'unsupported',
+      },
+    );
+  }
 });
 
 test('a scripted request to add a standard field as a list column uses its offered target', async () => {

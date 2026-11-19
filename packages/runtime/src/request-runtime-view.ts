@@ -148,7 +148,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
 > = Object.freeze({
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.agent]: {
     capabilityId: 'northstar.runtime:capability.agent-discovery',
-    maximumSupportedVersion: 3,
+    maximumSupportedVersion: 4,
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.catalog]: {
     capabilityId: 'northstar.runtime:capability.semantic-model',
@@ -160,7 +160,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.query]: {
     capabilityId: 'northstar.runtime:capability.query-catalog',
-    maximumSupportedVersion: 2,
+    maximumSupportedVersion: 3,
   },
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.surface]: {
     capabilityId: 'northstar.runtime:capability.surface-manifest',
@@ -189,7 +189,7 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // INTEGRATION after its ADR-0066 re-baseline).
     // 23 adds declared Record form fields and empty Detail values.
     // 24 adds tenant-authored saved List layouts.
-    // 25 adds header relation inputs and shared or lifecycle-less editors.
+    // 25 adds header relation inputs and shared or lifecycle-less editors, and Today metric cards.
     maximumSupportedVersion: 25,
   },
 });

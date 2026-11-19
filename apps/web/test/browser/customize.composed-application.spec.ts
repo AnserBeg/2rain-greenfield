@@ -11,7 +11,6 @@ import { composedApplicationSeed } from '../../../../packages/domain/src/app/see
 import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   inspection,
-  inspectionEntity,
   inspectionFields,
   inspectionLinks,
   inspectionLinkRecords,
@@ -216,50 +215,45 @@ test('a person builds Goods Receipt Inspection with the Customize screen and use
         await create
           .locator('[name="companyOwnership"]')
           .selectOption('entityOwned');
-        await create
-          .getByRole('button', { name: 'Draft this record type' })
-          .click();
-        await publish();
-        await page.goto(`${app.baseUrl}/?customize`);
-        const extend = page.locator('[data-customize-form="extendRecordType"]');
-        await extend.locator('[name="entity"]').selectOption(inspectionEntity);
-        await extend.getByText('Line table', { exact: true }).click();
-        await extend.locator('[name="lines_label"]').fill('Inspection results');
+        await create.getByText('Line table', { exact: true }).click();
+        await create.locator('[name="lines_label"]').fill('Inspection results');
         for (const [index, field] of inspectionFields.entries()) {
-          await extend
+          await create
             .locator(`[name="line_${index + 1}_label"]`)
             .fill(field.label);
-          await extend
+          await create
             .locator(`[name="line_${index + 1}_type"]`)
             .selectOption(field.type);
         }
-        await extend.locator('[name="line_1_required"]').check();
-        await extend.getByText('Links', { exact: true }).click();
+        await create.locator('[name="line_1_required"]').check();
+        await create.getByText('Links', { exact: true }).click();
         for (const [index, link] of inspectionLinks.entries()) {
-          await extend
+          await create
             .locator(`[name="link_${index + 1}_label"]`)
             .fill(link.label);
-          await extend
+          await create
             .locator(`[name="link_${index + 1}_target"]`)
             .selectOption(`northstar.app:entity.${link.target}`);
         }
-        await extend.getByText('States and actions', { exact: true }).click();
-        await extend.locator('[name="initial"]').fill('Pending');
+        await create.getByText('States and actions', { exact: true }).click();
+        await create.locator('[name="initial"]').fill('Pending');
         for (const [index, state] of inspectionStates.entries()) {
-          await extend
+          await create
             .locator(`[name="state_${index + 1}_label"]`)
             .fill(state.label);
-          await extend
+          await create
             .locator(`[name="state_${index + 1}_role"]`)
             .selectOption(state.role);
         }
         for (const [index, transition] of inspectionTransitions.entries()) {
           for (const key of ['label', 'from', 'to'] as const)
-            await extend
+            await create
               .locator(`[name="transition_${index + 1}_${key}"]`)
               .fill(transition[key]);
         }
-        await extend.getByRole('button', { name: 'Draft changes' }).click();
+        await create
+          .getByRole('button', { name: 'Draft this record type' })
+          .click();
         await expect(page.locator('[data-customize-diff] pre')).toContainText(
           'Quarantine changes',
           { timeout: 180_000 },
@@ -412,6 +406,75 @@ test('a person builds Goods Receipt Inspection with the Customize screen and use
   );
 });
 
+test('a person adds a count to Today, opens its list and rolls it back', async ({
+  page,
+}) => {
+  test.setTimeout(600_000);
+  await withEphemeralPostgres(
+    'customize-metric-browser',
+    async ({ connection }) => {
+      const app = await startComposedApplication({
+        databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+        tenantSlug: 'customize-metric-browser',
+        seedProfile: 'distributor',
+        port: 0,
+      });
+      try {
+        await page.goto(`${app.baseUrl}/?customize`);
+        const picker = page.locator('[data-customize-form="addMetricCard"]');
+        await picker
+          .getByLabel('List')
+          .selectOption('northstar.app:surface.location_list');
+        await picker.getByRole('button', { name: 'Set up metric' }).click();
+        await page.getByLabel('Card name').fill('Location count');
+        await page.getByRole('button', { name: 'Draft metric' }).click();
+        await expect(page.locator('[data-customize-diff]')).toContainText(
+          'counts records in Locations',
+        );
+        await page
+          .getByRole('button', { name: 'Approve', exact: true })
+          .click({ timeout: 180_000 });
+        await page
+          .getByRole('button', { name: 'Activate now' })
+          .click({ timeout: 180_000 });
+        await expect(
+          page.locator('[data-customize-result="activated"]'),
+        ).toBeVisible({ timeout: 180_000 });
+        await page.goto(app.baseUrl);
+        const metric = page.getByRole('link', { name: /^Location count/u });
+        const count = await metric
+          .locator('.launcher-tile__count')
+          .textContent();
+        expect(Number(count)).toBeGreaterThan(0);
+        await metric.click();
+        await expect(page.locator('[data-list-total]')).toHaveAttribute(
+          'data-list-total',
+          count!,
+        );
+        await page.goto(`${app.baseUrl}/?customize`);
+        await page
+          .getByRole('button', { name: 'Roll back the latest change' })
+          .click();
+        await expect(
+          page.locator('[data-customize-result="rolledBack"]'),
+        ).toBeVisible({ timeout: 180_000 });
+        await page.goto(app.baseUrl);
+        await expect(metric).toHaveCount(0);
+      } finally {
+        await app.close();
+      }
+    },
+    LINEAGE_INSTALL_VOLUME,
+  );
+});
+
+/**
+ * The non-developer path (CUSTOMIZE slices 3 and 5): on the Customize screen a
+ * person describes Equipment, reads the plain diff, approves and activates it,
+ * opens the new list with no restart, and rolls it back. The elapsed time from
+ * opening the screen to the live list is printed for the week-6 record and
+ * must stay under ten minutes.
+ */
 /**
  * The non-developer path (CUSTOMIZE slices 3 and 5): on the Customize screen a
  * person describes Equipment, reads the plain diff, approves and activates it,

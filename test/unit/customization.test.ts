@@ -95,6 +95,7 @@ test('the v1 patch vocabulary is add-only', () => {
     'addLink',
     'addLineTable',
     'declareLifecycle',
+    'addMetricCard',
     'changeSet',
   ];
   const [singlePatch, changeSet] = CustomizationPatchSchema.options;
@@ -552,11 +553,13 @@ test('tenant line tables use the document editor with or without company scope a
   const visual = await compileInSandbox(
     sandboxRequest([patch(header), change([...links, lines, lifecycle])]),
   );
-  assert.equal(
-    visual.status,
-    'compiled',
-    JSON.stringify(visual.status === 'compiled' ? [] : visual),
-  );
+  assert.deepEqual(visual, {
+    message:
+      'Links can be added when the record type is first created; adding one later is coming soon',
+    missingCapability: 'links on a published record type',
+    patchIndex: 1,
+    status: 'unsupported',
+  });
   const uncovered = applyCustomizationPatches(authored, [
     change([header, { ...link, required: true }, lines]),
   ]);
@@ -986,6 +989,46 @@ test('a generic Party list can be arranged through the same declared list runtim
   );
 });
 
+test('Today compiles only declared numeric measures of a direct List', async () => {
+  const card = {
+    kind: 'addMetricCard',
+    surface: 'northstar.app:surface.item_list',
+    label: 'Catalog prices in CAD',
+    sumField: 'northstar.app:field.item_price_cad',
+  };
+  const compiled = await compileInSandbox(sandboxRequest([patch(card)]));
+  assert.equal(compiled.status, 'compiled', JSON.stringify(compiled));
+  assert.match(compiled.steps[0]!.rendered.text, /sums Price \(CAD\) in/u);
+  const { projections } = parseSerializedRelease(compiled.steps[0]!.release)
+    .compiled.bundle.releaseManifest;
+  for (const [family, floor] of [
+    [PROJECTION_FAMILY_IDS.surfaceManifest, 25],
+    [PROJECTION_FAMILY_IDS.agentDiscovery, 4],
+    [PROJECTION_FAMILY_IDS.queryCatalog, 3],
+  ] as const) {
+    const requirement = projections.find(
+      (projection) => projection.familyId === family,
+    )!.requiredRuntimeCapability;
+    assert.equal(requirement.minimumVersion, floor);
+    assert.equal(unsupportedRuntimeCapability(family, requirement), null);
+  }
+  const invalidCard = patch({
+    ...card,
+    sumField: 'northstar.app:field.item_name',
+  });
+  const rejected = applyCustomizationPatches(authored, [invalidCard]);
+  assert.equal(rejected.status, 'refused');
+  const malformed = structuredClone(authored);
+  const query = (malformed.queries as Record<string, unknown>[]).find(
+    (query) => query.queryId === 'northstar.app:query.item_list',
+  )!;
+  query.listSumFields = ['northstar.app:field.item_name'];
+  assert.throws(
+    () => normalizeApplicationPackage(malformed),
+    /CANON_LIST_SUM_FIELD_INVALID/u,
+  );
+});
+
 test('a saved Location view compiles its own columns, sort and declared filter', async () => {
   const baseView = {
     kind: 'saveListView',
@@ -1252,7 +1295,7 @@ test('upgrade diagnostics name the missing tenant target and the new first-party
   );
 });
 
-test('an upgrade compiles field and layout intent as one transition from the prior live tenant release', async () => {
+test('an upgrade compiles field, layout and metric intent as one transition from the prior live tenant release', async () => {
   const chain = [
     patch({
       kind: 'addField',
@@ -1266,6 +1309,12 @@ test('an upgrade compiles field and layout intent as one transition from the pri
       relabel: [
         { field: 'northstar.app:field.item_name', label: 'Warehouse name' },
       ],
+    }),
+    patch({
+      kind: 'addMetricCard',
+      surface: 'northstar.app:surface.item_list',
+      label: 'Catalog prices in CAD',
+      sumField: 'northstar.app:field.item_price_cad',
     }),
   ];
   const original = await compileInSandbox(sandboxRequest(chain));
@@ -1312,7 +1361,11 @@ test('an upgrade compiles field and layout intent as one transition from the pri
     ).toString('utf8'),
   ) as {
     fields: { label: string }[];
-    surfaces: { surfaceId: string; list?: { columns: { label: string }[] } }[];
+    surfaces: {
+      surfaceId: string;
+      list?: { columns: { label: string }[] };
+      launcher?: { metrics?: { label: string; sumField: string }[] };
+    }[];
   };
   assert.ok(next.fields.some((field) => field.label === 'Stock number'));
   assert.ok(next.fields.some((field) => field.label === 'Shelf code'));
@@ -1323,6 +1376,11 @@ test('an upgrade compiles field and layout intent as one transition from the pri
       )
       ?.list?.columns.some((column) => column.label === 'Warehouse name'),
   );
+  const card = next.surfaces.find(
+    (surface) => surface.surfaceId === 'northstar.app:surface.inventory_today',
+  )?.launcher?.metrics?.[0];
+  assert.equal(card?.label, 'Catalog prices in CAD');
+  assert.equal(card?.sumField, 'northstar.app:field.item_price_cad');
 });
 
 test('a whole-package upgrade rejection keeps the compiler subject without attributing a patch', async () => {

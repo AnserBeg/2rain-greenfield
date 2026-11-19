@@ -1,4 +1,9 @@
 import {
+  ADD_LINK_LATER_CAPABILITY,
+  addLinkLaterRefusal,
+  checkCreateTimeLinks,
+} from './apply.js';
+import {
   CUSTOMIZATION_PATCH_KINDS,
   MAX_CUSTOMIZATION_CHANGE_PATCHES,
   parseCustomizationPatch,
@@ -121,6 +126,8 @@ const singlePatchSchema = {
     enumField: { type: 'string' },
     option: { type: 'string' },
     surface: { type: 'string' },
+    view: { type: 'string' },
+    sumField: { type: 'string' },
     order: { type: 'array', items: { type: 'string' } },
     upFront: { type: 'array', items: { type: 'string' } },
     columns: { type: 'array', items: { type: 'string' } },
@@ -191,14 +198,30 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
     '- addField {kind, entity, field:{label, type, required?, options?}}: a new field on an existing record type. entity is one of the record type ids below.',
     '- addChoice {kind, enumField, option}: a new choice on a choice field. enumField is one of the choice field ids below.',
     '- addLineTable {kind, entity, label, fields:[{label, type, required?, options?}]}: one child collection on a tenant record type, edited with the header. Include a text field naming a row.',
-    '- addLink {kind, entity, label, target, required?}: a create-time link from a tenant record type. Default is optional. Choose a target from the linkable types below or from an earlier patch in the change set.',
+    '- addLink {kind, entity, label, target, required?}: a link from a tenant record type added by an earlier addRecordType member of this same change set. Default is optional. Choose a target from the linkable types below or from an earlier patch in the change set.',
     '- declareLifecycle {kind, entity, initial, states:[{label, role?}], transitions:[{from, to, label}]}: declare named states and actions on a tenant record type. Roles are success, attention, blocked, inProgress. Actions change the record’s own status only.',
     'A record type created in this change set can be referenced by a later member as northstar.app:entity.custom_<label in lowercase with punctuation and spaces replaced by underscores>.',
     "- arrangeLayout {kind, surface, order?, hide?, relabel?}: add, reorder, hide or rename columns of a list. surface is one of the list ids below; order, hide and relabel[].field use that list's available field ids. Include an available hidden field in order to show it. At most 16 visible columns.",
     '- saveListView {kind, surface, label, columns:[column ID], sort:[{column, direction}], filters:[{field, value}]}: add a tab on one of the lists in Saved view targets below. List the columns in the desired order and include the required record title. Sort by at most three selected sortable columns using ascending or descending. Pin at most three of the declared filter values. Use an empty array for no filters or no sort.',
+    '- addMetricCard {kind, surface, label, view?, sumField?}: add a card to Today using a list in Metric card targets below. Omit sumField to count rows. Use a declared sum field for a sum. Omit view to use the default list view.',
+    `For links on an existing record type, report missingCapability "${ADD_LINK_LATER_CAPABILITY}".`,
     'If any requested part needs an unsupported capability, call the tool with {kind: "unsupported", missingCapability: "<name the exact missing capability>"}. Never omit or approximate part of a request. For example, name "goods receipt event subscription" for starting an inspection automatically when goods are received.',
     'Write labels the way the person would read them, with an initial capital. Do not invent ids.',
     '',
+    ...(targets.metricLists?.length
+      ? [
+          'Metric card targets:',
+          ...targets.metricLists.map(
+            (target) =>
+              `- ${target.surfaceId} "${target.label}"${target.views
+                .map((view) => `; view ${view.viewId} "${view.label}"`)
+                .join('')}${target.measures
+                .map((field) => `; sum ${field.fieldId} "${field.label}"`)
+                .join('')}`,
+          ),
+          '',
+        ]
+      : []),
     'Record types you can add a field to:',
     ...targets.recordTypes.map(
       (entity) => `- ${entity.entityId} — ${entity.label}`,
@@ -313,6 +336,7 @@ function readToolInput(input: unknown): DraftedRequest {
   ) {
     const missing = (input as { missingCapability?: unknown })
       .missingCapability;
+    if (missing === ADD_LINK_LATER_CAPABILITY) return addLinkLaterRefusal();
     return unsupported(
       typeof missing === 'string' && missing.trim() !== ''
         ? missing.trim().slice(0, 80)
@@ -322,7 +346,12 @@ function readToolInput(input: unknown): DraftedRequest {
   }
   const parsed = parseCustomizationPatch(input);
   if (parsed.status === 'unsupported') return parsed;
-  return parsed.status === 'parsed'
-    ? { patch: parsed.patch, status: 'parsed' }
-    : { issues: parsed.issues, status: 'invalid' };
+  if (parsed.status === 'invalid')
+    return { issues: parsed.issues, status: 'invalid' };
+  return (
+    checkCreateTimeLinks(parsed.patch) ?? {
+      patch: parsed.patch,
+      status: 'parsed',
+    }
+  );
 }

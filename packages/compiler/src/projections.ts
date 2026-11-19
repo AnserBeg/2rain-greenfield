@@ -7,6 +7,7 @@ import {
   type SurfaceForm,
   type SurfaceComposition,
   type SurfaceList,
+  type SurfaceLauncher,
   type SurfaceListFigures,
   type SurfaceListSupply,
   type FieldNumbering,
@@ -196,6 +197,7 @@ export function lowerBaseProjectionPayloads(
     agentCapability.minimumVersion,
     confirmationRequiredFor.length > 0 ? 2 : 1,
     hasSavedListLayouts(verificationPackageRevision) ? 3 : 1,
+    hasMetrics(verificationPackageRevision) ? 4 : 1,
   );
   const plans = [
     plan(
@@ -829,7 +831,7 @@ function surfaceManifestPayload(
       ),
   );
   const surfaceFloor =
-    extendedEditor || declaredRelationList
+    extendedEditor || declaredRelationList || hasMetrics(original)
       ? 25
       : hasSavedListLayouts(original)
         ? 24
@@ -1438,6 +1440,27 @@ function agentDiscoveryPayload(
     original.queries.map((query) => [String(query.queryId), query]),
   );
   const listPresets = agentListPresets(original);
+  const metricCards = original.surfaces.flatMap((surface) => {
+    const metrics =
+      'launcher' in surface ? surface.launcher?.metrics : undefined;
+    return (metrics ?? []).map((metric) => {
+      const target = original.surfaces.find(
+        (candidate) => candidate.surfaceId === metric.surface,
+      )!;
+      const list =
+        'list' in target ? (target.list as SurfaceList | undefined) : undefined;
+      const first = [...(list?.views ?? [])].sort(
+        (left, right) =>
+          left.orderKey - right.orderKey || compare(left.viewId, right.viewId),
+      )[0];
+      const view = metric.view ?? first?.viewId;
+      return {
+        ...metric,
+        queryId: target.dataSource.targetId,
+        ...(view ? { view } : {}),
+      };
+    });
+  });
   return {
     kind: 'agentDiscoveryPayload',
     ...(confirmationRequiredFor.length ? { confirmationRequiredFor } : {}),
@@ -1466,6 +1489,7 @@ function agentDiscoveryPayload(
       })(),
     })),
     ...(listPresets.length > 0 ? { listPresets } : {}),
+    ...(metricCards.length > 0 ? { metricCards } : {}),
     schemaVersion: payloadSchemaVersions[PROJECTION_FAMILY_IDS.agentDiscovery],
     surfaces: packageRevision.surfaces.map((surface) => surface.surfaceId),
     toolIds: [...OPERATIONS_AGENT_TOOL_IDS],
@@ -1478,6 +1502,14 @@ function hasSavedListLayouts(original: VersionedNormalizedApplicationPackage) {
       'list' in surface ? (surface.list as SurfaceList | undefined) : undefined;
     return list?.views.some((view) => view.layout);
   });
+}
+
+function hasMetrics(original: VersionedNormalizedApplicationPackage): boolean {
+  return original.surfaces.some(
+    (surface) =>
+      'launcher' in surface &&
+      (surface.launcher as SurfaceLauncher | undefined)?.metrics,
+  );
 }
 
 /** A List's view settings also let the assistant issue the same semantic query as the List. */

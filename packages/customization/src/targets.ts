@@ -18,6 +18,7 @@ export interface CustomizationTargets {
     readonly label: string;
     readonly companyOwned: boolean;
   }[];
+  readonly metricLists?: readonly MetricListTarget[];
   readonly choiceFields: readonly {
     readonly fieldId: string;
     readonly label: string;
@@ -58,6 +59,19 @@ export interface CustomizationTargets {
     readonly entityId: string;
     readonly label: string;
     readonly tenantAuthored: boolean;
+  }[];
+}
+
+export interface MetricListTarget {
+  readonly surfaceId: string;
+  readonly label: string;
+  readonly views: readonly {
+    readonly viewId: string;
+    readonly label: string;
+  }[];
+  readonly measures: readonly {
+    readonly fieldId: string;
+    readonly label: string;
   }[];
 }
 
@@ -233,11 +247,61 @@ export function customizationTargets(definition: {
         : [];
     })
     .sort((left, right) => left.label.localeCompare(right.label));
+  const metricLists = definition.surfaces.some(
+    (surface) =>
+      String(surface.surfaceId).endsWith(':surface.inventory_today') &&
+      surface.launcher,
+  )
+    ? definition.surfaces
+        .flatMap((surface) => {
+          const list = surface.list as Json | undefined;
+          if (
+            !list ||
+            surface.surfaceRole !== 'list' ||
+            surface.lifecycle !== 'active'
+          )
+            return [];
+          const query = definition.queries.find(
+            (candidate) =>
+              candidate.queryId === (surface.dataSource as Json).targetId,
+          );
+          if (
+            !query ||
+            query.queryType !== 'list' ||
+            query.tier !== 'q0' ||
+            query.lifecycle !== 'active' ||
+            query.readModel
+          )
+            return [];
+          return [
+            {
+              surfaceId: String(surface.surfaceId),
+              label: String(surface.label),
+              views: (list.views as Json[]).map((view) => ({
+                viewId: String(view.viewId),
+                label: String(view.label),
+              })),
+              measures: (list.progress || list.figures
+                ? []
+                : ((query.listSumFields ?? []) as string[])
+              ).map((fieldId) => ({
+                fieldId,
+                label: String(
+                  definition.fields.find((field) => field.fieldId === fieldId)
+                    ?.label,
+                ),
+              })),
+            },
+          ];
+        })
+        .sort((left, right) => left.label.localeCompare(right.label))
+    : [];
   return Object.freeze({
     choiceFields,
     forms,
     linkTargets,
     lists,
     recordTypes,
+    ...(metricLists.length ? { metricLists } : {}),
   });
 }

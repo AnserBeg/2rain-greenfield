@@ -14,6 +14,7 @@ import {
 import { documentEditor } from './document-editor.js';
 import {
   companyParameterFor,
+  launcherMetrics,
   launcherTiles,
   loadDeclaredListCounts,
   resolveLauncherScan,
@@ -399,17 +400,28 @@ export async function renderSurfaceRuntimeWithData(
       binding.query.legalEntityScope?.operand.parameterId;
     // Today (the landing launcher) leaves out a queue the person may not
     // open; another launcher keeps its tile, uncounted. Neither reads it.
+    const now = gateways.clock?.() ?? new Date();
     const tiles = await launcherTiles(
       view,
       launcher,
       selection.surfaces,
       company,
       gateways.queryGateway,
-      gateways.clock?.() ?? new Date(),
+      now,
       null,
       landingSurface(selection.navigation, selection.surfaces)?.surfaceId ===
         selection.selected.surfaceId,
     );
+    const metrics = launcher.metrics
+      ? await launcherMetrics(
+          view,
+          launcher.metrics,
+          selection.surfaces,
+          company,
+          gateways.queryGateway,
+          now,
+        )
+      : undefined;
     return rendered(() =>
       renderSelectedSurface(
         view,
@@ -422,6 +434,7 @@ export async function renderSurfaceRuntimeWithData(
                 ? { parameterId: scopeParameterId, value: company }
                 : null,
             tiles,
+            ...(metrics ? { metrics } : {}),
           },
           status: 'LAUNCHER_READY',
         },

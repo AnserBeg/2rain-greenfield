@@ -186,6 +186,13 @@ const SinglePatchSchema = z.discriminatedUnion('kind', [
   declareLifecycle,
   arrangeLayout,
   saveListView,
+  z.strictObject({
+    kind: z.literal('addMetricCard'),
+    surface: canonicalId,
+    label,
+    view: canonicalId.optional(),
+    sumField: canonicalId.optional(),
+  }),
 ]);
 type ParsedPatch = z.infer<typeof SinglePatchSchema>;
 export type SingleCustomizationPatch =
@@ -215,6 +222,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'declareLifecycle',
   'arrangeLayout',
   'saveListView',
+  'addMetricCard',
   'changeSet',
 ] as const satisfies readonly CustomizationPatchKind[]);
 

@@ -1,3 +1,5 @@
+import { recordTypeEntityId } from '@north-star/customization';
+
 /*
  * The shapes this screen reads from the customization service, declared here:
  * apps/web never imports the provider (surface-data-binding gate); the
@@ -34,6 +36,18 @@ interface CustomizationTargets {
     readonly entityId: string;
     readonly label: string;
     readonly companyOwned: boolean;
+  }[];
+  readonly metricLists?: readonly {
+    readonly surfaceId: string;
+    readonly label: string;
+    readonly views: readonly {
+      readonly viewId: string;
+      readonly label: string;
+    }[];
+    readonly measures: readonly {
+      readonly fieldId: string;
+      readonly label: string;
+    }[];
   }[];
   readonly choiceFields: readonly {
     readonly fieldId: string;
@@ -170,6 +184,9 @@ export async function renderCustomizeScreen(
       const saveView = url.searchParams.get('saveView');
       if (saveView)
         return page('Save a list view', await savedViewForm(service, saveView));
+      const metric = url.searchParams.get('metric');
+      if (metric)
+        return page('Add a metric card', await metricForm(service, metric));
       return page('Customize', await overview(service));
     }
     switch (submission.action) {
@@ -282,12 +299,13 @@ async function overview(service: CustomizeScreenService): Promise<string> {
     }</section>`,
     '<h2>Describe a change</h2>',
     askForm(service),
-    recordTypeForm(),
+    recordTypeForm(targets),
     extendRecordTypeForm(targets),
     fieldForm(targets),
     choiceForm(targets),
     arrangePicker(targets),
     savedViewPicker(targets),
+    metricPicker(targets),
     ...(targets.forms ?? []).map(
       (form) =>
         `<form method="post"><fieldset><legend>Show fields up front on ${escapeHtml(form.label)}</legend><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="arrangeLayout"><input type="hidden" name="surface" value="${escapeHtml(form.surfaceId)}"><input type="hidden" name="formLayout" value="1">${form.fields.map((f) => `<label><input type="checkbox" name="front:${escapeHtml(f.fieldId)}"${f.upFront ? ' checked' : ''}> ${escapeHtml(f.label)}</label>`).join(' ')}<button>Draft form arrangement</button></fieldset></form>`,
@@ -309,8 +327,8 @@ function fieldRows(prefix = 'field', firstNamesRecord = false): string {
   return `<table><thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Choices</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-function recordTypeForm(): string {
-  return `<form method="post" data-customize-form="addRecordType"><fieldset><legend>A new record type</legend><label>Name of the record type <input name="label" required placeholder="Equipment"></label><label>Ownership <select name="companyOwnership"><option value="">Shared across companies</option><option value="entityOwned">Each record belongs to one company</option></select></label>${fieldRows('field', true)}<p>The first field names each record. Leave unused rows empty.</p><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addRecordType"><p><button type="submit">Draft this record type</button></p></fieldset></form>`;
+function recordTypeForm(targets: CustomizationTargets): string {
+  return `<form method="post" data-customize-form="addRecordType"><fieldset><legend>A new record type</legend><label>Name of the record type <input name="label" required placeholder="Equipment"></label><label>Ownership <select name="companyOwnership"><option value="">Shared across companies</option><option value="entityOwned">Each record belongs to one company</option></select></label>${fieldRows('field', true)}<p>The first field names each record. Leave unused rows empty.</p>${recordTypeDetails(targets.linkTargets ?? [])}<input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addRecordType"><p><button type="submit">Draft this record type</button></p></fieldset></form>`;
 }
 
 function extendRecordTypeForm(targets: CustomizationTargets): string {
@@ -322,7 +340,13 @@ function extendRecordTypeForm(targets: CustomizationTargets): string {
     )
     .join('');
   if (!options) return '';
-  const linkOptions = (targets.linkTargets ?? [])
+  return `<form method="post" data-customize-form="extendRecordType"><fieldset><legend>Lines and actions</legend><label>Record type <select name="entity" required>${options}</select></label>${recordTypeDetails()}<input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="extendRecordType"><button>Draft changes</button></fieldset></form>`;
+}
+
+function recordTypeDetails(
+  linkTargets?: CustomizationTargets['linkTargets'],
+): string {
+  const linkOptions = (linkTargets ?? [])
     .map(
       (target) =>
         `<option value="${escapeHtml(target.entityId)}">${escapeHtml(target.label)}${target.companyOwned ? ' (company owned)' : ''}</option>`,
@@ -340,7 +364,7 @@ function extendRecordTypeForm(targets: CustomizationTargets): string {
     const n = index + 1;
     return `<div><label>Action ${n} name <input name="transition_${n}_label"></label><label>From <input name="transition_${n}_from"></label><label>To <input name="transition_${n}_to"></label></div>`;
   }).join('');
-  return `<form method="post" data-customize-form="extendRecordType"><fieldset><legend>Lines, links and actions</legend><label>Record type <select name="entity" required>${options}</select></label><details><summary>Line table</summary><label>Table name <input name="lines_label"></label>${fieldRows('line')}</details><details><summary>Links</summary>${links}</details><details><summary>States and actions</summary><label>Initial state <input name="initial"></label>${states}${actions}</details><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="extendRecordType"><button>Draft changes</button></fieldset></form>`;
+  return `<details><summary>Line table</summary><label>Table name <input name="lines_label"></label>${fieldRows('line')}</details>${linkTargets?.length ? `<details><summary>Links</summary>${links}</details>` : ''}<details><summary>States and actions</summary><label>Initial state <input name="initial"></label>${states}${actions}</details>`;
 }
 
 function fieldForm(targets: CustomizationTargets): string {
@@ -393,6 +417,40 @@ async function arrangeForm(
     })
     .join('');
   return `<p class="eyebrow">Customize</p><h1>Arrange ${escapeHtml(list.label)}</h1><form method="post" data-customize-form="arrangeColumns"><table><thead><tr><th>Position</th><th>Heading</th><th>Hide</th></tr></thead><tbody>${rows}</tbody></table><input type="hidden" name="surface" value="${escapeHtml(list.surfaceId)}"><input type="hidden" name="columns" value="${String(list.columns.length)}"><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="arrangeLayout"><p><button type="submit">Draft this arrangement</button></p></form>${backLink()}`;
+}
+
+function metricPicker(targets: CustomizationTargets): string {
+  if (!targets.metricLists?.length) return '';
+  const options = targets.metricLists
+    .map(
+      (target) =>
+        `<option value="${escapeHtml(target.surfaceId)}">${escapeHtml(target.label)}</option>`,
+    )
+    .join('');
+  return `<form method="get" data-customize-form="addMetricCard"><fieldset><legend>Add a metric card to Today</legend><input type="hidden" name="customize" value=""><label for="metric-list">List</label> <select id="metric-list" name="metric" required>${options}</select><p><button>Set up metric</button></p></fieldset></form>`;
+}
+
+async function metricForm(
+  service: CustomizeScreenService,
+  surfaceId: string,
+): Promise<string> {
+  const { metricLists } = await service.targets();
+  const target = metricLists?.find((list) => list.surfaceId === surfaceId);
+  if (!target)
+    return `<p>Choose a list that reads records directly.</p>${backLink()}`;
+  const views = target.views
+    .map(
+      (view) =>
+        `<option value="${escapeHtml(view.viewId)}">${escapeHtml(view.label)}</option>`,
+    )
+    .join('');
+  const measures = target.measures
+    .map(
+      (field) =>
+        `<option value="${escapeHtml(field.fieldId)}">Sum of ${escapeHtml(field.label)}</option>`,
+    )
+    .join('');
+  return `<h1>Add a metric for ${escapeHtml(target.label)}</h1><form method="post"><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addMetricCard"><input type="hidden" name="surface" value="${escapeHtml(surfaceId)}"><label>Card name <input name="label" required maxlength="80"></label><label for="metric-view">View</label> <select id="metric-view" name="view"><option value="">Default view</option>${views}</select><label for="metric-measure">Measure</label> <select id="metric-measure" name="sumField"><option value="">Count records</option>${measures}</select><p><button>Draft metric</button></p></form>${backLink()}`;
 }
 
 function savedViewPicker(targets: CustomizationTargets): string {
@@ -470,19 +528,33 @@ export function patchFromForm(form: CustomizeScreenSubmission): unknown {
     };
   };
   switch (form.kind) {
-    case 'addRecordType':
+    case 'addMetricCard':
       return {
-        fields: Array.from({ length: FIELD_ROWS }, (_, index) =>
-          field(index + 1),
-        ).filter((entry) => entry !== null),
-        kind: 'addRecordType',
-        label: String(form.label ?? '').trim(),
-        ...(form.companyOwnership
-          ? { companyOwnership: form.companyOwnership }
-          : {}),
+        kind: 'addMetricCard',
+        surface: form.surface,
+        label: form.label,
+        ...(form.view ? { view: form.view } : {}),
+        ...(form.sumField ? { sumField: form.sumField } : {}),
       };
+    case 'addRecordType':
     case 'extendRecordType': {
-      const entity = form.entity;
+      const label = (form.label ?? '').trim();
+      const header =
+        form.kind === 'addRecordType'
+          ? {
+              fields: Array.from({ length: FIELD_ROWS }, (_, index) =>
+                field(index + 1),
+              ).filter((entry) => entry !== null),
+              kind: 'addRecordType',
+              label,
+              ...(form.companyOwnership
+                ? { companyOwnership: form.companyOwnership }
+                : {}),
+            }
+          : null;
+      const entity = header
+        ? recordTypeEntityId('northstar.app', label)
+        : form.entity;
       const value = (key: string) => (form[key] ?? '').trim();
       const lines = Array.from({ length: FIELD_ROWS }, (_, index) =>
         field(index + 1, 'line'),
@@ -512,6 +584,7 @@ export function patchFromForm(form: CustomizeScreenSubmission): unknown {
       const tableLabel = value('lines_label');
       const initial = value('initial');
       const patches = [
+        ...(header ? [header] : []),
         ...links,
         ...(tableLabel || lines.length
           ? [{ kind: 'addLineTable', entity, label: tableLabel, fields: lines }]
@@ -664,6 +737,8 @@ function describe(patch: PatchSummary): string {
         : 'Arranged list columns';
     case 'saveListView':
       return `Saved list view "${label}"`;
+    case 'addMetricCard':
+      return `Metric card "${label}"`;
     default:
       return `${patch.kind} (${patch.patchId})`;
   }
