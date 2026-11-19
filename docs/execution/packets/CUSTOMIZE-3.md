@@ -46,7 +46,7 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
   "base": "31d16d2d381b54ff1f2a7100d9264e7b2679a899",
-  "head": "da57523a58acbf6e3b6c395867890007de69df24",
+  "head": "57bb745bfd4ff589559a9ee78f863904b4288f2c",
   "changedPaths": [
     "apps/web/src/customize-screen.ts", "apps/web/test/browser/customize-formulas.composed-application.spec.ts", "package.json", "packages/canonical-model/src/calculated-display-bindings.ts", "packages/canonical-model/src/calculated-display-projection.ts",
     "packages/canonical-model/src/calculated-display-schema.ts", "packages/canonical-model/src/calculated-display.ts", "packages/canonical-model/src/formula-validation-projection.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts",
@@ -54,8 +54,8 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
     "packages/customization/src/apply.ts", "packages/customization/src/calculated-display-draft.ts", "packages/customization/src/index.ts", "packages/customization/src/patch.ts", "packages/customization/src/render.ts",
     "packages/customization/src/targets.ts", "packages/operations-agent/src/catalog.ts", "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/release-repository.ts",
     "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/calculated-display.ts", "packages/runtime/src/request-runtime-view.ts", "test/architecture/repository-hygiene.test.ts", "test/evidence/CUSTOMIZE-3.expected-red.json",
-    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/language-coverage-packages.ts", "test/helpers/reachability-producers.ts", "test/postgres/customization-display.test.ts", "test/unit/calculated-display.test.ts",
-    "test/unit/customization-ai-draft.test.ts"
+    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts", "test/helpers/language-coverage-packages.ts", "test/helpers/reachability-producers.ts", "test/postgres/customization-display.test.ts",
+    "test/postgres/customization-validation.test.ts", "test/unit/calculated-display.test.ts", "test/unit/customization-ai-draft.test.ts"
   ],
   "symbols": [
     {"path":"packages/canonical-model/src/calculated-display-bindings.ts","name":"bindCalculatedDisplayField"},
