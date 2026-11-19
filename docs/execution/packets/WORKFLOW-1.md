@@ -20,6 +20,7 @@ Status — slice 1 candidate, host only. Fable 5.2 approved the amended ADR to b
 ## Gates
 
 - Nine focused host tests cover cooperative and watchdog pre-emption, heap and ambient API refusal, invalid and repeated dispatch, refused grants and inputs, journal reload, replay quarantine and unmocked calls.
+- The compiled-path smoke verified that a plain Node worker can load the supervisor-resolved engine and yield a call.
 - Hosted CI, including dependency and secret scans, is the integration gate. Slice 1 changes no Critical path.
 - Slice 2 owns the migration and event consumer. Slice 3 owns verifier admission and reader floor. Slice 4 owns durable timers, approvals and the browser journey.
 - The rest of N2 includes document templates, business-object-linked communication and consent, and email behind a connector with deduplicated delivery and reconciliation.
@@ -29,7 +30,7 @@ Status — slice 1 candidate, host only. Fable 5.2 approved the amended ADR to b
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WORKFLOW-1",
   "base": "246bd6434eeb6bcc21390c327c7613b14e9c29c4",
-  "head": "b82c8889209ec1874a2aa3e48eb12c3067eebb44",
+  "head": "a7951fe0331038203a15d4a66a3be8a8dbe1b14b",
   "changedPaths": [
     "packages/postgres-provider/package.json",
     "packages/postgres-provider/src/module-runtime-interpreter.ts",
