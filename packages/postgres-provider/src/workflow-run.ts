@@ -13,6 +13,10 @@ import {
 } from './workflow-isolate.js';
 import type { WorkflowCall, WorkflowEvent } from './workflow-sdk.js';
 
+export class WorkflowGuestError extends Error {
+  override readonly name = 'WorkflowGuestError';
+}
+
 type WorkflowTerminal =
   | { readonly kind: 'done' }
   | {
@@ -73,7 +77,7 @@ export class InMemoryWorkflowRun {
       this.#prefix.length + Number(this.#pending !== null) >
       MAXIMUM_WORKFLOW_EFFECTS
     ) {
-      throw new Error('Workflow journal exceeds the effect limit');
+      throw new WorkflowGuestError('Workflow journal exceeds the effect limit');
     }
     if (this.#terminal && this.#pending !== null)
       throw new Error('Terminal workflow has a pending request');
@@ -149,18 +153,20 @@ export class InMemoryWorkflowRun {
         return this.#terminal;
       case 'call': {
         if (this.#prefix.length === MAXIMUM_WORKFLOW_EFFECTS)
-          throw new Error('Workflow effect limit exceeded');
+          throw new WorkflowGuestError('Workflow effect limit exceeded');
         const call = this.#admit(outcome.request);
         this.#assertReplaySize(this.#prefix, outcome.request);
         this.#pending = outcome.request;
         return { kind: 'call', cursor: this.#prefix.length, call };
       }
       case 'invalid-call':
-        throw new Error('Workflow made an invalid or repeated call');
+        throw new WorkflowGuestError(
+          'Workflow made an invalid or repeated call',
+        );
       case 'cpu-limit':
-        throw new Error('Workflow isolate CPU limit exceeded');
+        throw new WorkflowGuestError('Workflow isolate CPU limit exceeded');
       case 'execution-failed':
-        throw new Error('Workflow guest execution failed');
+        throw new WorkflowGuestError('Workflow guest execution failed');
     }
   }
 
@@ -173,7 +179,16 @@ export class InMemoryWorkflowRun {
   }
 
   #admit(encoded: string): WorkflowCall {
-    return this.workflow.sdk.admitCall(decodeWorkflowRequest(encoded));
+    try {
+      return this.workflow.sdk.admitCall(decodeWorkflowRequest(encoded));
+    } catch (error) {
+      throw new WorkflowGuestError(
+        error instanceof Error
+          ? error.message
+          : 'Workflow guest call was refused',
+        { cause: error },
+      );
+    }
   }
 
   #assertReplaySize(
@@ -184,7 +199,9 @@ export class InMemoryWorkflowRun {
       Buffer.byteLength(canonicalize({ event: this.#event, prefix, pending })) >
       MAXIMUM_WORKFLOW_REPLAY_BYTES
     ) {
-      throw new Error('Workflow journal exceeds the replay byte limit');
+      throw new WorkflowGuestError(
+        'Workflow journal exceeds the replay byte limit',
+      );
     }
   }
 }
