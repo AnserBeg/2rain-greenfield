@@ -12,7 +12,7 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 6. An operation restriction subtracts one role’s grants. Other roles keep their existing grants. Release activation and replay check the role in the destination environment.
 7. Literal validation (F1/F3) adds a guard to bound create and update operations. Create checks after defaults. Update checks when a watched value changes. Form and assistant show the pinned message, and rollback restores the prior rules.
 8. Cross-field validation compares same-record values and one declared, authorized parent field. Its guard checks create and changes to watched values under the same transaction.
-9. Calculated display fields use exact-decimal add, subtract and multiply. The elected record page, list, CSV, assistant and read-back use the server result. The declaration carries no storage field or mutation input.
+9. Calculated display fields use exact-decimal add, subtract and multiply. The elected record page, list, declared CSV export, assistant and read-back use the server result. The declaration carries no storage field or mutation input.
 
 ## Decisions
 
@@ -46,7 +46,7 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
   "base": "6b2d28da596cbdd0f909130de1ab286bf3ec57c6",
-  "head": "2b01a7238c0fd7efec8790ccc1ccfa144eb2afc8",
+  "head": "84a284ea2ba7e7b2fd15896b5b2b8ec136ab86bc",
   "changedPaths": [
     "apps/web/src/customize-screen.ts", "apps/web/test/browser/customize-formulas.composed-application.spec.ts", "package.json", "packages/canonical-model/src/calculated-display-bindings.ts", "packages/canonical-model/src/calculated-display-projection.ts",
     "packages/canonical-model/src/calculated-display-schema.ts", "packages/canonical-model/src/calculated-display.ts", "packages/canonical-model/src/formula-validation-projection.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts",
@@ -73,4 +73,4 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 **Slice 2.** In **Customize → Add validation → Item**, choose **Description** and **Require a value**, enter a message, then draft, approve and activate. Open **New item**, fill SKU, name and base unit, and save with Description blank. The form keeps your entries and shows your message. Fill Description and save. Roll back in Customize and verify that another item saves with Description blank.
 **Slice 6.** In **Customize → Add a metric card to Today**, choose **Locations**, select **Set up metric** and name it **Location count**. Draft, approve and activate. Select the card on Today and compare its count with the destination list. For a sum, choose **Items** and **Price (CAD)**, then use its card to open the governed list. Roll back from Customize and verify that the latest card disappears.
 **Slice 3.** In **Customize → Add validation → Location → Compare fields**, choose **Location name**, **Different from**, and the parent Location name. Draft, approve and activate. Create a Location with a parent, then try the parent’s exact name. Change the name, save, then roll back and verify that the original name is accepted.
-**Slice 4.** In **Customize → Add a calculated display field → Item**, name it **Margin CAD** and choose **Price (CAD)**, **Subtract**, and **Standard cost (CAD)**. Choose **Items** as the optional list, then draft, approve and activate. Compare the margin on an item, in Items and in its CSV. Roll back to remove the display.
+**Slice 4.** In **Customize → Add a calculated display field → Item**, name it **Margin CAD** and choose **Price (CAD)**, **Subtract**, and **Standard cost (CAD)**. Choose **Stock by item** as the optional list, then draft, approve and activate. Compare the margin on the item page, on Stock by item and in its CSV. Roll back to remove the display.
