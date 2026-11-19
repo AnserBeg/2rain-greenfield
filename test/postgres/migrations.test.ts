@@ -78,6 +78,32 @@ test('empty, concurrent, and previously migrated databases converge', async () =
   );
 });
 
+test('every application SECURITY DEFINER puts pg_temp last', async () => {
+  await withEphemeralPostgres('definer-search-paths', async ({ pool }) => {
+    const client = await pool.connect();
+    try {
+      await runMigrations(client, await loadMigrations(checkedInMigrations));
+      const definers = await client.query<{
+        signature: string;
+        path: string | null;
+      }>(`
+        SELECT p.oid::regprocedure::text AS signature,
+               (SELECT option_value FROM pg_options_to_table(p.proconfig)
+                 WHERE option_name = 'search_path') AS path
+          FROM pg_proc AS p JOIN pg_namespace AS ns ON ns.oid = p.pronamespace
+         WHERE p.prosecdef AND ns.nspname !~ '^pg_' AND ns.nspname <> 'information_schema'`);
+      assert.ok(definers.rows.length > 0);
+      for (const { signature, path } of definers.rows) {
+        const schemas = path?.split(',').map((name) => name.trim()) ?? [];
+        assert.equal(schemas.at(-1), 'pg_temp', signature);
+        assert.ok(!schemas.slice(0, -1).includes('pg_temp'), signature);
+      }
+    } finally {
+      client.release();
+    }
+  });
+});
+
 test('archive uniqueness migration replaces both legacy indexes without renaming them', async () => {
   await withEphemeralPostgres(
     'archive-unique-index-migration',
@@ -256,10 +282,7 @@ test('inventory migration owns exactly two platform relations and no managed-mod
       const client = await pool.connect();
       try {
         const migrations = await loadMigrations(checkedInMigrations);
-        assert.equal(
-          migrations.at(-1)?.name,
-          '0032_customization_upgrades.sql',
-        );
+        assert.equal(migrations.at(-1)?.name, '0033_definer_search_paths.sql');
         const inventoryMigrationIndex = migrations.findIndex(
           (migration) =>
             migration.name === '0015_inventory_storage_foundation.sql',
