@@ -13,7 +13,7 @@ BUILD · 2026-11-18 · No Critical path. Each numbered regression failed on `6b7
 
 The release declares confirmation on entities and fields. Older releases without declarations require confirmation for edits to records in Setup.
 CI caught a valid order-line reference in reserve-and-ship. The target get now verifies it during planning.
-The assistant keeps its five tools. GitHub CI gates integration. The browser assertion checks the card’s rendered field rows.
+The assistant keeps its five tools. The persistent dock replays the live card’s typed rows and digest. GitHub CI gates integration.
 
 ## Test it yourself
 
@@ -31,8 +31,8 @@ Open a draft PO with a supplier reference and ask the assistant to place it. Loo
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "AGENT-5",
-  "base": "c31f17df1ebc3bfca7819ef34e60e0fb43160cba",
-  "head": "55afd3694fb5e7ec81df1d56791968d6e5841cdb",
+  "base": "1f9db1dcec4e7f7779ced76594f3ebffd1e4e0bd",
+  "head": "9e3b286a8d5a52dc95df0057e3cf7b681509990d",
   "changedPaths": ["apps/api/src/assistant-endpoint.ts","apps/web/release/app.authored.json","apps/web/release/app.compiled.json","apps/web/src/assistant-panel.ts","apps/web/test/browser/assistant-panel.composed-application.spec.ts","packages/canonical-model/src/schemas.ts","packages/compiler/src/projections.ts","packages/domain/src/catalog/definition.ts","packages/domain/src/inventory/definition.ts","packages/domain/src/purchasing/approval-arguments.ts","packages/domain/src/purchasing/approvals.ts","packages/operations-agent/src/catalog.ts","packages/operations-agent/src/risk.ts","packages/operations-agent/src/session.ts","packages/runtime/src/request-runtime-view.ts","test/agent/assistant-endpoint.test.ts","test/agent/business-map.test.ts","test/agent/compiled-view.ts","test/fixtures/g2/language-conformance/coverage-decisions.json"],
   "symbols": [{"path":"apps/api/src/assistant-endpoint.ts","name":"inputRows"},{"path":"packages/operations-agent/src/risk.ts","name":"operationRisk"},{"path":"packages/domain/src/purchasing/approval-arguments.ts","name":"effectiveApprovalArguments"}]
 }
