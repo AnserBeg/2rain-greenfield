@@ -297,29 +297,33 @@ test(
                 field: { label: 'Inspection notes', type: 'text' },
               });
               assert.ok(v6Patch.status === 'parsed');
-              const compiled = parseCompiledApplication(compiledApplication);
-              const request = {
-                acknowledgement: readUnboundPermissionAcknowledgementFor(
-                  authoredPath,
-                  'northstar.app:package.application',
-                ),
-                base: firstPartyAuthored,
-                chain: [v6Patch.patch],
-                tip: serializeRelease(
-                  compiled.applications.at(-1) ?? compiled.bootstrap,
-                ),
-              };
-              const historicalEnvelope = await run(
+              // Use a base both compilers can read even after concurrent
+              // v6 keys land. The old runner exports its exact input so the
+              // current runner sees the same base, policy and parent bytes.
+              const { request, release: historicalEnvelope } = (await run(
                 `
             import { readFile } from 'node:fs/promises';
+            import { readUnboundPermissionAcknowledgementFor } from './apps/web/scripts/unbound-permission-acknowledgement.ts';
+            import { parseCompiledApplication } from './packages/postgres-provider/src/composed-application-runtime.ts';
             import { compileInSandbox } from './packages/customization/src/sandbox.ts';
-            const request = JSON.parse(await readFile(process.argv[2], 'utf8'));
-            const compiled = await compileInSandbox(request);
-            if (compiled.status !== 'compiled') throw new Error(JSON.stringify(compiled));
-            console.log(JSON.stringify(compiled.steps[0].release));
+            import { serializeRelease } from './packages/customization/src/release-envelope.ts';
+            const path = 'apps/web/release/app.authored.json';
+            const compiled = parseCompiledApplication(JSON.parse(await readFile('apps/web/release/app.compiled.json', 'utf8')));
+            const request = {
+              acknowledgement: readUnboundPermissionAcknowledgementFor(path, 'northstar.app:package.application'),
+              base: JSON.parse(await readFile(path, 'utf8')),
+              chain: [JSON.parse(await readFile(process.argv[2], 'utf8'))],
+              tip: serializeRelease(compiled.applications.at(-1) ?? compiled.bootstrap),
+            };
+            const result = await compileInSandbox(request);
+            if (result.status !== 'compiled') throw new Error(JSON.stringify(result));
+            console.log(JSON.stringify({ request, release: result.steps[0].release }));
           `,
-                request,
-              );
+                v6Patch.patch,
+              )) as {
+                request: Parameters<typeof compileInSandbox>[0];
+                release: unknown;
+              };
               const currentEnvelope = await compileInSandbox(request);
               assert.ok(
                 currentEnvelope.status === 'compiled',
