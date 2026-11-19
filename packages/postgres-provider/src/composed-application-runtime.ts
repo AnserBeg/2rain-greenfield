@@ -31,6 +31,7 @@ import {
   renderCompiledDiff,
   type AcknowledgementInput,
 } from '@north-star/customization';
+import { readCustomizationLineage } from './customization-lineage.js';
 import type { UpgradePreparation } from './customization-service.js';
 import {
   COMPILER_TRANSITION_FACTS_VERSION,
@@ -747,7 +748,12 @@ export async function createComposedApplicationRuntime(
             options.capabilityOperationExecutorFactories ?? [],
         },
       );
-      customizationUpgrade = await customization.prepareUpgrade();
+      customizationUpgrade = await customization.prepareUpgrade().catch(() => ({
+        status: 'refused' as const,
+        code: 'CUSTOMIZE_UPGRADE_RECORD_FAILED',
+        message:
+          'The upgrade could not be recorded. The verified release is still live.',
+      }));
     }
 
     const actorIssuer = humanActorIssuer();
@@ -1005,61 +1011,14 @@ async function tenantDescendantOfLineageTip(
   lineage: readonly PersistedReleaseIdentity[],
   allowMovedBase: boolean,
 ): Promise<ServingRelease | null> {
-  const base = await withTrustedRequestTransaction(
-    pool,
-    context,
-    async (client) => {
-      const result = await client.query<{
-        base_provenance: string | null;
-        base_revision_id: MintedUuid | null;
-        tenant_authored: boolean;
-      }>(
-        `WITH RECURSIVE chain(revision_id, provenance, parent_revision_id) AS (
-           SELECT revision.revision_id, revision.provenance,
-                  revision.parent_revision_id
-             FROM platform.tenant_releases AS release
-             JOIN platform.app_package_revisions AS revision
-               ON revision.tenant_id = release.tenant_id
-              AND revision.revision_id = release.app_package_revision_id
-            WHERE release.tenant_id = $1 AND release.environment_id = $2
-              AND release.release_id = $3
-           UNION ALL
-           SELECT parent.revision_id, parent.provenance,
-                  parent.parent_revision_id
-             FROM chain
-             LEFT JOIN platform.customization_upgrades AS upgrade
-               ON upgrade.tenant_id = $1 AND upgrade.environment_id = $2
-              AND upgrade.candidate_revision_id = chain.revision_id
-             LEFT JOIN platform.tenant_releases AS upgrade_base
-               ON upgrade_base.tenant_id = upgrade.tenant_id
-              AND upgrade_base.environment_id = upgrade.environment_id
-              AND upgrade_base.release_id = upgrade.base_release_id
-             JOIN platform.app_package_revisions AS parent
-               ON parent.tenant_id = $1
-              AND parent.revision_id = COALESCE(upgrade_base.app_package_revision_id, chain.parent_revision_id)
-            WHERE chain.provenance = 'tenantAuthored'
-         )
-         SELECT bool_or(provenance = 'tenantAuthored') AS tenant_authored,
-                (array_agg(revision_id) FILTER (
-                   WHERE provenance <> 'tenantAuthored'))[1]
-                  AS base_revision_id,
-                (array_agg(provenance) FILTER (
-                   WHERE provenance <> 'tenantAuthored'))[1]
-                  AS base_provenance
-           FROM chain`,
-        [context.tenantId, context.environmentId, releaseId],
-      );
-      return result.rows[0];
-    },
+  const chain = await withTrustedRequestTransaction(pool, context, (client) =>
+    readCustomizationLineage(client, { ...context, releaseId }),
   );
-  if (!base?.tenant_authored) return null;
-  if (base.base_revision_id !== lineage.at(-1)!.revisionId && !allowMovedBase) {
+  if (chain[0]?.provenance !== 'tenantAuthored') return null;
+  if (chain.at(-1)?.release_id !== lineage.at(-1)!.releaseId && !allowMovedBase)
     throw new Error(
-      'the active release is a tenant customization of an earlier version of this application; ' +
-        're-applying customizations to a new first-party release is not built yet. ' +
-        'Pre-tenant remedy: corepack pnpm --filter @north-star/api dev:reset',
+      'the active release is a tenant customization of an earlier version of this application',
     );
-  }
   return loadServingRelease(pool, context, releaseId);
 }
 
@@ -2531,6 +2490,7 @@ export async function approveModuleRelease(
   preparationId: MintedUuid,
   diffBinding: ReleaseDiffBinding,
   freshTenantBinding?: FreshTenantPreparationBinding,
+  customizationUpgradeId?: MintedUuid,
 ): Promise<MintedUuid> {
   // The approver's diff and the plan the executor prepared are one plan.
   if (
@@ -2605,6 +2565,7 @@ export async function approveModuleRelease(
     approverContext,
     preparationId,
     target.releaseId,
+    customizationUpgradeId,
   );
 }
 
@@ -2619,6 +2580,7 @@ export async function approveReleaseWithoutStorageTransition(
   diffBinding: ReleaseDiffBinding,
   reverseAuthorization?: ReleaseReverseTransitionAuthorization,
   freshTenantBinding?: FreshTenantPreparationBinding,
+  customizationUpgradeId?: MintedUuid,
 ): Promise<MintedUuid> {
   if (pointer.releaseId === null) {
     throw new Error('release advancement requires an active source release');
@@ -2710,6 +2672,7 @@ export async function approveReleaseWithoutStorageTransition(
     approverContext,
     preparationId,
     target.releaseId,
+    customizationUpgradeId,
   );
 }
 
@@ -2874,12 +2837,14 @@ async function createApproval(
   approverContext: TrustedRequestContext,
   preparationId: MintedUuid,
   targetReleaseId: MintedUuid,
+  customizationUpgradeId?: MintedUuid,
 ): Promise<MintedUuid> {
   const activationAttemptId = minted(randomUUID());
   const created = await new PostgresReleaseApprovalService(pool).createApproval(
     approverContext,
     {
       activationAttemptId,
+      ...(customizationUpgradeId ? { customizationUpgradeId } : {}),
       approvalId: minted(randomUUID()),
       approvingHumanId: approverContext.principalId,
       initiatingHumanId: initiatingContext.principalId,

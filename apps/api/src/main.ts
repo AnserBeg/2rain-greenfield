@@ -2,6 +2,8 @@ import { execFile } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 import { promisify } from 'node:util';
 
+import { upgradeLogFields } from '@north-star/postgres-provider/customization-service';
+
 import { APPLICATION_IDS } from '../../../packages/domain/src/app/builder.js';
 
 import { resolveDevContainer } from './dev-container.js';
@@ -79,7 +81,9 @@ announce(application!);
 function announce(running: RunningComposedApplication): void {
   const upgrade = running.runtime.customizationUpgrade;
   if (upgrade && upgrade.status !== 'current') {
-    process.stdout.write(`CUSTOMIZATION_UPGRADE ${JSON.stringify(upgrade)}\n`);
+    process.stdout.write(
+      `CUSTOMIZATION_UPGRADE ${JSON.stringify(upgradeLogFields(upgrade))}\n`,
+    );
   }
   process.stdout.write(
     `COMPOSED_APPLICATION_READY ${JSON.stringify({

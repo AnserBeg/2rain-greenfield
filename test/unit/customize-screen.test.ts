@@ -62,6 +62,8 @@ function fakeService(calls: string[]): CustomizeScreenService {
     status: () =>
       Promise.resolve({
         activeChain: [],
+        upgrades: [],
+        upgradeRefusal: null,
         activeReleaseId: 'r' as never,
         activeReleaseRoot: 'a'.repeat(64),
         patches: [],
@@ -179,6 +181,7 @@ test('approve, activate and roll back each act once and say what happened', asyn
     'http://local/?customize',
     {
       action: 'rollback',
+      releaseId: 'r',
     },
   );
   assert.match(rolledBack.html, /data-customize-result="rolledBack"/u);
@@ -257,4 +260,48 @@ test('Customize reports activation on another page until the operation settles',
     (await renderCustomizeScreen(service, '/?customize', null)).html,
     /Activation is still running/u,
   );
+});
+
+test('the live platform upgrade is the named and release-bound rollback target', async () => {
+  const calls: string[] = [];
+  const service = fakeService(calls);
+  const status = await service.status();
+  service.status = () =>
+    Promise.resolve({
+      ...status,
+      activeReleaseId: 'selected-release',
+      activeChain: [{ kind: 'addField', patchId, displayLabel: 'Order note' }],
+      upgrades: [
+        {
+          candidateReleaseId: 'selected-release',
+          upgradeId: 'upgrade-b',
+          state: 'live',
+        },
+      ],
+      upgradeRefusal: {
+        code: 'CUSTOMIZE_BASE_MOVED',
+        message: 'This chain cannot be upgraded.',
+      },
+    });
+  service.rollback = (releaseId) => {
+    calls.push(releaseId);
+    return Promise.resolve({ releaseRoot: 'restored' });
+  };
+  const page = await renderCustomizeScreen(service, '/?customize', null);
+  assert.match(page.html, /Latest: Platform upgrade upgrade-b/u);
+  assert.match(page.html, /name="releaseId" value="selected-release"/u);
+  assert.match(page.html, /CUSTOMIZE_BASE_MOVED/u);
+  assert.equal(
+    (
+      await renderCustomizeScreen(service, '/?customize', {
+        action: 'rollback',
+      })
+    ).statusCode,
+    409,
+  );
+  await renderCustomizeScreen(service, '/?customize', {
+    action: 'rollback',
+    releaseId: 'selected-release',
+  });
+  assert.deepEqual(calls, ['selected-release']);
 });

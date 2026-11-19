@@ -105,6 +105,12 @@ try {
     const lines = [
       `Active release ${status.activeReleaseRoot.slice(0, 12)} (${status.activeChain.length === 0 ? 'the standard application' : `${String(status.activeChain.length)} change${status.activeChain.length === 1 ? '' : 's'} applied`})`,
       '',
+      ...(status.upgradeRefusal
+        ? [
+            `Platform upgrade refused: ${status.upgradeRefusal.code} — ${status.upgradeRefusal.message}`,
+            ...(status.upgradeRefusal.issues ?? []),
+          ]
+        : []),
       status.patches.length === 0
         ? 'No changes recorded yet.'
         : 'Recorded changes:',
@@ -114,7 +120,7 @@ try {
       ),
       ...status.patches.map(
         (patch) =>
-          `  ${patch.patchId}  ${patch.kind.padEnd(14)} ${summary(patch.patch)}${
+          `  ${patch.patchId}  ${patch.kind.padEnd(14)} ${patch.displayLabel ?? ''}${
             status.activeChain.some(
               (active) => active.patchId === patch.patchId,
             )
@@ -164,12 +170,4 @@ function report(outcome: DraftOutcome): number {
     ].join('\n'),
   );
   return 1;
-}
-
-function summary(patch: Record<string, unknown>): string {
-  if (typeof patch.label === 'string') return `"${patch.label}"`;
-  if (typeof patch.option === 'string') return `"${patch.option}"`;
-  const field = patch.field as Record<string, unknown> | undefined;
-  if (field && typeof field.label === 'string') return `"${field.label}"`;
-  return String(patch.surface ?? '');
 }

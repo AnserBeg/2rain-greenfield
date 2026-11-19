@@ -3,15 +3,28 @@
  * apps/web never imports the provider (surface-data-binding gate); the
  * composition hands in the service, whose results are structurally these.
  */
-type PatchBody = Readonly<Record<string, unknown>> & { readonly kind: string };
-interface ScreenPatch {
-  readonly createdAt: string;
-  readonly patch: PatchBody;
+interface PatchSummary {
+  readonly kind: string;
+  readonly displayLabel: string | null;
   readonly patchId: string;
+}
+interface ScreenPatch extends PatchSummary {
+  readonly createdAt: string;
   readonly state: 'live' | 'approved' | 'drafted' | 'stale';
 }
 interface CustomizationStatus {
-  readonly activeChain: readonly { readonly patch: PatchBody }[];
+  readonly activeChain: readonly PatchSummary[];
+  readonly activeReleaseId: string;
+  readonly upgradeRefusal: {
+    readonly code: string;
+    readonly message: string;
+    readonly issues?: readonly string[];
+  } | null;
+  readonly upgrades: readonly {
+    readonly candidateReleaseId: string;
+    readonly upgradeId: string;
+    readonly state: string;
+  }[];
   readonly patches: readonly ScreenPatch[];
 }
 interface CustomizationTargets {
@@ -93,7 +106,7 @@ export interface CustomizeScreenService {
   ): Promise<DraftOutcome>;
   /** Present once AI drafting is composed: plain English to one typed patch. */
   draftFromRequest?(request: string): Promise<DraftOutcome>;
-  rollback(): Promise<ActivationOutcome>;
+  rollback(expectedReleaseId: string): Promise<ActivationOutcome>;
   status(): Promise<CustomizationStatus>;
   targets(): Promise<CustomizationTargets>;
 }
@@ -168,7 +181,11 @@ export async function renderCustomizeScreen(
         );
       }
       case 'rollback':
-        await service.rollback();
+        if (!submission.releaseId)
+          return failure(
+            'Open Customize again to review the live release before rolling back.',
+          );
+        await service.rollback(submission.releaseId);
         return page(
           'Rolled back',
           `<p class="eyebrow">Rolled back</p><h1>The change is rolled back</h1><p>It is hidden again. Every record entered under it is kept and comes back if it is activated again.</p>${backLink()}`,
@@ -194,7 +211,17 @@ async function overview(service: CustomizeScreenService): Promise<string> {
     service.status(),
     service.targets(),
   ]);
-  const live = status.activeChain.at(-1);
+  const latest = status.activeChain.at(-1);
+  const activeUpgrade = status.upgrades.find(
+    (u) =>
+      u.state === 'live' && u.candidateReleaseId === status.activeReleaseId,
+  );
+  const live = activeUpgrade
+    ? `Platform upgrade ${activeUpgrade.upgradeId}`
+    : latest
+      ? describe(latest)
+      : null;
+  const refusal = status.upgradeRefusal;
   const rows = status.patches
     .slice()
     .reverse()
@@ -205,16 +232,19 @@ async function overview(service: CustomizeScreenService): Promise<string> {
           : patch.state === 'approved'
             ? button('activate', 'Activate', { patchId: patch.patchId })
             : '';
-      return `<tr data-patch-id="${escapeHtml(patch.patchId)}" data-patch-state="${patch.state}"><td>${escapeHtml(describe(patch.patch))}</td><td>${stateLabel(patch.state)}</td><td>${escapeHtml(patch.createdAt.slice(0, 16).replace('T', ' '))}</td><td>${action}</td></tr>`;
+      return `<tr data-patch-id="${escapeHtml(patch.patchId)}" data-patch-state="${patch.state}"><td>${escapeHtml(describe(patch))}</td><td>${stateLabel(patch.state)}</td><td>${escapeHtml(patch.createdAt.slice(0, 16).replace('T', ' '))}</td><td>${action}</td></tr>`;
     })
     .join('');
   return [
     '<p class="eyebrow">Customize</p><h1>Customize this application</h1>',
     `<section data-customize-live><h2>What is live</h2>${
       live
-        ? `<p>${String(status.activeChain.length)} change${status.activeChain.length === 1 ? '' : 's'} on top of the standard application. Latest: ${escapeHtml(describe(live.patch))}.</p>${button('rollback', 'Roll back the latest change', {})}`
+        ? `<p>${String(status.activeChain.length)} change${status.activeChain.length === 1 ? '' : 's'} on top of the standard application. Latest: ${escapeHtml(live)}.</p>${button('rollback', 'Roll back the latest change', { releaseId: status.activeReleaseId })}`
         : '<p>The standard application, with no customizations.</p>'
     }</section>`,
+    refusal
+      ? `<section data-customize-upgrade-refusal><h2>Platform upgrade refused</h2><p>Your current release is still live.</p><p>${escapeHtml(refusal.code)} · ${escapeHtml(refusal.message)}</p>${(refusal.issues ?? []).map((issue) => `<pre>${escapeHtml(issue)}</pre>`).join('')}</section>`
+      : '',
     `<section data-customize-changes><h2>Changes</h2>${
       rows
         ? `<table><thead><tr><th>Change</th><th>State</th><th>Drafted</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
@@ -414,18 +444,21 @@ async function liveLinks(service: CustomizeScreenService): Promise<string> {
         .join(' · ')}</p>`;
 }
 
-function describe(patch: Record<string, unknown>): string {
+function describe(patch: PatchSummary): string {
+  const label = patch.displayLabel ?? patch.patchId;
   switch (patch.kind) {
     case 'addRecordType':
-      return `New record type "${String(patch.label)}"`;
+      return `New record type "${label}"`;
     case 'addField':
-      return `New field "${String((patch.field as Record<string, unknown>).label)}"`;
+      return `New field "${label}"`;
     case 'addChoice':
-      return `New choice "${String(patch.option)}"`;
+      return `New choice "${label}"`;
     case 'arrangeLayout':
-      return patch.upFront ? 'Arranged form fields' : 'Arranged list columns';
+      return label === 'form'
+        ? 'Arranged form fields'
+        : 'Arranged list columns';
     default:
-      return String(patch.kind);
+      return `${patch.kind} (${patch.patchId})`;
   }
 }
 
