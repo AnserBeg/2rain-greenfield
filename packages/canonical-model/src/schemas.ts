@@ -904,6 +904,29 @@ const compositionTaskValue = z.discriminatedUnion('source', [
   z.strictObject({ source: z.literal('input'), inputId: CanonicalIdSchema }),
   compositionTaskColumn.extend({ source: z.literal('column') }),
 ]);
+const compositionStockImpact = z.strictObject({
+  /** A document-wide posting may affect a child dataset without running per row. */
+  datasetId: CanonicalIdSchema.optional(),
+  query: compositionReference('queryReference'),
+  fields: z.strictObject({
+    item: CanonicalIdSchema,
+    location: CanonicalIdSchema,
+    onHand: CanonicalIdSchema,
+    reserved: CanonicalIdSchema,
+    available: CanonicalIdSchema,
+  }),
+  locationStatus: z.strictObject({
+    query: compositionReference('queryReference'),
+    field: CanonicalIdSchema,
+    label: CanonicalIdSchema,
+    usable: CanonicalIdSchema,
+  }),
+  item: compositionValue,
+  location: compositionValue,
+  quantity: compositionValue,
+  onHand: z.enum(['increase', 'decrease', 'unchanged']),
+  reserved: z.enum(['increase', 'decrease', 'unchanged']),
+});
 const compositionAction = z.strictObject({
   presentation: z
     .strictObject({
@@ -937,6 +960,8 @@ const compositionAction = z.strictObject({
   actionId: CanonicalIdSchema,
   label: LabelSchema,
   description: LabelSchema,
+  /** Server-computed advisory stock changes over declared current read models. Optional v6 key. */
+  stockImpacts: z.array(compositionStockImpact).min(1).max(4).optional(),
   orderKey: boundedOrderKey,
   datasetId: CanonicalIdSchema.optional(),
   conditions: z.array(compositionCondition).max(12),

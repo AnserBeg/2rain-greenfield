@@ -4,62 +4,65 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 
 ## Claims
 
-- Contract facts determine direct application; consequential tasks still explicitly confirm a server preparation.
-- Native task stages and verified outcomes replace named regions in place. Page submits remain available.
-- The existing live gateway and read-back remain the writer and verifier; ADR-0071 bounds task reads.
+- Contract facts determine direct application; consequential tasks explicitly confirm a server preparation.
+- Task stages and verified outcomes replace named regions in place, with ordinary page forms available.
+- Existing live authorization, atomic posting and verified read-back remain authoritative.
+- Stock impact rows use existing server read models and exact decimal arithmetic.
 
 ## Slices and gates
 
-- 0: merged `b218bf03`, PR #88, all 16 jobs green in [CI 44393050211](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44393050211). [Measured spike](../evidence/interact-1-spike.md).
-- 1: merged `d775c078`, PR #93, all 16 jobs green in [CI 44407145880](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44407145880).
-- 2–5: separately preserved drafts; integration follows CI in order.
+- 0: merged `b218bf03`, PR #88, [CI 44393050211](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44393050211) green.
+- 1: merged `d775c078`, PR #93, [CI 44407145880](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44407145880) green.
+- 2: merged `ca9812e7`, PR #96, [CI 44488258241](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44488258241) green.
 
 ## Decisions
 
-- The production transport replaces the test-only spike; the executable scorecard now measures production task stages.
-- Slice 0 merged-main [CI 44399875916](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44399875916) passed every job.
-- Explicit stage submissions hold task controls until replacement or recovery; live preparations retain generation checks.
-- Exact-minute browser fills canonicalize zero seconds without changing their instant (CI reproduction passed).
-- Read-only normal git metadata requires isolated metadata in `/tmp`, tracking only this worktree.
-- CUSTOMIZE-2 main merge preserves its progress indicator and custom-field presentation alongside the task transport.
-- AGENT-4 advanced main only in assistant behavior; its shared runtime change is the company helper. The clean integration preserves the tested packet tip; merged-main CI gates their combination.
+- The production scorecard replaces the test-only spike. [Baseline and spike measurements](../evidence/interact-1-spike.md).
+- Additive v6 keys have compiler accept/refuse coverage; release lineage and coverage are re-derived (ADR-0066).
+- Normal git metadata is read-only; isolated metadata in `/tmp` tracks this chartered worktree.
+- Exact-minute browser fills canonicalize zero seconds without changing the instant (CI reproduction passed).
+- Task preview budgets: measured 2/46/3/0 in CI 44426260000; +5 statements buys governed stock/location reads. Confirmation unchanged.
+- Accepted Today metrics and list sums are synchronized; shared release and coverage artifacts are re-derived.
 - Mid-packet checkpoint: no whole-app review trigger; no new correctness domain or fan-out.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "INTERACT-1",
-  "base": "e61e90e2ffdca32cf92bf39f7c921ca5069b130f",
-  "head": "6493bc59947bc7a63291b6a1a821591f09f9f227",
+  "base": "81ba7405e7512a806882f9ea3cff51af8c7115d9",
+  "head": "5a8ea614a7a3627c4bbb320d42165cd04624c684",
   "changedPaths": [
-    "apps/web/src/app-server.ts",
+    "apps/web/release/app.authored.json",
+    "apps/web/release/app.compiled.json",
+    "apps/web/src/ledger-styles.ts",
     "apps/web/src/surface-client.ts",
     "apps/web/src/surface-composition.ts",
-    "apps/web/src/surface-runtime.ts",
-    "apps/web/test/browser/complete-task.ts",
-    "apps/web/test/browser/customer-defaults.spec.ts",
-    "apps/web/test/browser/inventory-catalog-aliases.spec.ts",
-    "apps/web/test/browser/inventory-locations.spec.ts",
+    "apps/web/test/browser/composed-application.spec.ts",
+    "apps/web/test/browser/inventory-documents.spec.ts",
     "apps/web/test/browser/inventory-warehouse-mode.spec.ts",
-    "apps/web/test/browser/loop-scorecard.composed-application.spec.ts",
-    "apps/web/test/browser/loop-scorecard.ts",
-    "apps/web/test/browser/meta-sales.spec.ts",
-    "apps/web/test/browser/order-entry.spec.ts",
     "apps/web/test/browser/order-pages.spec.ts",
-    "apps/web/test/browser/payables.spec.ts",
-    "apps/web/test/browser/price-list-pricing.spec.ts",
-    "apps/web/test/browser/purchase-approvals.spec.ts",
-    "apps/web/test/browser/purchase-pricing.spec.ts",
-    "apps/web/test/browser/receivables-counter-sale.spec.ts",
-    "apps/web/test/browser/receivables-credit.spec.ts",
-    "apps/web/test/browser/receivables.spec.ts",
-    "apps/web/test/browser/receiving.composed-application.spec.ts",
-    "test/integration/surface-data-binding.test.ts"
+    "apps/web/test/browser/sale-fulfillment.composed-application.spec.ts",
+    "packages/canonical-model/src/schemas.ts",
+    "packages/canonical-model/src/surface-composition.ts",
+    "packages/domain/src/inventory/workspace.ts",
+    "packages/domain/src/purchasing/workspace.ts",
+    "packages/domain/src/sales/workspace.ts",
+    "test/compiler/g2-module-conformance.test.ts",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json",
+    "test/helpers/assert-composed-inventory.ts",
+    "test/performance/page-budgets.ts",
+    "test/unit/canonical-model/surface-composition.test.ts",
+    "test/unit/inventory-definition.test.ts",
+    "test/unit/workspace-contract.test.ts"
   ],
   "symbols": [
     {
       "path": "apps/web/src/surface-composition.ts",
-      "name": "taskCanApplyDirectly"
+      "name": "stockImpactRows"
+    },
+    {
+      "path": "test/helpers/assert-composed-inventory.ts",
+      "name": "assertStockPostingActions"
     }
   ]
 }
@@ -67,5 +70,6 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 
 ## Test it yourself
 
-- Slice 0: compare `INTERACT_SPIKE` in the linked browser job; receipt 2/0 and shipment 4/0 clicks/loads.
-- Slice 1: open a released PO, Receive, enter actual cost, and confirm the server preparation; the order updates in place. With JavaScript disabled, use Review then Confirm.
+- 0: compare INTERACT_SPIKE in the linked browser job; receipt 2/0 and shipment 4/0 clicks/loads.
+- 1: Receive on a released PO, enter actual cost, and confirm the server preparation; the record updates in place. Disable JavaScript to exercise Review and Confirm page forms.
+- 2: inspect each receipt line’s On hand, Reserved and Available changes; edit quantity and confirm the current prepared action. Try a signed adjustment.

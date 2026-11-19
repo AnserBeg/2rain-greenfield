@@ -3,6 +3,8 @@ import test from 'node:test';
 
 import { normalizeApplicationPackage } from '../../packages/canonical-model/src/index.js';
 import { inventoryModuleDefinition } from '../../packages/domain/src/inventory/index.js';
+import { composedApplicationDefinition } from '../../packages/domain/src/app/builder.js';
+import { assertComposedInventoryCollection } from '../helpers/assert-composed-inventory.js';
 
 type Field = Record<string, unknown> & {
   fieldId: string;
@@ -72,4 +74,31 @@ test('INVENTORY-PARITY: the standalone kernel harness keeps the module it has al
       JSON.stringify(declared.get(fieldId)),
   );
   assert.deepEqual(differing, [transaction('number')]);
+});
+
+test('INTERACT-1: composed stock tasks retain the governed posting operation', () => {
+  const application = composedApplicationDefinition();
+  const inventory = inventoryModuleDefinition(ns, {
+    companyReorderRule: true,
+    documentEntry: true,
+  });
+  const surfaces = application.surfaces as Record<string, unknown>[];
+  const check = (candidate: readonly unknown[]) =>
+    assertComposedInventoryCollection(
+      'surfaces',
+      candidate,
+      inventory.surfaces as unknown[],
+      ns,
+    );
+  assert.doesNotThrow(() => check(surfaces));
+  const changed = structuredClone(surfaces);
+  const document = changed.find(
+    (surface) =>
+      surface.surfaceId === `${ns}:surface.inventory_transaction_detail`,
+  )!;
+  const composition = document.composition as {
+    actions: { steps: { operation: { targetId: string } }[] }[];
+  };
+  composition.actions[0]!.steps[0]!.operation.targetId = `${ns}:operation.inventory_transaction_update`;
+  assert.throws(() => check(changed), /stock task is one governed Post/u);
 });
