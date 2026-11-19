@@ -1,3 +1,4 @@
+import { servingPointersSql } from './verified-release-generation.js';
 import pg from 'pg';
 import { readCustomizationLineage } from './customization-lineage.js';
 
@@ -50,7 +51,7 @@ export async function readActiveRelease(options: {
       `SELECT pointer.tenant_id, pointer.environment_id, pointer.release_id, pointer.fence
          FROM platform.tenants AS tenant
          JOIN platform.environments AS env ON env.tenant_id = tenant.id AND env.slug = $2
-         JOIN platform.active_release_pointers AS pointer ON pointer.tenant_id = tenant.id AND pointer.environment_id = env.id
+         JOIN ${servingPointersSql} AS pointer ON pointer.tenant_id = tenant.id AND pointer.environment_id = env.id
         WHERE tenant.slug = $1 AND pointer.release_id IS NOT NULL`,
       [options.tenantSlug, options.environmentSlug ?? 'production'],
     );

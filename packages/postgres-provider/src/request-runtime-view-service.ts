@@ -1,3 +1,4 @@
+import { servingPointersSql } from './verified-release-generation.js';
 import { createHash } from 'node:crypto';
 
 import { canonicalize } from '@north-star/canonical-model';
@@ -95,6 +96,7 @@ export interface RequestRuntimeInvalidationResult {
 }
 
 interface PointerAuthority {
+  physicalFence: number;
   environmentId: string;
   fence: number;
   pointerId: MintedUuid;
@@ -129,6 +131,7 @@ interface SnapshotRow {
 }
 
 interface PointerRow {
+  physical_fence: string;
   environment_id: string;
   fence: string;
   pointer_id: MintedUuid;
@@ -209,8 +212,9 @@ const authoritativeSnapshotSql = `
   SELECT pointer.tenant_id,
          pointer.environment_id,
          pointer.pointer_id,
-         pointer.release_id AS pointer_release_id,
+         pointer.physical_release_id AS pointer_release_id,
          pointer.fence,
+         pointer.physical_fence,
          release.release_id,
          release.content_hash AS release_content_hash,
          release.compiler_version AS release_compiler_version,
@@ -229,7 +233,7 @@ const authoritativeSnapshotSql = `
          projection.projection_family_id AS manifest_projection_family_id,
          chunk.projection_instance_id AS chunk_projection_instance_id,
          chunk.chunk_id
-    FROM platform.active_release_pointers AS pointer
+    FROM ${servingPointersSql} AS pointer
     LEFT JOIN platform.tenant_releases AS release
       ON release.tenant_id = pointer.tenant_id
      AND release.environment_id = pointer.environment_id
@@ -277,13 +281,14 @@ const pointerAuthoritySql = `
   SELECT pointer.tenant_id,
          pointer.environment_id,
          pointer.pointer_id,
-         pointer.release_id AS pointer_release_id,
+         pointer.physical_release_id AS pointer_release_id,
          pointer.fence,
+         pointer.physical_fence,
          release.release_id,
          release.content_hash AS release_content_hash,
          admission.release_id AS semantic_admission_release_id
          ,intermediate.release_id AS transition_admission_release_id
-    FROM platform.active_release_pointers AS pointer
+    FROM ${servingPointersSql} AS pointer
     LEFT JOIN platform.tenant_releases AS release
       ON release.tenant_id = pointer.tenant_id
      AND release.environment_id = pointer.environment_id
@@ -391,7 +396,7 @@ export class PostgresRequestRuntimeViewService implements RequestRuntimeDefiniti
           'authoritative pointer identity differs from invalidation identity',
         );
       }
-      if (authority.fence < consumer.highestFence) {
+      if (authority.physicalFence < consumer.highestFence) {
         throw loadError(
           'INVALIDATION_AHEAD_OF_AUTHORITY',
           'invalidation fence is ahead of the authoritative pointer',
@@ -467,7 +472,7 @@ export class PostgresRequestRuntimeViewService implements RequestRuntimeDefiniti
       );
       if (
         highestInvalidatedFence !== null &&
-        definition.pointer.fence < highestInvalidatedFence
+        authority.physicalFence < highestInvalidatedFence
       ) {
         continue;
       }
@@ -937,6 +942,7 @@ function pointerAuthorityFromRows(
   }
   return {
     environmentId: row.environment_id,
+    physicalFence: safeFence(row.physical_fence),
     fence: safeFence(row.fence),
     pointerId: row.pointer_id,
     releaseContentHash: row.release_content_hash,

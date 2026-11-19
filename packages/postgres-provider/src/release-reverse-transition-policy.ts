@@ -1,3 +1,4 @@
+import { verifiedGenerationsSql } from './verified-release-generation.js';
 import {
   TRANSITION_COMPATIBILITY_POLICY_V2_VERSION,
   TRANSITION_COMPATIBILITY_POLICY_VERSION,
@@ -14,6 +15,7 @@ export const RELEASE_REVERSE_TRANSITION_POLICY_VERSION =
   'northstar.release-reverse-transition-policy/v1' as const;
 
 export type ReleaseReverseTransitionRefusalCode =
+  | 'RELEASE_SOURCE_NOT_VERIFIED'
   | 'RELEASE_TRANSITION_NOT_EXACT_LINEAGE_EDGE'
   | 'ROLLBACK_ACROSS_PROFILE_ONLY_EDGE'
   | 'ROLLBACK_FORWARD_ACTIVATION_NOT_VERIFIED'
@@ -43,6 +45,8 @@ export interface ReleaseReverseTransitionAuthorization {
 }
 
 interface ReverseTransitionEvidenceRow {
+  source_verified: boolean;
+  predecessor_verified: boolean;
   exact_forward_lineage: boolean;
   exact_reverse_lineage: boolean;
   forward_activation_attempt_id: MintedUuid | null;
@@ -76,13 +80,25 @@ export async function authorizeReverseTransitionIfApplicable(
   client: PoolClient,
   context: TrustedRequestContext,
   input: Readonly<{
+    expectedPointerId: MintedUuid;
     expectedFence: number;
     sourceReleaseId: MintedUuid;
     targetReleaseId: MintedUuid;
   }>,
 ): Promise<ReleaseReverseTransitionAuthorization | null> {
   const result = await client.query<ReverseTransitionEvidenceRow>(
-    `SELECT target_revision.parent_revision_id = source_revision.revision_id
+    `SELECT EXISTS (
+              SELECT 1 FROM ${verifiedGenerationsSql} AS generation
+               WHERE generation.tenant_id = source.tenant_id AND generation.environment_id = source.environment_id
+                 AND generation.pointer_id = $6 AND generation.fence = $5 AND generation.activated_release_id = source.release_id
+            ) AS source_verified,
+            EXISTS (
+              SELECT 1 FROM ${verifiedGenerationsSql} AS generation
+               WHERE generation.tenant_id = swap.tenant_id AND generation.environment_id = swap.environment_id
+                 AND generation.pointer_id = swap.pointer_id AND generation.fence = swap.fence - 1
+                 AND generation.activated_release_id = swap.previous_release_id
+            ) AS predecessor_verified,
+            target_revision.parent_revision_id = source_revision.revision_id
               AS exact_forward_lineage,
             source_revision.parent_revision_id = target_revision.revision_id
               AS exact_reverse_lineage,
@@ -136,13 +152,13 @@ export async function authorizeReverseTransitionIfApplicable(
         AND swap.environment_id = source.environment_id
         AND swap.previous_release_id = target.release_id
         AND swap.activated_release_id = source.release_id
-        AND swap.fence = $5
+        AND swap.fence = $5 AND swap.pointer_id = $6
        LEFT JOIN platform.release_activation_verification_receipts AS verification
          ON verification.tenant_id = swap.tenant_id
         AND verification.environment_id = swap.environment_id
         AND verification.activation_attempt_id = swap.activation_attempt_id
         AND verification.activated_release_id = source.release_id
-        AND verification.fence = swap.fence
+        AND verification.fence = swap.fence AND verification.pointer_id = swap.pointer_id
        LEFT JOIN platform.release_approvals AS approval
          ON approval.tenant_id = swap.tenant_id
         AND approval.environment_id = swap.environment_id
@@ -161,16 +177,23 @@ export async function authorizeReverseTransitionIfApplicable(
       input.sourceReleaseId,
       input.targetReleaseId,
       input.expectedFence,
+      input.expectedPointerId,
     ],
   );
   const row = result.rows[0];
-  if (row?.exact_forward_lineage) return null;
+
   if (!row) {
     refuse(
       'RELEASE_TRANSITION_NOT_EXACT_LINEAGE_EDGE',
       'release transition pair is not visible in the trusted environment',
     );
   }
+  if (!row.source_verified && !row.exact_reverse_lineage)
+    refuse(
+      'RELEASE_SOURCE_NOT_VERIFIED',
+      'activation requires a verified source pointer generation',
+    );
+  if (row.exact_forward_lineage) return null;
   if (!row.exact_reverse_lineage) {
     if (row.target_is_ancestor) {
       refuse(
@@ -182,6 +205,8 @@ export async function authorizeReverseTransitionIfApplicable(
   }
 
   if (
+    !row.source_verified ||
+    !row.predecessor_verified ||
     row.forward_activation_attempt_id === null ||
     row.forward_verification_status !== 'SWAPPED_VERIFIED'
   ) {

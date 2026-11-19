@@ -338,14 +338,10 @@ test('fresh-tenant install refuses a failing intermediate transition', async () 
   const firstIntermediate = compiledApplication.applications[1]!;
   compiledApplication.applications[1] = compiledApplication.applications[2]!;
   compiledApplication.applications[2] = firstIntermediate;
-  await assert.rejects(
-    createRuntime(
-      compiledApplication,
-      'postgresql://postgres@127.0.0.1:1/postgres',
-      'failing-intermediate-transition',
-    ),
-    /transition does not match its declared previous release/u,
-  );
+  await withEphemeralPostgres('invalid-fresh-transition', async ({connection}) => {
+    await assert.rejects(createRuntime(compiledApplication,connectionUrl(connection),'failing-intermediate-transition'),
+      /transition does not match its declared previous release/u);
+  });
 });
 
 // ADR-0047 §6, the direction the revision check alone cannot establish. Shared

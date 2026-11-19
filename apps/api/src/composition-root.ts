@@ -348,12 +348,14 @@ export async function openComposedApplicationRuntime(
           .pathname,
         'northstar.app:package.application',
       ),
-      firstPartyAuthored: canonicalAuthoredProjection(
-        parseNormalizedApplicationPackageJson(
-          parseCompiledApplication(compiledApplication).application
-            .normalizedDefinitionBytes,
-        ),
-      ) as unknown as Record<string, unknown>,
+      get firstPartyAuthored() {
+        return canonicalAuthoredProjection(
+          parseNormalizedApplicationPackageJson(
+            parseCompiledApplication(compiledApplication).application
+              .normalizedDefinitionBytes,
+          ),
+        ) as unknown as Record<string, unknown>;
+      },
     },
     databaseUrl: options.databaseUrl,
     inventoryScopeProvisioning: COMPOSED_APPLICATION_INVENTORY_SCOPE,
