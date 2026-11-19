@@ -18,7 +18,7 @@ Customize approval uses this same mechanism.
 calls the normal release helpers, which use
 `PostgresReleaseApprovalService.createApproval`. The release activation service
 writes the verification receipt under the same trusted request context.
-[Customize approval](../../packages/postgres-provider/src/customization-service.ts#L1222) ·
+[Customize approval](../../packages/postgres-provider/src/customization-service.ts#L1219) ·
 [Release approval helper](../../packages/postgres-provider/src/composed-application-runtime.ts#L3011) ·
 [Principal assertion](../../packages/postgres-provider/src/request-context.ts#L611) ·
 [Verification receipt](../../packages/postgres-provider/src/release-activation-service.ts#L427) ·
