@@ -1,7 +1,8 @@
 # ADR-0073. Workflow isolation, replay and authority
 
 Date 2026-11-18. Fable 5.2 approved the amended WORKFLOW-1 design to build in
-slices. The Gate N2 wording still needs an owner ruling or a plan amendment.
+slices. The owner ruled on 2026-11-18 that Gate N2 v1 uses same-pin retry or
+cancel. The plan records this in §12.5.
 
 ## Host and SDK
 
@@ -165,10 +166,10 @@ fence before resuming. Outstanding confirmation needs a fresh plan and human
 decision. Cancellation preserves completed effects and evidence. Successor
 retry against a different release is deferred.
 
-The proposed Gate N2 proof starts a run before an upgrade, shows it suspending
-while stale, then restores the original release and demonstrates that a person's
+The Gate N2 v1 proof starts a run before an upgrade, shows it suspending while
+stale, then restores the original release and demonstrates that a person's
 same-pin retry finishes the run. While a different release is active, the
-operator can cancel the suspended run. The Gate N2 wording is with the owner.
+operator can cancel the suspended run.
 
 ## Timers, signals and external delivery
 

@@ -209,6 +209,7 @@ const suiteDefinitions = [
       'test/postgres/table-behavior.test.ts',
       'test/postgres/tenant-isolation.test.ts',
       'test/postgres/trust-substrate.test.ts',
+      'test/postgres/workflow-consumer.test.ts',
     ],
     scripts: ['test:postgres:1', 'test:postgres:2', 'test:postgres:3'],
   },

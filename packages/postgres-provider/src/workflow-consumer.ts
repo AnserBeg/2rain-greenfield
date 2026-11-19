@@ -48,7 +48,7 @@ export const WORKFLOW_RECEIPT_PAGE_SQL = `
   )
   SELECT o.outbox_id, occurrence.disposition, o.release_id, o.release_content_hash,
          event.domain_event_id AS event_id, change.record_id AS receipt_id,
-         event.payload #>> '{legalEntityId,value}' AS legal_entity_id,
+         invocation.policy_inputs #>> '{legalEntityId,value}' AS legal_entity_id,
          change.execution_principal_id AS trigger_principal_id
     FROM page AS o
     LEFT JOIN platform.workflow_event_occurrences AS occurrence
@@ -61,6 +61,12 @@ export const WORKFLOW_RECEIPT_PAGE_SQL = `
      AND event.event_type = o.event_type AND event.event_schema_version = o.event_schema_version
      AND event.action_id = o.action_id AND o.action_id = $5 AND o.event_schema_version = $6
      AND event.payload #>> '{legalEntityId,representation}' = 'VALUE'
+    LEFT JOIN platform.trust_action_invocations AS invocation
+      ON invocation.tenant_id = event.tenant_id AND invocation.environment_id = event.environment_id
+     AND invocation.invocation_id = event.invocation_id AND invocation.action_id = event.action_id
+     AND invocation.outcome = 'SUCCEEDED'
+     AND invocation.policy_inputs #>> '{legalEntityId,representation}' = 'VALUE'
+     AND invocation.policy_inputs #>> '{legalEntityId,value}' = event.payload #>> '{legalEntityId,value}'
     LEFT JOIN platform.trust_business_change_documents AS change
       ON change.tenant_id = o.tenant_id AND change.environment_id = o.environment_id
      AND change.change_document_id = event.change_document_id AND change.invocation_id = event.invocation_id

@@ -239,6 +239,13 @@ DECLARE
       table_name, scoped, scoped
     ); END LOOP;
   FOREACH table_name IN ARRAY ARRAY[
+    'workflow_body_blobs', 'workflow_definitions', 'workflow_verification_evidence'
+  ] LOOP
+    EXECUTE format(
+      'CREATE POLICY workflow_scoped_release_author ON platform.%I TO north_star_runtime USING (%s) WITH CHECK (%s)',
+      table_name, scoped, scoped
+    ); END LOOP;
+  FOREACH table_name IN ARRAY ARRAY[
     'workflow_body_blobs', 'workflow_definitions', 'workflow_verification_evidence',
     'workflow_activation_watermarks', 'workflow_event_occurrences', 'workflow_instances',
     'workflow_journal', 'workflow_timers', 'workflow_event_waits', 'workflow_effect_outbox'
@@ -251,24 +258,37 @@ DECLARE
       'CREATE RULE %I AS ON DELETE TO platform.%I DO INSTEAD INSERT INTO platform.immutable_release_write_guard VALUES (%L)',
       table_name || '_reject_delete', table_name, table_name
     ); END LOOP;
-  FOREACH table_name IN ARRAY ARRAY[
-    'trust_outbox', 'trust_domain_events', 'trust_business_change_documents'
-  ] LOOP
+  FOREACH table_name IN ARRAY ARRAY['trust_outbox', 'trust_domain_events'] LOOP
     EXECUTE format(
-      'CREATE POLICY workflow_scoped_source ON platform.%I FOR SELECT TO north_star_workflow_worker USING (%s)',
-      table_name, scoped
-    ); END LOOP; END
+      'CREATE POLICY workflow_scoped_source ON platform.%I FOR SELECT TO north_star_workflow_worker USING ((%s) AND event_type = %L)',
+      table_name, scoped, 'northstar.inventory:event.receipt_posted'
+    ); END LOOP;
+  EXECUTE format(
+    'CREATE POLICY workflow_scoped_source ON platform.trust_business_change_documents FOR SELECT TO north_star_workflow_worker USING ((%s) AND record_type = %L)',
+    scoped, 'northstar.inventory:record.goods_receipt'
+  );
+  EXECUTE format(
+    'CREATE POLICY workflow_scoped_source ON platform.trust_action_invocations FOR SELECT TO north_star_workflow_worker USING ((%s) AND action_id = %L)',
+    scoped, 'northstar.inventory:capability.posting'
+  ); END
 $workflow_policies$;
 
+GRANT SELECT, INSERT ON platform.workflow_body_blobs, platform.workflow_definitions,
+  platform.workflow_verification_evidence TO north_star_runtime;
 GRANT SELECT ON platform.workflow_definitions, platform.workflow_activation_watermarks
   TO north_star_workflow_worker;
 GRANT SELECT, INSERT ON platform.workflow_event_occurrences, platform.workflow_instances,
-  platform.workflow_runs, platform.workflow_journal, platform.workflow_effect_outbox
+  platform.workflow_runs, platform.workflow_journal, platform.workflow_effect_outbox,
+  platform.workflow_timers, platform.workflow_event_waits, platform.workflow_pending_approvals
+  TO north_star_workflow_worker;
+GRANT UPDATE (status, decided_by, decided_at) ON platform.workflow_pending_approvals
   TO north_star_workflow_worker;
 GRANT UPDATE (execution_fence, status, reason) ON platform.workflow_runs
   TO north_star_workflow_worker;
 GRANT SELECT ON platform.trust_outbox, platform.trust_domain_events,
   platform.trust_business_change_documents TO north_star_workflow_worker;
+GRANT SELECT (tenant_id, environment_id, invocation_id, action_id, policy_inputs, outcome)
+  ON platform.trust_action_invocations TO north_star_workflow_worker;
 
 CREATE FUNCTION platform.workflow_environment_ids()
 RETURNS TABLE (tenant_id uuid, environment_id uuid)

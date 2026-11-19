@@ -160,12 +160,24 @@ export class PostgresWorkflowExecution {
     }
     if (call.kind === 'operation') await this.afterOperationCommit?.();
     await withWorkflowTransaction(this.workerPool, scope, async (client) => {
-      const pointer = call.kind === 'query' ? await lockWorkflowPointer(client) : null;
+      const pointer =
+        call.kind === 'query' ? await lockWorkflowPointer(client) : null;
       const current = await loadRun(client, scope, runId);
       if (!current) return;
-      if (call.kind === 'query' && (!matchesPin(current, pointer) ||
-          current.status !== 'RUNNABLE' || current.execution_fence !== run.execution_fence)) return;
-      await insertResult(client, current, cursor, result, call.kind === 'query');
+      if (
+        call.kind === 'query' &&
+        (!matchesPin(current, pointer) ||
+          current.status !== 'RUNNABLE' ||
+          current.execution_fence !== run.execution_fence)
+      )
+        return;
+      await insertResult(
+        client,
+        current,
+        cursor,
+        result,
+        call.kind === 'query',
+      );
     });
   }
 
@@ -200,10 +212,15 @@ export class PostgresWorkflowExecution {
           const pointer = await lockWorkflowPointer(client);
           const run = await loadRun(client, scope, runId);
           if (!run) return 'ineligible';
-        if (run.status !== 'SUSPENDED') {
-          await recordControl(client, run, `${action}-ineligible`, operator.principalId);
-          return 'ineligible';
-        }
+          if (run.status !== 'SUSPENDED') {
+            await recordControl(
+              client,
+              run,
+              `${action}-ineligible`,
+              operator.principalId,
+            );
+            return 'ineligible';
+          }
           const { pending } = await loadJournal(client, run);
           if (pending && pending.call.kind === 'operation')
             await this.#recover(client, run, { ...pending, run });
