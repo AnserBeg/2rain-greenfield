@@ -402,6 +402,8 @@ export class PostgresModuleRuntimeInterpreter
         releaseId: request.view.release.releaseId,
       }),
       async (client) => {
+        if (request.channel === 'WORKFLOW')
+          await assertWorkflowWriteFence(client, request);
         const currentStorage = await this.#loadPinnedStorageTarget(
           client,
           request,
@@ -1380,6 +1382,50 @@ async function assertRestorableRelations(
       [],
     );
   }
+}
+
+/**
+ * Fresh workflow effects must commit under the exact fence and policy that
+ * admitted them. The trust service returns an existing receipt before this
+ * callback, so receipt recovery needs no fresh write authority.
+ */
+async function assertWorkflowWriteFence(
+  client: PoolClient,
+  request: SemanticOperationExecutionRequest,
+): Promise<void> {
+  const { tenantId, environmentId } = request.context;
+  const result = await client.query<{ fence: string }>(
+    `SELECT fence FROM platform.active_release_pointers
+      WHERE tenant_id = $1 AND environment_id = $2
+        AND pointer_id = $3 AND release_id = $4 AND fence = $5
+      FOR SHARE`,
+    [
+      tenantId,
+      environmentId,
+      request.view.pointer.pointerId,
+      request.view.release.releaseId,
+      request.view.pointer.fence,
+    ],
+  );
+  if (!result.rows[0])
+    throw failure(
+      'WORKFLOW_STALE_FENCE',
+      'Workflow write fence changed',
+      request.definition.operationId,
+    );
+  const policy = await client.query<{ policy_version: string }>(
+    'SELECT platform.lock_current_policy_epoch($1, $2) AS policy_version',
+    [tenantId, environmentId],
+  );
+  if (
+    currentPolicyVersionOf(policy.rows[0]?.policy_version) !==
+    request.policyVersion
+  )
+    throw failure(
+      'WORKFLOW_POLICY_CHANGED',
+      'Workflow policy changed before commit',
+      request.definition.operationId,
+    );
 }
 
 /**
