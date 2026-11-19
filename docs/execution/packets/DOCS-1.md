@@ -17,7 +17,7 @@ Slice 1a implements [ADR-0078](../../decisions/ADR-0078-governed-documents-files
 
 ## Evidence
 
-PostgreSQL tests cover byte reads, grants, company refusal, audit, quota, count, scanner gating and rollback. The HTTP test holds two slots of each kind and observes the third refusal. Hosted CI runs the archived floor-26 reader against the new release.
+PostgreSQL tests cover byte reads, grants, company refusal, audit, quota, count, scanner gating and rollback. The HTTP test holds two slots of each kind and observes the third refusal. Hosted CI runs the archived floor-26 reader against the new release. Negative controls cover revocation, ownership, audit and stored-byte quota.
 
 ## Test it yourself
 
@@ -28,7 +28,7 @@ PostgreSQL tests cover byte reads, grants, company refusal, audit, quota, count,
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1", "packet": "DOCS-1",
-  "base": "5402386557abd00c633b1930724e91e1fe586762", "head": "5e83b83448631823d201fd5c1838486a25b78c28",
+  "base": "e0bb8e9582cb9a7eca95f520fb2d4fabe47a7803", "head": "521cee0376c471991f7308a5f51beca1c5c9c08b",
   "changedPaths": [
     "apps/api/src/composition-root.ts", "apps/api/src/main.ts", "apps/web/src/app-server.ts",
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/document-http.ts",
@@ -42,9 +42,9 @@ PostgreSQL tests cover byte reads, grants, company refusal, audit, quota, count,
     "packages/postgres-provider/src/document-content.ts", "packages/postgres-provider/src/document-publication.ts", "packages/postgres-provider/src/request-runtime-view-service.ts",
     "packages/runtime/src/document-gateway.ts", "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts",
     "packages/runtime/src/semantic-query-gateway.ts", "pnpm-lock.yaml", "test/architecture/release-persistence-boundary.test.ts",
-    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/integration/document-http.test.ts", "test/postgres/document-attachments.test.ts",
-    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts",
-    "test/postgres/trust-substrate.test.ts"
+    "test/evidence/DOCS-1.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/integration/document-http.test.ts",
+    "test/postgres/document-attachments.test.ts", "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts",
+    "test/postgres/module-storage-transition.test.ts", "test/postgres/trust-substrate.test.ts"
   ],
   "symbols": [
     {"path": "packages/postgres-provider/src/document-attachments.ts", "name": "PostgresDocumentGateway"},
