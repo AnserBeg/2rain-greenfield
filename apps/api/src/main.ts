@@ -3,6 +3,7 @@ import { performance } from 'node:perf_hooks';
 import { promisify } from 'node:util';
 
 import { upgradeLogFields } from '@north-star/postgres-provider/customization-service';
+import { workflowSchedulerConfig } from '@north-star/postgres-provider/workflow-worker';
 
 import { APPLICATION_IDS } from '../../../packages/domain/src/app/builder.js';
 
@@ -57,9 +58,11 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 }
 
 try {
+  const workflowScheduler = workflowSchedulerConfig(process.env);
   if (managesContainer) await ensureLocalPostgres();
   application = await startComposedApplication({
     databaseUrl,
+    ...(workflowScheduler ? { workflowScheduler } : {}),
     host: process.env.HOST ?? '127.0.0.1',
     port: Number.parseInt(process.env.PORT ?? '4174', 10),
     ...(process.env.NORTH_STAR_ROLLBACK_RELEASE_ROOT !== undefined
