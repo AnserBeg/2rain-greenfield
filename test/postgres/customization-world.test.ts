@@ -16,6 +16,7 @@ import test from 'node:test';
 import { checkTerminalRelease } from '../../apps/api/src/agent-release-guard.js';
 import {
   openComposedApplicationRuntime,
+  openCustomizeService,
   startComposedApplication,
 } from '../../apps/api/src/composition-root.js';
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
@@ -505,6 +506,127 @@ test(
     );
   },
 );
+
+for (const mode of ['reverify', 'revert'] as const) {
+  test(
+    `recover a failed verification with ${mode} and resume inventory posting`,
+    { timeout: 600_000 },
+    async () => {
+      await withEphemeralPostgres(
+        `recover-${mode}`,
+        async ({ connection, pool }) => {
+          const options = {
+            databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+            tenantSlug,
+          };
+          const app = await startComposedApplication({
+            ...options,
+            port: 0,
+            seedProfile: 'distributor',
+          });
+          const opened = await openCustomizeService(options);
+          try {
+            const service = opened.service;
+            const before = await service.status();
+            const drafted = await service.draft(equipment, 'declarativeEditor');
+            assert.equal(drafted.status, 'drafted');
+            if (drafted.status !== 'drafted') return;
+            const approved = await service.approve(drafted.patchId);
+            // Make B's manifest unreadable only after its pointer swap commits.
+            // A stays readable, including while the fault persists during revert.
+            await pool.query(`
+          ALTER FUNCTION platform.read_tenant_release_artifacts(uuid) RENAME TO read_all_test_artifacts;
+          CREATE FUNCTION platform.read_tenant_release_artifacts(uuid)
+          RETURNS TABLE (artifact_kind text, content_hash text, domain_tag text, media_type text, canonical_bytes bytea)
+          LANGUAGE sql STABLE AS $fn$
+            SELECT artifact.* FROM platform.read_all_test_artifacts($1) AS artifact
+             WHERE artifact.artifact_kind <> 'releaseManifest' OR NOT EXISTS (
+               SELECT 1 FROM platform.active_release_pointers AS p JOIN platform.tenant_releases AS r USING (tenant_id, environment_id, release_id)
+                WHERE r.release_id=$1 AND r.content_hash='${drafted.releaseRoot}')
+          $fn$`);
+            await assert.rejects(
+              service.activate(drafted.patchId),
+              /SWAPPED_VERIFICATION_FAILED/u,
+            );
+            const failedFence = before.activeFence + 1;
+            const expected = {
+              attemptId: approved.activationAttemptId,
+              fence: String(failedFence),
+            };
+            const world = worldOver(app.runtime, String(connection.database));
+            const { notebook, calgary } = ids();
+            const served = () =>
+              app.runtime.entry.run({}, (view) => ({
+                releaseId: view.release.releaseId,
+                fence: view.pointer.fence,
+              }));
+            assert.deepEqual(await served(), {
+              releaseId: before.activeReleaseId,
+              fence: before.activeFence,
+            });
+            await assert.rejects(openingStock(world, notebook, calgary, '3'));
+            await assert.rejects(
+              service.recover(),
+              /SWAPPED_VERIFICATION_FAILED/u,
+            );
+            await assert.rejects(service.rollback());
+            if (mode === 'reverify') {
+              await pool.query(`DROP FUNCTION platform.read_tenant_release_artifacts(uuid);
+            ALTER FUNCTION platform.read_all_test_artifacts(uuid) RENAME TO read_tenant_release_artifacts`);
+            }
+            const recovered =
+              mode === 'reverify'
+                ? await service.recover()
+                : await service.recover('revert', expected);
+            const releaseId =
+              mode === 'reverify' ? drafted.releaseId : before.activeReleaseId;
+            const fence = mode === 'reverify' ? failedFence : failedFence + 1;
+            assert.equal(recovered.releaseId, releaseId);
+            assert.deepEqual(await served(), { releaseId, fence });
+            assert.deepEqual(await scopeRoots(pool, app.runtime), [
+              mode === 'reverify'
+                ? drafted.releaseRoot
+                : before.activeReleaseRoot,
+            ]);
+            const receipts = await pool.query(
+              `SELECT activation_attempt_id, activated_release_id, fence::text, status FROM platform.release_activation_verification_receipts
+            WHERE tenant_id=$1 AND fence >= $2 ORDER BY fence::bigint, (status='SWAPPED_VERIFIED')`,
+              [app.runtime.identity.tenantId, failedFence],
+            );
+            assert.deepEqual(receipts.rows, [
+              {
+                activation_attempt_id: approved.activationAttemptId,
+                activated_release_id: drafted.releaseId,
+                fence: String(failedFence),
+                status: 'SWAPPED_VERIFICATION_FAILED',
+              },
+              {
+                activation_attempt_id: recovered.activationAttemptId,
+                activated_release_id: releaseId,
+                fence: String(fence),
+                status: 'SWAPPED_VERIFIED',
+              },
+            ]);
+            assert.equal(
+              recovered.activationAttemptId === approved.activationAttemptId,
+              mode === 'reverify',
+            );
+            await assert.rejects(
+              service.recover('revert', expected),
+              /activation changed/iu,
+            );
+            await runTask(world, 7);
+            await runTask(world, 5);
+          } finally {
+            await opened.close();
+            await app.close();
+          }
+        },
+        { dataSizeMegabytes: 1024 },
+      );
+    },
+  );
+}
 
 /** The pointer generation before and after recovery. */
 async function livePointer(
