@@ -1413,6 +1413,10 @@ export class OperationsAgentSession {
             .map((step) => step.risk.reason),
         ),
       ];
+      if (only?.risk.riskClass === 'reversible' && !only.prior)
+        reasons.push(
+          'Undo needs the previous value of every changed field, so this needs your OK.',
+        );
       if (steps.length > 1)
         reasons.push('This plan has multiple steps, so it needs your OK.');
       const presentation: PlanForApproval = {
@@ -1764,12 +1768,13 @@ export class OperationsAgentSession {
         // revision read now.
         pinnedRevision: pins?.get(target) ?? record.revision,
         targetLabel: recordLabel(record),
-        ...(patch
+        ...(patch &&
+        Object.keys(patch).every((id) => Object.hasOwn(record.values, id))
           ? {
               prior: Object.fromEntries(
                 Object.keys(patch).map((fieldId) => [
                   fieldId,
-                  record.values[fieldId] ?? null,
+                  record.values[fieldId]!,
                 ]),
               ),
             }
