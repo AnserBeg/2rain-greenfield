@@ -103,7 +103,7 @@ try {
   } else {
     const status = await opened.service.status();
     const lines = [
-      `Active release ${status.activeReleaseRoot.slice(0, 12)} (${status.activeChain.length === 0 ? 'the standard application' : `${String(status.activeChain.length)} change${status.activeChain.length === 1 ? '' : 's'} applied`})`,
+      `Active release ${status.activeReleaseRoot.slice(0, 12)} (${status.historyUnavailable ? 'customization history unavailable' : status.activeChain.length === 0 ? 'the standard application' : `${String(status.activeChain.length)} change${status.activeChain.length === 1 ? '' : 's'} applied`})`,
       '',
       ...(status.upgradeRefusal
         ? [
@@ -111,9 +111,11 @@ try {
             ...(status.upgradeRefusal.issues ?? []),
           ]
         : []),
-      status.patches.length === 0
-        ? 'No changes recorded yet.'
-        : 'Recorded changes:',
+      status.historyUnavailable
+        ? 'Recorded changes are unavailable.'
+        : status.patches.length === 0
+          ? 'No changes recorded yet.'
+          : 'Recorded changes:',
       ...status.upgrades.map(
         (upgrade) =>
           `  ${upgrade.upgradeId}  platform upgrade  (${upgrade.state})`,

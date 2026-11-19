@@ -55,7 +55,10 @@ import {
   type PersistedReleaseIdentity,
   type ScopeIdentities,
 } from './composed-application-runtime.js';
-import { readCustomizationLineage } from './customization-lineage.js';
+import {
+  CustomizationLineageError,
+  readCustomizationLineage,
+} from './customization-lineage.js';
 import type { ModuleProviderErrorMapping } from './module-runtime-interpreter.js';
 import { PostgresModuleStorageMaterializer } from './module-storage-materializer.js';
 import { PostgresReleaseActivationService } from './release-activation-service.js';
@@ -273,6 +276,8 @@ export async function recordUpgradeRefusal(
 }
 
 export interface CustomizationStatus {
+  readonly historyUnavailable?: true;
+  readonly activeFence: number;
   readonly upgradeRefusal: UpgradeRefusal | null;
   readonly activeReleaseId: MintedUuid;
   readonly activeReleaseRoot: string;
@@ -336,6 +341,7 @@ export class PostgresCustomizationService {
         } catch (error) {
           const known =
             error instanceof CustomizationServiceRefusal ||
+            error instanceof CustomizationLineageError ||
             error instanceof SandboxFailure ||
             error instanceof PersistedReleaseConflict;
           result = {
@@ -603,7 +609,7 @@ export class PostgresCustomizationService {
 
   async status(): Promise<CustomizationStatus> {
     const context = await this.#context();
-    const active = await this.#active(context);
+    const pointer = await this.#livePointer(context);
     const refusal = await withTrustedRequestTransaction(
       this.connection.runtimePool,
       context,
@@ -614,11 +620,43 @@ export class PostgresCustomizationService {
           [
             context.tenantId,
             context.environmentId,
-            active.releaseId,
+            pointer.releaseId,
             this.#tip.compiled.releaseRoot,
           ],
         ),
     );
+    const observed = await this.#state(
+      context,
+      pointer.releaseId,
+      String(pointer.fence + 1),
+    ).catch((error: unknown) => {
+      if (
+        (error instanceof CustomizationLineageError &&
+          error.active?.provenance === 'tenantAuthored') ||
+        (error instanceof CustomizationServiceRefusal &&
+          error.code === 'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE')
+      )
+        return error;
+      throw error;
+    });
+    if (observed instanceof Error)
+      return {
+        historyUnavailable: true,
+        activeFence: pointer.fence,
+        activeChain: [],
+        patches: [],
+        upgrades: [],
+        activeReleaseId: pointer.releaseId,
+        activeReleaseRoot: await this.#root(context, pointer.releaseId),
+        upgradeRefusal: refusal.rows[0]?.diagnostic ?? {
+          status: 'refused',
+          code: observed.code,
+          message: observed.message,
+          sourceReleaseId: pointer.releaseId,
+          baseReleaseRoot: this.#tip.compiled.releaseRoot,
+        },
+      };
+    const active = { ...observed, pointer };
     const approved = await withTrustedRequestTransaction(
       this.connection.runtimePool,
       context,
@@ -658,6 +696,7 @@ export class PostgresCustomizationService {
             ? 'approved'
             : 'drafted';
     return Object.freeze({
+      activeFence: pointer.fence,
       upgradeRefusal: refusal.rows[0]?.diagnostic ?? null,
       upgrades: Object.freeze(
         (await this.#upgrades(context)).map((upgrade) => ({
@@ -738,7 +777,8 @@ export class PostgresCustomizationService {
   /** What a change may target on the live release (plan §10.6 rules). */
   async targets(): Promise<CustomizationTargets> {
     const context = await this.#context();
-    const active = await this.#active(context);
+    const pointer = await this.#livePointer(context);
+    const active = await this.#identity(context, pointer.releaseId);
     const definition = parseNormalizedApplicationPackageJson(
       await this.#desiredState(context, active.revisionId),
     ) as unknown as Parameters<typeof customizationTargets>[0];
@@ -1174,13 +1214,18 @@ export class PostgresCustomizationService {
    * came from, through the reverse-transition policy. Storage stays: the rows
    * entered under the change are kept and return if it is activated again.
    */
-  async rollback(expectedReleaseId?: string): Promise<ActivationOutcome> {
+  async rollback(
+    expectedReleaseId?: string,
+    expectedFence?: string,
+  ): Promise<ActivationOutcome> {
     // `#locked` first sets the scopes to the verified live release (review
     // R3), so a refusal below never leaves a cut-off rollback's scopes behind.
     return this.#locked(async (admin, context, active) => {
       if (
         expectedReleaseId !== undefined &&
-        active.releaseId !== expectedReleaseId
+        (active.releaseId !== expectedReleaseId ||
+          (expectedFence !== undefined &&
+            String(active.pointer.fence) !== expectedFence))
       )
         throw new CustomizationServiceRefusal(
           'CUSTOMIZE_DRAFT_STALE',
@@ -1716,7 +1761,7 @@ export class PostgresCustomizationService {
    * base must be the checked-in lineage tip, and the checked-in authored file
    * must still normalize to it, or no patch can be applied honestly.
    */
-  async #active(context: TrustedRequestContext): Promise<ActiveState> {
+  async #livePointer(context: TrustedRequestContext) {
     const pointer = await readPointer(this.connection.runtimePool, context);
     if (pointer.releaseId === null) {
       throw new CustomizationServiceRefusal(
@@ -1724,8 +1769,19 @@ export class PostgresCustomizationService {
         'the application has never started in this database; run corepack pnpm dev once',
       );
     }
-    const releaseId = pointer.releaseId;
-    return { ...(await this.#state(context, releaseId)), pointer };
+    return { ...pointer, releaseId: pointer.releaseId };
+  }
+
+  async #active(context: TrustedRequestContext): Promise<ActiveState> {
+    const pointer = await this.#livePointer(context);
+    return {
+      ...(await this.#state(
+        context,
+        pointer.releaseId,
+        String(pointer.fence + 1),
+      )),
+      pointer,
+    };
   }
 
   #assertAuthoredBase(): void {

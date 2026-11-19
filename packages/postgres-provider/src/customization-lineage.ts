@@ -12,6 +12,16 @@ export interface CustomizationLineageStep {
   readonly cycle: boolean;
 }
 
+export class CustomizationLineageError extends Error {
+  readonly code = 'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE';
+  constructor(
+    message: string,
+    readonly active: CustomizationLineageStep | undefined,
+  ) {
+    super(message);
+  }
+}
+
 /** Follow the forward activation that actually selected each release, even
  * after a rollback restored it. At an upgrade the approved base release is
  * exact, including across compiler-profile-only edges sharing a revision. */
@@ -70,15 +80,19 @@ export async function readCustomizationLineage(
     ],
   );
   if (result.rows.some((step) => step.cycle))
-    throw new Error('the customization lineage contains a cycle');
+    throw new CustomizationLineageError(
+      'the customization lineage contains a cycle',
+      result.rows[0],
+    );
   if (
     result.rows.some(
       (step) => step.via_upgrade && step.provenance !== 'firstParty',
     ) ||
     result.rows.at(-1)?.provenance !== 'firstParty'
   )
-    throw new Error(
+    throw new CustomizationLineageError(
       'the customization lineage does not reach a first-party base',
+      result.rows[0],
     );
   return result.rows;
 }

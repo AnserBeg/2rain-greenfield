@@ -31,7 +31,10 @@ import {
   renderCompiledDiff,
   type AcknowledgementInput,
 } from '@north-star/customization';
-import { readCustomizationLineage } from './customization-lineage.js';
+import {
+  CustomizationLineageError,
+  readCustomizationLineage,
+} from './customization-lineage.js';
 import type { UpgradePreparation } from './customization-service.js';
 import {
   COMPILER_TRANSITION_FACTS_VERSION,
@@ -1015,14 +1018,24 @@ async function loadActiveTenantCustomization(
   pool: pg.Pool,
   context: TrustedRequestContext,
   releaseId: MintedUuid,
-): Promise<(ServingRelease & { baseReleaseId: MintedUuid }) | null> {
+): Promise<(ServingRelease & { baseReleaseId: MintedUuid | null }) | null> {
   const chain = await withTrustedRequestTransaction(pool, context, (client) =>
     readCustomizationLineage(client, { ...context, releaseId }),
-  );
-  if (chain[0]?.provenance !== 'tenantAuthored') return null;
+  ).catch(async (error: unknown) => {
+    if (
+      !(error instanceof CustomizationLineageError) ||
+      error.active?.provenance !== 'tenantAuthored' ||
+      (await unprovenLivePointer(pool, context)) !== null
+    )
+      throw error;
+    // The registered tenant release has its own serving artifacts. An invalid
+    // upgrade edge refuses replay, independently of this verified pointer.
+    return null;
+  });
+  if (chain && chain[0]?.provenance !== 'tenantAuthored') return null;
   return {
     ...(await loadServingRelease(pool, context, releaseId)),
-    baseReleaseId: chain.at(-1)!.release_id,
+    baseReleaseId: chain?.at(-1)?.release_id ?? null,
   };
 }
 

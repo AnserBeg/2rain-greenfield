@@ -849,6 +849,7 @@ test('X15: the suggested customize command quotes the request as one shell word;
         status: () =>
           Promise.resolve({
             activeChain: [],
+            activeFence: 1,
             upgrades: [],
             upgradeRefusal: null,
             activeReleaseId: 'r',

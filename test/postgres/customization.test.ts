@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -1408,8 +1409,15 @@ test(
           databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
           tenantSlug: 'refused-record-type',
         };
-        const runtime = await openComposedApplicationRuntime(options);
-        const original = await openCustomizeService(options);
+        const installed = {
+          ...options,
+          compiledApplication: platformLabelVariant(
+            'Original stock identifier',
+            true,
+          ).envelope,
+        };
+        const runtime = await openComposedApplicationRuntime(installed);
+        const original = await openCustomizeService(installed);
         const recordId = randomUUID();
         const base = runtime.activeReleaseId;
         let source: string;
@@ -1431,11 +1439,7 @@ test(
           await original.close();
           await runtime.close();
         }
-        const next = {
-          ...options,
-          compiledApplication:
-            platformLabelVariant('Stock identifier').envelope,
-        };
+        const next = options;
         for (const kind of ['addRecordType', 'futurePatchKind']) {
           if (kind === 'futurePatchKind') {
             // Model a row written by a newer parser in this disposable tenant.
@@ -1472,12 +1476,43 @@ test(
             assert.equal(status.upgradeRefusal?.code, 'CUSTOMIZE_BASE_MOVED');
             assert.equal(status.activeChain[0]?.kind, kind);
             if (kind === 'futurePatchKind') {
+              const cli = execFileSync(
+                process.execPath,
+                [
+                  '--import',
+                  'tsx',
+                  'apps/api/scripts/customize-cli.ts',
+                  'status',
+                ],
+                {
+                  encoding: 'utf8',
+                  env: {
+                    ...process.env,
+                    DATABASE_URL: options.databaseUrl,
+                    NORTH_STAR_TENANT_SLUG: options.tenantSlug,
+                  },
+                },
+              );
+              assert.match(
+                cli,
+                /Platform upgrade refused: CUSTOMIZE_BASE_MOVED/u,
+              );
+              assert.match(cli, /futurePatchKind/u);
               await assert.rejects(
                 opened.service.rollback(base),
                 /live release changed/iu,
               );
+              await assert.rejects(
+                opened.service.rollback(source, String(status.activeFence - 1)),
+                /live release changed/iu,
+              );
               assert.equal(
-                (await opened.service.rollback(source)).releaseId,
+                (
+                  await opened.service.rollback(
+                    source,
+                    String(status.activeFence),
+                  )
+                ).releaseId,
                 base,
               );
               assert.equal(
@@ -1533,13 +1568,29 @@ async function assertCycleRejected(
       readActiveRelease(options),
       /lineage contains a cycle/u,
     );
-    await assert.rejects(
-      openComposedApplicationRuntime({
-        ...options,
-        compiledApplication: envelope,
-      }),
-      /lineage contains a cycle/u,
-    );
+    const runtime = await openComposedApplicationRuntime({
+      ...options,
+      compiledApplication: envelope,
+    });
+    const service = await openCustomizeService({
+      ...options,
+      compiledApplication: envelope,
+    });
+    try {
+      const diagnostic = runtime.customizationUpgrade;
+      assert.ok(diagnostic?.status === 'refused');
+      assert.match(diagnostic.message, /lineage contains a cycle/u);
+      const status = await service.service.status();
+      assert.equal(
+        status.upgradeRefusal?.code,
+        'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+      );
+      assert.equal(status.activeReleaseId, runtime.activeReleaseId);
+      assert.equal(status.historyUnavailable, true);
+    } finally {
+      await service.close();
+      await runtime.close();
+    }
   } finally {
     await pool.query(
       'UPDATE platform.customization_upgrades SET base_release_id=$1 WHERE upgrade_id=$2',

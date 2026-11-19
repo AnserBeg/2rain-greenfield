@@ -62,6 +62,7 @@ function fakeService(calls: string[]): CustomizeScreenService {
     status: () =>
       Promise.resolve({
         activeChain: [],
+        activeFence: 2,
         upgrades: [],
         upgradeRefusal: null,
         activeReleaseId: 'r' as never,
@@ -182,6 +183,7 @@ test('approve, activate and roll back each act once and say what happened', asyn
     {
       action: 'rollback',
       releaseId: 'r',
+      fence: '2',
     },
   );
   assert.match(rolledBack.html, /data-customize-result="rolledBack"/u);
@@ -283,8 +285,8 @@ test('the live platform upgrade is the named and release-bound rollback target',
         message: 'This chain cannot be upgraded.',
       },
     });
-  service.rollback = (releaseId) => {
-    calls.push(releaseId);
+  service.rollback = (releaseId, fence) => {
+    calls.push(releaseId, fence);
     return Promise.resolve({ releaseRoot: 'restored' });
   };
   const page = await renderCustomizeScreen(service, '/?customize', null);
@@ -302,6 +304,7 @@ test('the live platform upgrade is the named and release-bound rollback target',
   await renderCustomizeScreen(service, '/?customize', {
     action: 'rollback',
     releaseId: 'selected-release',
+    fence: '2',
   });
-  assert.deepEqual(calls, ['selected-release']);
+  assert.deepEqual(calls, ['selected-release', '2']);
 });

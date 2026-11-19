@@ -13,6 +13,8 @@ interface ScreenPatch extends PatchSummary {
   readonly state: 'live' | 'approved' | 'drafted' | 'stale';
 }
 interface CustomizationStatus {
+  readonly activeFence: number;
+  readonly historyUnavailable?: true;
   readonly activeChain: readonly PatchSummary[];
   readonly activeReleaseId: string;
   readonly upgradeRefusal: {
@@ -106,7 +108,10 @@ export interface CustomizeScreenService {
   ): Promise<DraftOutcome>;
   /** Present once AI drafting is composed: plain English to one typed patch. */
   draftFromRequest?(request: string): Promise<DraftOutcome>;
-  rollback(expectedReleaseId: string): Promise<ActivationOutcome>;
+  rollback(
+    expectedReleaseId: string,
+    expectedFence: string,
+  ): Promise<ActivationOutcome>;
   status(): Promise<CustomizationStatus>;
   targets(): Promise<CustomizationTargets>;
 }
@@ -181,11 +186,11 @@ export async function renderCustomizeScreen(
         );
       }
       case 'rollback':
-        if (!submission.releaseId)
+        if (!submission.releaseId || !submission.fence)
           return failure(
             'Open Customize again to review the live release before rolling back.',
           );
-        await service.rollback(submission.releaseId);
+        await service.rollback(submission.releaseId, submission.fence);
         return page(
           'Rolled back',
           `<p class="eyebrow">Rolled back</p><h1>The change is rolled back</h1><p>It is hidden again. Every record entered under it is kept and comes back if it is activated again.</p>${backLink()}`,
@@ -239,8 +244,10 @@ async function overview(service: CustomizeScreenService): Promise<string> {
     '<p class="eyebrow">Customize</p><h1>Customize this application</h1>',
     `<section data-customize-live><h2>What is live</h2>${
       live
-        ? `<p>${String(status.activeChain.length)} change${status.activeChain.length === 1 ? '' : 's'} on top of the standard application. Latest: ${escapeHtml(live)}.</p>${button('rollback', 'Roll back the latest change', { releaseId: status.activeReleaseId })}`
-        : '<p>The standard application, with no customizations.</p>'
+        ? `<p>${String(status.activeChain.length)} change${status.activeChain.length === 1 ? '' : 's'} on top of the standard application. Latest: ${escapeHtml(live)}.</p>${button('rollback', 'Roll back the latest change', { releaseId: status.activeReleaseId, fence: String(status.activeFence) })}`
+        : status.historyUnavailable
+          ? '<p>The verified release is live. Its customization history is unavailable.</p>'
+          : '<p>The standard application, with no customizations.</p>'
     }</section>`,
     refusal
       ? `<section data-customize-upgrade-refusal><h2>Platform upgrade refused</h2><p>Your current release is still live.</p><p>${escapeHtml(refusal.code)} · ${escapeHtml(refusal.message)}</p>${(refusal.issues ?? []).map((issue) => `<pre>${escapeHtml(issue)}</pre>`).join('')}</section>`
@@ -248,7 +255,9 @@ async function overview(service: CustomizeScreenService): Promise<string> {
     `<section data-customize-changes><h2>Changes</h2>${
       rows
         ? `<table><thead><tr><th>Change</th><th>State</th><th>Drafted</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
-        : '<p>No changes yet.</p>'
+        : status.historyUnavailable
+          ? '<p>Recorded changes are unavailable.</p>'
+          : '<p>No changes yet.</p>'
     }</section>`,
     '<h2>Describe a change</h2>',
     askForm(service),
