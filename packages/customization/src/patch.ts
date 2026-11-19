@@ -206,10 +206,6 @@ export const CUSTOMIZATION_CHANGE_MEMBER_KINDS = Object.freeze(
   ChangeMemberSchema.options.map((schema) => schema.shape.kind.value),
 );
 
-const validationRule: z.ZodType<FormulaValidationRule> =
-  FormulaValidationRuleDefinitionSchema;
-const calculatedDisplay: z.ZodType<CalculatedDisplayField> =
-  CalculatedDisplayFieldDefinitionSchema;
 const singlePatchKinds = [
   ...ChangeMemberSchema.options,
   z.strictObject({
@@ -230,21 +226,39 @@ const singlePatchKinds = [
   }),
 ] as const;
 
-const SinglePatchSchema = z.discriminatedUnion('kind', [
+const validationPatch: z.ZodObject<
+  {
+    kind: z.ZodLiteral<'addValidation'>;
+    rule: z.ZodType<FormulaValidationRule>;
+  },
+  z.core.$strict
+> = z.strictObject({
+  kind: z.literal('addValidation'),
+  rule: FormulaValidationRuleDefinitionSchema,
+});
+const calculatedDisplayPatch: z.ZodObject<
+  {
+    kind: z.ZodLiteral<'addCalculatedDisplayField'>;
+    field: z.ZodType<CalculatedDisplayField>;
+  },
+  z.core.$strict
+> = z.strictObject({
+  kind: z.literal('addCalculatedDisplayField'),
+  field: CalculatedDisplayFieldDefinitionSchema,
+});
+const SinglePatchSchema: z.ZodDiscriminatedUnion<
+  [
+    ...typeof singlePatchKinds,
+    typeof validationPatch,
+    typeof calculatedDisplayPatch,
+  ],
+  'kind'
+> = z.discriminatedUnion('kind', [
   ...singlePatchKinds,
-  z.strictObject({
-    kind: z.literal('addValidation'),
-    rule: validationRule,
-  }),
-  z.strictObject({
-    kind: z.literal('addCalculatedDisplayField'),
-    field: calculatedDisplay,
-  }),
+  validationPatch,
+  calculatedDisplayPatch,
 ]);
-type ParsedPatch =
-  | z.output<(typeof singlePatchKinds)[number]>
-  | { kind: 'addValidation'; rule: FormulaValidationRule }
-  | { kind: 'addCalculatedDisplayField'; field: CalculatedDisplayField };
+type ParsedPatch = z.infer<typeof SinglePatchSchema>;
 export type SingleCustomizationPatch =
   ParsedPatch | (Extract<ParsedPatch, { kind: 'addField' }> & { legacy: true });
 
@@ -256,8 +270,9 @@ const changeSet = z.strictObject({
     .min(2)
     .max(MAX_CUSTOMIZATION_CHANGE_PATCHES),
 });
-export const CustomizationPatchSchema: z.ZodType<
-  ParsedPatch | z.infer<typeof changeSet>
+export const CustomizationPatchSchema: z.ZodDiscriminatedUnion<
+  [typeof SinglePatchSchema, typeof changeSet],
+  'kind'
 > = z.discriminatedUnion('kind', [SinglePatchSchema, changeSet]);
 export type CustomizationPatch =
   SingleCustomizationPatch | z.infer<typeof changeSet>;
