@@ -8,7 +8,10 @@ import {
   type CurrentPolicySubject,
   type ImmutableJsonValue,
 } from '@north-star/runtime/request-runtime-view';
-import { OPERATION_BOUNDARY_PERMISSION_ID } from '../../runtime/src/semantic-operation-gateway.js';
+import {
+  OPERATION_BOUNDARY_PERMISSION_ID,
+  type RegisteredOperationDefinition,
+} from '../../runtime/src/semantic-operation-gateway.js';
 import {
   QUERY_BOUNDARY_PERMISSION_ID,
   type SemanticQueryDenialRecorder,
@@ -96,10 +99,13 @@ export class CurrentPolicyBindingError extends Error {
 /** Live, deny-by-default authorization over explicit evaluator bindings. */
 export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
   readonly #bindings: ReadonlyMap<string, CurrentPolicyPermissionBinding>;
+  readonly #operations: ReadonlyMap<string, RegisteredOperationDefinition>;
+  readonly #restrictedPermissions: ReadonlySet<string>;
 
   constructor(
     private readonly pool: Pool,
     bindings: readonly CurrentPolicyPermissionBinding[],
+    operations: readonly RegisteredOperationDefinition[] = [],
   ) {
     const byId = new Map<string, CurrentPolicyPermissionBinding>();
     for (const binding of [...CURRENT_POLICY_RUNTIME_BINDINGS, ...bindings]) {
@@ -116,6 +122,14 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
       byId.set(binding.permissionId, Object.freeze({ ...binding }));
     }
     this.#bindings = byId;
+    this.#operations = new Map(
+      operations.map((operation) => [operation.operationId, operation]),
+    );
+    this.#restrictedPermissions = new Set(
+      operations
+        .filter((operation) => operation.excludedRoleKeys)
+        .map((operation) => operation.permissionId),
+    );
   }
 
   async readCurrentVersion(subject: CurrentPolicySubject) {
@@ -145,7 +159,20 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
     const context = trustedContextForCurrentPolicyDecision(request);
     const binding = this.#bindings.get(request.permissionId);
     const scope = extractLegalEntityScope(request.decisionInput);
-    if (!binding || scope.status === 'invalid') {
+    const input = request.decisionInput;
+    const operation =
+      isRecord(input) && typeof input.operationId === 'string'
+        ? this.#operations.get(input.operationId)
+        : undefined;
+    const missingOperation =
+      this.#restrictedPermissions.has(request.permissionId) &&
+      (operation?.permissionId !== request.permissionId ||
+        operation.lifecycle !== 'active');
+    const excluded =
+      operation?.permissionId === request.permissionId
+        ? operation.excludedRoleKeys
+        : undefined;
+    if (!binding || missingOperation || scope.status === 'invalid') {
       return Object.freeze({
         decision: 'DENY' as const,
         decisionVersion: CURRENT_POLICY_DECISION_VERSION,
@@ -182,6 +209,7 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
           }
         : await client.query<{
             grant_role_id: string | null;
+            role_key: string | null;
             legal_entity_id: string | null;
             policy_version: string;
           }>(
@@ -194,6 +222,7 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
            ) AS value
          )
          SELECT permission_grant.role_id AS grant_role_id,
+                role.role_key,
                 membership.legal_entity_id,
                 policy_version.value::text AS policy_version
            FROM policy_version
@@ -224,7 +253,12 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
           );
       const version = policyVersion(result.rows[0]?.policy_version);
       const memberships = result.rows
-        .filter((row) => row.grant_role_id !== null)
+        .filter(
+          (row) =>
+            row.grant_role_id !== null &&
+            (!excluded ||
+              (row.role_key !== null && !excluded.includes(row.role_key))),
+        )
         .map((row) => row.legal_entity_id?.toLowerCase() ?? null);
       const global = memberships.includes(null);
       const allowed =
@@ -380,6 +414,7 @@ interface PrincipalGrant {
   readonly permissionId: string;
   readonly resourceId: string;
   readonly roleId: string;
+  readonly roleKey: string;
 }
 
 /**
@@ -392,11 +427,13 @@ async function readPrincipalGrants(
 ): Promise<readonly PrincipalGrant[]> {
   const result = await client.query<{
     grant_role_id: string;
+    role_key: string;
     legal_entity_id: string | null;
     permission_id: string;
     resource_id: string;
   }>(
     `SELECT permission_grant.role_id AS grant_role_id,
+            role.role_key,
             permission_grant.permission_id,
             permission_grant.resource_id,
             membership.legal_entity_id
@@ -424,6 +461,7 @@ async function readPrincipalGrants(
         permissionId: row.permission_id,
         resourceId: row.resource_id,
         roleId: row.grant_role_id,
+        roleKey: row.role_key,
       }),
     ),
   );
@@ -436,6 +474,7 @@ function snapshotGrantRows(
   snapshotPolicyVersion: string,
 ): {
   grant_role_id: string | null;
+  role_key: string | null;
   legal_entity_id: string | null;
   policy_version: string;
 }[] {
@@ -447,6 +486,7 @@ function snapshotGrantRows(
     )
     .map((grant) => ({
       grant_role_id: grant.roleId,
+      role_key: grant.roleKey,
       legal_entity_id: grant.legalEntityId,
       policy_version: snapshotPolicyVersion,
     }));
@@ -455,6 +495,7 @@ function snapshotGrantRows(
     : [
         {
           grant_role_id: null,
+          role_key: null,
           legal_entity_id: null,
           policy_version: snapshotPolicyVersion,
         },

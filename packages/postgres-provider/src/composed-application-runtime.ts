@@ -65,6 +65,7 @@ import { meterPoolStatements } from './request-work-meter.js';
 
 import {
   SemanticOperationGateway,
+  parsePinnedOperationCatalog,
   SemanticOperationMediationAuthority,
 } from '../../runtime/src/semantic-operation-gateway.js';
 import {
@@ -813,6 +814,9 @@ export async function createComposedApplicationRuntime(
             release.normalizedDefinitionBytes,
           ).permissions,
         ),
+        parsePinnedOperationCatalog(
+          release.projection(PROJECTION_FAMILY_IDS.operationCatalog).payload,
+        ),
       );
     const bootPolicy = policyFor(serving);
     // The runtime's one read ingress: a capability executor's read-back goes
@@ -1048,10 +1052,17 @@ export async function provisionLocalDemoReleaseAuthorization(
   identities: ScopeIdentities,
   normalizedDefinitionBytes: Uint8Array,
 ): Promise<void> {
-  const bindings = currentPolicyBindingsFromPermissions(
-    parseNormalizedApplicationPackageJson(normalizedDefinitionBytes)
-      .permissions,
-  );
+  const bindings = [
+    ...currentPolicyBindingsFromPermissions(
+      parseNormalizedApplicationPackageJson(normalizedDefinitionBytes)
+        .permissions,
+    ),
+    {
+      action: 'author',
+      permissionId: 'northstar.runtime:permission.customize_author',
+      resourceId: 'northstar.runtime:customization.application',
+    },
+  ];
   await provisionLocalDemoAuthorization(
     adminPool,
     identities.runtime,

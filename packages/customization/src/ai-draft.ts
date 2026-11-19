@@ -87,6 +87,8 @@ const toolSchema = {
         'arrangeLayout',
         'saveListView',
         'addMetricCard',
+        'narrowPermission',
+        'unNarrowPermission',
         'unsupported',
       ],
     },
@@ -99,6 +101,15 @@ const toolSchema = {
     surface: { type: 'string' },
     view: { type: 'string' },
     sumField: { type: 'string' },
+    roleKey: { type: 'string' },
+    target: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', enum: ['operation'] },
+        id: { type: 'string' },
+      },
+      required: ['kind', 'id'],
+    },
     order: { type: 'array', items: { type: 'string' } },
     upFront: { type: 'array', items: { type: 'string' } },
     columns: { type: 'array', items: { type: 'string' } },
@@ -153,9 +164,34 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
     "- arrangeLayout {kind, surface, order?, hide?, relabel?}: add, reorder, hide or rename columns of a list. surface is one of the list ids below; order, hide and relabel[].field use that list's available field ids. Include an available hidden field in order to show it. At most 16 visible columns.",
     '- saveListView {kind, surface, label, columns:[column ID], sort:[{column, direction}], filters:[{field, value}]}: add a tab on one of the lists in Saved view targets below. List the columns in the desired order and include the required record title. Sort by at most three selected sortable columns using ascending or descending. Pin at most three of the declared filter values. Use an empty array for no filters or no sort.',
     '- addMetricCard {kind, surface, label, view?, sumField?}: add a card to Today using a list in Metric card targets below. Omit sumField to count rows. Use a declared sum field for a sum. Omit view to use the default list view.',
-    'If the request needs anything else (workflows, approvals, automations, calculations, permissions, reports, deleting things, changing how stock or money is computed), call the tool with {kind: "unsupported", missingCapability: "<a short name of what is missing>"}.',
+    '- narrowPermission {kind, roleKey, target:{kind:"operation", id}}: remove the named role\'s grant for one action. Use an exact role key and an action id shown below.',
+    '- unNarrowPermission {kind, roleKey, target:{kind:"operation", id}}: remove an existing restriction for exactly the role key and action id listed below.',
+    'If the request needs anything else (workflows, approvals, automations, calculations, role-based field visibility, permission grants, reports, deleting things, changing how stock or money is computed), call the tool with {kind: "unsupported", missingCapability: "<a short name of what is missing>"}.',
     'Write labels the way the person would read them, with an initial capital. Do not invent ids.',
     '',
+    ...(targets.permissionRoleKeys?.length && targets.permissionActions?.length
+      ? [
+          'Role keys for action restrictions:',
+          ...targets.permissionRoleKeys.map(
+            (key) =>
+              `- ${key}${targets.permissionRoleLabels?.[key] ? ` — ${targets.permissionRoleLabels[key]}` : ''}`,
+          ),
+          'Actions for role restrictions:',
+          ...targets.permissionActions.map(
+            ({ id, label }) => `- ${id} — ${label}`,
+          ),
+          ...(targets.permissionRestrictions?.length
+            ? [
+                'Existing action restrictions:',
+                ...targets.permissionRestrictions.map(
+                  ({ operationId, roleKey }) =>
+                    `- ${operationId} for ${roleKey}`,
+                ),
+              ]
+            : []),
+          '',
+        ]
+      : []),
     ...(targets.metricLists?.length
       ? [
           'Metric card targets:',

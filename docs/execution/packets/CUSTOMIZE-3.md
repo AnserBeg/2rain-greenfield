@@ -17,7 +17,7 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 - The next-free migration rule assigns 0034 after CRITFIX-A at the candidate base. The migration retains the patch table's existing policies, grants and append-only rules.
 - STOP at slice 2 for canonical language admission. The orchestrator approved compiler-proved validation examples and the verifier change that reads them. Plan §5.12 and ADR-0012 still require the dedicated Formula Rule projection for tenant validation and calculated fields. The v3 adoption explicitly deferred that family to a tenant-customization language event ([4c](4c.md#adoption-boundary)).
 - [ADR-0074](../../decisions/ADR-0074-formula-rule-and-workflow-projection-admission.md) accepts joint optional v6 admission with mandatory reader floors, tenant-runner byte parity, and explicit validation and replay contracts. Slices 2–4 must prove these gates before serving either family.
-- Slice 5 is open. First-party operations such as Close and Reopen share a permission ID, so an action restriction must identify the operation. Field visibility must also govern query and read-back results.
+- Slice 5 (candidate) subtracts the selected role’s grant for a named operation. Other roles still grant access. The actual Customize author sees active role keys and labels in their environment. A removal restores evaluation against current policy. Field restrictions remain a gap across query, read-back, exports and assistant output.
 - Slice 6 restores the candidate preserved at `e97ebd9f` and adds a CRITFIX-B replay witness. Catalog measures are separate by currency. Re-baselined the pre-tenant first-party artifact. The surface, agent and query readers require 25, 4 and 3 when their projections carry the corresponding keys.
 
 ## Gates
@@ -28,7 +28,6 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 - Earlier CI passed the live saved-view PostgreSQL test and exposed the missing boot replay admission. The updated test passed locally and with all 71 shard-2 tests in [CI 44445972885](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44445972885).
 - CI attempt 2 exposed an ambiguous form label. Saved-view selects now have explicit label associations. The browser journey checks the order of data columns outside the bulk-selection header and passed locally in 3.8 minutes on the combined UPGRADE-1 tree.
 - `unrecognized-patch-kind-admitted` at `e5d2c82bbcc6`: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (1 passing). [Controls 44457971797](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44457971797).
-
 - Today metrics passed the hosted matrix at `5df9c9c8`. [CI 44471090769](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44471090769). Local scripted drafting passed. The local compiler sandbox hit its existing timeout.
 - The silent-sum control checks the actual aggregate across both witness rows when only one row is on the page. [Controls 44472880285](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44472880285).
 
@@ -75,5 +74,7 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 **Slice 1.** In **Customize → Save a list view → Locations**, name the view **Warehouses**. Keep Code, move Name first and sort names descending. Set **Type** to **Warehouse**, then draft, review the diff, approve and activate. Open Locations and select **Warehouses**. Its count matches the filtered rows, Name is first and the rows are sorted. Roll back the view and reopen Locations to see its standard list.
 
 **ADR-0074.** Read the decision's mandatory reader floor table and first patch payloads. Check the `unknown` rows in the truth table and the old-reader and tenant-runner adoption gates. The decision itself has no UI change.
+
+**Slice 5 (candidate).** As Manager, open **Customize → Restrict an action for a role**. Choose **Local Demo Full Release** and the Location Archive action. Draft, approve and activate. Open a Location as Buyer and check that Archive is gone. Draft removal from Customize, approve and activate to restore access under current policy.
 
 **Slice 6.** In **Customize → Add a metric card to Today**, choose **Locations**, select **Set up metric** and name it **Location count**. Draft, approve and activate. Select the card on Today and compare its count with the destination list. For a sum, choose **Items** and **Price (CAD)**, then use its card to open the governed list. Roll back from Customize and verify that the latest card disappears.

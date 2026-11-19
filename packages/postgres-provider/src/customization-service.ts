@@ -92,6 +92,8 @@ const UPGRADE_PATCH_KINDS: ReadonlySet<string> = new Set([
   'arrangeLayout',
   'saveListView',
   'addMetricCard',
+  'narrowPermission',
+  'unNarrowPermission',
 ]);
 
 export type CustomizationRefusalCode =
@@ -345,7 +347,7 @@ export class PostgresCustomizationService {
         try {
           await this.#repair(admin, context);
           const state = await this.#state(context, sourceReleaseId);
-          result = await this.#prepareReplay(context, state);
+          result = await this.#prepareReplay(admin, context, state);
         } catch (error) {
           const known =
             error instanceof CustomizationServiceRefusal ||
@@ -394,6 +396,7 @@ export class PostgresCustomizationService {
   }
 
   async #prepareReplay(
+    admin: pg.PoolClient,
     context: TrustedRequestContext,
     active: ReleaseState,
   ): Promise<UpgradePreparation> {
@@ -446,6 +449,11 @@ export class PostgresCustomizationService {
     if (replay.status !== 'compiled') return replay;
     const step = replay.steps[0]!;
     const candidate = parseSerializedRelease(step.release);
+    await this.#assertActiveRestrictionRoles(
+      admin,
+      context,
+      candidate.normalizedDefinitionBytes,
+    );
     const existing = (await this.#upgrades(context)).find(
       (record) =>
         record.sourceReleaseId === active.releaseId &&
@@ -740,6 +748,7 @@ export class PostgresCustomizationService {
   async draftFromRequest(
     request: string,
     signal?: AbortSignal,
+    actor?: TrustedRequestContext,
   ): Promise<DraftOutcome> {
     if (!this.options.draftingModel) {
       return Object.freeze({
@@ -762,11 +771,11 @@ export class PostgresCustomizationService {
     const drafted = await draftPatchFromRequest(
       model,
       request,
-      await this.targets(),
+      await this.targets(actor),
     );
     if (drafted.status === 'parsed') {
       signal?.throwIfAborted();
-      return this.draft(drafted.patch, 'conversationalAi', signal);
+      return this.draft(drafted.patch, 'conversationalAi', signal, actor);
     }
     if (drafted.status === 'unsupported') {
       return Object.freeze({
@@ -783,14 +792,70 @@ export class PostgresCustomizationService {
   }
 
   /** What a change may target on the live release (plan §10.6 rules). */
-  async targets(): Promise<CustomizationTargets> {
-    const context = await this.#context();
+  async targets(actor?: TrustedRequestContext): Promise<CustomizationTargets> {
+    const context = await this.#context(actor);
     const pointer = await this.#livePointer(context);
     const active = await this.#identity(context, pointer.releaseId);
     const definition = parseNormalizedApplicationPackageJson(
       await this.#desiredState(context, active.revisionId),
     ) as unknown as Parameters<typeof customizationTargets>[0];
-    return customizationTargets(definition);
+    const roles = await this.#permissionRoles(context);
+    if (!roles.length)
+      return customizationTargets({
+        ...definition,
+        operations: [],
+        operationRoleNarrowings: [],
+      });
+    return {
+      ...customizationTargets(definition),
+      permissionRoleKeys: roles.map(({ role_key }) => role_key),
+      permissionRoleLabels: Object.fromEntries(
+        roles.map(({ role_key, label }) => [role_key, label]),
+      ),
+    };
+  }
+
+  async #permissionRoles(context: TrustedRequestContext) {
+    return withTrustedRequestTransaction(
+      this.connection.runtimePool,
+      context,
+      async (client) =>
+        (
+          await client.query<{ role_key: string; label: string }>(
+            'SELECT role_key, label FROM platform.customization_permission_roles()',
+          )
+        ).rows,
+    );
+  }
+
+  async #assertActiveRestrictionRoles(
+    admin: pg.PoolClient,
+    context: TrustedRequestContext,
+    desiredState: Uint8Array,
+  ): Promise<void> {
+    const definition = parseNormalizedApplicationPackageJson(desiredState);
+    if (
+      definition.languageVersion !== 'v6' ||
+      !definition.operationRoleNarrowings
+    )
+      return;
+    const roleKeys = [
+      ...new Set(
+        definition.operationRoleNarrowings.map(({ roleKey }) => roleKey),
+      ),
+    ];
+    const active = await admin.query<{ role_key: string }>(
+      `SELECT role_key
+         FROM platform.current_policy_roles
+        WHERE tenant_id = $1 AND environment_id = $2
+          AND role_key = ANY($3::text[]) AND revoked_at IS NULL`,
+      [context.tenantId, context.environmentId, roleKeys],
+    );
+    if (active.rows.length !== roleKeys.length)
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_TARGET_NOT_FOUND',
+        'An action restriction names a role that is inactive in this workspace.',
+      );
   }
 
   /**
@@ -802,6 +867,7 @@ export class PostgresCustomizationService {
     input: unknown,
     channel: AuthoringChannel,
     signal?: AbortSignal,
+    actor?: TrustedRequestContext,
   ): Promise<DraftOutcome> {
     const parsed = parseCustomizationPatch(input);
     if (parsed.status === 'invalid') {
@@ -818,8 +884,31 @@ export class PostgresCustomizationService {
         status: 'unsupported' as const,
       });
     }
-    const context = await this.#context();
+    const context = await this.#context(actor);
     const active = await this.#active(context);
+    const change = parsed.patch;
+    if (
+      change.kind === 'narrowPermission' ||
+      change.kind === 'unNarrowPermission'
+    ) {
+      const roles = await this.#permissionRoles(context);
+      if (!roles.length)
+        return Object.freeze({
+          code: 'CUSTOMIZE_AUTHOR_REQUIRED',
+          message:
+            'You need Customize author permission to edit action restrictions.',
+          status: 'refused' as const,
+        });
+      if (
+        change.kind === 'narrowPermission' &&
+        !roles.some(({ role_key }) => role_key === change.roleKey)
+      )
+        return Object.freeze({
+          status: 'invalid' as const,
+          issues: ['roleKey must name an active role in this workspace'],
+          message: 'Choose an active role to restrict.',
+        });
+    }
     const patch =
       parsed.patch.kind === 'addField'
         ? { ...parsed.patch, screens: 'record' as const }
@@ -1200,11 +1289,16 @@ export class PostgresCustomizationService {
           );
         }
       }
+      const desiredState = await this.#desiredState(
+        context,
+        record.resultingRevisionId,
+      );
+      await this.#assertActiveRestrictionRoles(admin, context, desiredState);
       if (this.options.localDemoIdentity) {
         await provisionLocalDemoReleaseAuthorization(
           admin,
           this.connection.identities,
-          await this.#desiredState(context, record.resultingRevisionId),
+          desiredState,
         );
       }
       return this.#swap(
@@ -1767,11 +1861,23 @@ export class PostgresCustomizationService {
     });
   }
 
-  async #context(): Promise<TrustedRequestContext> {
+  async #context(
+    actor?: TrustedRequestContext,
+  ): Promise<TrustedRequestContext> {
     this.#runtimeContext ??= await trustedContext(
       this.connection.identities.runtime,
     );
-    return this.#runtimeContext;
+    if (
+      actor &&
+      (actor.tenantId !== this.#runtimeContext.tenantId ||
+        actor.environmentId !== this.#runtimeContext.environmentId)
+    ) {
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_NOT_STARTED',
+        'Customize is unavailable in this workspace.',
+      );
+    }
+    return actor ?? this.#runtimeContext;
   }
 
   /**
@@ -2067,6 +2173,9 @@ function patchDisplayLabel(patch: CustomizationPatch): string | null {
     case 'saveListView':
     case 'addMetricCard':
       return patch.label;
+    case 'narrowPermission':
+    case 'unNarrowPermission':
+      return patch.roleKey;
     case 'arrangeLayout':
       return 'upFront' in patch ? 'form' : 'list';
     default:
