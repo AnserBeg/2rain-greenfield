@@ -77,6 +77,7 @@ test('migration owns one immutable RLS release schema with no blob hash oracle',
     '0040_customization_permission_directory.sql',
     '0041_workflow_authority.sql',
     '0042_customization_patch_kind_identifier.sql',
+    '0043_workflow_approval_scope.sql',
   ]);
 
   const migration = read(

@@ -42,6 +42,12 @@ export type WorkflowCall =
     }
   | { readonly kind: 'requestApproval'; readonly summary: string }
   | {
+      readonly kind: 'requestApproval';
+      readonly summary: string;
+      readonly operationId: string;
+      readonly input: ImmutableJsonValue;
+    }
+  | {
       readonly kind: 'query' | 'operation';
       readonly id: string;
       readonly input: ImmutableJsonValue;
@@ -57,6 +63,7 @@ export interface WorkflowSdk {
 export function generateWorkflowSdk(
   view: RequestRuntimeView,
   grants: WorkflowGrants,
+  legacyApproval = false,
 ): WorkflowSdk {
   assertRequestRuntimeView(view);
   const queries = new Map(
@@ -89,6 +96,9 @@ export function generateWorkflowSdk(
     }),
   );
 
+  const approvalMethods = legacyApproval
+    ? ''
+    : [...operations.values()].map(approvalDeclaration).join('\n');
   const declarations = `
     type Json = null | boolean | number | string | readonly Json[] | { readonly [key: string]: Json };
     type ReceiptEvent = Readonly<{ type: 'goodsReceiptPosted'; eventId: string; receiptId: string; legalEntityId: string }>;
@@ -97,10 +107,9 @@ export function generateWorkflowSdk(
       now(): string;
       sleep(milliseconds: number): void;
       waitForEvent(type: ReceiptEvent['type'], timeoutMs: number): ReceiptEvent | null;
-      requestApproval(summary: string): boolean;
-      ${[...queries.values()].map(queryDeclaration).join('\n')}
+      ${legacyApproval ? 'requestApproval(summary: string): boolean;\n      ' : ''}${[...queries.values()].map(queryDeclaration).join('\n')}
       ${[...operations.values()].map(operationDeclaration).join('\n')}
-    }
+    ${approvalMethods ? `${approvalMethods}\n    ` : ''}}
   `;
   return Object.freeze({
     release: Object.freeze({
@@ -149,9 +158,30 @@ export function generateWorkflowSdk(
             timeoutMs: duration(value.timeoutMs),
           };
         case 'requestApproval':
-          assertKeys(value, ['kind', 'summary']);
           if (typeof value.summary !== 'string' || !value.summary.trim())
             throw new Error('Workflow approval needs a summary');
+          if (!legacyApproval && Object.hasOwn(value, 'operationId')) {
+            assertKeys(value, ['kind', 'summary', 'operationId', 'input']);
+            const operation =
+              typeof value.operationId === 'string'
+                ? operations.get(value.operationId)
+                : undefined;
+            if (!operation || operation.tier !== 'o0' || !isRecord(value.input))
+              throw new Error('Workflow approval operation grant refused');
+            const input = value.input as Record<string, ImmutableJsonValue>;
+            parseMutationInput(operation, input);
+            return {
+              kind: 'requestApproval',
+              summary: value.summary,
+              operationId: operation.operationId,
+              input,
+            };
+          }
+          if (!legacyApproval)
+            throw new Error(
+              'Workflow approval needs an exact operation and input',
+            );
+          assertKeys(value, ['kind', 'summary']);
           return { kind: 'requestApproval', summary: value.summary };
         default:
           throw new Error('Unknown workflow call');
@@ -193,7 +223,7 @@ function queryDeclaration(query: RegisteredSemanticQueryDefinition): string {
   return `query(id: ${JSON.stringify(query.queryId)}, input: ${objectType(keys)}): ${result};`;
 }
 
-function operationDeclaration(
+function operationInputDeclaration(
   operation: RegisteredOperationDefinition,
 ): string {
   const contract = operation.inputContract!;
@@ -224,7 +254,17 @@ function operationDeclaration(
       throw new Error(`Unsupported workflow operation argument: ${key}`);
     return declaration;
   });
-  return `operation(id: ${JSON.stringify(operation.operationId)}, input: ${objectType(keys)}): Readonly<{ outcome: "succeeded" | "unsupported"; readBack: RecordResult | null }>;`;
+  return `id: ${JSON.stringify(operation.operationId)}, input: ${objectType(keys)}`;
+}
+
+function operationDeclaration(
+  operation: RegisteredOperationDefinition,
+): string {
+  return `operation(${operationInputDeclaration(operation)}): Readonly<{ outcome: "succeeded" | "unsupported"; readBack: RecordResult | null }>;`;
+}
+
+function approvalDeclaration(operation: RegisteredOperationDefinition): string {
+  return `requestApproval(summary: string, ${operationInputDeclaration(operation)}): boolean;`;
 }
 
 function assertQueryInput(

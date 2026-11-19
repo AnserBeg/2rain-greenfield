@@ -1,49 +1,39 @@
 # WORKFLOW-1 — goods receipt workflows
 
-Slices 1 and 2 and the first correction landed. Round 2 addresses the five open verification findings with Critical migration 0041. The orchestrator's narrow verification follows integration before slice 3.
+Latest integrated checkpoint is approval authority. Workflow authoring and verifier admission remain pending.
 
 ## Claims
 
-1. The verifier role publishes evidence for the exact release and definition digest. Human approval freezes the set. Activation copies it into the exact pointer fence.
-2. Only the human-decision function can decide an approval. Replay derives the branch from that decision for the exact request digest and fence.
-3. The Tier B closure comes from pinned compiler projections, including owned children and transitive relations. The gate requires exact operation and input-contract digests.
-4. Deterministic operation failures quarantine the run. Each batch rotates attempted runs so retryable failures leave slots for later work.
-5. The workflow gateway commits cross-company query denials under the automation principal and WORKFLOW channel before suspending the run.
+1. Verified definition bindings and receipt source authority are release- and fence-pinned. The worker consumes the existing receipt outbox.
+2. Approval decisions bind the exact release, operation inputs, receipt company, occurrence and fence. The approver needs live grants for the company and operation.
 
 ## Decisions
 
-- QuickJS Emscripten 0.32.0 won on fixed host-owned WASM memory. Both candidates passed isolation, dispatch, and limit probes. [ADR-0073](../../decisions/ADR-0073-workflow-isolate-and-authority.md)
-- Tier B calls, reachable intersections, and incomplete proofs require exact human confirmation. Only the owning capability can create a Tier B fact.
-- Seed the Tier B closure conservatively with first-party storage and capability writes. A receipt reference on an independent tenant record does not make that record a receipt dependency.
-- Treat pre-correction evidence and decisions as historical. A trusted definition set needs verification and a fresh human approval.
-- The PostgreSQL journey uses the verifier role with test-provisioned credentials. Canonical authoring, timers, the Approvals worklist, and the Inspection browser journey are still ahead.
-- Workflow-bearing releases require surface reader 27, following the Inspection editor at 26.
-- Documents, communication and email, and connectors remain later N2 work.
+- QuickJS Emscripten 0.32.0 won on the fixed host-owned WASM memory cap. Both candidates passed isolation, dispatch and limit probes. [ADR-0073](../../decisions/ADR-0073-workflow-isolate-and-authority.md)
+- Require exact human confirmation for Tier B calls, dependency intersections and incomplete proofs. The owning capability alone writes Tier B facts.
+- Actionless historical plans remain auditable and ineligible. Active approval uses source trust records and the pinned action catalog.
+- Surface reader 27, workflow drafting and activation, the full author-to-Inspection browser journey, and wait-for-event remain open. Documents, communication/email and connectors are later N2 work.
 
 ## Gates
 
-- Slice 1 [CI 44456002463](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44456002463), slice 2 [CI 44477729782](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44477729782), and round 1 [CI 44497680722](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44497680722).
-- Round 2's earlier CI at `c551826d` was cancelled after Actions minutes ran out while the repository was private. [CI 44539741235](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44539741235).
-- All 16 jobs passed at `f23882c3` before INTERACT-1 slice 5 landed. [CI 44552342929](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44552342929).
-- The full acceptance run at the synchronized packet tip is linked from the ledger and review log.
+- Slices 1 and 2 passed [CI 44456002463](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44456002463) and [CI 44477729782](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44477729782).
+- Receipt scope and release authority passed [CI 44593928640](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44593928640) and [controls 44593937918](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44593937918).
+- Approval authority at `e993d742` uses the tested executable tree from `ca1d0d59` and a docs-only synchronization. Gates passed on [CI 44605664198](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44605664198) and [controls 44605664128](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44605664128).
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WORKFLOW-1",
-  "base": "129cb3019b86a0de06511c05c08978c8ee50a34e",
-  "head": "10763e3b85bedfa1416754e6d7ef5108c79d6b85",
+  "base": "31d16d2d381b54ff1f2a7100d9264e7b2679a899",
+  "head": "e993d7427a508d09409273c7655dea4961817ae4",
   "changedPaths": [
-    "db/migrations/0041_workflow_authority.sql",
+    "db/migrations/0043_workflow_approval_scope.sql",
     "db/schema.snapshot.json",
-    "learnings.md",
-    "packages/compiler/src/index.ts",
-    "packages/compiler/src/workflow-dependencies.ts",
-    "packages/postgres-provider/src/workflow-consumer.ts",
     "packages/postgres-provider/src/workflow-execution.ts",
-    "packages/postgres-provider/src/workflow-gateway.ts",
-    "packages/postgres-provider/src/workflow-verification.ts",
+    "packages/postgres-provider/src/workflow-isolate-worker.ts",
+    "packages/postgres-provider/src/workflow-sdk.ts",
     "test/architecture/release-persistence-boundary.test.ts",
+    "test/evidence/WORKFLOW-1.expected-red.json",
     "test/integration/workflow-host.test.ts",
     "test/postgres/inventory-storage.test.ts",
     "test/postgres/migrations.test.ts",
@@ -52,15 +42,14 @@ Slices 1 and 2 and the first correction landed. Round 2 addresses the five open 
     "test/postgres/workflow-consumer.test.ts"
   ],
   "symbols": [
-    {"path": "packages/compiler/src/workflow-dependencies.ts", "name": "workflowTierBDependencies"},
-    {"path": "packages/postgres-provider/src/workflow-verification.ts", "name": "recordVerifiedWorkflow"},
-    {"path": "packages/postgres-provider/src/workflow-execution.ts", "name": "PostgresWorkflowExecution"},
-    {"path": "packages/postgres-provider/src/workflow-gateway.ts", "name": "PostgresWorkflowGateway"}
+    {
+      "path": "packages/postgres-provider/src/workflow-sdk.ts",
+      "name": "generateWorkflowSdk"
+    }
   ]
 }
 ```
 
 ## Test it yourself
 
-- Run `node --import tsx --test --test-name-pattern='workflow verification derives' test/integration/workflow-host.test.ts` to check the transitive Tier B closure.
-- Run the [PostgreSQL receipt journey](../../../test/postgres/workflow-consumer.test.ts) in CI shard 3. Check that late evidence stays out of the approved set, a duplicate create is quarantined, a cross-company denial is audited, and a forged journal result cannot override a human approval or decline.
+- In the PostgreSQL receipt journey, verify that a release approver with another company's grant or without the action grant cannot decide or read the plan. Check that no result is written and a current authorized approval succeeds.
