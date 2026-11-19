@@ -18,7 +18,7 @@ Require exact human confirmation for every Tier B operation and every operation 
 
 ## Bakeoff
 
-The 2026-11-18 probe ran on Node 22.22.2 against Emscripten 0.32.0 and Vercel's QuickJS-WASI 3.6.3, released 2026-10-19. Both passed one narrow JSON dispatch, absence of the filesystem and network entry points and the removed clock and random globals, a 32 MiB allocation refusal at a 4 MiB heap limit, and interruption of a busy loop with a 25 ms budget. Emscripten accepted an imported 16 MiB fixed-size memory and rejected a request to grow it. The WASI binary had no memory import, so its stock API did not supply that independent host ceiling. Emscripten gives us the hard ceiling while keeping the dependency count to one direct pin. npm's audit found zero advisories in the temporary two-candidate install. The repository scans are still due for the actual dependency change. [Emscripten API](https://github.com/justjake/quickjs-emscripten/blob/main/packages/quickjs-emscripten-core/src/module.ts) · [QuickJS-WASI API](https://github.com/vercel-labs/quickjs-wasi) · [npm release metadata](https://registry.npmjs.org/quickjs-emscripten)
+The 2026-11-18 probe ran on Node 22.22.2 against Emscripten 0.32.0 and Vercel's QuickJS-WASI 3.6.3, released 2026-10-19. Both passed one narrow JSON dispatch, absence of the filesystem and network entry points and the removed clock and random globals, an 8 MiB allocation refusal at a 4 MiB heap limit, and interruption of a busy loop with a 25 ms budget. Emscripten accepted an imported 16 MiB fixed-size memory and rejected a request to grow it. The WASI binary had no memory import, so its stock API did not supply that independent host ceiling. Emscripten gives us the hard ceiling while keeping the dependency count to one direct pin. npm's audit found zero advisories in the temporary two-candidate install. The repository scans are still due for the actual dependency change. [Emscripten API](https://github.com/justjake/quickjs-emscripten/blob/main/packages/quickjs-emscripten-core/src/module.ts) · [QuickJS-WASI API](https://github.com/vercel-labs/quickjs-wasi) · [npm release metadata](https://registry.npmjs.org/quickjs-emscripten)
 
 ## Release admission required
 
@@ -82,7 +82,7 @@ emEval(bootstrap);
 assert.equal(emEval(absent), absentValues);
 assert.equal(emEval(`dispatch('{"kind":"now"}')`), 7);
 assert.equal(calls, 1);
-assert.throws(() => emEval('new ArrayBuffer(32 * 1024 * 1024)'), /memory/i);
+assert.throws(() => emEval('new ArrayBuffer(8 * 1024 * 1024)'), /memory/i);
 deadline = performance.now() + 25;
 assert.throws(() => emEval('while (true) {}'), /interrupt/i);
 guest.dispose();
@@ -108,7 +108,7 @@ wasiEval(bootstrap);
 assert.equal(wasiEval(absent), absentValues);
 assert.equal(wasiEval(`dispatch('{"kind":"now"}')`), 7);
 assert.equal(calls, 1);
-assert.throws(() => wasiEval('new ArrayBuffer(32 * 1024 * 1024)'), /memory/i);
+assert.throws(() => wasiEval('new ArrayBuffer(8 * 1024 * 1024)'), /memory/i);
 deadline = performance.now() + 25;
 assert.throws(() => wasiEval('while (true) {}'), /interrupt/i);
 wasi.dispose();
