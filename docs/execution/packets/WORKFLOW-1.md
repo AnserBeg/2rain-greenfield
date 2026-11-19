@@ -29,7 +29,7 @@ Status — slice 1 candidate, host only. Fable 5.2 approved the amended ADR to b
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "WORKFLOW-1",
   "base": "246bd6434eeb6bcc21390c327c7613b14e9c29c4",
-  "head": "e3e1fb5e23b83f7b83b2bebe7a88c971731ae73c",
+  "head": "b82c8889209ec1874a2aa3e48eb12c3067eebb44",
   "changedPaths": [
     "packages/postgres-provider/package.json",
     "packages/postgres-provider/src/module-runtime-interpreter.ts",
