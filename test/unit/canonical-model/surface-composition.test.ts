@@ -1044,3 +1044,35 @@ test('INTERACT-1 document-wide stock impacts name a declared child dataset', () 
     /stock impacts require declared stock and location query results/u,
   );
 });
+
+test('INTERACT-1 task defaults read declared row fields and exact lookup results', () => {
+  const purchase = composition(normalized, 'purchase_order_detail');
+  const cost = action(purchase, 'receive_lines_known').inputs.find(
+    (input: Json) => input.inputId === id('input', 'receive_lines_cost'),
+  );
+  assert.equal(
+    cost.defaultFrom.field,
+    id('field', 'purchase_order_line_unit_price'),
+  );
+  validateSurfaceCompositions(structuredClone(normalized) as never);
+  assert.match(
+    refused('purchase_order_detail', (value) => {
+      const input = action(value, 'receive_lines_known').inputs.find(
+        (candidate: Json) =>
+          candidate.inputId === id('input', 'receive_lines_cost'),
+      );
+      input.defaultFrom.field = id('field', 'missing_ordered_cost');
+    }),
+    /row defaults require a declared row field and an optional exact lookup field/u,
+  );
+  assert.match(
+    refused('sales_order_detail', (value) => {
+      const input = action(value, 'ship_lines').inputs.find(
+        (candidate: Json) =>
+          candidate.inputId === id('input', 'ship_lines_location'),
+      );
+      delete input.defaultFrom.valueField;
+    }),
+    /row defaults require a declared row field and an optional exact lookup field/u,
+  );
+});

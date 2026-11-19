@@ -173,6 +173,19 @@ export function orderEntrySurfaces(
           id('field', 'item_sku'),
           id('field', 'item_base_unit'),
         ],
+        details: {
+          listSurfaceId: id('surface', 'item_stock_list'),
+          values: [
+            ...(['cad', 'usd', 'eur'] as const).map((code) => ({
+              fieldId: id('field', `item_price_${code}`),
+              label: `Price (${code.toUpperCase()})`,
+            })),
+            {
+              fieldId: id('list_figure', 'item_stock_list_available'),
+              label: 'Available',
+            },
+          ],
+        },
         ...aliasSearch,
         create: {
           label: 'New product',

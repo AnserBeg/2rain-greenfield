@@ -322,6 +322,12 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
     required: true,
     query: q('location_list'),
     labelField: ref('fieldReference', field('location_name')),
+    defaultFrom: {
+      source: 'selected',
+      field: field('sales_order_line_item_id'),
+      query: q('item_get'),
+      valueField: ref('fieldReference', field('item_preferred_location_id')),
+    },
   });
   /** A draft reservation of the row's line, at the Task's location. */
   const reserveLine = (
@@ -389,6 +395,15 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         required: true,
         query: q('location_list'),
         labelField: ref('fieldReference', field('location_name')),
+        defaultFrom: {
+          source: 'selected',
+          field: field('sales_order_line_item_id'),
+          query: q('item_get'),
+          valueField: ref(
+            'fieldReference',
+            field('item_preferred_location_id'),
+          ),
+        },
       },
       ...(paid
         ? [
@@ -1112,7 +1127,11 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         datasetId: lines,
         conditions: [released],
         inputs: [
-          { ...quantityInput, label: 'Quantity to reserve' },
+          {
+            ...quantityInput,
+            label: 'Quantity to reserve',
+            defaultFrom: selected(id('metric', 'open_to_ship')),
+          },
           {
             inputId: id('input', 'location'),
             label: 'Stock location',
@@ -1121,6 +1140,15 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
             required: true,
             query: q('location_list'),
             labelField: ref('fieldReference', field('location_name')),
+            defaultFrom: {
+              source: 'selected',
+              field: field('sales_order_line_item_id'),
+              query: q('item_get'),
+              valueField: ref(
+                'fieldReference',
+                field('item_preferred_location_id'),
+              ),
+            },
           },
         ],
         steps: [
@@ -1298,7 +1326,11 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         datasetId: reservations,
         conditions: [released, active],
         inputs: [
-          { ...quantityInput, label: 'Quantity to ship' },
+          {
+            ...quantityInput,
+            label: 'Quantity to ship',
+            defaultFrom: selected(id('metric', 'remaining')),
+          },
           // Optional (LOOP-1): a customer pickup or a local delivery has no
           // carrier or tracking number to give.
           {
