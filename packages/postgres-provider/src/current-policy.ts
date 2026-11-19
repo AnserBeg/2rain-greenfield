@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   CURRENT_POLICY_DECISION_VERSION,
   LEGAL_ENTITY_READ_SCOPE_PERMISSION_ID,
@@ -96,6 +97,23 @@ export class CurrentPolicyBindingError extends Error {
   override readonly name = 'CurrentPolicyBindingError';
 }
 
+type PolicyContext = ReturnType<typeof trustedContextForCurrentPolicyDecision>;
+const recordCompanyPolicyClient = new AsyncLocalStorage<{
+  pool: Pool;
+  client: PoolClient;
+  context: PolicyContext;
+}>();
+
+/** Run the live policy read on the connection holding the business row lock. */
+export function withRecordCompanyPolicyClient<T>(
+  pool: Pool,
+  client: PoolClient,
+  context: PolicyContext,
+  decide: () => Promise<T>,
+): Promise<T> {
+  return recordCompanyPolicyClient.run({ pool, client, context }, decide);
+}
+
 /** Live, deny-by-default authorization over explicit evaluator bindings. */
 export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
   readonly #bindings: ReadonlyMap<string, CurrentPolicyPermissionBinding>;
@@ -157,8 +175,17 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
 
   async authorize(request: CurrentPolicyDecisionRequest) {
     const context = trustedContextForCurrentPolicyDecision(request);
+    const heldRecord = recordCompanyPolicyClient.getStore();
+    const lockedClient =
+      heldRecord?.pool === this.pool && heldRecord.context === context
+        ? heldRecord.client
+        : undefined;
     const binding = this.#bindings.get(request.permissionId);
-    const scope = extractLegalEntityScope(request.decisionInput);
+    // A gateway boundary checks membership before the operation is resolved.
+    // Only the resource decision receives the server-bound company operand.
+    const scope = extractLegalEntityScope(
+      binding?.scopeMode === 'membershipOnly' ? null : request.decisionInput,
+    );
     const input = request.decisionInput;
     const operation =
       isRecord(input) && typeof input.operationId === 'string'
@@ -176,14 +203,17 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
       return Object.freeze({
         decision: 'DENY' as const,
         decisionVersion: CURRENT_POLICY_DECISION_VERSION,
-        policyVersion: await this.#readVersion(context),
+        policyVersion: lockedClient
+          ? await livePolicyVersion(lockedClient, context)
+          : await this.#readVersion(context),
       });
     }
 
     // SPEED-1 (ADR-0071): a read decision inside a page's read snapshot is
     // computed from the principal's grants, read once per snapshot; any other
     // decision -- an invocation, a capability's, one outside a page -- reads
-    // the live grants in a transaction of its own, which never joins.
+    // live grants. A record mutation uses its own write transaction so the
+    // owner stays locked while those grants are evaluated.
     const reusable = reusableReadDecision(request.decisionInput);
     const transaction = reusable
       ? withTrustedRequestRead
@@ -192,9 +222,11 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
           trusted: typeof context,
           run: (client: PoolClient, held: null) => Promise<T>,
         ) =>
-          withTrustedRequestTransaction(pool, trusted, (client) =>
-            run(client, null),
-          );
+          lockedClient
+            ? run(lockedClient, null)
+            : withTrustedRequestTransaction(pool, trusted, (client) =>
+                run(client, null),
+              );
     return transaction(this.pool, context, async (client, held) => {
       const result = held
         ? {
@@ -281,18 +313,25 @@ export class PostgresCurrentPolicyGateway implements CurrentPolicyGateway {
   ): Promise<string> {
     return withTrustedRequestRead(this.pool, context, async (client, held) => {
       if (held !== null) return policyVersion(held.policyVersion);
-      const result = await client.query<{ policy_version: string }>(
-        `SELECT COALESCE(
+      return livePolicyVersion(client, context);
+    });
+  }
+}
+
+async function livePolicyVersion(
+  client: PoolClient,
+  context: PolicyContext,
+): Promise<string> {
+  const result = await client.query<{ policy_version: string }>(
+    `SELECT COALESCE(
            (SELECT policy_version::text
               FROM platform.current_policy_epochs
              WHERE tenant_id = $1 AND environment_id = $2),
            '0'
          ) AS policy_version`,
-        [context.tenantId, context.environmentId],
-      );
-      return policyVersion(result.rows[0]?.policy_version);
-    });
-  }
+    [context.tenantId, context.environmentId],
+  );
+  return policyVersion(result.rows[0]?.policy_version);
 }
 
 export class PostgresSemanticQueryDenialRecorder implements SemanticQueryDenialRecorder {

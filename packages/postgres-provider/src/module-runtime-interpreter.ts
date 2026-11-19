@@ -23,6 +23,7 @@ import type {
 } from '../../platform-runtime/src/trust/contracts.js';
 import { POLICY_DECISION_EVIDENCE_VERSION } from '../../platform-runtime/src/trust/contracts.js';
 import type {
+  AuthorizeRecordCompany,
   RegisteredOperationDefinition,
   RegisteredOperationInputContract,
   RegisteredRecordOperationDefinition,
@@ -79,6 +80,7 @@ import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 
 import {
   currentPolicyVersionOf,
+  withRecordCompanyPolicyClient,
   isCurrentPolicyVersion,
 } from './current-policy.js';
 import {
@@ -391,9 +393,18 @@ export class PostgresModuleRuntimeInterpreter
     }
   }
 
+  executeWithRecordCompany(
+    request: SemanticOperationExecutionRequest,
+    authorize: AuthorizeRecordCompany,
+  ) {
+    return this.#executeOperation(request, authorize);
+  }
+
   async #executeOperation(
     request: SemanticOperationExecutionRequest,
+    authorize?: AuthorizeRecordCompany,
   ): Promise<SemanticOperationResultEnvelope> {
+    let policyVersion = request.policyVersion;
     const parsedInput = parseMutationInput(request.definition, request.input);
     const actor = await this.actorIssuer.issue(request.context);
     const receipt = await this.#trust.executeIdempotentAcceptedMutation(
@@ -462,7 +473,11 @@ export class PostgresModuleRuntimeInterpreter
               request.readBackDefinition.selections,
             );
             return Object.freeze({
-              command: acceptedCommand(request, preparation, ids),
+              command: acceptedCommand(
+                { ...request, policyVersion },
+                preparation,
+                ids,
+              ),
               mutationResult,
             });
           } catch (error) {
@@ -475,6 +490,26 @@ export class PostgresModuleRuntimeInterpreter
           }
         });
       },
+      undefined,
+      authorize &&
+        (async (client) => {
+          const storage = await this.#loadPinnedStorageTarget(client, request);
+          const entity = requiredEntity(
+            storage,
+            request.definition.effect.entity.targetId,
+          );
+          const owner = entity.legalEntity
+            ? await withModuleRuntimeRole(client, () =>
+                readRecordCompany(client, entity, parsedInput.recordId),
+              )
+            : null;
+          policyVersion = await withRecordCompanyPolicyClient(
+            this.pool,
+            client,
+            request.context,
+            () => authorize(owner),
+          );
+        }),
     );
     return Object.freeze({
       kind: 'semanticOperationResult',
@@ -607,6 +642,26 @@ function pinnedStorageTargetCacheIdentity(
     key.releaseId,
     key.contentHash,
   ]);
+}
+
+/** Hold the ownership row through policy, idempotency replay and the write. */
+async function readRecordCompany(
+  client: PoolClient,
+  entity: StorageEntity,
+  recordId: string,
+): Promise<string> {
+  const result = await client.query<{ owner: string }>(
+    `SELECT ${quoted(entity.legalEntity!.column)} AS owner
+       FROM north_star_module.${quoted(entity.physicalTableName)}
+      WHERE tenant_id = north_star_internal.trusted_tenant_id()
+        AND environment_id = north_star_internal.trusted_environment_id()
+        AND ${quoted(entity.recordIdentity.column)} = $1
+      FOR NO KEY UPDATE`,
+    [recordId],
+  );
+  if (!result.rows[0])
+    throw failure('MODULE_RECORD_NOT_FOUND', 'module record was not found');
+  return requiredUuid(result.rows[0].owner, 'stored company');
 }
 
 async function prepareMutation(

@@ -178,8 +178,8 @@
       "name": "capability-authoritative-scope-ignored",
       "claim": "The final capability permission decision must use the adapter-resolved legal entity instead of the caller's record-only input.",
       "file": "packages/runtime/src/semantic-operation-gateway.ts",
-      "original": "          input: capabilityAuthorization?.decisionInput ?? request.input,",
-      "replacement": "          input: request.input,",
+      "original": "        capabilityAuthorization?.decisionInput ??",
+      "replacement": "        (capabilityAuthorization ? request.input : undefined) ??",
       "test": {
         "files": ["test/postgres/composed-application.test.ts"],
         "namePattern": "composed product activates through the kernel"

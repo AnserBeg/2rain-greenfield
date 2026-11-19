@@ -1316,6 +1316,152 @@ test(
 );
 
 test(
+  'company-owned tenant record mutations follow the stored owner',
+  { timeout: 600_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'custom-company',
+      async ({ connection, pool }) => {
+        const options = {
+          databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+          tenantSlug: 'custom-company',
+        };
+        const app = await startComposedApplication({ ...options, port: 0 });
+        const opened = await openCustomizeService(options);
+        try {
+          const type = 'custom_review';
+          const field = `northstar.app:field.${type}_name`;
+          const ordinaryField = `northstar.app:field.${type}_external_legal_entity_id`;
+          const draft = await opened.service.draft(
+            {
+              kind: 'changeSet',
+              patches: [
+                {
+                  kind: 'addRecordType',
+                  label: 'Review',
+                  companyOwnership: 'entityOwned',
+                  fields: [
+                    { label: 'Name', type: 'text' },
+                    { label: 'External legal entity ID', type: 'text' },
+                  ],
+                },
+                {
+                  kind: 'declareLifecycle',
+                  entity: `northstar.app:entity.${type}`,
+                  initial: 'Pending',
+                  states: [{ label: 'Pending' }, { label: 'Passed' }],
+                  transitions: [
+                    { label: 'Pass', from: 'Pending', to: 'Passed' },
+                  ],
+                },
+              ],
+            },
+            'visualBuilder',
+          );
+          assert.ok(draft.status === 'drafted', JSON.stringify(draft));
+          await opened.service.approve(draft.patchId);
+          await opened.service.activate(draft.patchId);
+          const world = worldOver(app.runtime, String(connection.database));
+          const foreignCompany = randomUUID();
+          await world.invoke('legal_entity_create', {
+            recordId: foreignCompany,
+            values: {
+              'northstar.app:field.legal_entity_code': 'REVIEW-B',
+              'northstar.app:field.legal_entity_name': 'Review B',
+              'northstar.app:field.legal_entity_is_default': false,
+              'northstar.app:field.legal_entity_status':
+                'northstar.app:option.legal_entity_status_active',
+            },
+          });
+          const foreign = randomUUID();
+          await world.invoke(`${type}_create`, {
+            legalEntityId: foreignCompany,
+            recordId: foreign,
+            values: { [field]: 'Foreign review' },
+          });
+          const local = await world.create(type, { name: 'Local review' });
+          const buyer = { actor: 'buyer' } as const;
+          const { tenantId, environmentId, principalId } = app.runtime.identity;
+          const scoped = await pool.query(
+            'UPDATE platform.current_policy_memberships SET legal_entity_id=$4 WHERE tenant_id=$1 AND environment_id=$2 AND principal_id=$3 AND revoked_at IS NULL',
+            [tenantId, environmentId, principalId, COMPANY],
+          );
+          assert.ok(scoped.rowCount);
+          const foreignInput = { recordId: foreign, expectedRevision: 1 };
+          const denied = { name: 'SemanticOperationPolicyDeniedError' };
+          await assert.rejects(
+            world.invoke(
+              `${type}_update`,
+              {
+                ...foreignInput,
+                patch: { [ordinaryField]: COMPANY },
+              },
+              buyer,
+            ),
+            denied,
+          );
+          for (const effect of ['action_pass', 'archive', 'restore']) {
+            await assert.rejects(
+              world.invoke(`${type}_${effect}`, foreignInput, buyer),
+              denied,
+            );
+          }
+          // A globally granted actor also cannot reassign ownership.
+          await assert.rejects(
+            world.invoke(`${type}_update`, {
+              recordId: local.recordId,
+              expectedRevision: 1,
+              legalEntityId: foreignCompany,
+              patch: { [field]: 'Moved review' },
+            }),
+            { code: 'MODULE_INPUT_MALFORMED' },
+          );
+          const updated = await world.invoke(
+            `${type}_update`,
+            {
+              recordId: local.recordId,
+              expectedRevision: 1,
+              patch: { [field]: 'Edited review' },
+            },
+            buyer,
+          );
+          assert.equal(updated.readBack?.revision, 2);
+          for (const [index, effect] of [
+            'action_pass',
+            'archive',
+            'restore',
+          ].entries()) {
+            const result = await world.invoke(
+              `${type}_${effect}`,
+              {
+                recordId: local.recordId,
+                expectedRevision: index + 2,
+              },
+              buyer,
+            );
+            assert.equal(result.readBack?.revision, index + 3);
+          }
+          // Revision one is still current after every refused foreign write.
+          assert.equal(
+            (
+              await world.invoke(`${type}_update`, {
+                ...foreignInput,
+                patch: { [field]: 'Manager edit' },
+              })
+            ).readBack?.revision,
+            2,
+          );
+        } finally {
+          await opened.close();
+          await app.close();
+        }
+      },
+      LINEAGE_INSTALL_VOLUME,
+    );
+  },
+);
+
+test(
   'one inspection change activates linked records and owned lines, and an assistant transition needs a yes',
   { timeout: 600_000 },
   async () => {
