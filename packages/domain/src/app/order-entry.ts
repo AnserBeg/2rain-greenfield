@@ -394,9 +394,23 @@ export function orderEntrySurfaces(
       headerLabel: 'Order details',
       linesLabel: 'Order lines',
       saveDescription: sales
-        ? 'Saving keeps the order as a draft; stock does not change. Confirm it when it has a full ship-to address (street, city, postal code and country).'
-        : 'Saving keeps the order as a draft; stock does not change. Place the order when it is ready.',
+        ? 'Save draft keeps the order editable without changing stock. Place the order when it is ready for fulfillment.'
+        : 'Save draft keeps the order editable without changing stock. Place the order when it is ready for receiving.',
       saveMode: 'sequential',
+      saveThen: {
+        operationId: id('operation', `${local}_release`),
+        label: 'Save and place',
+        ...(!sales
+          ? {
+              arguments: [
+                {
+                  name: 'supplierReference',
+                  fieldId: id('field', 'purchase_order_supplier_reference'),
+                },
+              ],
+            }
+          : {}),
+      },
       headerFormSurfaceId: id('surface', `${local}_form`),
       recordSurfaceId: id('surface', `${local}_detail`),
       lineFormSurfaceId: id('surface', `${local}_line_form`),
