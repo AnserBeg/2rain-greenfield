@@ -318,7 +318,12 @@ async function requireAlignment(page: Page, screen: Screen): Promise<void> {
     }
     if (['po', 'so', 'new-po', 'record', 'receive'].includes(screen)) {
       near('breadcrumb', rect('.record-breadcrumb').left, grid.left);
-      near('eyebrow', rect('main .eyebrow').left, grid.left);
+      near(
+        'eyebrow',
+        rect('main :is(.surface-heading--slot,.composition-title) .eyebrow')
+          .left,
+        grid.left,
+      );
     }
     if (screen === 'new-po') {
       for (const selector of [
