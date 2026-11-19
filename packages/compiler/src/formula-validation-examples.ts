@@ -2,9 +2,10 @@ import {
   BUSINESS_DATE_FIELD_ID,
   type BoundFormulaValidation,
 } from '../../canonical-model/src/formula-validation-bindings.js';
-import type {
-  ValidationPredicate,
-  ValidationScalar,
+import {
+  adjacentCalendarDates,
+  type ValidationPredicate,
+  type ValidationScalar,
 } from '../../canonical-model/src/formula-validation.js';
 import type { VersionedNormalizedApplicationPackage } from '../../canonical-model/src/schemas.js';
 
@@ -21,7 +22,6 @@ type Bound = {
 };
 
 const MAXIMUM_SYNTHESIZED_ROWS = 512;
-const DAYS_IN_MILLISECONDS = 86_400_000;
 
 function collectBounds(
   predicate: ValidationPredicate,
@@ -55,19 +55,6 @@ function collectBounds(
     case 'required':
       return;
   }
-}
-
-function adjacentDates(value: string): readonly string[] {
-  const time = Date.parse(`${value}T00:00:00.000Z`);
-  if (!Number.isFinite(time)) return [];
-  return [-1, 0, 1]
-    .map(
-      (offset) =>
-        new Date(time + offset * DAYS_IN_MILLISECONDS)
-          .toISOString()
-          .split('T')[0]!,
-    )
-    .filter((date) => /^\d{4}-\d{2}-\d{2}$/u.test(date));
 }
 
 function coefficientAtScale(value: string, scale: number): bigint {
@@ -104,10 +91,12 @@ function syntheticScalars(
       const dates = [businessDate];
       for (const { value } of bounds)
         if (value.kind === 'date') dates.push(value.value);
-      return [...new Set(dates.flatMap(adjacentDates))].map((value) => ({
-        kind: 'date',
-        value,
-      }));
+      return [...new Set(dates.flatMap(adjacentCalendarDates))].map(
+        (value) => ({
+          kind: 'date',
+          value,
+        }),
+      );
     }
     case 'integer': {
       const centers = [65_531n, -65_531n, 0n, 1n];

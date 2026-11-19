@@ -97,12 +97,53 @@ function compareOrdered<T extends string | bigint>(
 }
 
 function validCalendarDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value) || value.startsWith('0000'))
-    return false;
-  const date = new Date(`${value}T00:00:00.000Z`);
-  return (
-    Number.isFinite(date.getTime()) && date.toISOString().startsWith(value)
-  );
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number) as [
+    number,
+    number,
+    number,
+  ];
+  return year > 0 && day > 0 && day <= daysInCalendarMonth(year, month);
+}
+
+function daysInCalendarMonth(year: number, month: number): number {
+  if (month === 2) {
+    const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    return leap ? 29 : 28;
+  }
+  return [31, 0, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1] ?? 0;
+}
+
+export function adjacentCalendarDates(value: string): readonly string[] {
+  if (!validCalendarDate(value)) return [];
+  const [year, month, day] = value.split('-').map(Number) as [
+    number,
+    number,
+    number,
+  ];
+  const shift = (offset: -1 | 1): string | null => {
+    let shiftedYear = year;
+    let shiftedMonth = month;
+    let shiftedDay = day + offset;
+    if (shiftedDay === 0) {
+      shiftedMonth -= 1;
+      if (shiftedMonth === 0) {
+        shiftedMonth = 12;
+        shiftedYear -= 1;
+      }
+      shiftedDay = daysInCalendarMonth(shiftedYear, shiftedMonth);
+    } else if (shiftedDay > daysInCalendarMonth(year, month)) {
+      shiftedDay = 1;
+      shiftedMonth += 1;
+      if (shiftedMonth === 13) {
+        shiftedMonth = 1;
+        shiftedYear += 1;
+      }
+    }
+    if (shiftedYear < 1 || shiftedYear > 9999) return null;
+    return `${String(shiftedYear).padStart(4, '0')}-${String(shiftedMonth).padStart(2, '0')}-${String(shiftedDay).padStart(2, '0')}`;
+  };
+  return [shift(-1), value, shift(1)].filter((date) => date !== null);
 }
 
 function exactCoefficient(

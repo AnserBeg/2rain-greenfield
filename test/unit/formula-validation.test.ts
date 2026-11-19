@@ -22,12 +22,31 @@ import { observeValidationRefusals } from '../../packages/runtime/src/formula-va
 import { compilerInput, mustCompile } from '../compiler/helpers.js';
 
 import {
+  adjacentCalendarDates,
   inspectValidation,
   VALIDATION_NODE_VERSION as schemaVersion,
   type ValidationOperand,
   type ValidationPredicate,
   type ValidationScalar,
 } from '../../packages/canonical-model/src/formula-validation.js';
+
+test('calendar witnesses cross month and year boundaries without a clock', () => {
+  assert.deepEqual(adjacentCalendarDates('2024-02-29'), [
+    '2024-02-28',
+    '2024-02-29',
+    '2024-03-01',
+  ]);
+  assert.deepEqual(adjacentCalendarDates('2026-01-01'), [
+    '2025-12-31',
+    '2026-01-01',
+    '2026-01-02',
+  ]);
+  assert.deepEqual(adjacentCalendarDates('1900-02-29'), []);
+  assert.deepEqual(adjacentCalendarDates('9999-12-31'), [
+    '9999-12-30',
+    '9999-12-31',
+  ]);
+});
 
 const field: ValidationOperand = {
   schemaVersion,
