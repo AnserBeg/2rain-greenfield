@@ -2,7 +2,7 @@
 
 Date: 2026-11-19
 
-Status: Proposed for orchestrator read. This record admits no language syntax, patch payload, or reader.
+Status: Accepted with changes on 2026-11-19 after two independent reads. This decision sets the admission contract. Implementation must pass the adoption gates below before serving either family.
 
 ## Context
 
@@ -31,13 +31,21 @@ The prototype also appended a v7 entry, `eec65f91f560098e8ccf7c5e927b5aea2b88160
 
 The unchanged patch writer was tried against the prototype v7 base first. Its v6 tag on the new field, field selections and form/list nodes caused `CANON_VERSION_MIXED`. The v7 measurement re-tags the patch's emitted nodes in the probe. Current cross-language replay stays refused.
 
-## Proposed decision
+## Decision
 
-Admit both closed family IDs together through one versioned registration. Recommend optional, nonempty collections on v6 and a named, versioned payload and minimum reader for each dedicated projection. An absent declaration produces no normalized key, manifest reference, capability claim, or empty artifact. The existing mandatory families stay required. A present declaration must resolve to its complete, typed projection and required consumer bindings, or compilation or release admission refuses. This is an explicit amendment to the family-admission timing in ADR-0012 for additive families with measured absence parity. The older inline predicate positions stay in their owning catalogs.
+Admit both closed family IDs together through one versioned registration, with optional, nonempty collections on v6 and a named, versioned payload and minimum reader for each dedicated projection. An absent declaration produces no normalized key, manifest reference, capability claim, or empty artifact. The existing mandatory families stay required. A present declaration must resolve to its complete, typed projection and required consumer bindings, or compilation or release admission refuses. Each new key mints an obligation in the ADR-0047 §7 conformance ledger, with positive fixtures authored at v6 and coverage decisions re-derived. This amends ADR-0012's family-admission timing for these additive families. The older inline predicate positions stay in their owning catalogs.
 
-The release manifest and release-verification code must match **both** directions of declaration and output, including the exact family, instance, payload version and reader requirement. A missing consumer refuses before activation. WORKFLOW-1's planned surface-reader floor 26 remains reserved for the surface behavior that consumes workflows. Dedicated family readers are independently versioned from the surface reader, and a release without either feature keeps its existing floors. When deploying, keep at least the newest patch parser and reader floors already used by tenants.
+The release manifest and release-verification code must match **both** directions of declaration and output, including the exact family, instance, payload version and reader requirement. A missing consumer refuses before activation. For every feature-bearing release, compilation also raises the minimum reader on a mandatory family that pre-admission serving binaries already check:
 
-If admission requires materializing a default or changing the normalized language, batch both families in one language adoption. If identical normalized input starts producing different projections, append a compiler-semantic profile under ADR-0047 §1. Combine those events when both axes move. Historical readers reproduce each entry under its own language and profile.
+| Feature | Mandatory reader floor |
+| --- | --- |
+| Validation | Operation catalog |
+| Calculated display fields | Surface, query, or agent catalog, with the floor pinned to an existing gated consumer |
+| Workflows | Surface, with floor 26 reserved for WORKFLOW-1 (ADR-0073) |
+
+A test for each feature runs an actual older binary or its serving reader and proves that it refuses the feature-bearing release before serving it. A current reader with a simulated unsupported family does not establish this. A release without these declarations keeps its existing floors. Deployments keep at least the newest patch parser and reader floors already used by tenants.
+
+Any new required key, materialized default, or changed meaning of an existing v6 node triggers v7. Stop for that ruling before implementing the change. If identical normalized input starts producing different projections, append a compiler-semantic profile under ADR-0047 §1. Combine those events when both axes move. Historical readers reproduce each entry under its own language and profile.
 
 ## Release lineage and replay
 
@@ -51,13 +59,35 @@ An existing customized v6 release remains pinned and serviceable on refusal. A d
 
 ## Formula/rule binding contract
 
-- The dedicated projection carries stable IDs, versioned typed IR and result type, binding position and phase, purity, target, absence and error behavior, dependency and authorization/classification closure, applicable lowering and provider-probe references, allowed sinks, explanation contract, kernel version and IR hash, and deterministic assertion references.
-- Validation binds to declared plain create/update Semantic Operations. Create evaluates the candidate values with declared defaults applied. Update evaluates the proposed row with unchanged values filled from the governed transaction snapshot. A rule fires on an update only if the actual write set intersects its compiler-declared watched fields, which include its local dependencies and the reference fields for admitted to-one traversals. An unrelated write or an independent update of a related record does not invoke the rule. A dependency on stored state is re-read inside the write transaction under the same locking and scope as the operation.
-- Comparisons with an absent optional operand pass in the validation position. Only a required rule tests presence. Resolve absent values by canonical field type and position. An unreadable dependency, malformed value, or evaluation error is a refusal and cannot be treated as absence. A bound date comparison uses a captured business-date value from the operation context. Its source and time-zone semantics belong in the primitive contract.
-- The compiler emits a deterministic satisfying example as the assertion reference for each admitted validation binding. It proves the reference meets the admitted rules and the invocation's typed input contract, and refuses an unsupported or unproved example. The verifier passes that exact example into the pinned assertion invocation. It does not search for, rewrite, or synthesize inputs. Gateway refusal and its form message use the same active rule as assistant discovery.
+- The dedicated projection carries stable IDs, versioned typed IR and result type, binding position and phase, purity, target, versioned absence and error behavior, dependency and authorization/classification closure, applicable lowering and provider-probe references, allowed sinks, explanation contract, kernel version and IR hash, and deterministic assertion references. Each validation binding also projects its compiler-resolved operation IDs, versioned trigger, watched field IDs, refusal effect, existing-records policy, message and field anchors.
+- Validation is an operation guard, shown as checked when saving through the bound create or edit. Activation grandfathers existing rows. The first scope is declared plain create/update Semantic Operations. Archive, transitions and capability operations are outside those bindings. An expansion adds explicit bindings. Create evaluates after declared defaults. An update's write set is the set of fields whose typed values change from the current row to the merged row, including changes to or from absence. The rule fires when that set intersects the compiler-derived watched fields, including the relation keys for admitted to-one paths. Evaluate the merged row and re-read stored dependencies in the same governed write transaction against locked, scoped state. An unrelated write or an independent edit to a related record does not invoke the rule. Authorized recovery reports the outcome of tenant narrowing without using it as a veto, and records that outcome.
+- Comparisons with an absent optional operand evaluate to `unknown`; `required` explicitly tests presence. Resolve absence by canonical field type. A malformed or unreadable operand or evaluation error refuses, including inside a composed expression. Evaluation is total and independent of term order. The v1 validation position accepts `true` or `unknown` at the root and refuses `false`. Future positions such as guards and filters carry their own versioned root policy. The date primitive contract must pin the captured business-date source and time zone before admitting that operand.
+- For each bound invocation and fixture state, the compiler emits a satisfying example that meets all applicable rules and base input requirements, and a violating example per rule that meets the other rules and base requirements. Each witness pins the operation, synthesized input and fixture values, and a business date. An update witness changes a watched value. The violating witness pins the expected refusal code and message and proves refusal before mutation. Compilation refuses an unsupported or unproved witness. The verifier passes the exact compiled example through the pinned invocation's `#createInput` overrides. The gateway, form and assistant use the same active rule and its explanation.
 - Calculated fields are server-evaluated read-time display values. Exact-decimal operands carry precision, scale and currency through typing. Reject mixed currencies, unsupported overflow bounds and undeclared sinks. A derived display value never enters storage, a default, a mutation input, or a Tier B dependency set.
 
 ADR-0012's structural depth ceiling of 24 and total, terminating, loop-free IR remain binding. No recursion, operation calls, ambient I/O, unbounded traversal, textual expression parser, or evaluator duplication. F4 paths must be typed and bounded. F5 remains subject to its own cardinality, snapshot, absence, and other §5.12 admission conditions. Workflow TypeScript stays on the durable process host under ADR-0073. Its effects invoke whole governed operations and it supplies no request-path expression semantics.
+
+The three-valued operators use this truth table wherever composition is admitted. For a collection of terms, `all` folds from `true` and `any` folds from `false`.
+
+| `a` | `b` | `not(a)` | `all(a, b)` | `any(a, b)` |
+| --- | --- | --- | --- | --- |
+| `true` | `true` | `false` | `true` | `true` |
+| `true` | `unknown` | `false` | `unknown` | `true` |
+| `true` | `false` | `false` | `false` | `true` |
+| `unknown` | `true` | `unknown` | `unknown` | `true` |
+| `unknown` | `unknown` | `unknown` | `unknown` | `unknown` |
+| `unknown` | `false` | `unknown` | `false` | `unknown` |
+| `false` | `true` | `true` | `false` | `true` |
+| `false` | `unknown` | `true` | `false` | `unknown` |
+| `false` | `false` | `true` | `false` | `false` |
+
+## First patch payloads
+
+`addValidation` has a versioned binding with a stable rule ID, target record type ID, explicit bound create/update operation IDs, trigger, absence policy, `effect: 'refuse'`, existing-records policy, a message, and field IDs for the form anchors. The initial trigger checks creates after defaults and updates when a watched value changes. The initial existing-records policy grandfathers rows at activation. The compiler resolves the operation bindings and derives the watched fields, authorization closure and witnesses.
+
+The predicate is a structured AST with a `schemaVersion` on every node. A comparison has the same shape whether its operands are literals or references. The discriminated operand union is `literal | field | path`. Literals carry canonical types and values. Exact-decimal values are strings with declared precision, scale and currency where applicable. A field operand identifies a field by stable ID. A path carries a bounded sequence of declared to-one relation IDs and the terminal field ID. The first literal-validation slice admits only its contracted operand positions and refuses unsupported shapes explicitly. F2 and F4 add admitted bindings to that same contract.
+
+`addCalculatedField` is a separate versioned kind with a stable field ID, target record type ID, typed expression, result type, precision and scale, currency where applicable, and declared display sinks. Both patch kinds require explicit upgrade-replay admission and exact original-root reproduction. Replay refuses with a typed diagnostic when the new base retires or retypes a referenced field, relation, or operation contract.
 
 ## Scope and acceptance
 
@@ -70,4 +100,4 @@ ADR-0012's structural depth ceiling of 24 and total, terminating, loop-free IR r
 | Saved views, column arrangement, role-based restriction, and cards over declared top-level list measures | Existing surface, query, and policy projections |
 | WORKFLOW-1 workflow admission after the host slice | Workflow |
 
-Before implementation adoption, keep the no-definition byte-equality probes for both a first-party and a customized release. Add positive family/reader and negative unsupported, missing consumer, undeclared projection, and historical replay tests. Each primitive still needs the §5.11 contract and provider, UI, assistant, reporting, and rollback evidence for its admitted positions. This proposal carries no validation, rule or calculated-field patch vocabulary until the orchestrator returns the ADR read.
+Before adoption, reproduce the no-declaration first-party and tenant-authored release envelopes byte for byte, with the same roots. The tenant case must use the real tenant runner and tenant provenance to compile the same authored package against the same parent before and after registration. The fixture-provenance probe above is preliminary. Also require v6 compiler accept/refuse fixtures, positive family/reader and negative unsupported, missing consumer, undeclared projection and historical replay tests, and the older-reader refusal. Each primitive still needs the §5.11 contract and provider, UI, assistant, reporting and rollback evidence for its admitted positions.
