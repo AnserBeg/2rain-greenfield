@@ -173,6 +173,14 @@ export interface SharedListBeforeFilter {
   readonly fieldId: string;
 }
 
+export type SharedListViewCount = {
+  readonly viewId: string;
+  readonly filters: readonly {
+    readonly fieldId: string;
+    readonly value: string;
+  }[];
+};
+
 export interface SharedListQueryRequest {
   readonly cursor: string | null;
   readonly effectivePageSize: number;
@@ -186,6 +194,8 @@ export interface SharedListQueryRequest {
     readonly value: string;
   }[];
   readonly beforeFilters?: readonly SharedListBeforeFilter[];
+  /** Exact-filter counts over this query's common scope, search and predicates. */
+  readonly viewCounts?: readonly SharedListViewCount[];
   readonly progress?: SharedListProgress;
   /** Per-row figures the statement computes before the count and the page. */
   readonly figures?: SharedListFigures;
@@ -268,6 +278,9 @@ export interface SharedListCoverage {
    * open view or a before-today view would count the wrong rows silently.
    */
   readonly beforeFilters?: readonly SharedListBeforeFilter[];
+  readonly viewCounts?: readonly (SharedListViewCount & {
+    readonly totalCount: number;
+  })[];
   readonly progress?: SharedListProgress;
   /** Echoed and REQUIRED to match, as progress is: a band kept is a count. */
   readonly figures?: SharedListFigures;
@@ -331,6 +344,7 @@ export function parseSharedListArguments(
     outputMode: outputModeValue,
     progress: progressValue,
     beforeFilters: beforeFiltersValue,
+    viewCounts: viewCountsValue,
     figures: figuresValue,
     searchChildren: searchChildrenValue,
     ...closedList
@@ -431,6 +445,12 @@ export function parseSharedListArguments(
       input.queryId,
     );
   const cursor = parseNullableCursor(list.cursor);
+  const viewCounts =
+    viewCountsValue === undefined
+      ? undefined
+      : parseViewCounts(viewCountsValue);
+  if (viewCounts && (exporting || cursor !== null))
+    throw malformed('view counts are requested without export or a cursor');
   if (exporting && cursor !== null)
     throw malformed('an export reads the whole set and takes no cursor');
   const requestedPageSize = Number(list.pageSize);
@@ -470,6 +490,7 @@ export function parseSharedListArguments(
     ...(progress ? { progress } : {}),
     ...(figures ? { figures } : {}),
     ...(beforeFilters ? { beforeFilters } : {}),
+    ...(viewCounts ? { viewCounts } : {}),
     relationLabels,
     ...(referenceLabels ? { referenceLabels } : {}),
     ...(exporting ? { outputMode: 'export' as const } : {}),
@@ -521,12 +542,15 @@ export function authorizeSharedListFields(
       ? [query.progress.supply.shortIn.fieldId]
       : []),
     ...(query.beforeFilters ?? []).map((filter) => filter.fieldId),
+    ...(query.viewCounts ?? []).flatMap((view) =>
+      view.filters.map((filter) => filter.fieldId),
+    ),
   ];
   for (const fieldId of compared) {
     if (!input.selectedFieldIds.has(fieldId)) {
       throw new SharedListContractError(
         'LIST_FIELD_NOT_AUTHORIZED',
-        'a progress state or before filter reads a field the list query selects',
+        'a progress state, before filter or view count reads a field the list query selects',
         fieldId,
       );
     }
@@ -582,6 +606,20 @@ export function requireSharedListEcho(
       : canonicalize(left) === canonicalize(right);
   if (
     !same(
+      query.viewCounts as ImmutableJsonValue | undefined,
+      listCoverage.viewCounts?.map(({ viewId, filters }) => ({
+        viewId,
+        filters,
+      })) as ImmutableJsonValue | undefined,
+    )
+  ) {
+    throw new SharedListContractError(
+      'LIST_RESULT_MALFORMED',
+      'the list result did not apply the requested view counts',
+    );
+  }
+  if (
+    !same(
       query.progress as ImmutableJsonValue | undefined,
       listCoverage.progress as ImmutableJsonValue | undefined,
     ) ||
@@ -634,6 +672,9 @@ export function assertSharedListResult(
     listCoverage.returnedCount !== recordCount ||
     !Number.isSafeInteger(listCoverage.totalCount) ||
     listCoverage.totalCount < listCoverage.returnedCount ||
+    listCoverage.viewCounts?.some(
+      (view) => !Number.isSafeInteger(view.totalCount) || view.totalCount < 0,
+    ) === true ||
     !Number.isSafeInteger(listCoverage.pageOffset) ||
     listCoverage.pageOffset < 0 ||
     !Number.isSafeInteger(listCoverage.projectedSearchValueCount) ||
@@ -694,6 +735,31 @@ function parseExactFieldFilters(
       )
         throw malformed('invalid exact field filter');
       return Object.freeze({ fieldId: entry.fieldId, value: entry.value });
+    }),
+  );
+}
+
+function parseViewCounts(
+  value: ImmutableJsonValue,
+): readonly SharedListViewCount[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 8)
+    throw malformed('list view counts contain one to eight views');
+  const ids = new Set<string>();
+  return Object.freeze(
+    value.map((entry) => {
+      if (!isRecord(entry)) throw malformed('a view count is an object');
+      assertExactKeys(entry, ['viewId', 'filters']);
+      assertCanonicalId(entry.viewId, 'view count id');
+      if (ids.has(entry.viewId))
+        throw malformed('view count ids must be distinct');
+      ids.add(entry.viewId);
+      return Object.freeze({
+        viewId: entry.viewId,
+        filters:
+          Array.isArray(entry.filters) && entry.filters.length === 0
+            ? Object.freeze([])
+            : parseExactFieldFilters(entry.filters),
+      });
     }),
   );
 }

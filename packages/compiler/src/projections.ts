@@ -224,6 +224,13 @@ export function lowerBaseProjectionPayloads(
       namespace,
       packageScope,
       agentDiscoveryPayload(packageRevision, verificationPackageRevision),
+      undefined,
+      hasSavedListLayouts(verificationPackageRevision)
+        ? {
+            capabilityId: 'northstar.runtime:capability.agent-discovery',
+            minimumVersion: 2,
+          }
+        : undefined,
     ),
     plan(
       PROJECTION_FAMILY_IDS.verificationPlan,
@@ -781,11 +788,13 @@ function surfaceManifestPayload(
         'form' in surface &&
         (surface.form as SurfaceForm | undefined)?.fields !== undefined,
     );
-  const editorFloor = recordFieldPresentation
-    ? 23
-    : rankedDefaultsOrChainedTasks
-      ? 22
-      : null;
+  const surfaceFloor = hasSavedListLayouts(original)
+    ? 24
+    : recordFieldPresentation
+      ? 23
+      : rankedDefaultsOrChainedTasks
+        ? 22
+        : null;
   const payloadSchemaVersion = composed
     ? COMPOSED_SURFACE_MANIFEST_PAYLOAD_VERSION
     : navigation
@@ -909,6 +918,7 @@ function surfaceManifestPayload(
     // behave like a browser for that sentence to hold.
     requiredRuntimeCapability: {
       capabilityId: 'northstar.runtime:capability.surface-manifest',
+      // 24 adds a saved view's own columns, sort and pinned filter options.
       // 22 (INTEGRATION; SALES-EXTRAS took 15 in parallel, which INVENTORY-PARITY
       // already held): ranked editor defaults (`tiers`), such as a customer's
       // price lists, and Tasks of up to twelve steps whose per-row steps read
@@ -972,8 +982,8 @@ function surfaceManifestPayload(
       // 9: picker eligibility and typed Task inputs. A reader that dropped
       // either would offer every party as a customer, or ask for free text
       // where a governed value is declared -- a wrong render, not a lesser one.
-      minimumVersion: editorFloor
-        ? editorFloor
+      minimumVersion: surfaceFloor
+        ? surfaceFloor
         : original.surfaces.some((surface) => {
               const list =
                 'list' in surface
@@ -1417,12 +1427,15 @@ function agentDiscoveryPayload(
   };
 }
 
-/**
- * A declared List's views, filters, default order and reference labels are
- * ordinary list-query arguments. Publishing them here lets an agent ask for
- * "draft orders, newest first, with customer names" through the same query
- * gateway the screen uses, so no List behaviour is UI-only.
- */
+function hasSavedListLayouts(original: VersionedNormalizedApplicationPackage) {
+  return original.surfaces.some((surface) => {
+    const list =
+      'list' in surface ? (surface.list as SurfaceList | undefined) : undefined;
+    return list?.views.some((view) => view.layout);
+  });
+}
+
+/** A List's view settings also let the assistant issue the same semantic query as the List. */
 function agentListPresets(original: VersionedNormalizedApplicationPackage) {
   return original.surfaces.flatMap((surface) => {
     if (!('list' in surface) || !surface.list) return [];
@@ -1526,6 +1539,15 @@ function agentListPresets(original: VersionedNormalizedApplicationPackage) {
           })),
           label: view.label,
           viewId: view.viewId,
+          ...(view.layout
+            ? {
+                columns: view.layout.columns.map(sortKey),
+                sort: view.layout.sort.map((sort) => ({
+                  direction: sort.direction,
+                  fieldId: sortKey(sort.columnId),
+                })),
+              }
+            : {}),
           ...(view.open ? { open: true } : {}),
           ...(view.supply ? { supply: view.supply } : {}),
           ...(view.band

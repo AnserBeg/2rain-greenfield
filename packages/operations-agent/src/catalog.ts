@@ -44,7 +44,21 @@ export interface ListPreset {
     readonly viewId: string;
     readonly label: string;
     readonly fieldFilters: readonly { fieldId: string; value: string }[];
+    readonly columns?: readonly string[];
+    readonly sort?: readonly {
+      readonly fieldId: string;
+      readonly direction: 'ascending' | 'descending';
+    }[];
   }[];
+  readonly referenceLabels?: readonly {
+    readonly fieldId: string;
+    readonly queryId: string;
+    readonly referenceId: string;
+    readonly sourceFieldId: string;
+  }[];
+  readonly progress?: ImmutableJsonValue;
+  readonly figures?: ImmutableJsonValue;
+  readonly searchChildren?: ImmutableJsonValue;
   readonly filters?: readonly {
     readonly filterId: string;
     readonly fieldId: string;
@@ -310,6 +324,10 @@ export function queryContract(
           views: preset.views.map((view) => ({
             viewId: view.viewId,
             label: view.label,
+            ...(view.columns ? { columns: view.columns } : {}),
+            ...(view.sort
+              ? { sort: view.sort as unknown as ImmutableJsonValue }
+              : {}),
             ...(view.fieldFilters.length > 0
               ? { filters: view.fieldFilters as unknown as ImmutableJsonValue }
               : {}),

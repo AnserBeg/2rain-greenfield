@@ -187,3 +187,54 @@ test('a scripted request to add a standard field as a list column uses its offer
     input.order[0],
   );
 });
+
+test('a scripted request to save a warehouse view uses its declared columns and filter option', async () => {
+  const definition = JSON.parse(
+    readFileSync('apps/web/release/app.authored.json', 'utf8'),
+  ) as Record<string, unknown>;
+  const offered = customizationTargets(
+    normalizeApplicationPackage(definition) as unknown as Parameters<
+      typeof customizationTargets
+    >[0],
+  );
+  const input = {
+    kind: 'saveListView' as const,
+    surface: 'northstar.app:surface.location_list',
+    label: 'Warehouses',
+    columns: [
+      'northstar.app:list_column.location_list_name',
+      'northstar.app:list_column.location_list_code',
+    ],
+    sort: [
+      {
+        column: 'northstar.app:list_column.location_list_name',
+        direction: 'descending' as const,
+      },
+    ],
+    filters: [
+      {
+        field: 'northstar.app:field.location_type',
+        value: 'northstar.app:option.warehouse',
+      },
+    ],
+  };
+  const seen: { system: string; toolNames: string[]; turns: number }[] = [];
+  const outcome = await draftPatchFromRequest(
+    scripted([{ toolInput: input }], seen),
+    'Give me a Warehouses tab on Locations with name then code, names from Z to A.',
+    offered,
+  );
+  assert.deepEqual(outcome, { status: 'parsed', patch: input });
+  assert.match(
+    seen[0]!.system,
+    /location_list_code "Code" \(required title\)/u,
+  );
+  assert.match(
+    seen[0]!.system,
+    /location_type "Type": northstar.app:option.warehouse "Warehouse"/u,
+  );
+  assert.equal(
+    applyCustomizationPatches(definition, [outcome.patch]).status,
+    'applied',
+  );
+});

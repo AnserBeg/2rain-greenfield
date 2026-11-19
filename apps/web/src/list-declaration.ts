@@ -7,6 +7,7 @@ import {
   encodeSharedListCursor,
   SHARED_LIST_QUERY_VERSION,
   type SharedListQueryRequest,
+  type SharedListViewCount,
 } from '../../../packages/runtime/src/list-behavior/index.js';
 import {
   SemanticQueryPolicyDeniedError,
@@ -38,7 +39,18 @@ export type DeclaredListColumn = SurfaceList['columns'][number];
 
 export function orderedColumns(
   list: SurfaceList,
+  viewId: string | null = null,
 ): readonly DeclaredListColumn[] {
+  const layout = list.views.find((view) => view.viewId === viewId)?.layout;
+  if (layout) {
+    const byId = new Map(
+      list.columns.map((column) => [column.columnId, column]),
+    );
+    return layout.columns.map((id, priority) => ({
+      ...byId.get(id)!,
+      priority,
+    }));
+  }
   return [...list.columns].sort(
     (left, right) =>
       left.orderKey - right.orderKey ||
@@ -67,10 +79,8 @@ export function readDeclaredListState(
 ): DeclaredListState {
   const views = orderedViews(list);
   const requestedView = url.searchParams.get('view');
-  const viewId =
-    views.find((view) => view.viewId === requestedView)?.viewId ??
-    views[0]?.viewId ??
-    null;
+  const view = views.find((view) => view.viewId === requestedView) ?? views[0];
+  const viewId = view?.viewId ?? null;
   const filterValues = Object.fromEntries(
     orderedFilters(list).flatMap((filter) => {
       const value = url.searchParams.get(filter.filterId);
@@ -79,7 +89,7 @@ export function readDeclaredListState(
         : [];
     }),
   );
-  const requestedSort = list.columns.find(
+  const requestedSort = orderedColumns(list, viewId).find(
     (column) =>
       column.sortable && column.columnId === url.searchParams.get('sort'),
   );
@@ -101,7 +111,7 @@ export function readDeclaredListState(
                   : ('ascending' as const),
             },
           ]
-        : list.defaultSort.map((sort) => ({ ...sort })),
+        : (view?.layout?.sort ?? list.defaultSort).map((sort) => ({ ...sort })),
     ),
     sortIsExplicit: requestedSort !== undefined,
     viewId,
@@ -148,6 +158,7 @@ interface ListArgumentOptions {
   >;
   /** For a view count, the view counted instead of the selected one. */
   readonly viewId?: string | null;
+  readonly viewCounts?: readonly SharedListViewCount[];
   /**
    * The List's progress withheld by current policy (`whenDenied: 'omit'`):
    * the request carries none, so its figures read "—". A view that keeps
@@ -504,20 +515,7 @@ export function declaredListArguments(
 ): RuntimeViewContract.ImmutableJsonValue {
   const viewId = options.viewId === undefined ? state.viewId : options.viewId;
   const view = list.views.find((candidate) => candidate.viewId === viewId);
-  const filtersById = new Map(
-    list.filters.map((filter) => [filter.filterId, filter]),
-  );
-  const fieldFilters = Object.freeze([
-    ...(view?.filters ?? []).map((filter) =>
-      Object.freeze({ fieldId: filter.field, value: filter.value }),
-    ),
-    ...orderedFilters(list).flatMap((filter) => {
-      const value = state.filterValues[filter.filterId];
-      return value !== undefined && filtersById.has(filter.filterId)
-        ? [Object.freeze({ fieldId: filter.field, value })]
-        : [];
-    }),
-  ]);
+  const fieldFilters = declaredViewFilters(list, state, view);
   const referenceLabels = Object.freeze(
     orderedColumns(list).flatMap((column) =>
       column.reference
@@ -626,6 +624,7 @@ export function declaredListArguments(
           ? encodeSharedListCursor(options.queryId, digestInput, offset)
           : null,
       ...(fieldFilters.length > 0 ? { fieldFilters } : {}),
+      ...(options.viewCounts ? { viewCounts: options.viewCounts } : {}),
       ...(progress ? { progress } : {}),
       ...(figures ? { figures } : {}),
       ...(beforeFilters.length > 0 ? { beforeFilters } : {}),
@@ -641,6 +640,25 @@ export function declaredListArguments(
     }),
     ...options.scopeArguments,
   });
+}
+
+export function declaredViewFilters(
+  list: SurfaceList,
+  state: DeclaredListState,
+  view?: SurfaceList['views'][number],
+): SharedListViewCount['filters'] {
+  const pinned = new Set((view?.filters ?? []).map((filter) => filter.field));
+  return Object.freeze([
+    ...(view?.filters ?? []).map((filter) =>
+      Object.freeze({ fieldId: filter.field, value: filter.value }),
+    ),
+    ...orderedFilters(list).flatMap((filter) => {
+      const value = state.filterValues[filter.filterId];
+      return value === undefined || pinned.has(filter.field)
+        ? []
+        : [Object.freeze({ fieldId: filter.field, value })];
+    }),
+  ]);
 }
 
 /** Presents one stored value by its compiled field kind (enum label, date). */
@@ -908,8 +926,9 @@ export function declaredListCsv(
   list: SurfaceList,
   records: readonly SemanticRecordDto[],
   presentLabel: FieldPresenter,
+  viewId: string | null = null,
 ): string {
-  const columns = orderedColumns(list);
+  const columns = orderedColumns(list, viewId);
   const rows = [
     columns.map((column) => csvCell(column.label)).join(','),
     ...records.map((record) =>

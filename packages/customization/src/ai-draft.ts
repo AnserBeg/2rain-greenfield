@@ -8,7 +8,7 @@ import type { CustomizationTargets } from './targets.js';
  * calling the single drafting tool; its input is the patch JSON, read through
  * the same Zod schema every channel uses. Text is never taken as a change, a
  * malformed patch gets one repair turn with the schema's issues, and a request
- * outside the four kinds comes back as a typed `unsupported` naming what is
+ * outside the supported kinds comes back as a typed `unsupported` naming what is
  * missing. Nothing here records, compiles or activates anything.
  *
  * The model is any adapter with this shape -- the operations agent's
@@ -85,6 +85,7 @@ const toolSchema = {
         'addField',
         'addChoice',
         'arrangeLayout',
+        'saveListView',
         'unsupported',
       ],
     },
@@ -97,6 +98,26 @@ const toolSchema = {
     surface: { type: 'string' },
     order: { type: 'array', items: { type: 'string' } },
     upFront: { type: 'array', items: { type: 'string' } },
+    columns: { type: 'array', items: { type: 'string' } },
+    sort: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          column: { type: 'string' },
+          direction: { type: 'string', enum: ['ascending', 'descending'] },
+        },
+        required: ['column', 'direction'],
+      },
+    },
+    filters: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { field: { type: 'string' }, value: { type: 'string' } },
+        required: ['field', 'value'],
+      },
+    },
     hide: { type: 'array', items: { type: 'string' } },
     relabel: {
       type: 'array',
@@ -113,7 +134,7 @@ const toolSchema = {
 
 const TOOL = Object.freeze({
   description:
-    'Record the one change the person asked for, as a typed patch. Include only the keys of the chosen kind. Use kind "unsupported" with missingCapability when the request is not one of the four kinds.',
+    'Record the one change the person asked for, as a typed patch. Include only the keys of the chosen kind. Use kind "unsupported" with missingCapability when the request needs another kind.',
   inputSchema: toolSchema,
   name: DRAFT_CUSTOMIZATION_TOOL,
 });
@@ -122,11 +143,12 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
   return [
     "You turn a business person's request for a change to their ERP into exactly one typed patch.",
     `Answer ONLY by calling the ${DRAFT_CUSTOMIZATION_TOOL} tool, exactly once. Never answer in text.`,
-    'The four kinds, with exactly these keys:',
+    'The supported kinds, with exactly these keys:',
     '- addRecordType {kind, label, fields:[{label, type, required?, options?}]}: a new kind of record with its own list, page and form. The first field is its name and must be type "text". type is one of text, number (whole number), date, yesNo, choice; a choice field lists options. At most 24 fields.',
     '- addField {kind, entity, field:{label, type, required?, options?}}: a new field on an existing record type. entity is one of the record type ids below.',
     '- addChoice {kind, enumField, option}: a new choice on a choice field. enumField is one of the choice field ids below.',
     "- arrangeLayout {kind, surface, order?, hide?, relabel?}: add, reorder, hide or rename columns of a list. surface is one of the list ids below; order, hide and relabel[].field use that list's available field ids. Include an available hidden field in order to show it. At most 16 visible columns.",
+    '- saveListView {kind, surface, label, columns:[column ID], sort:[{column, direction}], filters:[{field, value}]}: add a tab on one of the lists in Saved view targets below. List the columns in the desired order and include the required record title. Sort by at most three selected sortable columns using ascending or descending. Pin at most three of the declared filter values. Use an empty array for no filters or no sort.',
     'If the request needs anything else (workflows, approvals, automations, calculations, permissions, reports, deleting things, changing how stock or money is computed), call the tool with {kind: "unsupported", missingCapability: "<a short name of what is missing>"}.',
     'Write labels the way the person would read them, with an initial capital. Do not invent ids.',
     '',
@@ -155,6 +177,18 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
               `${column.fieldId} "${column.label}"${column.hidden ? ' (available, hidden)' : ''}`,
           )
           .join(', ')}`,
+    ),
+    'Saved view targets:',
+    ...targets.lists.flatMap((list) =>
+      list.savedView
+        ? [
+            `- ${list.surfaceId} — ${list.label}: ${list.savedView.columns.map((column) => `${column.columnId} "${column.label}"${column.title ? ' (required title)' : ''}${column.sortable ? ' (sortable)' : ''}`).join(', ')}`,
+            ...list.savedView.filters.map(
+              (filter) =>
+                `  Filter ${filter.field} "${filter.label}": ${filter.options.map((option) => `${option.value} "${option.label}"`).join(', ')}`,
+            ),
+          ]
+        : [],
     ),
   ].join('\n');
 }

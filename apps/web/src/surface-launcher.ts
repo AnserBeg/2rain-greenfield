@@ -54,6 +54,21 @@ export interface LauncherRenderData {
   } | null;
 }
 
+/** Read queue or tab counts through the request's pinned query and read snapshot. */
+export async function loadDeclaredListCounts(
+  view: RuntimeViewContract.RequestRuntimeView,
+  queryGateway: SemanticQueryGateway,
+  queryId: string,
+  listArguments: RuntimeViewContract.ImmutableJsonValue,
+) {
+  const result = await queryGateway.invoke(view, {
+    arguments: listArguments,
+    queryId,
+    schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+  });
+  return result.listCoverage;
+}
+
 /** The longest code a scan box accepts; longer input is no barcode. */
 export const SCAN_CODE_MAXIMUM_LENGTH = 120;
 
@@ -141,12 +156,13 @@ export async function launcherTiles(
           );
           if (!eligible && omitIneligible) continue;
           if (eligible && (!counted || counted.has(tile.tileId))) {
-            const result = await queryGateway.invoke(view, {
-              arguments: listArguments,
-              queryId: binding.query.queryId,
-              schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-            });
-            count = result.listCoverage?.totalCount ?? null;
+            const coverage = await loadDeclaredListCounts(
+              view,
+              queryGateway,
+              binding.query.queryId,
+              listArguments,
+            );
+            count = coverage?.totalCount ?? null;
           }
         }
       } catch {

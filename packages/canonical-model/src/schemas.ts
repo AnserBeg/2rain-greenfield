@@ -1876,19 +1876,20 @@ const listSearchChild = z.strictObject({
   relation: CanonicalIdSchema,
   field: CanonicalIdSchema,
 });
+const listSort = z
+  .array(
+    z.strictObject({
+      columnId: CanonicalIdSchema,
+      direction: z.enum(['ascending', 'descending']),
+    }),
+  )
+  .max(3);
 export const SurfaceListSchema = z.strictObject({
   kind: z.literal('surfaceList'),
   schemaVersion: v6NodeVersion,
   pageSize: z.int().min(1).max(100),
   columns: z.array(listColumn).min(1).max(16),
-  defaultSort: z
-    .array(
-      z.strictObject({
-        columnId: CanonicalIdSchema,
-        direction: z.enum(['ascending', 'descending']),
-      }),
-    )
-    .max(3),
+  defaultSort: listSort,
   views: z
     .array(
       z.strictObject({
@@ -1896,6 +1897,13 @@ export const SurfaceListSchema = z.strictObject({
         label: LabelSchema,
         orderKey: boundedOrderKey,
         filters: z.array(listFieldValue).max(3),
+        /** A saved selection and default order over this List's columns. */
+        layout: z
+          .strictObject({
+            columns: z.array(CanonicalIdSchema).min(1).max(16),
+            sort: listSort,
+          })
+          .optional(),
         /** Only rows whose declared progress leaves something open. */
         open: z.literal(true).optional(),
         /**
@@ -1929,7 +1937,7 @@ export const SurfaceListSchema = z.strictObject({
         supply: z.enum(['covered', 'short']).optional(),
       }),
     )
-    .max(8),
+    .max(16),
   filters: z
     .array(
       z.strictObject({

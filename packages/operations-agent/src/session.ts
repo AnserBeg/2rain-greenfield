@@ -22,10 +22,14 @@ import {
   type RegisteredOperationDefinition,
 } from '../../runtime/src/semantic-operation-gateway.js';
 import {
+  SemanticQueryPolicyDeniedError,
   SEMANTIC_QUERY_REQUEST_VERSION,
   type SemanticRecordDto,
 } from '../../runtime/src/semantic-query-gateway.js';
-import { SHARED_LIST_QUERY_VERSION } from '../../runtime/src/list-behavior/index.js';
+import {
+  SHARED_LIST_QUERY_VERSION,
+  SharedListContractError,
+} from '../../runtime/src/list-behavior/index.js';
 
 import {
   describePredicate,
@@ -1013,7 +1017,10 @@ export class OperationsAgentSession {
           queryId,
           outcome: listed.records.length === 0 ? 'not-found' : 'exact',
           records: listed.records.map((record) =>
-            compactRecord(record, selection),
+            compactRecord(
+              record,
+              selection ?? listed.presentationFields ?? null,
+            ),
           ),
           ...(listed.nextCursor ? { nextCursor: listed.nextCursor } : {}),
         };
@@ -1063,41 +1070,49 @@ export class OperationsAgentSession {
   ): Promise<{
     records: readonly SemanticRecordDto[];
     nextCursor: string | null;
+    presentationFields?: readonly string[];
   }> {
+    const preset = catalog.preset(query.queryId);
     const presetView = request.view
-      ? catalog.preset(query.queryId)?.views?.find(
+      ? preset?.views?.find(
           (candidate) =>
             candidate.viewId ===
             matchId(
               request.view!,
-              (catalog.preset(query.queryId)?.views ?? []).map(
-                (view) => view.viewId,
-              ),
+              (preset?.views ?? []).map((view) => view.viewId),
               localName(query.queryId),
             ),
         )
       : undefined;
     if (request.view && !presetView)
       throw new ToolInputError(`no view ${request.view} on ${query.queryId}`);
+    const pinnedFields = new Set(
+      presetView?.fieldFilters.map((filter) => filter.fieldId),
+    );
     const filters = [
       ...(presetView?.fieldFilters ?? []),
-      ...(request.filters ?? []).map((filter) => {
-        if (
-          !isRecord(filter) ||
-          typeof filter.fieldId !== 'string' ||
-          (typeof filter.value !== 'string' && typeof filter.value !== 'number')
-        )
-          throw new ToolInputError('a filter is {"fieldId", "value"}');
-        return {
-          fieldId:
-            matchId(
-              filter.fieldId,
-              query.selections.map((selection) => selection.fieldId),
-              localName(query.sourceEntityId),
-            ) ?? filter.fieldId,
-          value: String(filter.value),
-        };
-      }),
+      ...(request.filters ?? [])
+        .map((filter) => {
+          if (
+            !isRecord(filter) ||
+            typeof filter.fieldId !== 'string' ||
+            (typeof filter.value !== 'string' &&
+              typeof filter.value !== 'number')
+          )
+            throw new ToolInputError('a filter is {"fieldId", "value"}');
+          return {
+            fieldId:
+              matchId(
+                filter.fieldId,
+                query.selections.map((selection) => selection.fieldId),
+                localName(query.sourceEntityId),
+              ) ?? filter.fieldId,
+            value: String(filter.value),
+          };
+        })
+        .filter(
+          (filter) => !presetView?.columns || !pinnedFields.has(filter.fieldId),
+        ),
     ];
     if (filters.length > 4)
       throw new ToolInputError('at most four exact filters');
@@ -1114,28 +1129,90 @@ export class OperationsAgentSession {
           recordId: requiredText(request.parent.recordId, 'parent.recordId'),
         }
       : null;
-    const result = await this.#options.runtime.queryGateway.invoke(view, {
-      schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
-      queryId: query.queryId,
-      arguments: withScope(
-        query,
-        {
-          includeArchived: false,
-          list: {
-            cursor: request.cursor ?? null,
-            matchMode: 'substring',
-            pageSize: limit,
-            relationLabels: [],
-            schemaVersion: SHARED_LIST_QUERY_VERSION,
-            search: request.search ?? '',
-            sort: [],
-            ...(filters.length > 0 ? { fieldFilters: filters } : {}),
-            ...(parent ? { [request.scope ?? 'parentScope']: parent } : {}),
+    const savedView = presetView?.columns !== undefined;
+    const progress =
+      savedView && isRecord(preset?.progress) ? preset.progress : null;
+    const supply = isRecord(progress?.supply) ? progress.supply : null;
+    const showProgress = (show: boolean, showSupply: boolean) => {
+      if (!show || !progress) return null;
+      const body = { ...progress };
+      delete body.whenDenied;
+      delete body.supply;
+      if (!showSupply || !supply) return body;
+      const supplyBody = { ...supply };
+      delete supplyBody.whenDenied;
+      return { ...body, supply: supplyBody };
+    };
+    const invoke = (withProgress: boolean, withSupply: boolean) => {
+      const progressArgs = showProgress(withProgress, withSupply);
+      return this.#options.runtime.queryGateway.invoke(view, {
+        schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+        queryId: query.queryId,
+        arguments: withScope(
+          query,
+          {
+            includeArchived: false,
+            list: {
+              cursor: request.cursor ?? null,
+              matchMode: 'substring',
+              pageSize: limit,
+              relationLabels: [],
+              schemaVersion: SHARED_LIST_QUERY_VERSION,
+              search: request.search ?? '',
+              sort: presetView?.sort ?? [],
+              ...(presetView?.columns && preset?.referenceLabels?.length
+                ? { referenceLabels: preset.referenceLabels }
+                : {}),
+              ...(progressArgs ? { progress: progressArgs } : {}),
+              ...(savedView && preset?.figures
+                ? { figures: preset.figures }
+                : {}),
+              ...(savedView && preset?.searchChildren
+                ? { searchChildren: preset.searchChildren }
+                : {}),
+              ...(filters.length > 0 ? { fieldFilters: filters } : {}),
+              ...(parent ? { [request.scope ?? 'parentScope']: parent } : {}),
+            },
           },
-        },
-        this.#options.companyId,
-      ),
-    });
+          this.#options.companyId,
+        ),
+      });
+    };
+    let includeProgress = progress !== null;
+    let includeSupply = supply !== null;
+    let result: Awaited<ReturnType<typeof invoke>>;
+    for (;;) {
+      try {
+        result = await invoke(includeProgress, includeSupply);
+        break;
+      } catch (error) {
+        const denied =
+          error instanceof SemanticQueryPolicyDeniedError
+            ? error.queryId
+            : null;
+        const cursorMismatch =
+          error instanceof SharedListContractError &&
+          error.code === 'LIST_CURSOR_INVALID';
+        if (
+          includeProgress &&
+          includeSupply &&
+          supply?.whenDenied === 'omit' &&
+          (cursorMismatch || (denied && usesQuery(supply, denied)))
+        ) {
+          includeSupply = false;
+        } else if (
+          includeProgress &&
+          progress?.whenDenied === 'omit' &&
+          (cursorMismatch ||
+            (denied &&
+              [progress.done, progress.lines].some(
+                (source) => isRecord(source) && source.queryId === denied,
+              )))
+        ) {
+          includeProgress = false;
+        } else throw error;
+      }
+    }
     if (request.scope) {
       const coverage = result.listCoverage;
       const applied = coverage?.[request.scope];
@@ -1154,6 +1231,9 @@ export class OperationsAgentSession {
     return {
       records: result.records,
       nextCursor: result.listCoverage?.nextCursor ?? null,
+      ...(presetView?.columns
+        ? { presentationFields: presetView.columns }
+        : {}),
     };
   }
 
@@ -2452,6 +2532,16 @@ function declaredOnly(
   );
   return Object.fromEntries(
     Object.entries(args).filter(([key]) => declared.has(key)),
+  );
+}
+
+function usesQuery(value: ImmutableJsonValue, queryId: string): boolean {
+  if (Array.isArray(value))
+    return value.some((entry) => usesQuery(entry, queryId));
+  return (
+    isRecord(value) &&
+    (value.queryId === queryId ||
+      Object.values(value).some((entry) => usesQuery(entry, queryId)))
   );
 }
 

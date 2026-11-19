@@ -6,11 +6,19 @@ import test from 'node:test';
 
 import type pg from 'pg';
 import { renderCompositionFields } from '../../apps/web/src/surface-composition.js';
+import {
+  declaredListArguments,
+  declaredListCsv,
+  declaredViewFilters,
+  readDeclaredListState,
+} from '../../apps/web/src/list-declaration.js';
 import type { CompiledSurfaceDefinition } from '../../apps/web/src/surface-contract.js';
 import {
+  CanonicalModelError,
   normalizeApplicationPackage,
   type SurfaceList,
 } from '../../packages/canonical-model/src/index.js';
+import { PROJECTION_FAMILY_IDS } from '../../packages/compiler/src/index.js';
 
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import {
@@ -32,6 +40,11 @@ import {
 } from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { SemanticOperationGateway } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import { SemanticQueryGateway } from '../../packages/runtime/src/semantic-query-gateway.js';
+import { unsupportedRuntimeCapability } from '../../packages/runtime/src/request-runtime-view.js';
+import {
+  authorizeSharedListFields,
+  parseSharedListArguments,
+} from '../../packages/runtime/src/list-behavior/index.js';
 
 const authoredPath = resolve('apps/web/release/app.authored.json');
 const authored = JSON.parse(readFileSync(authoredPath, 'utf8')) as Record<
@@ -63,7 +76,7 @@ const equipment = patch({
   label: 'Equipment',
 });
 
-test('a request outside the four patch kinds is unsupported and names what is missing', () => {
+test('a request outside the supported patch kinds is unsupported and names what is missing', () => {
   const outcome = parseCustomizationPatch({
     kind: 'addWorkflow',
     label: 'Approve equipment purchases',
@@ -609,6 +622,171 @@ test('a generic Party list can be arranged through the same declared list runtim
   assert.equal(
     'list' in surface && (surface.list as SurfaceList).columns[0]?.field,
     'northstar.app:field.party_credit_limit',
+  );
+});
+
+test('a saved Location view compiles its own columns, sort and declared filter', async () => {
+  const baseView = {
+    kind: 'saveListView',
+    surface: 'northstar.app:surface.location_list',
+    label: 'Warehouses',
+    columns: [
+      'northstar.app:list_column.location_list_name',
+      'northstar.app:list_column.location_list_code',
+    ],
+    sort: [
+      {
+        column: 'northstar.app:list_column.location_list_name',
+        direction: 'descending',
+      },
+    ],
+    filters: [
+      {
+        field: 'northstar.app:field.location_type',
+        value: 'northstar.app:option.warehouse',
+      },
+    ],
+  };
+  const saved = patch(baseView);
+  const compiled = await compileInSandbox(sandboxRequest([saved]));
+  assert.equal(compiled.status, 'compiled', JSON.stringify(compiled));
+  const { projections } = parseSerializedRelease(compiled.steps[0]!.release)
+    .compiled.bundle.releaseManifest;
+  for (const [familyId, version] of [
+    [PROJECTION_FAMILY_IDS.surfaceManifest, 24],
+    [PROJECTION_FAMILY_IDS.agentDiscovery, 2],
+  ] as const) {
+    const requirement = projections.find(
+      (projection) => projection.familyId === familyId,
+    )!.requiredRuntimeCapability;
+    assert.equal(requirement.minimumVersion, version);
+    assert.equal(unsupportedRuntimeCapability(familyId, requirement), null);
+    assert.match(
+      unsupportedRuntimeCapability(familyId, requirement, {
+        [familyId]: {
+          capabilityId: requirement.capabilityId,
+          maximumSupportedVersion: version - 1,
+        },
+      }) ?? '',
+      /requires version/u,
+    );
+  }
+  assert.match(
+    compiled.steps[0]!.rendered.text,
+    /Columns in order: Name, Code\./u,
+  );
+  assert.match(
+    compiled.steps[0]!.rendered.text,
+    /Filter: Type is Warehouse\./u,
+  );
+
+  const result = applyCustomizationPatches(authored, [saved]);
+  assert.equal(result.status, 'applied');
+  const normalized = normalizeApplicationPackage(result.authored);
+  const surface = normalized.surfaces.find(
+    (s) => s.surfaceId === baseView.surface,
+  )!;
+  const list = ('list' in surface && surface.list) as SurfaceList;
+  assert.deepEqual(
+    list.views.map((view) => view.label),
+    ['All', 'Warehouses'],
+  );
+  assert.deepEqual(list.views[1]?.layout?.columns, baseView.columns);
+  assert.deepEqual(list.views[1]?.layout?.sort, [
+    { columnId: baseView.sort[0]!.column, direction: 'descending' },
+  ]);
+  const all = list.views[0]!;
+  const warehouses = list.views[1]!;
+  const filterId = list.filters.find(
+    (filter) => filter.field === baseView.filters[0]!.field,
+  )!.filterId;
+  const url = new URL('http://local/');
+  url.searchParams.set('view', warehouses.viewId);
+  url.searchParams.set(filterId, 'northstar.app:option.store');
+  const state = readDeclaredListState(list, url);
+  const queryId = 'northstar.app:query.location_list';
+  const read = {
+    mode: 'page' as const,
+    now: new Date('2026-11-18T00:00:00Z'),
+    queryId,
+    scopeArguments: {},
+  };
+  const limits = { declaredParameterIds: [], maximumResultCount: 100, queryId };
+  const selected = parseSharedListArguments(
+    declaredListArguments(list, state, read),
+    limits,
+  )!;
+  assert.deepEqual(selected.fieldFilters, [
+    { fieldId: baseView.filters[0]!.field, value: baseView.filters[0]!.value },
+  ]);
+  assert.deepEqual(selected.sort, [
+    { fieldId: 'northstar.app:field.location_name', direction: 'descending' },
+  ]);
+  assert.deepEqual(declaredViewFilters(list, state, all), [
+    {
+      fieldId: baseView.filters[0]!.field,
+      value: 'northstar.app:option.store',
+    },
+  ]);
+  assert.equal(
+    declaredListCsv(
+      list,
+      [
+        {
+          archived: false,
+          entityId: 'northstar.app:entity.location',
+          recordId: 'location',
+          revision: 1,
+          values: {
+            'northstar.app:field.location_name': 'Main warehouse',
+            'northstar.app:field.location_code': 'W-1',
+            [baseView.filters[0]!.field]: baseView.filters[0]!.value,
+          },
+        },
+      ],
+      (_record, _field, value) => String(value),
+      warehouses.viewId,
+    ),
+    '\uFEFFName,Code\r\nMain warehouse,W-1\r\n',
+  );
+  assert.throws(
+    () =>
+      authorizeSharedListFields(
+        {
+          ...selected,
+          sort: [],
+          viewCounts: [
+            { viewId: warehouses.viewId, filters: selected.fieldFilters! },
+          ],
+        },
+        { selectedFieldIds: new Set() },
+      ),
+    /list query selects/u,
+  );
+
+  const refused = await compileInSandbox(
+    sandboxRequest([
+      patch({
+        ...baseView,
+        filters: [
+          { ...baseView.filters[0], value: 'northstar.app:option.invalid' },
+        ],
+      }),
+    ]),
+  );
+  assert.equal(refused.status, 'refused');
+  assert.equal(refused.code, 'CUSTOMIZE_LIST_VIEW_INVALID');
+
+  const invalidLayout = structuredClone(result.authored);
+  const edited = (
+    invalidLayout.surfaces as { surfaceId: string; list?: SurfaceList }[]
+  ).find((s) => s.surfaceId === baseView.surface)!;
+  edited.list!.views[1]!.layout!.columns.splice(1, 1);
+  assert.throws(
+    () => normalizeApplicationPackage(invalidLayout),
+    (error) =>
+      error instanceof CanonicalModelError &&
+      error.diagnostics.some((entry) => entry.rule.includes('keeps its title')),
   );
 });
 
