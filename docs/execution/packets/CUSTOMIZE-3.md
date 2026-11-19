@@ -40,7 +40,7 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
   "base": "881768043d00d894b44a64486c43aa10b85ed7cb",
-  "head": "9025a422f8e0d53eb6c1e2f83258b3575841e14e",
+  "head": "f8beb192f557444e16935648d9e59bf03a6934c7",
   "changedPaths": [
     ".github/workflows/ci.yml", ".github/workflows/evidence.yml", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
     "apps/web/src/document-editor.ts", "apps/web/src/surface-composition.ts", "apps/web/src/surface-runtime.ts", "apps/web/src/validation-refusal.ts",
