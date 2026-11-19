@@ -1,32 +1,23 @@
 # UI-COMPOSE-1 — Arrange forms and record pages, add pop-up actions and brand the app
 
-Slice 0 is a docs-only proposal. Implementation awaits the orchestrator’s Fable ruling.
+The orchestrator accepted ADR-0079 with Fable’s amendments on 2026-11-19.
 
-## Decisions for the read
+## Decisions
 
-1. First-party and tenant record types publish the same section and field inventory. Check required inputs and protected business blocks through the whole layout.
-2. A custom button opens one native Task with a full-page fallback. Its bound target supplies its rules, confirmation and approval requirements.
-3. A company brand revision supplies the Ledger palette, display name and governed logo for both the shell and DOCS-1 generation.
-4. Append versioned patches with stable IDs and source expectations. A moved field can break an upgrade even when its ID still exists.
-5. Layout takes the next implemented surface rung at merge, 29 if workflow and file fields land at 27 and 28. This follows the DOCS-1 Fable ruling at `6b2d28da`. Predecessor-reader refusal and release reproduction gate implementation.
+1. Compose eligible first-party and tenant inputs inside declared slots. Keep each input bound once, protect required and Tier B inputs, and confine block moves to the existing sections/childTables region.
+2. Start from the legacy arrangement. Only the layout revision can write the composed surface thereafter. Derive base IDs without changing historical release bytes.
+3. Append versioned layout, action and brand revisions. Verify the layout result digest, source bindings and target contract when replaying.
+4. Each declaring capability takes the next rung above the implemented maximum at merge. Admission requires refusal by the preceding reader and reproduction of feature-absent releases.
+5. A secondary pop-up inherits its target’s grants, guards, review and approval. The company chooses a tested Ledger colour scheme and display name. Generated documents pin their brand revision.
 
 ## Slices
 
-0. [Design and Fable read](../../decisions/ADR-0079-form-and-record-composition.md).
-1. Layout, including existing sections, disclosure and assistant discovery.
-2. Pop-up actions with governed execution.
-3. Branding across the app and generated documents.
+- [Design with Fable’s amendments](../../decisions/ADR-0079-form-and-record-composition.md).
+- 1a covers the slot inventory, persistent IDs and create/move/rename/reorder.
+- 1b adds disclosure, upgrade refusals and assistant discovery.
+- Shell branding and pop-up actions can land in either order. Document branding follows DOCS-1 templates.
 
-## Gates
-
-The docs-only gate is `scripts/check-records.sh`. The Fable ruling gates Slice 1.
-
-## Test it yourself
+## Gates and test it yourself
 
 Run `scripts/check-records.sh` from the repository root. Expect exit status zero.
-In the ADR, trace these cases before approving the design.
-
-- Move a required supplier input into Delivery and then collapse Delivery. The move succeeds in an expanded section. The collapse must be refused.
-- After an upgrade moves a field, replay the owner’s old move. The source-section mismatch must identify the field and preserve the live release.
-- Open a stock action and close the dialog before confirming. Nothing posts.
-- Change the company palette and generate a successor PDF. The earlier signed version keeps its bytes.
+In ADR-0079, trace a required supplier input moved into Delivery, a legacy form arrangement followed by a layout revision, and a governed action whose displayed input came from the record.
