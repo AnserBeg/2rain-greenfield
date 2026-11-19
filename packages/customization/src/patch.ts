@@ -3,7 +3,7 @@ import { z } from 'zod';
 /**
  * The typed semantic patch a tenant customization is made of (ADR-0013). Every
  * channel -- the command line, the Customize screen and the model -- emits one
- * of these four kinds and nothing else. A request outside them is a typed
+ * of these kinds. A request outside them is a typed
  * `unsupported` result naming the missing capability, never partial output.
  *
  * Targets are canonical ids, never labels, so re-applying a recorded patch to
@@ -111,11 +111,35 @@ const arrangeLayout = z
     }
   });
 
+const saveListView = z.strictObject({
+  kind: z.literal('saveListView'),
+  surface: canonicalId,
+  label,
+  columns: z.array(canonicalId).min(1).max(16),
+  sort: z
+    .array(
+      z.strictObject({
+        column: canonicalId,
+        direction: z.enum(['ascending', 'descending']),
+      }),
+    )
+    .max(3),
+  filters: z
+    .array(
+      z.strictObject({
+        field: canonicalId,
+        value: z.string().min(1).max(240),
+      }),
+    )
+    .max(3),
+});
+
 export const CustomizationPatchSchema = z.discriminatedUnion('kind', [
   addRecordType,
   addField,
   addChoice,
   arrangeLayout,
+  saveListView,
 ]);
 type ParsedPatch = z.infer<typeof CustomizationPatchSchema>;
 export type CustomizationPatch =
@@ -126,6 +150,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'addField',
   'addChoice',
   'arrangeLayout',
+  'saveListView',
 ] as const satisfies readonly CustomizationPatchKind[]);
 
 export interface UnsupportedCustomization {
@@ -158,7 +183,7 @@ export function parseCustomizationPatch(
   ) {
     return unsupported(
       typeof kind === 'string' && kind.trim() !== '' ? kind : 'unnamed',
-      `This version can add a record type, add a field, add a choice or arrange a layout; "${typeof kind === 'string' ? kind : 'no kind'}" is not one of them.`,
+      `This version can add a record type, add a field, add a choice, arrange a layout or save a list view. "${typeof kind === 'string' ? kind : 'no kind'}" is not one of them.`,
     );
   }
   const parsed = CustomizationPatchSchema.safeParse(input);

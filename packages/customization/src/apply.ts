@@ -47,6 +47,7 @@ export type CustomizationRefusalCode =
   | 'CUSTOMIZE_TARGET_IN_TIER_B_DEPENDENCY_SET'
   | 'CUSTOMIZE_TARGET_NOT_CHOICE'
   | 'CUSTOMIZE_TARGET_NOT_FOUND'
+  | 'CUSTOMIZE_LIST_VIEW_INVALID'
   | 'CUSTOMIZE_FIELD_NOT_ON_LIST';
 
 export interface CustomizationRefusal {
@@ -140,6 +141,8 @@ function applyOne(
       return addChoice(authored, patch.enumField, patch.option);
     case 'arrangeLayout':
       return arrangeLayout(authored, patch);
+    case 'saveListView':
+      return saveListView(authored, patch);
   }
 }
 
@@ -629,7 +632,7 @@ function listColumn(
   index: number,
 ): Json {
   return {
-    columnId: `${namespace}:list_column.${entityLocal}_list_${localOf(String(field.fieldId))}`,
+    columnId: listColumnId(namespace, entityLocal, String(field.fieldId)),
     field: field.fieldId,
     label: field.label,
     orderKey: (index + 1) * 10,
@@ -640,6 +643,14 @@ function listColumn(
       ? { format: 'date' }
       : {}),
   };
+}
+
+export function listColumnId(
+  namespace: string,
+  entityLocal: string,
+  fieldId: string,
+): string {
+  return `${namespace}:list_column.${entityLocal}_list_${localOf(fieldId)}`;
 }
 
 function addChoice(
@@ -778,24 +789,43 @@ function arrangeLayout(
   );
   const boundary = tierBoundary(entityId);
   if (boundary) return boundary;
-  const declared = surface.list as Json | undefined;
+  let declared = surface.list as Json | undefined;
   if (!declared) {
-    return unsupported(
-      'arrangeLayout.undeclaredList',
-      'This list has no declared columns to arrange.',
+    const fields = new Map(
+      list(authored, 'fields').map((field) => [field.fieldId, field]),
     );
+    declared = {
+      kind: 'surfaceList',
+      schemaVersion: version,
+      columns: (query!.selections as Json[]).map((selection, index) => ({
+        ...listColumn(
+          namespaceOf(authored),
+          localOf(entityId),
+          fields.get((selection.field as Json).targetId)!,
+          index,
+        ),
+        role: index === 0 ? 'title' : 'value',
+      })),
+      defaultSort: [],
+      filters: [],
+      views: [],
+      pageSize: Math.min(50, Number(query!.maximumResultCount)),
+    };
+    surface.list = declared;
   }
   const columns = declared.columns as Json[];
   const byField = new Map(
     columns.map((column) => [String(column.field), column]),
   );
-  // A selected custom field remains available after a prior layout hid it.
+  // Every field of the listed entity may become a column. Only fields used
+  // by this arrangement are added to the query, so earlier patches reproduce
+  // their original selections and release roots.
   const selected = new Set(
     (query!.selections as Json[]).map((s) => (s.field as Json).targetId),
   );
   for (const field of list(authored, 'fields')) {
     const id = String(field.fieldId);
-    if (isTenantId(id) && selected.has(id) && !byField.has(id))
+    if ((field.entity as Json).targetId === entityId && !byField.has(id))
       byField.set(
         id,
         listColumn(
@@ -834,6 +864,26 @@ function arrangeLayout(
       `${String(surface.label)} must keep at least one column.`,
     );
   }
+  for (const column of ordered) {
+    if (selected.has(column.field)) continue;
+    // Existing columns can also be derived outputs. Those already have a
+    // declared provider and never become stored-field selections.
+    if (!list(authored, 'fields').some((f) => f.fieldId === column.field))
+      continue;
+    const selections = query!.selections as Json[];
+    selections.push({
+      kind: 'querySelection',
+      schemaVersion: version,
+      selectionId: `${namespaceOf(authored)}:selection.custom_${localOf(String(query!.queryId))}_${localOf(String(column.field))}`,
+      field: {
+        kind: 'fieldReference',
+        schemaVersion: version,
+        targetId: column.field,
+      },
+      orderKey: nextOrder(selections),
+    });
+    selected.add(column.field);
+  }
   const titleKept = ordered.some((column) => column.role === 'title');
   declared.columns = ordered.map((column, index) => ({
     ...column,
@@ -844,6 +894,16 @@ function arrangeLayout(
   const keptIds = new Set(
     (declared.columns as Json[]).map((column) => String(column.columnId)),
   );
+  const affected = (declared.views as Json[]).find((view) =>
+    ((view.layout as { columns: string[] } | undefined)?.columns ?? []).some(
+      (id) => !keptIds.has(id),
+    ),
+  );
+  if (affected)
+    return refusal(
+      'CUSTOMIZE_LIST_VIEW_INVALID',
+      `Keep the columns used by the "${String(affected.label)}" view.`,
+    );
   declared.defaultSort = (declared.defaultSort as Json[]).filter((sort) =>
     keptIds.has(String(sort.columnId)),
   );
@@ -863,6 +923,135 @@ function tierBoundary(entityId: string): Outcome | null {
     'CUSTOMIZE_TARGET_IN_TIER_B_DEPENDENCY_SET',
     `${entityId} is read or written as a whole by a platform capability (plan §10.6), so it cannot be customized.`,
   );
+}
+
+function saveListView(
+  authored: Json,
+  patch: Extract<CustomizationPatch, { kind: 'saveListView' }>,
+): Outcome | null {
+  const surface = list(authored, 'surfaces').find(
+    (candidate) =>
+      candidate.surfaceId === patch.surface && candidate.surfaceRole === 'list',
+  );
+  if (!surface)
+    return refusal('CUSTOMIZE_TARGET_NOT_FOUND', 'Choose an existing list.');
+
+  const query = list(authored, 'queries').find(
+    (candidate) => candidate.queryId === (surface.dataSource as Json).targetId,
+  );
+  const boundary = tierBoundary(
+    String((query?.sourceEntity as Json | undefined)?.targetId ?? ''),
+  );
+  if (boundary) return boundary;
+  if (!surface.list) {
+    const arranged = arrangeLayout(authored, {
+      kind: 'arrangeLayout',
+      surface: patch.surface,
+    });
+    if (arranged) return arranged;
+  }
+  const declared = surface.list as Json;
+  const views = declared.views as Json[];
+  const namespace = namespaceOf(authored);
+  const local = localOf(patch.surface);
+  const viewId = `${namespace}:list_view.custom_${local}_${slug(patch.label)}`;
+  if (
+    views.some(
+      (view) =>
+        view.viewId === viewId ||
+        String(view.label).toLowerCase() === patch.label.toLowerCase(),
+    ) ||
+    (views.length === 0 && patch.label.toLowerCase() === 'all')
+  )
+    return refusal(
+      'CUSTOMIZE_DUPLICATE_LABEL',
+      'This list already has a view with that name.',
+    );
+  if (views.filter((view) => view.layout).length >= 8)
+    return refusal(
+      'CUSTOMIZE_LIST_VIEW_INVALID',
+      'This list already has eight saved views.',
+    );
+
+  const columns = new Map(
+    (declared.columns as Json[]).map((column) => [
+      String(column.columnId),
+      column,
+    ]),
+  );
+  if (
+    firstDuplicate(patch.columns) ||
+    patch.columns.some((id) => !columns.has(id)) ||
+    !patch.columns.some((id) => columns.get(id)?.role === 'title')
+  )
+    return refusal(
+      'CUSTOMIZE_FIELD_NOT_ON_LIST',
+      'Choose distinct columns from this list and keep its record title.',
+    );
+  const sort = patch.sort.map(({ column, direction }) => ({
+    columnId: column,
+    direction,
+  }));
+  if (
+    firstDuplicate(sort.map((entry) => entry.columnId)) ||
+    sort.some(
+      ({ columnId }) =>
+        !patch.columns.includes(columnId) ||
+        columns.get(columnId)?.sortable !== true,
+    )
+  )
+    return refusal(
+      'CUSTOMIZE_LIST_VIEW_INVALID',
+      'Sort by a column shown in this view that supports sorting.',
+    );
+  const filters = declared.filters as {
+    field: string;
+    options: { value: string }[];
+  }[];
+  if (
+    firstDuplicate(patch.filters.map((filter) => filter.field)) ||
+    patch.filters.some(
+      ({ field, value }) =>
+        !filters.some(
+          (filter) =>
+            filter.field === field &&
+            filter.options.some((option) => option.value === value),
+        ),
+    )
+  )
+    return refusal(
+      'CUSTOMIZE_LIST_VIEW_INVALID',
+      'Choose one declared filter value for each field you want to filter.',
+    );
+
+  if (views.length === 0) {
+    views.push({
+      viewId: `${namespace}:list_view.${local}_all`,
+      label: 'All',
+      orderKey: 10,
+      filters: [],
+    });
+    (surface.slots as Json[]).push({
+      kind: 'surfaceSlot',
+      schemaVersion: version,
+      slot: 'savedViews',
+      slotId: `${namespace}:slot.${local}_saved_views`,
+      orderKey: 15,
+      content: {
+        kind: 'opaqueSurfaceContentReference',
+        schemaVersion: version,
+        targetId: `${namespace}:capability.standard_surface_content`,
+      },
+    });
+  }
+  views.push({
+    viewId,
+    label: patch.label,
+    orderKey: nextOrder(views),
+    filters: patch.filters,
+    layout: { columns: patch.columns, sort },
+  });
+  return null;
 }
 
 function fieldDefinition(

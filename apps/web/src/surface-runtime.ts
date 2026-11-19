@@ -15,11 +15,13 @@ import { documentEditor } from './document-editor.js';
 import {
   companyParameterFor,
   launcherTiles,
+  loadDeclaredListCounts,
   resolveLauncherScan,
   type LauncherRenderData,
 } from './surface-launcher.js';
 import {
   declaredListArguments,
+  declaredViewFilters,
   declaredListCsv,
   exportFileName,
   figureBandLabel,
@@ -781,37 +783,73 @@ async function declaredListData(
   now: Date,
 ): Promise<SurfaceDataRenderState> {
   const scopeArguments = legalEntityScopeArguments(binding, url);
-  const read = (
+  const argumentsFor = (
     mode: 'count' | 'page',
     listState: DeclaredListState,
     withheld: WithheldFigures,
-    viewId?: string,
+    viewId?: string | null,
+    viewCounts?: Parameters<typeof declaredListArguments>[2]['viewCounts'],
   ) =>
+    declaredListArguments(list, listState, {
+      mode,
+      now,
+      ...(mode === 'page'
+        ? { pageOffset: (listState.page - 1) * list.pageSize }
+        : {}),
+      queryId: binding.query.queryId,
+      scopeArguments,
+      ...(viewId === undefined ? {} : { viewId }),
+      ...(viewCounts ? { viewCounts } : {}),
+      ...withoutWithheld(withheld),
+    });
+  const readPage = (listState: DeclaredListState, withheld: WithheldFigures) =>
     queryGateway.invoke(view, {
-      arguments: declaredListArguments(list, listState, {
-        mode,
-        now,
-        ...(mode === 'page'
-          ? { pageOffset: (listState.page - 1) * list.pageSize }
-          : {}),
-        queryId: binding.query.queryId,
-        scopeArguments,
-        ...(viewId === undefined ? {} : { viewId }),
-        ...withoutWithheld(withheld),
-      }),
+      arguments: argumentsFor('page', listState, withheld),
       queryId: binding.query.queryId,
       schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
     });
   const viewCounts = async (withheld: WithheldFigures) => {
     const counts: Record<string, number> = {};
+    const savedViews = list.views.filter((candidate) => candidate.layout);
+    if (savedViews.length > 0) {
+      try {
+        const groups = savedViews.map((candidate) => ({
+          viewId: candidate.viewId,
+          filters: declaredViewFilters(list, state, candidate),
+        }));
+        const args = argumentsFor(
+          'count',
+          { ...state, filterValues: {} },
+          withheld,
+          null,
+          groups,
+        );
+        const counted = await loadDeclaredListCounts(
+          view,
+          queryGateway,
+          binding.query.queryId,
+          args,
+        );
+        for (const count of counted?.viewCounts ?? [])
+          counts[count.viewId] = count.totalCount;
+      } catch {
+        // An unavailable batch leaves the tabs navigable, without a guessed count.
+      }
+    }
     for (const listView of list.views) {
       // A view needing withheld figures is never counted without them: its
       // tab shows no count, and its own page refuses.
-      if (!viewServes(list, withheld, listView.viewId)) continue;
+      if (listView.layout || !viewServes(list, withheld, listView.viewId))
+        continue;
       try {
-        const counted = await read('count', state, withheld, listView.viewId);
-        if (counted.listCoverage)
-          counts[listView.viewId] = counted.listCoverage.totalCount;
+        const args = argumentsFor('count', state, withheld, listView.viewId);
+        const counted = await loadDeclaredListCounts(
+          view,
+          queryGateway,
+          binding.query.queryId,
+          args,
+        );
+        if (counted) counts[listView.viewId] = counted.totalCount;
       } catch {
         // Omitted: the tab still navigates, and its own page reports its count.
       }
@@ -822,7 +860,7 @@ async function declaredListData(
   let result: SemanticQueryResultEnvelope | undefined;
   while (result === undefined) {
     try {
-      result = await read('page', state, withheld);
+      result = await readPage(state, withheld);
     } catch (error) {
       const next = withholding(list, withheld, error);
       if (next === null) throw error;
@@ -849,7 +887,7 @@ async function declaredListData(
   ) {
     const lastPage = Math.ceil(coverage.totalCount / list.pageSize);
     state = { ...state, page: lastPage };
-    result = await read('page', state, withheld);
+    result = await readPage(state, withheld);
   }
   const counts = await viewCounts(withheld);
   const data = dataState(result);
@@ -924,21 +962,26 @@ async function exportDeclaredList(
     return renderApplicationDiagnostic(422, { code: 'LIST_EXPORT_OVER_LIMIT' });
   return Object.freeze({
     download: Object.freeze({
-      body: declaredListCsv(list, result.records, (record, fieldId, value) => {
-        // A band's value is a code; its declared label is what it means.
-        const band = figureBandLabel(list, fieldId, value);
-        if (band !== null) return band;
-        const presented = displayFieldValue(view, record, fieldId, value);
-        // Only an enumeration's label replaces its stored value in a file.
-        return typeof value === 'string' &&
-          presented !== value &&
-          !Number.isFinite(Date.parse(value)) &&
-          !/^-?\d+(\.\d+)?$/u.test(value)
-          ? presented
-          : typeof value === 'string'
-            ? value
-            : JSON.stringify(value);
-      }),
+      body: declaredListCsv(
+        list,
+        result.records,
+        (record, fieldId, value) => {
+          // A band's value is a code; its declared label is what it means.
+          const band = figureBandLabel(list, fieldId, value);
+          if (band !== null) return band;
+          const presented = displayFieldValue(view, record, fieldId, value);
+          // Only an enumeration's label replaces its stored value in a file.
+          return typeof value === 'string' &&
+            presented !== value &&
+            !Number.isFinite(Date.parse(value)) &&
+            !/^-?\d+(\.\d+)?$/u.test(value)
+            ? presented
+            : typeof value === 'string'
+              ? value
+              : JSON.stringify(value);
+        },
+        state.viewId,
+      ),
       contentType: 'text/csv; charset=utf-8' as const,
       fileName: exportFileName(surface.label, now),
     }),

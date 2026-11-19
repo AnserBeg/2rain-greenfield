@@ -2697,7 +2697,11 @@ function renderDeclaredListViews(
     .map((view) => {
       const current = view.viewId === state.viewId;
       const count = counts[view.viewId];
-      const href = `/?${declaredListParameters(state, base, { page: 1, viewId: view.viewId }).toString()}`;
+      const href = `/?${declaredListParameters(state, base, {
+        page: 1,
+        viewId: view.viewId,
+        ...(view.layout ? { sortIsExplicit: false } : {}),
+      }).toString()}`;
       return `<li><a class="list-view" href="${escapeHtml(href)}" data-view-id="${escapeHtml(view.viewId)}"${current ? ' aria-current="page"' : ''}><span>${escapeHtml(view.label)}</span>${count === undefined ? '' : `<span class="list-view__count" data-view-count="${String(count)}">${escapeHtml(String(count))}</span>`}</a></li>`;
     })
     .join('')}</ul></nav>`;
@@ -2705,7 +2709,28 @@ function renderDeclaredListViews(
 
 function renderDeclaredList(input: DeclaredListRenderInput): string {
   const { list, state, coverage, base } = input;
-  const columns = orderedColumns(input.list);
+  const columns = orderedColumns(list, state.viewId);
+  const fixed = new Map(
+    list.views
+      .find((view) => view.viewId === state.viewId)
+      ?.filters.map((filter) => [filter.field, filter.value]),
+  );
+  const filters = orderedFilters(list);
+  const adjustableFilters = filters.filter(
+    (filter) => !fixed.has(filter.field),
+  );
+  const pinnedFilters = filters
+    .flatMap((filter) => {
+      const option = filter.options.find(
+        (option) => option.value === fixed.get(filter.field),
+      );
+      return option
+        ? [
+            `<span class="muted">${escapeHtml(filter.label)} is ${escapeHtml(option.label)}</span>`,
+          ]
+        : [];
+    })
+    .join(' ');
   const pageCount = Math.max(
     1,
     Math.ceil(coverage.totalCount / Math.max(1, coverage.effectivePageSize)),
@@ -2717,7 +2742,10 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
     coverage.returnedCount === 0 ? 0 : coverage.pageOffset + 1;
   const lastVisible = coverage.pageOffset + coverage.returnedCount;
   const narrowed =
-    state.search.length > 0 || Object.keys(state.filterValues).length > 0;
+    state.search.length > 0 ||
+    adjustableFilters.some(
+      (filter) => state.filterValues[filter.filterId] !== undefined,
+    );
   const formHidden = [
     ...declaredListParameters(state, base, { page: 1 }).entries(),
   ]
@@ -2738,7 +2766,7 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
   // label would be announced with its current option ("Currency All").
   const controlId = (suffix: string) =>
     `list-${String(input.list.columns[0]?.columnId ?? 'list').replaceAll(/[^A-Za-z0-9_-]/gu, '-')}-${suffix}`;
-  const filterControls = orderedFilters(list)
+  const filterControls = adjustableFilters
     .map(
       (filter, index) =>
         `<div class="form-field"><label for="${controlId(`filter-${String(index)}`)}">${escapeHtml(filter.label)}</label><select id="${controlId(`filter-${String(index)}`)}" name="${escapeHtml(filter.filterId)}"><option value="">All</option>${filter.options
@@ -2749,7 +2777,7 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
           .join('')}</select></div>`,
     )
     .join('');
-  const sortable = orderedColumns(list).filter((column) => column.sortable);
+  const sortable = columns.filter((column) => column.sortable);
   const current = state.sort[0];
   const sortControls =
     sortable.length > 0
@@ -2763,7 +2791,7 @@ function renderDeclaredList(input: DeclaredListRenderInput): string {
           )}</select></div><div class="form-field"><label for="${controlId('dir')}">Order</label><select id="${controlId('dir')}" name="dir"><option value="asc"${current?.direction === 'descending' ? '' : ' selected'}>Ascending</option><option value="desc"${current?.direction === 'descending' ? ' selected' : ''}>Descending</option></select></div>`
       : '';
   const clearHref = `/?${declaredListParameters(state, base, { filterValues: {}, page: 1, search: '' }).toString()}`;
-  const controls = `<form class="list-controls" data-list-search method="get" action="/">${formHidden}<div class="form-field list-controls__search"><label><span>Search ${escapeHtml(input.recordLabel.toLowerCase())}</span><input type="search" name="q" value="${escapeHtml(state.search)}" maxlength="240" autocomplete="off" placeholder="Search ${escapeHtml(input.recordLabel.toLowerCase())}"></label></div>${filterControls}${sortControls}<div class="list-controls__actions"><button type="submit">Apply</button>${narrowed ? `<a class="secondary-action" href="${escapeHtml(clearHref)}">Clear</a>` : ''}</div></form>`;
+  const controls = `<form class="list-controls" data-list-search method="get" action="/">${formHidden}<div class="form-field list-controls__search"><label><span>Search ${escapeHtml(input.recordLabel.toLowerCase())}</span><input type="search" name="q" value="${escapeHtml(state.search)}" maxlength="240" autocomplete="off" placeholder="Search ${escapeHtml(input.recordLabel.toLowerCase())}"></label></div>${pinnedFilters}${filterControls}${sortControls}<div class="list-controls__actions"><button type="submit">Apply</button>${narrowed ? `<a class="secondary-action" href="${escapeHtml(clearHref)}">Clear</a>` : ''}</div></form>`;
   const sortState = new Map(
     state.sort.map((sort) => [sort.columnId, sort.direction]),
   );

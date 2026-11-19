@@ -112,6 +112,53 @@ export function renderReleaseDiff(input: {
     const before = from.surfaces.find((s) => s.surfaceId === change.subjectId);
     const after = to.surfaces.find((s) => s.surfaceId === change.subjectId);
     if (!before || !after) continue;
+    const list = after.list as Json | undefined;
+    const previousViews = new Set(
+      ((before.list as Json | undefined)?.views as Json[] | undefined)?.map(
+        (view) => view.viewId,
+      ),
+    );
+    const savedViews = ((list?.views ?? []) as Json[]).filter(
+      (view) => view.layout && !previousViews.has(view.viewId),
+    );
+    if (savedViews.length) {
+      const headings = new Map(
+        (list!.columns as Json[]).map((column) => [
+          column.columnId,
+          column.label,
+        ]),
+      );
+      for (const view of savedViews) {
+        const layout = view.layout as {
+          columns: string[];
+          sort: { columnId: string; direction: string }[];
+        };
+        lines.push(
+          `The "${String(after.label)}" list gains the "${String(view.label)}" view.`,
+          `  Columns in order: ${layout.columns.map((id) => String(headings.get(id))).join(', ')}.`,
+        );
+        if (layout.sort.length)
+          lines.push(
+            `  Sort: ${layout.sort.map(({ columnId, direction }) => `${String(headings.get(columnId))} ${direction}`).join(', ')}.`,
+          );
+        for (const { field, value } of view.filters as {
+          field: string;
+          value: string;
+        }[]) {
+          const declared = (
+            list!.filters as {
+              field: string;
+              label: string;
+              options: { value: string; label: string }[];
+            }[]
+          ).find((filter) => filter.field === field);
+          lines.push(
+            `  Filter: ${declared?.label ?? field} is ${declared?.options.find((option) => option.value === value)?.label ?? value}.`,
+          );
+        }
+      }
+      continue;
+    }
     const columns = (surface: Json) =>
       (
         ((surface.list as Json | undefined)?.columns as Json[] | undefined) ??
