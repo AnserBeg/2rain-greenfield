@@ -5,7 +5,7 @@
     {
       "name": "upgrade-refusal-environment-omitted",
       "claim": "Refusal details stay within their tenant and environment.",
-      "file": "db/migrations/0033_customization_upgrade_bindings.sql",
+      "file": "db/migrations/0034_customization_upgrade_bindings.sql",
       "original": "    AND environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid\n",
       "replacement": "",
       "test": {
@@ -23,7 +23,7 @@
     {
       "name": "upgrade-base-provenance-unchecked",
       "claim": "A stored upgrade must name a first-party base.",
-      "file": "db/migrations/0033_customization_upgrade_bindings.sql",
+      "file": "db/migrations/0034_customization_upgrade_bindings.sql",
       "original": " AND base_revision.provenance = 'firstParty'",
       "replacement": "",
       "test": {
@@ -41,7 +41,7 @@
     {
       "name": "upgrade-candidate-revision-unchecked",
       "claim": "A stored upgrade must name the candidate’s actual revision.",
-      "file": "db/migrations/0033_customization_upgrade_bindings.sql",
+      "file": "db/migrations/0034_customization_upgrade_bindings.sql",
       "original": " AND revision.revision_id = NEW.candidate_revision_id",
       "replacement": "",
       "test": {

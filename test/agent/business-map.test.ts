@@ -13,6 +13,8 @@ import {
   matchId,
   pinnedCatalog,
 } from '../../packages/operations-agent/src/catalog.js';
+import { operationRisk } from '../../packages/operations-agent/src/risk.js';
+import { parsePinnedOperationCatalog } from '../../packages/runtime/src/semantic-operation-gateway.js';
 import type { RequestRuntimeView } from '../../packages/runtime/src/request-runtime-view.js';
 
 import { toMessages } from '../../packages/operations-agent/src/anthropic-model.js';
@@ -214,18 +216,19 @@ test('a short name stands for exactly one id or for none', () => {
   );
 });
 
-test('the risk class comes from contract facts: only eligible O0 updates are reversible, everything else needs a yes', async () => {
-  const { operationRisk } =
-    await import('../../packages/operations-agent/src/risk.js');
+test('the risk class comes from contract facts: only eligible O0 updates are reversible, everything else needs a yes', () => {
   const catalog = pinnedCatalog(compiledAppView());
-  const risk = (local: string) =>
-    operationRisk(catalog, catalog.operation(local)!);
+  const risk = (local: string, fields: readonly string[] = []) =>
+    operationRisk(catalog, catalog.operation(local)!, fields);
   assert.equal(risk('party_create').riskClass, 'needsYes');
   assert.equal(risk('party_create').inverse, undefined);
-  assert.deepEqual(risk('sales_order_update').inverse, {
-    kind: 'restorePriorValues',
-    operationId: `${NS}:operation.sales_order_update`,
-  });
+  assert.deepEqual(
+    risk('sales_order_update', [`${NS}:field.sales_order_notes`]).inverse,
+    {
+      kind: 'restorePriorValues',
+      operationId: `${NS}:operation.sales_order_update`,
+    },
+  );
   for (const local of [
     'party_archive',
     'party_restore',
@@ -244,6 +247,85 @@ test('the risk class comes from contract facts: only eligible O0 updates are rev
     tier: 'o9',
   } as never;
   assert.equal(operationRisk(catalog, strange).riskClass, 'needsYes');
+});
+
+test('the compiled catalog auto-run snapshot covers every O0 update field', () => {
+  const view = compiledAppView();
+  const catalog = pinnedCatalog(view);
+  const eligible: string[] = [];
+  for (const operation of parsePinnedOperationCatalog(
+    view.projections.operation.payload,
+  )) {
+    if (
+      operation.tier !== 'o0' ||
+      operation.effect.kind !== 'updateRecordEffect'
+    )
+      continue;
+    const contract = operation.inputContract!;
+    const fields = new Set([
+      ...contract.writableFieldIds,
+      ...contract.fields.filter((f) => f.writable).map((f) => f.fieldId),
+    ]);
+    for (const field of fields) {
+      if (operationRisk(catalog, operation, [field]).riskClass === 'reversible')
+        eligible.push(`${operation.operationId} -> ${field}`);
+    }
+  }
+  assert.deepEqual(eligible.sort(), [
+    'northstar.app:operation.item_update -> northstar.app:field.item_description',
+    'northstar.app:operation.item_update -> northstar.app:field.item_name',
+    'northstar.app:operation.legal_entity_update -> northstar.app:field.legal_entity_name',
+    'northstar.app:operation.location_update -> northstar.app:field.location_name',
+    'northstar.app:operation.party_update -> northstar.app:field.party_contact_summary',
+    'northstar.app:operation.party_update -> northstar.app:field.party_credit_hold',
+    'northstar.app:operation.party_update -> northstar.app:field.party_name',
+    'northstar.app:operation.party_update -> northstar.app:field.party_payment_terms',
+    'northstar.app:operation.purchase_order_update -> northstar.app:field.purchase_order_notes',
+    'northstar.app:operation.sales_order_update -> northstar.app:field.sales_order_notes',
+    'northstar.app:operation.stock_count_line_update -> northstar.app:field.stock_count_line_counted_quantity',
+    'northstar.app:operation.tax_code_update -> northstar.app:field.tax_code_name',
+  ]);
+});
+
+test('a new field, record type or risk tier needs confirmation even with a revision-checked inverse shape', () => {
+  const catalog = pinnedCatalog(compiledAppView());
+  const party = catalog.operation('party_update')!;
+  assert.equal(party.tier, 'o0');
+  assert.ok(party.effect.kind === 'updateRecordEffect');
+  const name = `${NS}:field.party_name`;
+  const field = `${NS}:field.custom_party_label`;
+  const contract = party.inputContract!;
+  const extended = {
+    ...party,
+    inputContract: {
+      ...contract,
+      fields: [...contract.fields, { ...contract.fields[0]!, fieldId: field }],
+      writableFieldIds: [...contract.writableFieldIds, field],
+    },
+  };
+  for (const fields of [[], [field], [name, field]])
+    assert.equal(
+      operationRisk(catalog, extended, fields).riskClass,
+      'needsYes',
+    );
+  const custom = {
+    ...extended,
+    effect: {
+      ...party.effect,
+      entity: {
+        ...party.effect.entity,
+        targetId: `${NS}:entity.custom_equipment`,
+      },
+    },
+    operationId: `${NS}:operation.custom_equipment_update`,
+  };
+  assert.equal(operationRisk(catalog, custom, [field]).riskClass, 'needsYes');
+  assert.equal(operationRisk(catalog, custom, [name]).riskClass, 'needsYes');
+  assert.equal(
+    operationRisk(catalog, { ...party, tier: 'unknown' } as never, [name])
+      .riskClass,
+    'needsYes',
+  );
 });
 
 // ------------------------------------------------ plan guards (audit A1, A2)
@@ -269,7 +351,8 @@ function guardedSession(
       values: {
         [`${NS}:field.party_number`]: 'P-2016',
         [`${NS}:field.party_contact_summary`]: 'Old',
-      } as Record<string, string>,
+        [`${NS}:field.party_name`]: 'Before',
+      } as Record<string, string | boolean>,
     },
     invoked: [] as string[],
     afterInvoke: () => {},
@@ -675,7 +758,7 @@ test('X14: a list page never makes a record "this"; only a record page with its 
 test('X5: a status or state change, a settings update, and a create its maker cannot archive all need a yes', async () => {
   const classOf = async (
     intent: Record<string, unknown>,
-    values: Record<string, string> = {},
+    values: Record<string, string | boolean> = {},
     deny: ReadonlySet<string> = new Set(),
   ) => {
     const { session, state } = guardedSession(deny);
@@ -757,11 +840,14 @@ test('X5: a status or state change, a settings update, and a create its maker ca
   );
   // A master field edit stays reversible (charter): Undo puts it back.
   assert.equal(
-    await classOf({
-      operationId: 'party_update',
-      target: PARTY,
-      patch: { credit_hold: true },
-    }),
+    await classOf(
+      {
+        operationId: 'party_update',
+        target: PARTY,
+        patch: { credit_hold: true },
+      },
+      { [`${NS}:field.party_credit_hold`]: false },
+    ),
     'reversible',
   );
 });
@@ -816,7 +902,10 @@ function storeSession() {
     recordId: PARTY,
     revision: 1,
     archived: false,
-    values: { [`${NS}:field.party_number`]: 'P-2016' },
+    values: {
+      [`${NS}:field.party_number`]: 'P-2016',
+      [`${NS}:field.party_name`]: 'Before',
+    },
   });
   const state = {
     rows,
@@ -995,6 +1084,17 @@ test('X7: Stop before a mutation step writes nothing more; the host verifies wha
   assert.deepEqual(
     checked.map((entry) => [entry.planId, entry.verified]),
     [[made.planId, true]],
+  );
+});
+
+test('an Undo-enabled host asks when one prior value of a multi-field patch is missing', async () => {
+  const { session } = storeSession();
+  await plannedUpdate(session, [
+    { name: 'New', contact_summary: 'New contact' },
+  ]);
+  assert.deepEqual(
+    session.approvals.map(({ by, riskClass }) => [by, riskClass]),
+    [['person', 'needsYes']],
   );
 });
 
@@ -1250,6 +1350,7 @@ test('7: a count line reads its parent before deciding whether it may run', asyn
       [`${NS}:relation.stock_count_line_session`]: { recordId: PARTY },
     },
   });
+  state.record.values[`${NS}:field.stock_count_line_counted_quantity`] = '10';
   for (const [phase, risk] of [
     ['draft', 'reversible'],
     ['reviewed', 'needsYes'],
@@ -1461,7 +1562,9 @@ test('5: a capability on a newly created order binds only the approved line rece
 });
 
 test('AGENT-5 7: the pinned release guards policy fields and every settings edit', async () => {
-  const { session } = guardedSession();
+  const { session, state } = guardedSession();
+  state.record.values[`${NS}:field.legal_entity_name`] = 'Old company';
+  state.record.values[`${NS}:field.tax_code_name`] = 'Old tax code';
   const view = compiledAppView();
   const agent = view.projections.agent;
   const metadata = agent.payload as { confirmationRequiredFor: string[] };
@@ -1489,8 +1592,6 @@ test('AGENT-5 7: the pinned release guards policy fields and every settings edit
       },
     },
   });
-  const { operationRisk } =
-    await import('../../packages/operations-agent/src/risk.js');
   assert.equal(
     operationRisk(amended, amended.operation('tax_code_update')!, [field])
       .riskClass,

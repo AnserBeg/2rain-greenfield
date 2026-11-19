@@ -69,7 +69,7 @@ export async function withoutReadSnapshot<T>(
  * as if it were, whatever its sections do with the error.
  */
 export function failReadSnapshot(error: unknown): void {
-  heldSnapshots.getStore()?.fail(error);
+  requestEvidence.getStore()?.fail(error);
 }
 
 /**
@@ -80,7 +80,7 @@ export function failReadSnapshot(error: unknown): void {
 export function detachedFromReadSnapshot<T>(
   work: () => Promise<T>,
 ): Promise<T> {
-  return heldSnapshots.exit(work);
+  return requestEvidence.exit(() => heldSnapshots.exit(work));
 }
 
 async function runTrustedTransaction<T>(
@@ -182,13 +182,14 @@ export async function withReadSnapshot<T>(
   for (let attempt = 1; ; attempt += 1) {
     const snapshot = new ReadSnapshot(pool);
     try {
-      const result = await heldSnapshots.run(snapshot, () =>
-        work(() => snapshot.finish()),
+      const result = await requestEvidence.run(snapshot, () =>
+        heldSnapshots.run(snapshot, () => work(() => snapshot.finish())),
       );
       await snapshot.finish();
       return result;
     } catch (error) {
       await snapshot.abandon();
+      snapshot.assertEvidenceRecorded();
       if (error instanceof ReadSnapshotPolicyChangedError && attempt < attempts)
         continue;
       throw error;
@@ -233,6 +234,8 @@ function snapshotHandle(policyVersion: string): ReadSnapshotHandle {
   });
 }
 
+// A live invocation releases the read snapshot but still owes the request its denial evidence.
+const requestEvidence = new AsyncLocalStorage<ReadSnapshot>();
 const heldSnapshots = new AsyncLocalStorage<ReadSnapshot>();
 /** Set while a joined read runs, so a nested read reuses its turn. */
 const joinedReads = new AsyncLocalStorage<ReadSnapshot>();
@@ -387,10 +390,14 @@ class ReadSnapshot {
     this.#failure ??= { error };
   }
 
+  assertEvidenceRecorded(): void {
+    if (this.#failure) throw this.#failure.error;
+  }
+
   /** No more reads join; the snapshot ends and the live policy is checked. */
   async finish(): Promise<void> {
     await this.#exclusive(async () => {
-      if (this.#failure) throw this.#failure.error;
+      this.assertEvidenceRecorded();
       if (this.#finished) return;
       this.#finished = true;
       if (this.#client) await this.#endWithLivePolicy();
