@@ -3,7 +3,7 @@ import { z } from 'zod';
 /**
  * The typed semantic patch a tenant customization is made of (ADR-0013). Every
  * channel -- the command line, the Customize screen and the model -- emits one
- * of these four kinds and nothing else. A request outside them is a typed
+ * typed change. A request outside the supported kinds is a typed
  * `unsupported` result naming the missing capability, never partial output.
  *
  * Targets are canonical ids, never labels, so re-applying a recorded patch to
@@ -111,21 +111,37 @@ const arrangeLayout = z
     }
   });
 
-export const CustomizationPatchSchema = z.discriminatedUnion('kind', [
+const SinglePatchSchema = z.discriminatedUnion('kind', [
   addRecordType,
   addField,
   addChoice,
   arrangeLayout,
 ]);
-type ParsedPatch = z.infer<typeof CustomizationPatchSchema>;
-export type CustomizationPatch =
+type ParsedPatch = z.infer<typeof SinglePatchSchema>;
+export type SingleCustomizationPatch =
   ParsedPatch | (Extract<ParsedPatch, { kind: 'addField' }> & { legacy: true });
+
+export const MAX_CUSTOMIZATION_CHANGE_PATCHES = 16;
+const changeSet = z.strictObject({
+  kind: z.literal('changeSet'),
+  patches: z
+    .array(SinglePatchSchema)
+    .min(2)
+    .max(MAX_CUSTOMIZATION_CHANGE_PATCHES),
+});
+export const CustomizationPatchSchema = z.discriminatedUnion('kind', [
+  SinglePatchSchema,
+  changeSet,
+]);
+export type CustomizationPatch =
+  SingleCustomizationPatch | z.infer<typeof changeSet>;
 export type CustomizationPatchKind = CustomizationPatch['kind'];
 export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'addRecordType',
   'addField',
   'addChoice',
   'arrangeLayout',
+  'changeSet',
 ] as const satisfies readonly CustomizationPatchKind[]);
 
 export interface UnsupportedCustomization {
@@ -148,18 +164,28 @@ export type ParsedCustomizationPatch =
 export function parseCustomizationPatch(
   input: unknown,
 ): ParsedCustomizationPatch {
-  const kind =
-    typeof input === 'object' && input !== null && 'kind' in input
-      ? (input as { kind: unknown }).kind
-      : undefined;
+  const kind = patchKind(input);
   if (
     typeof kind !== 'string' ||
     !(CUSTOMIZATION_PATCH_KINDS as readonly string[]).includes(kind)
   ) {
-    return unsupported(
-      typeof kind === 'string' && kind.trim() !== '' ? kind : 'unnamed',
-      `This version can add a record type, add a field, add a choice or arrange a layout; "${typeof kind === 'string' ? kind : 'no kind'}" is not one of them.`,
-    );
+    return unsupportedKind(kind);
+  }
+  if (kind === 'changeSet') {
+    const patches = (input as { patches?: unknown }).patches;
+    if (
+      Array.isArray(patches) &&
+      patches.length <= MAX_CUSTOMIZATION_CHANGE_PATCHES
+    ) {
+      for (const patch of patches) {
+        const memberKind = patchKind(patch);
+        if (
+          typeof memberKind === 'string' &&
+          !(CUSTOMIZATION_PATCH_KINDS as readonly string[]).includes(memberKind)
+        )
+          return unsupportedKind(memberKind);
+      }
+    }
   }
   const parsed = CustomizationPatchSchema.safeParse(input);
   if (!parsed.success) {
@@ -174,6 +200,21 @@ export function parseCustomizationPatch(
     });
   }
   return Object.freeze({ patch: parsed.data, status: 'parsed' as const });
+}
+
+function patchKind(input: unknown): unknown {
+  return typeof input === 'object' && input !== null && 'kind' in input
+    ? input.kind
+    : undefined;
+}
+
+function unsupportedKind(kind: unknown): UnsupportedCustomization {
+  const name =
+    typeof kind === 'string' && kind.trim() !== '' ? kind : 'unnamed';
+  return unsupported(
+    name,
+    `This version does not support patch kind "${name}".`,
+  );
 }
 
 export function unsupported(

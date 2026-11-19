@@ -60,7 +60,7 @@ const equipment = patch({
   label: 'Equipment',
 });
 
-test('a request outside the four patch kinds is unsupported and names what is missing', () => {
+test('an unknown patch kind is unsupported and named, including inside a change set', () => {
   const outcome = parseCustomizationPatch({
     kind: 'addWorkflow',
     label: 'Approve equipment purchases',
@@ -76,6 +76,26 @@ test('a request outside the four patch kinds is unsupported and names what is mi
     label: 'Equipment',
   });
   assert.equal(malformed.status, 'invalid');
+  const batch = parseCustomizationPatch({
+    kind: 'changeSet',
+    patches: [equipment, { kind: 'subscribeToGoodsReceipt' }],
+  });
+  assert.equal(batch.status, 'unsupported');
+  assert.equal(
+    batch.status === 'unsupported' && batch.missingCapability,
+    'subscribeToGoodsReceipt',
+  );
+  for (const patches of [
+    [],
+    [equipment],
+    Array(17).fill(equipment),
+    [equipment, { kind: 'changeSet', patches: [equipment, equipment] }],
+  ]) {
+    assert.equal(
+      parseCustomizationPatch({ kind: 'changeSet', patches }).status,
+      'invalid',
+    );
+  }
 });
 
 test('patch application refuses the §10.6 boundary with stable codes, never partially', () => {
@@ -263,6 +283,40 @@ function sandboxRequest(chain: readonly CustomizationPatch[]) {
     tip: serializeRelease(tip),
   };
 }
+
+test('a change set compiles only its final definition and refuses a broken dependency order', async () => {
+  const addSerial = patch({
+    entity: 'northstar.app:entity.custom_equipment',
+    field: { label: 'Inspection date', type: 'date' },
+    kind: 'addField',
+    screens: 'record',
+  });
+  const change = patch({ kind: 'changeSet', patches: [equipment, addSerial] });
+  const result = await compileInSandbox(sandboxRequest([change]));
+  assert.equal(result.status, 'compiled');
+  if (result.status !== 'compiled') return;
+  assert.equal(result.steps.length, 1);
+  const step = result.steps[0]!;
+  assert.match(step.rendered.text, /Equipment/u);
+  const definition = parseSerializedRelease(
+    step.release,
+  ).normalizedDefinitionBytes;
+  assert.match(
+    new TextDecoder().decode(definition),
+    /custom_equipment_inspection_date/u,
+  );
+  const reversed = patch({
+    kind: 'changeSet',
+    patches: [addSerial, equipment],
+  });
+  assert.deepEqual(await compileInSandbox(sandboxRequest([reversed])), {
+    code: 'CUSTOMIZE_TARGET_NOT_FOUND',
+    message:
+      'There is no record type northstar.app:entity.custom_equipment to add a field to.',
+    patchIndex: 0,
+    status: 'refused',
+  });
+});
 
 function patch(input: unknown): CustomizationPatch {
   const parsed = parseCustomizationPatch(input);

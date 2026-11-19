@@ -1,6 +1,7 @@
 import type {
   CustomField,
   CustomizationPatch,
+  SingleCustomizationPatch,
   UnsupportedCustomization,
 } from './patch.js';
 import { unsupported } from './patch.js';
@@ -81,9 +82,14 @@ export function applyCustomizationPatches(
   patches: readonly CustomizationPatch[],
 ): CustomizationApplication {
   const authored = structuredClone(base) as Json;
-  for (const [index, patch] of patches.entries()) {
-    const outcome = applyOne(authored, patch, patches.slice(0, index));
-    if (outcome) return Object.freeze({ ...outcome, patchIndex: index });
+  const previous: SingleCustomizationPatch[] = [];
+  for (const [index, change] of patches.entries()) {
+    const members = change.kind === 'changeSet' ? change.patches : [change];
+    for (const patch of members) {
+      const outcome = applyOne(authored, patch, previous);
+      if (outcome) return Object.freeze({ ...outcome, patchIndex: index });
+      previous.push(patch);
+    }
   }
   // A revision carrying a tenant patch is tenant-authored; the repository
   // checks the revision row against this value.
@@ -128,8 +134,8 @@ type Outcome =
 
 function applyOne(
   authored: Json,
-  patch: CustomizationPatch,
-  previous: readonly CustomizationPatch[],
+  patch: SingleCustomizationPatch,
+  previous: readonly SingleCustomizationPatch[],
 ): Outcome | null {
   switch (patch.kind) {
     case 'addRecordType':
@@ -423,7 +429,7 @@ function addRecordType(
 function addField(
   authored: Json,
   patch: Extract<CustomizationPatch, { kind: 'addField' }>,
-  previous: readonly CustomizationPatch[],
+  previous: readonly SingleCustomizationPatch[],
 ): Outcome | null {
   const { entity: entityId, field } = patch;
   const legacy = 'legacy' in patch;
