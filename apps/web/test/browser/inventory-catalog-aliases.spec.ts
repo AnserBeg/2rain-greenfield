@@ -1,3 +1,4 @@
+import { completeTask } from './complete-task.js';
 import { test, expect, type Locator, type Page } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -33,8 +34,7 @@ test('an item is found by its aliases, the stock Lists follow the company rule a
     });
     const dialog = page.getByRole('dialog');
     const finish = async (label: string) => {
-      await dialog.getByRole('button', { name: `Review ${label}` }).click();
-      await dialog.getByRole('button', { name: `Confirm ${label}` }).click();
+      await completeTask(dialog, label);
     };
 
     // Catalog -> Item: the barcode finds the notebook, in any case.

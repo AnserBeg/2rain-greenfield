@@ -762,3 +762,8 @@ How to apply: test permitted, denied and unavailable-policy Task offers through 
 Date: 2026-11-18
 Why: [CI 44386300951](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44386300951) hit Playwright's `Malformed value` for `2026-11-18T20:25:00`. A one-browser reproduction confirmed that Chromium drops zero seconds, while nonzero seconds remain valid.
 How to apply: when filling a seconds-precision datetime-local control, omit only a trailing `:00`; preserve nonzero seconds. This keeps the same instant and the existing business assertions. [INTERACT-1](docs/execution/packets/INTERACT-1.md).
+
+## Hold form controls while replacing a task stage
+Date: 2026-11-18
+Why: [CI 44400146615](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44400146615) and a focused reproduction lost receipt edits when a pending Fill response replaced the form after typing began.
+How to apply: capture the submitted values, disable the task's controls while its stage response is pending, and restore them on transport failure or page fallback. Live read-only preparation keeps its generation check. [INTERACT-1](docs/execution/packets/INTERACT-1.md).

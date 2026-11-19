@@ -9,6 +9,7 @@ import {
   type Request,
 } from '@playwright/test';
 import type pg from 'pg';
+import { reviewTask } from './complete-task.js';
 
 import { parseServerTiming } from '../../../../packages/postgres-provider/src/request-work-meter.js';
 
@@ -34,6 +35,7 @@ import {
  */
 export class LoopScorecard {
   readonly steps: ScorecardStep[] = [];
+  readonly postings: { name: string; clicks: number; loads: number }[] = [];
   /** Facts a step measures beside its counts, such as a form's field count. */
   readonly notes = new Map<string, string>();
   /** Every page and fragment request, with the database work it caused. */
@@ -68,6 +70,8 @@ export class LoopScorecard {
       const before = this.started.get(request);
       if (!before) return;
       this.started.delete(request);
+      // A fragment can change visible text without a document load.
+      this.carried = false;
       const work = parseServerTiming(
         response.headers()['server-timing'] ?? null,
       );
@@ -146,6 +150,27 @@ export class LoopScorecard {
     await this.scan();
     await target.click();
     this.step().clicks += 1;
+  }
+
+  interactionMark(): { clicks: number; loads: number } {
+    const { clicks, loads } = this.step();
+    return { clicks, loads };
+  }
+
+  /** Count from a ready form or task opener through its verified result. */
+  async recordPosting(
+    name: string,
+    before: { clicks: number; loads: number },
+  ): Promise<void> {
+    await this.page.waitForLoadState('load');
+    const after = this.interactionMark();
+    const posting = {
+      name,
+      clicks: after.clicks - before.clicks,
+      loads: after.loads - before.loads,
+    };
+    this.postings.push(posting);
+    console.log(`INTERACT_POSTING ${JSON.stringify(posting)}`);
   }
 
   async choose(target: Locator, option: { label: string }): Promise<void> {
@@ -548,10 +573,7 @@ export async function placePurchaseOrder(card: LoopScorecard): Promise<void> {
   await card.end('done');
 }
 
-export async function receiveInFull(
-  card: LoopScorecard,
-  stages: 'page' | 'fragment-spike' = 'page',
-): Promise<void> {
+export async function receiveInFull(card: LoopScorecard): Promise<void> {
   const { page } = card;
   const f = LOOP_FIXTURE;
   card.begin(LOOP_STEPS.receive);
@@ -562,8 +584,7 @@ export async function receiveInFull(
         f.unitCost,
       );
     },
-    stages,
-    prepareOnInput: true,
+    confirm: `Receive ${f.purchased}`,
   });
   await expect(cell(page, 'purchasing_lines', 'Received')).toHaveText(
     f.purchased,
@@ -612,10 +633,7 @@ export async function createSale(card: LoopScorecard): Promise<void> {
  * Ship the confirmed order: its next action reserves and ships every line
  * with nothing reserved yet, from one location, on one shipment.
  */
-export async function ship(
-  card: LoopScorecard,
-  stages: 'page' | 'fragment-spike' = 'page',
-): Promise<void> {
+export async function ship(card: LoopScorecard): Promise<void> {
   const { page } = card;
   const f = LOOP_FIXTURE;
   card.begin(LOOP_STEPS.ship);
@@ -623,7 +641,7 @@ export async function ship(
     async enter() {
       await chooseReference(card, 'Ship from', f.location[1]);
     },
-    stages,
+    confirm: `Ship ${f.sold}`,
   });
   await expect(cell(page, 'fulfillment_lines', 'Shipped')).toHaveText(f.sold);
   await card.end('done');
@@ -768,91 +786,33 @@ async function runTask(
     readonly enter?: () => Promise<void>;
     readonly review?: string;
     readonly confirm?: string;
-    readonly stages?: 'page' | 'fragment-spike';
-    readonly prepareOnInput?: boolean;
   } = {},
 ): Promise<void> {
   const { page } = card;
-  if (stages.stages === 'fragment-spike') await installTaskStageSpike(page);
+  const posting = card.interactionMark();
   await card.click(opener);
   const dialog = page.locator('[data-composition-task]');
   await expect(dialog).toBeVisible();
   await stages.enter?.();
-  const review = dialog.getByRole('button', {
-    name: stages.review ?? `Review ${label}`,
-    exact: true,
-  });
-  if (await review.isVisible()) {
-    if (stages.stages === 'fragment-spike' && stages.prepareOnInput) {
-      // Test-only stand-in for a read-only preview after the input settles.
-      await review.evaluate((button: HTMLButtonElement) =>
-        button.form?.requestSubmit(button),
-      );
-    } else await card.click(review);
-  }
+  await reviewTask(dialog, stages.review ?? `Review ${label}`, (target) =>
+    card.click(target),
+  );
   await card.click(
     dialog.getByRole('button', {
       name: stages.confirm ?? `Confirm ${label}`,
       exact: true,
     }),
   );
-  if (stages.stages === 'fragment-spike') {
-    await expect(
-      page.getByRole('status').filter({ hasText: `${label}: done` }),
-    ).toBeVisible();
-  } else {
+  await expect(page.locator('[data-task-result]')).toContainText(
+    `${label}: done`,
+  );
+  if (await dialog.count()) {
     await expect(dialog).toHaveAttribute('data-task-phase', 'result');
     // Back to the record, where the next step is offered.
     await card.click(dialog.getByRole('link', { name: /^Back to/u }));
   }
   await expect(dialog).toHaveCount(0);
-}
-
-/** Spike transport only. Carry the existing form to the real server and use its rendered answer. */
-async function installTaskStageSpike(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    document.addEventListener('submit', async (event) => {
-      const form = event.target;
-      if (!(form instanceof HTMLFormElement)) return;
-      const fields = new FormData(form, event.submitter);
-      if (!fields.has('compositionAction')) return;
-      event.preventDefault();
-      const body = new URLSearchParams();
-      for (const [name, value] of fields)
-        if (typeof value === 'string') body.append(name, value);
-      const response = await fetch(form.action, {
-        method: 'POST',
-        body,
-        credentials: 'same-origin',
-        redirect: 'error',
-      });
-      const rendered = new DOMParser().parseFromString(
-        await response.text(),
-        'text/html',
-      );
-      const task = rendered.querySelector<HTMLDialogElement>(
-        'dialog[data-composition-task]',
-      );
-      const pageContent = rendered.querySelector('#surface-content');
-      if (!response.ok || !task || !pageContent)
-        throw new Error(`Task stage returned HTTP ${response.status}`);
-      if (task.dataset.taskPhase === 'result') {
-        const outcome = task.querySelector('[role="status"]');
-        if (!outcome) throw new Error('Task result has no outcome');
-        pageContent.prepend(outcome);
-        task.remove();
-      }
-      const previous = document.querySelector<HTMLDialogElement>(
-        'dialog[data-composition-task]',
-      );
-      previous?.close();
-      document.querySelector('#surface-content')!.replaceWith(pageContent);
-      if (task.isConnected) {
-        task.removeAttribute('open');
-        task.showModal();
-      }
-    });
-  });
+  await card.recordPosting(label, posting);
 }
 
 function nextAction(page: Page): Locator {
