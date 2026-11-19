@@ -14,7 +14,7 @@
 export const LEDGER_STYLES = `
 *,*::before,*::after{box-sizing:border-box}
 [hidden]{display:none!important}
-html{font-size:16px;-webkit-text-size-adjust:100%}
+html{container:ledger / inline-size;font-size:16px;-webkit-text-size-adjust:100%}
 body{margin:0;min-width:320px;background:var(--paper);color:var(--ink);font:400 13px/1.45 var(--f-ui);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
 h1,h2,h3,p,dl,dd{margin:0}
 h1,h2,h3,strong,th{font-weight:600}
@@ -387,7 +387,7 @@ html:has([data-save-boundary]){scroll-padding-bottom:120px}
 .launcher-action button{min-height:44px}
 .launcher-empty{grid-column:1/-1;margin:24px 0 0;color:var(--muted);font-size:13px;text-align:center}
 /* The find box's button sits beside it, at the input's line (LOOK-1 round 2). */
-@media(min-width:801px){
+@container ledger (min-width:801px){
 .surface-grid:has(.launcher-scan):has(.launcher-action) .launcher-scan{grid-column:1/12}
 .surface-grid:has(.launcher-scan):has(.launcher-action) .launcher-action{grid-column:12/13;align-self:end;margin-bottom:calc(var(--row-y) + 9px)}
 .surface-grid:has(.launcher-scan):has(.launcher-action) .launcher-action button{width:100%}
@@ -522,7 +522,7 @@ html:has([data-save-boundary]){scroll-padding-bottom:120px}
    Linked documents declared for the rail sit beside the sheet: on a wide
    screen the page is two columns, the title and the stepper span both, and
    the rail's sections fill the right column from the top (dense flow). */
-@media(min-width:1181px){
+@container ledger (min-width:1181px){
 .surface-grid:has(.composition-rail){grid-template-columns:minmax(0,1fr) var(--rail-w);grid-auto-flow:row dense;align-items:start;row-gap:0}
 .surface-grid:has(.composition-rail)>.surface-slot>*,.surface-grid:has(.composition-rail) .composition-header>*{grid-column:1;margin-bottom:var(--gap)}
 .surface-grid:has(.composition-rail) :is(.composition-title,.record-breadcrumb,.composition-alert,.composition-progression,.composition-record-actions,.composition-back){grid-column:1/-1}
@@ -704,7 +704,7 @@ td[data-cell-role=actions] a:not([class]){color:var(--muted);font-size:12px}
 @media (prefers-reduced-motion:no-preference){.sidebar a,.navigation-group>summary,button,.button,.primary-action,.secondary-action,.list-page-link,.list-view,.launcher-tile,.data-table-wrap td{transition:background-color var(--motion-duration) var(--motion-easing),border-color var(--motion-duration) var(--motion-easing),color var(--motion-duration) var(--motion-easing)}}
 
 /* ---------- 1000px and below ---------- */
-@media(max-width:1000px){
+@container ledger (max-width:1000px){
 .draft-header.form-fields{grid-template-columns:repeat(2,minmax(0,1fr))}
 .record-fields,.key-fact-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 .launcher-tiles ul{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -714,12 +714,12 @@ td[data-cell-role=actions] a:not([class]){color:var(--muted);font-size:12px}
 /* The menu button is the sidebar's first child, so keyboard order runs from
    it into the opened drawer; closed, the drawer is invisible and skipped.
    Native <details>, no script (ADR-0036). */
-@media(max-width:900px){
+@container ledger (max-width:900px){
 .app-shell{display:block;background:none}
 .sidebar{position:fixed;z-index:60;top:48px;bottom:0;left:0;width:min(300px,86vw);height:auto;padding:12px 10px calc(12px + env(safe-area-inset-bottom,0px)) max(10px,env(safe-area-inset-left,0px));box-shadow:var(--shadow-dlg);visibility:hidden}
 .shell-menu{display:block;position:fixed;z-index:61;top:8px;left:max(10px,env(safe-area-inset-left,0px));visibility:visible}
 body:has(.shell-menu[open]) .sidebar{visibility:visible}
-body:has(.shell-menu[open])::after{content:"";position:fixed;inset:48px 0 0;z-index:55;background:var(--scrim)}
+.app-shell:has(.shell-menu[open])::after{content:"";position:fixed;inset:48px 0 0;z-index:55;background:var(--scrim)}
 .topbar{position:sticky;top:0;z-index:58;min-height:48px;height:auto;gap:10px;flex-wrap:wrap;padding:6px max(16px,env(safe-area-inset-right,0px)) 6px max(16px,env(safe-area-inset-left,0px))}
 .topbar__context{display:block;flex:1;padding-left:40px}
 .shell-search{order:3;flex-basis:100%;margin:0}
@@ -734,7 +734,7 @@ main{padding:14px max(16px,env(safe-area-inset-left,0px)) 40px}
 }
 
 /* ---------- 800px and below: the compact projection ---------- */
-@media(max-width:800px){
+@container ledger (max-width:800px){
 /* A record's title keeps the gutter; its badge sits beside it or just
    under it, never alone across the page (round 4). */
 .surface-heading--slot:has(.eyebrow){flex-direction:row;flex-wrap:wrap;align-items:flex-end;justify-content:flex-start;gap:8px}
