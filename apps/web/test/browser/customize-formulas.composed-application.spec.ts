@@ -38,8 +38,8 @@ test('Customize compares a location name with its declared parent on the live fo
             .fill(code);
           await page.locator(`[name="value:${nameId}"]`).fill(name);
           await page
-            .locator('[name="value:northstar.app:field.location_type"]')
-            .selectOption('northstar.app:option.store');
+            .getByRole('combobox', { name: 'Type', exact: true })
+            .fill('northstar.app:option.store');
           if (inside) await parent.selectOption(inside);
         };
         const save = () =>

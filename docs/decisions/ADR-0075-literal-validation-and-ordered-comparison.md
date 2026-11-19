@@ -1,6 +1,6 @@
 # ADR-0075: Literal validation and the Formula Rule validation profile
 
-Status: Implementation draft for CUSTOMIZE-3. ADR-0074 governs admission.
+Status: Accepted for the literal validation position. ADR-0074 governs admission.
 
 ## §5.11 contract
 
