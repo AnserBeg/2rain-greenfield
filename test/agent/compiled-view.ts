@@ -35,8 +35,12 @@ export function compiledAppView(
   if (!loaded) {
     const file = JSON.parse(
       readFileSync(resolve('apps/web/release/app.compiled.json'), 'utf8'),
-    ) as { application: CompiledApplication };
-    const application = file.application;
+    ) as {
+      application?: CompiledApplication;
+      applications?: CompiledApplication[];
+    };
+    const application = file.applications?.at(-1) ?? file.application;
+    if (!application) throw new Error('missing compiled application head');
     const artifacts = new Map(
       application.artifacts.map((artifact) => [artifact.contentHash, artifact]),
     );

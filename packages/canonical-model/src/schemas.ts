@@ -2551,10 +2551,16 @@ const normalizedV6OperationDefinition = normalizedV3OperationDefinition.extend({
 const authoredV6OperationDefinition = authoredV3OperationDefinition.extend({
   label: operationLabel,
 });
+// A whole settings record, or one policy field, can require the person's yes.
+const assistantConfirmation = {
+  requiresAssistantConfirmation: z.literal(true).optional(),
+};
 const normalizedV6FieldDefinition = normalizedV3FieldDefinition.extend({
+  ...assistantConfirmation,
   numbering: FieldNumberingSchema.optional(),
 });
 const authoredV6FieldDefinition = authoredV3FieldDefinition.extend({
+  ...assistantConfirmation,
   numbering: FieldNumberingSchema.optional(),
 });
 // A list query may declare the most rows one export statement returns. It is a
@@ -2577,6 +2583,7 @@ const authoredV6QueryDefinition = z.union([
 
 const v6NormalizedShape = {
   ...v5NormalizedShape,
+  entities: z.array(normalizedEntityDefinition.extend(assistantConfirmation)),
   fields: z.array(normalizedV6FieldDefinition),
   operations: z.array(normalizedV6OperationDefinition),
   queries: z.array(normalizedV6QueryDefinition),
@@ -2704,6 +2711,7 @@ const v5AuthoredShape = {
 
 const v6AuthoredShape = {
   ...v5AuthoredShape,
+  entities: z.array(authoredEntityDefinition.extend(assistantConfirmation)),
   fields: z.array(authoredV6FieldDefinition),
   operations: z.array(authoredV6OperationDefinition),
   queries: z.array(authoredV6QueryDefinition),
