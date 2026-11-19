@@ -1304,7 +1304,11 @@ test(
           );
           await runtime.close();
 
-          runtime = await createRuntime(mismatched, databaseUrl, 'advancing-tenant');
+          runtime = await createRuntime(
+            mismatched,
+            databaseUrl,
+            'advancing-tenant',
+          );
           assert.equal(runtime.activeReleaseId, sourceReleaseId);
           assert.equal(runtime.customizationUpgrade?.status, 'refused');
           await runtime.close();
@@ -1318,7 +1322,11 @@ test(
                DISABLE TRIGGER active_release_pointer_exact_swap`,
           );
           try {
-            runtime = await createRuntime(approvalCandidate, databaseUrl, 'advancing-tenant');
+            runtime = await createRuntime(
+              approvalCandidate,
+              databaseUrl,
+              'advancing-tenant',
+            );
             assert.equal(runtime.activeReleaseId, sourceReleaseId);
             assert.equal(runtime.customizationUpgrade?.status, 'refused');
             await runtime.close();

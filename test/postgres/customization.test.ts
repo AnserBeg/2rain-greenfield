@@ -1395,7 +1395,9 @@ test(
           await pool.query(
             'ALTER TABLE platform.customization_upgrades DISABLE RULE customization_upgrades_reject_update',
           );
-          const history = (await service.service.status()).upgrades.map(record => record.upgradeId);
+          const history = (await service.service.status()).upgrades.map(
+            (record) => record.upgradeId,
+          );
           assert.ok(history.includes(other.upgradeId));
           assert.ok(history.includes(upgrade.upgradeId));
           const oldPayload = (
@@ -1425,7 +1427,7 @@ test(
             const isolated = await service.service.status();
             assert.deepEqual(
               isolated.upgrades.map((record) => record.upgradeId),
-              history.filter(id => id !== other.upgradeId),
+              history.filter((id) => id !== other.upgradeId),
             );
           } finally {
             await setPayload(oldPayload);
@@ -1637,6 +1639,18 @@ test(
           } finally {
             await boot.close();
           }
+        }
+        const unreadable = await openComposedApplicationRuntime({
+          ...options,
+          get compiledApplication(): unknown {
+            throw new SyntaxError('malformed successor JSON');
+          },
+        });
+        try {
+          assert.equal(unreadable.activeReleaseId, previous);
+          assert.equal(unreadable.customizationUpgrade?.status, 'refused');
+        } finally {
+          await unreadable.close();
         }
         await assertServesPrevious(malformed.envelope);
         await pool.query(`CREATE FUNCTION public.refuse_successor() RETURNS trigger LANGUAGE plpgsql AS $$

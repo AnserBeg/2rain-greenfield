@@ -2150,7 +2150,12 @@ test('ABI function checks compose additively across live roots and conflicting d
           targetReleaseId: releases.a.target,
         });
         assert.equal(priorPreparation.schemaState, 'APPLIED');
-        await activatePreparedFixture(pool, runtimePool, contexts.a, releases.a);
+        await activatePreparedFixture(
+          pool,
+          runtimePool,
+          contexts.a,
+          releases.a,
+        );
 
         const mountedGenerationId = randomUUID();
         const mountedPreparationId = randomUUID();
@@ -3706,7 +3711,12 @@ test('a pre-existing relation index executes as atomic locking DDL and rejects i
         assert.equal(legacyPreparation.schemaState, 'APPLIED');
         await assertIndexPresence(pool, relationIndex.physicalName, false);
 
-        await activatePreparedFixture(pool, runtimePool, contexts.a, releases.a);
+        await activatePreparedFixture(
+          pool,
+          runtimePool,
+          contexts.a,
+          releases.a,
+        );
         const generationId = randomUUID();
         const preparationId = randomUUID();
         const prepared = await materializer.prepare({
@@ -4036,7 +4046,12 @@ test('a released required relation is widened by executed DDL, and a mixed live-
         });
         assert.equal(await readNullability(pool), 'NO');
 
-        await activatePreparedFixture(pool, runtimePool, contexts.a, releases.a);
+        await activatePreparedFixture(
+          pool,
+          runtimePool,
+          contexts.a,
+          releases.a,
+        );
         const generationId = randomUUID();
         const prepared = await materializer.prepare({
           context: contexts.a,
@@ -4115,7 +4130,12 @@ test('a released required relation is widened by executed DDL, and a mixed live-
           optional,
           definitionBytes(optionalDefinition),
         );
-        await activatePreparedFixture(pool, runtimePool, contexts.b, releases.b);
+        await activatePreparedFixture(
+          pool,
+          runtimePool,
+          contexts.b,
+          releases.b,
+        );
         await materializer.prepare({
           context: contexts.b,
           expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -4695,7 +4715,12 @@ test('a released enum domain is widened by one atomic CHECK replacement, observe
           // stale CHECK -- before any transition is prepared -- does not admit
           // the candidate. Verification is not the gap; the missing element
           // was.
-          await activatePreparedFixture(pool, runtimePool, contexts.a, releases.a);
+          await activatePreparedFixture(
+            pool,
+            runtimePool,
+            contexts.a,
+            releases.a,
+          );
           const next = await persistNextRelease(
             runtimePool,
             contexts.a,
@@ -4741,7 +4766,12 @@ test('a released enum domain is widened by one atomic CHECK replacement, observe
           // envelope installs none of them, and the addColumn it still carries
           // is what gets preparation as far as catalog verification. Expected
           // is the merged superset; actual is the untouched two-option CHECK.
-          await activatePreparedFixture(pool, runtimePool, contexts.b, releases.b);
+          await activatePreparedFixture(
+            pool,
+            runtimePool,
+            contexts.b,
+            releases.b,
+          );
           const tamperedB = await persistNextRelease(
             runtimePool,
             contexts.b,
@@ -5361,7 +5391,12 @@ test('a pre-existing generated fold and prefix index record their measured locki
           [tenantA, environmentA, pr6cMeasurementRows],
         );
 
-        await activatePreparedFixture(pool, runtimePool, contexts.a, releases.a);
+        await activatePreparedFixture(
+          pool,
+          runtimePool,
+          contexts.a,
+          releases.a,
+        );
         const generationId = randomUUID();
         const preparationId = randomUUID();
         const prepared = await materializer.prepare({
@@ -6928,9 +6963,20 @@ function releaseCommand(
   };
 }
 
-async function activatePreparedFixture(admin: pg.Pool, runtime: pg.Pool, context: TrustedRequestContext, release: ReleasePair): Promise<void> {
+async function activatePreparedFixture(
+  admin: pg.Pool,
+  runtime: pg.Pool,
+  context: TrustedRequestContext,
+  release: ReleasePair,
+): Promise<void> {
   await admitPreparedTarget(runtime, context, release);
-  await activateFixtureRelease(admin, runtime, context.tenantId, context.environmentId, release.target);
+  await activateFixtureRelease(
+    admin,
+    runtime,
+    context.tenantId,
+    context.environmentId,
+    release.target,
+  );
 }
 
 async function installSourcePointers(
@@ -6938,24 +6984,33 @@ async function installSourcePointers(
   runtime: pg.Pool,
   releases: { a: ReleasePair; b: ReleasePair },
 ): Promise<void> {
-  await activateFixtureRelease(admin, runtime, tenantA, environmentA, releases.a.source);
-  await activateFixtureRelease(admin, runtime, tenantB, environmentB, releases.b.source);
+  await activateFixtureRelease(
+    admin,
+    runtime,
+    tenantA,
+    environmentA,
+    releases.a.source,
+  );
+  await activateFixtureRelease(
+    admin,
+    runtime,
+    tenantB,
+    environmentB,
+    releases.b.source,
+  );
 }
 
 async function grantExecutorAuthority(pool: pg.Pool): Promise<void> {
   await pool.query(
     `SELECT platform.set_release_executor_authority($1,$2,true,$2,$3),
             platform.set_release_executor_authority($4,$5,true,$5,$6),
-            platform.set_release_executor_authority($1,$7,true,$7,$8),
-            platform.set_release_approver_eligibility($1,$9,true,$9,$10)`,
+            platform.set_release_approver_eligibility($1,$7,true,$7,$8)`,
     [
       tenantA,
       principalA,
       randomUUID(),
       tenantB,
       principalB,
-      randomUUID(),
-      SYSTEM_EXECUTION_PRINCIPAL.principalId,
       randomUUID(),
       approverA,
       randomUUID(),

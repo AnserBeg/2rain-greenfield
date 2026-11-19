@@ -44,7 +44,10 @@ export async function activateFixtureRelease(
     [tenantId, principalId, randomUUID()],
   );
   await admin.query(
-    'SELECT platform.set_release_executor_authority($1,$2,true,$3,$4)',
+    `SELECT platform.set_release_executor_authority($1,$2,true,$3,$4)
+      WHERE (SELECT authorized FROM platform.release_executor_authority_events
+              WHERE tenant_id=$1 AND principal_id=$2 ORDER BY policy_version DESC LIMIT 1)
+            IS DISTINCT FROM true`,
     [tenantId, system.principalId, principalId, randomUUID()],
   );
   const attempt = await prepareApproval(runtime, approver, approver, {

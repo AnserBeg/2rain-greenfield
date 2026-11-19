@@ -337,17 +337,22 @@ export async function openComposedApplicationRuntime(
     'compiledApplication' | 'databaseUrl' | 'rollbackReleaseRoot' | 'tenantSlug'
   >,
 ): Promise<ComposedApplicationRuntime> {
-  const compiledApplication =
-    options.compiledApplication ?? (await readCompiledApplication());
+  let compiledApplication: unknown;
   return createComposedApplicationRuntime({
     capabilityOperationExecutorFactories: CAPABILITY_EXECUTOR_FACTORIES,
-    compiledApplication,
+    async loadCompiledApplication() {
+      compiledApplication =
+        options.compiledApplication ?? (await readCompiledApplication());
+      return compiledApplication;
+    },
     customization: {
-      acknowledgement: readUnboundPermissionAcknowledgementFor(
-        new URL('../../web/release/app.authored.json', import.meta.url)
-          .pathname,
-        'northstar.app:package.application',
-      ),
+      get acknowledgement() {
+        return readUnboundPermissionAcknowledgementFor(
+          new URL('../../web/release/app.authored.json', import.meta.url)
+            .pathname,
+          'northstar.app:package.application',
+        );
+      },
       get firstPartyAuthored() {
         return canonicalAuthoredProjection(
           parseNormalizedApplicationPackageJson(

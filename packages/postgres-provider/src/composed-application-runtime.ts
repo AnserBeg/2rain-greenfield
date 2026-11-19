@@ -125,12 +125,20 @@ const freshTenantIntermediateAdmissionVersion =
 export const FRESH_TENANT_INSTALL_EVIDENCE_VERSION =
   'northstar.fresh-tenant-install-evidence/v1' as const;
 
-export interface ComposedApplicationRuntimeOptions {
+export type ComposedApplicationRuntimeOptions = (
+  | {
+      readonly compiledApplication: unknown;
+      readonly loadCompiledApplication?: never;
+    }
+  | {
+      readonly compiledApplication?: never;
+      readonly loadCompiledApplication: () => Promise<unknown>;
+    }
+) & {
   /** Deterministic observation seam for the non-serving active-pointer window. */
   readonly afterFreshTenantIntermediateActivation?: (
     observation: FreshTenantIntermediateActivationObservation,
   ) => Promise<void>;
-  readonly compiledApplication: unknown;
   readonly customization?: {
     readonly acknowledgement: AcknowledgementInput;
     readonly firstPartyAuthored: Readonly<Record<string, unknown>>;
@@ -160,7 +168,7 @@ export interface ComposedApplicationRuntimeOptions {
     readonly targetReleaseRoot: string;
   }>;
   readonly tenantSlug: string;
-}
+};
 
 export interface FreshTenantIntermediateActivationObservation {
   readonly lineageOrdinal: number;
@@ -343,39 +351,51 @@ export async function createComposedApplicationRuntime(
     if (selected.prepareReplay) {
       const { PostgresCustomizationService, recordUpgradeRefusal } =
         await import('./customization-service.js');
-      const preparation = options.customization
-        ? new PostgresCustomizationService(
-            {
-              adminPool,
-              runtimePool,
-              materializerPool,
-              modulePool,
-              identities,
-            },
-            {
-              ...options.customization,
-              compiledApplication: options.compiledApplication,
-              ...(options.localDemoIdentity
-                ? { localDemoIdentity: true as const }
-                : {}),
-              providerErrorMappings: options.providerErrorMappings,
-              capabilityOperationExecutorFactories:
-                options.capabilityOperationExecutorFactories ?? [],
-            },
-          ).prepareUpgrade()
-        : recordUpgradeRefusal(runtimePool, runtimeContext, {
-            status: 'refused',
-            code: 'CUSTOMIZE_UPGRADE_UNAVAILABLE',
-            message: 'This runtime cannot prepare a platform upgrade.',
+      try {
+        customizationUpgrade = options.customization
+          ? await new PostgresCustomizationService(
+              {
+                adminPool,
+                runtimePool,
+                materializerPool,
+                modulePool,
+                identities,
+              },
+              {
+                ...options.customization,
+                compiledApplication: selected.compiledApplication,
+                ...(options.localDemoIdentity
+                  ? { localDemoIdentity: true as const }
+                  : {}),
+                providerErrorMappings: options.providerErrorMappings,
+                capabilityOperationExecutorFactories:
+                  options.capabilityOperationExecutorFactories ?? [],
+              },
+            ).prepareUpgrade()
+          : await recordUpgradeRefusal(runtimePool, runtimeContext, {
+              status: 'refused',
+              code: 'CUSTOMIZE_UPGRADE_UNAVAILABLE',
+              message: 'This runtime cannot prepare a platform upgrade.',
+              sourceReleaseId: serving.releaseId,
+              baseReleaseRoot: selected.baseReleaseRoot!,
+            });
+      } catch {
+        const refusal = {
+          status: 'refused' as const,
+          code: 'CUSTOMIZE_UPGRADE_FAILED',
+          message:
+            'The upgrade could not be prepared. The verified release is still live.',
+        };
+        customizationUpgrade = await recordUpgradeRefusal(
+          runtimePool,
+          runtimeContext,
+          {
+            ...refusal,
             sourceReleaseId: serving.releaseId,
             baseReleaseRoot: selected.baseReleaseRoot!,
-          });
-      customizationUpgrade = await preparation.catch(() => ({
-        status: 'refused' as const,
-        code: 'CUSTOMIZE_UPGRADE_RECORD_FAILED',
-        message:
-          'The upgrade could not be recorded. The verified release is still live.',
-      }));
+          },
+        ).catch(() => refusal);
+      }
     }
 
     const actorIssuer = humanActorIssuer();
@@ -572,7 +592,10 @@ async function selectBootRelease(
       previous.fence !== initialPointer.fence
     )
       throw new Error('the latest swap awaits activation recovery');
-    const releases = parseCompiledApplication(options.compiledApplication);
+    const compiledApplication = options.loadCompiledApplication
+      ? await options.loadCompiledApplication()
+      : options.compiledApplication;
+    const releases = parseCompiledApplication(compiledApplication);
     baseReleaseRoot = releases.application.compiled.releaseRoot;
     const releaseLineage = releasesForLineage(releases);
     for (let index = 1; index < releaseLineage.length; index += 1) {
@@ -999,6 +1022,7 @@ async function selectBootRelease(
           tenantServing.baseReleaseId !== lineage.at(-1)!.releaseId),
       baseReleaseRoot: releases.application.compiled.releaseRoot,
       diagnostic: null,
+      compiledApplication,
     };
   } catch (error) {
     if (!previous || options.releaseSelection?.kind === 'rollback') throw error;
@@ -1030,6 +1054,7 @@ async function selectBootRelease(
       prepareReplay: false,
       freshTenantInstallEvidence: null,
       diagnostic,
+      compiledApplication: null,
       baseReleaseRoot,
     };
   }
