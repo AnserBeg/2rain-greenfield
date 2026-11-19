@@ -28,7 +28,7 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 - Saved views and columns passed [CI 44457971677](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44457971677) and the closed patch-kind [control 44457971797](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44457971797).
 - Today metrics passed [CI 44471090769](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44471090769) and the sum-before-pagination [control 44472880285](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44472880285).
 - The ADR amendment passed [CI 44481530303](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44481530303) and the record checker. GitHub canceled the merge run when CRITFIX-C advanced main.
-- Slice 2 candidate exercises actual compiler accept/refuse, the previous serving reader, archived and current tenant-runner envelope equality, an unchanged existing row, the browser rule journey, assistant discovery and rollback.
+- Slice 2 passed [CI 44583050908](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44583050908) and [control 44583050933](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44583050933). PostgreSQL exercised the previous serving reader, tenant-runner envelope equality, grandfathering, and rollback. The browser and assistant exercised the same pinned rule.
 - Slice 5 passed [CI 44510381381](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44510381381) and [four mutation controls](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44510308624). Migration 0040 follows activation recovery and the snapshot was rebuilt from all 40 migrations. Standard surface actions check current permission before being offered. The service stages the release and the patch audit row records the author.
 
 ## Filed
@@ -39,8 +39,8 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
-  "base": "048cf713bc528c1c85385dfa84abdc6d506228b6",
-  "head": "8c049374f1665ef9370a130e021f822f772b88ce",
+  "base": "5a7daf8e64aa50aee56cbdf068f1fe78583a2321",
+  "head": "69acef38d220a07f9a1a795e0a1b7b76e5cf8ba6",
   "changedPaths": [
     ".github/scripts/run-security-scans.sh", ".github/workflows/ci.yml", ".github/workflows/evidence.yml", "apps/web/playwright.composed.config.ts", "apps/web/playwright.customization.config.ts",
     "apps/web/playwright.shared.ts", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/document-editor.ts", "apps/web/src/surface-composition.ts",
@@ -74,6 +74,6 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 
 **Slice 5.** As Manager, open **Customize → Restrict an action for a role**. Choose **Local Demo Full Release** and the Location Archive action. Draft, approve and activate. Open a Location as Buyer and check that Archive is gone. Draft removal from Customize, approve and activate to restore access under current policy.
 
-**Slice 2.** In **Customize → Add a validation rule → Item**, choose **Description** and **Required**, enter a message, then draft, approve and activate. Open **New item**, fill SKU, name and base unit, and save with Description blank. The form keeps your entries and shows your message. Fill Description and save. Roll back in Customize and verify that another item saves with Description blank.
+**Slice 2.** In **Customize → Add validation → Item**, choose **Description** and **Require a value**, enter a message, then draft, approve and activate. Open **New item**, fill SKU, name and base unit, and save with Description blank. The form keeps your entries and shows your message. Fill Description and save. Roll back in Customize and verify that another item saves with Description blank.
 
 **Slice 6.** In **Customize → Add a metric card to Today**, choose **Locations**, select **Set up metric** and name it **Location count**. Draft, approve and activate. Select the card on Today and compare its count with the destination list. For a sum, choose **Items** and **Price (CAD)**, then use its card to open the governed list. Roll back from Customize and verify that the latest card disappears.
