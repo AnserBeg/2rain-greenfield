@@ -8,6 +8,8 @@ import {
 } from '../../apps/api/src/composition-root.js';
 import { calculatedDisplayDraft } from '../../packages/customization/src/calculated-display-draft.js';
 import { OperationsAgentSession } from '../../packages/operations-agent/src/session.js';
+import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
+import { SEMANTIC_QUERY_REQUEST_VERSION } from '../../packages/runtime/src/semantic-query-gateway.js';
 import { COMPANY, worldOver } from '../agent/agent-world.js';
 import {
   archivedRuntimeRead,
@@ -119,16 +121,35 @@ test(
             (await world.read('item', recordId)).values[fieldId],
             '0.999999999999999999',
           );
-          const listed = (await world.list(itemList)).find(
-            (row) => row.recordId === recordId,
+          const personHeaders = { cookie: 'northstar-demo-actor=manager' };
+          const list = await app.runtime.entry.run(
+            { headers: personHeaders },
+            (view) =>
+              app.runtime.queryGateway.invoke(view, {
+                schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+                queryId: itemList,
+                arguments: {
+                  includeArchived: false,
+                  list: {
+                    cursor: null,
+                    matchMode: 'substring',
+                    pageSize: 50,
+                    relationLabels: [],
+                    schemaVersion: SHARED_LIST_QUERY_VERSION,
+                    search: '',
+                    sort: [],
+                  },
+                },
+              }),
           );
+          const listed = list.records.find((row) => row.recordId === recordId);
           assert.equal(listed?.values[fieldId], '0.999999999999999999');
           const absent = await issue('MARGIN-ABSENT', randomUUID());
           assert.equal(absent.readBack?.values[fieldId], null);
           const agent = new OperationsAgentSession({
             runtime: app.runtime,
             companyId: COMPANY,
-            personHeaders: { cookie: 'northstar-demo-actor=manager' },
+            personHeaders,
             approve: () => Promise.resolve(true),
           });
           const discover = () =>
@@ -145,6 +166,11 @@ test(
             arguments: { recordId },
             selection: [fieldId],
           });
+          assert.equal(
+            assistantRead.isError,
+            false,
+            JSON.stringify(assistantRead.content),
+          );
           assert.match(
             JSON.stringify(assistantRead.content),
             /0\.999999999999999999/u,
