@@ -2811,6 +2811,7 @@ export const DocumentsProjectionSchema = z.strictObject({
         entityId: CanonicalIdSchema,
         queryId: CanonicalIdSchema,
         attachPermissionId: CanonicalIdSchema,
+        attachOperationId: CanonicalIdSchema,
         surfaceIds: z.array(CanonicalIdSchema).min(1),
       }),
     )

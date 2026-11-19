@@ -25,6 +25,7 @@ export interface DocumentUpload {
 }
 
 export class DocumentRequestError extends Error {
+  readonly code = 'DOCUMENT_REQUEST_REFUSED';
   constructor(
     readonly status: number,
     message: string,

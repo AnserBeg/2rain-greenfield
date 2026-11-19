@@ -5,6 +5,7 @@ import {
   type StorageTargetPayloadV1,
 } from '@north-star/compiler';
 import type { DocumentGateway } from '../../runtime/src/document-gateway.js';
+import { PostgresDocumentPublication } from './document-publication.js';
 import {
   PostgresDocumentGateway,
   documentPermissionBindings,
@@ -430,6 +431,7 @@ export async function createComposedApplicationRuntime(
         },
       );
     const operationMediation = new SemanticOperationMediationAuthority();
+    const documentPublication = new PostgresDocumentPublication();
     const denialRecorder = new PostgresSemanticQueryDenialRecorder(
       runtimePool,
       actorIssuer,
@@ -505,7 +507,9 @@ export async function createComposedApplicationRuntime(
           interpreter,
           operationMediation,
           undefined,
-          capabilityExecutors,
+          options.documents
+            ? [...capabilityExecutors, documentPublication]
+            : capabilityExecutors,
         ),
         policy,
         queryGateway,
@@ -585,6 +589,9 @@ export async function createComposedApplicationRuntime(
             queryGateway,
             servingFor,
             scanner,
+            documentPublication,
+            operationGateway,
+            operationMediation,
           )
         : null,
       freshTenantInstallEvidence,

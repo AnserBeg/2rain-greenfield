@@ -7,6 +7,7 @@ import {
   DOCUMENT_STAGING_MAX_BYTES,
   DOCUMENT_TENANT_MAX_BYTES,
   documentAttachPermission,
+  documentAttachOperation,
 } from '../../canonical-model/src/documents.js';
 import { DocumentsProjectionSchema } from '../../canonical-model/src/schemas.js';
 import {
@@ -25,6 +26,8 @@ import {
   registeredQueryFromPinnedView,
   SEMANTIC_QUERY_REQUEST_VERSION,
   type SemanticQueryGateway,
+  type RegisteredQueryDefinition,
+  type SemanticRecordDto,
 } from '../../runtime/src/semantic-query-gateway.js';
 import {
   currentPolicyVersionOf,
@@ -39,6 +42,12 @@ import {
 } from './document-content.js';
 import { withModuleRuntimeRole } from './module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from './request-context.js';
+import {
+  OPERATION_BOUNDARY_PERMISSION_ID,
+  type SemanticOperationGateway,
+  type SemanticOperationMediationAuthority,
+} from '../../runtime/src/semantic-operation-gateway.js';
+import type { PostgresDocumentPublication } from './document-publication.js';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 type Entity = StorageTargetPayloadV1['entities'][number];
@@ -53,6 +62,8 @@ const metadataColumns = `v.link_id AS "linkId", v.version_id AS "versionId",
 
 interface GoverningRecord {
   readonly entity: Entity;
+  readonly record: SemanticRecordDto;
+  readonly query: RegisteredQueryDefinition;
   readonly recordId: string;
   readonly revision: number;
   readonly scope: string;
@@ -83,6 +94,9 @@ export class PostgresDocumentGateway implements DocumentGateway {
       id: string,
     ) => DocumentRelease | Promise<DocumentRelease>,
     private readonly scanner: DocumentScanner | undefined,
+    private readonly publication: PostgresDocumentPublication,
+    private readonly operations: SemanticOperationGateway,
+    private readonly mediation: SemanticOperationMediationAuthority,
   ) {}
 
   get scannerLabel() {
@@ -325,126 +339,146 @@ export class PostgresDocumentGateway implements DocumentGateway {
         'The file did not pass content screening.',
       );
 
-    return this.withRecord(
-      view,
-      target,
-      permissions,
-      async (client, record) => {
-        checkSameRecord(targetRecord, record);
-        await this.authorizeAttach(client, view, record);
-        signal.throwIfAborted();
-        await lockDocumentQuota(client, view);
-        const existing = await readUploadReceipt(client, view, upload.uploadId);
-        if (existing) {
-          if (!matchesUpload(existing, view, record, upload, digest, fileName))
-            throw new DocumentRequestError(
-              409,
-              'This upload ID already has different input.',
+    return this.publication.publish(
+      {
+        view,
+        record: targetRecord.record,
+        query: targetRecord.query,
+        companyId: target.companyId,
+        uploadId: upload.uploadId,
+        commit: () =>
+          this.withRecord(view, target, permissions, async (client, record) => {
+            checkSameRecord(targetRecord, record);
+            await this.authorizeAttach(client, view, record);
+            signal.throwIfAborted();
+            await lockDocumentQuota(client, view);
+            const existing = await readUploadReceipt(
+              client,
+              view,
+              upload.uploadId,
             );
-          return existing.metadata;
-        }
-        // Apply the same quota refusal to new and matching bytes before touching
-        // the blob's digest key, even if this publication would add no bytes.
-        if (
-          (await scopeBytes(client, view, 'document_blobs')) + bytes.length >
-          DOCUMENT_TENANT_MAX_BYTES
-        )
-          throw new DocumentRequestError(413, 'The stored file quota is full.');
-        if (field) {
-          const count = await client.query<{
-            total: number;
-            categorized: number;
-          }>(
-            `SELECT count(*)::int AS total, count(*) FILTER (WHERE category_id = $7)::int AS categorized
+            if (existing) {
+              if (
+                !matchesUpload(existing, view, record, upload, digest, fileName)
+              )
+                throw new DocumentRequestError(
+                  409,
+                  'This upload ID already has different input.',
+                );
+              return existing.metadata;
+            }
+            // Apply the same quota refusal to new and matching bytes before touching
+            // the blob's digest key, even if this publication would add no bytes.
+            if (
+              (await scopeBytes(client, view, 'document_blobs')) +
+                bytes.length >
+              DOCUMENT_TENANT_MAX_BYTES
+            )
+              throw new DocumentRequestError(
+                413,
+                'The stored file quota is full.',
+              );
+            if (field) {
+              const count = await client.query<{
+                total: number;
+                categorized: number;
+              }>(
+                `SELECT count(*)::int AS total, count(*) FILTER (WHERE category_id = $7)::int AS categorized
              FROM platform.document_versions
             WHERE tenant_id = $1 AND environment_id = $2 AND entity_id = $3
               AND record_id = $4 AND owner_scope = $5 AND field_id = $6`,
-            [...targetKey(view, record), upload.fieldId, upload.categoryId],
-          );
-          if (
-            count.rows[0]!.total >= field.maxCount ||
-            (category && count.rows[0]!.categorized >= category.maxCount)
-          )
-            throw new DocumentRequestError(
-              409,
-              'This file field or category is full.',
-            );
-        }
-        const staged = await client.query(
-          `SELECT 1 FROM platform.document_upload_staging
+                [...targetKey(view, record), upload.fieldId, upload.categoryId],
+              );
+              if (
+                count.rows[0]!.total >= field.maxCount ||
+                (category && count.rows[0]!.categorized >= category.maxCount)
+              )
+                throw new DocumentRequestError(
+                  409,
+                  'This file field or category is full.',
+                );
+            }
+            const staged = await client.query(
+              `SELECT 1 FROM platform.document_upload_staging
           WHERE tenant_id = $1 AND environment_id = $2 AND upload_id = $3
             AND principal_id = $4 AND digest = $5 AND expires_at > clock_timestamp()`,
-          [
-            view.tenantId,
-            view.environmentId,
-            upload.uploadId,
-            view.principalId,
-            digest,
-          ],
-        );
-        if (!staged.rowCount)
-          throw new DocumentRequestError(409, 'This staged upload expired.');
-        await client.query(
-          `INSERT INTO platform.document_blobs
+              [
+                view.tenantId,
+                view.environmentId,
+                upload.uploadId,
+                view.principalId,
+                digest,
+              ],
+            );
+            if (!staged.rowCount)
+              throw new DocumentRequestError(
+                409,
+                'This staged upload expired.',
+              );
+            await client.query(
+              `INSERT INTO platform.document_blobs
             (tenant_id, environment_id, owner_scope, digest, content_type, bytes)
          SELECT tenant_id, environment_id, owner_scope, digest, content_type, bytes
            FROM platform.document_upload_staging
           WHERE tenant_id = $1 AND environment_id = $2 AND upload_id = $3
          ON CONFLICT (tenant_id, environment_id, owner_scope, digest) DO NOTHING`,
-          [view.tenantId, view.environmentId, upload.uploadId],
-        );
-        const linkId = randomUUID();
-        const versionId = randomUUID();
-        await client.query(
-          `INSERT INTO platform.document_versions
+              [view.tenantId, view.environmentId, upload.uploadId],
+            );
+            const linkId = randomUUID();
+            const versionId = randomUUID();
+            await client.query(
+              `INSERT INTO platform.document_versions
           (tenant_id, environment_id, link_id, version_id, upload_id, owner_scope, digest, entity_id,
            record_id, record_revision, field_id, category_id, retention_class, file_name, actor_id,
            release_id, scan_policy_version)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
-          [
-            view.tenantId,
-            view.environmentId,
-            linkId,
-            versionId,
-            upload.uploadId,
-            record.scope,
-            digest,
-            record.entity.entityId,
-            record.recordId,
-            record.revision,
-            upload.fieldId,
-            upload.categoryId,
-            category?.retentionClass ?? null,
-            fileName,
-            view.principalId,
-            view.release.releaseId,
-            scanner.policyVersion,
-          ],
-        );
-        await client.query(
-          `INSERT INTO platform.document_attachment_audit (tenant_id, environment_id, link_id, operation_id)
+              [
+                view.tenantId,
+                view.environmentId,
+                linkId,
+                versionId,
+                upload.uploadId,
+                record.scope,
+                digest,
+                record.entity.entityId,
+                record.recordId,
+                record.revision,
+                upload.fieldId,
+                upload.categoryId,
+                category?.retentionClass ?? null,
+                fileName,
+                view.principalId,
+                view.release.releaseId,
+                scanner.policyVersion,
+              ],
+            );
+            await client.query(
+              `INSERT INTO platform.document_attachment_audit (tenant_id, environment_id, link_id, operation_id)
          VALUES ($1,$2,$3,$4)`,
-          [
-            view.tenantId,
-            view.environmentId,
-            linkId,
-            documentAttachPermission(record.entity.entityId),
-          ],
-        );
-        await client.query(
-          'DELETE FROM platform.document_upload_staging WHERE tenant_id = $1 AND environment_id = $2 AND upload_id = $3',
-          [view.tenantId, view.environmentId, upload.uploadId],
-        );
-        return {
-          linkId,
-          versionId,
-          fieldId: upload.fieldId,
-          categoryId: upload.categoryId,
-          fileName,
-          contentType,
-          byteLength: bytes.length,
-        };
+              [
+                view.tenantId,
+                view.environmentId,
+                linkId,
+                documentAttachOperation(record.entity.entityId),
+              ],
+            );
+            await client.query(
+              'DELETE FROM platform.document_upload_staging WHERE tenant_id = $1 AND environment_id = $2 AND upload_id = $3',
+              [view.tenantId, view.environmentId, upload.uploadId],
+            );
+            return {
+              linkId,
+              versionId,
+              fieldId: upload.fieldId,
+              categoryId: upload.categoryId,
+              fileName,
+              contentType,
+              byteLength: bytes.length,
+            };
+          }),
       },
+      this.operations,
+      this.mediation,
     );
   }
 
@@ -455,6 +489,7 @@ export class PostgresDocumentGateway implements DocumentGateway {
   ) {
     const { policy } = await this.release(view.release.releaseId);
     await this.authorize(client, policy, view, record.scope, [
+      OPERATION_BOUNDARY_PERMISSION_ID,
       documentAttachPermission(record.entity.entityId),
     ]);
   }
@@ -541,6 +576,10 @@ export class PostgresDocumentGateway implements DocumentGateway {
     if (
       canonicalBinding &&
       (canonicalBinding.queryId !== query.queryId ||
+        canonicalBinding.attachOperationId !==
+          documentAttachOperation(entity.entityId) ||
+        canonicalBinding.attachPermissionId !==
+          documentAttachPermission(entity.entityId) ||
         !canonicalBinding.surfaceIds.some((id) => id === target.surfaceId))
     )
       throw notFound();
@@ -645,6 +684,8 @@ export class PostgresDocumentGateway implements DocumentGateway {
       await this.authorize(client, policy, view, scope, permissions);
       return work(client, {
         entity,
+        record: result,
+        query,
         recordId: target.recordId,
         revision: result.revision,
         scope,

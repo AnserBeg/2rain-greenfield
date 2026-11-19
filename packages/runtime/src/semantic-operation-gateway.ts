@@ -26,6 +26,7 @@ import {
 } from './request-runtime-view.js';
 import type { RequestRuntimeView as IssuedRequestRuntimeView } from './request-runtime-view.js';
 import type { SemanticRecordDto } from './semantic-query-gateway.js';
+import { DOCUMENT_ATTACH_CAPABILITY } from '../../canonical-model/src/documents.js';
 import {
   QUERY_BOUNDARY_PERMISSION_ID,
   observePredicateReceiptSafely,
@@ -310,6 +311,11 @@ export interface SemanticOperationExecutor {
 /** Exact-ID registration for capability-backed O1 execution. */
 export interface RegisteredCapabilityOperationExecutor {
   readonly capabilityId: string;
+  /** A binary publication is available only inside its issued staging call. */
+  resolveStagedOperation?(
+    view: IssuedRequestRuntimeView,
+    operationId: string,
+  ): RegisteredCapabilityOperationDefinition | undefined;
   prepareAuthorization(
     request: RegisteredCapabilityOperationAuthorizationRequest,
   ): Promise<RegisteredCapabilityOperationAuthorization>;
@@ -770,9 +776,13 @@ export class SemanticOperationGateway {
       }
 
       const operationCatalog = readPinnedOperationCatalog(view);
-      const definition = operationCatalog.find(
-        (operation) => operation.operationId === request.operationId,
-      );
+      const definition =
+        operationCatalog.find(
+          (operation) => operation.operationId === request.operationId,
+        ) ??
+        this.#capabilityExecutors
+          .get(DOCUMENT_ATTACH_CAPABILITY)
+          ?.resolveStagedOperation?.(view, request.operationId);
       if (!definition) {
         throw new NoSuchRegisteredOperationError(request.operationId, view);
       }

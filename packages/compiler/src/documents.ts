@@ -1,6 +1,7 @@
 import type { VersionedNormalizedApplicationPackage } from '@north-star/canonical-model';
 import {
   DOCUMENTS_PAYLOAD_VERSION,
+  documentAttachOperation,
   documentAttachPermission,
 } from '../../canonical-model/src/documents.js';
 
@@ -106,6 +107,7 @@ export function compileDocuments(
       entityId,
       queryId: query.queryId,
       attachPermissionId: documentAttachPermission(entityId),
+      attachOperationId: documentAttachOperation(entityId),
       surfaceIds: surfaces
         .filter((surface) => surface.dataSource.targetId === query.queryId)
         .map((surface) => surface.surfaceId),

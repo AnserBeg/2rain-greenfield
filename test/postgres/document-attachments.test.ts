@@ -10,11 +10,19 @@ import {
   DOCUMENT_DEMO_SCANNER_LABEL,
   DOCUMENT_FILES_SURFACE_FLOOR,
   DOCUMENT_TENANT_MAX_BYTES,
+  documentAttachOperation,
 } from '../../packages/canonical-model/src/documents.js';
 import type { DocumentMetadata } from '../../packages/runtime/src/document-gateway.js';
+import {
+  ensureScope,
+  rolePool,
+  trustedContext,
+} from '../../packages/postgres-provider/src/composed-application-runtime.js';
+import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
+
 import { worldOver } from '../agent/agent-world.js';
 import {
-  archivedServingRead,
+  archivedRuntimeRead,
   withArchivedCustomizationRuntime,
 } from '../helpers/archived-customization-runtime.js';
 import {
@@ -27,7 +35,7 @@ const pixel = Buffer.from(
   'base64',
 );
 const itemSurface = 'northstar.app:surface.item_detail';
-const poSurface = 'northstar.app:surface.purchase_order_detail';
+const companySurface = 'northstar.app:surface.inventory_transaction_detail';
 
 test(
   'internal files use live record authority, scoped dedupe, bounded ingress and immutable audit',
@@ -49,17 +57,30 @@ test(
           const item = app.seededRecords.find(
             (row) => row.operationId === 'northstar.app:operation.item_create',
           )!;
-          const po = app.seededRecords.find(
-            (row) =>
-              row.operationId ===
-              'northstar.app:operation.purchase_order_create',
-          )!;
+          const world = worldOver(app.runtime, String(connection.database));
+          const transactionId = randomUUID();
+          const transaction = await world.create(
+            'inventory_transaction',
+            {
+              actor_id: 'document-test',
+              recorded_at: new Date().toISOString(),
+              source_id: transactionId,
+              source_type: 'inventoryTransaction',
+              state: 'northstar.app:option.inventory_transaction_state_draft',
+              effective_at: new Date().toISOString(),
+              reason_code: 'SETUP',
+              reason_narrative: 'Attachment evidence',
+              type: 'northstar.app:option.inventory_transaction_type_adjustment',
+            },
+            {},
+            transactionId,
+          );
           const company = COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId;
           const itemUrl = documentUrl(app.baseUrl, itemSurface, item.recordId);
-          const poUrl = documentUrl(
+          const companyUrl = documentUrl(
             app.baseUrl,
-            poSurface,
-            po.recordId,
+            companySurface,
+            transaction.recordId,
             company,
           );
           assert.equal(
@@ -67,6 +88,29 @@ test(
             DOCUMENT_DEMO_SCANNER_LABEL,
           );
           const uploadId = randomUUID();
+          await assert.rejects(
+            app.runtime.entry.run({}, (view) =>
+              app.runtime.operationGateway.invoke(
+                view,
+                {
+                  schemaVersion: 'northstar.semantic-operation-request/v1',
+                  operationId: documentAttachOperation(
+                    'northstar.app:entity.item',
+                  ),
+                  idempotencyKey: uploadId,
+                  confirmationGrant: null,
+                  input: {
+                    recordId: item.recordId,
+                    expectedRevision: 1,
+                    uploadId,
+                  },
+                },
+                app.runtime.operationMediation.issueInvocation(view, 'UI'),
+              ),
+            ),
+            { code: 'NO_SUCH_REGISTERED_OPERATION' },
+          );
+
           const first = await upload(itemUrl, pixel, { uploadId });
           assert.equal(first.status, 201, await first.clone().text());
           const attachment = (await first.json()) as DocumentMetadata;
@@ -78,7 +122,7 @@ test(
             ((await second.json()) as DocumentMetadata).versionId,
             attachment.versionId,
           );
-          assert.equal((await upload(poUrl, pixel)).status, 201);
+          assert.equal((await upload(companyUrl, pixel)).status, 201);
           const counts = async () =>
             (
               await pool.query(
@@ -110,13 +154,18 @@ test(
           );
           await download.arrayBuffer();
           assert.equal(
-            (await fetch(byteUrl(poUrl, attachment, 'download'))).status,
+            (await fetch(byteUrl(companyUrl, attachment, 'download'))).status,
             404,
           );
           assert.equal(
             (
               await upload(
-                documentUrl(app.baseUrl, poSurface, po.recordId, randomUUID()),
+                documentUrl(
+                  app.baseUrl,
+                  companySurface,
+                  transaction.recordId,
+                  randomUUID(),
+                ),
                 pixel,
               )
             ).status,
@@ -179,6 +228,49 @@ test(
           const overQuota = await upload(itemUrl, pixel, { headers: manager });
           assert.equal(overQuota.status, 413, await overQuota.clone().text());
           assert.deepEqual(await counts(), { blobs: 7, versions: 3, audit: 3 });
+
+          const other = (
+            await ensureScope(pool, 'documents-other', 'production')
+          ).runtime;
+          await pool.query(
+            `INSERT INTO platform.document_blobs (tenant_id, environment_id, owner_scope, digest, content_type, bytes)
+             VALUES ($1, $2, 'shared', encode(sha256($3), 'hex'), 'image/png', $3)`,
+            [other.tenantId, other.environmentId, pixel],
+          );
+          const runtimePool = rolePool(
+            options.databaseUrl,
+            'north_star_runtime',
+            1,
+          );
+          const context = await trustedContext(app.runtime.identity);
+          try {
+            await withTrustedRequestTransaction(
+              runtimePool,
+              context,
+              async (client) => {
+                const hidden = await client.query(
+                  'SELECT bytes FROM platform.document_blobs WHERE tenant_id = $1 AND environment_id = $2',
+                  [other.tenantId, other.environmentId],
+                );
+                assert.equal(
+                  hidden.rowCount,
+                  0,
+                  'a different tenant received stored bytes',
+                );
+              },
+            );
+            await assert.rejects(
+              withTrustedRequestTransaction(runtimePool, context, (client) =>
+                client.query(
+                  'DELETE FROM platform.document_versions WHERE link_id = $1',
+                  [attachment.linkId],
+                ),
+              ),
+              { code: '42501' },
+            );
+          } finally {
+            await runtimePool.end();
+          }
         } finally {
           await app.close();
         }
@@ -300,14 +392,11 @@ test(
               'b2b7877e58074b325c53c7b13f926535e83f39e5',
               async (run) => {
                 const read = () =>
-                  run(archivedServingRead, {
+                  archivedRuntimeRead(run, {
                     databaseUrl: options.databaseUrl,
                     identity: app.runtime.identity,
                   });
-                assert.equal(
-                  ((await read()) as { outcome: string }).outcome,
-                  'loaded',
-                );
+                assert.equal((await read()).outcome, 'loaded');
                 await activate();
                 assert.deepEqual(await read(), {
                   outcome: 'refused',

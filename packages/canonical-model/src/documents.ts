@@ -1,6 +1,8 @@
 export const DOCUMENT_FILES_SURFACE_FLOOR = 27;
 export const DOCUMENTS_PROJECTION_FAMILY =
   'northstar.compiler:projection-family.documents' as const;
+export const DOCUMENT_ATTACH_CAPABILITY =
+  'northstar.documents:capability.attach' as const;
 export const DOCUMENTS_PAYLOAD_VERSION =
   'northstar.documents-payload/v1' as const;
 
@@ -21,4 +23,9 @@ export const DOCUMENT_PERMISSIONS = Object.freeze({
 export function documentAttachPermission(entityId: string): string {
   const [namespace, local] = entityId.split(':entity.');
   return `${namespace}:permission.document_attach_${local}`;
+}
+
+export function documentAttachOperation(entityId: string): string {
+  const [namespace, local] = entityId.split(':entity.');
+  return `${namespace}:operation.document_attach_${local}`;
 }
