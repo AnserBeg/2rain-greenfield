@@ -25,6 +25,7 @@ Slice 1 includes the tested list-column work and saved list views in [PR #95](ht
 - Slice 1 passed focused compiler, reader refusal, export and scripted drafting tests, typecheck and lint. GitHub CI will run the PostgreSQL and browser journeys and upgrade replay.
 - [CI 44441030550](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44441030550) caught a declaration emit error in the list-count helper. The explicit return type passed local declaration emit.
 - [CI 44442711383](https://github.com/rainerp-com/2rain-greenfield/actions/runs/44442711383) passed the live saved-view PostgreSQL test and found that boot's UPGRADE-1 admission omitted `saveListView`. The replay gate now admits that kind.
+- The targeted upgrade reproduction passed locally. [CI 44445972885](https://github.com/rainerp-com/2rain-greenfield/actions/runs/44445972885) passed all 71 shard-2 tests. The combined packet includes the later activation recovery changes from `main` and needs CI on that tree.
 - The migration control `unrecognized-patch-kind-admitted` checks that the database refuses a new unknown kind even with a matching digest.
 
 ## Filed
@@ -35,8 +36,8 @@ Slice 1 includes the tested list-column work and saved list views in [PR #95](ht
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
-  "base": "8b61740a17c18a6201f01c4345c0e6c215ee91d3",
-  "head": "5cbf7973222abaead7446590206408c2188dc06d",
+  "base": "7df1ea960f03528926be71e55cbbea7cfcbb77a3",
+  "head": "b8502283d5df9d7a05d7a1efc0580a2de04efa2e",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
     "apps/web/src/list-declaration.ts", "apps/web/src/surface-launcher.ts",
