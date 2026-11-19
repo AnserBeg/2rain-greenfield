@@ -1,4 +1,4 @@
-import { renderLayoutSection } from './composed-sections.js';
+import { renderLayoutSection } from './component-registry.js';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import {

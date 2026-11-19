@@ -158,8 +158,9 @@ test('the capability comparison binds the family to its capability, then compare
     null,
   );
 
-  for (const reader of [22, 23, 24, 25, 26]) {
-    for (const floor of [22, 23, 24, 25, 26]) {
+  const surfaceFloors = [22, 23, 24, 25, 26, 27];
+  for (const reader of surfaceFloors) {
+    for (const floor of surfaceFloors) {
       const refusal = unsupportedRuntimeCapability(
         surface,
         { ...requirement, minimumVersion: floor },
@@ -835,7 +836,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                   versionContext,
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
-              /requires version 999 and this runtime supports 26/,
+              /requires version 999 and this runtime supports 27/,
             );
           },
         );
@@ -864,7 +865,7 @@ test('G1-P5 pins one immutable release while policy and pointer authority remain
                   versionContext,
                 ),
               'UNSUPPORTED_RUNTIME_CAPABILITY',
-              /requires version 999 and this runtime supports 26/,
+              /requires version 999 and this runtime supports 27/,
             );
           },
         );

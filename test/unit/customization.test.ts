@@ -1933,7 +1933,7 @@ test('detail layout moves whole protected blocks, preserves read-only bindings a
 
 test('tenant inspection edit sections share the extended header bindings and the higher reader floor', async () => {
   const { inspectionChange } =
-    await import('../fixtures/inspection-customization.js');
+    await import('../fixtures/inspection-definition.js');
   const change = patch(inspectionChange);
   const applied = applyCustomizationPatches(authored, [change]);
   assert.ok(applied.status === 'applied');

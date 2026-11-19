@@ -616,7 +616,8 @@ for (const target of ['purchase_order', 'party'] as const) {
 test('a buyer creates a section and moves the bound vendor picker into it', async ({
   page,
 }) => {
-  test.setTimeout(600_000);
+  test.setTimeout(360_000);
+  page.setDefaultTimeout(30_000);
   await withEphemeralPostgres(
     'customize-layout-browser',
     async ({ connection }) => {
@@ -639,6 +640,10 @@ test('a buyer creates a section and moves the bound vendor picker into it', asyn
           await chooser.getByRole('button', { name: 'Choose page' }).click();
         };
         const activate = async () => {
+          await expect(page.locator('[data-customize-result]')).toHaveAttribute(
+            'data-customize-result',
+            'drafted',
+          );
           await page
             .getByRole('button', { name: 'Approve', exact: true })
             .click({ timeout: 180_000 });
@@ -691,10 +696,14 @@ test('a buyer creates a section and moves the bound vendor picker into it', asyn
         });
         await picker.fill('Cascade');
         await page
-          .getByRole('option', { name: /Cascade Fastener Works/u })
+          .getByRole('option')
+          .filter({ hasText: 'Cascade Fastener Works' })
           .first()
           .click();
-        await expect(picker).toHaveValue(/Cascade/u);
+        await expect(picker).toHaveAttribute(
+          'data-selected-label',
+          'Cascade Fastener Works',
+        );
       } finally {
         await app.close();
       }
