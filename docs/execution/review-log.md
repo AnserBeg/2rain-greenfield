@@ -266,3 +266,4 @@ one line per round; the gate only requires that the SHA on `main` appears.
 | `f7554e294a398194f3daa2860383be3541070de8` | DOCS-1 (Fable amendment) | integration | merged — no Critical path | 2026-11-19 | ADR-0078 adopts the independent read rulings. |
 | `8797cc6f0ed1ed1fd7a2219a7bbac0706b2ad934` | UI-COMPOSE-1 (slice 0) | integration | merged — no Critical path | 2026-11-19 | Docs-only ADR-0079 for the orchestrator’s Fable read. Packet tip is the second parent. |
 | `2a485ec839152f090898cfb9fe93140853a65394` | AGENT-SPEED-1 | host integration | merged — no Critical path | 2026-11-19 | [CI 44612076361](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44612076361). |
+| `1e01020fd35300a7d65a40c6956b9c424e7cea78` | CONNECT-1 (slice 0) | integration | merged — no Critical path | 2026-11-19 | Docs-only ADR-0080 for the orchestrator’s Fable read. Packet tip is the second parent. |
