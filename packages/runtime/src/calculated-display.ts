@@ -59,7 +59,11 @@ export function withCalculatedDisplay(
   const selected = new Set(definition.selections.map(({ fieldId }) => fieldId));
   const read = (binding: BoundDisplayOperand): bigint | null => {
     const { operand, valueType } = binding;
-    if (operand.kind === 'field' && !selected.has(operand.fieldId)) {
+    if (
+      operand.kind === 'field' &&
+      (!selected.has(operand.fieldId) ||
+        !Object.hasOwn(record.values, operand.fieldId))
+    ) {
       throw new CalculatedDisplayReadError(
         'A field used in a calculation is outside the authorized read.',
       );
