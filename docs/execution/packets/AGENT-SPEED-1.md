@@ -1,18 +1,26 @@
-# AGENT-SPEED-1 — assistant speed in user-built modules
+# AGENT-SPEED-1 — the host verifies approved changes
 
-Base `9ac017b915d24b058a35450db92433c97486a2f7`. In progress.
+The panel and CLI execute a personally approved plan and read it back before asking the model for its summary. Both calls use the existing session gateways and the approved plan ID. A scripted test makes the gateway acknowledge two writes without saving either field and checks that the model receives the failed verification.
 
-## Measures registered before tuning
+## Matched measurements from the original packet
 
-- Time to card starts before the assistant reads the screen and ends at the first presented card for that task. Yes-to-done runs from each granted human approval to its first successful declared read-back. Report medians, exclude tasks without the respective event, and report pass rate across all attempts.
-- Calls count invocations of the five tools, including host invocations. USD per task is total metered spend divided by attempted tasks. End-to-end elapsed time includes preamble and final model summary. The existing ten-task eval also reports model-loop time.
-- Route trials use tasks 1 and 14 (reads), 16 and 18 (single creates), three attempts each on Opus high, Opus low and Sonnet low. Compare read and single-operation tasks separately against Opus high on the same inputs. An adopted route must preserve each selected task's pass count.
-- Generate the proof set from declarations only after freezing the assistant. Run the identical generator on baseline and candidate. Compare the medians and end-state pass rates of matched first-party and generated journeys. Inspection is excluded.
+| Set | Time to card (s) | Yes to verified (s) | Tool calls | Pass rate | USD/task |
+|---|---:|---:|---:|---:|---:|
+| First-party, before | 4.05 | 3.03 | 4 | 12/12 | 0.0501 |
+| First-party, all levers | 5.36 | 0.18 | 4.5 | 12/12 | 0.0270 |
+| Generated, before | 2.89 | 2.71 | 3 | 12/12 | 0.0357 |
+| Generated, all levers | 6.52 | 0.25 | 4 | 12/12 | 0.0200 |
+
+Each set covers four matched tasks with three attempts per task. The isolated timing investigation follows this split. The trace test observes the order of approval, execution, verification and summary.
 
 ## Test it yourself
 
-1. Ask the panel to archive a record. Check the card, click Yes, and observe execution and read-back before the next model response. Decline another card and check the record remains active.
+Ask the assistant to archive a record and approve the card. The summary follows the read-back. Decline another card and verify that the record stays active. Run `node --import tsx --test --test-name-pattern='a personal yes|auto-run snapshot' test/agent/business-map.test.ts` to exercise the failed read-back and CRITFIX-A snapshot.
 
 ## Filed
 
-Atomic create with lines (CUSTOMIZE-4 Option A), recipes after WORKFLOW-1, and habit-based shortcuts after durable run records.
+Atomic creation with lines needs CUSTOMIZE-4 Option A. Recipes depend on WORKFLOW-1 bodies. Habit shortcuts need a durable run record.
+
+```record-claim
+{"schemaVersion": "northstar.record-claim/v1", "packet": "AGENT-SPEED-1", "base": "61c8afb1dd760c854bc5bc33890f1e85fc2a0e99", "head": "0b33d468d4c0e78cbb654bbc0f3614b84127a782", "changedPaths": ["apps/api/src/agent-cli.ts", "apps/api/src/assistant-endpoint.ts", "apps/web/test/browser/assistant-panel.composed-application.spec.ts", "packages/operations-agent/src/loop.ts", "test/agent/business-map.test.ts", "test/agent/eval-harness.ts"], "symbols": [{"path": "packages/operations-agent/src/loop.ts", "name": "runOperationsAgent"}]}
+```
