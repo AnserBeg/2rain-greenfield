@@ -1,6 +1,7 @@
 import {
   trustedContextForRequestRuntimeView,
   type RequestRuntimeView,
+  type ImmutableJsonValue,
 } from '../../../packages/runtime/src/request-runtime-view.js';
 import {
   registeredSemanticQueryFromPinnedView,
@@ -219,6 +220,8 @@ export async function workspaceSearch(
   parentScope?: { readonly relationId: string; readonly recordId: string },
   /** Children whose text also answers the search -- an item's aliases. */
   searchChildren?: readonly ReferenceSearchChild[],
+  /** Supplementary figures from a compiled List declaration. */
+  figures?: ImmutableJsonValue,
 ): Promise<{
   records: readonly SemanticRecordDto[];
   hasMore: boolean;
@@ -254,6 +257,7 @@ export async function workspaceSearch(
           matchMode: 'substring',
           sort: [],
           relationLabels: [],
+          ...(figures ? { figures } : {}),
           ...(relatedFilter ? { relatedFilter } : {}),
           ...(parentScope ? { parentScope } : {}),
           // Echoed or refused by the gateway: a picker never searches

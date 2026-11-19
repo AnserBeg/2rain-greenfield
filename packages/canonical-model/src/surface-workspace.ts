@@ -630,6 +630,39 @@ export function validateSurfaceWorkspaces(
               ),
             );
           if (field.reference.within) checkWithin(field, declared);
+          if (field.reference.details) {
+            const details = field.reference.details;
+            const source = surfaces.get(details.listSurfaceId);
+            const query = source && queries.get(source.dataSource.targetId);
+            const list = source && 'list' in source ? source.list : undefined;
+            const figures = new Set(
+              [
+                ...(list?.figures?.sums ?? []),
+                ...(list?.figures?.choices ?? []),
+                ...(list?.figures?.totals ?? []),
+              ].map((value) => value.figureId),
+            );
+            if (
+              !source ||
+              source.lifecycle !== 'active' ||
+              !list ||
+              !list.figures ||
+              !query ||
+              query?.sourceEntity.targetId !==
+                queries.get(field.reference.queryId)?.sourceEntity.targetId ||
+              new Set(details.values.map((value) => value.fieldId)).size !==
+                details.values.length ||
+              details.values.some(
+                (value) =>
+                  !figures.has(value.fieldId) &&
+                  !selects(query.queryId, [value.fieldId]),
+              )
+            )
+              fail(
+                surface.surfaceId,
+                'picker details require readable fields or numeric figures of an active List of the picker entity',
+              );
+          }
           // CATALOG-EXTRAS: the search also finds a record through its
           // children, each through its own relation once.
           const searched = field.reference.searchChildren ?? [];

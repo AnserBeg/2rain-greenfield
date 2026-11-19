@@ -1117,6 +1117,10 @@ async function pick(page: Page, name: string, term: string, option: string) {
         .click(),
     );
   const choice = records(page, name).filter({ hasText: option }).first();
+  if (name.endsWith(' product')) {
+    await expect(choice).toContainText('Price (CAD):');
+    await expect(choice).toContainText(/Available: -?\d/u);
+  }
   if (enhanced) await choice.click();
   else await submit(page, () => choice.click());
   await expect(
