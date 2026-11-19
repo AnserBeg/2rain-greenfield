@@ -74,6 +74,7 @@ test('calculated display arithmetic keeps exact signed decimals at the propagate
       36,
     ),
     '0.000000000000000000000000000000000001',
+    'multiplication must preserve both factors and all 36 decimal places',
   );
   assert.equal(decimalDisplayCoefficient('100000000000000000000', cad), null);
   assert.deepEqual(displayArithmeticType('subtract', cad, cad), {

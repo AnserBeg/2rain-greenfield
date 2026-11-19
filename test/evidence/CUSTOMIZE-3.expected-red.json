@@ -124,7 +124,7 @@
         {
           "file": "test/unit/calculated-display.test.ts",
           "name": "calculated display arithmetic keeps exact signed decimals at the propagated scale",
-          "expected": "the full-scale expected coefficient differs when multiplication is replaced by addition"
+          "expected": "multiplication must preserve both factors and all 36 decimal places"
         }
       ]
     }
