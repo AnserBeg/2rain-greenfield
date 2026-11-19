@@ -142,7 +142,7 @@ test('a person builds Goods Receipt Inspection with the Customize screen and use
       });
       try {
         const runtime = app.runtime;
-        const create: Parameters<typeof inspectionLinkRecords>[0] = (
+        const createRecord: Parameters<typeof inspectionLinkRecords>[0] = (
           local,
           values,
           relations = {},
@@ -183,13 +183,16 @@ test('a person builds Goods Receipt Inspection with the Customize screen and use
             },
           );
         const seed = composedApplicationSeed('distributor');
-        const { receipt } = await inspectionLinkRecords(create, (name) => {
-          const record = seed.find((item) =>
-            Object.values(item.values).includes(name),
-          );
-          if (!record) throw new Error(`Missing seed record ${name}`);
-          return record.recordId;
-        });
+        const { receipt } = await inspectionLinkRecords(
+          createRecord,
+          (name) => {
+            const record = seed.find((item) =>
+              Object.values(item.values).includes(name),
+            );
+            if (!record) throw new Error(`Missing seed record ${name}`);
+            return record.recordId;
+          },
+        );
         const receiptNumber = String(
           receipt.values['northstar.app:field.goods_receipt_number'],
         );
@@ -374,7 +377,7 @@ test('a person builds Goods Receipt Inspection with the Customize screen and use
           'Released',
         );
         await page.goto(listUrl);
-        await create(inspection, { name: 'Unrelated lot' });
+        await createRecord(inspection, { name: 'Unrelated lot' });
         await page.getByRole('searchbox').last().fill(receiptNumber);
         await page.getByRole('button', { name: 'Apply', exact: true }).click();
         await expect(

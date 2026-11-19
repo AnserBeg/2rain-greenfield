@@ -1127,9 +1127,9 @@ test(
           const line = await world.create(
             lineType,
             {
-              line_number: 1,
+              line_number: '1',
               characteristic: 'Length',
-              measured_value: 21,
+              measured_value: '21',
               pass: true,
             },
             { parent: header.recordId },
@@ -1137,7 +1137,7 @@ test(
           const other = await world.create(inspection, { name: 'Another lot' });
           await world.create(
             lineType,
-            { line_number: 1, characteristic: 'Width' },
+            { line_number: '1', characteristic: 'Width' },
             { parent: other.recordId },
           );
           const lines = await world.list(
