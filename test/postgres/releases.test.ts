@@ -489,83 +489,6 @@ test('scope omission verification runs for an empty plan and refuses malformed o
   );
 });
 
-test('release admission requires the formula projection and its mandatory reader only on a declaring revision', async (t) => {
-  const authored = parseVersionedAuthoredApplicationPackageJson(
-    readFileSync('apps/web/release/app.authored.json'),
-  );
-  assert.equal(authored.languageVersion, 'v6');
-  const base = normalizeApplicationPackage(authored);
-  const target = customizationTargets(base).calculatedDisplayTargets?.find(
-    ({ recordSurfaceId }) =>
-      recordSurfaceId === 'northstar.app:surface.item_detail',
-  );
-  assert.ok(target);
-  const patch = calculatedDisplayDraft(target, {
-    label: 'Margin CAD',
-    operator: 'subtract',
-    leftFieldId: 'northstar.app:field.item_price_cad',
-    rightFieldId: 'northstar.app:field.item_standard_cost_cad',
-    listSurfaceId: 'northstar.app:surface.item_list',
-  });
-  const plainBytes = canonicalizeAndHash(base).bytes;
-  const declaringBytes = canonicalizeAndHash(
-    normalizeApplicationPackage({
-      ...authored,
-      calculatedDisplayFields: [patch.field],
-    }),
-  ).bytes;
-  const declaring = mustCompile(declaringBytes);
-  const formula = declaring.bundle.releaseManifest.projections.find(
-    ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.formulaRule,
-  );
-  assert.ok(formula);
-  const undeclared = mustCompile(plainBytes);
-  undeclared.bundle.releaseManifest.projections.push(formula);
-  const missingProjection = structuredClone(declaring);
-  missingProjection.bundle.releaseManifest.projections =
-    missingProjection.bundle.releaseManifest.projections.filter(
-      ({ familyId }) => familyId !== PROJECTION_FAMILY_IDS.formulaRule,
-    );
-  const missingConsumer = structuredClone(declaring);
-  const query = missingConsumer.bundle.releaseManifest.projections.find(
-    ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.queryCatalog,
-  );
-  assert.ok(query);
-  query.requiredRuntimeCapability.minimumVersion = 3;
-
-  const context = await contextFor(requestEntry(), 'session-a');
-  const pool = new pg.Pool();
-  t.after(() => pool.end());
-  const repository = new PostgresImmutableReleaseRepository(pool);
-  for (const [reason, candidate, revision] of [
-    ['undeclared projection', undeclared, plainBytes],
-    ['missing projection', missingProjection, declaringBytes],
-    ['missing consumer floor', missingConsumer, declaringBytes],
-  ] as const) {
-    const stored = t.mock.method(
-      repository,
-      'getAppPackageRevision',
-      async () => ({
-        ...revisionCommand(context, revisionA, revision),
-        createdAt: '2026-11-19T00:00:00.000Z',
-      }),
-    );
-    await assert.rejects(
-      repository.stageTenantReleaseCandidate(context, {
-        appPackageRevisionId: revisionA,
-        compiledRelease: rebuildReleaseRoot(candidate),
-        createdBy: context.principalId,
-        environmentId: context.environmentId,
-        releaseId: releaseA,
-        tenantId: context.tenantId,
-      }),
-      { code: 'FORMULA_PROJECTION_CONTRACT_MISMATCH' },
-      reason,
-    );
-    stored.mock.restore();
-  }
-});
-
 for (const forbidden of [
   {
     key: 'skipVerification',
@@ -2068,6 +1991,83 @@ test('immutable release persistence verifies bytes, identities, links, RLS, and 
       }
     },
   );
+});
+
+test('release admission requires the formula projection and its mandatory reader only on a declaring revision', async (t) => {
+  const authored = parseVersionedAuthoredApplicationPackageJson(
+    readFileSync('apps/web/release/app.authored.json'),
+  );
+  assert.equal(authored.languageVersion, 'v6');
+  const base = normalizeApplicationPackage(authored);
+  const target = customizationTargets(base).calculatedDisplayTargets?.find(
+    ({ recordSurfaceId }) =>
+      recordSurfaceId === 'northstar.app:surface.item_detail',
+  );
+  assert.ok(target);
+  const patch = calculatedDisplayDraft(target, {
+    label: 'Margin CAD',
+    operator: 'subtract',
+    leftFieldId: 'northstar.app:field.item_price_cad',
+    rightFieldId: 'northstar.app:field.item_standard_cost_cad',
+    listSurfaceId: 'northstar.app:surface.item_list',
+  });
+  const plainBytes = canonicalizeAndHash(base).bytes;
+  const declaringBytes = canonicalizeAndHash(
+    normalizeApplicationPackage({
+      ...authored,
+      calculatedDisplayFields: [patch.field],
+    }),
+  ).bytes;
+  const declaring = mustCompile(declaringBytes);
+  const formula = declaring.bundle.releaseManifest.projections.find(
+    ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.formulaRule,
+  );
+  assert.ok(formula);
+  const undeclared = mustCompile(plainBytes);
+  undeclared.bundle.releaseManifest.projections.push(formula);
+  const missingProjection = structuredClone(declaring);
+  missingProjection.bundle.releaseManifest.projections =
+    missingProjection.bundle.releaseManifest.projections.filter(
+      ({ familyId }) => familyId !== PROJECTION_FAMILY_IDS.formulaRule,
+    );
+  const missingConsumer = structuredClone(declaring);
+  const query = missingConsumer.bundle.releaseManifest.projections.find(
+    ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.queryCatalog,
+  );
+  assert.ok(query);
+  query.requiredRuntimeCapability.minimumVersion = 3;
+
+  const context = await contextFor(requestEntry(), 'session-a');
+  const pool = new pg.Pool();
+  t.after(() => pool.end());
+  const repository = new PostgresImmutableReleaseRepository(pool);
+  for (const [reason, candidate, revision] of [
+    ['undeclared projection', undeclared, plainBytes],
+    ['missing projection', missingProjection, declaringBytes],
+    ['missing consumer floor', missingConsumer, declaringBytes],
+  ] as const) {
+    const stored = t.mock.method(
+      repository,
+      'getAppPackageRevision',
+      async () => ({
+        ...revisionCommand(context, revisionA, revision),
+        createdAt: '2026-11-19T00:00:00.000Z',
+      }),
+    );
+    await assert.rejects(
+      repository.stageTenantReleaseCandidate(context, {
+        appPackageRevisionId: revisionA,
+        compiledRelease: rebuildReleaseRoot(candidate),
+        createdBy: context.principalId,
+        environmentId: context.environmentId,
+        releaseId: releaseA,
+        tenantId: context.tenantId,
+      }),
+      { code: 'FORMULA_PROJECTION_CONTRACT_MISMATCH' },
+      reason,
+    );
+    stored.mock.restore();
+  }
 });
 
 function partitionVerificationPlan(): VerificationPlanPayloadV1 {

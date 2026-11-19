@@ -28,13 +28,13 @@ import {
   type ProjectionReference,
   type ReleaseManifestEnvelope,
 } from '@north-star/compiler';
-import { bindLiteralValidation } from '../../canonical-model/src/formula-validation-bindings.js';
 import { bindCalculatedDisplayField } from '../../canonical-model/src/calculated-display-bindings.js';
-import { projectCalculatedDisplay } from '../../canonical-model/src/calculated-display-projection.js';
 import {
   CALCULATED_DISPLAY_QUERY_READER,
   parseCalculatedDisplayProjection,
+  projectCalculatedDisplay,
 } from '../../canonical-model/src/calculated-display-projection.js';
+import { bindLiteralValidation } from '../../canonical-model/src/formula-validation-bindings.js';
 import { parseFormulaValidationBindings } from '../../canonical-model/src/formula-validation-projection.js';
 import {
   LITERAL_VALIDATION_OPERATION_READER,
@@ -682,7 +682,7 @@ function verifyCompiledRelease(
       }
       throw integrity(
         'FORMULA_PROJECTION_CONTRACT_MISMATCH',
-        'the formula/rule projection does not bind the declared validation rules',
+        'the formula/rule projection disagrees with the declared validation rules or calculated displays',
       );
     }
   }
