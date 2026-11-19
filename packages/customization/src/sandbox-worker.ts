@@ -60,7 +60,8 @@ function compileChain(
     length += 1
   ) {
     const result = compileCustomizationCandidate({
-      acknowledgement: request.acknowledgement,
+      acknowledgement:
+        request.stepAcknowledgements?.[steps.length] ?? request.acknowledgement,
       base: request.base,
       chain: request.chain.slice(0, length),
       parent,

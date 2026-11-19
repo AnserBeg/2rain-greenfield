@@ -1,7 +1,10 @@
+import { RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receivables-capability-executor.js';
+import { PAYABLES_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/payables-capability-executor.js';
+import { FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/fulfillment-capability-executor.js';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
@@ -20,6 +23,8 @@ import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/
 import {
   createComposedApplicationRuntime,
   ensureScope,
+  reconcileInventoryScopeToPointer,
+  type PointerState,
   parseCompiledApplication,
   rolePool,
   trustedContext,
@@ -1389,7 +1394,54 @@ test(
             tenantSlug,
             upgrade.upgradeId,
           );
+          await pool.query(
+            'ALTER TABLE platform.customization_upgrades DISABLE RULE customization_upgrades_reject_update',
+          );
+          const history = (await service.service.status()).upgrades.map(
+            (record) => record.upgradeId,
+          );
+          assert.ok(history.includes(other.upgradeId));
+          assert.ok(history.includes(upgrade.upgradeId));
+          const oldPayload = (
+            await pool.query<{ payload: Buffer }>(
+              'SELECT payload FROM platform.customization_upgrades WHERE upgrade_id=$1',
+              [other.upgradeId],
+            )
+          ).rows[0]!.payload;
+          const setPayload = (bytes: Buffer) =>
+            pool.query(
+              'UPDATE platform.customization_upgrades SET payload=$2,payload_digest=$3 WHERE upgrade_id=$1',
+              [
+                other.upgradeId,
+                bytes,
+                createHash('sha256').update(bytes).digest('hex'),
+              ],
+            );
+          try {
+            await setPayload(
+              Buffer.from(
+                canonicalize({
+                  ...(JSON.parse(oldPayload.toString()) as object),
+                  patchIds: [42],
+                }),
+              ),
+            );
+            const isolated = await service.service.status();
+            assert.deepEqual(
+              isolated.upgrades.map((record) => record.upgradeId),
+              history.filter((id) => id !== other.upgradeId),
+            );
+          } finally {
+            await setPayload(oldPayload);
+            await pool.query(
+              'ALTER TABLE platform.customization_upgrades ENABLE RULE customization_upgrades_reject_update',
+            );
+          }
           const approval = await service.service.approve(upgrade.upgradeId);
+          await assertLegacyApprovalReconciliation(
+            pool,
+            approval.activationAttemptId,
+          );
           assert.match(approval.renderedDiff, /Stock number/u);
           assert.equal(
             (
@@ -1414,6 +1466,22 @@ test(
             await pointerFence(pool, runtime.identity.tenantId),
             sourceFence,
           );
+          const laterCheckout = await openCustomizeService({
+            ...options,
+            compiledApplication: discardedBase.envelope,
+          });
+          try {
+            await assert.rejects(
+              laterCheckout.service.activate(upgrade.upgradeId),
+              { code: 'CUSTOMIZE_BASE_MOVED' },
+            );
+            assert.equal(
+              await pointerFence(pool, runtime.identity.tenantId),
+              sourceFence,
+            );
+          } finally {
+            await laterCheckout.close();
+          }
           await service.service.activate(upgrade.upgradeId);
           assert.equal(
             (await service.service.status()).activeReleaseRoot,
@@ -1459,6 +1527,47 @@ test(
           } finally {
             await restarted.close();
           }
+          const predecessorReceipt = (
+            await pool.query<{
+              verification_receipt_id: string;
+              fence: string;
+            }>(
+              `SELECT proof.verification_receipt_id, proof.fence FROM platform.release_activation_verification_receipts AS proof
+                JOIN platform.release_approvals AS approval USING (tenant_id, environment_id)
+               WHERE proof.tenant_id=$1 AND proof.environment_id=$2 AND proof.activated_release_id=$3
+                 AND approval.activation_attempt_id=$4 AND approval.expected_pointer_id=proof.pointer_id
+                 AND approval.expected_release_id=proof.activated_release_id AND approval.expected_fence=proof.fence`,
+              [
+                runtime.identity.tenantId,
+                runtime.identity.environmentId,
+                upgrade.sourceReleaseId,
+                approval.activationAttemptId,
+              ],
+            )
+          ).rows[0]!;
+          await pool.query(
+            'ALTER TABLE platform.release_activation_verification_receipts DISABLE RULE release_activation_verification_receipts_reject_update',
+          );
+          try {
+            await pool.query(
+              'UPDATE platform.release_activation_verification_receipts SET fence=fence+100 WHERE verification_receipt_id=$1',
+              [predecessorReceipt.verification_receipt_id],
+            );
+            await assert.rejects(service.service.rollback(), {
+              code: 'ROLLBACK_FORWARD_ACTIVATION_NOT_VERIFIED',
+            });
+          } finally {
+            await pool.query(
+              'UPDATE platform.release_activation_verification_receipts SET fence=$2 WHERE verification_receipt_id=$1',
+              [
+                predecessorReceipt.verification_receipt_id,
+                predecessorReceipt.fence,
+              ],
+            );
+            await pool.query(
+              'ALTER TABLE platform.release_activation_verification_receipts ENABLE RULE release_activation_verification_receipts_reject_update',
+            );
+          }
           // A later pre-tenant baseline omits the old first-party releases from
           // the file. Their immutable database artifacts still reproduce intent.
           const nextBase = platformLabelVariant('Platform stock number', true);
@@ -1482,7 +1591,6 @@ test(
               upgraded.envelope,
               upgrade.upgradeId,
             );
-            await nextService.service.rollback();
           } finally {
             await nextService.close();
             await nextRuntime.close();
@@ -1500,6 +1608,177 @@ test(
         } finally {
           await service.close();
           await runtime.close();
+        }
+      },
+      LINEAGE_INSTALL_VOLUME,
+    );
+  },
+);
+
+test(
+  'standard boot diagnoses an invalid or refused successor and serializes its verified swap',
+  { timeout: 600_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'boot-verified',
+      async ({ connection, pool }) => {
+        const databaseUrl = `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`;
+        const options = { databaseUrl, tenantSlug: 'verified-standard-boot' };
+        const installed = await openComposedApplicationRuntime(options);
+        const previous = installed.activeReleaseId;
+        const { tenantId, environmentId } = installed.identity;
+        await installed.close();
+        const next = platformLabelVariant('New catalog code');
+        const malformed = platformLabelVariant(
+          'Wrong predecessor',
+          false,
+          undefined,
+          next.envelope,
+        );
+        malformed.envelope.applications.splice(-2, 1);
+        async function assertServesPrevious(compiledApplication: unknown) {
+          const boot = await openComposedApplicationRuntime({
+            ...options,
+            compiledApplication,
+          });
+          try {
+            assert.equal(boot.activeReleaseId, previous);
+            assert.equal(boot.customizationUpgrade?.status, 'refused');
+            assert.equal(
+              await boot.entry.run({}, (view) => view.release.releaseId),
+              previous,
+            );
+          } finally {
+            await boot.close();
+          }
+        }
+        const unreadable = await openComposedApplicationRuntime({
+          ...options,
+          get compiledApplication(): unknown {
+            throw new SyntaxError('malformed successor JSON');
+          },
+        });
+        try {
+          assert.equal(unreadable.activeReleaseId, previous);
+          assert.equal(unreadable.customizationUpgrade?.status, 'refused');
+        } finally {
+          await unreadable.close();
+        }
+        await assertServesPrevious(malformed.envelope);
+        await pool.query(`CREATE FUNCTION public.refuse_successor() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN RAISE EXCEPTION 'test successor refused'; END $$;
+      CREATE TRIGGER refuse_successor BEFORE UPDATE ON platform.active_release_pointers
+        FOR EACH ROW EXECUTE FUNCTION public.refuse_successor()`);
+        try {
+          await assertServesPrevious(next.envelope);
+        } finally {
+          await pool.query(
+            'DROP TRIGGER refuse_successor ON platform.active_release_pointers',
+          );
+        }
+
+        const holder = await pool.connect();
+        let opening: Promise<ComposedApplicationRuntime> | undefined;
+        try {
+          await holder.query('BEGIN');
+          await holder.query(
+            'SELECT pg_advisory_xact_lock(hashtextextended($1,0))',
+            [`northstar.release-scope:${tenantId}:${environmentId}`],
+          );
+          opening = createComposedApplicationRuntime({
+            ...options,
+            compiledApplication: next.envelope,
+            localDemoIdentity: true,
+            migrationsDirectory,
+            providerErrorMappings: INVENTORY_PROVIDER_ERROR_MAPPINGS,
+            capabilityOperationExecutorFactories: [
+              INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY,
+              RECEIVING_CAPABILITY_EXECUTOR_FACTORY,
+              PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY,
+              FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY,
+              RECEIVABLES_CAPABILITY_EXECUTOR_FACTORY,
+              PAYABLES_CAPABILITY_EXECUTOR_FACTORY,
+            ],
+          });
+          void opening.catch(() => undefined);
+          const deadline = performance.now() + 120_000;
+          while (
+            !(
+              await holder.query(
+                `SELECT 1 FROM pg_stat_activity WHERE pg_backend_pid()=ANY(pg_blocking_pids(pid))`,
+              )
+            ).rowCount
+          ) {
+            if (performance.now() > deadline)
+              throw new Error('boot did not reach the release scope lock');
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+          const physical = await holder.query<{ release_id: string }>(
+            'SELECT release_id FROM platform.active_release_pointers WHERE tenant_id=$1 AND environment_id=$2',
+            [tenantId, environmentId],
+          );
+          assert.equal(
+            physical.rows[0]!.release_id,
+            previous,
+            'first-party boot waits for the lock before swapping',
+          );
+        } finally {
+          await holder.query('ROLLBACK');
+          holder.release();
+          if (opening) {
+            const boot = await opening;
+            try {
+              assert.equal(
+                boot.releaseRoot,
+                next.envelope.applications.at(-1)!.releaseRoot,
+              );
+              const client = await pool.connect();
+              try {
+                await client.query('BEGIN');
+                const current = (
+                  await client.query<PointerState>(
+                    `SELECT pointer_id AS "pointerId", release_id AS "releaseId", fence::int AS fence
+                     FROM platform.active_release_pointers WHERE tenant_id=$1 AND environment_id=$2`,
+                    [tenantId, environmentId],
+                  )
+                ).rows[0]!;
+                await client.query(
+                  'UPDATE platform.inventory_posting_configurations SET contract_release_root=$3 WHERE tenant_id=$1 AND environment_id=$2',
+                  [tenantId, environmentId, installed.releaseRoot],
+                );
+                assert.equal(
+                  await reconcileInventoryScopeToPointer(
+                    client,
+                    boot.identity,
+                    { ...current, fence: current.fence - 1 },
+                  ),
+                  null,
+                );
+                const scopes = await client.query<{
+                  contract_release_root: string;
+                }>(
+                  'SELECT DISTINCT contract_release_root FROM platform.inventory_posting_configurations WHERE tenant_id=$1 AND environment_id=$2',
+                  [tenantId, environmentId],
+                );
+                assert.deepEqual(scopes.rows, [
+                  { contract_release_root: installed.releaseRoot },
+                ]);
+                assert.equal(
+                  await reconcileInventoryScopeToPointer(
+                    client,
+                    boot.identity,
+                    current,
+                  ),
+                  boot.releaseRoot,
+                );
+              } finally {
+                await client.query('ROLLBACK');
+                client.release();
+              }
+            } finally {
+              await boot.close();
+            }
+          }
         }
       },
       LINEAGE_INSTALL_VOLUME,
@@ -1595,6 +1874,68 @@ function platformLabelVariant(
       ],
     },
   };
+}
+
+// Replay the corrective migration against an approval in the exact on-disk
+// shape left by 0035. The transaction restores the original schema and rows.
+async function assertLegacyApprovalReconciliation(
+  pool: pg.Pool,
+  attemptId: string,
+) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`ALTER TABLE platform.release_approvals DISABLE RULE release_approvals_reject_update;
+      ALTER TABLE platform.release_approvals DROP COLUMN IF EXISTS customization_reconciliation_required;
+      ALTER TABLE platform.customization_patches DROP COLUMN IF EXISTS compiler_acknowledgement;
+      ALTER TABLE platform.customization_upgrades DROP COLUMN IF EXISTS compiler_acknowledgement;
+      DROP TRIGGER IF EXISTS customization_upgrade_patch_refs ON platform.customization_upgrades;
+      DROP FUNCTION IF EXISTS platform.check_customization_patch_refs();
+      DROP FUNCTION IF EXISTS platform.customization_patch_refs_valid(uuid,uuid,bytea)`);
+    await client.query(
+      'UPDATE platform.release_approvals SET source_decision_id=NULL,customization_upgrade_id=NULL WHERE activation_attempt_id=$1',
+      [attemptId],
+    );
+    const original = readFileSync(
+      resolve(migrationsDirectory, '0035_customization_upgrade_bindings.sql'),
+      'utf8',
+    );
+    const backfill =
+      /UPDATE platform\.release_approvals AS a SET customization_upgrade_id[\s\S]*?;/u.exec(
+        original,
+      )![0];
+    await client.query(backfill);
+    const approval = () =>
+      client.query<{
+        customization_upgrade_id: string | null;
+        ambiguous: boolean | null;
+      }>(
+        `SELECT customization_upgrade_id,(to_jsonb(a)->>'customization_reconciliation_required')::boolean AS ambiguous FROM platform.release_approvals a WHERE activation_attempt_id=$1`,
+        [attemptId],
+      );
+    assert.ok(
+      (await approval()).rows[0]!.customization_upgrade_id,
+      '0035 inferred the id from the release pair',
+    );
+    await client.query(
+      'ALTER TABLE platform.release_approvals ENABLE RULE release_approvals_reject_update',
+    );
+    const correction = readdirSync(migrationsDirectory).find((name) =>
+      name.endsWith('_verified_release_history.sql'),
+    );
+    if (correction)
+      await client.query(
+        readFileSync(resolve(migrationsDirectory, correction), 'utf8'),
+      );
+    assert.deepEqual(
+      (await approval()).rows[0],
+      { customization_upgrade_id: null, ambiguous: true },
+      'an approval with no original action evidence requires reconciliation',
+    );
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+  }
 }
 
 async function assertUpgradePersistence(
@@ -1725,6 +2066,40 @@ async function assertUpgradePersistence(
       [row.tenant_id, row.environment_id],
     );
     const firstPartyId = firstParty.rows[0]!.release_id;
+    const originalIds = (
+      JSON.parse(row.payload.toString()) as { patchIds: string[] }
+    ).patchIds;
+    for (const ids of [
+      [42],
+      [originalIds[0], originalIds[0]],
+      [randomUUID()],
+    ]) {
+      const payload = Buffer.from(
+        canonicalize({
+          ...(JSON.parse(row.payload.toString()) as object),
+          baseReleaseId: firstPartyId,
+          patchIds: ids,
+        }),
+      );
+      await assert.rejects(
+        pool.query(
+          `INSERT INTO platform.customization_upgrades (tenant_id, environment_id, upgrade_id, source_release_id, base_release_id, candidate_release_id, candidate_revision_id, payload, payload_digest, authored_by)
+         VALUES ($1,$2,gen_random_uuid(),$3,$4,$5,$6,$7,$8,$9)`,
+          [
+            row.tenant_id,
+            row.environment_id,
+            row.source_release_id,
+            firstPartyId,
+            row.candidate_release_id,
+            row.candidate_revision_id,
+            payload,
+            createHash('sha256').update(payload).digest('hex'),
+            row.authored_by,
+          ],
+        ),
+        /invalid customization patch references/u,
+      );
+    }
     for (const [baseId, revisionId] of [
       [row.source_release_id, row.candidate_revision_id],
       [
@@ -1967,6 +2342,24 @@ async function assertCycleRejected(
       );
       assert.equal(status.activeReleaseId, runtime.activeReleaseId);
       assert.equal(status.historyUnavailable, true);
+      assert.equal(
+        status.rollbackAvailable,
+        true,
+        'verified rollback survives unreadable replay metadata',
+      );
+      const rolled = await service.service.rollback(
+        status.activeReleaseId,
+        String(status.activeFence),
+      );
+      assert.equal(
+        rolled.releaseId,
+        (
+          await pool.query<{ source_release_id: string }>(
+            'SELECT source_release_id FROM platform.customization_upgrades WHERE upgrade_id=$1',
+            [id],
+          )
+        ).rows[0]!.source_release_id,
+      );
     } finally {
       await service.close();
       await runtime.close();

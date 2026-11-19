@@ -99,7 +99,7 @@ test('PostgreSQL owns same-statement fill, P4b invalidation, and no release muta
   assert.match(provider, /const authoritativeSnapshotSql =/);
   assert.match(
     provider,
-    /FROM platform\.active_release_pointers[\s\S]*LEFT JOIN platform\.tenant_releases[\s\S]*read_tenant_release_artifacts[\s\S]*tenant_release_projection_links[\s\S]*tenant_release_chunk_links/,
+    /FROM \$\{servingPointersSql\} AS pointer[\s\S]*LEFT JOIN platform\.tenant_releases[\s\S]*read_tenant_release_artifacts[\s\S]*tenant_release_projection_links[\s\S]*tenant_release_chunk_links/,
   );
   assert.match(
     provider,

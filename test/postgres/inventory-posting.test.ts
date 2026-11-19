@@ -1,3 +1,4 @@
+import { activateInventoryFixture } from '../helpers/verified-fixture-release.js';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -3889,7 +3890,13 @@ async function withPostingDatabase(
       ]);
       const sourceReleaseId = releases[0]!;
       const targetReleaseId = releases[1]!;
-      await setPointer(database.pool, sourceReleaseId);
+      await activateInventoryFixture(
+        database.pool,
+        runtimePool,
+        context,
+        sourceReleaseId,
+        fixture.empty,
+      );
       await grantExecutorAuthority(database.pool);
       const materializer = new PostgresModuleStorageMaterializer(
         materializerPool,
@@ -3904,7 +3911,13 @@ async function withPostingDatabase(
         targetReleaseId,
       });
       assert.equal(prepared.schemaState, 'APPLIED');
-      await setPointer(database.pool, targetReleaseId);
+      await activateInventoryFixture(
+        database.pool,
+        runtimePool,
+        context,
+        targetReleaseId,
+        fixture.inventory,
+      );
       await seedManagedFoundation(runtimePool, context, binding);
       const actor = await actorEnvelope(context, null);
       const approvedActor = await actorEnvelope(context, approvingHumanId);

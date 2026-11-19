@@ -1,3 +1,4 @@
+import { servingPointersSql } from './verified-release-generation.js';
 import { VALUATION_CAPABILITY_ID } from '../../domain/src/inventory/valuation.js';
 import {
   inventoryValuationReadModel,
@@ -124,12 +125,20 @@ const freshTenantIntermediateAdmissionVersion =
 export const FRESH_TENANT_INSTALL_EVIDENCE_VERSION =
   'northstar.fresh-tenant-install-evidence/v1' as const;
 
-export interface ComposedApplicationRuntimeOptions {
+export type ComposedApplicationRuntimeOptions = (
+  | {
+      readonly compiledApplication: unknown;
+      readonly loadCompiledApplication?: never;
+    }
+  | {
+      readonly compiledApplication?: never;
+      readonly loadCompiledApplication: () => Promise<unknown>;
+    }
+) & {
   /** Deterministic observation seam for the non-serving active-pointer window. */
   readonly afterFreshTenantIntermediateActivation?: (
     observation: FreshTenantIntermediateActivationObservation,
   ) => Promise<void>;
-  readonly compiledApplication: unknown;
   readonly customization?: {
     readonly acknowledgement: AcknowledgementInput;
     readonly firstPartyAuthored: Readonly<Record<string, unknown>>;
@@ -159,7 +168,7 @@ export interface ComposedApplicationRuntimeOptions {
     readonly targetReleaseRoot: string;
   }>;
   readonly tenantSlug: string;
-}
+};
 
 export interface FreshTenantIntermediateActivationObservation {
   readonly lineageOrdinal: number;
@@ -285,14 +294,6 @@ export async function createComposedApplicationRuntime(
   if (options.tenantSlug.trim() === '') {
     throw new TypeError('tenantSlug must not be blank');
   }
-  const releases = parseCompiledApplication(options.compiledApplication);
-  const releaseLineage = releasesForLineage(releases);
-  for (let index = 1; index < releaseLineage.length; index += 1) {
-    assertExactCompiledTransition(
-      releaseLineage[index - 1]!,
-      releaseLineage[index]!,
-    );
-  }
   const adminPool = new pg.Pool({
     connectionString: options.databaseUrl,
     max: 2,
@@ -310,15 +311,6 @@ export async function createComposedApplicationRuntime(
       options.tenantSlug,
       options.environmentSlug ?? 'production',
     );
-    if (options.inventoryScopeProvisioning) {
-      await provisionInventoryScope(
-        adminPool,
-        identities.runtime,
-        releases.application.compiled.releaseRoot,
-        options.inventoryScopeProvisioning,
-      );
-    }
-    await ensureAuthority(adminPool, identities);
 
     runtimePool = rolePool(options.databaseUrl, 'north_star_runtime', 6);
     materializerPool = rolePool(
@@ -331,396 +323,22 @@ export async function createComposedApplicationRuntime(
     evidencePool = rolePool(options.databaseUrl, 'north_star_runtime', 2);
 
     const runtimeContext = await trustedContext(identities.runtime);
-    const approverContext = await trustedContext(identities.approver);
-    const systemContext = await trustedContext(identities.system);
-    const bootstrapIdentity = await ensurePersistedRelease(
-      runtimePool,
-      runtimeContext,
-      releases.bootstrap,
-      null,
-    );
-    const applicationIdentities: PersistedReleaseIdentity[] = [];
-    let parentRevisionId = bootstrapIdentity.revisionId;
-    for (const application of releases.applications) {
-      const identity = await ensurePersistedRelease(
-        runtimePool,
-        runtimeContext,
-        application,
-        parentRevisionId,
-      );
-      applicationIdentities.push(identity);
-      parentRevisionId = identity.revisionId;
-    }
-
-    const activation = new PostgresReleaseActivationService(runtimePool);
-    let pointer = await readPointer(runtimePool, runtimeContext);
-    const lineage = [bootstrapIdentity, ...applicationIdentities];
-    const candidateInstallId = minted(
-      stableUuid(
-        `fresh-tenant-install:${runtimeContext.tenantId}:${runtimeContext.environmentId}:${releases.application.compiled.releaseRoot}`,
-      ),
-    );
-    const freshInstall =
-      pointer.releaseId === null ||
-      (await freshTenantInstallIsIncomplete(
-        runtimePool,
-        runtimeContext,
-        candidateInstallId,
-        pointer.releaseId,
-        lineage.at(-1)!.releaseId,
-      ));
-    const installId = freshInstall ? candidateInstallId : null;
-    if (pointer.releaseId === null) {
-      await ensureFreshTenantIntermediateReleaseAdmitted(
-        runtimePool,
-        runtimeContext,
-        candidateInstallId,
-        0,
-        bootstrapIdentity,
-        releaseLineage[0]!,
-        null,
-      );
-      await assertExactSwapTriggerEnabled(adminPool);
-      const attemptId = await approveInitialRelease(
-        runtimePool,
-        runtimeContext,
-        approverContext,
-        pointer,
-        bootstrapIdentity,
-        releases.bootstrap.compiled,
-        { installId: candidateInstallId, lineageOrdinal: 0 },
-      );
-      const activated = await activateWithExactSwapTrigger(
-        adminPool,
-        activation,
-        systemContext,
-        attemptId,
-      );
-      if (activated.status !== 'SWAPPED_VERIFIED') {
-        throw new Error(
-          `bootstrap activation did not verify: ${activated.status}`,
-        );
-      }
-      pointer = await readPointer(runtimePool, runtimeContext);
-      await observeFreshTenantIntermediateActivation(
-        options,
-        runtimePool,
-        runtimeContext,
-        0,
-        bootstrapIdentity,
-        releases.bootstrap.compiled.releaseRoot,
-      );
-    }
-
-    const pointerLineageIndex = lineage.findIndex(
-      (identity) => identity.releaseId === pointer.releaseId,
-    );
-    // A tenant customization activated on the lineage tip is served as it is:
-    // the first-party lineage has nothing to advance (CUSTOMIZE).
-    const tenantServing =
-      pointerLineageIndex < 0 && pointer.releaseId !== null
-        ? await loadActiveTenantCustomization(
-            runtimePool,
-            runtimeContext,
-            pointer.releaseId,
-          )
-        : null;
-    if (pointerLineageIndex < 0 && !tenantServing) {
-      throw new Error(
-        'the active pointer names a release outside this composed application lineage',
-      );
-    }
-    if (tenantServing && options.releaseSelection?.kind === 'rollback') {
-      refuseReverseTransition(
-        'ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR',
-        'the active release is a tenant customization; roll it back with corepack pnpm customize rollback',
-      );
-    }
-    const activeLineageIndex = tenantServing
-      ? lineage.length - 1
-      : pointerLineageIndex;
-    if (
-      !tenantServing &&
-      (!freshInstall || activeLineageIndex === lineage.length - 1)
-    ) {
-      await ensureReleaseAdmitted(
-        runtimePool,
-        runtimeContext,
-        lineage[activeLineageIndex]!,
-        releaseLineage[activeLineageIndex]!,
-        options.providerErrorMappings,
-        options.capabilityOperationExecutorFactories ?? [],
-      );
-    }
-    const materializer = new PostgresModuleStorageMaterializer(
-      materializerPool,
-      modulePool,
-    );
-    let servingLineageIndex = activeLineageIndex;
-    if (options.releaseSelection?.kind === 'rollback') {
-      const targetIndex = releaseLineage.findIndex(
-        (release) =>
-          release.compiled.releaseRoot ===
-          options.releaseSelection?.targetReleaseRoot,
-      );
-      if (targetIndex < 1 || targetIndex !== activeLineageIndex - 1) {
-        refuseReverseTransition(
-          'ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR',
-          'rollback target must be the immediate prior immutable application release',
-        );
-      }
-      const source = releaseLineage[activeLineageIndex]!;
-      const target = releaseLineage[targetIndex]!;
-      const targetIdentity = lineage[targetIndex]!;
-      await ensureReleaseAdmitted(
-        runtimePool,
-        runtimeContext,
-        targetIdentity,
-        target,
-        options.providerErrorMappings,
-        options.capabilityOperationExecutorFactories ?? [],
-      );
-      const reverseAuthorization = await withTrustedRequestTransaction(
-        runtimePool,
-        runtimeContext,
-        async (client) =>
-          authorizeReverseTransitionIfApplicable(client, runtimeContext, {
-            expectedFence: pointer.fence,
-            sourceReleaseId: lineage[activeLineageIndex]!.releaseId,
-            targetReleaseId: targetIdentity.releaseId,
-          }),
-      );
-      if (reverseAuthorization === null) {
-        // ADR-0047 §6. A profile-only edge: both releases compile the SAME
-        // package revision under DIFFERENT compiler-semantic profiles, so
-        // `ensurePersistedRelease` reused one revision row and the revision
-        // graph has no edge to reverse even though the release lineage does.
-        // The index check above already passed, so the target IS the immediate
-        // predecessor -- borrowing that code here would misname the cause and
-        // send an operator hunting the wrong fault (ADR-0046).
-        //
-        // BOTH facts are observed, because shared revision alone does not
-        // establish the profile as the difference. Compilation identity also
-        // folds in the expected active release, the dependency closure and the
-        // limits, so a same-revision SAME-profile successor is constructible;
-        // it has no revision-parent edge either, and naming it a profile-only
-        // edge would be the same misnaming in a new place.
-        const activeProfileVersion =
-          source.compiled.bundle.releaseManifest.compilerSemanticProfileVersion;
-        const targetProfileVersion =
-          target.compiled.bundle.releaseManifest.compilerSemanticProfileVersion;
-        if (
-          targetIdentity.revisionId ===
-            lineage[activeLineageIndex]!.revisionId &&
-          targetProfileVersion !== activeProfileVersion
-        ) {
-          refuseReverseTransition(
-            'ROLLBACK_ACROSS_PROFILE_ONLY_EDGE',
-            `rollback target is the immediate predecessor and shares its package revision, but was compiled under a different compiler-semantic profile (${targetProfileVersion} to ${activeProfileVersion}): the release lineage advances across this edge while the revision lineage does not, so there is no reverse revision edge to authorize`,
-          );
-        }
-        refuseReverseTransition(
-          'ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR',
-          'rollback target does not reverse an exact compiled lineage edge',
-        );
-      }
-      await assertExactSwapTriggerEnabled(adminPool);
-      const attemptId = await approveReleaseWithoutStorageTransition(
-        runtimePool,
-        runtimeContext,
-        approverContext,
-        pointer,
-        source,
-        targetIdentity,
-        target.compiled,
-        releaseDiffBinding(source, target, 'reverse'),
-        reverseAuthorization,
-      );
-      const activated = await activateWithExactSwapTrigger(
-        adminPool,
-        activation,
-        systemContext,
-        attemptId,
-      );
-      if (activated.status !== 'SWAPPED_VERIFIED') {
-        throw new Error(
-          `composed release rollback did not verify: ${activated.status}`,
-        );
-      }
-      pointer = await readPointer(runtimePool, runtimeContext);
-      if (pointer.releaseId !== targetIdentity.releaseId) {
-        throw new Error('composed release rollback selected the wrong target');
-      }
-      servingLineageIndex = targetIndex;
-    } else {
-      for (
-        let targetIndex = activeLineageIndex + 1;
-        targetIndex < lineage.length;
-        targetIndex += 1
-      ) {
-        const source = releaseLineage[targetIndex - 1]!;
-        const target = releaseLineage[targetIndex]!;
-        const targetIdentity = lineage[targetIndex]!;
-        const transition = assertExactCompiledTransition(source, target);
-        await assertExactSwapTriggerEnabled(adminPool);
-        const generationId = minted(randomUUID());
-        const preparationId = minted(randomUUID());
-        let attemptId: MintedUuid;
-        const servingTarget = targetIndex === lineage.length - 1;
-        if (transition.elements.length === 0) {
-          if (!freshInstall || servingTarget) {
-            await ensureReleaseAdmitted(
-              runtimePool,
-              runtimeContext,
-              targetIdentity,
-              target,
-              options.providerErrorMappings,
-              options.capabilityOperationExecutorFactories ?? [],
-            );
-          } else {
-            await ensureFreshTenantIntermediateReleaseAdmitted(
-              runtimePool,
-              runtimeContext,
-              candidateInstallId,
-              targetIndex,
-              targetIdentity,
-              target,
-              source.compiled.releaseRoot,
-            );
-          }
-          attemptId = await approveReleaseWithoutStorageTransition(
-            runtimePool,
-            runtimeContext,
-            approverContext,
-            pointer,
-            source,
-            targetIdentity,
-            target.compiled,
-            releaseDiffBinding(source, target),
-            undefined,
-            freshInstall && !servingTarget
-              ? { installId: candidateInstallId, lineageOrdinal: targetIndex }
-              : undefined,
-          );
-        } else {
-          const prepared = await materializer.prepare({
-            context: runtimeContext,
-            expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
-            generationId,
-            initiatedBy: runtimeContext.principalId,
-            preparationId,
-            targetReleaseId: targetIdentity.releaseId,
-          });
-          if (!freshInstall || servingTarget) {
-            await ensureReleaseAdmitted(
-              runtimePool,
-              runtimeContext,
-              targetIdentity,
-              target,
-              options.providerErrorMappings,
-              options.capabilityOperationExecutorFactories ?? [],
-            );
-          } else {
-            await ensureFreshTenantIntermediateReleaseAdmitted(
-              runtimePool,
-              runtimeContext,
-              candidateInstallId,
-              targetIndex,
-              targetIdentity,
-              target,
-              source.compiled.releaseRoot,
-            );
-          }
-          attemptId = await approveModuleRelease(
-            runtimePool,
-            runtimeContext,
-            approverContext,
-            pointer,
-            targetIdentity,
-            target.compiled,
-            prepared,
-            preparationId,
-            releaseDiffBinding(source, target),
-            freshInstall && !servingTarget
-              ? { installId: candidateInstallId, lineageOrdinal: targetIndex }
-              : undefined,
-          );
-          const executed = await materializer.executeApprovedAttempt({
-            activationAttemptId: attemptId,
-            context: runtimeContext,
-            coordinatorId: minted(randomUUID()),
-            generationId,
-          });
-          if (executed.disposition !== 'READY_TO_SWAP') {
-            throw new Error(
-              `module materialization did not become ready: ${executed.disposition}`,
-            );
-          }
-        }
-        const activated = await activateWithExactSwapTrigger(
-          adminPool,
-          activation,
-          systemContext,
-          attemptId,
-        );
-        if (activated.status !== 'SWAPPED_VERIFIED') {
-          throw new Error(
-            `composed release activation did not verify: ${activated.status}`,
-          );
-        }
-        pointer = await readPointer(runtimePool, runtimeContext);
-        if (pointer.releaseId !== targetIdentity.releaseId) {
-          throw new Error(
-            'composed release activation selected the wrong target',
-          );
-        }
-        servingLineageIndex = targetIndex;
-        if (freshInstall && !servingTarget) {
-          await observeFreshTenantIntermediateActivation(
-            options,
-            runtimePool,
-            runtimeContext,
-            targetIndex,
-            targetIdentity,
-            target.compiled.releaseRoot,
-          );
-        }
-      }
-    }
-    await assertExactSwapTriggerEnabled(adminPool);
-    const applicationIdentity = lineage[servingLineageIndex]!;
-    const applicationRelease = releaseLineage[servingLineageIndex]!;
-    const freshTenantInstallEvidence = installId
-      ? await persistFreshTenantInstallEvidence(
-          runtimePool,
+    const selected = await withReleaseScopeLock(
+      adminPool,
+      identities.runtime,
+      (admin) =>
+        selectBootRelease(
+          options,
+          identities,
+          admin,
+          runtimePool!,
+          materializerPool!,
+          modulePool!,
           runtimeContext,
-          installId,
-          lineage,
-          releaseLineage,
-          applicationIdentity,
-          applicationRelease,
-        )
-      : null;
-
-    const metrics = options.metrics ?? new ObservabilityMetrics();
-    const serving =
-      tenantServing ??
-      servingReleaseFromParsed(
-        applicationIdentity.releaseId,
-        applicationRelease,
-      );
-    // Provisioning above recorded the lineage tip; the posting kernel posts
-    // only for the release a scope names, so every scope is reconciled to the
-    // pointer as re-read under the lock the customize swap also takes.
-    // A live pointer whose activation never verified (a cut between the
-    // kernel's swap and its verification) is not blessed by a restart: its
-    // scopes stay where they are (CUSTOMIZE review R2).
-    const proofPool = runtimePool;
-    await withReleaseScopeLock(adminPool, identities.runtime, async (client) =>
-      (await unprovenLivePointer(proofPool, runtimeContext)) === null
-        ? reconcileInventoryScopeToPointer(client, identities.runtime)
-        : null,
+        ),
     );
+    const { serving, freshTenantInstallEvidence } = selected;
+    const metrics = options.metrics ?? new ObservabilityMetrics();
     if (options.localDemoIdentity) {
       await provisionLocalDemoReleaseAuthorization(
         adminPool,
@@ -728,48 +346,55 @@ export async function createComposedApplicationRuntime(
         serving.normalizedDefinitionBytes,
       );
     }
-    let customizationUpgrade: UpgradePreparation | null = null;
-    if (
-      tenantServing &&
-      (options.customization ||
-        tenantServing.baseReleaseId !== lineage.at(-1)!.releaseId) &&
-      (await unprovenLivePointer(runtimePool, runtimeContext)) === null
-    ) {
+    let customizationUpgrade: UpgradePreparation | null = selected.diagnostic;
+    if (selected.prepareReplay) {
       const { PostgresCustomizationService, recordUpgradeRefusal } =
         await import('./customization-service.js');
-      const preparation = options.customization
-        ? new PostgresCustomizationService(
-            {
-              adminPool,
-              runtimePool,
-              materializerPool,
-              modulePool,
-              identities,
-            },
-            {
-              ...options.customization,
-              compiledApplication: options.compiledApplication,
-              ...(options.localDemoIdentity
-                ? { localDemoIdentity: true as const }
-                : {}),
-              providerErrorMappings: options.providerErrorMappings,
-              capabilityOperationExecutorFactories:
-                options.capabilityOperationExecutorFactories ?? [],
-            },
-          ).prepareUpgrade()
-        : recordUpgradeRefusal(runtimePool, runtimeContext, {
-            status: 'refused',
-            code: 'CUSTOMIZE_UPGRADE_UNAVAILABLE',
-            message: 'This runtime cannot prepare a platform upgrade.',
-            sourceReleaseId: tenantServing.releaseId,
-            baseReleaseRoot: releases.application.compiled.releaseRoot,
-          });
-      customizationUpgrade = await preparation.catch(() => ({
-        status: 'refused' as const,
-        code: 'CUSTOMIZE_UPGRADE_RECORD_FAILED',
-        message:
-          'The upgrade could not be recorded. The verified release is still live.',
-      }));
+      try {
+        customizationUpgrade = options.customization
+          ? await new PostgresCustomizationService(
+              {
+                adminPool,
+                runtimePool,
+                materializerPool,
+                modulePool,
+                identities,
+              },
+              {
+                ...options.customization,
+                compiledApplication: selected.compiledApplication,
+                ...(options.localDemoIdentity
+                  ? { localDemoIdentity: true as const }
+                  : {}),
+                providerErrorMappings: options.providerErrorMappings,
+                capabilityOperationExecutorFactories:
+                  options.capabilityOperationExecutorFactories ?? [],
+              },
+            ).prepareUpgrade()
+          : await recordUpgradeRefusal(runtimePool, runtimeContext, {
+              status: 'refused',
+              code: 'CUSTOMIZE_UPGRADE_UNAVAILABLE',
+              message: 'This runtime cannot prepare a platform upgrade.',
+              sourceReleaseId: serving.releaseId,
+              baseReleaseRoot: selected.baseReleaseRoot!,
+            });
+      } catch {
+        const refusal = {
+          status: 'refused' as const,
+          code: 'CUSTOMIZE_UPGRADE_FAILED',
+          message:
+            'The upgrade could not be prepared. The verified release is still live.',
+        };
+        customizationUpgrade = await recordUpgradeRefusal(
+          runtimePool,
+          runtimeContext,
+          {
+            ...refusal,
+            sourceReleaseId: serving.releaseId,
+            baseReleaseRoot: selected.baseReleaseRoot!,
+          },
+        ).catch(() => refusal);
+      }
     }
 
     const actorIssuer = humanActorIssuer();
@@ -937,6 +562,501 @@ export async function createComposedApplicationRuntime(
         .map((pool) => pool.end().catch(() => undefined)),
     );
     throw error;
+  }
+}
+
+async function selectBootRelease(
+  options: ComposedApplicationRuntimeOptions,
+  identities: ScopeIdentities,
+  admin: pg.PoolClient,
+  runtimePool: pg.Pool,
+  materializerPool: pg.Pool,
+  modulePool: pg.Pool,
+  runtimeContext: TrustedRequestContext,
+) {
+  const initialPointer = await readPointer(runtimePool, runtimeContext);
+  const previous = await readVerifiedServing(runtimePool, runtimeContext);
+  if (previous && options.inventoryScopeProvisioning)
+    await provisionInventoryScopeOnClient(
+      admin,
+      identities.runtime,
+      previous.releaseRoot,
+      options.inventoryScopeProvisioning,
+    );
+  let baseReleaseRoot: string | null = null;
+  try {
+    if (
+      initialPointer.releaseId &&
+      previous &&
+      previous.fence !== initialPointer.fence
+    )
+      throw new Error('the latest swap awaits activation recovery');
+    await ensureAuthority(admin, identities);
+    const compiledApplication = options.loadCompiledApplication
+      ? await options.loadCompiledApplication()
+      : options.compiledApplication;
+    const releases = parseCompiledApplication(compiledApplication);
+    baseReleaseRoot = releases.application.compiled.releaseRoot;
+    const releaseLineage = releasesForLineage(releases);
+    for (let index = 1; index < releaseLineage.length; index += 1) {
+      assertExactCompiledTransition(
+        releaseLineage[index - 1]!,
+        releaseLineage[index]!,
+      );
+    }
+    const approverContext = await trustedContext(identities.approver);
+    const systemContext = await trustedContext(identities.system);
+    if (!previous && options.inventoryScopeProvisioning)
+      await provisionInventoryScopeOnClient(
+        admin,
+        identities.runtime,
+        releases.application.compiled.releaseRoot,
+        options.inventoryScopeProvisioning,
+      );
+    const bootstrapIdentity = await ensurePersistedRelease(
+      runtimePool,
+      runtimeContext,
+      releases.bootstrap,
+      null,
+    );
+    const applicationIdentities: PersistedReleaseIdentity[] = [];
+    let parentRevisionId = bootstrapIdentity.revisionId;
+    for (const application of releases.applications) {
+      const identity = await ensurePersistedRelease(
+        runtimePool,
+        runtimeContext,
+        application,
+        parentRevisionId,
+      );
+      applicationIdentities.push(identity);
+      parentRevisionId = identity.revisionId;
+    }
+
+    const activation = new PostgresReleaseActivationService(runtimePool);
+    let pointer = initialPointer;
+    const lineage = [bootstrapIdentity, ...applicationIdentities];
+    const candidateInstallId = minted(
+      stableUuid(
+        `fresh-tenant-install:${runtimeContext.tenantId}:${runtimeContext.environmentId}:${releases.application.compiled.releaseRoot}`,
+      ),
+    );
+    const freshInstall =
+      pointer.releaseId === null ||
+      (await freshTenantInstallIsIncomplete(
+        runtimePool,
+        runtimeContext,
+        candidateInstallId,
+        pointer.releaseId,
+        lineage.at(-1)!.releaseId,
+      ));
+    const installId = freshInstall ? candidateInstallId : null;
+    if (pointer.releaseId === null) {
+      await ensureFreshTenantIntermediateReleaseAdmitted(
+        runtimePool,
+        runtimeContext,
+        candidateInstallId,
+        0,
+        bootstrapIdentity,
+        releaseLineage[0]!,
+        null,
+      );
+      await assertExactSwapTriggerEnabled(admin);
+      const attemptId = await approveInitialRelease(
+        runtimePool,
+        runtimeContext,
+        approverContext,
+        pointer,
+        bootstrapIdentity,
+        releases.bootstrap.compiled,
+        { installId: candidateInstallId, lineageOrdinal: 0 },
+      );
+      const activated = await activateWithExactSwapTrigger(
+        admin,
+        activation,
+        systemContext,
+        attemptId,
+      );
+      if (activated.status !== 'SWAPPED_VERIFIED') {
+        throw new Error(
+          `bootstrap activation did not verify: ${activated.status}`,
+        );
+      }
+      pointer = await readPointer(runtimePool, runtimeContext);
+      if (
+        pointer.releaseId !== bootstrapIdentity.releaseId ||
+        pointer.pointerId !== activated.pointerId ||
+        pointer.fence !== activated.fence
+      )
+        throw new Error('bootstrap generation changed before readback');
+      await observeFreshTenantIntermediateActivation(
+        options,
+        runtimePool,
+        runtimeContext,
+        0,
+        bootstrapIdentity,
+        releases.bootstrap.compiled.releaseRoot,
+      );
+    }
+
+    const pointerLineageIndex = lineage.findIndex(
+      (identity) => identity.releaseId === pointer.releaseId,
+    );
+    // A tenant customization activated on the lineage tip is served as it is:
+    // the first-party lineage has nothing to advance (CUSTOMIZE).
+    const tenantServing =
+      pointerLineageIndex < 0 && pointer.releaseId !== null
+        ? await loadActiveTenantCustomization(
+            runtimePool,
+            runtimeContext,
+            pointer.releaseId,
+          )
+        : null;
+    if (pointerLineageIndex < 0 && !tenantServing) {
+      throw new Error(
+        'the active pointer names a release outside this composed application lineage',
+      );
+    }
+    if (tenantServing && options.releaseSelection?.kind === 'rollback') {
+      refuseReverseTransition(
+        'ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR',
+        'the active release is a tenant customization; roll it back with corepack pnpm customize rollback',
+      );
+    }
+    const activeLineageIndex = tenantServing
+      ? lineage.length - 1
+      : pointerLineageIndex;
+    if (
+      !tenantServing &&
+      (!freshInstall || activeLineageIndex === lineage.length - 1)
+    ) {
+      await ensureReleaseAdmitted(
+        runtimePool,
+        runtimeContext,
+        lineage[activeLineageIndex]!,
+        releaseLineage[activeLineageIndex]!,
+        options.providerErrorMappings,
+        options.capabilityOperationExecutorFactories ?? [],
+      );
+    }
+    const materializer = new PostgresModuleStorageMaterializer(
+      materializerPool,
+      modulePool,
+    );
+    let servingLineageIndex = activeLineageIndex;
+    if (options.releaseSelection?.kind === 'rollback') {
+      const targetIndex = releaseLineage.findIndex(
+        (release) =>
+          release.compiled.releaseRoot ===
+          options.releaseSelection?.targetReleaseRoot,
+      );
+      if (targetIndex < 1 || targetIndex !== activeLineageIndex - 1) {
+        refuseReverseTransition(
+          'ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR',
+          'rollback target must be the immediate prior immutable application release',
+        );
+      }
+      const source = releaseLineage[activeLineageIndex]!;
+      const target = releaseLineage[targetIndex]!;
+      const targetIdentity = lineage[targetIndex]!;
+      await ensureReleaseAdmitted(
+        runtimePool,
+        runtimeContext,
+        targetIdentity,
+        target,
+        options.providerErrorMappings,
+        options.capabilityOperationExecutorFactories ?? [],
+      );
+      const reverseAuthorization = await withTrustedRequestTransaction(
+        runtimePool,
+        runtimeContext,
+        async (client) =>
+          authorizeReverseTransitionIfApplicable(client, runtimeContext, {
+            expectedPointerId: pointer.pointerId,
+            expectedFence: pointer.fence,
+            sourceReleaseId: lineage[activeLineageIndex]!.releaseId,
+            targetReleaseId: targetIdentity.releaseId,
+          }),
+      );
+      if (reverseAuthorization === null) {
+        // ADR-0047 §6. A profile-only edge: both releases compile the SAME
+        // package revision under DIFFERENT compiler-semantic profiles, so
+        // `ensurePersistedRelease` reused one revision row and the revision
+        // graph has no edge to reverse even though the release lineage does.
+        // The index check above already passed, so the target IS the immediate
+        // predecessor -- borrowing that code here would misname the cause and
+        // send an operator hunting the wrong fault (ADR-0046).
+        //
+        // BOTH facts are observed, because shared revision alone does not
+        // establish the profile as the difference. Compilation identity also
+        // folds in the expected active release, the dependency closure and the
+        // limits, so a same-revision SAME-profile successor is constructible;
+        // it has no revision-parent edge either, and naming it a profile-only
+        // edge would be the same misnaming in a new place.
+        const activeProfileVersion =
+          source.compiled.bundle.releaseManifest.compilerSemanticProfileVersion;
+        const targetProfileVersion =
+          target.compiled.bundle.releaseManifest.compilerSemanticProfileVersion;
+        if (
+          targetIdentity.revisionId ===
+            lineage[activeLineageIndex]!.revisionId &&
+          targetProfileVersion !== activeProfileVersion
+        ) {
+          refuseReverseTransition(
+            'ROLLBACK_ACROSS_PROFILE_ONLY_EDGE',
+            `rollback target is the immediate predecessor and shares its package revision, but was compiled under a different compiler-semantic profile (${targetProfileVersion} to ${activeProfileVersion}): the release lineage advances across this edge while the revision lineage does not, so there is no reverse revision edge to authorize`,
+          );
+        }
+        refuseReverseTransition(
+          'ROLLBACK_TARGET_NOT_IMMEDIATE_PREDECESSOR',
+          'rollback target does not reverse an exact compiled lineage edge',
+        );
+      }
+      await assertExactSwapTriggerEnabled(admin);
+      const attemptId = await approveReleaseWithoutStorageTransition(
+        runtimePool,
+        runtimeContext,
+        approverContext,
+        pointer,
+        source,
+        targetIdentity,
+        target.compiled,
+        releaseDiffBinding(source, target, 'reverse'),
+        reverseAuthorization,
+      );
+      const activated = await activateWithExactSwapTrigger(
+        admin,
+        activation,
+        systemContext,
+        attemptId,
+      );
+      if (activated.status !== 'SWAPPED_VERIFIED') {
+        throw new Error(
+          `composed release rollback did not verify: ${activated.status}`,
+        );
+      }
+      pointer = await readPointer(runtimePool, runtimeContext);
+      if (
+        pointer.releaseId !== targetIdentity.releaseId ||
+        pointer.pointerId !== activated.pointerId ||
+        pointer.fence !== activated.fence
+      ) {
+        throw new Error('composed release rollback selected the wrong target');
+      }
+      servingLineageIndex = targetIndex;
+    } else {
+      for (
+        let targetIndex = activeLineageIndex + 1;
+        targetIndex < lineage.length;
+        targetIndex += 1
+      ) {
+        const source = releaseLineage[targetIndex - 1]!;
+        const target = releaseLineage[targetIndex]!;
+        const targetIdentity = lineage[targetIndex]!;
+        const transition = assertExactCompiledTransition(source, target);
+        await assertExactSwapTriggerEnabled(admin);
+        const generationId = minted(randomUUID());
+        const preparationId = minted(randomUUID());
+        let attemptId: MintedUuid;
+        const servingTarget = targetIndex === lineage.length - 1;
+        if (transition.elements.length === 0) {
+          if (!freshInstall || servingTarget) {
+            await ensureReleaseAdmitted(
+              runtimePool,
+              runtimeContext,
+              targetIdentity,
+              target,
+              options.providerErrorMappings,
+              options.capabilityOperationExecutorFactories ?? [],
+            );
+          } else {
+            await ensureFreshTenantIntermediateReleaseAdmitted(
+              runtimePool,
+              runtimeContext,
+              candidateInstallId,
+              targetIndex,
+              targetIdentity,
+              target,
+              source.compiled.releaseRoot,
+            );
+          }
+          attemptId = await approveReleaseWithoutStorageTransition(
+            runtimePool,
+            runtimeContext,
+            approverContext,
+            pointer,
+            source,
+            targetIdentity,
+            target.compiled,
+            releaseDiffBinding(source, target),
+            undefined,
+            freshInstall && !servingTarget
+              ? { installId: candidateInstallId, lineageOrdinal: targetIndex }
+              : undefined,
+          );
+        } else {
+          const prepared = await materializer.prepare({
+            context: runtimeContext,
+            expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+            generationId,
+            initiatedBy: runtimeContext.principalId,
+            preparationId,
+            targetReleaseId: targetIdentity.releaseId,
+          });
+          if (!freshInstall || servingTarget) {
+            await ensureReleaseAdmitted(
+              runtimePool,
+              runtimeContext,
+              targetIdentity,
+              target,
+              options.providerErrorMappings,
+              options.capabilityOperationExecutorFactories ?? [],
+            );
+          } else {
+            await ensureFreshTenantIntermediateReleaseAdmitted(
+              runtimePool,
+              runtimeContext,
+              candidateInstallId,
+              targetIndex,
+              targetIdentity,
+              target,
+              source.compiled.releaseRoot,
+            );
+          }
+          attemptId = await approveModuleRelease(
+            runtimePool,
+            runtimeContext,
+            approverContext,
+            pointer,
+            targetIdentity,
+            target.compiled,
+            prepared,
+            preparationId,
+            releaseDiffBinding(source, target),
+            freshInstall && !servingTarget
+              ? { installId: candidateInstallId, lineageOrdinal: targetIndex }
+              : undefined,
+          );
+          const executed = await materializer.executeApprovedAttempt({
+            activationAttemptId: attemptId,
+            context: runtimeContext,
+            coordinatorId: minted(randomUUID()),
+            generationId,
+          });
+          if (executed.disposition !== 'READY_TO_SWAP') {
+            throw new Error(
+              `module materialization did not become ready: ${executed.disposition}`,
+            );
+          }
+        }
+        const activated = await activateWithExactSwapTrigger(
+          admin,
+          activation,
+          systemContext,
+          attemptId,
+        );
+        if (activated.status !== 'SWAPPED_VERIFIED') {
+          throw new Error(
+            `composed release activation did not verify: ${activated.status}`,
+          );
+        }
+        pointer = await readPointer(runtimePool, runtimeContext);
+        if (
+          pointer.releaseId !== targetIdentity.releaseId ||
+          pointer.pointerId !== activated.pointerId ||
+          pointer.fence !== activated.fence
+        ) {
+          throw new Error(
+            'composed release activation selected the wrong target',
+          );
+        }
+        servingLineageIndex = targetIndex;
+        if (freshInstall && !servingTarget) {
+          await observeFreshTenantIntermediateActivation(
+            options,
+            runtimePool,
+            runtimeContext,
+            targetIndex,
+            targetIdentity,
+            target.compiled.releaseRoot,
+          );
+        }
+      }
+    }
+    await assertExactSwapTriggerEnabled(admin);
+    const applicationIdentity = lineage[servingLineageIndex]!;
+    const applicationRelease = releaseLineage[servingLineageIndex]!;
+    const freshTenantInstallEvidence = installId
+      ? await persistFreshTenantInstallEvidence(
+          runtimePool,
+          runtimeContext,
+          installId,
+          lineage,
+          releaseLineage,
+          applicationIdentity,
+          applicationRelease,
+        )
+      : null;
+
+    const serving =
+      tenantServing ??
+      servingReleaseFromParsed(
+        applicationIdentity.releaseId,
+        applicationRelease,
+      );
+    const verified = await readVerifiedServing(runtimePool, runtimeContext);
+    if (
+      !verified ||
+      verified.releaseId !== serving.releaseId ||
+      verified.fence !== pointer.fence
+    )
+      throw new Error(
+        'the selected release has no verified serving generation',
+      );
+    await reconcileInventoryScopeToPointer(admin, identities.runtime, verified);
+    return {
+      serving,
+      freshTenantInstallEvidence,
+      prepareReplay:
+        !!tenantServing &&
+        (!!options.customization ||
+          tenantServing.baseReleaseId !== lineage.at(-1)!.releaseId),
+      baseReleaseRoot: releases.application.compiled.releaseRoot,
+      diagnostic: null,
+      compiledApplication,
+    };
+  } catch (error) {
+    if (!previous || options.releaseSelection?.kind === 'rollback') throw error;
+    const verified = await readVerifiedServing(runtimePool, runtimeContext);
+    if (!verified) throw error;
+    const serving = await loadServingRelease(
+      runtimePool,
+      runtimeContext,
+      verified.releaseId,
+    );
+    await reconcileInventoryScopeToPointer(admin, identities.runtime, verified);
+    const refusal = {
+      status: 'refused' as const,
+      code: 'CUSTOMIZE_UPGRADE_FAILED',
+      message:
+        'The proposed platform release could not be activated. The verified release is still live.',
+    };
+    const { recordUpgradeRefusal } = await import('./customization-service.js');
+    const diagnostic =
+      baseReleaseRoot && /^[a-f0-9]{64}$/u.test(baseReleaseRoot)
+        ? await recordUpgradeRefusal(runtimePool, runtimeContext, {
+            ...refusal,
+            baseReleaseRoot,
+            sourceReleaseId: verified.releaseId,
+          }).catch(() => refusal)
+        : refusal;
+    return {
+      serving,
+      prepareReplay: false,
+      freshTenantInstallEvidence: null,
+      diagnostic,
+      compiledApplication: null,
+      baseReleaseRoot,
+    };
   }
 }
 
@@ -1641,37 +1761,47 @@ export async function unprovenLivePointer(
   context: TrustedRequestContext,
 ): Promise<string | null> {
   return withTrustedRequestTransaction(runtimePool, context, async (client) => {
+    const result = await client.query(
+      `SELECT 1 FROM ${servingPointersSql} AS pointer
+        WHERE tenant_id=$1 AND environment_id=$2 AND physical_release_id IS NOT NULL
+          AND (physical_release_id IS DISTINCT FROM release_id OR physical_fence IS DISTINCT FROM fence)`,
+      [context.tenantId, context.environmentId],
+    );
+    return result.rowCount
+      ? 'the current pointer generation has no verified swap receipt'
+      : null;
+  });
+}
+
+export async function readVerifiedServing(
+  pool: pg.Pool,
+  context: TrustedRequestContext,
+) {
+  return withTrustedRequestTransaction(pool, context, async (client) => {
     const result = await client.query<{
-      activation_attempt_id: string | null;
-      release_id: string | null;
-      status: string | null;
+      pointer_id: MintedUuid;
+      release_id: MintedUuid;
+      fence: string;
+      content_hash: string;
     }>(
-      `SELECT pointer.release_id, swap.activation_attempt_id,
-                verification.status
-           FROM platform.active_release_pointers AS pointer
-           LEFT JOIN platform.release_activation_swap_receipts AS swap
-             ON swap.tenant_id = pointer.tenant_id
-            AND swap.environment_id = pointer.environment_id
-            AND swap.pointer_id = pointer.pointer_id
-            AND swap.activated_release_id = pointer.release_id
-            AND swap.fence = pointer.fence
-           LEFT JOIN platform.release_activation_verification_receipts
-                  AS verification
-             ON verification.tenant_id = swap.tenant_id
-            AND verification.environment_id = swap.environment_id
-            AND verification.activation_attempt_id = swap.activation_attempt_id
-          WHERE pointer.tenant_id = $1 AND pointer.environment_id = $2`,
+      `SELECT pointer.pointer_id, pointer.release_id, pointer.fence, release.content_hash
+         FROM ${servingPointersSql} AS pointer
+         JOIN platform.tenant_releases AS release USING (tenant_id, environment_id, release_id)
+         JOIN platform.tenant_release_admissions AS admission
+           ON admission.tenant_id = release.tenant_id AND admission.environment_id = release.environment_id
+          AND admission.release_id = release.release_id AND admission.verification_evidence_id = release.verification_evidence_id
+        WHERE pointer.tenant_id=$1 AND pointer.environment_id=$2`,
       [context.tenantId, context.environmentId],
     );
     const row = result.rows[0];
-    if (!row || row.release_id === null) return null;
-    if (row.status === 'SWAPPED_VERIFIED') return null;
-    if (row.activation_attempt_id === null) {
-      return 'no activation receipt names the live release';
-    }
-    return row.status === null
-      ? `activation ${row.activation_attempt_id} swapped the pointer but never verified`
-      : `activation ${row.activation_attempt_id} ended ${row.status}`;
+    return row
+      ? {
+          pointerId: row.pointer_id,
+          releaseId: row.release_id,
+          releaseRoot: row.content_hash,
+          fence: Number(row.fence),
+        }
+      : null;
   });
 }
 
@@ -1688,24 +1818,24 @@ export async function unprovenLivePointer(
 export async function reconcileInventoryScopeToPointer(
   client: pg.PoolClient,
   identity: AuthenticatedIdentity,
+  expected: PointerState,
 ): Promise<string | null> {
   const pointer = await client.query<{ content_hash: string }>(
-    `SELECT release.content_hash
-       FROM platform.active_release_pointers AS pointer
-       JOIN platform.tenant_releases AS release
-         ON release.tenant_id = pointer.tenant_id
-        AND release.environment_id = pointer.environment_id
-        AND release.release_id = pointer.release_id
-      WHERE pointer.tenant_id = $1 AND pointer.environment_id = $2`,
-    [identity.tenantId, identity.environmentId],
-  );
-  const releaseRoot = pointer.rows[0]?.content_hash ?? null;
-  if (releaseRoot === null) return null;
-  await client.query(
-    `SELECT platform.provision_inventory_scope(
+    `WITH generation AS MATERIALIZED (
+       SELECT release.content_hash
+         FROM ${servingPointersSql} AS pointer
+         JOIN platform.tenant_releases AS release USING (tenant_id,environment_id,release_id)
+         JOIN platform.active_release_pointers AS physical
+           ON physical.tenant_id=pointer.tenant_id AND physical.environment_id=pointer.environment_id
+          AND physical.pointer_id=pointer.pointer_id AND physical.fence=$5 AND physical.release_id=$4
+        WHERE pointer.tenant_id=$1 AND pointer.environment_id=$2
+          AND pointer.pointer_id=$3 AND pointer.release_id=$4 AND pointer.fence=$5
+        FOR SHARE OF physical
+     ), reconciled AS MATERIALIZED (
+       SELECT platform.provision_inventory_scope(
        configuration.tenant_id, configuration.environment_id,
        configuration.legal_entity_id, 'scope', 'scope',
-       calendar.time_zone, calendar.business_day_boundary, $3,
+       calendar.time_zone, calendar.business_day_boundary, generation.content_hash,
        configuration.configuration_version, configuration.negative_stock,
        configuration.maximum_backdate_days,
        configuration.adjustment_reason_requirement,
@@ -1718,15 +1848,22 @@ export async function reconcileInventoryScopeToPointer(
        configuration.count_approval_threshold,
        configuration.correction_approval_threshold,
        configuration.rebaseline_approval_threshold)
-       FROM platform.inventory_posting_configurations AS configuration
+       FROM generation CROSS JOIN platform.inventory_posting_configurations AS configuration
        JOIN platform.inventory_tenant_calendars AS calendar
          ON calendar.tenant_id = configuration.tenant_id
       WHERE configuration.tenant_id = $1
         AND configuration.environment_id = $2
-        AND configuration.contract_release_root IS DISTINCT FROM $3`,
-    [identity.tenantId, identity.environmentId, releaseRoot],
+        AND configuration.contract_release_root IS DISTINCT FROM generation.content_hash
+     ) SELECT content_hash,(SELECT count(*) FROM reconciled) AS scope_count FROM generation`,
+    [
+      identity.tenantId,
+      identity.environmentId,
+      expected.pointerId,
+      expected.releaseId,
+      expected.fence,
+    ],
   );
-  return releaseRoot;
+  return pointer.rows[0]?.content_hash ?? null;
 }
 
 export async function provisionInventoryScope(
@@ -1735,62 +1872,63 @@ export async function provisionInventoryScope(
   contractReleaseRoot: string,
   provisioning: InventoryScopeProvisioning,
 ): Promise<void> {
-  // `contract_release_root` is provenance, not policy: it records which
-  // compiled contract this scope runs against and advances with the product.
-  // The runtime always asks for the root it is actually activating, so the
-  // stored value stays truthful by advancing (migration 0019) rather than by
-  // being read back and echoed. Every policy field is still asserted exactly,
-  // so genuine configuration drift still conflicts.
-  //
-  // Only a fresh scope takes the root asked for here. An existing scope keeps
-  // its root (policy is still asserted): roots move only in boot's final
-  // reconcile, under the release-scope lock and only to a verified live
-  // pointer (CUSTOMIZE review B1) -- never to a pointer a cut-off rollback
-  // left unverified. The read and the write hold the release-scope lock on
-  // one connection (review B1b), so no reconcile lands between them.
-  await withReleaseScopeLock(adminPool, identity, async (client) => {
-    const existing = await client.query<{ contract_release_root: string }>(
-      `SELECT contract_release_root
+  await withReleaseScopeLock(adminPool, identity, (client) =>
+    provisionInventoryScopeOnClient(
+      client,
+      identity,
+      contractReleaseRoot,
+      provisioning,
+    ),
+  );
+}
+
+async function provisionInventoryScopeOnClient(
+  client: pg.PoolClient,
+  identity: AuthenticatedIdentity,
+  contractReleaseRoot: string,
+  provisioning: InventoryScopeProvisioning,
+) {
+  const existing = await client.query<{ contract_release_root: string }>(
+    `SELECT contract_release_root
        FROM platform.inventory_posting_configurations
       WHERE tenant_id = $1 AND environment_id = $2 AND legal_entity_id = $3`,
-      [identity.tenantId, identity.environmentId, provisioning.legalEntityId],
-    );
-    const releaseRoot =
-      existing.rows[0]?.contract_release_root ?? contractReleaseRoot;
-    await client.query(
-      `SELECT platform.provision_inventory_scope(
+    [identity.tenantId, identity.environmentId, provisioning.legalEntityId],
+  );
+  const releaseRoot =
+    existing.rows[0]?.contract_release_root ?? contractReleaseRoot;
+  await client.query(
+    `SELECT platform.provision_inventory_scope(
        $1,$2,$3,$4,$5,$6,$7,$8,$9::smallint,$10,$11,
        $12,$13,$14,$15,$16,$17,$18,$19,$20,$21
      )`,
-      [
-        identity.tenantId,
-        identity.environmentId,
-        provisioning.legalEntityId,
-        provisioning.entityCode,
-        provisioning.entityName,
-        provisioning.timeZone,
-        provisioning.businessDayBoundary,
-        releaseRoot,
-        provisioning.configurationVersion,
-        provisioning.negativeStock,
-        provisioning.maximumBackdateDays,
-        provisioning.adjustmentReasonRequirement,
-        provisioning.transferReasonRequirement,
-        provisioning.countReasonRequirement,
-        provisioning.correctionReasonRequirement,
-        provisioning.rebaselineReasonRequirement,
-        provisioning.adjustmentApprovalThreshold,
-        provisioning.transferApprovalThreshold,
-        provisioning.countApprovalThreshold,
-        provisioning.correctionApprovalThreshold,
-        provisioning.rebaselineApprovalThreshold,
-      ],
-    );
-  });
+    [
+      identity.tenantId,
+      identity.environmentId,
+      provisioning.legalEntityId,
+      provisioning.entityCode,
+      provisioning.entityName,
+      provisioning.timeZone,
+      provisioning.businessDayBoundary,
+      releaseRoot,
+      provisioning.configurationVersion,
+      provisioning.negativeStock,
+      provisioning.maximumBackdateDays,
+      provisioning.adjustmentReasonRequirement,
+      provisioning.transferReasonRequirement,
+      provisioning.countReasonRequirement,
+      provisioning.correctionReasonRequirement,
+      provisioning.rebaselineReasonRequirement,
+      provisioning.adjustmentApprovalThreshold,
+      provisioning.transferApprovalThreshold,
+      provisioning.countApprovalThreshold,
+      provisioning.correctionApprovalThreshold,
+      provisioning.rebaselineApprovalThreshold,
+    ],
+  );
 }
 
 async function ensureAuthority(
-  pool: pg.Pool,
+  pool: pg.PoolClient,
   identities: ScopeIdentities,
 ): Promise<void> {
   const tenantId = identities.runtime.tenantId;
@@ -2861,7 +2999,9 @@ async function createApproval(
     approverContext,
     {
       activationAttemptId,
-      ...(customizationUpgradeId ? { customizationUpgradeId } : {}),
+      ...(customizationUpgradeId
+        ? { customizationUpgradeId, sourceDecisionId: customizationUpgradeId }
+        : {}),
       approvalId: minted(randomUUID()),
       approvingHumanId: approverContext.principalId,
       initiatingHumanId: initiatingContext.principalId,

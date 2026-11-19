@@ -1,3 +1,4 @@
+import { activateFixtureRelease } from '../helpers/verified-fixture-release.js';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -329,7 +330,13 @@ test('release verification executes a parameterized aggregate assertion as an om
           [empty, emptyDefinition_],
           [compiled, definition],
         ]);
-        await setPointer(pool, tenant, environment, releases[0]!);
+        await activateFixtureRelease(
+          pool,
+          runtimePool,
+          tenant,
+          environment,
+          releases[0]!,
+        );
         await grantExecutorAuthority(pool, [[tenant, principal]]);
         const materializer = new PostgresModuleStorageMaterializer(
           materializerPool,
@@ -631,8 +638,20 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
           [empty, emptyDefinition(ordinaryModuleV1())],
           [v1, ordinaryModuleV1()],
         ]);
-        await setPointer(pool, tenantA, environmentA, releasesA[0]!);
-        await setPointer(pool, tenantB, environmentB, releasesB[0]!);
+        await activateFixtureRelease(
+          pool,
+          runtimePool,
+          tenantA,
+          environmentA,
+          releasesA[0]!,
+        );
+        await activateFixtureRelease(
+          pool,
+          runtimePool,
+          tenantB,
+          environmentB,
+          releasesB[0]!,
+        );
         await grantExecutorAuthority(pool, [
           [tenantA, principalA],
           [tenantA, principalASecond],
@@ -649,8 +668,20 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
         await admitCandidate(runtimePool, contexts.a!, releasesA[1]!, v1);
         await admitCandidate(runtimePool, contexts.a!, releasesA[3]!, v1);
         await admitCandidate(runtimePool, contexts.b!, releasesB[1]!, v1);
-        await setPointer(pool, tenantA, environmentA, releasesA[1]!);
-        await setPointer(pool, tenantB, environmentB, releasesB[1]!);
+        await activateFixtureRelease(
+          pool,
+          runtimePool,
+          tenantA,
+          environmentA,
+          releasesA[1]!,
+        );
+        await activateFixtureRelease(
+          pool,
+          runtimePool,
+          tenantB,
+          environmentB,
+          releasesB[1]!,
+        );
 
         const policy = new AllowPolicy();
         const interpreter = new PostgresModuleRuntimeInterpreter(
@@ -1063,7 +1094,13 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
         );
         assert.equal(await moduleRecordCount(pool, storageV1, soloId), 1);
 
-        await setPointer(pool, tenantA, environmentA, releasesA[3]!);
+        await activateFixtureRelease(
+          pool,
+          runtimePool,
+          tenantA,
+          environmentA,
+          releasesA[3]!,
+        );
         const activatedReleaseView = await issuedView(entry, 'a');
         assert.notEqual(
           activatedReleaseView.release.releaseId,
@@ -1127,7 +1164,13 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
           'master_archive',
           { expectedRevision: 1, recordId: activatedReleaseRecordId },
         );
-        await setPointer(pool, tenantA, environmentA, releasesA[1]!);
+        await activateFixtureRelease(
+          pool,
+          runtimePool,
+          tenantA,
+          environmentA,
+          releasesA[1]!,
+        );
 
         const concurrentRecordId = randomUUID();
         const concurrentKey = randomUUID();
@@ -1485,7 +1528,13 @@ test('definition-only module is served generically through Q0/O0, trust, RLS, an
 
         await prepare(materializer, contexts.a!, principalA, releasesA[2]!);
         await admitCandidate(runtimePool, contexts.a!, releasesA[2]!, v2);
-        await setPointer(pool, tenantA, environmentA, releasesA[2]!);
+        await activateFixtureRelease(
+          pool,
+          runtimePool,
+          tenantA,
+          environmentA,
+          releasesA[2]!,
+        );
         const viewA2 = await issuedView(entry, 'a');
         assert.notEqual(viewA2.release.contentHash, viewA1.release.contentHash);
         const recompileFactsBefore = await trustFactCount(
@@ -1695,7 +1744,13 @@ test('v3 inventory reads require issued legal-entity scope and preserve generic 
           [empty, emptyInventory],
           [compiled, definition],
         ]);
-        await setPointer(pool, tenant, environment, releases[0]!);
+        await activateFixtureRelease(
+          pool,
+          runtimePool,
+          tenant,
+          environment,
+          releases[0]!,
+        );
         await grantExecutorAuthority(pool, [[tenant, principal]]);
 
         const materializer = new PostgresModuleStorageMaterializer(
@@ -2465,7 +2520,13 @@ test('metamorphic random namespace executes the compiled declared-semantics cont
           [empty, emptyDefinition(definition)],
           [compiled, definition],
         ]);
-        await setPointer(pool, tenant, environment, releases[0]!);
+        await activateFixtureRelease(
+          pool,
+          runtimePool,
+          tenant,
+          environment,
+          releases[0]!,
+        );
         await grantExecutorAuthority(pool, [[tenant, principal]]);
         const materializer = new PostgresModuleStorageMaterializer(
           materializerPool,
@@ -2473,7 +2534,13 @@ test('metamorphic random namespace executes the compiled declared-semantics cont
         );
         await prepare(materializer, context, principal, releases[1]!);
         await admitCandidate(runtimePool, context, releases[1]!, compiled);
-        await setPointer(pool, tenant, environment, releases[1]!);
+        await activateFixtureRelease(
+          pool,
+          runtimePool,
+          tenant,
+          environment,
+          releases[1]!,
+        );
 
         const policy = new AllowPolicy();
         const interpreter = new PostgresModuleRuntimeInterpreter(
@@ -3917,30 +3984,6 @@ function releaseCommand(
   };
 }
 
-async function setPointer(
-  pool: pg.Pool,
-  tenantId: string,
-  environmentId: string,
-  releaseId: string,
-): Promise<void> {
-  await pool.query(
-    'ALTER TABLE platform.active_release_pointers DISABLE TRIGGER active_release_pointer_exact_swap',
-  );
-  try {
-    const result = await pool.query(
-      `UPDATE platform.active_release_pointers
-          SET release_id = $3, fence = fence + 1
-        WHERE tenant_id = $1 AND environment_id = $2`,
-      [tenantId, environmentId, releaseId],
-    );
-    assert.equal(result.rowCount, 1);
-  } finally {
-    await pool.query(
-      'ALTER TABLE platform.active_release_pointers ENABLE TRIGGER active_release_pointer_exact_swap',
-    );
-  }
-}
-
 async function grantExecutorAuthority(
   pool: pg.Pool,
   subjects: ReadonlyArray<readonly [string, string]>,
@@ -4210,7 +4253,13 @@ async function withOptionalRestrictRuntime(
           [empty, emptyDefinition_],
           [compiled, definition],
         ]);
-        await setPointer(pool, tenant, environment, releases[0]!);
+        await activateFixtureRelease(
+          pool,
+          runtimePool,
+          tenant,
+          environment,
+          releases[0]!,
+        );
         await grantExecutorAuthority(pool, [[tenant, principal]]);
         const materializer = new PostgresModuleStorageMaterializer(
           materializerPool,
@@ -4384,7 +4433,13 @@ async function executeSelfRelationVerification(required: boolean) {
           [empty, emptyDefinition_],
           [compiled, definition],
         ]);
-        await setPointer(pool, tenant, environment, releases[0]!);
+        await activateFixtureRelease(
+          pool,
+          runtimePool,
+          tenant,
+          environment,
+          releases[0]!,
+        );
         await grantExecutorAuthority(pool, [[tenant, principal]]);
         const materializer = new PostgresModuleStorageMaterializer(
           materializerPool,
@@ -4517,7 +4572,13 @@ async function executeRequiredDiamondVerification() {
           [empty, emptyDefinition_],
           [compiled, definition],
         ]);
-        await setPointer(pool, tenant, environment, releases[0]!);
+        await activateFixtureRelease(
+          pool,
+          runtimePool,
+          tenant,
+          environment,
+          releases[0]!,
+        );
         await grantExecutorAuthority(pool, [[tenant, principal]]);
         const materializer = new PostgresModuleStorageMaterializer(
           materializerPool,
@@ -5272,7 +5333,13 @@ async function persistedLocaleOrderingChanges(): Promise<string> {
           [empty, emptyDefinition(definition)],
           [compiled, definition],
         ]);
-        await setPointer(pool, tenant, environment, releases[0]!);
+        await activateFixtureRelease(
+          pool,
+          runtimePool,
+          tenant,
+          environment,
+          releases[0]!,
+        );
         await grantExecutorAuthority(pool, [[tenant, principal]]);
         const materializer = new PostgresModuleStorageMaterializer(
           materializerPool,
@@ -5280,7 +5347,13 @@ async function persistedLocaleOrderingChanges(): Promise<string> {
         );
         await prepare(materializer, context, principal, releases[1]!);
         await admitCandidate(runtimePool, context, releases[1]!, compiled);
-        await setPointer(pool, tenant, environment, releases[1]!);
+        await activateFixtureRelease(
+          pool,
+          runtimePool,
+          tenant,
+          environment,
+          releases[1]!,
+        );
 
         const policy = new AllowPolicy();
         const interpreter = new PostgresModuleRuntimeInterpreter(
@@ -5661,7 +5734,13 @@ async function withTransitionProbeRuntime(
           [empty, emptyDefinition_],
           [compiled, definition],
         ]);
-        await setPointer(pool, tenant, environment, releases[0]!);
+        await activateFixtureRelease(
+          pool,
+          runtimePool,
+          tenant,
+          environment,
+          releases[0]!,
+        );
         await grantExecutorAuthority(pool, [[tenant, principal]]);
         const materializer = new PostgresModuleStorageMaterializer(
           materializerPool,
