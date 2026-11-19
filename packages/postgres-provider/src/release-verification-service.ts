@@ -38,6 +38,8 @@ import {
 import type { RequestRuntimeView as IssuedRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
 import type { FormulaRulePayload } from '../../compiler/src/formula-validation-plan.js';
 import type { ValidationWitness } from '../../compiler/src/formula-validation-witness.js';
+import { parseFormulaValidationBindings } from '../../canonical-model/src/formula-validation-projection.js';
+import { observeValidationRefusals } from '../../runtime/src/formula-validation.js';
 import {
   AuthenticatedRequestRuntimeEntryAdapter,
   CURRENT_POLICY_DECISION_VERSION,
@@ -1264,10 +1266,8 @@ function formulaValues(values: ValidationWitness['values']) {
 }
 
 class SemanticVerificationExecutor {
-  readonly #formulaCreateDefaults = new Map<
-    string,
-    Readonly<Record<string, unknown>>
-  >();
+  readonly #formulaCreateDefaults = new Map<string, ValidationWitness>();
+  readonly #formulaBindings: ReturnType<typeof parseFormulaValidationBindings>;
   readonly #arrangedLegalEntityIds = new Set<string>();
   readonly #createdRecords: VerificationRecord[] = [];
   readonly #excludedFieldsByEntity = new Map<string, Set<string>>();
@@ -1309,6 +1309,9 @@ class SemanticVerificationExecutor {
     );
     this.#relations = storage.relations;
     this.#storageEntities = storage.entities;
+    this.#formulaBindings = view.projections.formulaRule
+      ? parseFormulaValidationBindings(view.projections.formulaRule.payload)
+      : [];
     // The immutable application lineage includes releases compiled before any
     // query elected ADR-0031's v4 operand. Once a release elects the contract,
     // storage becomes the independent authority for the complete required set:
@@ -1335,7 +1338,7 @@ class SemanticVerificationExecutor {
         if (satisfying.invocation.kind === 'create')
           this.#formulaCreateDefaults.set(
             satisfying.invocation.operationId,
-            formulaValues(satisfying.values),
+            satisfying,
           );
         continue;
       }
@@ -2182,8 +2185,7 @@ class SemanticVerificationExecutor {
       );
     }
     const nextArrangementPath = [...arrangementPath, entityId];
-    const satisfyingDefaults =
-      this.#formulaCreateDefaults.get(operation.operationId) ?? {};
+    const witness = this.#formulaCreateDefaults.get(operation.operationId);
     const storageEntity = this.#requiredStorageEntity(entityId);
     const values = Object.fromEntries(
       operation.inputContract.fields
@@ -2192,11 +2194,29 @@ class SemanticVerificationExecutor {
           field.fieldId,
           Object.hasOwn(overrides, field.fieldId)
             ? overrides[field.fieldId]
-            : Object.hasOwn(satisfyingDefaults, field.fieldId)
-              ? satisfyingDefaults[field.fieldId]
-              : verificationFieldValue(field, token, storageEntity),
+            : verificationFieldValue(field, token, storageEntity),
         ]),
     );
+    if (
+      witness &&
+      observeValidationRefusals(this.#formulaBindings, {
+        operationId: operation.operationId,
+        businessDate: witness.invocation.businessDate,
+        values,
+      }).length
+    ) {
+      // Keep independent probes' original fixtures when those values satisfy
+      // the guards. Explicit per-invocation overrides always win.
+      for (const [fieldId, value] of Object.entries(
+        formulaValues(witness.values),
+      )) {
+        if (
+          Object.hasOwn(values, fieldId) &&
+          !Object.hasOwn(overrides, fieldId)
+        )
+          values[fieldId] = value;
+      }
+    }
     const fieldOriginRelations = this.#relations.filter(
       (relation) =>
         relation.sourceEntityId === entityId &&

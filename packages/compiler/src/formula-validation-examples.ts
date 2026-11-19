@@ -110,7 +110,7 @@ function syntheticScalars(
       }));
     }
     case 'integer': {
-      const centers = [0n, 1n];
+      const centers = [65_531n, -65_531n, 0n, 1n];
       for (const { value } of bounds) {
         if (value.kind === 'integer' && value.value.length <= 40)
           centers.push(BigInt(value.value));
@@ -131,7 +131,7 @@ function syntheticScalars(
       }
       const maximum = 10n ** BigInt(type.precision) - 1n;
       return [
-        ...new Set(centers.flatMap((value) => [value, value - 1n, value + 1n])),
+        ...new Set(centers.flatMap((value) => [value + 1n, value - 1n, value])),
       ]
         .filter((value) => value >= -maximum && value <= maximum)
         .map((value) => ({
@@ -142,7 +142,7 @@ function syntheticScalars(
     case 'text': {
       if (field.fieldType.kind !== 'textFieldType') return [];
       const limit = field.fieldType.maximumLength;
-      const candidates = ['A', '', 'B'];
+      const candidates = ['◇', 'A', '', 'B'];
       for (const { select, value } of bounds) {
         if (value.kind === 'text' && select === 'value')
           candidates.push(value.value);
