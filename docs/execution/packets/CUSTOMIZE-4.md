@@ -1,6 +1,6 @@
 # CUSTOMIZE-4 — tenant-authored Goods Receipt Inspection
 
-Status — rebased from checkpoint `c8110053` onto the CUSTOMIZE-3 trunk. Critical path: the approved patch-lineage migration.
+Status — rebased from checkpoint `c8110053` over CUSTOMIZE-3 and CRITFIX-B. The approved patch-lineage migration is the Critical path.
 
 ## Claims to verify
 
@@ -35,15 +35,15 @@ Status — rebased from checkpoint `c8110053` onto the CUSTOMIZE-3 trunk. Critic
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-4",
-  "base": "4efe21f72b91dc51f1f9528dc47f600c05f0f3a3",
-  "head": "6813a93265a16da5c0d0963be738d49b1900f1f5",
+  "base": "5f12be07640e5bade0937d3bc7c1bc26b08d4c87",
+  "head": "739ce3984bdc7c6b7bc7893f6e590275217902a6",
   "changedPaths": [
     "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts",
     "apps/web/src/customize-screen.ts", "apps/web/src/document-editor.ts",
     "apps/web/src/gateway-error-codes.ts", "apps/web/src/list-declaration.ts",
     "apps/web/src/message-catalog.ts", "apps/web/src/surface-runtime.ts",
     "apps/web/test/browser/customize.composed-application.spec.ts", "apps/web/test/browser/message-catalog.spec.ts",
-    "db/migrations/0035_customization_patch_kind_identifier.sql", "db/schema.snapshot.json",
+    "db/migrations/0036_customization_patch_kind_identifier.sql", "db/schema.snapshot.json",
     "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-list.ts",
     "packages/canonical-model/src/surface-workspace.ts", "packages/compiler/src/conformance.ts",
     "packages/compiler/src/projections.ts", "packages/compiler/src/storage.ts",
