@@ -26,6 +26,11 @@ import {
   renderCustomizeScreen,
   type CustomizeScreenService,
 } from './customize-screen.js';
+import {
+  renderWorkflowApprovals,
+  WORKFLOW_APPROVALS_HREF,
+  type WorkflowApprovalsService,
+} from './workflow-approvals.js';
 
 import {
   FRAGMENT_REQUEST_HEADER,
@@ -66,6 +71,7 @@ export interface SurfaceRuntimeServerOptions {
   readonly requestWork?: RequestWorkProbe;
   /** The assistant panel (AGENT-3, local demo only); absent, no panel. */
   readonly assistant?: AssistantMount;
+  readonly workflowApprovals?: WorkflowApprovalsService;
 }
 
 /** Each measured response's `Server-Timing` value, read as it is written. */
@@ -92,6 +98,7 @@ export function createSurfaceRuntimeServer(
         customize,
         options.readSnapshot,
         gateways ? options.assistant : undefined,
+        options.workflowApprovals,
       );
     const probe = options.requestWork;
     void (probe
@@ -112,6 +119,7 @@ async function handleRequest(
   customize?: () => Promise<CustomizeScreenService>,
   readSnapshot?: SurfaceRuntimeServerOptions['readSnapshot'],
   assistant?: AssistantMount,
+  workflowApprovals?: WorkflowApprovalsService,
 ): Promise<void> {
   response.setHeader('cache-control', 'no-store');
   response.setHeader(
@@ -253,6 +261,30 @@ async function handleRequest(
     const submission =
       request.method === 'POST' ? await readFormSubmission(request) : null;
     if (
+      workflowApprovals &&
+      url.searchParams.has('approvals') &&
+      !(submission && Object.hasOwn(submission, 'localDemoActAs'))
+    ) {
+      if (submission && !sameOriginRequest(request)) {
+        writeHtml(response, { statusCode: 403, html: '' });
+        return;
+      }
+      const result = await entry.run({ headers: request.headers }, (view) =>
+        renderWorkflowApprovals(view, workflowApprovals, submission),
+      );
+      const page = withLocalDemoIdentity(
+        result,
+        demoActors,
+        localDemoActor(request.headers.cookie),
+        WORKFLOW_APPROVALS_HREF,
+      );
+      writeHtml(
+        response,
+        assistant ? withAssistantPanel(page, WORKFLOW_APPROVALS_HREF) : page,
+      );
+      return;
+    }
+    if (
       customize &&
       url.searchParams.has('customize') &&
       !(submission && Object.hasOwn(submission, 'localDemoActAs'))
@@ -282,7 +314,12 @@ async function handleRequest(
       // panel comes along (end review X15).
       writeHtml(
         response,
-        assistant ? withAssistantPanel(customizePage) : customizePage,
+        assistant
+          ? withAssistantPanel(
+              customizePage,
+              workflowApprovals && WORKFLOW_APPROVALS_HREF,
+            )
+          : customizePage,
       );
       return;
     }
@@ -347,8 +384,14 @@ async function handleRequest(
       result,
       demoActors,
       localDemoActor(request.headers.cookie),
+      workflowApprovals && WORKFLOW_APPROVALS_HREF,
     );
-    writeHtml(response, assistant ? withAssistantPanel(page) : page);
+    writeHtml(
+      response,
+      assistant
+        ? withAssistantPanel(page, workflowApprovals && WORKFLOW_APPROVALS_HREF)
+        : page,
+    );
   } catch (error) {
     if (error instanceof AuthenticationRequiredError) {
       writeHtml(

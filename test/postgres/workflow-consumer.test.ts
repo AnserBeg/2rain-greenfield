@@ -813,6 +813,27 @@ test(
             },
           });
           try {
+            const manager = await scheduled.runtime.entry.run(
+              { headers: { cookie: 'northstar-demo-actor=manager' } },
+              (view) => view.principalId,
+            );
+            assert.equal(
+              (
+                await pool.query<{ eligible: boolean }>(
+                  `SELECT eligible FROM platform.release_approver_eligibility_events
+                  WHERE tenant_id = $1 AND principal_id = $2
+                  ORDER BY policy_version DESC LIMIT 1`,
+                  [tenantId, manager],
+                )
+              ).rows[0]?.eligible,
+              true,
+              'the opt-in Manager can decide workflow plans within current operation grants',
+            );
+            const approvals = await fetch(`${scheduled.baseUrl}/?approvals`, {
+              headers: { cookie: 'northstar-demo-actor=manager' },
+            });
+            assert.equal(approvals.status, 200);
+            assert.match(await approvals.text(), /<h1>Approvals<\/h1>/u);
             const { rows } = await pool.query<{ run_id: string }>(
               `SELECT r.run_id FROM platform.workflow_runs AS r
                 JOIN platform.workflow_instances AS i USING (tenant_id, environment_id, instance_id)
@@ -1037,6 +1058,81 @@ test(
             },
           );
 
+          await t.test(
+            'a restarted worker wakes a durable timer once at its business deadline',
+            async () => {
+              const workflowId = 'receipt-timer';
+              const start = '2026-11-19T17:30:00.000Z';
+              const due = '2026-11-21T17:30:00.000Z';
+              let instant = new Date(start);
+              const worker = () =>
+                new PostgresWorkflowExecution(
+                  workerPool,
+                  runtimePool,
+                  gateways,
+                  undefined,
+                  () => instant,
+                );
+              await service.rollback();
+              await cloneDefinition(
+                pool,
+                enrolled.releaseId,
+                workflowId,
+                compileWorkflowBody(
+                  `if (sdk.now() !== '${start}') throw new Error('clock changed');
+                 sdk.sleep(172_800_000);`,
+                  sdk,
+                ).executable,
+              );
+              await verify(workflowId);
+              await service.approve(draft.patchId);
+              await service.activate(draft.patchId);
+              await postReceipt(world);
+              const receipt = await latestReceipt(pool, tenantId);
+              assert.ok(await consumer.claim(scope));
+              const run = await runFor(pool, receipt.outbox_id, workflowId);
+              const original = worker();
+              await original.step(scope, run);
+              await original.step(scope, run);
+              assert.equal(await runStatus(pool, run), 'WAITING');
+              assert.equal(
+                (
+                  await pool.query<{ due_at: Date }>(
+                    'SELECT due_at FROM platform.workflow_timers WHERE run_id = $1 AND cursor = 1',
+                    [run],
+                  )
+                ).rows[0]?.due_at.toISOString(),
+                due,
+              );
+
+              const rebooted = worker();
+              instant = new Date('2026-11-21T17:29:59.999Z');
+              await rebooted.tick(scope);
+              assert.equal(await journalCount(pool, run, 'RESULT'), 1);
+              assert.equal(await runStatus(pool, run), 'WAITING');
+              instant = new Date(due);
+              await Promise.all([rebooted.tick(scope), worker().tick(scope)]);
+              assert.equal(await journalCount(pool, run, 'RESULT'), 2);
+              await rebooted.step(scope, run);
+              assert.equal(await runStatus(pool, run), 'COMPLETED');
+              assert.equal(await journalCount(pool, run, 'REQUEST'), 2);
+
+              instant = new Date(start);
+              await postReceipt(world);
+              const outgoing = await latestReceipt(pool, tenantId);
+              assert.ok(await consumer.claim(scope));
+              const stale = await runFor(pool, outgoing.outbox_id, workflowId);
+              await rebooted.step(scope, stale);
+              await rebooted.step(scope, stale);
+              assert.equal(await runStatus(pool, stale), 'WAITING');
+              await service.rollback();
+              instant = new Date(due);
+              await worker().tick(scope);
+              assert.equal(await runStatus(pool, stale), 'SUSPENDED');
+              assert.equal(await journalCount(pool, stale, 'RESULT'), 1);
+            },
+          );
+
           const revokeDuringBulk = new PostgresWorkflowExecution(
             workerPool,
             runtimePool,
@@ -1054,9 +1150,16 @@ test(
               },
             }),
           );
-          await assert.rejects(
-            revokeDuringBulk.remedy(operator, [refusedRun, firstRun], 'cancel'),
-            /permission refused/,
+          assert.deepEqual(
+            await revokeDuringBulk.remedy(
+              operator,
+              [refusedRun, firstRun],
+              'cancel',
+            ),
+            [
+              { runId: refusedRun, outcome: 'ineligible' },
+              { runId: firstRun, outcome: 'refused' },
+            ],
           );
         } finally {
           await workerPool.end();

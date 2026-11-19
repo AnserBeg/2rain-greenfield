@@ -104,6 +104,7 @@ export function withLocalDemoIdentity(
   actors:
     readonly { key: 'buyer' | 'manager'; label: string }[] | null | undefined,
   selected: 'buyer' | 'manager',
+  worklistHref?: string,
 ): SurfaceRuntimeResponse {
   if (!actors) return response;
   const bar = `<aside class="demo-identity" aria-label="Local demo identity"><form method="post"><label>Acting as <select name="localDemoActAs" aria-label="Acting as">${actors.map((actor) => `<option value="${actor.key}"${actor.key === selected ? ' selected' : ''}>${escapeHtml(actor.label)}</option>`).join('')}</select></label><button type="submit">Switch person</button><span>Local demo</span></form></aside>`;
@@ -111,6 +112,9 @@ export function withLocalDemoIdentity(
   // names the person and their role (LOOK-1 round 3); a page without the
   // shell keeps it at the top of the body.
   const menu = '<div class="shell-account__menu">';
+  const worklist = worklistHref
+    ? `<a href="${escapeHtml(worklistHref)}">Approvals</a>`
+    : '';
   const who = '<span class="side-foot__who"><strong>Signed in</strong></span>';
   const person = actors.find((actor) => actor.key === selected)?.label;
   if (!response.html.includes(menu))
@@ -121,7 +125,7 @@ export function withLocalDemoIdentity(
   return {
     ...response,
     html: response.html
-      .replace(menu, `${menu}${bar}`)
+      .replace(menu, `${menu}${bar}${worklist}`)
       .replace(
         who,
         person
@@ -2518,6 +2522,30 @@ export function renderApplicationDiagnostic(
   });
 }
 
+export function renderWorkspaceWorklist(
+  view: RuntimeViewContract.RequestRuntimeView,
+  title: string,
+  content: string,
+): SurfaceRuntimeResponse {
+  assertRequestRuntimeView(view);
+  const selection = selectSurface(view, '/');
+  if ('statusCode' in selection) return selection;
+  return {
+    html: shellDocument(
+      view,
+      selection.surfaces,
+      selection.navigation,
+      null,
+      `<h1>${escapeHtml(title)}</h1>${content}`,
+      null,
+      false,
+      null,
+      title,
+    ),
+    statusCode: 200,
+  };
+}
+
 /**
  * SPEED-1 (fix read 3): a task's Confirm or retry stopped by a policy change
  * after some of its steps may have committed. Nothing of the record is shown
@@ -2577,8 +2605,9 @@ function shellDocument(
   workspaceContext: WorkspaceContextBar | null = null,
   enhanceTaskDialog = false,
   queueCounts: ReadonlyMap<string, number | null> | null = null,
+  worklistTitle?: string,
 ): string {
-  const title = selected?.label ?? 'Release diagnostic';
+  const title = worklistTitle ?? selected?.label ?? 'Release diagnostic';
   const navigation = navigationEntries(surfaces, compiledNavigation);
   const activeDestination = currentNavigationDestination(
     view,
@@ -2612,7 +2641,7 @@ function shellDocument(
       </aside>
       <div class="workspace">
         <header class="topbar">
-          <strong class="topbar__context">${escapeHtml(activeDestination ?? selected?.label ?? 'Workspace')}</strong>
+          <strong class="topbar__context">${escapeHtml(worklistTitle ?? activeDestination ?? selected?.label ?? 'Workspace')}</strong>
           ${launcher ? renderShellSearch(view, launcher, workspaceContext) : ''}
           <details class="shell-account"><summary aria-label="Account and diagnostics"><span class="principal__avatar" aria-hidden="true">${escapeHtml(initials('Signed in'))}</span></summary><div class="shell-account__menu">
           <div class="principal" aria-label="Signed-in principal">Signed in</div>
