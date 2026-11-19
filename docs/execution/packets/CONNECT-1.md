@@ -12,10 +12,10 @@ Critical paths touched by CONNECT-1 in this slice are empty.
    scoped Semantic Operations under stable keys.
 3. A worker can save typed address text during an outage. A later pin must match the current
    address revision. Email confirmation binds recipients and an exact DOCS-1 version.
-4. The first connector-bearing release proposes surface reader 29 after Documents at 28.
+4. Address and email each take the next implemented surface rung at merge, per DOCS-1's ruling.
    A deploy must support every patch parser and surface floor already used by a tenant.
 5. The charter named ADR-0076. Main uses it for cross-field validation, CUSTOMIZE-3 uses
-   ADR-0077, and DOCS-1 uses ADR-0078. The connector proposal takes ADR-0079.
+   ADR-0077, DOCS-1 uses ADR-0078 and UI-COMPOSE-1 uses ADR-0079. Connectors take ADR-0080.
 
 ## Slices and gates
 
@@ -28,7 +28,7 @@ Critical paths touched by CONNECT-1 in this slice are empty.
 ## Test it yourself
 
 Run `scripts/check-records.sh` at the repository root and expect exit status zero.
-Open [ADR-0079](../../decisions/ADR-0079-connector-framework.md) and trace three cases.
+Open [ADR-0080](../../decisions/ADR-0080-connector-framework.md) and trace three cases.
 
 - Save address A during an outage, edit it to B and let A's result arrive. B remains
   the saved address and only B's result can supply its pin.

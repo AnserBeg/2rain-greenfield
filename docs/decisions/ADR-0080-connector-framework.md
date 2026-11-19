@@ -1,4 +1,4 @@
-# ADR-0079. Company connectors for addresses, maps and email
+# ADR-0080. Company connectors for addresses, maps and email
 
 Proposed on 2026-11-19 for the orchestrator's Fable read. Implementation starts after its ruling.
 
@@ -139,7 +139,8 @@ In Customize, select any first-party or tenant-authored record type and add an *
 field, optionally showing its map in a Record section. Or add **Email this document** to
 the Record command bar and choose a declared document relation and recipient source.
 Use closed, add-only patch kinds `addAddressField` and `addDocumentEmailAction` with
-stable target and binding IDs. Both compile against the pinned base. Refuse incompatible
+stable target and binding IDs and a per-payload schema version. Both compile against the
+pinned base. Refuse incompatible
 types, duplicate IDs, missing consumers and classifications that forbid the transfer.
 The builder and assistant show the same diff, verify with fakes, obtain approval and
 activate by compare-and-swap. Provider account selection and credentials stay in company
@@ -148,10 +149,13 @@ settings. Publishing a field cannot enable egress for another company.
 Admit optional v6 declarations only with exact byte/root reproduction for existing
 first-party and tenant-patched releases when absent. Emit a versioned connector projection
 only when used. Verify the declaration, projection and required query, operation and surface
-bindings in both directions. The first connector-bearing release proposes **surface reader
-29** on the mandatory surface manifest. Main assigns 26 to Inspection, 27 to Workflow and
-proposes 28 for Documents. Take the maximum required by the whole release. Check the ladder
-again at implementation and advance for later incompatible consumers. An actual older
+bindings in both directions. The serving surface reader on main at `6b2d28da` implements
+through 26. Assign Address the **next implemented rung** on the mandatory surface manifest
+when its code merges. For example, if Workflow and file fields land first at 27 and 28,
+Address takes 29. Allocate the email action its own rung when it lands. Each reader must
+implement all preceding rungs, and each release takes the maximum required by its features.
+Fetch main, assign the next free rung, regenerate the affected artifacts and tests and run
+CI. Fetch immediately before pushing and repeat if another implementation landed. An actual older
 reader must refuse before serving, and a parser missing a patch kind must refuse replay.
 Reproduce original roots before upgrade replay and retain the serving release on refusal.
 Deploy only binaries supporting the newest patch parser and surface reader any tenant has
