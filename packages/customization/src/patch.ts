@@ -1,3 +1,4 @@
+import { LayoutRevisionSchema } from './layout-revision.js';
 import {
   FormulaValidationRuleDefinitionSchema,
   OperationRoleKeySchema,
@@ -205,6 +206,7 @@ export const CUSTOMIZATION_CHANGE_MEMBER_KINDS = Object.freeze(
 );
 
 const singlePatchKinds = [
+  LayoutRevisionSchema,
   ...ChangeMemberSchema.options,
   z.strictObject({
     kind: z.literal('narrowPermission'),
@@ -265,6 +267,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'addLineTable',
   'declareLifecycle',
   'arrangeLayout',
+  'addLayoutRevision',
   'saveListView',
   'addValidation',
   'addMetricCard',

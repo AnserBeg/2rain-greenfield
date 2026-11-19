@@ -1,3 +1,4 @@
+import type { SurfaceLayout } from '@north-star/canonical-model';
 import { createHash } from 'node:crypto';
 
 import type { ReleaseDiffEnvelope } from '@north-star/compiler';
@@ -244,6 +245,34 @@ export function renderReleaseDiff(input: {
     if (!before || !after) continue;
     const beforeMetrics = ((before.launcher as Json | undefined)?.metrics ??
       []) as Json[];
+    const oldLayouts = (before.layouts ?? []) as SurfaceLayout[];
+    const newLayouts = (after.layouts ?? []) as SurfaceLayout[];
+    const describeBody = (l: SurfaceLayout) =>
+      l.body.order
+        .map((id) => {
+          const s = l.body.sections.find((s) => s.id === id);
+          return s
+            ? s.label.text +
+                ' (' +
+                s.fields.map((f) => f.label.text).join(', ') +
+                ')'
+            : l.body.blocks.find((b) => b.id === id)!.label.text;
+        })
+        .join(' → ');
+    const revisions = newLayouts.filter(
+      (l) => !oldLayouts.some((p) => p.revisionId === l.revisionId),
+    );
+    for (const l of revisions) {
+      const previous = oldLayouts.find((p) => p.body.mode === l.body.mode);
+      lines.push(
+        String(after.label) + ' · ' + l.body.mode + ' layout',
+        previous
+          ? 'Previously ' + describeBody(previous)
+          : 'Previously used the standard arrangement.',
+        'Now ' + describeBody(l),
+      );
+    }
+    if (revisions.length) continue;
     const addedMetrics = (
       ((after.launcher as Json | undefined)?.metrics ?? []) as Json[]
     ).filter(

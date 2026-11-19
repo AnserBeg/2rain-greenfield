@@ -1,4 +1,12 @@
-import { recordTypeEntityId } from '@north-star/customization';
+import {
+  layoutEditor,
+  layoutPicker,
+  layoutSubmission,
+} from './customize-layout.js';
+import {
+  type LayoutTarget,
+  recordTypeEntityId,
+} from '@north-star/customization';
 
 /*
  * The shapes this screen reads from the customization service, declared here:
@@ -44,6 +52,7 @@ interface CustomizationStatus {
   readonly patches: readonly ScreenPatch[];
 }
 interface CustomizationTargets {
+  readonly layouts?: readonly LayoutTarget[];
   readonly validationTargets?: readonly LiteralValidationTarget[];
   readonly linkTargets?: readonly {
     readonly entityId: string;
@@ -216,6 +225,15 @@ export async function renderCustomizeScreen(
           'Activating',
           '<h1>Activating your change</h1><p role="status">Activation is still running. This takes about a minute.</p><a href="/?customize">Check progress</a>',
         );
+      const layout = url.searchParams.get('layout');
+      if (layout) {
+        const target = (await loadTargets()).layouts?.find(
+          (t) => t.body.surfaceId + '/' + t.body.mode === layout,
+        );
+        return target
+          ? page('Arrange page', layoutEditor(target) + backLink())
+          : failure('Choose an available page.');
+      }
       const arrange = url.searchParams.get('arrange');
       if (arrange)
         return page('Arrange a list', await arrangeForm(loadTargets, arrange));
@@ -240,14 +258,19 @@ export async function renderCustomizeScreen(
       case 'draft':
         return drafted(
           await service.draft(
-            patchFromForm(
-              submission,
-              submission.kind === 'addValidation'
-                ? (await loadTargets()).validationTargets?.find(
-                    ({ entityId }) => entityId === submission.entity,
-                  )
-                : undefined,
-            ),
+            submission.kind === 'addLayoutRevision'
+              ? layoutSubmission(
+                  (await loadTargets()).layouts ?? [],
+                  submission,
+                )
+              : patchFromForm(
+                  submission,
+                  submission.kind === 'addValidation'
+                    ? (await loadTargets()).validationTargets?.find(
+                        ({ entityId }) => entityId === submission.entity,
+                      )
+                    : undefined,
+                ),
             'visualBuilder',
             undefined,
             actor,
@@ -391,6 +414,7 @@ async function overview(
     extendRecordTypeForm(targets),
     fieldForm(targets),
     choiceForm(targets),
+    layoutPicker(targets.layouts ?? []),
     arrangePicker(targets),
     savedViewPicker(targets),
     metricPicker(targets),
@@ -928,6 +952,8 @@ function describe(patch: PatchSummary): string {
       return `New line table "${label}"`;
     case 'declareLifecycle':
       return 'New states and actions';
+    case 'addLayoutRevision':
+      return 'Arranged form or record page';
     case 'changeSet':
       return patch.displayLabel ?? 'Grouped changes';
     case 'arrangeLayout':

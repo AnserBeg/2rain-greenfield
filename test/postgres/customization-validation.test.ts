@@ -215,3 +215,110 @@ test(
     );
   },
 );
+
+test(
+  'layout revisions admit the current reader, reproduce tenant bytes and refuse the preceding serving reader',
+  { timeout: 600_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'customize-layout-reader',
+      async ({ connection }) => {
+        const options = {
+          databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+          tenantSlug: 'customize-layout-reader',
+        };
+        const app = await startComposedApplication({ ...options, port: 0 });
+        const opened = await openCustomizeService(options);
+        try {
+          const target = (await opened.service.targets()).layouts?.find(
+            (t) =>
+              t.body.surfaceId.endsWith('item_form') &&
+              t.body.mode === 'create',
+          );
+          assert.ok(target);
+          const { layoutCommand } =
+            await import('../../packages/customization/src/layout-revision.js');
+          const revision = layoutCommand(target, {
+            action: 'rename',
+            member: target.body.sections[0]!.id,
+            label: 'Item identification',
+          });
+          const draft = await opened.service.draft(revision, 'visualBuilder');
+          assert.ok(draft.status === 'drafted', JSON.stringify(draft));
+          await opened.service.approve(draft.patchId);
+          await withArchivedCustomizationRuntime(
+            'b2b7877e58074b325c53c7b13f926535e83f39e5',
+            async (run) => {
+              const read = () =>
+                run(archivedServingRead, {
+                  databaseUrl: options.databaseUrl,
+                  identity: app.runtime.identity,
+                }) as Promise<{
+                  outcome: string;
+                  code?: string;
+                  message?: string;
+                }>;
+              assert.equal((await read()).outcome, 'loaded');
+              const prior = (await run(
+                `
+          import { readFile } from 'node:fs/promises';
+          import { readUnboundPermissionAcknowledgementFor } from './apps/web/scripts/unbound-permission-acknowledgement.ts';
+          import { parseCompiledApplication } from './packages/postgres-provider/src/composed-application-runtime.ts';
+          import { serializeRelease } from './packages/customization/src/release-envelope.ts';
+          import { compileInSandbox } from './packages/customization/src/sandbox.ts';
+          const path='apps/web/release/app.authored.json';
+          const base=JSON.parse(await readFile(path,'utf8'));
+          const tip=serializeRelease(parseCompiledApplication(JSON.parse(await readFile('apps/web/release/app.compiled.json','utf8'))).application);
+          const chain=[{kind:'addRecordType',label:'Pressure log',fields:[{label:'Name',type:'text',required:true}]}];
+          const request={base,tip,chain,acknowledgement:readUnboundPermissionAcknowledgementFor(path,base.package.packageId)};
+          const result=await compileInSandbox(request);
+          if(result.status!=='compiled') throw Error(JSON.stringify(result));
+          console.log(JSON.stringify({request,release:result.steps[0].release}));
+        `,
+                {},
+              )) as {
+                request: Parameters<typeof compileInSandbox>[0];
+                release: unknown;
+              };
+              const tenant = await compileInSandbox(prior.request);
+              assert.ok(
+                tenant.status === 'compiled',
+                JSON.stringify(tenant.status === 'compiled' ? null : tenant),
+              );
+              assert.equal(
+                canonicalize(tenant.steps[0]!.release),
+                canonicalize(prior.release),
+              );
+              assert.equal(
+                parseNormalizedApplicationPackageJson(
+                  parseSerializedRelease(tenant.steps[0]!.release)
+                    .normalizedDefinitionBytes,
+                ).package.provenance,
+                'tenantAuthored',
+              );
+              await opened.service.activate(draft.patchId);
+              const refused = await read();
+              assert.equal(refused.code, 'UNSUPPORTED_RUNTIME_CAPABILITY');
+              assert.match(
+                refused.message ?? '',
+                /surface-manifest requires version 27 and this runtime supports 26/u,
+              );
+              const form = await fetch(
+                app.baseUrl + '/?surface=northstar.app%3Asurface.item_form',
+              );
+              assert.equal(form.status, 200);
+              assert.match(
+                await form.text(),
+                /<legend>Item identification<\/legend>/u,
+              );
+            },
+          );
+        } finally {
+          await opened.close();
+          await app.close();
+        }
+      },
+      LINEAGE_INSTALL_VOLUME,
+    );
+  },
+);

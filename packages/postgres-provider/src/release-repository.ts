@@ -1,3 +1,8 @@
+import {
+  layoutDeclarationProblem,
+  layoutBindingsProblem,
+  declaredLayouts,
+} from './layout-admission.js';
 import { createHash } from 'node:crypto';
 
 import {
@@ -553,7 +558,27 @@ function verifyCompiledRelease(
   }
   verifyReleaseManifestEnvelope(manifest, revision);
   verifyAttestation(compiled, manifest);
-  const formulaBindings = verifyFormulaProjectionReference(manifest, revision);
+  const layoutInputs = new Map<string, Uint8Array>();
+  const layoutDefinition: unknown =
+    revision.languageVersion === 'v6'
+      ? JSON.parse(new TextDecoder().decode(revision.desiredState))
+      : null;
+  const formulaBindings = verifyFormulaProjectionReference(
+    manifest,
+    revision,
+    layoutDefinition,
+  );
+  const needsLayout =
+    declaredLayouts(isRecord(layoutDefinition) ? layoutDefinition.surfaces : [])
+      .length > 0;
+  const surfaceReference = manifest.projections.find(
+    (ref) => ref.familyId === PROJECTION_FAMILY_IDS.surfaceManifest,
+  );
+  if (needsLayout && !surfaceReference)
+    throw integrity(
+      'LAYOUT_PROJECTION_CONTRACT_MISMATCH',
+      'The declared layout has no surface manifest.',
+    );
 
   const artifactByHash = new Map(
     artifacts.map((artifact) => [artifact.contentHash, artifact]),
@@ -654,6 +679,33 @@ function verifyCompiledRelease(
       projectionManifest,
       projectionPayloadBytes,
     );
+    if (
+      reference.familyId === PROJECTION_FAMILY_IDS.surfaceManifest &&
+      revision.languageVersion === 'v6'
+    ) {
+      const payload = decodeCanonicalObject(
+        projectionPayloadBytes[0]!,
+        'PROJECTION_CHUNK_NOT_CANONICAL',
+      );
+      const problem = layoutDeclarationProblem(
+        layoutDefinition,
+        payload,
+        reference.requiredRuntimeCapability.minimumVersion,
+      );
+      if (problem)
+        throw integrity('LAYOUT_PROJECTION_CONTRACT_MISMATCH', problem);
+    }
+    if (
+      needsLayout &&
+      [
+        PROJECTION_FAMILY_IDS.surfaceManifest,
+        PROJECTION_FAMILY_IDS.queryCatalog,
+        PROJECTION_FAMILY_IDS.operationCatalog,
+      ].some((id) => id === reference.familyId) &&
+      projectionPayloadBytes.length === 1
+    ) {
+      layoutInputs.set(reference.familyId, projectionPayloadBytes[0]!);
+    }
     if (reference.familyId === PROJECTION_FAMILY_IDS.formulaRule) {
       try {
         const [payload] = projectionPayloadBytes;
@@ -674,6 +726,22 @@ function verifyCompiledRelease(
     }
   }
 
+  if (needsLayout) {
+    const payload = (family: string) => {
+      const bytes = layoutInputs.get(family);
+      return bytes
+        ? decodeCanonicalObject(bytes, 'PROJECTION_CHUNK_NOT_CANONICAL')
+        : null;
+    };
+    const problem = layoutBindingsProblem(
+      payload(PROJECTION_FAMILY_IDS.surfaceManifest),
+      surfaceReference!.requiredRuntimeCapability.minimumVersion,
+      payload(PROJECTION_FAMILY_IDS.operationCatalog),
+      payload(PROJECTION_FAMILY_IDS.queryCatalog),
+    );
+    if (problem)
+      throw integrity('LAYOUT_PROJECTION_CONTRACT_MISMATCH', problem);
+  }
   const closureArtifacts = artifacts.filter(
     (artifact) => artifact.artifactKind !== 'releaseManifest',
   );
@@ -706,13 +774,8 @@ function verifyCompiledRelease(
 function verifyFormulaProjectionReference(
   manifest: ReleaseManifestEnvelope,
   revision: AppPackageRevision,
+  normalized: unknown,
 ) {
-  // The repository has already checked these immutable bytes when it stored
-  // the revision. Absent declarations do not need another normalization pass.
-  const normalized: unknown =
-    revision.languageVersion === 'v6'
-      ? JSON.parse(new TextDecoder().decode(revision.desiredState))
-      : null;
   const definition =
     isRecord(normalized) && Object.hasOwn(normalized, 'formulaRules')
       ? parseNormalizedApplicationPackageJson(revision.desiredState)

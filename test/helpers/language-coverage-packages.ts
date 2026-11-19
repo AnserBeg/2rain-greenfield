@@ -1,3 +1,8 @@
+import {
+  baseLayout,
+  type LayoutDefinition,
+  layoutDigest,
+} from '../../packages/canonical-model/src/layout.js';
 import { composedApplicationDefinition } from '../../packages/domain/src/app/builder.js';
 import { platformModuleDefinition } from '../../packages/domain/src/platform/definition.js';
 import {
@@ -81,7 +86,27 @@ export function languageCoverageApplicationPackages() {
       }).rule,
     ],
   };
+  const source = application as unknown as LayoutDefinition;
+  const pageLayoutFixture = {
+    ...application,
+    surfaces: source.surfaces.map((surface) => {
+      if (surface.surfaceId !== 'northstar.app:surface.purchase_order_detail')
+        return surface;
+      const body = baseLayout(source, surface, 'detail')!;
+      return {
+        ...surface,
+        layouts: [
+          {
+            revisionId: 'c5f424f8-a0da-4836-b70e-0bb7a8da26e6',
+            resultLayoutDigest: layoutDigest(body),
+            body,
+          },
+        ],
+      };
+    }),
+  };
   return [
+    pageLayoutFixture,
     application,
     platformModuleDefinition(),
     validationFixture,

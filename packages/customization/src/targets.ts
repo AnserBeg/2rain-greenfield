@@ -1,3 +1,4 @@
+import { currentLayout, type LayoutTarget } from './layout-revision.js';
 import { isNarrowableOperationId } from '@north-star/canonical-model';
 import { formulaFieldType } from '../../canonical-model/src/formula-validation-bindings.js';
 import { resolveValidationPath } from '../../canonical-model/src/formula-validation-path.js';
@@ -18,6 +19,7 @@ import type { LiteralValidationTarget } from './validation-draft.js';
  * again when it is applied.
  */
 export interface CustomizationTargets {
+  readonly layouts?: readonly LayoutTarget[];
   readonly validationTargets?: readonly LiteralValidationTarget[];
   readonly linkTargets?: readonly {
     readonly entityId: string;
@@ -235,7 +237,7 @@ export function customizationTargets(definition: {
     ]),
   );
   const forms = definition.surfaces
-    .filter((surface) => surface.surfaceRole === 'form')
+    .filter((surface) => surface.surfaceRole === 'form' && !surface.layouts)
     .map((surface) => {
       const fields = ((surface.documentEditor as Json | undefined)
         ?.headerFields ??
@@ -431,6 +433,12 @@ export function customizationTargets(definition: {
         }))
         .sort((left, right) => left.label.localeCompare(right.label)),
     }),
+    layouts: definition.surfaces.flatMap((s) =>
+      (['create', 'edit', 'detail'] as const).flatMap((mode) => {
+        const target = currentLayout(definition, s, mode);
+        return target ? [target] : [];
+      }),
+    ),
     choiceFields,
     forms,
     linkTargets,

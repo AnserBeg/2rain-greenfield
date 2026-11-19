@@ -1,3 +1,7 @@
+import {
+  SurfaceLayoutSchema,
+  type SurfaceLayout,
+} from '../../../packages/canonical-model/src/layout.js';
 import { recordCatalogParse } from '../../../packages/runtime/src/catalog-parse-count.js';
 import {
   canonicalize,
@@ -295,6 +299,7 @@ export function formFieldIds(
 }
 
 export interface CompiledSurfaceDefinition {
+  readonly layouts?: readonly SurfaceLayout[];
   readonly list?: SurfaceList;
   /**
    * A Record form's references -- fields chosen from another List's
@@ -1125,6 +1130,14 @@ function parseSurface(
     ...(value.list === undefined
       ? {}
       : { list: SurfaceListSchema.parse(value.list) }),
+    ...(value.layouts === undefined
+      ? {}
+      : {
+          layouts: SurfaceLayoutSchema.array()
+            .min(1)
+            .max(2)
+            .parse(value.layouts),
+        }),
     ...(value.form === undefined
       ? {}
       : { form: SurfaceFormSchema.parse(value.form) }),
