@@ -164,8 +164,14 @@ export class PostgresWorkflowConsumer {
               `INSERT INTO platform.workflow_instances (
                tenant_id, environment_id, instance_id, outbox_id, event_id,
                workflow_id, legal_entity_id, receipt_id, trigger_principal_id
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-             ON CONFLICT (tenant_id, environment_id, event_id, workflow_id) DO NOTHING
+             )
+             SELECT $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
+                    $6::text, $7::uuid, $8::uuid, $9::uuid
+             WHERE NOT EXISTS (
+               SELECT 1 FROM platform.workflow_instances
+                WHERE tenant_id = $1 AND environment_id = $2
+                  AND event_id = $5 AND workflow_id = $6
+             )
              RETURNING instance_id`,
               [
                 ...scopeKeys,
