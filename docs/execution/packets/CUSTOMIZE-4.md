@@ -41,8 +41,8 @@ Status — Candidate for integration. The orchestrator approved the patch-kind m
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-4",
-  "base": "881768043d00d894b44a64486c43aa10b85ed7cb",
-  "head": "193058a182234e1df84f0584d608e6a867f760cd",
+  "base": "129e59c4a5cfbefcad42b9c14efa164b18b797e7",
+  "head": "a5c7e4dee1181dcec2d4557508095c327d8fc260",
   "changedPaths": [
     ".github/workflows/ci.yml", "apps/web/package.json",
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
