@@ -12,6 +12,10 @@ import type {
   ImmutableJsonValue,
   RequestRuntimeView,
 } from '../../runtime/src/request-runtime-view.js';
+import {
+  parseCalculatedDisplayProjection,
+  type CalculatedDisplayProjectionEntry,
+} from '../../canonical-model/src/calculated-display-projection.js';
 import { parseFormulaValidationBindings } from '../../canonical-model/src/formula-validation-projection.js';
 import type { FormulaValidationRule } from '../../canonical-model/src/formula-validation-schema.js';
 import {
@@ -104,6 +108,7 @@ export interface PinnedCatalog {
   readonly queries: readonly QueryCatalogEntry[];
   readonly presets: readonly ListPreset[];
   readonly metricCards?: readonly MetricCard[];
+  readonly calculatedDisplays?: readonly CalculatedDisplayProjectionEntry[];
   readonly validationRules?: readonly FormulaValidationRule[];
   operation(operationId: string): RegisteredOperationDefinition | undefined;
   query(queryId: string): QueryCatalogEntry | undefined;
@@ -174,7 +179,12 @@ export function pinnedCatalog(view: RequestRuntimeView): PinnedCatalog {
         return entity ? [entity] : [];
       }),
   );
+  const formulaPayload = view.projections.formulaRule?.payload;
   const catalog: PinnedCatalog = {
+    ...(isRecord(formulaPayload) &&
+    Object.hasOwn(formulaPayload, 'calculatedFields')
+      ? { calculatedDisplays: parseCalculatedDisplayProjection(formulaPayload) }
+      : {}),
     confirmationRequiredFor,
     operations,
     queries,
@@ -381,6 +391,9 @@ export function queryContract(
 ): Record<string, ImmutableJsonValue> {
   const scopeParameter = query.legalEntityScope?.operand.parameterId;
   const preset = catalog.preset(query.queryId);
+  const calculatedFields = catalog.calculatedDisplays?.filter(({ readSinks }) =>
+    readSinks.some(({ queryId }) => queryId === query.queryId),
+  );
   const metrics = catalog.metricCards?.filter(
     (card) => card.queryId === query.queryId,
   );
@@ -399,6 +412,17 @@ export function queryContract(
     entity: query.sourceEntityId,
     arguments: argumentsHelp[query.queryType] ?? '{}',
     fields: query.selections.map((selection) => selection.fieldId),
+    ...(calculatedFields?.length
+      ? {
+          calculatedDisplayFields: calculatedFields.map(({ declaration }) => ({
+            fieldId: declaration.fieldId,
+            label: declaration.label,
+            currency: declaration.resultType.currency,
+            scale: declaration.resultType.scale,
+            readOnly: true,
+          })),
+        }
+      : {}),
     ...(metrics?.length
       ? {
           todayMetrics: metrics.map(({ metricId, label, sumField, view }) => ({

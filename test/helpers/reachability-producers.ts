@@ -27,6 +27,7 @@ export const observabilityTestFiles = [
 
 export const reachabilityProducers = [
   nodeProducer('unit', 'quality', 'test:unit', [
+    'test/unit/calculated-display.test.ts',
     'test/unit/canonical-model/diagnostic-ordering.test.ts',
     'test/unit/canonical-model/disclosure-tier.test.ts',
     'test/unit/canonical-model/field-numbering.test.ts',

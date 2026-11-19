@@ -6,20 +6,12 @@ import {
   openCustomizeService,
   startComposedApplication,
 } from '../../apps/api/src/composition-root.js';
-import {
-  canonicalize,
-  parseNormalizedApplicationPackageJson,
-} from '../../packages/canonical-model/src/index.js';
-import {
-  compileInSandbox,
-  parseCustomizationPatch,
-  parseSerializedRelease,
-} from '../../packages/customization/src/index.js';
 import { literalValidationDraft } from '../../packages/customization/src/validation-draft.js';
 import { OperationsAgentSession } from '../../packages/operations-agent/src/session.js';
 import { COMPANY, worldOver } from '../agent/agent-world.js';
 import {
-  archivedServingRead,
+  archivedRuntimeRead,
+  assertArchivedTenantEnvelope,
   withArchivedCustomizationRuntime,
 } from '../helpers/archived-customization-runtime.js';
 import {
@@ -94,67 +86,12 @@ test(
           await withArchivedCustomizationRuntime(
             'bae7e49e88bfde2257b4a0cb499af9fb9f121e74',
             async (run) => {
-              const v6Patch = parseCustomizationPatch({
-                kind: 'addField',
-                entity: entityId,
-                field: { label: 'Inspection notes', type: 'text' },
-              });
-              assert.ok(v6Patch.status === 'parsed');
-              // Use a base both compilers can read even after concurrent
-              // v6 keys land. The old runner exports its exact input so the
-              // current runner sees the same base, policy and parent bytes.
-              const { request, release: historicalEnvelope } = (await run(
-                `
-            import { readFile } from 'node:fs/promises';
-            import { readUnboundPermissionAcknowledgementFor } from './apps/web/scripts/unbound-permission-acknowledgement.ts';
-            import { parseCompiledApplication } from './packages/postgres-provider/src/composed-application-runtime.ts';
-            import { compileInSandbox } from './packages/customization/src/sandbox.ts';
-            import { serializeRelease } from './packages/customization/src/release-envelope.ts';
-            const path = 'apps/web/release/app.authored.json';
-            const compiled = parseCompiledApplication(JSON.parse(await readFile('apps/web/release/app.compiled.json', 'utf8')));
-            const request = {
-              acknowledgement: readUnboundPermissionAcknowledgementFor(path, 'northstar.app:package.application'),
-              base: JSON.parse(await readFile(path, 'utf8')),
-              chain: [JSON.parse(await readFile(process.argv[2], 'utf8'))],
-              tip: serializeRelease(compiled.applications.at(-1) ?? compiled.bootstrap),
-            };
-            const result = await compileInSandbox(request);
-            if (result.status !== 'compiled') throw new Error(JSON.stringify(result));
-            console.log(JSON.stringify({ request, release: result.steps[0].release }));
-          `,
-                v6Patch.patch,
-              )) as {
-                request: Parameters<typeof compileInSandbox>[0];
-                release: unknown;
-              };
-              const currentEnvelope = await compileInSandbox(request);
-              assert.ok(
-                currentEnvelope.status === 'compiled',
-                JSON.stringify(currentEnvelope),
-              );
-              const compiledTenant = parseSerializedRelease(
-                currentEnvelope.steps[0]!.release,
-              );
-              assert.equal(
-                parseNormalizedApplicationPackageJson(
-                  compiledTenant.normalizedDefinitionBytes,
-                ).package.provenance,
-                'tenantAuthored',
-              );
-              assert.equal(
-                canonicalize(currentEnvelope.steps[0]!.release),
-                canonicalize(historicalEnvelope),
-                'the tenant compiler reproduces the entire v6 envelope with validation absent',
-              );
+              await assertArchivedTenantEnvelope(run);
               const read = () =>
-                run(archivedServingRead, {
+                archivedRuntimeRead(run, {
                   databaseUrl: options.databaseUrl,
                   identity: app.runtime.identity,
-                }) as Promise<{
-                  outcome: string;
-                  code?: string;
-                  message?: string;
-                }>;
+                });
               assert.equal((await read()).outcome, 'loaded');
               await opened.service.activate(draft.patchId);
               const refused = await read();
