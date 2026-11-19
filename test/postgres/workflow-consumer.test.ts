@@ -164,9 +164,14 @@ test(
           const sdk = generateWorkflowSdk(view, grants);
           const receivingReadModel =
             'northstar.app:query.receiving_receipt_lines';
+          const registeredReadModel = registeredSemanticQueryFromPinnedView(
+            view,
+            receivingReadModel,
+          );
           assert.ok(
-            registeredSemanticQueryFromPinnedView(view, receivingReadModel)
-              ?.readModel,
+            registeredReadModel &&
+              'readModel' in registeredReadModel &&
+              registeredReadModel.readModel,
           );
           assert.throws(
             () =>
@@ -358,12 +363,12 @@ test(
             }),
           ]);
           try {
-            await Promise.race([
-              service.rollback(),
-              delay(5_000, undefined, { ref: false }).then(() => {
-                throw new Error('workflow replay held the pointer lock');
-              }),
-            ]);
+            await pool.query(
+              `SELECT pointer_id FROM platform.active_release_pointers
+                WHERE tenant_id = $1 AND environment_id = $2 FOR UPDATE NOWAIT`,
+              [tenantId, environmentId],
+            );
+            await service.rollback();
           } finally {
             resumeReplay.resolve();
             await delayedReplay;

@@ -199,7 +199,7 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
           actor,
           call.id,
         );
-        if (definition?.readModel)
+        if (definition && 'readModel' in definition && definition.readModel)
           throw new WorkflowEffectRefusal('unsupported-read-model');
         const company = definition?.legalEntityScope?.operand.parameterId;
         const selected = company && asObject(call.input)[company];
@@ -217,6 +217,9 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
         const gateway = new SemanticQueryGateway(
           intersection,
           interpreter,
+          undefined,
+          undefined,
+          undefined,
           new PostgresSemanticQueryDenialRecorder(
             this.pool,
             actorIssuer,
