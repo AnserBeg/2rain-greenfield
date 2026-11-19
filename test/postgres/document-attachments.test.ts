@@ -131,7 +131,22 @@ test(
                 (SELECT count(*)::int FROM platform.document_attachment_audit) AS audit`,
               )
             ).rows[0];
-          assert.deepEqual(await counts(), { blobs: 2, versions: 3, audit: 3 });
+          const admitted = await counts();
+          assert.equal(
+            admitted?.blobs,
+            2,
+            'identical bytes were pooled across ownership scopes',
+          );
+          assert.equal(
+            admitted?.versions,
+            3,
+            'an upload retry changed the version count',
+          );
+          assert.equal(
+            admitted?.audit,
+            3,
+            'published attachments missed their audit rows',
+          );
 
           const preview = await fetch(byteUrl(itemUrl, attachment, 'preview'));
           assert.equal(preview.status, 200);
@@ -200,6 +215,7 @@ test(
           assert.equal(
             (await fetch(byteUrl(itemUrl, attachment, 'download'))).status,
             404,
+            'a revoked download grant still returned bytes',
           );
           assert.equal(
             (await fetch(byteUrl(itemUrl, attachment, 'preview'))).status,
@@ -226,7 +242,11 @@ test(
           );
           const manager = { cookie: 'northstar-demo-actor=manager' };
           const overQuota = await upload(itemUrl, pixel, { headers: manager });
-          assert.equal(overQuota.status, 413, await overQuota.clone().text());
+          assert.equal(
+            overQuota.status,
+            413,
+            'the stored-byte quota allowed publication',
+          );
           assert.deepEqual(await counts(), { blobs: 7, versions: 3, audit: 3 });
 
           const other = (
@@ -316,22 +336,6 @@ test(
         const customize = await openCustomizeService(options);
         try {
           const { service } = customize;
-          const recordType = await service.draft(
-            {
-              kind: 'addRecordType',
-              label: 'Equipment',
-              companyOwnership: 'entityOwned',
-              fields: [{ type: 'text', label: 'Name', required: true }],
-            },
-            'visualBuilder',
-          );
-          assert.equal(recordType.status, 'drafted');
-          await service.approve(recordType.patchId);
-          await service.activate(recordType.patchId);
-          const world = worldOver(app.runtime, String(connection.database));
-          const equipment = await world.create('custom_equipment', {
-            name: 'Inspection camera',
-          });
           const item = app.seededRecords.find(
             (row) => row.operationId === 'northstar.app:operation.item_create',
           )!;
@@ -353,6 +357,12 @@ test(
             {
               kind: 'changeSet',
               patches: [
+                {
+                  kind: 'addRecordType',
+                  label: 'Equipment',
+                  companyOwnership: 'entityOwned',
+                  fields: [{ type: 'text', label: 'Name', required: true }],
+                },
                 files(
                   'northstar.app:entity.item',
                   'northstar.app:field.custom_item_evidence',
@@ -408,6 +418,10 @@ test(
           } else {
             await activate();
           }
+          const world = worldOver(app.runtime, String(connection.database));
+          const equipment = await world.create('custom_equipment', {
+            name: 'Inspection camera',
+          });
           const fieldUrl = documentUrl(
             app.baseUrl,
             'northstar.app:surface.custom_equipment_detail',
@@ -443,8 +457,14 @@ test(
           );
           assert.equal(firstParty.status, 201, await firstParty.clone().text());
           assert.equal((await fetch(listUrl(fieldUrl))).status, 200);
+          const itemAttachment = (await firstParty.json()) as DocumentMetadata;
           await service.rollback();
-          assert.deepEqual(await (await fetch(listUrl(fieldUrl))).json(), []);
+          const itemUrl = documentUrl(app.baseUrl, itemSurface, item.recordId);
+          assert.deepEqual(await (await fetch(listUrl(itemUrl))).json(), []);
+          assert.equal(
+            (await fetch(byteUrl(itemUrl, itemAttachment, 'download'))).status,
+            404,
+          );
           assert.equal(
             (await fetch(byteUrl(fieldUrl, published, 'download'))).status,
             404,
