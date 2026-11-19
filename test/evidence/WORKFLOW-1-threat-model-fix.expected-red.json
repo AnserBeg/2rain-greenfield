@@ -9,9 +9,7 @@
       "original": "      if (\n        operation?.tier !== 'o0' ||\n        operation.confirmation !== 'none' ||\n        operation.effect.kind !== 'createRecordEffect' ||\n        !operation.inputContract ||\n        !proof ||\n        proof.releaseRoot !== run.release_root ||\n        proof.operationDigest !== sha256(canonicalize(operation)) ||\n        proof.inputContractDigest !==\n          sha256(canonicalize(operation.inputContract)) ||\n        !Array.isArray(proof.reachableWriteEntities) ||\n        proof.reachableWriteEntities.length !== 1 ||\n        proof.reachableWriteEntities[0] !== operation.effect.entity.targetId ||\n        !Array.isArray(proof.tierBIntersections) ||\n        proof.tierBIntersections.length !== 0\n      ) {\n",
       "replacement": "      if (false) {\n",
       "test": {
-        "files": [
-          "test/postgres/workflow-consumer.test.ts"
-        ]
+        "files": ["test/postgres/workflow-consumer.test.ts"]
       },
       "kills": [
         {
@@ -28,9 +26,7 @@
       "original": "      if (!run.verified_digest)",
       "replacement": "      if (false)",
       "test": {
-        "files": [
-          "test/postgres/workflow-consumer.test.ts"
-        ]
+        "files": ["test/postgres/workflow-consumer.test.ts"]
       },
       "kills": [
         {
@@ -47,9 +43,7 @@
       "original": "        if (!inSnapshot || actorDecision.decision !== 'ALLOW')\n",
       "replacement": "        if (!inSnapshot)\n",
       "test": {
-        "files": [
-          "test/postgres/workflow-consumer.test.ts"
-        ]
+        "files": ["test/postgres/workflow-consumer.test.ts"]
       },
       "kills": [
         {
@@ -66,9 +60,7 @@
       "original": "               'legal_entity_id', event.payload #>> '{legalEntityId,value}',\n               'receipt_id', change.record_id,",
       "replacement": "               'legal_entity_id', i.legal_entity_id,\n               'receipt_id', i.receipt_id,",
       "test": {
-        "files": [
-          "test/postgres/workflow-consumer.test.ts"
-        ]
+        "files": ["test/postgres/workflow-consumer.test.ts"]
       },
       "kills": [
         {
@@ -85,9 +77,7 @@
       "original": "      const view = await this.gateway.loadView(await automationContext(run));",
       "replacement": "      const view = await withWorkflowTransaction(this.workerPool, run, async (client) => {\n        await lockWorkflowPointer(client);\n        return this.gateway.loadView(await automationContext(run));\n      });",
       "test": {
-        "files": [
-          "test/postgres/workflow-consumer.test.ts"
-        ]
+        "files": ["test/postgres/workflow-consumer.test.ts"]
       },
       "kills": [
         {
