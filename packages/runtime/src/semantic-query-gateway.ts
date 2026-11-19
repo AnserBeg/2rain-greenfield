@@ -847,7 +847,7 @@ function assertAggregateResultEnvelope(
  * an unreadable operand must never become a narrower scope, a wider scope, or
  * tenant-wide execution.
  */
-function acceptedLegalEntityScopeSelection(
+export function acceptedLegalEntityScopeSelection(
   definition: RegisteredSemanticQueryDefinition,
   declaredScope: RegisteredLegalEntityScope,
   argumentsValue: ImmutableJsonValue,
@@ -2534,7 +2534,7 @@ function assertParameterizedPlanReferences(
   }
 }
 
-function bindQueryParameters(
+export function bindQueryParameters(
   definition: RegisteredSemanticQueryDefinition,
   argumentsValue: ImmutableJsonValue,
 ): Readonly<Record<string, ImmutableJsonValue>> {
