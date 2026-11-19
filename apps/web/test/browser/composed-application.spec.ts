@@ -1,3 +1,4 @@
+import { reviewTask, returnToRecord } from './complete-task.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -1743,9 +1744,7 @@ async function scopedInventoryJourney(
   // The record's identity is on its page, in its quiet technical details
   // (LOOK-1 round 2).
   await expect(
-    page.locator('main code', {
-      hasText: `${browserTransactionId.slice(0, 8)}…${browserTransactionId.slice(-4)}`,
-    }),
+    page.locator(`.record-technical[data-record-id="${browserTransactionId}"]`),
   ).toBeAttached();
   await expect(page.locator('form.capability-command')).toHaveCount(0);
   // THE THIRD INVERSION, and it is the one ADR-0054 predicted rather than found.
@@ -1759,6 +1758,7 @@ async function scopedInventoryJourney(
   //
   // The grammar's placement is asserted with them: destructive actions live
   // behind the overflow and are never a lone exposed control.
+  await page.locator('.composition-record-actions > summary').click();
   const lifecycleOverflow = page.locator(
     '[data-platform-slot="record:commandBar"] details.action-overflow',
   );
@@ -1797,9 +1797,7 @@ async function scopedInventoryJourney(
   // The record's identity is on its page, in its quiet technical details
   // (LOOK-1 round 2).
   await expect(
-    page.locator('main code', {
-      hasText: `${browserTransactionId.slice(0, 8)}…${browserTransactionId.slice(-4)}`,
-    }),
+    page.locator(`.record-technical[data-record-id="${browserTransactionId}"]`),
   ).toBeAttached();
   const inventoryTransactionFormUrl = scopedSurfaceUrl(
     baseUrl,
@@ -2359,6 +2357,29 @@ const inventoryFormHeadings = Object.freeze({
   stock_count_line_form: 'Stock count line',
 });
 
+async function expectInventoryRecordRevision(
+  page: Page,
+  recordId: string,
+  revision: string,
+): Promise<void> {
+  const details = page.locator(
+    `.record-technical[data-record-id="${recordId}"]`,
+  );
+  await expect(details).toBeAttached();
+  await expect(
+    details
+      .locator('dl > div')
+      .filter({ has: page.getByText('Activity', { exact: true }) })
+      .locator('dd'),
+  ).toHaveText('Active');
+  await expect(
+    details
+      .locator('dl > div')
+      .filter({ has: page.getByText('Revision', { exact: true }) })
+      .locator('dd'),
+  ).toHaveText(revision);
+}
+
 async function postingRouteDraftJourney(
   page: Page,
   baseUrl: string,
@@ -2374,6 +2395,7 @@ async function postingRouteDraftJourney(
   )}&record=${encodeURIComponent(browserRouteTransactionId)}`;
   await expectRoutePostingEffect(page, baseUrl, 0, '5');
   await page.goto(detailUrl);
+  await page.locator('.composition-record-actions > summary').click();
   const edit = page.getByRole('link', { name: 'Edit', exact: true });
   await expect(edit).toHaveCount(1);
   const editHref = await edit.getAttribute('href');
@@ -2420,7 +2442,8 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
     browserLegalEntityId,
   )}&record=${encodeURIComponent(browserRouteTransactionLineId)}`;
   await page.goto(detailUrl);
-  await expect(page.getByText(/Active · revision 1/)).toBeVisible();
+  await expectInventoryRecordRevision(page, browserRouteTransactionId, '1');
+  await page.locator('.composition-record-actions > summary').click();
   const edit = page.getByRole('link', { name: 'Edit', exact: true });
   await expect(edit).toHaveCount(1);
   const editHref = await edit.getAttribute('href');
@@ -2467,67 +2490,74 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
       `${applicationNamespace}:operation.inventory_transaction_line_update`,
     );
 
-    const command = page.locator('form.capability-command');
-    await expect(command).toHaveAttribute(
-      'data-capability-id',
-      INVENTORY_POSTING_CAPABILITY_ID,
-    );
-    // A posting command is its button alone (LOOP-1: no developer sentence).
-    await expect(command).not.toContainText('Draft staged.');
-    const renderedIdempotencyKey = await command
-      .locator('input[name="idempotencyKey"]')
+    // The compiled Task owns Post; the issued task token and preparation,
+    // rather than a caller-created operation key, preserve this confirmation.
+    await page.locator('.composition-record-actions > summary').click();
+    await page.getByRole('button', { name: 'Post', exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    const issuedToken = await dialog
+      .locator('form.composition-inputs [name="taskToken"]')
       .inputValue();
-    await command.getByRole('button', { name: 'Post' }).click();
-    await expect(
-      page.getByRole('heading', { level: 1, name: 'Confirm Post' }),
-    ).toBeVisible();
-    await expect(
-      page.locator('[data-predicted-effects="registered-capability"]'),
-    ).toContainText(INVENTORY_POSTING_CAPABILITY_ID);
-    await expect(page.locator('input[name="idempotencyKey"]')).toHaveValue(
-      renderedIdempotencyKey,
+    await reviewTask(dialog, 'Review Post');
+    const prepared = dialog.locator('[data-task-prepared]');
+    const confirmation = prepared.locator('form');
+    await expect(confirmation.locator('[name="taskToken"]')).toHaveValue(
+      issuedToken,
     );
-    const preservedSubmission = Object.fromEntries(
-      await page
-        .locator('form input[type="hidden"]')
-        .evaluateAll((inputs) =>
-          inputs.map((input) => [
-            input.getAttribute('name') ?? '',
-            (input as HTMLInputElement).value,
-          ]),
+    const impact = prepared.locator('[data-stock-impact="onHand"]').first();
+    await expect(impact.locator('[data-impact-before]')).toHaveText('5');
+    await expect(impact.locator('[data-impact-after]')).toHaveText('8');
+    const preservedSubmission = await confirmation.evaluate((form) =>
+      Object.fromEntries(
+        [...new FormData(form as HTMLFormElement).entries()].map(
+          ([name, value]) => [name, String(value)],
         ),
+      ),
     );
+    preservedSubmission.taskStage = 'confirm';
+    const confirmationUrl = new URL(
+      (await confirmation.getAttribute('action'))!,
+      baseUrl,
+    ).href;
 
     const beforeConfirmation = await page.context().newPage();
     try {
       await beforeConfirmation.goto(detailUrl);
+      await expectInventoryRecordRevision(
+        beforeConfirmation,
+        browserRouteTransactionId,
+        '1',
+      );
       await expect(
-        beforeConfirmation.getByText(/Active · revision 1/),
+        beforeConfirmation.getByRole('button', { name: 'Post', exact: true }),
       ).toBeVisible();
-      await expect(
-        beforeConfirmation.locator('form.capability-command'),
-      ).toBeVisible();
+      await expectRoutePostingEffect(beforeConfirmation, baseUrl, 0, '5');
     } finally {
       await beforeConfirmation.close();
     }
 
-    await page.getByRole('button', { name: 'Confirm Post' }).click();
-    await expect(page.getByRole('status')).toContainText('Post complete');
-    await expect(page.getByText(/Active · revision 2/)).toBeVisible();
-    await expect(page.locator('form.capability-command')).toHaveCount(0);
+    await confirmation
+      .getByRole('button', { name: 'Confirm Post', exact: true })
+      .click();
+    await expect(page.locator('[data-task-result]')).toContainText(
+      'Post: done',
+    );
+    await returnToRecord(page);
+    await expectInventoryRecordRevision(page, browserRouteTransactionId, '2');
+    await expect(
+      page.getByRole('button', { name: 'Post', exact: true }),
+    ).toHaveCount(0);
     await expect(edit).toHaveCount(0);
 
-    const replay = await page.request.post(
-      `${baseUrl}/?surface=${encodeURIComponent(`${applicationNamespace}:surface.inventory_transaction_detail`)}`,
-      { form: preservedSubmission },
-    );
+    // Replay the exact issued confirmation, including its prepared identity.
+    const replay = await page.request.post(confirmationUrl, {
+      headers: { 'x-rain-fragment': 'task' },
+      form: preservedSubmission,
+    });
     expect(replay.status()).toBe(200);
     const replayHtml = await replay.text();
-    expect(replayHtml).toContain('Post complete');
-    // The revision is the badge's screen-reader text (LOOK-1 round 3).
-    expect(replayHtml).toMatch(
-      /Active<span class="sr-only"> · revision 2<\/span>/u,
-    );
+    expect(replayHtml).toContain('Post: done');
+    expect(replayHtml).toMatch(/<dt>Revision<\/dt><dd>2<\/dd>/u);
 
     // The editor opened before posting is a second UI boundary: its Save
     // draft is refused against the posted document rather than applied.
@@ -2573,7 +2603,7 @@ async function postingRouteJourney(page: Page, baseUrl: string): Promise<void> {
   // rewritten line posted again would move both.
   await expectRoutePostingEffect(page, baseUrl, 1, '8');
   await page.goto(detailUrl);
-  await expect(page.getByText(/Active · revision 2/)).toBeVisible();
+  await expectInventoryRecordRevision(page, browserRouteTransactionId, '2');
   await expect(page.locator('form.capability-command')).toHaveCount(0);
   await expect(
     page.getByRole('link', { name: 'Edit', exact: true }),

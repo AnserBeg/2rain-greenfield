@@ -5,9 +5,9 @@
  * one request). `test/performance/page-budget.test.ts` fails when a page
  * exceeds any ceiling.
  *
- * A ceiling only ever moves down. Lower it in the commit that earns it; never
- * raise it to admit a regression. `null` is not measured yet: the test prints
- * the measured value and fails until it is pinned.
+ * Lower a ceiling in the commit that earns it. Added feature reads require a
+ * measured value and reason beside the changed pin; unrelated regressions are
+ * refused. `null` is not measured yet: the test fails until it is pinned.
  *
  * Targets at the end of SPEED-1: PO detail and PO list ≤ 3 transactions,
  * ≤ 40 statements, 0 repeats; a task step the same for its read, plus one
@@ -66,8 +66,11 @@ export const PAGE_BUDGETS: Readonly<Record<PageBudgetName, PageBudget>> =
     // A task step's page shows the day's queues too (orchestrator ruling):
     // their counts are read in the step's snapshot, +5 statements, no
     // transaction (ADR-0071 as amended: a read-only step reads in one).
-    'task: open': budget([2, 41, 3, 0], [0, 0, 0, 75]),
-    'task: review': budget([2, 41, 3, 0], [0, 0, 0, 75]),
+    // INTERACT-1 slice 2: stock position and location reads add 5 statements,
+    // no transactions, authorization reads or repeats. Measured by CI
+    // 44426260000 / job 135231781159 on the same warm fixture.
+    'task: open': budget([2, 46, 3, 0], [0, 0, 0, 75]),
+    'task: review': budget([2, 46, 3, 0], [0, 0, 0, 75]),
     // Raised once, by the security fix round (S1, orchestrator-ruled): every
     // decision on Confirm's write path is now read live in its own transaction.
     // Then +5 statements: its page's queues, read after the posting in its

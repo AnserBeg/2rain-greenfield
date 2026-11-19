@@ -316,8 +316,10 @@ async function refused(page: Page, saved: Saved, code: string) {
   const secondary = page.locator(
     '.composition-record-actions:not([open]) > summary',
   );
-  if (await secondary.count()) await secondary.click();
-  await page.getByRole('button', { name: 'Post', exact: true }).click();
+  const post = page.getByRole('button', { name: 'Post', exact: true });
+  if (!(await post.isVisible()) && (await secondary.count()))
+    await secondary.click();
+  await post.click();
   await reviewTask(page.getByRole('dialog'), 'Review Post');
   await page.getByRole('button', { name: 'Confirm Post', exact: true }).click();
   await expect(page.locator('[data-message-subject]').first()).toHaveText(code);
@@ -325,7 +327,12 @@ async function refused(page: Page, saved: Saved, code: string) {
   await expect(
     page.getByRole('heading', { level: 1, name: saved.number, exact: true }),
   ).toBeVisible();
-  await expect(page.getByText(/Active · revision 1/u)).toBeVisible();
+  await expect(
+    page
+      .locator('.record-technical dl > div')
+      .filter({ has: page.getByText('Revision', { exact: true }) })
+      .locator('dd'),
+  ).toHaveText('1');
 }
 
 /**
