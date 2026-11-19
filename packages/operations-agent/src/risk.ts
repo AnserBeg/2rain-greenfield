@@ -22,6 +22,7 @@ export interface OperationRisk {
 export function operationRisk(
   catalog: PinnedCatalog,
   operation: RegisteredOperationDefinition,
+  writtenFieldIds: readonly string[] = [],
 ): OperationRisk {
   const kind = effectKind(operation);
   const tier = (operation as { tier?: unknown }).tier;
@@ -45,10 +46,18 @@ export function operationRisk(
     return { riskClass: 'needsYes', reason: 'Adding a record needs your OK.' };
   if (kind === 'updateRecordEffect') {
     const keys = operation.inputContract?.closedArgumentKeys ?? [];
+    const entity = catalog.operationEntity(operation);
+    if (
+      catalog.confirmationRequiredFor.has(entity) ||
+      writtenFieldIds.some((id) => catalog.confirmationRequiredFor.has(id))
+    )
+      return {
+        riskClass: 'needsYes',
+        reason: 'This changes a setting, so it needs your OK.',
+      };
     // A field another operation of the record type writes only with the
     // person's confirmation (a period's reopen) is guarded: changing it, or
     // putting it back, needs that confirmation too.
-    const entity = catalog.operationEntity(operation);
     const fields = new Set(operation.inputContract?.writableFieldIds ?? []);
     const guarded = catalog.operations.some(
       (candidate) =>

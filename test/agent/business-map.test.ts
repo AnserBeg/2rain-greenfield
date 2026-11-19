@@ -274,6 +274,15 @@ function guardedSession(
     invoked: [] as string[],
     afterInvoke: () => {},
     denyReads: false,
+    getRecords: new Map<
+      string,
+      {
+        recordId: string;
+        revision: number;
+        archived: boolean;
+        values: Record<string, string>;
+      }[]
+    >(),
     onList: undefined as
       | undefined
       | ((
@@ -346,7 +355,9 @@ function guardedSession(
                   })
                 : Promise.resolve({
                     outcome: 'exact',
-                    records: [state.record],
+                    records: state.getRecords.get(request.queryId) ?? [
+                      state.record,
+                    ],
                     listCoverage: {
                       ...request.arguments.list,
                       hasMore: false,
@@ -1447,4 +1458,187 @@ test('5: a capability on a newly created order binds only the approved line rece
       JSON.stringify(run.content),
     );
   }
+});
+
+test('AGENT-5 7: the pinned release guards policy fields and every settings edit', async () => {
+  const { session } = guardedSession();
+  const view = compiledAppView();
+  const agent = view.projections.agent;
+  const metadata = agent.payload as { confirmationRequiredFor: string[] };
+  assert.deepEqual(
+    [...metadata.confirmationRequiredFor].sort(),
+    [
+      `${NS}:entity.purchasing_settings`,
+      `${NS}:field.legal_entity_is_default`,
+      `${NS}:field.legal_entity_reorder_point_percent`,
+      `${NS}:field.tax_code_rate_percent`,
+    ].sort(),
+  );
+  // A release can change only the confirmation declaration and reuse the same operation catalog.
+  const field = `${NS}:field.tax_code_name`;
+  const amended = pinnedCatalog({
+    ...view,
+    projections: {
+      ...view.projections,
+      agent: {
+        ...agent,
+        payload: {
+          ...metadata,
+          confirmationRequiredFor: [...metadata.confirmationRequiredFor, field],
+        },
+      },
+    },
+  });
+  const { operationRisk } =
+    await import('../../packages/operations-agent/src/risk.js');
+  assert.equal(
+    operationRisk(amended, amended.operation('tax_code_update')!, [field])
+      .riskClass,
+    'needsYes',
+  );
+  for (const [entity, patch, expected] of [
+    ['legal_entity', { reorder_point_percent: '50' }, 'needsYes'],
+    ['legal_entity', { is_default: true }, 'needsYes'],
+    ['tax_code', { rate_percent: '20' }, 'needsYes'],
+    ['purchasing_settings', { key: 'primary' }, 'needsYes'],
+    ['purchasing_settings', { require_approval: false }, 'needsYes'],
+    ['tax_code', { name: 'Standard' }, 'reversible'],
+    ['legal_entity', { name: 'Company' }, 'reversible'],
+  ] as const) {
+    await session.call('erp_query', {
+      queryId: entity + '_get',
+      arguments: { recordId: PARTY },
+    });
+    const result = await session.call('erp_plan', {
+      intents: [{ operationId: entity + '_update', target: PARTY, patch }],
+    });
+    assert.ok(
+      (result.content as { planId?: string }).planId,
+      JSON.stringify(result.content),
+    );
+    assert.equal(
+      session.approvals.at(-1)?.riskClass,
+      expected,
+      JSON.stringify(patch),
+    );
+  }
+});
+
+test('AGENT-5 8: stored reference text cannot prove a location identity', async () => {
+  const { session, state } = guardedSession();
+  const location = '11111111-2222-4333-8444-555555555555';
+  state.record.values[`${NS}:field.item_preferred_location_id`] = location;
+  await session.call('erp_query', {
+    queryId: 'item_get',
+    arguments: { recordId: PARTY },
+  });
+  const plan = async () =>
+    (
+      await session.call('erp_plan', {
+        intents: [
+          {
+            operationId: 'item_update',
+            target: PARTY,
+            patch: { preferred_location_id: location },
+          },
+        ],
+      })
+    ).content;
+  assert.match(JSON.stringify(await plan()), /lookup.*location/u);
+  // A result from a list still needs an exact get before it can be used as a reference.
+  state.onList = () => ({
+    outcome: 'exact',
+    records: [{ ...state.record, recordId: location }],
+  });
+  await session.call('erp_query', { queryId: 'location_list' });
+  assert.match(JSON.stringify(await plan()), /lookup.*location/u);
+  const resolved = { ...state.record, recordId: location, values: {} };
+  state.getRecords.set(`${NS}:query.location_get`, [resolved]);
+  assert.ok(((await plan()) as { planId?: string }).planId);
+  // A valid reference on the line can supply the lookup candidate by itself.
+  const { session: next, state: line } = guardedSession();
+  line.record.values[`${NS}:field.item_preferred_location_id`] = location;
+  line.getRecords.set(`${NS}:query.location_get`, [resolved]);
+  await next.call('erp_query', {
+    queryId: 'item_get',
+    arguments: { recordId: PARTY },
+  });
+  const valid = await next.call('erp_plan', {
+    intents: [
+      {
+        operationId: 'item_update',
+        target: PARTY,
+        patch: { preferred_location_id: location },
+      },
+    ],
+  });
+  assert.ok(
+    (valid.content as { planId?: string }).planId,
+    JSON.stringify(valid.content),
+  );
+});
+
+test('AGENT-5 9: uppercase UUID targets and references bind their canonical IDs', async () => {
+  const { session } = guardedSession();
+  for (const entity of ['item', 'location'])
+    await session.call('erp_query', {
+      queryId: entity + '_get',
+      arguments: { recordId: PARTY.toUpperCase() },
+    });
+  const plan = (
+    await session.call('erp_plan', {
+      intents: [
+        {
+          operationId: 'item_update',
+          target: PARTY.toUpperCase(),
+          patch: {
+            preferred_location_id: PARTY.toUpperCase(),
+            name: PARTY.toUpperCase(),
+          },
+        },
+      ],
+    })
+  ).content as {
+    planId?: string;
+    steps: { target: string; inputs: { patch: Record<string, string> } }[];
+  };
+  assert.ok(plan.planId, JSON.stringify(plan));
+  assert.equal(plan.steps[0]!.target, PARTY);
+  assert.equal(
+    plan.steps[0]!.inputs.patch[`${NS}:field.item_preferred_location_id`],
+    PARTY,
+  );
+  assert.equal(
+    plan.steps[0]!.inputs.patch[`${NS}:field.item_name`],
+    PARTY.toUpperCase(),
+  );
+});
+
+test('AGENT-5 10: an offered currency before a document name authorizes that currency for the turn', async () => {
+  const { session } = guardedSession();
+  await session.call('erp_query', {
+    queryId: 'party_get',
+    arguments: { recordId: PARTY },
+  });
+  const create = async (currency: string) =>
+    (
+      await session.call('erp_plan', {
+        intents: [
+          {
+            operationId: 'purchase_order_create',
+            values: {
+              supplier_party_id: PARTY,
+              order_date: '2026-11-18T00:00:00.000Z',
+              currency,
+            },
+          },
+        ],
+      })
+    ).content as { planId?: string; reason?: string };
+  session.noteRequest('Create a USD purchase order for Acme');
+  assert.ok((await create('USD')).planId);
+  session.noteRequest('Create a purchase order for USD Plastics');
+  assert.match(String((await create('USD')).reason), /one the person named/u);
+  session.noteRequest('Create an ABC purchase order');
+  assert.match(String((await create('ABC')).reason), /not a currency code/u);
 });

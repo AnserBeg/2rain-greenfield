@@ -402,6 +402,7 @@ export function catalogModuleDefinition(
             'Rate %',
             30,
           ),
+          requiresAssistantConfirmation: true,
           defaultSemantics: 'none',
           presence: 'required',
         },
