@@ -26,14 +26,14 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 - Mid-packet checkpoint: no whole-app review trigger; no new correctness domain or fan-out.
 
 - CI 44499550504: only actually counted queues are reused; Reorder retains its independent count.
-- Accepted WORKFLOW-1 review corrections are inherited unchanged; compiler and authored inputs match.
+- Accepted workflow and activation-recovery corrections are inherited unchanged; compiler inputs match.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "INTERACT-1",
-  "base": "1d64f6977728c4829a68780a1308a3da2323c555",
-  "head": "8691c6cd049c3d0d46ff245549b6788d0996c616",
+  "base": "bae7e49e88bfde2257b4a0cb499af9fb9f121e74",
+  "head": "4da3f438505f08ff871c8f2108c38a1c74b72a77",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
