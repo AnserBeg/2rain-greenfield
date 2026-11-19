@@ -778,3 +778,8 @@ How to apply: Reverse the approved release pair using its stored artifacts and d
 
 2026-11-19. PostgreSQL rejects `ON CONFLICT` on tables with INSERT or UPDATE rules, including an UPDATE rule that rejects changes to immutable workflow instances.
 Check for the existing key and insert while holding the scope lock. Keep the unique constraint as the final check. [WORKFLOW-1](docs/execution/packets/WORKFLOW-1.md)
+
+## Serialize workflow effects with run controls
+Date: 2026-11-19
+Why: The same release fence can contain both an in-flight dispatch and an operator cancellation. An earlier check can let the dispatch commit after cancellation.
+How to apply: Take the run lock inside the effect transaction and require the exact runnable outbox occurrence under that lock. Keep guest replay and pool acquisition outside the pointer lock. See [WORKFLOW-1](docs/execution/packets/WORKFLOW-1.md).
