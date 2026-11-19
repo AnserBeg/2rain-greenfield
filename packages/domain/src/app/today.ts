@@ -64,15 +64,18 @@ export function todaySurface(namespace: string): Record<string, unknown> {
       kind: 'surfaceLauncher',
       schemaVersion: 'v6',
       tiles: [
-        tile(
-          'receive',
-          'To receive',
-          'Purchase orders with goods still to arrive.',
-          10,
-          'expected_receipt_list',
-          'to_receive',
-          'inbox',
-        ),
+        {
+          ...tile(
+            'receive',
+            'To receive',
+            'Purchase orders with goods still to arrive.',
+            10,
+            'expected_receipt_list',
+            'to_receive',
+            'inbox',
+          ),
+          preview: { recordSurface: id('surface', 'purchase_order_detail') },
+        },
         tile(
           'ship',
           'To ship',

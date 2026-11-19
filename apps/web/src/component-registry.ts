@@ -666,7 +666,12 @@ function renderTaskDecision(context: SurfaceComponentContext): string {
     return slotPanel(
       context,
       data.status === 'LAUNCHER_READY'
-        ? renderLauncherTiles(context.surface, data.launcher)
+        ? renderLauncherTiles(
+            context.surface,
+            data.launcher,
+            (record, fieldId, value) =>
+              displayFieldValue(context.view, record, fieldId, value),
+          )
         : '',
       'task-decision-slot',
     );
