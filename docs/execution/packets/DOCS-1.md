@@ -1,34 +1,54 @@
-# DOCS-1 — documents, files, templates and signatures
+# DOCS-1 — internal files on saved records
 
-Slice 0 and the binding Fable amendment are docs-only. Slice 1a is authorized.
+Slice 1a implements [ADR-0078](../../decisions/ADR-0078-governed-documents-files-templates-and-signatures.md). Critical path is the forward migration and its grants. Fable's design read is closed.
 
 ## Claims
 
-1. Documents store immutable scoped versions and inherit live permission from an actual record.
-2. Customize adds file fields through an approved release.
-3. A signing receipt attests to an exact version and protects its bytes while retained.
+1. Standard and tenant records use the same attachment control and the same live record, company and document permissions for list, preview and download.
+2. Customize drafts, approves and activates files fields with explicit count, requiredness and allowed internal categories. Rollback retains existing versions and hides retired fields from ordinary reads.
+3. The provider publishes immutable bytes, versions and audit together. Tenant and environment quotas serialize publication. Dedupe also keys on stored company ownership.
+4. Byte reads and writes each have two process slots and a 30-second response deadline. The local demo scanner is opt-in. Serving without a real or explicitly enabled local scanner refuses uploads.
 
 ## Decisions
 
-- [ADR-0078](../../decisions/ADR-0078-governed-documents-files-templates-and-signatures.md) sets the design after the 2026-11-19 Fable read.
-- PostgreSQL stores bounded blobs. Production upload waits for a scanner. The local demo uses a labelled pass-through.
-- The first Documents slice takes the next free surface reader rung at integration. Templates and signatures each get their own rung.
-- Tenant-shared documents can link down to company records under live read checks on both targets.
-- Templates render with pinned PDFKit in an OS sandbox. Signing waits for sign-in.
+- File-field requiredness applies to document task completion. Slice 1a allows attachments after saving and stores the flag for the later task.
+- Internal categories can accompany a field draft. Customer upload requests still require the external-identity ruling.
+- The PDF content gate admits single-revision PDFs with a classic cross-reference table. PNG admission uses the single-image noninterlaced profile.
 
-## Slices
+## Evidence
 
-0. Design and Fable amendments.
-1a. Internal attachments and file fields.
-1b. Customer upload requests, following the external-identity ruling.
-2. Templates and PDF.
-3. Signatures, following sign-in.
-
-## Gates
-
-Run `scripts/check-records.sh` for the docs-only amendment. No runtime guarantee is claimed by this checkpoint.
+PostgreSQL tests cover byte reads, grants, company refusal, audit, quota, count, scanner gating and rollback. The HTTP test holds two slots of each kind and observes the third refusal. Hosted CI runs the archived floor-26 reader against the new release.
 
 ## Test it yourself
 
-Read ADR-0078 and confirm that production uploads wait for scanning, a shared document can
-link to a company without exposing the governing record, and signing waits for sign-in.
+1. Start the local demo with `NORTH_STAR_DEV_DATABASE_CONTAINER=dev-composed-app-postgres-docs-1 NORTH_STAR_DATABASE_PORT=55444 PORT=4175 NORTH_STAR_DOCUMENT_DEMO_SCANNER=1 corepack pnpm dev`.
+2. Open a saved Item and expand **Files**. Observe the demo scanner label. Attach a PNG, preview it, and download the same file.
+3. In **Customize**, draft a files field on Item or a tenant record with Maximum files set to 1. Approve and activate it. Attach one file in the new field, then try a second. Check the refusal and roll back the field.
+
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1", "packet": "DOCS-1",
+  "base": "b2b7877e58074b325c53c7b13f926535e83f39e5", "head": "aa0130efc95890d24e04d2828616960e13d543d1",
+  "changedPaths": [
+    "apps/api/src/composition-root.ts", "apps/api/src/main.ts", "apps/web/src/app-server.ts",
+    "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/document-http.ts",
+    "apps/web/src/document-section.ts", "apps/web/src/surface-client.ts", "apps/web/src/surface-runtime.ts",
+    "db/migrations/0044_document_attachments.sql", "db/schema.snapshot.json", "packages/canonical-model/src/documents.ts",
+    "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts", "packages/compiler/src/compiler.ts",
+    "packages/compiler/src/diff.ts", "packages/compiler/src/documents.ts", "packages/compiler/src/projections.ts",
+    "packages/compiler/src/protocol.ts", "packages/customization/src/apply.ts", "packages/customization/src/patch.ts",
+    "packages/customization/src/render.ts", "packages/customization/src/targets.ts", "packages/postgres-provider/package.json",
+    "packages/postgres-provider/src/composed-application-runtime.ts", "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/document-attachments.ts",
+    "packages/postgres-provider/src/document-content.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/document-gateway.ts",
+    "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts", "packages/runtime/src/semantic-query-gateway.ts",
+    "pnpm-lock.yaml", "test/architecture/release-persistence-boundary.test.ts", "test/integration/document-http.test.ts",
+    "test/postgres/document-attachments.test.ts", "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts",
+    "test/postgres/module-storage-transition.test.ts", "test/postgres/trust-substrate.test.ts"
+  ],
+  "symbols": [
+    {"path": "packages/postgres-provider/src/document-attachments.ts", "name": "PostgresDocumentGateway"},
+    {"path": "packages/compiler/src/documents.ts", "name": "compileDocuments"},
+    {"path": "apps/web/src/document-http.ts", "name": "mountDocumentHttp"}
+  ]
+}
+```
