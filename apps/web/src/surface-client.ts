@@ -93,6 +93,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
     const region = form.parentElement.querySelector('[data-task-inline-review]');
     const review = form.querySelector('footer button[value="prepare"]');
     if (!region || !review) return;
+    form.querySelector('[data-task-entry-impact]')?.setAttribute('hidden', '');
     region.hidden = true;
     region.replaceChildren();
     review.hidden = false;
@@ -120,6 +121,7 @@ export const SURFACE_CLIENT_SCRIPT = String.raw`(() => {
             }
             errors.forEach(error => error.remove());
             form.parentElement.querySelector('[data-task-input-error]')?.remove();
+            preview.querySelector('[data-task-row-review]')?.setAttribute('hidden', '');
             preview.querySelector('button[value="edit"]')?.setAttribute('hidden', '');
             region.replaceChildren(preview);
             region.hidden = false;

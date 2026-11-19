@@ -2,6 +2,7 @@ import { test, expect, type Locator, type Page } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
+import { reviewTask } from './complete-task.js';
 
 const ns = 'northstar.app';
 /** Field notebook, the demo seed's first product. */
@@ -66,7 +67,7 @@ test('an adjustment is entered like a document, numbered on save, and posted or 
       fullPage: true,
     });
     const damaged = await saveDraft(page);
-    await command(page, 'Post');
+    await command(page, 'Post', ['13', '11']);
     // The document's movement carries its reason; stock drops by two -- of
     // stock the fixture received today, which the default of now is after.
     expect(await postedMovements(page, damaged)).toEqual([
@@ -269,19 +270,41 @@ async function postedMovements(page: Page, saved: Saved) {
 }
 
 /** A confirmed command on the saved document. */
-async function command(page: Page, label: string) {
+async function command(
+  page: Page,
+  label: string,
+  expected?: readonly [string, string],
+) {
   const secondary = page.locator(
     '.composition-record-actions:not([open]) > summary',
   );
-  if (await secondary.count()) await secondary.click();
-  await page.getByRole('button', { name: label, exact: true }).click();
+  const post = page.getByRole('button', { name: label, exact: true });
+  if (!(await post.isVisible()) && (await secondary.count()))
+    await secondary.click();
+  await post.click();
+  const dialog = page.getByRole('dialog');
   await expect(
-    page.getByRole('heading', { name: `Confirm ${label}`, exact: true }),
+    dialog.getByRole('heading', { name: label, exact: true }),
   ).toBeVisible();
-  await page
+  await reviewTask(dialog, `Review ${label}`);
+  await expect(
+    dialog.locator('[data-stock-impact="onHand"]:visible').first(),
+  ).toBeVisible();
+  if (expected) {
+    const impact = dialog
+      .locator('[data-stock-impact="onHand"]:visible')
+      .first();
+    await expect(impact.locator('[data-impact-before]')).toHaveText(
+      expected[0],
+    );
+    await expect(impact.locator('[data-impact-after]')).toHaveText(expected[1]);
+  }
+  await dialog
     .getByRole('button', { name: `Confirm ${label}`, exact: true })
     .click();
-  await expect(page.getByRole('status')).toContainText(`${label} complete`);
+  await expect(page.locator('[data-task-result]')).toContainText(
+    `${label}: done`,
+  );
 }
 
 /**
@@ -293,15 +316,23 @@ async function refused(page: Page, saved: Saved, code: string) {
   const secondary = page.locator(
     '.composition-record-actions:not([open]) > summary',
   );
-  if (await secondary.count()) await secondary.click();
-  await page.getByRole('button', { name: 'Post', exact: true }).click();
+  const post = page.getByRole('button', { name: 'Post', exact: true });
+  if (!(await post.isVisible()) && (await secondary.count()))
+    await secondary.click();
+  await post.click();
+  await reviewTask(page.getByRole('dialog'), 'Review Post');
   await page.getByRole('button', { name: 'Confirm Post', exact: true }).click();
   await expect(page.locator('[data-message-subject]').first()).toHaveText(code);
   await page.goto(saved.url);
   await expect(
     page.getByRole('heading', { level: 1, name: saved.number, exact: true }),
   ).toBeVisible();
-  await expect(page.getByText(/Active · revision 1/u)).toBeVisible();
+  await expect(
+    page
+      .locator('.record-technical dl > div')
+      .filter({ has: page.getByText('Revision', { exact: true }) })
+      .locator('dd'),
+  ).toHaveText('1');
 }
 
 /**

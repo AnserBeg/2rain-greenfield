@@ -1,3 +1,5 @@
+import { stockImpact } from '../inventory/workspace.js';
+
 export const FULFILLMENT_READ_MODEL_BINDINGS = Object.freeze({
   line: 'northstar.sales:read_model.line',
   reservation: 'northstar.sales:read_model.reservation',
@@ -353,6 +355,16 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
   const counterSale = (paid: boolean) => ({
     actionId: id('action', paid ? 'counter_sale_paid' : 'counter_sale_account'),
     label: paid ? 'Counter sale: take payment' : 'Counter sale: on account',
+    stockImpacts: [
+      stockImpact(
+        namespace,
+        selected(field('sales_order_line_item_id')),
+        input('counter_location'),
+        selected(field('sales_order_line_ordered_quantity')),
+        'decrease',
+        'unchanged',
+      ),
+    ],
     description: paid
       ? 'Confirms this order, ships every line from one location, invoices it and records the payment of the whole balance. Each step uses the order’s own operations.'
       : 'Confirms this order, ships every line from one location and invoices it on the customer’s account. Each step uses the order’s own operations.',
@@ -1085,6 +1097,16 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         actionId: id('action', 'reserve_stock'),
         presentation: taskPresentation('reserve'),
         label: 'Reserve stock',
+        stockImpacts: [
+          stockImpact(
+            namespace,
+            selected(field('sales_order_line_item_id')),
+            input('location'),
+            input('quantity'),
+            'unchanged',
+            'increase',
+          ),
+        ],
         description: 'On hand stays unchanged; available stock decreases.',
         orderKey: 10,
         datasetId: lines,
@@ -1127,6 +1149,16 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         // reservation ("Ship reserved stock"), so stock is never held twice.
         actionId: id('action', 'ship_lines'),
         label: 'Ship',
+        stockImpacts: [
+          stockImpact(
+            namespace,
+            selected(field('sales_order_line_item_id')),
+            input('ship_lines_location'),
+            input('ship_lines_quantity'),
+            'decrease',
+            'unchanged',
+          ),
+        ],
         description:
           'Reserves and ships each line given a quantity from one location, on one shipment. On hand decreases by the shipped quantity. A line left empty is not shipped.',
         orderKey: 15,
@@ -1250,6 +1282,16 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         actionId: id('action', 'ship_reserved'),
         presentation: taskPresentation('ship'),
         label: 'Ship reserved stock',
+        stockImpacts: [
+          stockImpact(
+            namespace,
+            selected(field('reservation_item_id')),
+            selected(field('reservation_location_id')),
+            input('quantity'),
+            'decrease',
+            'decrease',
+          ),
+        ],
         description:
           'On hand and reserved stock decrease by the shipped quantity.',
         orderKey: 20,
@@ -1354,6 +1396,16 @@ export function salesWorkspace(namespace: string): Record<string, unknown> {
         actionId: id('action', 'release_remaining'),
         presentation: taskPresentation('release'),
         label: 'Release remainder',
+        stockImpacts: [
+          stockImpact(
+            namespace,
+            selected(field('reservation_item_id')),
+            selected(field('reservation_location_id')),
+            selected(id('metric', 'remaining')),
+            'unchanged',
+            'decrease',
+          ),
+        ],
         description:
           'On hand stays unchanged; the remaining reservation becomes available.',
         orderKey: 30,

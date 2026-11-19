@@ -96,10 +96,72 @@ function expectedInventoryWorkspace(namespace: string, surface: Value): Value {
   };
 }
 
+/** The two stock task presentations both invoke the existing governed Post once. */
+function assertStockPostingActions(namespace: string, actions: unknown): void {
+  const id = (kind: string, local: string) => `${namespace}:${kind}.${local}`;
+  assert.ok(Array.isArray(actions));
+  assert.deepEqual(
+    actions.map((action: Value) => [
+      action.actionId,
+      action.label,
+      action.inputs,
+      action.datasetId ?? null,
+      action.rows ?? null,
+      action.conditions,
+      (action.steps as Value[]).map((step) => [step.operation, step.bindings]),
+    ]),
+    ['adjustment', 'transfer'].map((type) => [
+      id('action', `inventory_post_${type}`),
+      'Post',
+      [],
+      null,
+      null,
+      [
+        {
+          value: {
+            source: 'record',
+            field: id('field', 'inventory_transaction_state'),
+          },
+          operator: 'equals',
+          compare: id('option', 'inventory_transaction_state_draft'),
+        },
+        {
+          value: {
+            source: 'record',
+            field: id('field', 'inventory_transaction_type'),
+          },
+          operator: 'equals',
+          compare: id('option', `inventory_transaction_type_${type}`),
+        },
+      ],
+      [
+        [
+          {
+            kind: 'operationReference',
+            schemaVersion: 'v6',
+            targetId: id('operation', 'inventory_transaction_post'),
+          },
+          [
+            {
+              path: ['recordId'],
+              value: { source: 'record', field: 'recordId' },
+            },
+            {
+              path: ['expectedRevision'],
+              value: { source: 'record', field: 'revision' },
+            },
+          ],
+        ],
+      ],
+    ]),
+    'stock task is one governed Post over the document and its revision',
+  );
+}
+
 /**
- * A read-only document composition may add exactly its line datasets, scoped
- * by their declared parent relations, with no action, and the two slots that
- * render it; every other slot keeps its binding (key facts move last).
+ * A document composition adds only its own line datasets and rendering slots.
+ * Stock documents may present the existing Post with its current document
+ * revision; stock counts remain read-only. Every original slot binding stays.
  */
 function assertDocumentComposition(
   namespace: string,
@@ -111,11 +173,14 @@ function assertDocumentComposition(
   const lines = DOCUMENT_LINES[local]!;
   record(composition);
   assert.equal(composition.kind, 'surfaceComposition');
-  assert.deepEqual(
-    composition.actions,
-    [],
-    `${local} composition declares no action`,
-  );
+  if (local === 'inventory_transaction_detail')
+    assertStockPostingActions(namespace, composition.actions);
+  else
+    assert.deepEqual(
+      composition.actions,
+      [],
+      `${local} composition declares no action`,
+    );
   const children = composition.children as Value[];
   assert.deepEqual(
     children.map((child) => [

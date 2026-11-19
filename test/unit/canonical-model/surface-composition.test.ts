@@ -987,3 +987,60 @@ test('LOOK-1 round 3: the grand total reads with a declared currency column', ()
     /a totals currency is a declared column beside declared totals/u,
   );
 });
+
+test('INTERACT-1 stock impacts require current stock and location reads and declared input or row values', () => {
+  const purchase = composition(normalized, 'purchase_order_detail');
+  assert.equal(
+    action(purchase, 'receive_lines_known').stockImpacts[0].onHand,
+    'increase',
+  );
+  validateSurfaceCompositions(structuredClone(normalized) as never);
+  assert.match(
+    refused('purchase_order_detail', (value) => {
+      action(value, 'receive_lines_known').stockImpacts[0].fields.onHand = id(
+        'field',
+        'missing_quantity',
+      );
+    }),
+    /stock impacts require declared stock and location query results/u,
+  );
+  assert.match(
+    refused('purchase_order_detail', (value) => {
+      action(value, 'receive_lines_known').stockImpacts[0].quantity = {
+        source: 'input',
+        inputId: id('input', 'missing_quantity'),
+      };
+    }),
+    /stock impacts require declared task inputs/u,
+  );
+  assert.match(
+    refused('purchase_order_detail', (value) => {
+      action(value, 'receive_lines_known').stockImpacts[0].item = {
+        source: 'step',
+        stepId: id('step', 'not_run'),
+        field: 'recordId',
+      };
+    }),
+    /context binding requires a declared record or selected result/u,
+  );
+});
+
+test('INTERACT-1 document-wide stock impacts name a declared child dataset', () => {
+  const inventory = composition(normalized, 'inventory_transaction_detail');
+  const post = action(inventory, 'inventory_post_adjustment');
+  assert.equal(post.stockImpacts.length, 2);
+  assert.equal(post.rows, undefined);
+  assert.equal(
+    post.stockImpacts[0].datasetId,
+    id('dataset', 'inventory_transaction_inventory_transaction_line'),
+  );
+  assert.match(
+    refused('inventory_transaction_detail', (value) => {
+      action(value, 'inventory_post_adjustment').stockImpacts[0].datasetId = id(
+        'dataset',
+        'missing_stock_lines',
+      );
+    }),
+    /stock impacts require declared stock and location query results/u,
+  );
+});
