@@ -1,7 +1,7 @@
 # ADR-0073. Workflow isolation, replay and authority
 
-Date 2026-11-18. Proposed in WORKFLOW-1. Fable 5.2 approved the direction with
-changes. This amendment records the design for re-review before implementation.
+Date 2026-11-18. Fable 5.2 approved the amended WORKFLOW-1 design to build in
+slices. The Gate N2 wording still needs an owner ruling or a plan amendment.
 
 ## Host and SDK
 
@@ -80,10 +80,16 @@ Each verified activation gets a watermark keyed by tenant, environment, pointer
 ID and fence in `platform.workflow_activation_watermarks`. Capture it with an
 insert hook on a `SWAPPED_VERIFIED` receipt in
 `platform.release_activation_verification_receipts`, in the same transaction
-and under the verification path's pointer lock. The capture statement's MVCC
-snapshot defines the boundary. In that statement, seed the occurrence table
-with a pre-activation disposition for every as-yet-unconsumed receipt outbox ID
-visible at capture. Previously consumed IDs already have a disposition.
+and under the verification path's pointer lock. This hook is a Critical touch of
+the 0005 receipts table. Return without capturing a watermark or seeding
+occurrences if neither the incoming nor outgoing release declares workflows.
+The capture statement's MVCC snapshot defines the boundary. Seed in one
+set-based statement filtered to the union of the incoming and outgoing
+subscriptions' event types. Give each matching unresolved outbox ID visible at
+capture a pre-activation disposition. Previously consumed IDs already have a
+disposition. The activation test must compare latency and persisted bytes for
+a no-workflow tenant against the pre-hook path and establish that both stay
+unchanged.
 The boundary uses committed row membership. UUIDs and posting timestamps
 cannot serve as a high-water mark because they can be observed out of order.
 A receipt becoming visible after capture is eligible only if its source release
@@ -94,7 +100,8 @@ watermark.
 
 `platform.workflow_event_occurrences` is the durable consumer cursor. Poll in
 bounded batches for visible source IDs without a disposition, with no advancing
-timestamp cursor. Lock the pointer for the claim transaction, require its
+timestamp cursor. Index the eligible lookup and measure the polling bound against
+an accumulated outbox. Lock the pointer for the claim transaction, require its
 current fence and verify the matching watermark, and atomically commit the event
 disposition and all matching run starts. Claimed starts become visible to
 execution only after that transaction commits. A unique start key binds tenant,
@@ -150,25 +157,18 @@ whose effects have not committed become permanently ineligible. Keep their
 history visible and report the reason in the worklist and assistant. Returning
 to the same digest under a later fence cannot revive a prior approval.
 
-A person can retry against the current verified release or cancel, with the
-decision audited. When the original release is active again, a retry may resume
-that run on its original pin after admitting the new execution fence. For a
-different release, retry creates a linked successor on the current body and SDK.
-Replay may reuse a previously committed effect only after matching its cursor,
-canonical intent and receipt under compatible current contracts and policy.
-Before permitting new effects, the successor must account for every previously
-committed effect through that prefix. Otherwise the retry is refused and the
-operator can cancel or use a governed correcting operation. Outstanding
-confirmation always needs a fresh plan and human decision. Cancellation
-preserves completed effects and evidence.
+An operator can cancel or retry suspended runs in bulk. Evaluate each run
+individually and audit each result. A retry is admitted only when the original
+release is verified active again and the run retains its original release, body,
+SDK and runtime pins. Reconcile in-flight effects and admit the new execution
+fence before resuming. Outstanding confirmation needs a fresh plan and human
+decision. Cancellation preserves completed effects and evidence. Successor
+retry against a different release is deferred.
 
-Gate N2's pinned-release finish is a version-integrity requirement subject to
-the active-release fence. Its upgrade proof must show that a run starts before
-an upgrade, suspends while stale, and can finish with the same body, release and
-runtime pins after the original release is restored and a person retries it.
-With the newer release still active the remedy is a separately pinned successor
-or cancellation. Finishing on a newer release does not count as a pinned-run
-finish.
+The proposed Gate N2 proof starts a run before an upgrade, shows it suspending
+while stale, then restores the original release and demonstrates that a person's
+same-pin retry finishes the run. While a different release is active, the
+operator can cancel the suspended run. The Gate N2 wording is with the owner.
 
 ## Timers, signals and external delivery
 
@@ -219,7 +219,7 @@ bound to the same candidate and digests. Missing, stale or mismatched evidence
 refuses the candidate. Existing query/operation execution, capability factories,
 activation authority and posting remain governed by their existing contracts.
 
-Type-check against the generated SDK, then lint before compilation. Refuse
+Type-check against the generated SDK and lint before emitting executable code. Refuse
 `Date.now`, `Math.random`, other ambient clock, random and I/O APIs, and module
 imports outside the SDK. Require at least one verification fixture for each
 workflow. For each fixture, execute the compiled body once with deterministic
@@ -235,8 +235,8 @@ workflow projection, evidence or added floor for these releases.
 
 ## Migration
 
-Assign the single forward migration number at merge after CUSTOMIZE-4 (expected
-0035). Assign the reader floor at merge after the latest allocated rung. The
+Assign the single forward migration the next free number at merge after
+CUSTOMIZE-4. Assign the reader floor at merge after the latest allocated rung. The
 migration declares these relations in `platform`:
 
 | Table | Responsibility |
@@ -256,8 +256,8 @@ Use tenant/environment keys and forced RLS as in 0029. Grant only scoped reads,
 inserts and the narrow state transitions each role needs. Keep the body,
 definition, watermark, occurrence, verification and journal evidence immutable.
 The migration adds the verified-activation receipt hook and read-only scheduler
-enumeration function. The verifier extension above requires an implementation
-scope ruling after re-review.
+enumeration function. Use a dedicated `north_star_workflow_worker` role. A Codex read is required
+before any tenant activates a workflow-bearing release.
 
 ## Deploy rule
 
