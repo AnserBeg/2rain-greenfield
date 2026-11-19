@@ -1,6 +1,6 @@
 # CUSTOMIZE-3 — the launch customization set
 
-Slice 0 is in [PR #95](https://github.com/AnserBeg/2rain-greenfield/pull/95). Slice 1 is a local candidate. Migration 0033 is the approved Critical path.
+Slice 1 includes the tested list-column work and saved list views in [PR #95](https://github.com/AnserBeg/2rain-greenfield/pull/95). Migration 0033 is the approved Critical path.
 
 ## Claims
 
@@ -12,7 +12,7 @@ Slice 0 is in [PR #95](https://github.com/AnserBeg/2rain-greenfield/pull/95). Sl
 ## Decisions
 
 - Each saved view keeps the record title. It pins filter choices from the list's declared options. The list keeps its standard tabs, and the first saved view adds an All tab when needed.
-- The optional view layout rides v6 under ADR-0047 §7. Surfaces require reader 24 and the assistant projection requires reader 2 for releases carrying it. The first-party re-baseline reproduced the checked-in release byte for byte.
+- The optional view layout rides v6 under ADR-0047 §7. Surfaces require reader 24 and the assistant projection requires reader 3 for releases carrying it (reader 2 already serves assistant confirmation). The first-party re-baseline reproduced the checked-in release byte for byte.
 - The orchestrator approved 0033 after 0032. The migration retains the patch table's existing policies, grants and append-only rules. Integration will be logged as merged — unread.
 
 ## Gates
@@ -25,8 +25,8 @@ Slice 0 is in [PR #95](https://github.com/AnserBeg/2rain-greenfield/pull/95). Sl
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
-  "base": "99371b437fdf45c51cf8ecfb3b7cf4c95459409a",
-  "head": "8347564eed0623a5f848237a2fa135d4814f38e0",
+  "base": "8b61740a17c18a6201f01c4345c0e6c215ee91d3",
+  "head": "c6296bfa3ab1ed9deb28d3212ee94375293c9bdf",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
     "apps/web/src/list-declaration.ts", "apps/web/src/surface-launcher.ts",
