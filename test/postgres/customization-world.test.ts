@@ -23,11 +23,6 @@ import {
   DRAFT_CUSTOMIZATION_TOOL,
   type DraftingModel,
 } from '../../packages/customization/src/index.js';
-import {
-  ensureScope,
-  rolePool,
-  trustedContext,
-} from '../../packages/postgres-provider/src/composed-application-runtime.js';
 import { openCustomizationService } from '../../packages/postgres-provider/src/customization-service.js';
 import { FULFILLMENT_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/fulfillment-capability-executor.js';
 import { INVENTORY_POSTING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/inventory-posting-capability-executor.js';
@@ -48,7 +43,6 @@ import { ids, openingStock, snapshot } from '../agent/arrange.js';
 import { referenceScript } from '../agent/reference-scripts.js';
 import { TASKS } from '../agent/tasks.js';
 import { withEphemeralPostgres } from '../helpers/postgres.js';
-import type { MintedUuid } from '../../packages/platform-runtime/src/index.js';
 import type pg from 'pg';
 
 const equipment = JSON.parse(
@@ -331,12 +325,18 @@ test(
             'a restart left the scopes on the last verified release',
           );
           await assert.rejects(openingStock(world, notebook, calgary, '6'));
-          await verifyThroughKernel(
-            pool,
-            databaseUrl,
-            tenantSlug,
-            cutRollbackAttempt!,
+          const rollbackPointer = await livePointer(pool, runtime);
+          const recoveredRollback = await opened.service.recover();
+          assert.equal(
+            recoveredRollback.activationAttemptId,
+            cutRollbackAttempt,
           );
+          assert.deepEqual(
+            await livePointer(pool, runtime),
+            rollbackPointer,
+            'recovery must not move the pointer or fence',
+          );
+          await assertScopesNamePointer(pool, runtime);
           await assert.rejects(
             opened.service.rollback(),
             (error: unknown) =>
@@ -431,12 +431,26 @@ test(
             (await scopeMismatches(pool, runtime)) > 0,
             'a restart did not set the scopes to an unverified release',
           );
-          await verifyThroughKernel(
-            pool,
-            databaseUrl,
-            tenantSlug,
-            approvedVehicle.activationAttemptId,
+          const activationPointer = await livePointer(pool, runtime);
+          const recoveries = await within(
+            Promise.all([opened.service.recover(), opened.service.recover()]),
+            300_000,
+            'two concurrent recoveries on one service never finished',
           );
+          assert.ok(
+            recoveries.every(
+              (outcome) =>
+                outcome.activationAttemptId ===
+                approvedVehicle.activationAttemptId,
+            ),
+            'recovery must verify the attempt at the current pointer and fence',
+          );
+          assert.deepEqual(
+            await livePointer(pool, runtime),
+            activationPointer,
+            'recovery must not move the pointer or fence',
+          );
+          await assertScopesNamePointer(pool, runtime);
           const finished = await opened.service.activate(vehicle.patchId);
           assert.equal(finished.status, 'activated');
           assert.equal(finished.releaseRoot, vehicle.releaseRoot);
@@ -452,25 +466,16 @@ test(
   },
 );
 
-/** The kernel's own verification of one activation attempt. */
-async function verifyThroughKernel(
+/** The pointer generation before and after recovery. */
+async function livePointer(
   pool: pg.Pool,
-  databaseUrl: string,
-  slug: string,
-  activationAttemptId: string,
-): Promise<void> {
-  const identities = await ensureScope(pool, slug, 'production');
-  const kernelPool = rolePool(databaseUrl, 'north_star_runtime', 2);
-  try {
-    const verified = await new PostgresReleaseActivationService(
-      kernelPool,
-    ).verifyActivation(await trustedContext(identities.system), {
-      activationAttemptId: activationAttemptId as MintedUuid,
-    });
-    assert.equal(verified.status, 'SWAPPED_VERIFIED');
-  } finally {
-    await kernelPool.end();
-  }
+  runtime: { readonly identity: { readonly tenantId: string } },
+): Promise<unknown> {
+  const result = await pool.query(
+    'SELECT pointer_id, release_id, fence FROM platform.active_release_pointers WHERE tenant_id = $1 ORDER BY environment_id',
+    [runtime.identity.tenantId],
+  );
+  return result.rows;
 }
 
 /** The newest activation attempt that swapped the pointer. */
