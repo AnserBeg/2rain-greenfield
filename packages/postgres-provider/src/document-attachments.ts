@@ -266,13 +266,16 @@ export class PostgresDocumentGateway implements DocumentGateway {
           category_id: string | null;
           digest: string;
           file_name: string;
+          retired_at: Date | null;
         }>(
-          `SELECT principal_id, owner_scope, entity_id, record_id, field_id, category_id, digest, file_name
+          `SELECT principal_id, owner_scope, entity_id, record_id, field_id, category_id, digest, file_name, retired_at
            FROM platform.document_upload_staging
           WHERE tenant_id = $1 AND environment_id = $2 AND upload_id = $3`,
           [view.tenantId, view.environmentId, upload.uploadId],
         );
         if (staged.rows[0]) {
+          if (staged.rows[0].retired_at)
+            throw new DocumentRequestError(409, 'This staged upload expired.');
           if (
             !matchesUpload(
               staged.rows[0],
@@ -399,7 +402,8 @@ export class PostgresDocumentGateway implements DocumentGateway {
             const staged = await client.query(
               `SELECT 1 FROM platform.document_upload_staging
           WHERE tenant_id = $1 AND environment_id = $2 AND upload_id = $3
-            AND principal_id = $4 AND digest = $5 AND expires_at > clock_timestamp()`,
+            AND principal_id = $4 AND digest = $5 AND retired_at IS NULL
+              AND expires_at > clock_timestamp()`,
               [
                 view.tenantId,
                 view.environmentId,

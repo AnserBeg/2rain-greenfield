@@ -26,13 +26,18 @@ CREATE TABLE platform.document_upload_staging (
   file_name text NOT NULL CHECK (length(file_name) BETWEEN 1 AND 180),
   content_type text NOT NULL CHECK (content_type IN ('application/pdf', 'image/jpeg', 'image/png')),
   digest text NOT NULL,
-  bytes bytea NOT NULL,
-  byte_length integer GENERATED ALWAYS AS (octet_length(bytes)) STORED,
+  bytes bytea,
+  byte_length integer GENERATED ALWAYS AS (COALESCE(octet_length(bytes), 0)) STORED,
   expires_at timestamptz NOT NULL DEFAULT (clock_timestamp() + interval '24 hours'),
+  retired_at timestamptz,
   PRIMARY KEY (tenant_id, environment_id, upload_id),
   FOREIGN KEY (tenant_id, environment_id) REFERENCES platform.environments (tenant_id, id),
-  CHECK (octet_length(bytes) BETWEEN 1 AND 20971520),
-  CHECK (digest = encode(sha256(bytes), 'hex'))
+  CHECK (
+    (retired_at IS NULL AND bytes IS NOT NULL
+      AND octet_length(bytes) BETWEEN 1 AND 20971520
+      AND digest = encode(sha256(bytes), 'hex'))
+    OR (retired_at IS NOT NULL AND bytes IS NULL)
+  )
 );
 
 CREATE TABLE platform.document_versions (
@@ -127,8 +132,10 @@ CREATE FUNCTION platform.retire_document_upload_staging(published_upload uuid)
 RETURNS void
 LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, pg_temp
 AS $$
-  DELETE FROM platform.document_upload_staging AS stage
-   WHERE stage.tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
+  UPDATE platform.document_upload_staging AS stage
+     SET bytes = NULL, retired_at = clock_timestamp()
+   WHERE stage.retired_at IS NULL
+     AND stage.tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid
      AND stage.environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid
      AND nullif(current_setting('north_star.principal_id', true), '')::uuid IS NOT NULL
      AND (
