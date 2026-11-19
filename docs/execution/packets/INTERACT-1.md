@@ -21,16 +21,16 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 - Additive v6 keys have compiler accept/refuse coverage; release lineage and coverage are re-derived (ADR-0066).
 - Normal git metadata is read-only; isolated metadata in `/tmp` tracks this chartered worktree.
 - Exact-minute browser fills canonicalize zero seconds without changing the instant (CI reproduction passed).
-- CI 44426260000 measured stock preview open/review at 2/46/3/0; +5 statements buys the governed stock/location reads. Confirmation budget unchanged.
-- Compiler negative cases require canonical-schema decode diagnostics in the existing failed-compilation protocol (CI 44435048993).
+- Task preview budgets: measured 2/46/3/0 in CI 44426260000; +5 statements buys governed stock/location reads. Confirmation unchanged.
+- Accepted AGENT-5 merged; release and coverage re-derived from combined definitions.
 - Mid-packet checkpoint: no whole-app review trigger; no new correctness domain or fan-out.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "INTERACT-1",
-  "base": "99371b437fdf45c51cf8ecfb3b7cf4c95459409a",
-  "head": "e9ac4736a672c2521ac6125f45935123c5e45dc3",
+  "base": "8b61740a17c18a6201f01c4345c0e6c215ee91d3",
+  "head": "a88c2711537912d136b0ea536f61d6bc4090c631",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
