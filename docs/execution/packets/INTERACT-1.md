@@ -21,7 +21,7 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 - Additive v6 keys have compiler accept/refuse coverage; release lineage and coverage are re-derived (ADR-0066).
 - Normal git metadata is read-only; isolated metadata in `/tmp` tracks this chartered worktree.
 - Exact-minute browser fills canonicalize zero seconds without changing the instant (CI reproduction passed).
-- CI 44423202139 exposed the old no-action harness assumption; its replacement pins the governed Post and rejects a forged generic update in focused units.
+- CI 44426260000 measured stock preview open/review at 2/46/3/0; +5 statements buys the governed stock/location reads. Confirmation budget unchanged.
 - Mid-packet checkpoint: no whole-app review trigger; no new correctness domain or fan-out.
 
 ```record-claim
@@ -29,15 +29,18 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "INTERACT-1",
   "base": "c31f17df1ebc3bfca7819ef34e60e0fb43160cba",
-  "head": "220398ebee612a9906190d9b2c60d43555c3d689",
+  "head": "e5de986ee500a5f5d56e9b983ab12c7541aa3485",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
     "apps/web/src/ledger-styles.ts",
     "apps/web/src/surface-client.ts",
     "apps/web/src/surface-composition.ts",
+    "apps/web/test/browser/composed-application.spec.ts",
     "apps/web/test/browser/inventory-documents.spec.ts",
+    "apps/web/test/browser/inventory-warehouse-mode.spec.ts",
     "apps/web/test/browser/order-pages.spec.ts",
+    "apps/web/test/browser/sale-fulfillment.composed-application.spec.ts",
     "packages/canonical-model/src/schemas.ts",
     "packages/canonical-model/src/surface-composition.ts",
     "packages/domain/src/inventory/workspace.ts",
@@ -46,8 +49,10 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
     "test/compiler/g2-module-conformance.test.ts",
     "test/fixtures/g2/language-conformance/coverage-decisions.json",
     "test/helpers/assert-composed-inventory.ts",
+    "test/performance/page-budgets.ts",
     "test/unit/canonical-model/surface-composition.test.ts",
-    "test/unit/inventory-definition.test.ts"
+    "test/unit/inventory-definition.test.ts",
+    "test/unit/workspace-contract.test.ts"
   ],
   "symbols": [
     {
