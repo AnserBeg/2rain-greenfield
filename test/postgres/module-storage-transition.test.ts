@@ -5210,6 +5210,10 @@ test('a pre-existing generated fold and prefix index record their measured locki
     (field) => field.fieldId === FIXTURE_IDS.fieldIds.parentNotes,
   );
   assert.ok(searchableNotes);
+  const legacyBytes = definitionBytes(currentDefinition);
+  const legacy = mustCompile(
+    moduleInput(currentDefinition, expectedActiveReleaseFrom(source)),
+  );
   searchableNotes.searchable = true;
   assert.equal('businessKey' in searchableNotes, false);
   assert.equal(
@@ -5222,13 +5226,6 @@ test('a pre-existing generated fold and prefix index record their measured locki
     'the notes fixture must remain outside resolve-match authority',
   );
   const currentBytes = definitionBytes(currentDefinition);
-  const originallyCompiled = mustCompile(
-    moduleInput(currentDefinition, expectedActiveReleaseFrom(source)),
-  );
-  const legacy = withoutFoldedColumn(
-    originallyCompiled,
-    FIXTURE_IDS.fieldIds.parentNotes,
-  );
   const upgrade = mustCompile(
     moduleInput(currentDefinition, expectedActiveReleaseFrom(legacy)),
   );
@@ -5319,7 +5316,7 @@ test('a pre-existing generated fold and prefix index record their measured locki
           source,
           definitionBytes(emptyDefinition),
           legacy,
-          currentBytes,
+          legacyBytes,
         );
         const next = await persistNextRelease(
           runtimePool,
@@ -5508,7 +5505,7 @@ test('a pre-existing generated fold and prefix index record their measured locki
           mismatches: string;
           observed: string;
         }>(
-          `SELECT count(*)::text AS observed,
+          `SELECT count(*) FILTER (WHERE ${quoteTestIdentifier(numberColumn.physicalName)} LIKE 'MEASURE-%')::text AS observed,
                   count(*) FILTER (
                     WHERE ${quoteTestIdentifier(foldedColumn.physicalName)}
                       IS DISTINCT FROM
@@ -6026,66 +6023,6 @@ function withConflictingAbiFunctionCheck(
   );
   transition.elements = transition.elements.filter(
     (element) => element.classification.preparationValidity === 'inAttemptOnly',
-  );
-  transition.toStorageTargetArtifactRoot = storageReference.artifactRoot;
-  transition.toStorageTargetSemanticDigest = storageReference.semanticDigest;
-  rewriteProjectionPayload(
-    clone,
-    PROJECTION_FAMILY_IDS.storageTransition,
-    transition,
-  );
-  rebuildReleaseRoot(clone);
-  return clone;
-}
-
-function withoutFoldedColumn(
-  compiled: CompileSuccess,
-  canonicalFieldId: string,
-): CompileSuccess {
-  const clone = structuredClone(compiled);
-  const storage = projectionPayload<StorageTargetPayloadV1>(
-    clone,
-    PROJECTION_FAMILY_IDS.storageTarget,
-  );
-  const removedPhysicalNames = new Set<string>();
-  for (const entity of storage.entities) {
-    const removedColumns = entity.foldedColumns.filter(
-      (column) => column.canonicalFieldId === canonicalFieldId,
-    );
-    for (const column of removedColumns) {
-      removedPhysicalNames.add(column.physicalName);
-      for (const index of entity.indexes.filter((candidate) =>
-        candidate.columnNames.includes(column.physicalName),
-      )) {
-        removedPhysicalNames.add(index.physicalName);
-      }
-    }
-    entity.foldedColumns = entity.foldedColumns.filter(
-      (column) => column.canonicalFieldId !== canonicalFieldId,
-    );
-    entity.indexes = entity.indexes.filter(
-      (index) => !removedPhysicalNames.has(index.physicalName),
-    );
-  }
-  assert.ok(
-    removedPhysicalNames.size > 0,
-    `compiled storage has no folded column for ${canonicalFieldId}`,
-  );
-  storage.physicalMapping.records = storage.physicalMapping.records.filter(
-    (record) => !removedPhysicalNames.has(record.physicalName),
-  );
-  rewriteProjectionPayload(clone, PROJECTION_FAMILY_IDS.storageTarget, storage);
-
-  const storageReference = clone.bundle.releaseManifest.projections.find(
-    (reference) => reference.familyId === PROJECTION_FAMILY_IDS.storageTarget,
-  );
-  assert.ok(storageReference);
-  const transition = projectionPayload<StorageTransitionEnvelope>(
-    clone,
-    PROJECTION_FAMILY_IDS.storageTransition,
-  );
-  transition.elements = transition.elements.filter(
-    (element) => !removedPhysicalNames.has(element.physicalObjectName),
   );
   transition.toStorageTargetArtifactRoot = storageReference.artifactRoot;
   transition.toStorageTargetSemanticDigest = storageReference.semanticDigest;
