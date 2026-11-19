@@ -159,6 +159,7 @@ interface ListArgumentOptions {
   /** For a view count, the view counted instead of the selected one. */
   readonly viewId?: string | null;
   readonly viewCounts?: readonly SharedListViewCount[];
+  readonly sumField?: string;
   /**
    * The List's progress withheld by current policy (`whenDenied: 'omit'`):
    * the request carries none, so its figures read "—". A view that keeps
@@ -625,6 +626,7 @@ export function declaredListArguments(
           : null,
       ...(fieldFilters.length > 0 ? { fieldFilters } : {}),
       ...(options.viewCounts ? { viewCounts: options.viewCounts } : {}),
+      ...(options.sumField ? { sumField: options.sumField } : {}),
       ...(progress ? { progress } : {}),
       ...(figures ? { figures } : {}),
       ...(beforeFilters.length > 0 ? { beforeFilters } : {}),

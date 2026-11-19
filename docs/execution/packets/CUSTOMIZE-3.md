@@ -7,7 +7,8 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 1. Arrange a list offers stored standard and custom fields, and the list query selects newly visible values. This includes Party's generic list.
 2. Customize and plain-English drafting prepare a saved view with its own columns, default sort and declared filter choices. Approval shows those choices before activation.
 3. Saved tabs batch counts through the list query under current policy. The page, CSV and assistant use the view's declared settings. Rollback restores the prior list.
-4. Migration 0034 adds the planned patch kinds to the closed vocabulary. Its check continues to require a valid digest, lineage and channel. The replay test applies the saved-view patch to a new first-party base.
+4. Migration 0034 adds the planned patch kinds to the closed vocabulary. Its check requires a valid digest, lineage and channel.
+5. Today cards count a declared direct list or sum its declared numeric measure before pagination. The UI drill-through and assistant use the same list and saved-view conditions. Approval, replay and rollback preserve the card definition.
 
 ## Decisions
 
@@ -17,7 +18,7 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 - STOP at slice 2 for canonical language admission. The orchestrator approved compiler-proved validation examples and the verifier change that reads them. Plan §5.12 and ADR-0012 still require the dedicated Formula Rule projection for tenant validation and calculated fields. The v3 adoption explicitly deferred that family to a tenant-customization language event ([4c](4c.md#adoption-boundary)).
 - [ADR-0074](../../decisions/ADR-0074-formula-rule-and-workflow-projection-admission.md) measures unused formula/rule and workflow families under v6 and a prototype v7. It proposes joint optional admission for the orchestrator read. Slices 2–4 await that read.
 - Slice 5 is open. First-party operations such as Close and Reopen share a permission ID, so an action restriction must identify the operation. Field visibility must also govern query and read-back results.
-- Slice 6's preserved candidate `e97ebd9f` uses governed list counts and exact top-level sums, with separate CAD, USD and EUR measures. It requires surface reader 25. PostgreSQL and browser evidence is pending.
+- Slice 6 restores the candidate preserved at `e97ebd9f` and adds a CRITFIX-B replay witness. Catalog measures are separate by currency. Re-baselined the pre-tenant first-party artifact. The surface, agent and query readers require 25, 4 and 3 when their projections carry the corresponding keys.
 
 ## Gates
 
@@ -28,6 +29,9 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 - CI attempt 2 exposed an ambiguous form label. Saved-view selects now have explicit label associations. The browser journey checks the order of data columns outside the bulk-selection header and passed locally in 3.8 minutes on the combined UPGRADE-1 tree.
 - `unrecognized-patch-kind-admitted` at `e5d2c82bbcc6`: killed with the declared reason (1 declared kill(s) failed as declared) and restored green (1 passing). [Controls 44457971797](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44457971797).
 
+- Today metrics passed the hosted matrix at `5df9c9c8`. [CI 44471090769](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44471090769). Local scripted drafting passed. The local compiler sandbox hit its existing timeout.
+- The silent-sum control checks the actual aggregate across both witness rows when only one row is on the page. [Controls 44472880285](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44472880285).
+
 ## Filed
 
 - The full list/detail row also needs tenant controls for record-detail composition and formatting. F5 child aggregation remains pending a hard cardinality bound, visibility and absence rules, and a write concurrency protocol. [Archive](../current-plan-archive.md#filed-during-the-freeze).
@@ -36,38 +40,30 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
-  "base": "8ffab635ac7e6ca5c288ed4e3265bebf79654141",
-  "head": "ad901f54b5392cfd59657e435447d325f842499c",
+  "base": "b62cbb9c753ab62fde2a46a7a028ff217fbd4f46",
+  "head": "5df9c9c8d64001983805df98c8a80f8cd771fec4",
   "changedPaths": [
-    "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/list-declaration.ts",
-    "apps/web/src/surface-launcher.ts", "apps/web/src/surface-runtime.ts", "apps/web/test/browser/customize.composed-application.spec.ts",
-    "db/migrations/0034_customization_launch_patch_kinds.sql", "db/schema.snapshot.json", "packages/canonical-model/src/schemas.ts",
-    "packages/canonical-model/src/surface-list.ts", "packages/compiler/src/projections.ts", "packages/customization/src/ai-draft.ts",
-    "packages/customization/src/apply.ts", "packages/customization/src/patch.ts", "packages/customization/src/render.ts",
-    "packages/customization/src/targets.ts", "packages/operations-agent/src/catalog.ts", "packages/operations-agent/src/session.ts",
-    "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/runtime/src/list-behavior/index.ts",
-    "packages/runtime/src/request-runtime-view.ts", "test/architecture/release-persistence-boundary.test.ts", "test/evidence/CUSTOMIZE-3.expected-red.json",
-    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/postgres/customization.test.ts", "test/postgres/inventory-storage.test.ts",
-    "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts", "test/postgres/request-runtime-view.test.ts",
-    "test/postgres/trust-substrate.test.ts", "test/unit/customization-ai-draft.test.ts", "test/unit/customization.test.ts"
+    "apps/web/release/app.authored.json", "apps/web/release/app.compiled.json",
+    "apps/web/src/customize-screen.ts", "apps/web/src/list-declaration.ts",
+    "apps/web/src/surface-launcher.ts", "apps/web/src/surface-runtime.ts",
+    "apps/web/test/browser/customize.composed-application.spec.ts", "packages/canonical-model/src/normalize.ts",
+    "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-launcher.ts",
+    "packages/compiler/src/compiler.ts", "packages/compiler/src/projections.ts",
+    "packages/customization/src/ai-draft.ts", "packages/customization/src/apply.ts",
+    "packages/customization/src/patch.ts", "packages/customization/src/render.ts",
+    "packages/customization/src/targets.ts", "packages/domain/src/app/builder.ts",
+    "packages/operations-agent/src/catalog.ts", "packages/operations-agent/src/session.ts",
+    "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts",
+    "packages/runtime/src/list-behavior/index.ts", "packages/runtime/src/request-runtime-view.ts",
+    "packages/runtime/src/semantic-query-gateway.ts", "test/evidence/CUSTOMIZE-3.expected-red.json",
+    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/postgres/customization.test.ts",
+    "test/postgres/request-runtime-view.test.ts", "test/unit/customization-ai-draft.test.ts",
+    "test/unit/customization.test.ts"
   ],
   "symbols": [
-    {
-      "path": "packages/customization/src/apply.ts",
-      "name": "saveListView"
-    },
-    {
-      "path": "packages/postgres-provider/src/customization-service.ts",
-      "name": "UPGRADE_PATCH_KINDS"
-    },
-    {
-      "path": "apps/web/src/surface-launcher.ts",
-      "name": "loadDeclaredListCounts"
-    },
-    {
-      "path": "packages/runtime/src/list-behavior/index.ts",
-      "name": "requireSharedListEcho"
-    }
+    {"path":"packages/customization/src/apply.ts","name":"addMetricCard"},
+    {"path":"packages/canonical-model/src/surface-launcher.ts","name":"validateSurfaceLaunchers"},
+    {"path":"packages/postgres-provider/src/customization-service.ts","name":"UPGRADE_PATCH_KINDS"}
   ]
 }
 ```
@@ -77,3 +73,5 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 **Slice 0.** In Customize, add **Person ordering** to **Purchase order**, then draft, approve and activate. Save an order with that field filled. In **Arrange a list → Purchase orders → Choose columns**, clear **Hide Person ordering** and **Hide Notes**, then draft, approve and activate. The Purchase orders list shows both headings and the entered name. Roll back the arrangement and inspect the order to see its saved value.
 
 **Slice 1.** In **Customize → Save a list view → Locations**, name the view **Warehouses**. Keep Code, move Name first and sort names descending. Set **Type** to **Warehouse**, then draft, review the diff, approve and activate. Open Locations and select **Warehouses**. Its count matches the filtered rows, Name is first and the rows are sorted. Roll back the view and reopen Locations to see its standard list.
+
+**Slice 6.** In **Customize → Add a metric card to Today**, choose **Locations**, select **Set up metric** and name it **Location count**. Draft, approve and activate. Select the card on Today and compare its count with the destination list. For a sum, choose **Items** and **Price (CAD)**, then use its card to open the governed list. Roll back from Customize and verify that the latest card disappears.

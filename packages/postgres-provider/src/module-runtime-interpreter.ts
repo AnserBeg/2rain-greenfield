@@ -4090,6 +4090,22 @@ async function listSharedRecords(
   // every short list on a page).
   const shortFirstPage = list.query.pageOffset === 0 && !hasMore;
   const viewCounts = list.query.viewCounts;
+  const sumField = list.query.sumField;
+  const sumColumn = sumField
+    ? selectedColumns.find((column) => column.canonicalFieldId === sumField)
+    : undefined;
+  if (
+    sumField &&
+    (!sumColumn ||
+      !['exactDecimalFieldType', 'integerFieldType'].includes(
+        sumColumn.fieldContract.fieldKind,
+      ))
+  )
+    throw new SharedListContractError(
+      'LIST_FIELD_NOT_AUTHORIZED',
+      'a list sum requires a stored exact-decimal or integer field',
+      sumField,
+    );
   const countValues = [...values];
   const countColumns = (viewCounts ?? []).map(({ filters }, index) => {
     const where = filters
@@ -4098,10 +4114,18 @@ async function listSharedRecords(
     return `count(*) FILTER (WHERE ${where || 'true'})::text AS view_count_${index}`;
   });
   const countRow =
-    !shortFirstPage || viewCounts
+    !shortFirstPage || viewCounts || sumColumn
       ? (
           await client.query<Record<string, string>>(
-            `SELECT ${['count(*)::text AS total_count', ...countColumns].join(', ')} ${fromSql} WHERE ${whereSql}`,
+            `SELECT ${[
+              'count(*)::text AS total_count',
+              ...countColumns,
+              ...(sumColumn
+                ? [
+                    `coalesce(sum(${qualified(sourceAlias, sumColumn.physicalName)}::numeric), 0)::text AS list_sum`,
+                  ]
+                : []),
+            ].join(', ')} ${fromSql} WHERE ${whereSql}`,
             countValues,
           )
         ).rows[0]
@@ -4182,6 +4206,14 @@ async function listSharedRecords(
     search: list.query.search,
     sort: list.query.sort,
     totalCount,
+    ...(sumField
+      ? {
+          sum: Object.freeze({
+            fieldId: sumField,
+            value: canonicalProgressDecimal(countRow?.list_sum),
+          }),
+        }
+      : {}),
     truncatedByMaximum: list.query.truncatedByMaximum,
   });
   return Object.freeze({

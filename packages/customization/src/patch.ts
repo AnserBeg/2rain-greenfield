@@ -140,6 +140,13 @@ export const CustomizationPatchSchema = z.discriminatedUnion('kind', [
   addChoice,
   arrangeLayout,
   saveListView,
+  z.strictObject({
+    kind: z.literal('addMetricCard'),
+    surface: canonicalId,
+    label,
+    view: canonicalId.optional(),
+    sumField: canonicalId.optional(),
+  }),
 ]);
 type ParsedPatch = z.infer<typeof CustomizationPatchSchema>;
 export type CustomizationPatch =
@@ -151,6 +158,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'addChoice',
   'arrangeLayout',
   'saveListView',
+  'addMetricCard',
 ] as const satisfies readonly CustomizationPatchKind[]);
 
 export interface UnsupportedCustomization {
