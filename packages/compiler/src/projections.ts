@@ -828,7 +828,7 @@ function surfaceManifestPayload(
   );
   const editorFloor =
     extendedEditor || declaredRelationList
-      ? 24
+      ? 25
       : recordFieldPresentation
         ? 23
         : rankedDefaultsOrChainedTasks
@@ -1482,7 +1482,9 @@ function agentListPresets(original: VersionedNormalizedApplicationPackage) {
     );
     const sortKey = (columnId: string) => {
       const column = columns.get(columnId);
-      return column?.reference ? columnId : (column?.field ?? columnId);
+      return column?.reference && !column.relation
+        ? columnId
+        : (column?.field ?? columnId);
     };
     return [
       {
@@ -1499,7 +1501,7 @@ function agentListPresets(original: VersionedNormalizedApplicationPackage) {
         })),
         queryId: surface.dataSource.targetId,
         referenceLabels: list.columns.flatMap((column) =>
-          column.reference
+          column.reference && !column.relation
             ? [
                 {
                   fieldId: column.reference.labelField.targetId,

@@ -134,12 +134,21 @@ test('a person builds Goods Receipt Inspection with the Customize screen and use
           .getByLabel('Line 1 measured value', { exact: true })
           .fill('21');
         await page
+          .getByRole('button', { name: 'Add line', exact: true })
+          .click();
+        await page
+          .getByLabel('Line 2 characteristic', { exact: true })
+          .fill('Width');
+        await page
           .getByRole('button', { name: 'Save draft', exact: true })
           .click();
         await expect(page).toHaveURL(new RegExp(`${inspection}_detail`, 'u'));
         const detailUrl = page.url();
         await expect(
           page.getByRole('cell', { name: 'Length', exact: true }),
+        ).toBeVisible();
+        await expect(
+          page.getByRole('cell', { name: 'Width', exact: true }),
         ).toBeVisible();
         await page.getByLabel('Record actions', { exact: true }).click();
         await expect(
@@ -158,6 +167,29 @@ test('a person builds Goods Receipt Inspection with the Customize screen and use
           ),
         ).toBeVisible();
         await page.goto(detailUrl);
+        await page.getByLabel('Record actions', { exact: true }).click();
+        await page.getByRole('link', { name: 'Edit', exact: true }).click();
+        await page
+          .getByLabel('Line 1 measured value', { exact: true })
+          .fill('22');
+        await page
+          .getByRole('button', { name: 'Remove line 2', exact: true })
+          .click();
+        await page
+          .getByRole('button', { name: 'Save draft', exact: true })
+          .click();
+        await page
+          .getByRole('button', {
+            name: 'Confirm removal and save',
+            exact: true,
+          })
+          .click();
+        await expect(
+          page.getByRole('cell', { name: '22', exact: true }),
+        ).toBeVisible();
+        await expect(
+          page.getByRole('cell', { name: 'Width', exact: true }),
+        ).toHaveCount(0);
         await page.getByLabel('Record actions', { exact: true }).click();
         await expect(
           page.getByRole('button', { name: 'Quarantine', exact: true }),
@@ -178,6 +210,15 @@ test('a person builds Goods Receipt Inspection with the Customize screen and use
         await expect(
           page.getByRole('button', { name: 'Release', exact: true }),
         ).toBeVisible();
+        await page
+          .getByRole('button', { name: 'Release', exact: true })
+          .click();
+        await page
+          .getByRole('button', { name: 'Confirm Release', exact: true })
+          .click();
+        await expect(page.locator('.composition-business-status')).toHaveText(
+          'Released',
+        );
         await page.goto(listUrl);
         await world.create(inspection, { name: 'Unrelated lot' });
         await page.getByRole('searchbox').last().fill(receiptNumber);

@@ -13,6 +13,7 @@ List and exact get. The picker reuses the existing reference interaction and
 the first save sends selected IDs in the pinned create operation's `relations`
 argument. A rendered List can name that same relation in a column and use the
 existing exact relation restriction and label join for filtering and search.
+The assistant reads the linked label declarations from the same pinned surface.
 The detail page resolves labels and navigation under the target's read policy.
 
 The editor's state field and editable state IDs can be omitted together for
@@ -22,10 +23,11 @@ compiler and provider enforce company ownership on relations. The same
 sequential save plan creates the header before writing its child rows and
 reports a partial save. Archive refuses a parent with active owned lines.
 
-Surface capability floor 24 applies when an editor uses header relations, a
+Surface capability floor 25 applies when an editor uses header relations, a
 shared header or a lifecycle-less header, or a List declares a relation column.
-Floor-23 releases preserve their bytes and their behaviour. A reader capped
-at 23 refuses a release declaring floor 24. The authored change uses the
+Floor-23 releases preserve their bytes and their behaviour. CUSTOMIZE-3
+uses floor 24 for saved views. Readers capped at 23 or 24 refuse a release
+declaring floor 25. The authored change uses the
 optional-key rule in ADR-0047 §7. The ADR-0066 re-baseline of the first-party
 app retains its authored definition and all projection semantics except the
 storage transition, which now creates the tables from the bootstrap.

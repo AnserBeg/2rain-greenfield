@@ -187,8 +187,8 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // up to twelve steps whose per-row steps read their row's read-backs
     // (SALES-EXTRAS, which numbered it 15 in parallel; renumbered by
     // INTEGRATION after its ADR-0066 re-baseline).
-    // 24 adds header relation inputs and shared or lifecycle-less editors.
-    maximumSupportedVersion: 24,
+    // 25 adds header relation inputs and shared or lifecycle-less editors.
+    maximumSupportedVersion: 25,
   },
 });
 

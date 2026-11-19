@@ -402,6 +402,11 @@ test('tenant line tables use the document editor with or without company scope a
       target: `northstar.app:entity.${target}`,
     })),
   ];
+  const sharedTarget = {
+    ...header,
+    companyOwnership: 'tenantShared',
+    label: 'Review source',
+  };
   const accepted = await compileInSandbox(
     sandboxRequest([change([header, lifecycle, lines])]),
   );
@@ -466,7 +471,16 @@ test('tenant line tables use the document editor with or without company scope a
   for (const members of [
     [header, lines],
     [{ ...header, companyOwnership: 'tenantShared' }, lifecycle, lines],
-    [{ ...header, companyOwnership: 'tenantShared' }, lines],
+    [
+      sharedTarget,
+      { ...header, companyOwnership: 'tenantShared' },
+      {
+        ...link,
+        target: 'northstar.app:entity.custom_review_source',
+        label: 'Source',
+      },
+      lines,
+    ],
     [header, ...links, lines, lifecycle],
   ]) {
     const extended = await compileInSandbox(sandboxRequest([change(members)]));
@@ -482,16 +496,18 @@ test('tenant line tables use the document editor with or without company scope a
     ).compiled.bundle.releaseManifest.projections.find(
       (projection) => projection.familyId === family,
     )!.requiredRuntimeCapability;
-    assert.equal(requirement.minimumVersion, 24);
-    assert.match(
-      unsupportedRuntimeCapability(family, requirement, {
-        [family]: {
-          capabilityId: requirement.capabilityId,
-          maximumSupportedVersion: 23,
-        },
-      }) ?? '',
-      /24/u,
-    );
+    assert.equal(requirement.minimumVersion, 25);
+    for (const maximumSupportedVersion of [23, 24]) {
+      assert.match(
+        unsupportedRuntimeCapability(family, requirement, {
+          [family]: {
+            capabilityId: requirement.capabilityId,
+            maximumSupportedVersion,
+          },
+        }) ?? '',
+        /25/u,
+      );
+    }
     assert.equal(unsupportedRuntimeCapability(family, requirement), null);
   }
   const visual = await compileInSandbox(

@@ -12,7 +12,7 @@ Status — build checkpoint started at `99371b43` and synchronized with `8b61740
 
 ## Decisions
 
-- Floor 24 admits create-time header links and shared or lifecycle-less editors, including their declared List relation columns. The synchronized first-party release was re-baselined to one entry. See ADR-0072.
+- Floor 25 admits create-time header links and shared or lifecycle-less editors, including their declared List relation columns. CUSTOMIZE-3 uses floor 24 for saved views. See ADR-0072.
 - Links are chosen at creation and restrict archiving a target with active dependents. Multiple inspections can refer to the same receipt, so Inspection needs no new uniqueness rule.
 - List search matches linked labels. Selecting a linked value narrows the list by that record's ID.
 - The editor uses sequential per-row saves and refuses parent archive while there are active lines. Company ownership follows ADR-0015.
@@ -21,7 +21,7 @@ Status — build checkpoint started at `99371b43` and synchronized with `8b61740
 
 ## Gates
 
-- Typecheck, changed-file format and lint, record checks and compiled release freshness passed. Five focused tests passed for ordered drafting, ownership, lifecycle, lines, links and the floor-23/24 boundary.
+- Typecheck, changed-file format and lint, record checks and compiled release freshness passed. Five focused tests cover ordered drafting, ownership, lifecycle, lines, links and refusal by older surface readers.
 - The full Inspection change normalized against the synchronized trunk with four relations, owned lines and five transitions. The re-baseline retained the first-party authored definition and every projection digest except the bootstrap storage transition.
 - Hosted PostgreSQL, browser and scripted assistant evidence are pending. Migration 0033 is absent from trunk, so 0034 cannot yet enter the acceptance matrix.
 

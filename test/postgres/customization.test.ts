@@ -296,6 +296,27 @@ test(
               /customization_patches_shape/u,
               'a payload whose digest does not match is refused by the database',
             );
+            const invalidKind = 'a'.repeat(65);
+            const invalidKindPayload = Buffer.from(
+              JSON.stringify({ kind: invalidKind }),
+            );
+            await assert.rejects(
+              pool.query(
+                `INSERT INTO platform.customization_patches
+                   SELECT tenant_id, environment_id, gen_random_uuid(),
+                          patch_version, $2, $3,
+                          encode(sha256($3::bytea), 'hex'), channel, authored_by,
+                          base_package_id, base_package_version,
+                          base_revision_id, base_release_root,
+                          parent_revision_id, resulting_revision_id,
+                          resulting_release_id, language_version,
+                          normalization_profile_version, created_at
+                     FROM platform.customization_patches WHERE patch_id = $1`,
+                [drafted.patchId, invalidKind, invalidKindPayload],
+              ),
+              /customization_patches_shape/u,
+              'the database refuses an identifier over 64 characters with a valid payload digest',
+            );
             assert.equal(await patchCount(pool), 1);
 
             // Review R4: two identical drafts at once record one change, and
@@ -880,6 +901,20 @@ test(
             approve: (plan) =>
               Promise.resolve(plan.steps[0]?.operationLabel === 'Quarantine'),
           });
+          const found = await agent.call('erp_query', {
+            queryId: `${inspection}_list`,
+            arguments: {
+              search:
+                receipt.values['northstar.app:field.goods_receipt_number'],
+            },
+          });
+          assert.equal(found.isError, false, JSON.stringify(found.content));
+          assert.deepEqual(
+            (found.content as { records: { recordId: string }[] }).records.map(
+              (record) => record.recordId,
+            ),
+            [header.recordId],
+          );
           const plan = await agent.call('erp_plan', {
             intents: [
               {
