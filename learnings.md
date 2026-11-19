@@ -788,3 +788,8 @@ How to apply: Take the run lock inside the effect transaction and require the ex
 Date: 2026-11-19
 Why: Runtime-writable proof rows could change an approved definition set, and a worker-writable journal result could impersonate a human decision.
 How to apply: Compute dependencies from the verified compiler artifacts, restrict evidence writes to verification, freeze definitions at approval, and derive every approval replay value from the exact human decision. [WORKFLOW-1](docs/execution/packets/WORKFLOW-1.md)
+
+## Check stored company ownership before writing or replaying a record
+Date: 2026-11-19
+Why: A writable field with a company-like name supplied the policy operand for an update to another company’s record.
+How to apply: Read the compiler-declared owner under the write lock and evaluate the operation grant before mutation or idempotent read-back. Test both companies through the same gateway. [CRITFIX-E](docs/execution/packets/CRITFIX-E.md)

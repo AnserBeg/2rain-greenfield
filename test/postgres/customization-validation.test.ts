@@ -18,7 +18,10 @@ import {
 import { literalValidationDraft } from '../../packages/customization/src/validation-draft.js';
 import { OperationsAgentSession } from '../../packages/operations-agent/src/session.js';
 import { COMPANY, worldOver } from '../agent/agent-world.js';
-import { withArchivedCustomizationRuntime } from '../helpers/archived-customization-runtime.js';
+import {
+  archivedServingRead,
+  withArchivedCustomizationRuntime,
+} from '../helpers/archived-customization-runtime.js';
 import {
   LINEAGE_INSTALL_VOLUME,
   withEphemeralPostgres,
@@ -144,27 +147,10 @@ test(
                 'the tenant compiler reproduces the entire v6 envelope with validation absent',
               );
               const read = () =>
-                run(
-                  `
-            import { readFile } from 'node:fs/promises';
-            import { rolePool, trustedContext } from './packages/postgres-provider/src/composed-application-runtime.ts';
-            import { PostgresRequestRuntimeViewService } from './packages/postgres-provider/src/request-runtime-view-service.ts';
-            const { databaseUrl, identity } = JSON.parse(await readFile(process.argv[2], 'utf8'));
-            const pool = rolePool(databaseUrl, 'north_star_runtime', 1);
-            try {
-              const view = await new PostgresRequestRuntimeViewService(pool).load(await trustedContext(identity));
-              console.log(JSON.stringify({ outcome: 'loaded', root: view.release.contentHash }));
-            } catch (error) {
-              console.log(JSON.stringify({ outcome: 'refused', code: error.code, message: error.message }));
-            } finally {
-              await pool.end();
-            }
-          `,
-                  {
-                    databaseUrl: options.databaseUrl,
-                    identity: app.runtime.identity,
-                  },
-                ) as Promise<{
+                run(archivedServingRead, {
+                  databaseUrl: options.databaseUrl,
+                  identity: app.runtime.identity,
+                }) as Promise<{
                   outcome: string;
                   code?: string;
                   message?: string;

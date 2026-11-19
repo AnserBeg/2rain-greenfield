@@ -17,6 +17,7 @@ Slices 1 and 2 and the first correction landed. Round 2 addresses the five open 
 - Seed the Tier B closure conservatively with first-party storage and capability writes. A receipt reference on an independent tenant record does not make that record a receipt dependency.
 - Treat pre-correction evidence and decisions as historical. A trusted definition set needs verification and a fresh human approval.
 - The PostgreSQL journey uses the verifier role with test-provisioned credentials. Canonical authoring, timers, the Approvals worklist, and the Inspection browser journey are still ahead.
+- Workflow-bearing releases require surface reader 27, following the Inspection editor at 26.
 - Documents, communication and email, and connectors remain later N2 work.
 
 ## Gates
