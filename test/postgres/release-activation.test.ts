@@ -1032,11 +1032,26 @@ test('G1-P4b atomic activation, reconciliation, rollback, and invalidation', asy
               afterCommit.releaseId,
               5,
             );
-            const approveNext = () => prepareApproval(webPool, approverContextA, makerContextA, supersedingTarget);
-            await assert.rejects(approveNext(), {code:'RELEASE_SOURCE_NOT_VERIFIED'});
-            const reconciled = await workerService.reconcileActivation(systemContextA, ambiguousAttempt);
+            const approveNext = () =>
+              prepareApproval(
+                webPool,
+                approverContextA,
+                makerContextA,
+                supersedingTarget,
+              );
+            await assert.rejects(approveNext(), {
+              code: 'RELEASE_SOURCE_NOT_VERIFIED',
+            });
+            const reconciled = await workerService.reconcileActivation(
+              systemContextA,
+              ambiguousAttempt,
+            );
             assert.equal(reconciled.status, 'SWAPPED_VERIFIED');
-            assert.equal((await webService.activate(systemContextA, await approveNext())).status, 'SWAPPED_VERIFIED');
+            assert.equal(
+              (await webService.activate(systemContextA, await approveNext()))
+                .status,
+              'SWAPPED_VERIFIED',
+            );
           },
         );
 

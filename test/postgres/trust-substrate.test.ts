@@ -65,7 +65,6 @@ test('migrations upgrade accepted G1 and converge with the checked-in snapshot',
     const migrations = await loadMigrations(checkedInMigrations);
     assert.equal(
       migrations.at(-1)?.name,
-      '0035_customization_upgrade_bindings.sql',
       '0036_verified_release_history.sql',
     );
     const admin = await pool.connect();

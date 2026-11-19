@@ -1037,11 +1037,17 @@ test('a field-only chain reproduces with historical bindings and upgrades onto a
     ...acknowledgement.evaluatorBindings![0]!,
     permissionId: permission.permissionId,
   };
-  const obsolete = {...permission, permissionId:'northstar.app:permission.unbound_legacy'};
+  const obsolete = {
+    ...permission,
+    permissionId: 'northstar.app:permission.unbound_legacy',
+  };
   permissions.push(obsolete);
   const nextAcknowledgement = {
     ...acknowledgement,
-    entries: [...acknowledgement.entries,{permissionId:obsolete.permissionId,resource:additional.resource}],
+    entries: [
+      ...acknowledgement.entries,
+      { permissionId: obsolete.permissionId, resource: additional.resource },
+    ],
     evaluatorBindings: [
       ...(acknowledgement.evaluatorBindings ?? []),
       additional,
@@ -1072,11 +1078,19 @@ test('a field-only chain reproduces with historical bindings and upgrades onto a
     JSON.stringify(upgraded.status !== 'compiled' && upgraded.diagnostics),
   );
   const reproduced = await compileInSandbox({
-    ...request, base, acknowledgement,
-    stepAcknowledgements:[nextAcknowledgement], tip:history.steps[0]!.release,
-    upgradeBaseRoot:tip.compiled.releaseRoot,
+    ...request,
+    base,
+    acknowledgement,
+    stepAcknowledgements: [nextAcknowledgement],
+    tip: history.steps[0]!.release,
+    upgradeBaseRoot: tip.compiled.releaseRoot,
   });
-  assert.ok(reproduced.status === 'compiled', 'removed permissions require their recorded acknowledgement and evaluator binding');
-  assert.equal(reproduced.steps[0]!.release.releaseRoot, upgraded.steps[0]!.release.releaseRoot);
-
+  assert.ok(
+    reproduced.status === 'compiled',
+    'removed permissions require their recorded acknowledgement and evaluator binding',
+  );
+  assert.equal(
+    reproduced.steps[0]!.release.releaseRoot,
+    upgraded.steps[0]!.release.releaseRoot,
+  );
 });

@@ -53,7 +53,6 @@ import {
   releaseDiffBinding,
   rolePool,
   trustedContext,
-  unprovenLivePointer,
   type ParsedRelease,
   type PersistedReleaseIdentity,
   type ScopeIdentities,
@@ -531,10 +530,19 @@ export class PostgresCustomizationService {
       context,
       async (client) => {
         const result = await client.query<UpgradeRow>(
-          'SELECT * FROM platform.customization_upgrades WHERE tenant_id = $1 AND environment_id = $2 AND platform.customization_patch_refs_valid(tenant_id, environment_id, payload) ORDER BY created_at, upgrade_id',
+          'SELECT * FROM platform.customization_upgrades WHERE tenant_id = $1 AND environment_id = $2 ORDER BY created_at, upgrade_id',
           [context.tenantId, context.environmentId],
         );
-        return result.rows.map(upgradeRecord);
+        if (!result.rowCount) return [];
+        const patches = await client.query<{ patch_id: MintedUuid }>(
+          'SELECT patch_id FROM platform.customization_patches WHERE tenant_id=$1 AND environment_id=$2',
+          [context.tenantId, context.environmentId],
+        );
+        const scoped = new Set(patches.rows.map((patch) => patch.patch_id));
+        return result.rows.flatMap((row) => {
+          const record = parseUpgradeRecord(row);
+          return record?.patchIds.every((id) => scoped.has(id)) ? [record] : [];
+        });
       },
     );
   }
@@ -1322,6 +1330,9 @@ export class PostgresCustomizationService {
       async (client) => {
         const result = await client.query<{ previous_release_id: MintedUuid }>(
           `SELECT swap.previous_release_id FROM ${verifiedGenerationsSql} AS swap
+           JOIN platform.active_release_pointers AS physical
+             ON physical.tenant_id=swap.tenant_id AND physical.environment_id=swap.environment_id
+            AND physical.pointer_id=swap.pointer_id AND physical.release_id=swap.activated_release_id AND physical.fence=swap.fence
            JOIN platform.tenant_releases AS release ON release.tenant_id=swap.tenant_id AND release.environment_id=swap.environment_id AND release.release_id=swap.activated_release_id
            JOIN platform.app_package_revisions AS revision ON revision.tenant_id=release.tenant_id AND revision.revision_id=release.app_package_revision_id
           WHERE swap.tenant_id=$1 AND swap.environment_id=$2 AND swap.pointer_id=$3 AND swap.activated_release_id=$4 AND swap.fence=$5
@@ -1376,8 +1387,13 @@ export class PostgresCustomizationService {
       this.connection.adminPool,
       this.connection.identities.runtime,
       async (admin) => {
-        await this.#repair(admin, context);
-        return run(admin, context, await this.#active(context));
+        const pointer = await this.#repair(admin, context);
+        const state = await this.#state(
+          context,
+          pointer.releaseId,
+          String(pointer.fence + 1),
+        );
+        return run(admin, context, { ...state, pointer });
       },
     );
   }
@@ -1389,17 +1405,13 @@ export class PostgresCustomizationService {
    * scope to the live release. A retry after any cut lands here first.
    */
   async #repair(admin: pg.PoolClient, context: TrustedRequestContext) {
-    const unproven = await unprovenLivePointer(
-      this.connection.runtimePool,
-      context,
-    );
-    if (unproven !== null) {
+    const observed = await readPointer(this.connection.runtimePool, context);
+    if (!observed.releaseId)
       throw new CustomizationServiceRefusal(
-        'CUSTOMIZE_ACTIVATION_UNVERIFIED',
-        `the live release is not proven: ${unproven}; nothing was changed`,
+        'CUSTOMIZE_NOT_STARTED',
+        'there is no live release',
       );
-    }
-    const pointer = await this.#livePointer(context);
+    const pointer = { ...observed, releaseId: observed.releaseId };
     if (
       !(await reconcileInventoryScopeToPointer(
         admin,
@@ -1440,10 +1452,15 @@ export class PostgresCustomizationService {
       );
     }
     const pointer = await readPointer(this.connection.runtimePool, context);
-    if (pointer.releaseId !== expectedReleaseId) {
+    if (
+      pointer.releaseId !== expectedReleaseId ||
+      activated.releaseId !== expectedReleaseId ||
+      pointer.pointerId !== activated.pointerId ||
+      pointer.fence !== activated.fence
+    ) {
       throw new CustomizationServiceRefusal(
         'CUSTOMIZE_ACTIVATION_FAILED',
-        'activation selected another release',
+        'the verified activation no longer names the current generation',
       );
     }
     await this.options.afterSwapBeforeScope?.();
@@ -2177,8 +2194,27 @@ interface UpgradeRow {
 }
 
 function upgradeRecord(row: UpgradeRow): UpgradeRecord {
+  const record = parseUpgradeRecord(row);
+  if (!record)
+    throw new CustomizationServiceRefusal(
+      'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+      'the upgrade does not match its recorded binding',
+    );
+  return record;
+}
+
+function parseUpgradeRecord(row: UpgradeRow): UpgradeRecord | null {
   const bytes = Buffer.from(row.payload);
-  const payload = JSON.parse(bytes.toString('utf8')) as Record<string, unknown>;
+  let payload: Record<string, unknown> | null;
+  try {
+    payload = JSON.parse(bytes.toString('utf8')) as Record<
+      string,
+      unknown
+    > | null;
+  } catch {
+    return null;
+  }
+  if (!payload || typeof payload !== 'object') return null;
   const patchIds = payload.patchIds;
   if (
     createHash('sha256').update(bytes).digest('hex') !== row.payload_digest ||
@@ -2189,14 +2225,14 @@ function upgradeRecord(row: UpgradeRow): UpgradeRecord {
     payload.candidateRevisionId !== row.candidate_revision_id ||
     !Array.isArray(patchIds) ||
     patchIds.length === 0 ||
-    patchIds.some((id) => typeof id !== 'string') ||
+    patchIds.some(
+      (id) =>
+        typeof id !== 'string' ||
+        !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(id),
+    ) ||
     new Set(patchIds).size !== patchIds.length
-  ) {
-    throw new CustomizationServiceRefusal(
-      'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
-      'the upgrade does not match its recorded binding',
-    );
-  }
+  )
+    return null;
   return {
     compilerAcknowledgement: row.compiler_acknowledgement,
     upgradeId: row.upgrade_id,

@@ -61,6 +61,7 @@ function fakeService(calls: string[]): CustomizeScreenService {
     },
     status: () =>
       Promise.resolve({
+        rollbackAvailable: false,
         activeChain: [],
         activeFence: 2,
         upgrades: [],
@@ -271,6 +272,7 @@ test('the live platform upgrade is the named and release-bound rollback target',
   service.status = () =>
     Promise.resolve({
       ...status,
+      rollbackAvailable: true,
       activeReleaseId: 'selected-release',
       activeChain: [{ kind: 'addField', patchId, displayLabel: 'Order note' }],
       upgrades: [
@@ -293,6 +295,17 @@ test('the live platform upgrade is the named and release-bound rollback target',
   assert.match(page.html, /Latest: Platform upgrade upgrade-b/u);
   assert.match(page.html, /name="releaseId" value="selected-release"/u);
   assert.match(page.html, /CUSTOMIZE_BASE_MOVED/u);
+  service.status = () =>
+    Promise.resolve({
+      ...status,
+      activeReleaseId: 'selected-release',
+      historyUnavailable: true,
+      rollbackAvailable: true,
+    });
+  const unavailable = await renderCustomizeScreen(service, '/?customize', null);
+  assert.match(unavailable.html, /customization history is unavailable/u);
+  assert.match(unavailable.html, /name="releaseId" value="selected-release"/u);
+
   assert.equal(
     (
       await renderCustomizeScreen(service, '/?customize', {

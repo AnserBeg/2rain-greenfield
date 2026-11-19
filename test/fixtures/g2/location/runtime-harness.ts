@@ -1,3 +1,4 @@
+import { activateFixtureRelease } from '../../../helpers/verified-fixture-release.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import type { Server } from 'node:http';
@@ -145,20 +146,23 @@ export async function withRealLocationRuntime<T>(
           [fixture.compiled, fixture.definition],
         ],
       );
-      await setPointer(
+      await activateFixtureRelease(
         pool,
+        runtimePool,
         LOCATION_TEST_SCOPE.a.tenantId,
         LOCATION_TEST_SCOPE.a.environmentId,
         releasesA[0]!.releaseId,
       );
-      await setPointer(
+      await activateFixtureRelease(
         pool,
+        runtimePool,
         LOCATION_TEST_SCOPE.b.tenantId,
         LOCATION_TEST_SCOPE.b.environmentId,
         releasesB[0]!.releaseId,
       );
-      await setPointer(
+      await activateFixtureRelease(
         pool,
+        runtimePool,
         locationVerificationScope.tenantId,
         locationVerificationScope.environmentId,
         verificationReleases[0]!.releaseId,
@@ -196,14 +200,16 @@ export async function withRealLocationRuntime<T>(
       );
       await prepare(materializer, contexts.a, releasesA[1]!.releaseId);
       await prepare(materializer, contexts.b, releasesB[1]!.releaseId);
-      await setPointer(
+      await activateFixtureRelease(
         pool,
+        runtimePool,
         LOCATION_TEST_SCOPE.a.tenantId,
         LOCATION_TEST_SCOPE.a.environmentId,
         releasesA[1]!.releaseId,
       );
-      await setPointer(
+      await activateFixtureRelease(
         pool,
+        runtimePool,
         LOCATION_TEST_SCOPE.b.tenantId,
         LOCATION_TEST_SCOPE.b.environmentId,
         releasesB[1]!.releaseId,
@@ -547,30 +553,6 @@ function releaseCommand(
     tenantId: context.tenantId,
     verificationEvidenceId,
   };
-}
-
-async function setPointer(
-  pool: pg.Pool,
-  tenantId: string,
-  environmentId: string,
-  releaseId: string,
-): Promise<void> {
-  await pool.query(
-    'ALTER TABLE platform.active_release_pointers DISABLE TRIGGER active_release_pointer_exact_swap',
-  );
-  try {
-    const result = await pool.query(
-      `UPDATE platform.active_release_pointers
-          SET release_id = $3, fence = fence + 1
-        WHERE tenant_id = $1 AND environment_id = $2`,
-      [tenantId, environmentId, releaseId],
-    );
-    assert.equal(result.rowCount, 1);
-  } finally {
-    await pool.query(
-      'ALTER TABLE platform.active_release_pointers ENABLE TRIGGER active_release_pointer_exact_swap',
-    );
-  }
 }
 
 async function grantExecutorAuthority(pool: pg.Pool): Promise<void> {

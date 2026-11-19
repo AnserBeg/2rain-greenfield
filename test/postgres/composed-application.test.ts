@@ -338,10 +338,19 @@ test('fresh-tenant install refuses a failing intermediate transition', async () 
   const firstIntermediate = compiledApplication.applications[1]!;
   compiledApplication.applications[1] = compiledApplication.applications[2]!;
   compiledApplication.applications[2] = firstIntermediate;
-  await withEphemeralPostgres('invalid-fresh-transition', async ({connection}) => {
-    await assert.rejects(createRuntime(compiledApplication,connectionUrl(connection),'failing-intermediate-transition'),
-      /transition does not match its declared previous release/u);
-  });
+  await withEphemeralPostgres(
+    'invalid-fresh-transition',
+    async ({ connection }) => {
+      await assert.rejects(
+        createRuntime(
+          compiledApplication,
+          connectionUrl(connection),
+          'failing-intermediate-transition',
+        ),
+        /transition does not match its declared previous release/u,
+      );
+    },
+  );
 });
 
 // ADR-0047 §6, the direction the revision check alone cannot establish. Shared
@@ -1295,10 +1304,10 @@ test(
           );
           await runtime.close();
 
-          await assert.rejects(
-            createRuntime(mismatched, databaseUrl, 'advancing-tenant'),
-            /transition does not match its declared previous release/,
-          );
+          runtime = await createRuntime(mismatched, databaseUrl, 'advancing-tenant');
+          assert.equal(runtime.activeReleaseId, sourceReleaseId);
+          assert.equal(runtime.customizationUpgrade?.status, 'refused');
+          await runtime.close();
           assert.equal(
             await activeReleaseId(pool, runtime.identity),
             sourceReleaseId,
@@ -1309,10 +1318,10 @@ test(
                DISABLE TRIGGER active_release_pointer_exact_swap`,
           );
           try {
-            await assert.rejects(
-              createRuntime(approvalCandidate, databaseUrl, 'advancing-tenant'),
-              /active_release_pointer_exact_swap is not enabled/,
-            );
+            runtime = await createRuntime(approvalCandidate, databaseUrl, 'advancing-tenant');
+            assert.equal(runtime.activeReleaseId, sourceReleaseId);
+            assert.equal(runtime.customizationUpgrade?.status, 'refused');
+            await runtime.close();
           } finally {
             await pool.query(
               `ALTER TABLE platform.active_release_pointers

@@ -15,7 +15,7 @@ interface ScreenPatch extends PatchSummary {
 interface CustomizationStatus {
   readonly activeFence: number;
   readonly historyUnavailable?: true;
-  readonly rollbackAvailable?: boolean;
+  readonly rollbackAvailable: boolean;
   readonly activeChain: readonly PatchSummary[];
   readonly activeReleaseId: string;
   readonly upgradeRefusal: {
@@ -265,7 +265,7 @@ async function overview(service: CustomizeScreenService): Promise<string> {
         : status.historyUnavailable
           ? '<p>The verified release is live. Its customization history is unavailable.</p>'
           : '<p>The standard application, with no customizations.</p>'
-    }${(status.rollbackAvailable ?? !!live) ? button('rollback', 'Roll back the latest change', { releaseId: status.activeReleaseId, fence: String(status.activeFence) }) : ''}</section>`,
+    }${status.rollbackAvailable ? button('rollback', 'Roll back the latest change', { releaseId: status.activeReleaseId, fence: String(status.activeFence) }) : ''}</section>`,
     refusal
       ? `<section data-customize-upgrade-refusal><h2>Platform upgrade refused</h2><p>Your current release is still live.</p><p>${escapeHtml(refusal.code)} · ${escapeHtml(refusal.message)}</p>${(refusal.issues ?? []).map((issue) => `<pre>${escapeHtml(issue)}</pre>`).join('')}</section>`
       : '',

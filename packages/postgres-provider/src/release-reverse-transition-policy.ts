@@ -188,9 +188,11 @@ export async function authorizeReverseTransitionIfApplicable(
       'release transition pair is not visible in the trusted environment',
     );
   }
-  if (!row.source_verified && !row.exact_reverse_lineage)
+  if (!row.source_verified)
     refuse(
-      'RELEASE_SOURCE_NOT_VERIFIED',
+      row.exact_reverse_lineage
+        ? 'ROLLBACK_FORWARD_ACTIVATION_NOT_VERIFIED'
+        : 'RELEASE_SOURCE_NOT_VERIFIED',
       'activation requires a verified source pointer generation',
     );
   if (row.exact_forward_lineage) return null;
@@ -205,7 +207,6 @@ export async function authorizeReverseTransitionIfApplicable(
   }
 
   if (
-    !row.source_verified ||
     !row.predecessor_verified ||
     row.forward_activation_attempt_id === null ||
     row.forward_verification_status !== 'SWAPPED_VERIFIED'

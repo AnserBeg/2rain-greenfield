@@ -659,6 +659,12 @@ async function selectBootRelease(
         );
       }
       pointer = await readPointer(runtimePool, runtimeContext);
+      if (
+        pointer.releaseId !== bootstrapIdentity.releaseId ||
+        pointer.pointerId !== activated.pointerId ||
+        pointer.fence !== activated.fence
+      )
+        throw new Error('bootstrap generation changed before readback');
       await observeFreshTenantIntermediateActivation(
         options,
         runtimePool,
@@ -806,7 +812,11 @@ async function selectBootRelease(
         );
       }
       pointer = await readPointer(runtimePool, runtimeContext);
-      if (pointer.releaseId !== targetIdentity.releaseId) {
+      if (
+        pointer.releaseId !== targetIdentity.releaseId ||
+        pointer.pointerId !== activated.pointerId ||
+        pointer.fence !== activated.fence
+      ) {
         throw new Error('composed release rollback selected the wrong target');
       }
       servingLineageIndex = targetIndex;
@@ -927,7 +937,11 @@ async function selectBootRelease(
           );
         }
         pointer = await readPointer(runtimePool, runtimeContext);
-        if (pointer.releaseId !== targetIdentity.releaseId) {
+        if (
+          pointer.releaseId !== targetIdentity.releaseId ||
+          pointer.pointerId !== activated.pointerId ||
+          pointer.fence !== activated.fence
+        ) {
           throw new Error(
             'composed release activation selected the wrong target',
           );
@@ -1788,7 +1802,7 @@ export async function reconcileInventoryScopeToPointer(
          JOIN platform.tenant_releases AS release USING (tenant_id,environment_id,release_id)
          JOIN platform.active_release_pointers AS physical
            ON physical.tenant_id=pointer.tenant_id AND physical.environment_id=pointer.environment_id
-          AND physical.pointer_id=pointer.pointer_id AND physical.fence=pointer.physical_fence
+          AND physical.pointer_id=pointer.pointer_id AND physical.fence=$5 AND physical.release_id=$4
         WHERE pointer.tenant_id=$1 AND pointer.environment_id=$2
           AND pointer.pointer_id=$3 AND pointer.release_id=$4 AND pointer.fence=$5
         FOR SHARE OF physical
