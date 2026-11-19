@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test, { before } from 'node:test';
 
 import { canonicalize } from '../../packages/canonical-model/src/index.js';
+import { workflowTierBDependencies } from '../../packages/compiler/src/index.js';
 import {
   compileWorkflowBody,
   type CompiledWorkflow,
@@ -413,4 +414,50 @@ test('workflow scheduling is opt-in and a failed pass does not stop polling', as
   }
   assert.equal(failures, 1);
   assert.equal(polls, 2);
+});
+
+test('workflow verification derives the complete Tier B relation and ownership closure', () => {
+  const receipt = 'northstar.app:entity.goods_receipt';
+  const child = 'northstar.app:entity.custom_child';
+  const indirect = 'northstar.app:entity.custom_indirect';
+  const inspection = 'northstar.app:entity.custom_inspection';
+  const capabilityTarget = 'northstar.app:entity.custom_capability_target';
+  const capability = 'northstar.app:operation.capability_transition';
+  const entities = [receipt, child, indirect, inspection, capabilityTarget].map(
+    (entityId) => ({
+      entityId,
+      consumerWriterRoots: {
+        readerQueryIds: [],
+        writerOperationIds: entityId === capabilityTarget ? [capability] : [],
+      },
+    }),
+  );
+  const dependencies = workflowTierBDependencies(
+    {
+      entities,
+      relations: [
+        {
+          sourceEntityId: child,
+          targetEntityId: receipt,
+          ownership: 'parentScopedChild',
+        },
+        {
+          sourceEntityId: child,
+          targetEntityId: indirect,
+          ownership: 'reference',
+        },
+        {
+          sourceEntityId: inspection,
+          targetEntityId: receipt,
+          ownership: 'reference',
+        },
+      ],
+    },
+    new Set([capability]),
+  );
+
+  assert.deepEqual(
+    [...dependencies].sort(),
+    [receipt, child, indirect, capabilityTarget].sort(),
+  );
 });
