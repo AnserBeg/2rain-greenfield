@@ -282,7 +282,7 @@ test('inventory migration owns exactly two platform relations and no managed-mod
       const client = await pool.connect();
       try {
         const migrations = await loadMigrations(checkedInMigrations);
-        assert.equal(migrations.at(-1)?.name, '0039_activation_recovery.sql');
+        assert.equal(migrations.at(-1)?.name, '0040_workflow_authority.sql');
         const inventoryMigrationIndex = migrations.findIndex(
           (migration) =>
             migration.name === '0015_inventory_storage_foundation.sql',

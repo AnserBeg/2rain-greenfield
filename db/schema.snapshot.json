@@ -6694,6 +6694,20 @@
     },
     {
       "schema": "platform",
+      "relation": "release_approvals",
+      "ordinal_position": 46,
+      "column_name": "workflow_definition_bindings",
+      "data_type": "jsonb",
+      "is_nullable": true,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "platform",
       "relation": "release_approver_eligibility_events",
       "ordinal_position": 1,
       "column_name": "tenant_id",
@@ -10446,6 +10460,20 @@
     },
     {
       "schema": "platform",
+      "relation": "workflow_activation_watermarks",
+      "ordinal_position": 12,
+      "column_name": "verified_approval_binding",
+      "data_type": "boolean",
+      "is_nullable": false,
+      "column_default": "false",
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "platform",
       "relation": "workflow_body_blobs",
       "ordinal_position": 1,
       "column_name": "tenant_id",
@@ -11692,6 +11720,20 @@
     },
     {
       "schema": "platform",
+      "relation": "workflow_runs",
+      "ordinal_position": 14,
+      "column_name": "poll_order",
+      "data_type": "bigint",
+      "is_nullable": false,
+      "column_default": "0",
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "platform",
       "relation": "workflow_timers",
       "ordinal_position": 1,
       "column_name": "tenant_id",
@@ -11857,6 +11899,34 @@
       "storage_kind": "x",
       "compression": "",
       "collation": null
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_verification_evidence",
+      "ordinal_position": 8,
+      "column_name": "verified_release_id",
+      "data_type": "uuid",
+      "is_nullable": true,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_verification_evidence",
+      "ordinal_position": 9,
+      "column_name": "verified_release_root",
+      "data_type": "text",
+      "is_nullable": true,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": "pg_catalog.default"
     }
   ],
   "columnPrivileges": [
@@ -12350,6 +12420,15 @@
       "schema": "platform",
       "relation": "workflow_runs",
       "column_name": "execution_fence",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_runs",
+      "column_name": "poll_order",
       "grantor": "postgres",
       "grantee": "north_star_workflow_worker",
       "privilege_type": "UPDATE",
@@ -15653,6 +15732,20 @@
     },
     {
       "schema": "platform",
+      "relation": "release_approvals",
+      "domain": null,
+      "name": "release_approvals_workflow_definition_bindings_check",
+      "type": "c",
+      "definition": "CHECK (jsonb_typeof(workflow_definition_bindings) = 'object'::text)",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": false,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
+      "schema": "platform",
       "relation": "release_approver_eligibility_events",
       "domain": null,
       "name": "release_approver_eligibility_events_pkey",
@@ -18595,6 +18688,20 @@
       "schema": "platform",
       "relation": "workflow_verification_evidence",
       "domain": null,
+      "name": "workflow_verification_eviden_tenant_id_environment_id_ver_fkey1",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, verified_release_id, verification_evidence_id) REFERENCES platform.tenant_releases(tenant_id, environment_id, release_id, verification_evidence_id)",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": true,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_verification_evidence",
+      "domain": null,
       "name": "workflow_verification_evidenc_tenant_id_environment_id_ver_fkey",
       "type": "f",
       "definition": "FOREIGN KEY (tenant_id, environment_id, verification_evidence_id) REFERENCES platform.release_verification_evidence(tenant_id, environment_id, verification_evidence_id)",
@@ -18612,6 +18719,20 @@
       "name": "workflow_verification_evidence_binding_digest_check",
       "type": "c",
       "definition": "CHECK (binding_digest ~ '^[0-9a-f]{64}$'::text)",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": false,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_verification_evidence",
+      "domain": null,
+      "name": "workflow_verification_evidence_check",
+      "type": "c",
+      "definition": "CHECK (verified_release_id IS NULL AND verified_release_root IS NULL OR verified_release_id IS NOT NULL AND verified_release_root IS NOT NULL AND verified_release_root ~ '^[0-9a-f]{64}$'::text)",
       "deferrable": false,
       "initially_deferred": false,
       "validated": true,
@@ -21432,7 +21553,7 @@
       "name": "workflow_runs_runnable_idx",
       "owner": "postgres",
       "access_method": "btree",
-      "definition": "CREATE INDEX workflow_runs_runnable_idx ON platform.workflow_runs USING btree (tenant_id, environment_id, created_at, run_id) WHERE (status = 'RUNNABLE'::text)",
+      "definition": "CREATE INDEX workflow_runs_runnable_idx ON platform.workflow_runs USING btree (tenant_id, environment_id, poll_order, created_at, run_id) WHERE (status = 'RUNNABLE'::text)",
       "is_unique": false,
       "is_primary": false,
       "is_exclusion": false,
@@ -22586,9 +22707,9 @@
     {
       "schema": "platform",
       "relation": "workflow_verification_evidence",
-      "name": "workflow_scoped_release_author",
+      "name": "workflow_scoped_worker",
       "permissive": true,
-      "roles": ["north_star_runtime"],
+      "roles": ["north_star_workflow_worker"],
       "command": "*",
       "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid",
       "check_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid"
@@ -22596,12 +22717,12 @@
     {
       "schema": "platform",
       "relation": "workflow_verification_evidence",
-      "name": "workflow_scoped_worker",
+      "name": "workflow_verifier_evidence",
       "permissive": true,
-      "roles": ["north_star_workflow_worker"],
-      "command": "*",
-      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid",
-      "check_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid"
+      "roles": ["north_star_workflow_verifier"],
+      "command": "a",
+      "using_expression": null,
+      "check_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid AND verified_release_id IS NOT NULL AND verified_release_root IS NOT NULL"
     }
   ],
   "relations": [
@@ -29493,16 +29614,8 @@
       "schema": "platform",
       "relation": "workflow_verification_evidence",
       "grantor": "postgres",
-      "grantee": "north_star_runtime",
+      "grantee": "north_star_workflow_verifier",
       "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "workflow_verification_evidence",
-      "grantor": "postgres",
-      "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
       "is_grantable": false
     },
     {
@@ -30306,13 +30419,32 @@
     },
     {
       "schema": "platform",
+      "name": "workflow_bind_release_approval",
+      "identity_arguments": "",
+      "kind": "f",
+      "language": "plpgsql",
+      "owner": "postgres",
+      "result_type": "trigger",
+      "definition": "CREATE OR REPLACE FUNCTION platform.workflow_bind_release_approval()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$ BEGIN\n  SELECT jsonb_object_agg(d.workflow_id, jsonb_build_object(\n           'digest', e.binding_digest, 'eventType', d.event_type,\n           'unattendedOperations', e.unattended_operations\n         ))\n    INTO NEW.workflow_definition_bindings\n    FROM platform.workflow_verification_evidence AS e\n    JOIN platform.workflow_definitions AS d\n      ON (d.tenant_id, d.environment_id, d.release_id, d.workflow_id) =\n         (e.tenant_id, e.environment_id, e.verified_release_id, e.workflow_id)\n     AND e.binding_digest = platform.workflow_definition_digest(d)\n    JOIN platform.tenant_releases AS r\n      ON (r.tenant_id, r.environment_id, r.release_id, r.verification_evidence_id, r.content_hash) =\n         (e.tenant_id, e.environment_id, e.verified_release_id, e.verification_evidence_id, e.verified_release_root)\n   WHERE (e.tenant_id, e.environment_id, e.verification_evidence_id, e.verified_release_id, e.verified_release_root) =\n         (NEW.tenant_id, NEW.environment_id, NEW.verification_evidence_id,\n           NEW.target_release_id, encode(NEW.target_manifest_root, 'hex'));\n  RETURN NEW; END\n$function$\n",
+      "security_definer": true,
+      "leakproof": false,
+      "strict": false,
+      "returns_set": false,
+      "volatility": "v",
+      "parallel_safety": "u",
+      "cost": 100,
+      "estimated_rows": 0,
+      "configuration": ["search_path=pg_catalog, pg_temp"]
+    },
+    {
+      "schema": "platform",
       "name": "workflow_capture_watermark",
       "identity_arguments": "",
       "kind": "f",
       "language": "plpgsql",
       "owner": "postgres",
       "result_type": "trigger",
-      "definition": "CREATE OR REPLACE FUNCTION platform.workflow_capture_watermark()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$\nDECLARE\n  incoming jsonb;\n  outgoing jsonb;\n  subscribed_types text[]; BEGIN\n  SELECT COALESCE(jsonb_object_agg(d.workflow_id, jsonb_build_object(\n           'digest', e.binding_digest, 'eventType', d.event_type,\n           'unattendedOperations', e.unattended_operations\n         )), '{}'::jsonb)\n    INTO incoming\n    FROM platform.release_activation_swap_receipts AS swap\n    JOIN platform.release_approvals AS approval USING (tenant_id, environment_id, approval_id)\n    JOIN platform.workflow_verification_evidence AS e\n      ON (e.tenant_id, e.environment_id, e.verification_evidence_id) =\n         (approval.tenant_id, approval.environment_id, approval.verification_evidence_id)\n    JOIN platform.workflow_definitions AS d\n      ON (d.tenant_id, d.environment_id, d.release_id, d.workflow_id) =\n         (swap.tenant_id, swap.environment_id, swap.activated_release_id, e.workflow_id)\n     AND e.binding_digest = platform.workflow_definition_digest(d)\n   WHERE swap.tenant_id = NEW.tenant_id AND swap.environment_id = NEW.environment_id\n     AND swap.activation_attempt_id = NEW.activation_attempt_id;\n\n  SELECT w.definition_bindings INTO outgoing\n    FROM platform.workflow_activation_watermarks AS w\n   WHERE w.tenant_id = NEW.tenant_id AND w.environment_id = NEW.environment_id\n     AND w.pointer_id = NEW.pointer_id AND w.fence = NEW.fence - 1;\n\n  SELECT array_agg(DISTINCT subscription.value->>'eventType') INTO subscribed_types\n    FROM (\n      SELECT value FROM jsonb_each(incoming)\n      UNION ALL\n      SELECT value FROM jsonb_each(outgoing)\n    ) AS subscription;\n  IF subscribed_types IS NULL THEN RETURN NEW; END IF;\n\n  INSERT INTO platform.workflow_activation_watermarks (\n    tenant_id, environment_id, pointer_id, fence, release_id, release_root,\n    activation_attempt_id, approver_id, approver_grants, definition_bindings\n  )\n  SELECT NEW.tenant_id, NEW.environment_id, NEW.pointer_id, NEW.fence, NEW.activated_release_id,\n         r.content_hash, NEW.activation_attempt_id, a.approving_human_id,\n         COALESCE((\n           SELECT jsonb_agg(DISTINCT jsonb_build_array(g.permission_id, g.resource_id, m.legal_entity_id))\n             FROM platform.current_policy_memberships AS m\n             JOIN platform.current_policy_roles AS role USING (tenant_id, environment_id, role_id)\n             JOIN platform.current_policy_permission_grants AS g USING (tenant_id, environment_id, role_id)\n            WHERE m.tenant_id = NEW.tenant_id AND m.environment_id = NEW.environment_id\n              AND m.principal_id = a.approving_human_id\n              AND m.revoked_at IS NULL AND role.revoked_at IS NULL AND g.revoked_at IS NULL\n         ), '[]'::jsonb), incoming\n    FROM platform.release_activation_swap_receipts AS swap\n    JOIN platform.release_approvals AS a USING (tenant_id, environment_id, approval_id)\n    JOIN platform.tenant_releases AS r\n      ON r.tenant_id = swap.tenant_id AND r.environment_id = swap.environment_id\n     AND r.release_id = swap.activated_release_id\n   WHERE swap.tenant_id = NEW.tenant_id AND swap.environment_id = NEW.environment_id\n     AND swap.activation_attempt_id = NEW.activation_attempt_id;\n\n  -- This statement's snapshot is the activation boundary. A later commit with\n  -- an earlier UUID or recorded time is still visible to a subsequent sweep.\n  INSERT INTO platform.workflow_event_occurrences (tenant_id, environment_id, outbox_id, pointer_id, fence, disposition)\n  SELECT o.tenant_id, o.environment_id, o.outbox_id, NEW.pointer_id, NEW.fence, 'PRE_ACTIVATION'\n    FROM platform.workflow_event_sources AS o\n   WHERE o.tenant_id = NEW.tenant_id AND o.environment_id = NEW.environment_id\n     AND o.event_type = ANY(subscribed_types) AND NOT o.resolved;\n\n  RETURN NEW; END\n$function$\n",
+      "definition": "CREATE OR REPLACE FUNCTION platform.workflow_capture_watermark()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$\nDECLARE\n  incoming jsonb;\n  outgoing jsonb;\n  subscribed_types text[]; BEGIN\n  SELECT a.workflow_definition_bindings\n    INTO incoming\n    FROM platform.release_activation_swap_receipts AS swap\n    JOIN platform.release_approvals AS a\n      ON (a.tenant_id, a.environment_id, a.approval_id, a.activation_attempt_id) =\n         (swap.tenant_id, swap.environment_id, swap.approval_id, swap.activation_attempt_id)\n    JOIN platform.active_release_pointers AS p\n      ON (p.tenant_id, p.environment_id, p.pointer_id, p.fence, p.release_id) =\n         (swap.tenant_id, swap.environment_id, swap.pointer_id, swap.fence, swap.activated_release_id)\n   WHERE (swap.tenant_id, swap.environment_id, swap.activation_attempt_id, swap.pointer_id,\n          swap.fence, swap.activated_release_id) =\n         (NEW.tenant_id, NEW.environment_id, NEW.activation_attempt_id, NEW.pointer_id,\n          NEW.fence, NEW.activated_release_id)\n     AND a.expected_pointer_id = NEW.pointer_id AND a.expected_fence + 1 = NEW.fence\n     AND a.target_release_id = NEW.activated_release_id;\n  IF NOT FOUND THEN RETURN NEW; END IF;\n  incoming := COALESCE(incoming, '{}'::jsonb);\n\n  SELECT w.definition_bindings INTO outgoing\n    FROM platform.workflow_activation_watermarks AS w\n   WHERE w.tenant_id = NEW.tenant_id AND w.environment_id = NEW.environment_id\n     AND w.pointer_id = NEW.pointer_id AND w.fence = NEW.fence - 1;\n\n  SELECT array_agg(DISTINCT subscription.value->>'eventType') INTO subscribed_types\n    FROM (\n      SELECT value FROM jsonb_each(incoming)\n      UNION ALL\n      SELECT value FROM jsonb_each(outgoing)\n    ) AS subscription;\n  IF subscribed_types IS NULL THEN RETURN NEW; END IF;\n\n  INSERT INTO platform.workflow_activation_watermarks (\n    tenant_id, environment_id, pointer_id, fence, release_id, release_root,\n    activation_attempt_id, approver_id, approver_grants, definition_bindings, verified_approval_binding\n  )\n  SELECT NEW.tenant_id, NEW.environment_id, NEW.pointer_id, NEW.fence, NEW.activated_release_id,\n         r.content_hash, NEW.activation_attempt_id, a.approving_human_id,\n         COALESCE((\n           SELECT jsonb_agg(DISTINCT jsonb_build_array(g.permission_id, g.resource_id, m.legal_entity_id))\n             FROM platform.current_policy_memberships AS m\n             JOIN platform.current_policy_roles AS role USING (tenant_id, environment_id, role_id)\n             JOIN platform.current_policy_permission_grants AS g USING (tenant_id, environment_id, role_id)\n            WHERE m.tenant_id = NEW.tenant_id AND m.environment_id = NEW.environment_id\n              AND m.principal_id = a.approving_human_id\n              AND m.revoked_at IS NULL AND role.revoked_at IS NULL AND g.revoked_at IS NULL\n         ), '[]'::jsonb), incoming, true\n    FROM platform.release_activation_swap_receipts AS swap\n    JOIN platform.release_approvals AS a USING (tenant_id, environment_id, approval_id)\n    JOIN platform.tenant_releases AS r\n      ON r.tenant_id = swap.tenant_id AND r.environment_id = swap.environment_id\n     AND r.release_id = swap.activated_release_id\n   WHERE swap.tenant_id = NEW.tenant_id AND swap.environment_id = NEW.environment_id\n     AND swap.activation_attempt_id = NEW.activation_attempt_id;\n\n  -- This statement's snapshot is the activation boundary. A later commit with\n  -- an earlier UUID or recorded time is still visible to a subsequent sweep.\n  INSERT INTO platform.workflow_event_occurrences (tenant_id, environment_id, outbox_id, pointer_id, fence, disposition)\n  SELECT o.tenant_id, o.environment_id, o.outbox_id, NEW.pointer_id, NEW.fence, 'PRE_ACTIVATION'\n    FROM platform.workflow_event_sources AS o\n   WHERE o.tenant_id = NEW.tenant_id AND o.environment_id = NEW.environment_id\n     AND o.event_type = ANY(subscribed_types) AND NOT o.resolved;\n\n  RETURN NEW; END\n$function$\n",
       "security_definer": true,
       "leakproof": false,
       "strict": false,
@@ -30331,7 +30463,7 @@
       "language": "plpgsql",
       "owner": "postgres",
       "result_type": "boolean",
-      "definition": "CREATE OR REPLACE FUNCTION platform.workflow_decide_approval(requested_run uuid, requested_cursor integer, requested_fence bigint, requested_plan_digest text, decision text)\n RETURNS boolean\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$\nDECLARE\n  tenant uuid := nullif(current_setting('north_star.tenant_id', true), '')::uuid;\n  environment uuid := nullif(current_setting('north_star.environment_id', true), '')::uuid;\n  principal uuid := nullif(current_setting('north_star.principal_id', true), '')::uuid;\n  active_pointer uuid;\n  active_release uuid; BEGIN\n  IF decision NOT IN ('APPROVED', 'DECLINED') OR decision IS NULL OR principal IS NULL\n     OR nullif(current_setting('north_star.request_id', true), '') IS NULL\n  THEN RETURN false; END IF;\n  PERFORM 1 FROM platform.release_activation_authority_epochs AS epoch WHERE epoch.tenant_id = tenant FOR SHARE;\n  IF NOT COALESCE((\n    SELECT e.eligible FROM platform.release_approver_eligibility_events AS e\n     WHERE e.tenant_id = tenant AND e.principal_id = principal\n     ORDER BY e.policy_version DESC LIMIT 1\n  ), false) THEN RETURN false; END IF;\n  IF EXISTS (\n    SELECT 1 FROM platform.workflow_definitions AS d\n     WHERE d.tenant_id = tenant AND d.automation_principal_id = principal\n  ) THEN RETURN false; END IF;\n  SELECT p.pointer_id, p.release_id INTO active_pointer, active_release\n    FROM platform.active_release_pointers AS p\n   WHERE p.tenant_id = tenant AND p.environment_id = environment AND p.fence = requested_fence\n   FOR SHARE;\n  IF NOT FOUND THEN RETURN false; END IF;\n  PERFORM 1 FROM platform.workflow_runs AS r\n    JOIN platform.workflow_definitions AS d USING (tenant_id, environment_id, release_id, workflow_id)\n   WHERE r.tenant_id = tenant AND r.environment_id = environment AND r.run_id = requested_run\n     AND r.pointer_id = active_pointer AND r.release_id = active_release\n     AND r.execution_fence = requested_fence AND r.status = 'WAITING'\n     AND d.automation_principal_id <> principal\n   FOR UPDATE OF r;\n  IF NOT FOUND THEN RETURN false; END IF;\n  UPDATE platform.workflow_pending_approvals AS a\n     SET status = decision, decided_by = principal, decided_at = clock_timestamp(),\n         decision_request_id = current_setting('north_star.request_id')::uuid\n   WHERE a.tenant_id = tenant AND a.environment_id = environment AND a.run_id = requested_run\n     AND a.cursor = requested_cursor AND a.fence = requested_fence\n     AND a.plan_digest = requested_plan_digest AND a.status = 'PENDING';\n  RETURN FOUND; END\n$function$\n",
+      "definition": "CREATE OR REPLACE FUNCTION platform.workflow_decide_approval(requested_run uuid, requested_cursor integer, requested_fence bigint, requested_plan_digest text, decision text)\n RETURNS boolean\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$\nDECLARE\n  tenant uuid := nullif(current_setting('north_star.tenant_id', true), '')::uuid;\n  environment uuid := nullif(current_setting('north_star.environment_id', true), '')::uuid;\n  principal uuid := nullif(current_setting('north_star.principal_id', true), '')::uuid;\n  active_pointer uuid;\n  active_release uuid; BEGIN\n  IF decision NOT IN ('APPROVED', 'DECLINED') OR decision IS NULL OR principal IS NULL\n     OR nullif(current_setting('north_star.request_id', true), '') IS NULL\n  THEN RETURN false; END IF;\n  PERFORM 1 FROM platform.release_activation_authority_epochs AS epoch WHERE epoch.tenant_id = tenant FOR SHARE;\n  IF NOT COALESCE((\n    SELECT e.eligible FROM platform.release_approver_eligibility_events AS e\n     WHERE e.tenant_id = tenant AND e.principal_id = principal\n     ORDER BY e.policy_version DESC LIMIT 1\n  ), false) THEN RETURN false; END IF;\n  IF EXISTS (\n    SELECT 1 FROM platform.workflow_definitions AS d\n     WHERE d.tenant_id = tenant AND d.automation_principal_id = principal\n  ) THEN RETURN false; END IF;\n  SELECT p.pointer_id, p.release_id INTO active_pointer, active_release\n    FROM platform.active_release_pointers AS p\n   WHERE p.tenant_id = tenant AND p.environment_id = environment AND p.fence = requested_fence\n   FOR SHARE;\n  IF NOT FOUND THEN RETURN false; END IF;\n  PERFORM 1 FROM platform.workflow_runs AS r\n    JOIN platform.workflow_definitions AS d USING (tenant_id, environment_id, release_id, workflow_id)\n    JOIN platform.workflow_activation_watermarks AS w\n      ON (w.tenant_id, w.environment_id, w.pointer_id, w.fence, w.release_id, w.release_root) =\n         (r.tenant_id, r.environment_id, r.pointer_id, r.execution_fence, r.release_id, r.release_root)\n    JOIN platform.workflow_journal AS j ON (j.tenant_id, j.environment_id, j.run_id) = (r.tenant_id, r.environment_id, r.run_id)\n   WHERE r.tenant_id = tenant AND r.environment_id = environment AND r.run_id = requested_run\n     AND r.pointer_id = active_pointer AND r.release_id = active_release\n     AND r.execution_fence = requested_fence AND r.status = 'WAITING'\n     AND w.verified_approval_binding\n     AND w.definition_bindings->d.workflow_id->>'digest' = platform.workflow_definition_digest(d)\n     AND j.cursor = requested_cursor AND j.kind = 'REQUEST'\n     AND encode(sha256(j.canonical_bytes), 'hex') = requested_plan_digest\n     AND convert_from(j.canonical_bytes, 'UTF8')::jsonb->>'kind' = 'requestApproval'\n     AND d.automation_principal_id <> principal\n   FOR UPDATE OF r;\n  IF NOT FOUND THEN RETURN false; END IF;\n  UPDATE platform.workflow_pending_approvals AS a\n     SET status = decision, decided_by = principal, decided_at = clock_timestamp(),\n         decision_request_id = current_setting('north_star.request_id')::uuid\n   WHERE a.tenant_id = tenant AND a.environment_id = environment AND a.run_id = requested_run\n     AND a.cursor = requested_cursor AND a.fence = requested_fence\n     AND a.plan_digest = requested_plan_digest AND a.status = 'PENDING';\n  IF NOT FOUND THEN RETURN false; END IF;\n  INSERT INTO platform.workflow_journal (tenant_id, environment_id, run_id, cursor, kind, canonical_bytes)\n    VALUES (tenant, environment, requested_run, requested_cursor, 'RESULT',\n            convert_to((decision = 'APPROVED')::text, 'UTF8'))\n    ON CONFLICT DO NOTHING;\n  UPDATE platform.workflow_runs SET status = 'RUNNABLE', reason = NULL\n   WHERE tenant_id = tenant AND environment_id = environment AND run_id = requested_run;\n  RETURN true; END\n$function$\n",
       "security_definer": true,
       "leakproof": false,
       "strict": false,
@@ -30426,7 +30558,7 @@
       "language": "plpgsql",
       "owner": "postgres",
       "result_type": "boolean",
-      "definition": "CREATE OR REPLACE FUNCTION platform.workflow_lock_runnable_effect(requested_run uuid, requested_pointer uuid, requested_release uuid, requested_fence bigint, requested_effect uuid)\n RETURNS boolean\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$ BEGIN\n  PERFORM 1\n    FROM platform.workflow_runs AS r\n    JOIN platform.workflow_effect_outbox AS e USING (tenant_id, environment_id, run_id)\n    JOIN platform.workflow_definitions AS d USING (tenant_id, environment_id, release_id, workflow_id)\n    JOIN platform.workflow_activation_watermarks AS w\n      ON (w.tenant_id, w.environment_id, w.pointer_id, w.fence) =\n         (r.tenant_id, r.environment_id, r.pointer_id, r.initial_fence)\n   WHERE r.tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid\n     AND r.environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid\n     AND d.automation_principal_id = nullif(current_setting('north_star.principal_id', true), '')::uuid\n     AND r.run_id = requested_run AND r.pointer_id = requested_pointer AND r.release_id = requested_release\n     AND r.execution_fence = requested_fence AND r.status = 'RUNNABLE'\n     AND e.idempotency_key = requested_effect\n     AND w.definition_bindings->d.workflow_id->>'digest' = platform.workflow_definition_digest(d)\n   FOR UPDATE OF r;\n  RETURN FOUND; END\n$function$\n",
+      "definition": "CREATE OR REPLACE FUNCTION platform.workflow_lock_runnable_effect(requested_run uuid, requested_pointer uuid, requested_release uuid, requested_fence bigint, requested_effect uuid)\n RETURNS boolean\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$ BEGIN\n  PERFORM 1\n    FROM platform.workflow_runs AS r\n    JOIN platform.workflow_effect_outbox AS e USING (tenant_id, environment_id, run_id)\n    JOIN platform.workflow_definitions AS d USING (tenant_id, environment_id, release_id, workflow_id)\n    JOIN platform.workflow_activation_watermarks AS w\n      ON (w.tenant_id, w.environment_id, w.pointer_id, w.fence) =\n         (r.tenant_id, r.environment_id, r.pointer_id, r.initial_fence)\n   WHERE r.tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid\n     AND r.environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid\n     AND d.automation_principal_id = nullif(current_setting('north_star.principal_id', true), '')::uuid\n     AND r.run_id = requested_run AND r.pointer_id = requested_pointer AND r.release_id = requested_release\n     AND r.execution_fence = requested_fence AND r.status = 'RUNNABLE'\n     AND e.idempotency_key = requested_effect\n     AND w.verified_approval_binding\n     AND w.definition_bindings->d.workflow_id->>'digest' = platform.workflow_definition_digest(d)\n   FOR UPDATE OF r;\n  RETURN FOUND; END\n$function$\n",
       "security_definer": true,
       "leakproof": false,
       "strict": false,
@@ -30483,7 +30615,7 @@
       "language": "sql",
       "owner": "postgres",
       "result_type": "boolean",
-      "definition": "CREATE OR REPLACE FUNCTION platform.workflow_subscribed_at_active_fence(requested_tenant uuid, requested_environment uuid, requested_event text)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$\n  SELECT EXISTS (\n    SELECT 1 FROM platform.active_release_pointers AS p\n    JOIN platform.workflow_activation_watermarks AS w USING (tenant_id, environment_id, pointer_id, fence, release_id)\n    CROSS JOIN LATERAL jsonb_each(w.definition_bindings) AS binding(id, value)\n    WHERE p.tenant_id = requested_tenant AND p.environment_id = requested_environment\n      AND binding.value->>'eventType' = requested_event\n  )\n  AND requested_tenant = nullif(current_setting('north_star.tenant_id', true), '')::uuid\n  AND requested_environment = nullif(current_setting('north_star.environment_id', true), '')::uuid\n$function$\n",
+      "definition": "CREATE OR REPLACE FUNCTION platform.workflow_subscribed_at_active_fence(requested_tenant uuid, requested_environment uuid, requested_event text)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$\n  SELECT EXISTS (\n    SELECT 1 FROM platform.active_release_pointers AS p\n    JOIN platform.workflow_activation_watermarks AS w USING (tenant_id, environment_id, pointer_id, fence, release_id)\n    CROSS JOIN LATERAL jsonb_each(w.definition_bindings) AS binding(id, value)\n    WHERE p.tenant_id = requested_tenant AND p.environment_id = requested_environment\n      AND w.verified_approval_binding\n      AND binding.value->>'eventType' = requested_event\n  )\n  AND requested_tenant = nullif(current_setting('north_star.tenant_id', true), '')::uuid\n  AND requested_environment = nullif(current_setting('north_star.environment_id', true), '')::uuid\n$function$\n",
       "security_definer": true,
       "leakproof": false,
       "strict": false,
@@ -31138,6 +31270,15 @@
     {
       "schema": "platform",
       "name": "validate_release_activation_swap_fact_set",
+      "identity_arguments": "",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_bind_release_approval",
       "identity_arguments": "",
       "grantor": "postgres",
       "grantee": "postgres",
@@ -32247,6 +32388,13 @@
     {
       "schema": "platform",
       "grantor": "postgres",
+      "grantee": "north_star_workflow_verifier",
+      "privilege_type": "USAGE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "grantor": "postgres",
       "grantee": "north_star_workflow_worker",
       "privilege_type": "USAGE",
       "is_grantable": false
@@ -32281,12 +32429,59 @@
       "owned_by_schema": "north_star_internal",
       "owned_by_relation": "schema_migrations",
       "owned_by_column": "ordinal"
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_run_poll_order",
+      "owner": "postgres",
+      "data_type": "bigint",
+      "start_value": "1",
+      "increment": "1",
+      "maximum_value": "9223372036854775807",
+      "minimum_value": "1",
+      "cache_size": "1",
+      "cycles": false,
+      "owned_by_schema": null,
+      "owned_by_relation": null,
+      "owned_by_column": null
     }
   ],
   "sequencePrivileges": [
     {
       "schema": "north_star_internal",
       "name": "schema_migrations_ordinal_seq",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "USAGE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_run_poll_order",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "USAGE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_run_poll_order",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_run_poll_order",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_run_poll_order",
       "grantor": "postgres",
       "grantee": "postgres",
       "privilege_type": "USAGE",
@@ -32407,6 +32602,15 @@
       "relation": "release_activation_verification_receipts",
       "name": "workflow_verified_activation_watermark",
       "definition": "CREATE TRIGGER workflow_verified_activation_watermark AFTER INSERT ON platform.release_activation_verification_receipts FOR EACH ROW WHEN (new.status = 'SWAPPED_VERIFIED'::text) EXECUTE FUNCTION platform.workflow_capture_watermark()",
+      "enabled": "O",
+      "deferrable": false,
+      "initially_deferred": false
+    },
+    {
+      "schema": "platform",
+      "relation": "release_approvals",
+      "name": "workflow_bind_release_approval",
+      "definition": "CREATE TRIGGER workflow_bind_release_approval BEFORE INSERT ON platform.release_approvals FOR EACH ROW EXECUTE FUNCTION platform.workflow_bind_release_approval()",
       "enabled": "O",
       "deferrable": false,
       "initially_deferred": false

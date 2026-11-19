@@ -9,6 +9,7 @@ import {
 import {
   AuthenticatedRequestRuntimeEntryAdapter,
   authorizeCurrentPolicy,
+  trustedContextForRequestRuntimeView,
   type CurrentPolicyGateway,
   type ImmutableJsonValue,
   type RequestRuntimeView,
@@ -16,6 +17,7 @@ import {
 import type { Pool } from 'pg';
 
 import {
+  MalformedSemanticOperationRequestError,
   parsePinnedOperationCatalog,
   SEMANTIC_OPERATION_REQUEST_VERSION,
   SemanticOperationGateway,
@@ -43,6 +45,7 @@ import { PostgresRequestRuntimeViewService } from './request-runtime-view-servic
 import { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
 import {
   sha256,
+  WorkflowPermanentEffectFailure,
   WorkflowEffectRefusal,
   type WorkflowGateway,
   type WorkflowRunPin,
@@ -201,6 +204,12 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
         );
         if (definition && 'readModel' in definition && definition.readModel)
           throw new WorkflowEffectRefusal('unsupported-read-model');
+        const denialRecorder = new PostgresSemanticQueryDenialRecorder(
+          this.pool,
+          actorIssuer,
+          this.pool,
+          'WORKFLOW',
+        );
         const company = definition?.legalEntityScope?.operand.parameterId;
         const selected = company && asObject(call.input)[company];
         if (
@@ -212,6 +221,12 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
               selected[0] === run.legal_entity_id
             ))
         ) {
+          await denialRecorder.recordDenied({
+            context: trustedContextForRequestRuntimeView(actor),
+            policyVersion: actor.entryPolicyVersion,
+            queryId: call.id,
+            view: actor,
+          });
           throw new WorkflowEffectRefusal('query-company-scope-refused');
         }
         const gateway = new SemanticQueryGateway(
@@ -220,12 +235,7 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
           undefined,
           undefined,
           undefined,
-          new PostgresSemanticQueryDenialRecorder(
-            this.pool,
-            actorIssuer,
-            this.pool,
-            'WORKFLOW',
-          ),
+          denialRecorder,
         );
         const request = {
           schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
@@ -266,18 +276,34 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
         throw new WorkflowEffectRefusal('confirmation-required');
       }
       const input = asObject(call.input);
-      if (
-        'legalEntityId' in input &&
-        input.legalEntityId !== run.legal_entity_id
-      )
-        throw new WorkflowEffectRefusal('operation-company-scope-refused');
-      if (
-        'relations' in input &&
-        Object.values(asObject(input.relations)).some(
-          (value) => value !== run.receipt_id,
-        )
-      )
-        throw new WorkflowEffectRefusal('operation-receipt-link-refused');
+      const denial =
+        'legalEntityId' in input && input.legalEntityId !== run.legal_entity_id
+          ? {
+              code: 'WORKFLOW_OPERATION_COMPANY_SCOPE_REFUSED',
+              reason: 'operation-company-scope-refused',
+            }
+          : 'relations' in input &&
+              Object.values(asObject(input.relations)).some(
+                (value) => value !== run.receipt_id,
+              )
+            ? {
+                code: 'WORKFLOW_OPERATION_RECEIPT_LINK_REFUSED',
+                reason: 'operation-receipt-link-refused',
+              }
+            : null;
+      if (denial) {
+        await interpreter.recordNonAccepted({
+          channel: 'WORKFLOW',
+          context: trustedContextForRequestRuntimeView(actor),
+          failureCode: denial.code,
+          operationId: call.id,
+          outcome: 'DENIED',
+          policyDecision: 'DENY',
+          policyVersion: actor.entryPolicyVersion,
+          view: actor,
+        });
+        throw new WorkflowEffectRefusal(denial.reason);
+      }
       const mediation = new SemanticOperationMediationAuthority();
       const gateway = new SemanticOperationGateway(
         intersection,
@@ -318,6 +344,14 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
               ? 'run-not-runnable'
               : 'current-policy-refused',
         );
+      if (
+        call.kind === 'operation' &&
+        (error instanceof MalformedSemanticOperationRequestError ||
+          (error instanceof ModuleRuntimeInterpreterError &&
+            (error.code !== 'MODULE_PROVIDER_FAILURE' ||
+              /^(22|23)/.test(error.providerMetadata?.sqlstate ?? ''))))
+      )
+        throw new WorkflowPermanentEffectFailure(error.code, { cause: error });
       throw error;
     }
   }

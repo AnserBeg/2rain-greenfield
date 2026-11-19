@@ -303,7 +303,8 @@ export async function verifiedWorkflowWatermark(
     (
       await client.query<Watermark>(
         `SELECT release_root, definition_bindings FROM platform.workflow_activation_watermarks
-      WHERE tenant_id = $1 AND environment_id = $2 AND pointer_id = $3 AND fence = $4 AND release_id = $5`,
+      WHERE tenant_id = $1 AND environment_id = $2 AND pointer_id = $3 AND fence = $4 AND release_id = $5
+        AND verified_approval_binding`,
         [
           scope.tenant_id,
           scope.environment_id,

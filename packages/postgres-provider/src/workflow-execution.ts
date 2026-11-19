@@ -94,6 +94,7 @@ interface JournalRow {
   readonly kind: 'REQUEST' | 'RESULT';
   readonly canonical_bytes: Buffer;
   readonly idempotency_key: string | null;
+  readonly approval_status: 'APPROVED' | 'DECLINED' | null;
 }
 
 export interface WorkflowGateway {
@@ -111,6 +112,10 @@ export interface WorkflowGateway {
 
 export class WorkflowEffectRefusal extends Error {
   override readonly name = 'WorkflowEffectRefusal';
+}
+
+export class WorkflowPermanentEffectFailure extends Error {
+  override readonly name = 'WorkflowPermanentEffectFailure';
 }
 
 type Dispatch = {
@@ -137,9 +142,17 @@ export class PostgresWorkflowExecution {
       async (client) =>
         (
           await client.query<{ run_id: string }>(
-            `SELECT run_id FROM platform.workflow_runs
-          WHERE tenant_id = $1 AND environment_id = $2 AND status = 'RUNNABLE'
-          ORDER BY created_at, run_id LIMIT 16`,
+            `WITH batch AS MATERIALIZED (
+               SELECT run_id, poll_order, created_at FROM platform.workflow_runs
+                WHERE tenant_id = $1 AND environment_id = $2 AND status = 'RUNNABLE'
+                ORDER BY poll_order, created_at, run_id LIMIT 16 FOR UPDATE SKIP LOCKED
+             ), rotated AS (
+               UPDATE platform.workflow_runs AS r
+                  SET poll_order = nextval('platform.workflow_run_poll_order')
+                 FROM batch
+                WHERE r.tenant_id = $1 AND r.environment_id = $2 AND r.run_id = batch.run_id
+             )
+             SELECT run_id FROM batch ORDER BY poll_order, created_at, run_id`,
             [scope.tenant_id, scope.environment_id],
           )
         ).rows,
@@ -162,16 +175,20 @@ export class PostgresWorkflowExecution {
     const snapshot = await this.#snapshot(scope, runId);
     if (!snapshot || snapshot.run.status !== 'RUNNABLE') return;
     const { run, journal } = snapshot;
-    const pending = journal.pending && { ...journal.pending, run };
+    const pending = pendingDispatch(run, journal);
     const recovered = pending && (await this.#readReceipt(pending));
     const decision =
-      recovered || !matchesPin(run, snapshot.pointer)
+      journal.invalid || recovered || !matchesPin(run, snapshot.pointer)
         ? null
         : await this.#replay(run, journal);
     const dispatch = await this.#withCurrent(
       run,
       journal,
       async (client, current, pointer) => {
+        if (journal.invalid) {
+          await setStatus(client, current, 'QUARANTINED', journal.invalid);
+          return null;
+        }
         if (pending && recovered) {
           await persistEffectResult(client, current, pending, recovered);
           return null;
@@ -199,7 +216,32 @@ export class PostgresWorkflowExecution {
           return null;
         }
         const { call, cursor } = decision;
-        if (call.kind !== 'query' && call.kind !== 'operation') {
+        if (call.kind === 'requestApproval') {
+          const plan = canonicalize(call);
+          if (!journal.pending)
+            await insertJournal(client, current, cursor, 'REQUEST', call);
+          await client.query(
+            `INSERT INTO platform.workflow_pending_approvals
+               (tenant_id, environment_id, run_id, cursor, fence, plan, plan_digest)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             ON CONFLICT (tenant_id, environment_id, run_id, cursor, fence) DO NOTHING`,
+            [
+              ...runKey(current),
+              cursor,
+              current.execution_fence,
+              Buffer.from(plan),
+              sha256(plan),
+            ],
+          );
+          await setStatus(
+            client,
+            current,
+            'WAITING',
+            'human-approval-required',
+          );
+          return null;
+        }
+        if (!isEffect(call)) {
           await setStatus(
             client,
             current,
@@ -240,7 +282,11 @@ export class PostgresWorkflowExecution {
     try {
       result = await this.gateway.dispatch(run, call, idempotencyKey);
     } catch (error) {
-      if (!(error instanceof WorkflowEffectRefusal)) throw error;
+      if (!(
+        error instanceof WorkflowEffectRefusal ||
+        error instanceof WorkflowPermanentEffectFailure
+      ))
+        throw error;
       const recovered = await this.#readReceipt(dispatch);
       await this.#withCurrent(
         run,
@@ -252,7 +298,10 @@ export class PostgresWorkflowExecution {
             await setStatus(
               client,
               current,
-              'SUSPENDED',
+              error instanceof WorkflowPermanentEffectFailure &&
+                matchesPin(current, pointer)
+                ? 'QUARANTINED'
+                : 'SUSPENDED',
               matchesPin(current, pointer)
                 ? error.message
                 : 'stale-release-pin',
@@ -296,9 +345,8 @@ export class PostgresWorkflowExecution {
       const snapshot = await this.#snapshot(scope, runId);
       const pending =
         snapshot?.run.status === 'SUSPENDED' &&
-        snapshot.run.reason !== 'oversized-effect-result' &&
-        snapshot.journal.pending
-          ? { ...snapshot.journal.pending, run: snapshot.run }
+        snapshot.run.reason !== 'oversized-effect-result'
+          ? pendingDispatch(snapshot.run, snapshot.journal)
           : null;
       const recovered = pending && (await this.#readReceipt(pending));
       // Hold current operator authority through each committed transition.
@@ -431,11 +479,7 @@ export class PostgresWorkflowExecution {
           WHERE tenant_id = $1 AND environment_id = $2 AND run_id = $3 AND kind IN ('REQUEST', 'RESULT')`,
           runKey(snapshot),
         );
-        if (
-          counts[0]?.count !==
-          journal.prefix.length * 2 + Number(journal.pending !== null)
-        )
-          return null;
+        if (counts[0]?.count !== journal.rowCount) return null;
         return work(client, snapshot, pointer);
       },
     );
@@ -472,11 +516,22 @@ export class PostgresWorkflowExecution {
       };
       const workflow = { executable: run.executable.toString(), sdk };
       const base = new InMemoryWorkflowRun(workflow, event);
-      return await new InMemoryWorkflowRun(workflow, event, {
+      const decision = await new InMemoryWorkflowRun(workflow, event, {
         ...base.snapshot(),
         prefix: journal.prefix,
-        pending: journal.pending && canonicalize(journal.pending.call),
       }).step();
+      if (
+        journal.pending &&
+        (decision.kind !== 'call' ||
+          decision.cursor !== journal.pending.cursor ||
+          canonicalize(decision.call) !== canonicalize(journal.pending.call))
+      ) {
+        return {
+          kind: 'QUARANTINED' as const,
+          reason: 'changed-pending-request',
+        };
+      }
+      return decision;
     } catch (error) {
       if (error instanceof WorkflowEffectRefusal)
         return { kind: 'SUSPENDED' as const, reason: error.message };
@@ -567,15 +622,20 @@ async function loadRun(
         `SELECT r.*, d.executable, d.sdk_digest, d.grants, d.engine_build, d.host_version, d.sdk_version,
              d.automation_principal_id, i.legal_entity_id, i.receipt_id, i.event_id, i.trigger_principal_id,
              w.approver_id, w.approver_grants,
-             CASE WHEN w.definition_bindings->d.workflow_id->>'digest' = platform.workflow_definition_digest(d)
+             CASE WHEN w.verified_approval_binding AND active.verified_approval_binding
+                    AND w.definition_bindings->d.workflow_id->>'digest' = platform.workflow_definition_digest(d)
+                    AND active.definition_bindings->d.workflow_id->>'digest' = w.definition_bindings->d.workflow_id->>'digest'
                   THEN w.definition_bindings->d.workflow_id->>'digest' END AS verified_digest,
-             COALESCE(w.definition_bindings->d.workflow_id->'unattendedOperations', '{}'::jsonb) AS unattended_operations
+             COALESCE(active.definition_bindings->d.workflow_id->'unattendedOperations', '{}'::jsonb) AS unattended_operations
         FROM platform.workflow_runs AS r
         JOIN platform.workflow_instances AS i USING (tenant_id, environment_id, instance_id, workflow_id)
         JOIN platform.workflow_definitions AS d USING (tenant_id, environment_id, release_id, workflow_id)
         JOIN platform.workflow_activation_watermarks AS w
           ON w.tenant_id = r.tenant_id AND w.environment_id = r.environment_id
          AND w.pointer_id = r.pointer_id AND w.fence = r.initial_fence
+        JOIN platform.workflow_activation_watermarks AS active
+          ON (active.tenant_id, active.environment_id, active.pointer_id, active.fence, active.release_id, active.release_root) =
+             (r.tenant_id, r.environment_id, r.pointer_id, r.execution_fence, r.release_id, r.release_root)
        WHERE r.tenant_id = $1 AND r.environment_id = $2 AND r.run_id = $3`,
         [scope.tenant_id, scope.environment_id, runId],
       )
@@ -588,47 +648,100 @@ async function loadJournal(
   run: Run,
 ): Promise<{
   prefix: { request: string; result: string }[];
-  pending: Omit<Dispatch, 'run'> | null;
+  pending: {
+    cursor: number;
+    call: WorkflowCall;
+    idempotencyKey: string | null;
+  } | null;
+  rowCount: number;
+  invalid: string | null;
 }> {
   const journal = await client.query<JournalRow>(
-    `SELECT j.cursor, j.kind, j.canonical_bytes, e.idempotency_key
+    `SELECT j.cursor, j.kind, j.canonical_bytes, e.idempotency_key, a.status AS approval_status
        FROM platform.workflow_journal AS j
        LEFT JOIN platform.workflow_effect_outbox AS e
          ON e.tenant_id = j.tenant_id AND e.environment_id = j.environment_id
         AND e.run_id = j.run_id AND e.cursor = j.cursor AND e.request_journal_id = j.journal_id
+       LEFT JOIN platform.workflow_pending_approvals AS a
+         ON (a.tenant_id, a.environment_id, a.run_id, a.cursor) =
+            (j.tenant_id, j.environment_id, j.run_id, j.cursor)
+        AND a.fence = $4 AND j.kind = 'REQUEST'
+        AND a.plan_digest = encode(sha256(j.canonical_bytes), 'hex') AND a.plan = j.canonical_bytes
+        AND a.decision_request_id IS NOT NULL AND a.status IN ('APPROVED', 'DECLINED')
       WHERE j.tenant_id = $1 AND j.environment_id = $2 AND j.run_id = $3 AND j.kind <> 'CONTROL'
       ORDER BY j.cursor, j.kind`,
-    runKey(run),
+    [...runKey(run), run.execution_fence],
   );
   const prefix: { request: string; result: string }[] = [];
+  const state = {
+    prefix,
+    rowCount: journal.rows.length,
+    pending: null,
+    invalid: null,
+  };
   for (let index = 0; index < journal.rows.length; index += 2) {
     const request = journal.rows[index]!;
     const result = journal.rows[index + 1];
+    if (request.kind !== 'REQUEST' || request.cursor !== prefix.length)
+      return { ...state, invalid: 'noncontiguous-journal-request' };
+
+    const bytes = request.canonical_bytes.toString();
+    let call: WorkflowCall;
+    try {
+      call = JSON.parse(bytes) as WorkflowCall;
+      if (
+        !call ||
+        typeof call.kind !== 'string' ||
+        canonicalize(call) !== bytes
+      )
+        return { ...state, invalid: 'invalid-journal-request' };
+    } catch {
+      return { ...state, invalid: 'invalid-journal-request' };
+    }
     if (
-      request.kind !== 'REQUEST' ||
-      request.cursor !== prefix.length ||
-      !request.idempotency_key
+      isEffect(call) &&
+      request.idempotency_key !==
+        workflowEffectId(run.instance_id, request.cursor)
     )
-      throw new Error(
-        'Workflow journal has a missing or noncontiguous request',
-      );
+      return { ...state, invalid: 'invalid-effect-binding' };
     if (!result)
       return {
-        prefix,
+        ...state,
         pending: {
           cursor: request.cursor,
-          call: JSON.parse(request.canonical_bytes.toString()) as EffectCall,
+          call,
           idempotencyKey: request.idempotency_key,
         },
       };
     if (result.kind !== 'RESULT' || result.cursor !== request.cursor)
-      throw new Error('Workflow journal result is not paired with its request');
+      return { ...state, invalid: 'unpaired-journal-result' };
+    // The journal can report an outcome but cannot grant human approval.
+    if (call.kind === 'requestApproval' && !request.approval_status)
+      return { ...state, invalid: 'approval-result-without-decision' };
     prefix.push({
-      request: request.canonical_bytes.toString(),
-      result: result.canonical_bytes.toString(),
+      request: bytes,
+      result:
+        call.kind === 'requestApproval'
+          ? canonicalize(request.approval_status === 'APPROVED')
+          : result.canonical_bytes.toString(),
     });
   }
-  return { prefix, pending: null };
+  return state;
+}
+
+function pendingDispatch(run: Run, journal: Journal): Dispatch | null {
+  const pending = journal.pending;
+  if (!pending?.idempotencyKey || !isEffect(pending.call)) return null;
+  return {
+    run,
+    cursor: pending.cursor,
+    call: pending.call,
+    idempotencyKey: pending.idempotencyKey,
+  };
+}
+
+function isEffect(call: WorkflowCall): call is EffectCall {
+  return call.kind === 'query' || call.kind === 'operation';
 }
 
 async function insertJournal(

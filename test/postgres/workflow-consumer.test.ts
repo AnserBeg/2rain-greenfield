@@ -39,7 +39,8 @@ import {
 import { PostgresWorkflowGateway } from '../../packages/postgres-provider/src/workflow-gateway.js';
 import { generateWorkflowSdk } from '../../packages/postgres-provider/src/workflow-sdk.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
-import { parsePinnedOperationCatalog } from '../../packages/runtime/src/semantic-operation-gateway.js';
+import { PostgresImmutableReleaseRepository } from '../../packages/postgres-provider/src/release-repository.js';
+import { recordVerifiedWorkflow } from '../../packages/postgres-provider/src/workflow-verification.js';
 import {
   registeredSemanticQueryFromPinnedView,
   SEMANTIC_QUERY_REQUEST_VERSION,
@@ -181,20 +182,6 @@ test(
               }),
             /Workflow query grant does not resolve/,
           );
-          const operationDefinition = parsePinnedOperationCatalog(
-            view.projections.operation.payload,
-          ).find((definition) => definition.operationId === operation)!;
-          const proof = {
-            [operation]: {
-              releaseRoot: view.release.contentHash,
-              operationDigest: sha256(canonicalize(operationDefinition)),
-              inputContractDigest: sha256(
-                canonicalize(operationDefinition.inputContract),
-              ),
-              reachableWriteEntities: [entity],
-              tierBIntersections: [],
-            },
-          };
           const body = `sdk.operation('${operation}', { recordId: event.receiptId, values: {
         'northstar.app:field.custom_receipt_review_name': 'Pending',
         'northstar.app:field.custom_receipt_review_receipt_reference': event.receiptId
@@ -233,14 +220,71 @@ test(
               JSON.stringify(grants),
             ],
           );
-          await verifyFixtureDefinition(
+          const release = await new PostgresImmutableReleaseRepository(
+            runtimePool,
+          ).getTenantRelease(operator, enrolled.releaseId);
+          assert.ok(release);
+          const verify = async (id: string, asRuntime = false) => {
+            const definition = (
+              await pool.query<{ digest: string }>(
+                `SELECT platform.workflow_definition_digest(d) AS digest FROM platform.workflow_definitions AS d
+                  WHERE release_id = $1 AND workflow_id = $2`,
+                [enrolled.releaseId, id],
+              )
+            ).rows[0]!;
+            const client = await pool.connect();
+            try {
+              await client.query('BEGIN');
+              await client.query(
+                "SELECT set_config('north_star.tenant_id', $1, true), set_config('north_star.environment_id', $2, true)",
+                [tenantId, environmentId],
+              );
+              await client.query(
+                asRuntime
+                  ? 'SET LOCAL ROLE north_star_runtime'
+                  : 'SET LOCAL ROLE north_star_workflow_verifier',
+              );
+              await recordVerifiedWorkflow(
+                client,
+                release,
+                { id, digest: definition.digest, grants },
+                Buffer.from('{}'),
+              );
+              await client.query('COMMIT');
+            } catch (error) {
+              await client.query('ROLLBACK');
+              throw error;
+            } finally {
+              client.release();
+            }
+          };
+          await verify('receipt-review');
+          await service.approve(draft.patchId);
+          await cloneDefinition(
             pool,
             enrolled.releaseId,
-            'receipt-review',
-            proof,
+            'late-verified-definition',
+            undefined,
+            'northstar.app:event.test_only',
           );
-          await service.approve(draft.patchId);
+          await assert.rejects(verify('late-verified-definition', true), {
+            code: '42501',
+          });
+          await verify('late-verified-definition');
           await service.activate(draft.patchId);
+          assert.deepEqual(
+            (
+              await pool.query<{ workflow_id: string }>(
+                `SELECT jsonb_object_keys(w.definition_bindings) AS workflow_id
+                 FROM platform.workflow_activation_watermarks AS w
+                 JOIN platform.active_release_pointers AS p USING (tenant_id, environment_id, pointer_id, fence, release_id)
+                WHERE w.tenant_id = $1 AND w.environment_id = $2`,
+                [tenantId, environmentId],
+              )
+            ).rows,
+            [{ workflow_id: 'receipt-review' }],
+            'verification after approval cannot change the approved set',
+          );
           await cloneDefinition(pool, enrolled.releaseId, 'late-definition');
           assert.equal(
             (
@@ -492,6 +536,45 @@ test(
             1,
           );
 
+          await assert.rejects(
+            gateways.dispatch(
+              dispatchPin,
+              {
+                kind: 'query',
+                id: queryId,
+                input: { [companyParameter]: randomUUID() },
+              },
+              randomUUID(),
+            ),
+            /query-company-scope-refused/,
+          );
+          assert.equal(
+            (
+              await pool.query(
+                `SELECT 1 FROM platform.trust_action_invocations WHERE action_id = $1
+                AND execution_principal_id = $2 AND outcome = 'DENIED' AND channel = 'WORKFLOW'`,
+                [queryId, automation.principalId],
+              )
+            ).rowCount,
+            2,
+            'cross-company refusal commits audit evidence before returning',
+          );
+
+          const duplicate = await newRun();
+          const duplicateReceipt = await latestReceipt(pool, tenantId);
+          await world.invoke('custom_receipt_review_create', {
+            recordId: duplicateReceipt.receipt_id,
+            values: {
+              'northstar.app:field.custom_receipt_review_name':
+                'Already recorded',
+              'northstar.app:field.custom_receipt_review_receipt_reference':
+                duplicateReceipt.receipt_id,
+            },
+          });
+          await restarted.step(scope, duplicate);
+          assert.equal(await runStatus(pool, duplicate), 'QUARANTINED');
+          assert.equal(await operationReceiptCount(pool, duplicate), 0);
+
           const oversized = await newRun();
           await stageOversizedReceipt(pool, oversized);
           await restarted.step(scope, oversized);
@@ -508,14 +591,6 @@ test(
             ).rowCount,
             1,
           );
-          await assertApprovalBoundary(
-            pool,
-            workerPool,
-            runtimePool,
-            operator,
-            oversized,
-          );
-
           await service.rollback();
           await withWorkflowTransaction(workerPool, scope, async (client) => {
             const { rows } = await client.query<{ count: number }>(
@@ -537,12 +612,7 @@ test(
               sdk,
             ).executable,
           );
-          await verifyFixtureDefinition(
-            pool,
-            enrolled.releaseId,
-            'permanent-guest-error',
-            {},
-          );
+          await verify('permanent-guest-error');
           await service.approve(draft.patchId);
           await service.activate(draft.patchId);
 
@@ -656,6 +726,84 @@ test(
             await scheduled.close();
           }
 
+          await service.rollback();
+          await cloneDefinition(
+            pool,
+            enrolled.releaseId,
+            'human-approval',
+            compileWorkflowBody(
+              `if (sdk.requestApproval('Escalate')) { ${body} }`,
+              sdk,
+            ).executable,
+          );
+          await verify('human-approval');
+          await service.approve(draft.patchId);
+          await service.activate(draft.patchId);
+          const startApproval = async () => {
+            await postReceipt(world);
+            const receipt = await latestReceipt(pool, tenantId);
+            assert.equal(await consumer.claim(scope), 3);
+            const runId = await runFor(
+              pool,
+              receipt.outbox_id,
+              'human-approval',
+            );
+            await restarted.step(scope, runId);
+            assert.equal(await runStatus(pool, runId), 'WAITING');
+            return runId;
+          };
+
+          const forged = await startApproval();
+          await writeAdversarialApprovalResult(
+            workerPool,
+            scope,
+            forged,
+            true,
+            true,
+          );
+          await restarted.step(scope, forged);
+          assert.equal(await runStatus(pool, forged), 'QUARANTINED');
+          assert.equal(await journalCount(pool, forged, 'REQUEST'), 1);
+
+          const declined = await startApproval();
+          await writeAdversarialApprovalResult(
+            workerPool,
+            scope,
+            declined,
+            true,
+            false,
+          );
+          await assertApprovalBoundary(
+            pool,
+            workerPool,
+            runtimePool,
+            operator,
+            declined,
+            'DECLINED',
+          );
+          await restarted.step(scope, declined);
+          assert.equal(await runStatus(pool, declined), 'COMPLETED');
+          assert.equal(await journalCount(pool, declined, 'REQUEST'), 1);
+
+          const accepted = await startApproval();
+          await writeAdversarialApprovalResult(
+            workerPool,
+            scope,
+            accepted,
+            false,
+            false,
+          );
+          await assertApprovalBoundary(
+            pool,
+            workerPool,
+            runtimePool,
+            operator,
+            accepted,
+            'APPROVED',
+          );
+          await restarted.step(scope, accepted);
+          assert.equal(await journalCount(pool, accepted, 'REQUEST'), 2);
+
           const revokeDuringBulk = new PostgresWorkflowExecution(
             workerPool,
             runtimePool,
@@ -726,12 +874,16 @@ async function latestReceipt(
   return result.rows[0];
 }
 
-async function runFor(pool: pg.Pool, outbox: string): Promise<string> {
+async function runFor(
+  pool: pg.Pool,
+  outbox: string,
+  id = 'receipt-review',
+): Promise<string> {
   const result = await pool.query<{ run_id: string }>(
     `SELECT r.run_id FROM platform.workflow_runs AS r
       JOIN platform.workflow_instances AS i USING (tenant_id, environment_id, instance_id)
-     WHERE i.outbox_id = $1 AND r.workflow_id = 'receipt-review'`,
-    [outbox],
+     WHERE i.outbox_id = $1 AND r.workflow_id = $2`,
+    [outbox, id],
   );
   assert.equal(result.rowCount, 1);
   return result.rows[0]!.run_id;
@@ -932,10 +1084,11 @@ async function cloneDefinition(
   releaseId: string,
   id: string,
   executable?: string,
+  eventType?: string,
 ) {
   await pool.query(
     `INSERT INTO platform.workflow_definitions
-     SELECT tenant_id, environment_id, release_id, $2, event_type, body_digest,
+     SELECT tenant_id, environment_id, release_id, $2, COALESCE($5, event_type), body_digest,
             COALESCE($3, executable), COALESCE($4, executable_digest),
             sdk_digest, engine_build, host_version, sdk_version,
             automation_principal_id, authored_by, grants
@@ -945,27 +1098,8 @@ async function cloneDefinition(
       id,
       executable === undefined ? null : Buffer.from(executable),
       executable === undefined ? null : sha256(executable),
+      eventType ?? null,
     ],
-  );
-}
-
-async function verifyFixtureDefinition(
-  pool: pg.Pool,
-  releaseId: string,
-  workflowId: string,
-  proof: unknown,
-) {
-  await pool.query(
-    `INSERT INTO platform.workflow_verification_evidence (
-       tenant_id, environment_id, verification_evidence_id, workflow_id,
-       binding_digest, result_bytes, unattended_operations
-     )
-     SELECT d.tenant_id, d.environment_id, r.verification_evidence_id, d.workflow_id,
-            platform.workflow_definition_digest(d), convert_to('{}', 'UTF8'), $3
-       FROM platform.workflow_definitions AS d
-       JOIN platform.tenant_releases AS r USING (tenant_id, environment_id, release_id)
-      WHERE d.release_id = $1 AND d.workflow_id = $2`,
-    [releaseId, workflowId, JSON.stringify(proof)],
   );
 }
 
@@ -1024,28 +1158,48 @@ async function stageOversizedReceipt(pool: pg.Pool, runId: string) {
   assert.equal(result.rowCount, 1);
 }
 
+async function writeAdversarialApprovalResult(
+  workerPool: pg.Pool,
+  scope: { tenant_id: string; environment_id: string },
+  runId: string,
+  result: boolean,
+  resume: boolean,
+) {
+  await withWorkflowTransaction(workerPool, scope, async (client) => {
+    await client.query(
+      `INSERT INTO platform.workflow_journal (tenant_id, environment_id, run_id, cursor, kind, canonical_bytes)
+        VALUES ($1, $2, $3, 0, 'RESULT', convert_to($4, 'UTF8'))`,
+      [scope.tenant_id, scope.environment_id, runId, String(result)],
+    );
+    if (resume)
+      await client.query(
+        "UPDATE platform.workflow_runs SET status = 'RUNNABLE', reason = NULL WHERE run_id = $1",
+        [runId],
+      );
+  });
+}
+
 async function assertApprovalBoundary(
   pool: pg.Pool,
   workerPool: pg.Pool,
   runtimePool: pg.Pool,
   operator: Awaited<ReturnType<typeof trustedContext>>,
   runId: string,
+  decision: 'APPROVED' | 'DECLINED',
 ) {
   const scope = {
     tenant_id: operator.tenantId,
     environment_id: operator.environmentId,
   };
-  await pool.query(
-    "UPDATE platform.workflow_runs SET status = 'WAITING', reason = NULL WHERE run_id = $1",
-    [runId],
-  );
   const fence = (
     await pool.query<{ execution_fence: string }>(
       'SELECT execution_fence FROM platform.workflow_runs WHERE run_id = $1',
       [runId],
     )
   ).rows[0]!.execution_fence;
-  const digest = sha256('{"summary":"Escalate"}');
+  const digest = sha256(
+    canonicalize({ kind: 'requestApproval', summary: 'Escalate' }),
+  );
   await withWorkflowTransaction(workerPool, scope, async (client) => {
     const { rows } = await client.query<{
       insert_status: boolean;
@@ -1061,19 +1215,6 @@ async function assertApprovalBoundary(
       update_decision: false,
       read_changes: false,
     });
-    await client.query(
-      `INSERT INTO platform.workflow_pending_approvals
-        (tenant_id, environment_id, run_id, cursor, fence, plan, plan_digest)
-       VALUES ($1, $2, $3, 0, $4, $5, $6)`,
-      [
-        scope.tenant_id,
-        scope.environment_id,
-        runId,
-        fence,
-        Buffer.from('{"summary":"Escalate"}'),
-        digest,
-      ],
-    );
   });
   const decide = (planDigest: string, activeFence: string) =>
     withTrustedRequestTransaction(
@@ -1082,8 +1223,8 @@ async function assertApprovalBoundary(
       async (client) =>
         (
           await client.query<{ decided: boolean }>(
-            "SELECT platform.workflow_decide_approval($1, 0, $2, $3, 'APPROVED') AS decided",
-            [runId, activeFence, planDigest],
+            'SELECT platform.workflow_decide_approval($1, 0, $2, $3, $4) AS decided',
+            [runId, activeFence, planDigest, decision],
           )
         ).rows[0]!.decided,
     );
