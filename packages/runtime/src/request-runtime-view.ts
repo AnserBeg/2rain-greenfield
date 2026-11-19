@@ -27,6 +27,7 @@ export const REQUEST_RUNTIME_PROJECTION_FAMILIES = Object.freeze({
   operation: 'northstar.compiler:projection-family.operation-catalog',
   query: 'northstar.compiler:projection-family.query-catalog',
   surface: 'northstar.compiler:projection-family.surface-manifest',
+  workflow: 'northstar.compiler:projection-family.workflow',
 } as const);
 
 export type RequestRuntimeProjectionFamily =
@@ -187,7 +188,11 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // up to twelve steps whose per-row steps read their row's read-backs
     // (SALES-EXTRAS, which numbered it 15 in parallel; renumbered by
     // INTEGRATION after its ADR-0066 re-baseline).
-    maximumSupportedVersion: 23,
+    maximumSupportedVersion: 26,
+  },
+  [REQUEST_RUNTIME_PROJECTION_FAMILIES.workflow]: {
+    capabilityId: 'northstar.runtime:capability.workflow',
+    maximumSupportedVersion: 1,
   },
 });
 
@@ -269,6 +274,7 @@ export interface LoadedRequestRuntimeDefinition {
     readonly surface: RuntimeProjection<
       typeof REQUEST_RUNTIME_PROJECTION_FAMILIES.surface
     >;
+    readonly workflow?: RuntimeProjection<typeof REQUEST_RUNTIME_PROJECTION_FAMILIES.workflow>;
   };
   readonly release: {
     readonly contentHash: string;
@@ -926,6 +932,9 @@ function constructRequestRuntimeView(
       definition.projections.surface,
       REQUEST_RUNTIME_PROJECTION_FAMILIES.surface,
     ),
+    ...(definition.projections.workflow
+      ? { workflow: cloneProjection(definition.projections.workflow, REQUEST_RUNTIME_PROJECTION_FAMILIES.workflow) }
+      : {}),
   });
   const view: RequestRuntimeView = Object.freeze({
     entryPolicyVersion: policyEvidence.policyVersion,

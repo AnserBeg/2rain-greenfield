@@ -14,6 +14,7 @@ import {
 } from '@north-star/canonical-model';
 
 import { hashCanonical } from './hash.js';
+import { WORKFLOW_PROJECTION_VERSION } from './workflows.js';
 import { lowerQueryPredicate } from './predicate-lowering.js';
 import {
   lowerStorageTargetV1,
@@ -91,6 +92,7 @@ const payloadSchemaVersions: Record<
   [PROJECTION_FAMILY_IDS.surfaceManifest]:
     FLAT_SURFACE_MANIFEST_PAYLOAD_VERSION,
   [PROJECTION_FAMILY_IDS.verificationPlan]: VERIFICATION_PLAN_PAYLOAD_VERSION,
+  [PROJECTION_FAMILY_IDS.workflow]: WORKFLOW_PROJECTION_VERSION,
 };
 
 const MAX_PRIMARY_NAVIGATION_ENTRIES = 5;
@@ -133,6 +135,10 @@ const runtimeCapabilities: Record<
   },
   [PROJECTION_FAMILY_IDS.verificationPlan]: {
     capabilityId: 'northstar.runtime:capability.verification-plan',
+    minimumVersion: 1,
+  },
+  [PROJECTION_FAMILY_IDS.workflow]: {
+    capabilityId: 'northstar.runtime:capability.workflow',
     minimumVersion: 1,
   },
 };
@@ -195,7 +201,7 @@ export function lowerBaseProjectionPayloads(
       PROJECTION_FAMILY_IDS.semanticModel,
       namespace,
       packageScope,
-      semanticModelPayload(packageRevision),
+      semanticModelPayload(packageRevision, verificationPackageRevision),
     ),
     plan(
       PROJECTION_FAMILY_IDS.storageTarget,
@@ -350,6 +356,7 @@ function plan(
 
 function semanticModelPayload(
   packageRevision: NormalizedApplicationPackage,
+  original: VersionedNormalizedApplicationPackage,
 ): unknown {
   const constructs: Array<{
     constructKind: string;
@@ -381,6 +388,9 @@ function semanticModelPayload(
   addFamily(constructs, packageRevision.assertions, 'assertionId');
   addFamily(constructs, packageRevision.storageMappings, 'storageMappingId');
   addFamily(constructs, packageRevision.capabilityRequirements, 'capabilityId');
+  for (const workflow of ('workflows' in original ? original.workflows : undefined) ?? []) {
+    add('workflowDefinition', workflow.workflowId, workflow);
+  }
   for (const machine of packageRevision.stateMachines) {
     add(machine.kind, machine.machineId, machine);
     for (const state of machine.states) add(state.kind, state.stateId, state);

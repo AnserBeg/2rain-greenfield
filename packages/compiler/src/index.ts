@@ -13,6 +13,7 @@ export {
 } from './compiler.js';
 export { COMPILER_DIAGNOSTIC_COPY } from './diagnostics.js';
 export { diffCompiledReleases } from './diff.js';
+export * from './workflows.js';
 export {
   PREDICATE_LOWERING_TABLE,
   lowerQueryPredicate,

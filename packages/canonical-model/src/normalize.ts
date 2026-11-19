@@ -193,6 +193,17 @@ export function normalizeApplicationPackage(
   const queryContracts = deriveQueryContracts(authored);
 
   const normalizedCandidate = {
+    ...('workflows' in authored && authored.workflows
+      ? {
+          workflows: sortById(authored.workflows, 'workflowId').map((workflow) => ({
+            ...workflow,
+            grants: {
+              queries: sortedStrings(workflow.grants.queries),
+              operations: sortedStrings(workflow.grants.operations),
+            },
+          })),
+        }
+      : {}),
     assertions: authored.assertions.map((entry) => ({
       ...entry,
       evidenceKinds: sortedStrings(entry.evidenceKinds),
@@ -519,7 +530,7 @@ export function canonicalAuthoredProjection(
   delete projected.canonicalizationProfileVersion;
   delete projected.hashAlgorithm;
   delete projected.normalizationProfileVersion;
-  visitObjects(projected, (object) => {
+  visitObjects({ ...projected, workflows: undefined }, (object) => {
     if (object.lifecycle === IMMUTABLE_DEFAULTS_V0.lifecycle) {
       delete object.lifecycle;
     }
@@ -887,7 +898,7 @@ function validateSemantics(
 ): void {
   const diagnostics: CanonicalDiagnostic[] = [];
   const namespace = packageRevision.package.namespace;
-  visitObjects(packageRevision, (object) => {
+  visitObjects({ ...packageRevision, workflows: undefined }, (object) => {
     if (
       typeof object.schemaVersion === 'string' &&
       object.schemaVersion !== packageRevision.languageVersion
@@ -1807,6 +1818,11 @@ function validateSetCollections(
   packageRevision: VersionedNormalizedApplicationPackage,
   diagnostics: CanonicalDiagnostic[],
 ): void {
+  for (const workflow of ('workflows' in packageRevision ? packageRevision.workflows : undefined) ?? []) {
+    for (const key of ['queries', 'operations'] as const) {
+      rejectDuplicateStrings(workflow.grants[key], `$.workflows.grants.${key}`, workflow.workflowId, diagnostics);
+    }
+  }
   for (const surface of packageRevision.surfaces) {
     rejectDuplicateStrings(
       surface.statusRoles,
@@ -2400,6 +2416,9 @@ function collectIds(
   packageRevision: VersionedNormalizedApplicationPackage,
 ): Record<string, string[]> {
   return {
+    ...('workflows' in packageRevision && packageRevision.workflows
+      ? { workflows: packageRevision.workflows.map((workflow) => workflow.workflowId) }
+      : {}),
     package: [packageRevision.package.packageId],
     modules: packageRevision.modules.map((entry) => entry.moduleId),
     entities: packageRevision.entities.map((entry) => entry.entityId),

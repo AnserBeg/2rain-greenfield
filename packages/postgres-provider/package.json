@@ -31,7 +31,8 @@
     "@north-star/observability": "workspace:*",
     "@north-star/platform-runtime": "workspace:*",
     "@north-star/runtime": "workspace:*",
-    "pg": "^8.22.0"
+    "pg": "^8.22.0",
+    "quickjs-emscripten": "0.32.0"
   },
   "devDependencies": {
     "@types/pg": "^8.20.0"

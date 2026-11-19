@@ -2581,6 +2581,42 @@ const authoredV6QueryDefinition = z.union([
   authoredV4AggregateQueryDefinition,
 ]);
 
+export const WorkflowHostCallSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('now') }),
+  z.strictObject({ kind: z.literal('sleep'), milliseconds: z.int().min(0).max(30 * 86_400_000) }),
+  z.strictObject({ kind: z.literal('waitForEvent'), eventType: z.literal('goodsReceiptPosted'), timeoutMs: z.int().min(1).max(30 * 86_400_000) }),
+  z.strictObject({ kind: z.literal('requestApproval'), summary: z.string().trim().min(1).max(500) }),
+  z.strictObject({ kind: z.literal('query'), id: CanonicalIdSchema, input: z.json() }),
+  z.strictObject({ kind: z.literal('operation'), id: CanonicalIdSchema, input: z.json() }),
+]);
+
+export const GoodsReceiptWorkflowEventSchema = z.strictObject({
+  eventId: z.uuid(),
+  type: z.literal('goodsReceiptPosted'),
+  receiptId: z.uuid(),
+  legalEntityId: z.uuid(),
+  movementIds: z.array(z.uuid()).max(500),
+});
+
+export const WorkflowDefinitionSchema = z.strictObject({
+  workflowId: CanonicalIdSchema,
+  label: z.string().trim().min(1).max(100),
+  trigger: z.literal('goodsReceiptPosted'),
+  grants: z.strictObject({
+    queries: z.array(CanonicalIdSchema).max(32),
+    operations: z.array(CanonicalIdSchema).max(32),
+  }),
+  body: z.string().min(1).max(4_000),
+  tests: z.array(z.strictObject({
+    event: GoodsReceiptWorkflowEventSchema,
+    effects: z.array(z.strictObject({ call: WorkflowHostCallSchema, result: z.json() })).max(64),
+  })).min(1).max(8),
+});
+
+export type WorkflowDefinition = z.infer<typeof WorkflowDefinitionSchema>;
+export type WorkflowHostCall = z.infer<typeof WorkflowHostCallSchema>;
+export type GoodsReceiptWorkflowEvent = z.infer<typeof GoodsReceiptWorkflowEventSchema>;
+
 const v6NormalizedShape = {
   ...v5NormalizedShape,
   entities: z.array(normalizedEntityDefinition.extend(assistantConfirmation)),
@@ -2589,6 +2625,7 @@ const v6NormalizedShape = {
   queries: z.array(normalizedV6QueryDefinition),
   languageVersion: v6NodeVersion,
   surfaces: z.array(normalizedV6SurfaceDefinition),
+  workflows: z.array(WorkflowDefinitionSchema).min(1).max(20).optional(),
 } as const;
 const V6NormalizedApplicationPackageSchema = z.strictObject(v6NormalizedShape);
 
@@ -2627,7 +2664,7 @@ function collectMixedNodeVersions(
     found.push({ path: [...path, 'schemaVersion'] });
   }
   for (const [key, entry] of Object.entries(record)) {
-    if (key === 'schemaVersion') continue;
+    if (key === 'schemaVersion' || (path.length === 0 && key === 'workflows')) continue;
     collectMixedNodeVersions(entry, languageVersion, [...path, key], found);
   }
 }
@@ -2717,6 +2754,7 @@ const v6AuthoredShape = {
   queries: z.array(authoredV6QueryDefinition),
   languageVersion: v6NodeVersion,
   surfaces: z.array(authoredV6SurfaceDefinition),
+  workflows: z.array(WorkflowDefinitionSchema).min(1).max(20).optional(),
 } as const;
 const V6AuthoredApplicationPackageSchema = z.strictObject(v6AuthoredShape);
 

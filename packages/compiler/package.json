@@ -5,6 +5,7 @@
   "type": "module",
   "exports": "./src/index.ts",
   "dependencies": {
-    "@north-star/canonical-model": "workspace:*"
+    "@north-star/canonical-model": "workspace:*",
+    "typescript": "5.9.3"
   }
 }

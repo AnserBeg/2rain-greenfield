@@ -40,6 +40,12 @@ export {
   type CanonicalDiagnostic,
 } from './diagnostics.js';
 export {
+  GoodsReceiptWorkflowEventSchema,
+  WorkflowDefinitionSchema,
+  WorkflowHostCallSchema,
+  type GoodsReceiptWorkflowEvent,
+  type WorkflowDefinition,
+  type WorkflowHostCall,
   QueryReadModelSchema,
   type QueryReadModel,
   SurfaceCompositionSchema,

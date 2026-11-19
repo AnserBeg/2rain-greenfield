@@ -6,6 +6,10 @@ import {
   unicodeCaseFold,
 } from '@north-star/canonical-model';
 import {
+  assertWorkflowBinding,
+  HASH_DOMAINS,
+  WORKFLOW_PROJECTION_VERSION,
+  WORKFLOW_RUNTIME_FLOOR,
   PROJECTION_FAMILY_IDS,
   executeVerificationPlan,
   validateExecutedVerificationPlan,
@@ -16,6 +20,9 @@ import {
   type VerificationPlanPayloadV1,
   type VerificationScenario,
   type VerificationScenarioExecutor,
+  type WorkflowOperationContract,
+  type WorkflowProjection,
+  type WorkflowQueryContract,
 } from '@north-star/compiler';
 import {
   VERIFICATION_IMPACT_ANALYSIS_VERSION,
@@ -84,6 +91,7 @@ import {
 } from './module-runtime-interpreter.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 import { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
+import { verifyWorkflowReplay } from './workflow-isolate.js';
 
 type ResultSetVersion =
   | typeof VERIFICATION_PARTITIONED_RESULT_SET_VERSION
@@ -99,6 +107,7 @@ export interface ReleaseVerificationBinding {
   readonly releaseRoot: string;
   readonly verificationPlanArtifactRoot: string;
   readonly verificationPlanSemanticDigest: string;
+  readonly workflows?: WorkflowProjection;
 }
 
 /**
@@ -290,6 +299,8 @@ export class PostgresReleaseVerificationService {
     );
     if (existing) return existing;
 
+    await verifyCandidateWorkflows(binding);
+
     const derive = verificationScenarioDeriver(
       command.compiledRelease,
       binding,
@@ -385,6 +396,7 @@ export class PostgresReleaseVerificationService {
     const snapshot = snapshotExecutionCommand(command);
     const binding = releaseVerificationBinding(snapshot.compiledRelease);
     await this.assertStagedCandidate(context, snapshot, binding);
+    await verifyCandidateWorkflows(binding);
     const derive = verificationScenarioDeriver(
       snapshot.compiledRelease,
       binding,
@@ -728,6 +740,7 @@ export function releaseVerificationBinding(
       'verification-plan payload is malformed',
     );
   }
+  const workflows = bindCandidateWorkflows(compiledRelease);
   return Object.freeze({
     artifactClosureDigest: digestCanonical(
       'northstar.release-artifact-closure/v1',
@@ -738,7 +751,43 @@ export function releaseVerificationBinding(
     releaseRoot: compiledRelease.releaseRoot,
     verificationPlanArtifactRoot: reference.artifactRoot,
     verificationPlanSemanticDigest: reference.semanticDigest,
+    ...(workflows ? { workflows } : {}),
   });
+}
+
+function bindCandidateWorkflows(compiled: CompileSuccess): WorkflowProjection | undefined {
+  const refs = compiled.bundle.releaseManifest.projections;
+  const workflowRefs = refs.filter((ref) => ref.familyId === PROJECTION_FAMILY_IDS.workflow);
+  const { constructs } = compiledProjectionPayload<{ constructs: readonly { constructKind: string; semanticFingerprint: string; subjectId: string }[] }>(compiled, PROJECTION_FAMILY_IDS.semanticModel);
+  const definitions = constructs.filter((construct) => construct.constructKind === 'workflowDefinition');
+  if (workflowRefs.length === 0 && definitions.length === 0) return undefined;
+  const surface = refs.find((ref) => ref.familyId === PROJECTION_FAMILY_IDS.surfaceManifest);
+  if (workflowRefs.length !== 1 || (surface?.requiredRuntimeCapability.minimumVersion ?? 0) < WORKFLOW_RUNTIME_FLOOR) {
+    throw failure('VERIFICATION_WORKFLOW_PROJECTION_INVALID', 'Candidate workflows require one release projection and its compatibility floor');
+  }
+  const projection = compiledProjectionPayload<WorkflowProjection>(compiled, PROJECTION_FAMILY_IDS.workflow);
+  if (projection.kind !== 'workflowPayload' || projection.schemaVersion !== WORKFLOW_PROJECTION_VERSION || !Array.isArray(projection.workflows) || projection.workflows.length === 0 || projection.workflows.length !== definitions.length) {
+    throw failure('VERIFICATION_WORKFLOW_PROJECTION_INVALID', 'Candidate workflows do not match the semantic model');
+  }
+  const { queries } = compiledProjectionPayload<{ queries: readonly WorkflowQueryContract[] }>(compiled, PROJECTION_FAMILY_IDS.queryCatalog);
+  const { operations } = compiledProjectionPayload<{ operations: readonly WorkflowOperationContract[] }>(compiled, PROJECTION_FAMILY_IDS.operationCatalog);
+  const seen = new Set<string>();
+  for (const workflow of projection.workflows) {
+    const { bodyDigest: _digest, executable: _executable, sdk: _sdk, ...definition } = workflow;
+    const fingerprint = digestCanonical(HASH_DOMAINS.semanticConstruct, definition);
+    if (seen.has(workflow.workflowId) || !definitions.some((entry) => entry.subjectId === workflow.workflowId && entry.semanticFingerprint === fingerprint)) {
+      throw failure('VERIFICATION_WORKFLOW_DEFINITION_MISMATCH', `Candidate workflow definition changed: ${workflow.workflowId}`);
+    }
+    seen.add(workflow.workflowId);
+    assertWorkflowBinding(workflow, queries, operations);
+  }
+  return projection;
+}
+
+async function verifyCandidateWorkflows(binding: ReleaseVerificationBinding): Promise<void> {
+  for (const workflow of binding.workflows?.workflows ?? []) {
+    await verifyWorkflowReplay(workflow);
+  }
 }
 
 export function verificationConstructibilityFindings(

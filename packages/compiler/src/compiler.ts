@@ -24,6 +24,7 @@ import {
   validateUnboundPermissionAcknowledgement,
 } from './conformance.js';
 import { compilerDiagnostic, finalizeDiagnostics } from './diagnostics.js';
+import { compileWorkflow, workflowSdk, WORKFLOW_PROJECTION_VERSION, WORKFLOW_RUNTIME_FLOOR, type WorkflowOperationContract, type WorkflowProjection, type WorkflowQueryContract } from './workflows.js';
 import {
   canonicalBytes,
   equalBytes,
@@ -438,6 +439,30 @@ function compileApplicationInternal(
     ),
     packageRevision,
   );
+  if ('workflows' in packageRevision && packageRevision.workflows?.length) {
+    const surface = basePlans.find((plan) => plan.familyId === PROJECTION_FAMILY_IDS.surfaceManifest)!;
+    const { queries } = basePlans.find((plan) => plan.familyId === PROJECTION_FAMILY_IDS.queryCatalog)!.payload as { queries: WorkflowQueryContract[] };
+    const { operations } = basePlans.find((plan) => plan.familyId === PROJECTION_FAMILY_IDS.operationCatalog)!.payload as { operations: WorkflowOperationContract[] };
+    const workflows = [];
+    for (const workflow of packageRevision.workflows) {
+      try {
+        workflows.push(compileWorkflow(workflow, workflowSdk(workflow, queries, operations)));
+      } catch (error) {
+        const diagnostic = compilerDiagnostic('COMPILER_PROJECTION_INVARIANT_FAILED', 'postLoweringValidation', '$.workflows', workflow.workflowId);
+        return failure([{ ...diagnostic, rule: error instanceof Error ? error.message : 'Workflow compilation failed' }], maximumDiagnostics);
+      }
+    }
+    surface.requiredRuntimeCapability = { ...surface.requiredRuntimeCapability, minimumVersion: Math.max(WORKFLOW_RUNTIME_FLOOR, surface.requiredRuntimeCapability.minimumVersion) };
+    const payload: WorkflowProjection = { kind: 'workflowPayload', schemaVersion: WORKFLOW_PROJECTION_VERSION, workflows };
+    basePlans.push({
+      familyId: PROJECTION_FAMILY_IDS.workflow,
+      instanceId: `${packageRevision.package.namespace}:projection.workflow`,
+      logicalScope: surface.logicalScope,
+      payload,
+      payloadSchemaVersion: WORKFLOW_PROJECTION_VERSION,
+      requiredRuntimeCapability: { capabilityId: 'northstar.runtime:capability.workflow', minimumVersion: 1 },
+    });
+  }
   if (conformanceMode === 'current') {
     const resolveStorageDiagnostics = validateResolveStorageConformance(
       packageRevision,

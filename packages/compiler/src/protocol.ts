@@ -160,6 +160,7 @@ export const PROJECTION_FAMILY_IDS = Object.freeze({
   storageTransition: 'northstar.compiler:projection-family.storage-transition',
   surfaceManifest: 'northstar.compiler:projection-family.surface-manifest',
   verificationPlan: 'northstar.compiler:projection-family.verification-plan',
+  workflow: 'northstar.compiler:projection-family.workflow',
 } as const);
 
 export type ProjectionFamilyId =

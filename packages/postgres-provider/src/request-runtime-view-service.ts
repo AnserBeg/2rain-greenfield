@@ -9,6 +9,8 @@ import {
   PROJECTION_MANIFEST_VERSION,
   RELEASE_MANIFEST_VERSION,
   SUPPORTED_SURFACE_MANIFEST_PAYLOAD_VERSIONS,
+  WORKFLOW_PROJECTION_VERSION,
+  WORKFLOW_RUNTIME_FLOOR,
 } from '@north-star/compiler';
 import {
   ReleaseInvalidationFenceState,
@@ -199,6 +201,10 @@ const supportedProjectionSchemas = Object.freeze({
   [REQUEST_RUNTIME_PROJECTION_FAMILIES.surface]: Object.freeze({
     payloadKind: 'surfaceManifestPayload',
     payloadSchemaVersions: SUPPORTED_SURFACE_MANIFEST_PAYLOAD_VERSIONS,
+  }),
+  [REQUEST_RUNTIME_PROJECTION_FAMILIES.workflow]: Object.freeze({
+    payloadKind: 'workflowPayload',
+    payloadSchemaVersions: Object.freeze([WORKFLOW_PROJECTION_VERSION]),
   }),
 } satisfies Record<
   RequestRuntimeProjectionFamily,
@@ -810,6 +816,11 @@ function definitionFromSnapshotRows(
     });
   };
 
+  const surface = projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.surface);
+  const hasWorkflow = references.some((entry) => isRecord(entry) && entry.familyId === REQUEST_RUNTIME_PROJECTION_FAMILIES.workflow);
+  if (hasWorkflow && (surface.requiredRuntimeCapability?.minimumVersion ?? 0) < WORKFLOW_RUNTIME_FLOOR) {
+    throw malformedProjection('workflow projection is missing its surface reader floor');
+  }
   return Object.freeze({
     environmentId: context.environmentId,
     pointer: Object.freeze({ fence, pointerId: first.pointer_id }),
@@ -818,7 +829,8 @@ function definitionFromSnapshotRows(
       catalog: projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.catalog),
       operation: projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.operation),
       query: projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.query),
-      surface: projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.surface),
+      surface,
+      ...(hasWorkflow ? { workflow: projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.workflow) } : {}),
     }),
     release: Object.freeze({
       contentHash: first.release_content_hash,

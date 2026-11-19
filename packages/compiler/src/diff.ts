@@ -39,6 +39,7 @@ const impactByFamily: Record<ProjectionFamilyId, ReleaseImpactCode> = {
   [PROJECTION_FAMILY_IDS.storageTransition]: 'storage-transition-required',
   [PROJECTION_FAMILY_IDS.surfaceManifest]: 'surface-only',
   [PROJECTION_FAMILY_IDS.verificationPlan]: 'verification-plan-changed',
+  [PROJECTION_FAMILY_IDS.workflow]: 'semantic-contract-changed',
 };
 
 export function diffCompiledReleases(
