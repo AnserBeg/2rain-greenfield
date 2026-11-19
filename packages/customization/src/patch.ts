@@ -1,6 +1,8 @@
 import {
+  CalculatedDisplayFieldDefinitionSchema,
   FormulaValidationRuleDefinitionSchema,
   OperationRoleKeySchema,
+  type CalculatedDisplayField,
   type FormulaValidationRule,
 } from '@north-star/canonical-model';
 import { z } from 'zod';
@@ -171,11 +173,16 @@ const basePatchKinds = [
 ] as const;
 type ParsedPatch =
   | z.output<(typeof basePatchKinds)[number]>
-  | { kind: 'addValidation'; rule: FormulaValidationRule };
+  | { kind: 'addValidation'; rule: FormulaValidationRule }
+  | { kind: 'addCalculatedDisplayField'; field: CalculatedDisplayField };
 
 export const CustomizationPatchSchema: z.ZodType<ParsedPatch> =
   z.discriminatedUnion('kind', [
     ...basePatchKinds,
+    z.strictObject({
+      kind: z.literal('addCalculatedDisplayField'),
+      field: CalculatedDisplayFieldDefinitionSchema,
+    }),
     z.strictObject({
       kind: z.literal('addValidation'),
       rule: FormulaValidationRuleDefinitionSchema,
@@ -191,6 +198,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'arrangeLayout',
   'saveListView',
   'addValidation',
+  'addCalculatedDisplayField',
   'addMetricCard',
   'narrowPermission',
   'unNarrowPermission',

@@ -10,6 +10,12 @@ import {
   type LiteralValidationTarget,
 } from '../../../packages/customization/src/validation-draft.js';
 
+import {
+  calculatedDisplayDraft,
+  DISPLAY_OPERATIONS,
+  type CalculatedDisplayTarget,
+} from '../../../packages/customization/src/calculated-display-draft.js';
+
 interface PatchSummary {
   readonly kind: string;
   readonly displayLabel: string | null;
@@ -42,6 +48,7 @@ interface CustomizationStatus {
   readonly patches: readonly ScreenPatch[];
 }
 interface CustomizationTargets {
+  readonly calculatedDisplayTargets?: readonly CalculatedDisplayTarget[];
   readonly validationTargets?: readonly LiteralValidationTarget[];
   readonly permissionRoleKeys?: readonly string[];
   readonly permissionRoleLabels?: Readonly<Record<string, string>>;
@@ -221,6 +228,12 @@ export async function renderCustomizeScreen(
       const metric = url.searchParams.get('metric');
       if (metric)
         return page('Add a metric card', await metricForm(loadTargets, metric));
+      const display = url.searchParams.get('calculatedDisplay');
+      if (display)
+        return page(
+          'Add a calculated display field',
+          calculatedDisplayForm(await loadTargets(), display),
+        );
       const validation = url.searchParams.get('validation');
       if (validation)
         return page(
@@ -238,6 +251,12 @@ export async function renderCustomizeScreen(
               submission.kind === 'addValidation'
                 ? (await loadTargets()).validationTargets?.find(
                     ({ entityId }) => entityId === submission.entity,
+                  )
+                : undefined,
+              submission.kind === 'addCalculatedDisplayField'
+                ? (await loadTargets()).calculatedDisplayTargets?.find(
+                    ({ recordSurfaceId }) =>
+                      recordSurfaceId === submission.surface,
                   )
                 : undefined,
             ),
@@ -388,6 +407,7 @@ async function overview(
     metricPicker(targets),
     permissionForm(targets),
     validationSelector(targets),
+    calculatedDisplaySelector(targets),
     ...(targets.forms ?? []).map(
       (form) =>
         `<form method="post"><fieldset><legend>Show fields up front on ${escapeHtml(form.label)}</legend><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="arrangeLayout"><input type="hidden" name="surface" value="${escapeHtml(form.surfaceId)}"><input type="hidden" name="formLayout" value="1">${form.fields.map((f) => `<label><input type="checkbox" name="front:${escapeHtml(f.fieldId)}"${f.upFront ? ' checked' : ''}> ${escapeHtml(f.label)}</label>`).join(' ')}<button>Draft form arrangement</button></fieldset></form>`,
@@ -458,6 +478,44 @@ async function arrangeForm(
     })
     .join('');
   return `<p class="eyebrow">Customize</p><h1>Arrange ${escapeHtml(list.label)}</h1><form method="post" data-customize-form="arrangeColumns"><table><thead><tr><th>Position</th><th>Heading</th><th>Hide</th></tr></thead><tbody>${rows}</tbody></table><input type="hidden" name="surface" value="${escapeHtml(list.surfaceId)}"><input type="hidden" name="columns" value="${String(list.columns.length)}"><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="arrangeLayout"><p><button type="submit">Draft this arrangement</button></p></form>${backLink()}`;
+}
+
+function calculatedDisplaySelector(targets: CustomizationTargets): string {
+  if (!targets.calculatedDisplayTargets?.length) return '';
+  const options = targets.calculatedDisplayTargets
+    .map(
+      ({ recordSurfaceId, label }) =>
+        `<option value="${escapeHtml(recordSurfaceId)}">${escapeHtml(label)}</option>`,
+    )
+    .join('');
+  return `<form method="get" data-customize-form="calculatedDisplayPicker"><fieldset><legend>Add a calculated display field</legend><input type="hidden" name="customize" value=""><label for="calculated-record">Record page</label> <select id="calculated-record" name="calculatedDisplay" required>${options}</select><p><button>Set up calculation</button></p></fieldset></form>`;
+}
+
+function calculatedDisplayForm(
+  targets: CustomizationTargets,
+  surface: string,
+): string {
+  const target = targets.calculatedDisplayTargets?.find(
+    ({ recordSurfaceId }) => recordSurfaceId === surface,
+  );
+  if (!target)
+    return `<h1>Choose a record page for this calculation</h1>${backLink()}`;
+  const fields = target.fields
+    .map(
+      ({ fieldId, label }) =>
+        `<option value="${escapeHtml(fieldId)}">${escapeHtml(label)}</option>`,
+    )
+    .join('');
+  const operations = DISPLAY_OPERATIONS.map(
+    ([operator, label]) => `<option value="${operator}">${label}</option>`,
+  ).join('');
+  const lists = target.lists
+    .map(
+      ({ surfaceId, label }) =>
+        `<option value="${escapeHtml(surfaceId)}">${escapeHtml(label)}</option>`,
+    )
+    .join('');
+  return `<h1>Add a calculated display field to ${escapeHtml(target.label)}</h1><form method="post" data-customize-form="calculatedDisplay"><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addCalculatedDisplayField"><input type="hidden" name="surface" value="${escapeHtml(surface)}"><label>Field name <input name="label" required maxlength="80"></label><label for="calculated-first">First field</label> <select id="calculated-first" name="leftFieldId" required>${fields}</select><label for="calculated-operation">Operation</label> <select id="calculated-operation" name="operator" required>${operations}</select><label for="calculated-second">Second field</label> <select id="calculated-second" name="rightFieldId" required>${fields}</select>${lists ? `<label for="calculated-list">Also show on a list</label> <select id="calculated-list" name="listSurfaceId"><option value="">Record page only</option>${lists}</select>` : ''}<p><button>Draft calculation</button></p></form>${backLink()}`;
 }
 
 function validationSelector(targets: CustomizationTargets): string {
@@ -635,6 +693,7 @@ async function savedViewForm(
 export function patchFromForm(
   form: CustomizeScreenSubmission,
   validationTarget?: LiteralValidationTarget,
+  calculatedTarget?: CalculatedDisplayTarget,
 ): unknown {
   const field = (n: number) => {
     const label = String(form[`field_${String(n)}_label`] ?? '').trim();
@@ -654,6 +713,16 @@ export function patchFromForm(
     };
   };
   switch (form.kind) {
+    case 'addCalculatedDisplayField':
+      if (!calculatedTarget)
+        throw new Error('Choose a record page for the calculation.');
+      return calculatedDisplayDraft(calculatedTarget, {
+        label: form.label ?? '',
+        operator: form.operator ?? '',
+        leftFieldId: form.leftFieldId ?? '',
+        rightFieldId: form.rightFieldId ?? '',
+        listSurfaceId: form.listSurfaceId ?? '',
+      });
     case 'addValidation':
       if (!validationTarget) throw new Error('Choose an eligible record type.');
       if (form.check === 'compareFields') {
@@ -831,6 +900,8 @@ function describe(patch: PatchSummary): string {
       return `Saved list view "${label}"`;
     case 'addMetricCard':
       return `Metric card "${label}"`;
+    case 'addCalculatedDisplayField':
+      return `Calculated display field "${label}"`;
     case 'addValidation':
       return `Validation rule "${label}"`;
     case 'narrowPermission':

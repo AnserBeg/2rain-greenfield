@@ -31,6 +31,7 @@ const suiteDefinitions = [
       'test/unit/canonical-model/surface-composition.test.ts',
       'test/unit/canonical-model/surface-launcher.test.ts',
       'test/unit/canonical-model/surface-list.test.ts',
+      'test/unit/calculated-display.test.ts',
       'test/unit/catalog-definition.test.ts',
       'test/unit/catalog-extras.test.ts',
       'test/unit/commercial-amounts.test.ts',

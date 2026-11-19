@@ -31,6 +31,7 @@ import {
   formulaVerificationBusinessDate,
   parseFormulaValidationBindings,
 } from '../../canonical-model/src/formula-validation-projection.js';
+import { withCalculatedDisplay } from '../../runtime/src/calculated-display.js';
 import { observeValidationRefusals } from '../../runtime/src/formula-validation.js';
 import type {
   RegisteredOperationDefinition,
@@ -278,7 +279,20 @@ export class PostgresModuleRuntimeInterpreter
               request.definition.queryId,
             );
           }
-          return result;
+          return request.view.projections.formulaRule && result.records.length
+            ? Object.freeze({
+                ...result,
+                records: Object.freeze(
+                  result.records.map((record) =>
+                    withCalculatedDisplay(
+                      request.view,
+                      request.definition,
+                      record,
+                    ),
+                  ),
+                ),
+              })
+            : result;
         })
       : this.#executeOperation(request);
   }
@@ -516,7 +530,11 @@ export class PostgresModuleRuntimeInterpreter
       kind: 'semanticOperationResult',
       operationId: request.definition.operationId,
       outcome: 'succeeded',
-      readBack: receipt.mutationResult,
+      readBack: withCalculatedDisplay(
+        request.view,
+        request.readBackDefinition,
+        receipt.mutationResult,
+      ),
       schemaVersion: SEMANTIC_OPERATION_RESULT_VERSION,
       trust: Object.freeze({
         changeDocumentId: receipt.changeDocumentId,

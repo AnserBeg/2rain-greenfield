@@ -13,6 +13,7 @@ import {
   SURFACE_ARCHETYPES,
   type CanonicalLanguageVersion,
 } from './constants.js';
+import { calculatedDisplayFieldSchema } from './calculated-display-schema.js';
 import { formulaValidationRuleSchema } from './formula-validation-schema.js';
 import { LEGAL_ENTITY_SCOPE_CONTRACT_V1 } from './legal-entity-scope-kernel.js';
 
@@ -2695,6 +2696,20 @@ export const FormulaValidationRuleDefinitionSchema =
     integer: CanonicalIntegerStringSchema,
   });
 
+export const CalculatedDisplayFieldDefinitionSchema =
+  calculatedDisplayFieldSchema(
+    CanonicalIdSchema,
+    LabelSchema,
+    CanonicalSignedDecimalStringSchema,
+    CurrencyCodeSchema,
+  );
+
+const calculatedDisplayFields = z
+  .array(CalculatedDisplayFieldDefinitionSchema)
+  .min(1)
+  .max(128)
+  .optional();
+
 const formulaRules = z
   .array(FormulaValidationRuleDefinitionSchema)
   .min(1)
@@ -2707,6 +2722,7 @@ const v6NormalizedShape = {
   fields: z.array(normalizedV6FieldDefinition),
   operations: z.array(normalizedV6OperationDefinition),
   formulaRules,
+  calculatedDisplayFields,
   operationRoleNarrowings,
   queries: z.array(normalizedV6QueryDefinition),
   languageVersion: v6NodeVersion,
@@ -2837,6 +2853,7 @@ const v6AuthoredShape = {
   fields: z.array(authoredV6FieldDefinition),
   operations: z.array(authoredV6OperationDefinition),
   formulaRules,
+  calculatedDisplayFields,
   operationRoleNarrowings,
   queries: z.array(authoredV6QueryDefinition),
   languageVersion: v6NodeVersion,

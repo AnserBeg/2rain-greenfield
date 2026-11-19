@@ -43,6 +43,54 @@ const equipment = {
   label: 'Equipment',
 };
 
+test('plain English drafts item margin on the item page and Items list', async () => {
+  const application = normalizeApplicationPackage(
+    JSON.parse(
+      readFileSync('apps/web/release/app.authored.json', 'utf8'),
+    ) as unknown,
+  );
+  const options = customizationTargets(application);
+  const seen: { system: string; toolNames: string[]; turns: number }[] = [];
+  const result = await draftPatchFromRequest(
+    scripted(
+      [
+        {
+          toolInput: {
+            kind: 'addCalculatedDisplayField',
+            surface: 'northstar.app:surface.item_detail',
+            calculation: {
+              label: 'Margin CAD',
+              operator: 'subtract',
+              leftFieldId: 'northstar.app:field.item_price_cad',
+              rightFieldId: 'northstar.app:field.item_standard_cost_cad',
+              listSurfaceId: 'northstar.app:surface.item_list',
+            },
+          },
+        },
+      ],
+      seen,
+    ),
+    'Show CAD margin as CAD price minus CAD standard cost on item details and in the Items list.',
+    options,
+  );
+  assert.match(seen[0]?.system ?? '', /Calculated display targets/u);
+  assert.ok(
+    result.status === 'parsed' &&
+      result.patch.kind === 'addCalculatedDisplayField',
+    JSON.stringify(result),
+  );
+  assert.deepEqual(result.patch.field.resultType, {
+    precision: 39,
+    scale: 18,
+    currency: 'CAD',
+    unit: null,
+  });
+  assert.deepEqual(
+    result.patch.field.displaySinks.map(({ kind }) => kind),
+    ['record', 'list'],
+  );
+});
+
 test('plain English drafts a governed literal validation on the selected field', async () => {
   const entityId = 'northstar.app:entity.item';
   const fieldId = 'northstar.app:field.item_description';
