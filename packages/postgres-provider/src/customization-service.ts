@@ -399,6 +399,87 @@ export class PostgresCustomizationService {
     );
   }
 
+  /** Finish only the verification belonging to the current pointer generation. */
+  async recover(): Promise<{
+    readonly status: 'recovered';
+    readonly activationAttemptId: MintedUuid;
+    readonly releaseId: MintedUuid;
+    readonly releaseRoot: string;
+  }> {
+    const context = await this.#context();
+    return withReleaseScopeLock(
+      this.connection.adminPool,
+      this.connection.identities.runtime,
+      async (admin) => {
+        const pointer = await readPointer(this.connection.runtimePool, context);
+        if (!pointer.releaseId) {
+          throw new CustomizationServiceRefusal(
+            'CUSTOMIZE_NOT_STARTED',
+            'there is no live release to recover',
+          );
+        }
+        const attemptId = await withTrustedRequestTransaction(
+          this.connection.runtimePool,
+          context,
+          async (client) => {
+            const result = await client.query<{
+              activation_attempt_id: MintedUuid;
+            }>(
+              `SELECT activation_attempt_id
+               FROM platform.release_activation_swap_receipts
+              WHERE tenant_id = $1 AND environment_id = $2 AND pointer_id = $3
+                AND activated_release_id = $4 AND fence = $5`,
+              [
+                context.tenantId,
+                context.environmentId,
+                pointer.pointerId,
+                pointer.releaseId,
+                pointer.fence,
+              ],
+            );
+            return result.rows[0]?.activation_attempt_id;
+          },
+        );
+        if (!attemptId) {
+          throw new CustomizationServiceRefusal(
+            'CUSTOMIZE_ACTIVATION_UNVERIFIED',
+            'no swap receipt matches the live pointer and fence',
+          );
+        }
+        const verified = await new PostgresReleaseActivationService(
+          this.connection.runtimePool,
+        ).verifyActivation(
+          await trustedContext(this.connection.identities.system),
+          { activationAttemptId: attemptId },
+        );
+        if (verified.status !== 'SWAPPED_VERIFIED') {
+          throw new CustomizationServiceRefusal(
+            'CUSTOMIZE_ACTIVATION_UNVERIFIED',
+            `the live activation ended ${verified.status}`,
+          );
+        }
+        const current = await readPointer(this.connection.runtimePool, context);
+        if (
+          current.pointerId !== pointer.pointerId ||
+          current.releaseId !== pointer.releaseId ||
+          current.fence !== pointer.fence
+        ) {
+          throw new CustomizationServiceRefusal(
+            'CUSTOMIZE_ACTIVATION_UNVERIFIED',
+            'the live pointer generation changed during verification',
+          );
+        }
+        await this.#repair(admin, context);
+        return {
+          status: 'recovered' as const,
+          activationAttemptId: attemptId,
+          releaseId: pointer.releaseId,
+          releaseRoot: await this.#root(context, pointer.releaseId),
+        };
+      },
+    );
+  }
+
   async status(): Promise<CustomizationStatus> {
     const context = await this.#context();
     const active = await this.#active(context);
