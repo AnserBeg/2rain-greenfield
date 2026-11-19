@@ -1114,7 +1114,7 @@ test(
           await opened.service.activate(drafted.patchId);
           const world = worldOver(app.runtime, String(connection.database));
           const { receipt, supplier, item, location } =
-            await inspectionLinkRecords(world);
+            await inspectionLinkRecords(world.create, seededId);
           const beforeMovements = await world.list(
             'northstar.app:query.inventory_movement_list',
           );

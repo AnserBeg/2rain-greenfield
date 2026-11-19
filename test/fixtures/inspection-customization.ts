@@ -1,4 +1,4 @@
-import { type AgentWorld, seededId } from '../agent/agent-world.js';
+import type { AgentWorld } from '../agent/agent-world.js';
 
 export const inspection = 'custom_goods_receipt_inspection';
 export const inspectionEntity = `northstar.app:entity.${inspection}`;
@@ -60,16 +60,19 @@ export const inspectionChange = {
   ],
 } as const;
 
-export async function inspectionLinkRecords(world: AgentWorld) {
+export async function inspectionLinkRecords(
+  create: AgentWorld['create'],
+  seededId: (name: string) => string,
+) {
   const supplier = seededId('Cascade Fastener Works');
   const item = seededId('Field notebook');
   const location = seededId('Calgary warehouse');
-  const order = await world.create('purchase_order', {
+  const order = await create('purchase_order', {
     supplier_party_id: supplier,
     order_date: '2026-11-18T00:00:00.000Z',
     currency: 'CAD',
   });
-  const receipt = await world.create(
+  const receipt = await create(
     'goods_receipt',
     {
       state: 'northstar.app:option.goods_receipt_state_draft',

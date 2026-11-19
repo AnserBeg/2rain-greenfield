@@ -1,9 +1,14 @@
+import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 
 import { expect, test } from '@playwright/test';
 
-import { startComposedApplication } from '../../../api/src/composition-root.js';
-import { worldOver } from '../../../../test/agent/agent-world.js';
+import {
+  COMPOSED_APPLICATION_INVENTORY_SCOPE,
+  startComposedApplication,
+} from '../../../api/src/composition-root.js';
+import { composedApplicationSeed } from '../../../../packages/domain/src/app/seed.js';
+import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../../../packages/runtime/src/semantic-operation-gateway.js';
 import {
   inspection,
   inspectionEntity,
@@ -136,8 +141,55 @@ test('a person builds Goods Receipt Inspection with the Customize screen and use
         seedProfile: 'distributor',
       });
       try {
-        const world = worldOver(app.runtime, String(connection.database));
-        const { receipt } = await inspectionLinkRecords(world);
+        const runtime = app.runtime;
+        const create: Parameters<typeof inspectionLinkRecords>[0] = (
+          local,
+          values,
+          relations = {},
+        ) =>
+          runtime.entry.run(
+            { headers: { cookie: 'northstar-demo-actor=manager' } },
+            async (view) => {
+              const result = await runtime.operationGateway.invoke(
+                view,
+                {
+                  schemaVersion: SEMANTIC_OPERATION_REQUEST_VERSION,
+                  operationId: `northstar.app:operation.${local}_create`,
+                  idempotencyKey: randomUUID(),
+                  confirmationGrant: null,
+                  input: {
+                    recordId: randomUUID(),
+                    legalEntityId:
+                      COMPOSED_APPLICATION_INVENTORY_SCOPE.legalEntityId,
+                    values: Object.fromEntries(
+                      Object.entries(values).map(([field, value]) => [
+                        `northstar.app:field.${local}_${field}`,
+                        value,
+                      ]),
+                    ),
+                    relations: Object.fromEntries(
+                      Object.entries(relations).map(([relation, value]) => [
+                        `northstar.app:relation.${local}_${relation}`,
+                        value,
+                      ]),
+                    ),
+                  },
+                },
+                runtime.operationMediation.issueInvocation(view, 'UI'),
+              );
+              if (result.outcome !== 'succeeded' || !result.readBack)
+                throw new Error(`Creating ${local} for the journey failed`);
+              return result.readBack;
+            },
+          );
+        const seed = composedApplicationSeed('distributor');
+        const { receipt } = await inspectionLinkRecords(create, (name) => {
+          const record = seed.find((item) =>
+            Object.values(item.values).includes(name),
+          );
+          if (!record) throw new Error(`Missing seed record ${name}`);
+          return record.recordId;
+        });
         const receiptNumber = String(
           receipt.values['northstar.app:field.goods_receipt_number'],
         );
@@ -322,7 +374,7 @@ test('a person builds Goods Receipt Inspection with the Customize screen and use
           'Released',
         );
         await page.goto(listUrl);
-        await world.create(inspection, { name: 'Unrelated lot' });
+        await create(inspection, { name: 'Unrelated lot' });
         await page.getByRole('searchbox').last().fill(receiptNumber);
         await page.getByRole('button', { name: 'Apply', exact: true }).click();
         await expect(
