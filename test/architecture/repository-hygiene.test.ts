@@ -22,6 +22,7 @@ const suiteDefinitions = [
   {
     discoveryPattern: 'test/unit/**/*.test.ts',
     expectedFiles: [
+      'test/unit/calculated-display.test.ts',
       'test/unit/canonical-model/diagnostic-ordering.test.ts',
       'test/unit/canonical-model/disclosure-tier.test.ts',
       'test/unit/canonical-model/field-numbering.test.ts',
@@ -31,7 +32,6 @@ const suiteDefinitions = [
       'test/unit/canonical-model/surface-composition.test.ts',
       'test/unit/canonical-model/surface-launcher.test.ts',
       'test/unit/canonical-model/surface-list.test.ts',
-      'test/unit/calculated-display.test.ts',
       'test/unit/catalog-definition.test.ts',
       'test/unit/catalog-extras.test.ts',
       'test/unit/commercial-amounts.test.ts',
