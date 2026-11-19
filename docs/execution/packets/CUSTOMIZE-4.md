@@ -23,7 +23,7 @@ Status — Candidate for integration. The orchestrator approved the patch-kind m
 
 ## Gates
 
-- [CI 44485274087](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44485274087) passed the linked receipt, line editing and archive refusal steps before the command response lost the status badge. Composed record commands now refresh the declared record. Migration 0038 follows verified release history, and the snapshot was regenerated on PostgreSQL 16.
+- [CI 44485274087](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44485274087) passed the linked receipt, line editing and archive refusal steps before the command response lost the status badge. Composed record commands now refresh the declared record on its own URL. The [complete Inspection browser journey](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44489745075/job/135442045268) passed, and its suite exposed a surface-only stock replay regression and stale migration-tip assertions. The follow-up preserves replay read-back and corrects the assertions. Migration 0038 and the PostgreSQL 16 snapshot follow verified release history.
 
 - [CI 44480152260](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44480152260) passed compiler, PostgreSQL and schema checks. The browser activated one draft and saved the lines, then failed the receipt link assertion. The follow-up waits for server-confirmed selections and opens the exact linked receipt. Migration 0037 follows the workflow migration and the snapshot was regenerated on PostgreSQL 16.
 
@@ -42,7 +42,7 @@ Status — Candidate for integration. The orchestrator approved the patch-kind m
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-4",
   "base": "421bd8b82882ee24cbff87bb72914640e600aa6e",
-  "head": "603be1972ef9faa029caa94c57d3600ab7b8cee3",
+  "head": "84a4ac14869aee5f7ce1b0b10aad488f7a9d6d33",
   "changedPaths": [
     "apps/web/package.json", "apps/web/src/component-registry.ts",
     "apps/web/src/customize-screen.ts", "apps/web/src/document-editor.ts",
