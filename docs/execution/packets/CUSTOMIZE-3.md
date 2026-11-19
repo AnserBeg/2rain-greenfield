@@ -27,7 +27,7 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 - Saved views and columns passed [CI 44457971677](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44457971677) and the closed patch-kind [control 44457971797](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44457971797).
 - Today metrics passed [CI 44471090769](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44471090769) and the sum-before-pagination [control 44472880285](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44472880285).
 - The ADR amendment passed [CI 44481530303](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44481530303) and the record checker. GitHub canceled the merge run when CRITFIX-C advanced main.
-- Slice 5 candidate uses migration 0038, a snapshot rebuilt from 38 migrations and the re-derived v6 ledger. The scripted assistant unit test passed. The hosted matrix and controls gate integration.
+- Slice 5 candidate uses migration 0038, a snapshot rebuilt from 38 migrations and the re-derived v6 ledger. The scripted assistant unit test passed. The AUTH unknown-permission control follows the updated denial guard. The hosted matrix and controls gate integration.
 
 ## Filed
 
@@ -38,7 +38,7 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
   "base": "421bd8b82882ee24cbff87bb72914640e600aa6e",
-  "head": "44d885b3ba2e18340c3c45b8a4ba902ed46c7a6b",
+  "head": "d9f85fee8c5e729e12eabd007a6902ee68bc3500",
   "changedPaths": [
     "apps/api/src/assistant-endpoint.ts", "apps/api/src/composition-root.ts",
     "apps/web/src/app-server.ts", "apps/web/src/customize-screen.ts",
@@ -52,11 +52,11 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
     "packages/postgres-provider/src/current-policy.ts", "packages/postgres-provider/src/customization-service.ts",
     "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-operation-gateway.ts",
     "test/architecture/release-persistence-boundary.test.ts", "test/evidence/CUSTOMIZE-3.expected-red.json",
-    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/postgres/current-policy.test.ts",
-    "test/postgres/customization.test.ts", "test/postgres/inventory-storage.test.ts",
-    "test/postgres/migrations.test.ts", "test/postgres/module-storage-transition.test.ts",
-    "test/postgres/trust-substrate.test.ts", "test/unit/customization-ai-draft.test.ts",
-    "test/unit/customization.test.ts"
+    "test/evidence/auth.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json",
+    "test/postgres/current-policy.test.ts", "test/postgres/customization.test.ts",
+    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts",
+    "test/postgres/module-storage-transition.test.ts", "test/postgres/trust-substrate.test.ts",
+    "test/unit/customization-ai-draft.test.ts", "test/unit/customization.test.ts"
   ],
   "symbols": [
     {"path":"packages/postgres-provider/src/current-policy.ts","name":"PostgresCurrentPolicyGateway"},
