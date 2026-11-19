@@ -8,6 +8,7 @@ import {
   type ValidationScalar,
 } from '../../canonical-model/src/formula-validation.js';
 import type { VersionedNormalizedApplicationPackage } from '../../canonical-model/src/schemas.js';
+import type { ValidationRelatedValues } from './formula-validation-witness.js';
 
 type Field = Extract<
   VersionedNormalizedApplicationPackage,
@@ -163,6 +164,51 @@ export function synthesizeLiteralRows(
     for (const [id, type] of Object.entries(binding.watchedFields))
       watchedFields.set(id, type);
   }
+  return synthesizeRows(watchedFields, fields, bounds, businessDate);
+}
+
+export function synthesizeRelatedRows(
+  bindings: readonly BoundFormulaValidation[],
+  fields: readonly Field[],
+  businessDate: string,
+): readonly ValidationRelatedValues[] {
+  const related = new Map<string, Map<string, FieldType>>();
+  for (const { paths } of bindings) {
+    for (const path of paths ?? []) {
+      const watched =
+        related.get(path.relationId) ?? new Map<string, FieldType>();
+      watched.set(path.fieldId, path.fieldType);
+      related.set(path.relationId, watched);
+    }
+  }
+  if (!related.size) return [];
+  let rows: ValidationRelatedValues[] = [{}];
+  for (const relationId of [...related.keys()].sort()) {
+    const candidates = synthesizeRows(
+      related.get(relationId)!,
+      fields,
+      new Map(),
+      businessDate,
+    );
+    const expanded: ValidationRelatedValues[] = [];
+    for (const row of rows) {
+      for (const values of candidates) {
+        expanded.push({ ...row, [relationId]: values });
+        if (expanded.length === MAXIMUM_SYNTHESIZED_ROWS) break;
+      }
+      if (expanded.length === MAXIMUM_SYNTHESIZED_ROWS) break;
+    }
+    rows = expanded;
+  }
+  return rows;
+}
+
+function synthesizeRows(
+  watchedFields: ReadonlyMap<string, FieldType>,
+  fields: readonly Field[],
+  bounds: ReadonlyMap<string, readonly Bound[]>,
+  businessDate: string,
+): readonly Values[] {
   const fieldById = new Map<string, Field>(
     fields.map((field) => [field.fieldId, field]),
   );

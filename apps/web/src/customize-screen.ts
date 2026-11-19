@@ -6,7 +6,9 @@ import { recordTypeEntityId } from '@north-star/customization';
  * composition hands in the service, whose results are structurally these.
  */
 import {
+  fieldComparisonValidationDraft,
   literalValidationDraft,
+  VALIDATION_COMPARISONS,
   type LiteralValidationTarget,
 } from '../../../packages/customization/src/validation-draft.js';
 
@@ -532,7 +534,22 @@ function validationForm(
         `<option value="${escapeHtml(fieldId)}">${escapeHtml(label)}</option>`,
     )
     .join('');
-  return `<h1>Add validation for ${escapeHtml(target.label)}</h1><form method="post"><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addValidation"><input type="hidden" name="entity" value="${escapeHtml(entityId)}"><label>Field <select name="fieldId" required>${fields}</select></label><label>Rule <select name="check"><option value="required">Require a value</option><option value="minimum">Minimum number</option><option value="maximum">Maximum number</option><option value="maximumLength">Maximum text length</option><option value="notBeforeToday">Today or later</option></select></label><label>Limit for numbers or text length <input name="limit" maxlength="40"></label><label>Message shown when saving <input name="message" maxlength="240" required></label><p><button>Draft validation rule</button></p></form>${backLink()}`;
+  const subject = `<input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addValidation"><input type="hidden" name="entity" value="${escapeHtml(entityId)}">`;
+  const literal = `<form method="post">${subject}<label>Field <select name="fieldId" required>${fields}</select></label><label>Rule <select name="check"><option value="required">Require a value</option><option value="minimum">Minimum number</option><option value="maximum">Maximum number</option><option value="maximumLength">Maximum text length</option><option value="notBeforeToday">Today or later</option></select></label><label>Limit for numbers or text length <input name="limit" maxlength="40"></label><label>Message shown when saving <input name="message" maxlength="240" required></label><p><button>Draft validation rule</button></p></form>`;
+  const comparisons = VALIDATION_COMPARISONS.map(
+    ([operator, label]) => `<option value="${operator}">${label}</option>`,
+  ).join('');
+  const related = target.relatedFields
+    ?.map(
+      ({ relationId, fieldId, label }) =>
+        `<option value="${escapeHtml(`${relationId}/${fieldId}`)}">${escapeHtml(label)}</option>`,
+    )
+    .join('');
+  const comparison =
+    target.fields.length > 1 || related
+      ? `<form method="post" data-customize-form="compareValidationFields">${subject}<input type="hidden" name="check" value="compareFields"><fieldset><legend>Compare fields</legend><label>Field to check <select name="fieldId" required>${fields}</select></label><label>Comparison <select name="operator" required>${comparisons}</select></label><label>Other field <select name="otherField" required><option value="">Choose a field</option><optgroup label="This record">${fields}</optgroup>${related ? `<optgroup label="Related record">${related}</optgroup>` : ''}</select></label><label>Message when the comparison fails <input name="message" maxlength="240" required></label><p><button>Draft field comparison</button></p></fieldset></form>`
+      : '';
+  return `<h1>Add validation for ${escapeHtml(target.label)}</h1>${literal}${comparison}${backLink()}`;
 }
 
 function permissionForm(targets: CustomizationTargets): string {
@@ -687,6 +704,16 @@ export function patchFromForm(
   switch (form.kind) {
     case 'addValidation':
       if (!validationTarget) throw new Error('Choose an eligible record type.');
+      if (form.check === 'compareFields') {
+        const [first = '', second] = String(form.otherField ?? '').split('/');
+        return fieldComparisonValidationDraft(validationTarget, {
+          fieldId: String(form.fieldId ?? ''),
+          operator: String(form.operator ?? ''),
+          otherFieldId: second ?? first,
+          ...(second ? { relationId: first } : {}),
+          message: String(form.message ?? ''),
+        });
+      }
       return literalValidationDraft(validationTarget, {
         fieldId: String(form.fieldId ?? ''),
         check: String(form.check ?? ''),

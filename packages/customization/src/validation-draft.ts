@@ -7,12 +7,33 @@ import {
   type ValidationOperand,
   type ValidationPredicate,
 } from '../../canonical-model/src/formula-validation.js';
+import type { CustomizationPatch } from './patch.js';
+
+type ValidationPatch = Extract<CustomizationPatch, { kind: 'addValidation' }>;
+type ComparisonOperator = Extract<
+  ValidationPredicate,
+  { kind: 'comparison' }
+>['operator'];
+export const VALIDATION_COMPARISONS = [
+  ['lessThanOrEqual', 'At most'],
+  ['lessThan', 'Less than'],
+  ['greaterThanOrEqual', 'At least'],
+  ['greaterThan', 'Greater than'],
+  ['equal', 'Equal to'],
+  ['notEqual', 'Different from'],
+] as const satisfies readonly (readonly [ComparisonOperator, string])[];
 
 export interface LiteralValidationTarget {
   readonly entityId: string;
   readonly label: string;
   readonly operationIds: readonly string[];
   readonly fields: readonly {
+    readonly fieldId: string;
+    readonly label: string;
+    readonly valueType: FormulaValidationFieldType;
+  }[];
+  readonly relatedFields?: readonly {
+    readonly relationId: string;
     readonly fieldId: string;
     readonly label: string;
     readonly valueType: FormulaValidationFieldType;
@@ -95,21 +116,98 @@ export function literalValidationDraft(
     default:
       throw new Error('Choose a validation rule.');
   }
-  const [namespace = '', localField = ''] = field.fieldId.split(':field.');
+  return validationPatch(
+    target,
+    field.fieldId,
+    input.check.toLowerCase(),
+    input.message,
+    predicate,
+  );
+}
+
+export function fieldComparisonValidationDraft(
+  target: LiteralValidationTarget,
+  input: {
+    readonly fieldId: string;
+    readonly operator: string;
+    readonly otherFieldId: string;
+    readonly relationId?: string;
+    readonly message: string;
+  },
+): ValidationPatch {
+  const operator = VALIDATION_COMPARISONS.find(
+    ([choice]) => choice === input.operator,
+  )?.[0];
+  if (!operator) throw new Error('Choose how to compare the fields.');
+  if (!target.fields.some(({ fieldId }) => fieldId === input.fieldId))
+    throw new Error('Choose a field on this record type.');
+  const right: ValidationOperand = input.relationId
+    ? {
+        schemaVersion,
+        kind: 'path',
+        relationIds: [input.relationId],
+        fieldId: input.otherFieldId,
+      }
+    : {
+        schemaVersion,
+        kind: 'field',
+        fieldId: input.otherFieldId,
+        select: 'value',
+      };
+  const otherField = input.relationId
+    ? target.relatedFields?.some(
+        ({ relationId, fieldId }) =>
+          relationId === input.relationId && fieldId === input.otherFieldId,
+      )
+    : input.otherFieldId !== input.fieldId &&
+      target.fields.some(({ fieldId }) => fieldId === input.otherFieldId);
+  if (!otherField) throw new Error('Choose another field to compare.');
+  const [, relatedName = ''] = input.otherFieldId.split(':field.');
+  const [, relationName = ''] = input.relationId?.split(':relation.') ?? [];
+  return validationPatch(
+    target,
+    input.fieldId,
+    [operator.toLowerCase(), relationName, relatedName]
+      .filter(Boolean)
+      .join('_'),
+    input.message,
+    {
+      schemaVersion,
+      kind: 'comparison',
+      left: {
+        schemaVersion,
+        kind: 'field',
+        fieldId: input.fieldId,
+        select: 'value',
+      },
+      right,
+      operator,
+    },
+  );
+}
+
+function validationPatch(
+  target: LiteralValidationTarget,
+  fieldId: string,
+  idSuffix: string,
+  message: string,
+  predicate: ValidationPredicate,
+): ValidationPatch {
+  const [namespace = '', localField = ''] = fieldId.split(':field.');
   return {
     kind: 'addValidation' as const,
     rule: {
       kind: 'validationRule' as const,
       schemaVersion,
-      ruleId: `${namespace}:rule.custom_${localField}_${input.check.toLowerCase()}`,
+      ruleId: `${namespace}:rule.custom_${localField}_${idSuffix}`,
       targetId: target.entityId,
-      boundOperationIds: target.operationIds,
+      boundOperationIds: [...target.operationIds],
       trigger: { kind: 'afterDefaultsOrChangedFields' as const, schemaVersion },
       absence: { kind: 'validationThreeValued' as const, schemaVersion },
       effect: 'refuse' as const,
       existingRecords: 'grandfather' as const,
-      message: input.message.trim(),
-      fieldAnchors: [field.fieldId],
+      message: message.trim(),
+      fieldAnchors: [fieldId],
       predicate,
     },
   };

@@ -40,6 +40,10 @@ import {
 } from '@north-star/runtime/request-runtime-view';
 import type { Pool, PoolClient } from 'pg';
 import { parseFormulaValidationBindings } from '../../canonical-model/src/formula-validation-projection.js';
+import {
+  LITERAL_VALIDATION_OPERATION_READER,
+  requiredFormulaValidationOperationReader,
+} from '../../canonical-model/src/formula-validation-reader.js';
 
 import {
   withTrustedRequestRead,
@@ -824,6 +828,7 @@ function definitionFromSnapshotRows(
   const operation = projectionFor(
     REQUEST_RUNTIME_PROJECTION_FAMILIES.operation,
   );
+  const query = projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.query);
   const declaresRuleProjection = references.some(
     (entry) =>
       isRecord(entry) && entry.familyId === REQUEST_RUNTIME_FORMULA_RULE_FAMILY,
@@ -831,8 +836,9 @@ function definitionFromSnapshotRows(
   const hasRuleProjectionLink = projectionLinks.some(
     ({ familyId }) => familyId === REQUEST_RUNTIME_FORMULA_RULE_FAMILY,
   );
-  const consumesRules =
-    (operation.requiredRuntimeCapability?.minimumVersion ?? 0) >= 3;
+  const operationFloor =
+    operation.requiredRuntimeCapability?.minimumVersion ?? 0;
+  const consumesRules = operationFloor >= LITERAL_VALIDATION_OPERATION_READER;
   if (
     declaresRuleProjection !== consumesRules ||
     hasRuleProjectionLink !== consumesRules
@@ -846,7 +852,11 @@ function definitionFromSnapshotRows(
     : null;
   if (formulaRule) {
     try {
-      parseFormulaValidationBindings(formulaRule.payload);
+      const rules = parseFormulaValidationBindings(formulaRule.payload).map(
+        ({ rule }) => rule,
+      );
+      if (operationFloor !== requiredFormulaValidationOperationReader(rules))
+        throw new Error('operation floor does not match bound operands');
     } catch {
       throw malformedProjection('formula/rule projection has invalid bindings');
     }
@@ -859,7 +869,7 @@ function definitionFromSnapshotRows(
       catalog: projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.catalog),
       ...(formulaRule ? { formulaRule } : {}),
       operation,
-      query: projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.query),
+      query,
       surface: projectionFor(REQUEST_RUNTIME_PROJECTION_FAMILIES.surface),
     }),
     release: Object.freeze({

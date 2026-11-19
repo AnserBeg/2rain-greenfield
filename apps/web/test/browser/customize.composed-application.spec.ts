@@ -35,12 +35,15 @@ test('a rule drafted in Customize refuses an empty field on the live form until 
         await builder
           .getByRole('button', { name: 'Set up validation' })
           .click();
-        await page
+        const literal = page.locator('form').filter({
+          has: page.getByRole('button', { name: 'Draft validation rule' }),
+        });
+        await literal
           .locator('select[name="fieldId"]')
           .selectOption('northstar.app:field.item_description');
-        await page.locator('select[name="check"]').selectOption('required');
-        await page.getByLabel('Message shown when saving').fill(message);
-        await page
+        await literal.locator('select[name="check"]').selectOption('required');
+        await literal.getByLabel('Message shown when saving').fill(message);
+        await literal
           .getByRole('button', { name: 'Draft validation rule' })
           .click({ timeout: 180_000 });
         await expect(page.locator('[data-customize-diff]')).toContainText(

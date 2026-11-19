@@ -24,6 +24,7 @@ import {
   validateUnboundPermissionAcknowledgement,
 } from './conformance.js';
 import { compilerDiagnostic, finalizeDiagnostics } from './diagnostics.js';
+import { requiredFormulaValidationOperationReader } from '../../canonical-model/src/formula-validation-reader.js';
 import {
   compileLiteralFormulaRules,
   FORMULA_RULE_PAYLOAD_VERSION,
@@ -2171,24 +2172,26 @@ function verifyCompleteness(
   const ruleProjection = emitted.filter(
     ({ reference }) => reference.familyId === PROJECTION_FAMILY_IDS.formulaRule,
   );
-  const ruleDeclared =
-    packageRevision.languageVersion === 'v6' &&
-    Boolean(packageRevision.formulaRules);
+  const declaredRules =
+    packageRevision.languageVersion === 'v6'
+      ? packageRevision.formulaRules
+      : undefined;
   const ruleReference = ruleProjection[0]?.reference;
   const operationReference = emitted.find(
     ({ reference }) =>
       reference.familyId === PROJECTION_FAMILY_IDS.operationCatalog,
   )?.reference;
   if (
-    ruleProjection.length !== Number(ruleDeclared) ||
-    (ruleDeclared &&
+    ruleProjection.length !== Number(Boolean(declaredRules)) ||
+    (declaredRules &&
       (ruleReference?.instanceId !==
         `${packageRevision.package.namespace}:projection.formula-rule` ||
         ruleReference.payloadSchemaVersion !== FORMULA_RULE_PAYLOAD_VERSION ||
         ruleReference.requiredRuntimeCapability.capabilityId !==
           'northstar.runtime:capability.formula-rule' ||
         ruleReference.requiredRuntimeCapability.minimumVersion !== 1 ||
-        operationReference?.requiredRuntimeCapability.minimumVersion !== 3))
+        operationReference?.requiredRuntimeCapability.minimumVersion !==
+          requiredFormulaValidationOperationReader(declaredRules)))
   ) {
     diagnostics.push(
       compilerDiagnostic(

@@ -1601,16 +1601,45 @@ class SemanticVerificationExecutor {
       satisfying.invocation.operationId,
     );
     const entityId = scenario.entityId;
+    const arrangeRelations = async (
+      witness: ValidationWitness,
+      fixtureToken: string,
+    ) => {
+      const references: Record<string, string> = {};
+      for (const [relationId, values] of Object.entries(
+        witness.relatedValues ?? {},
+      )) {
+        if (!values) continue;
+        const relation = this.#relations.find(
+          (candidate) =>
+            candidate.relationId === relationId &&
+            candidate.sourceEntityId === entityId,
+        );
+        if (!relation)
+          throw failure(
+            'VERIFICATION_FORMULA_RULE_MISMATCH',
+            'The example refers to an unavailable relation.',
+          );
+        const record = await this.#create(
+          relation.targetEntityId,
+          arrangementPathToken(fixtureToken, relationId),
+          formulaValues(values),
+        );
+        references[relationId] = record.recordId;
+      }
+      return references;
+    };
     const prepare = async (
       witness: ValidationWitness,
       fixtureToken: string,
     ) => {
+      const relations = await arrangeRelations(witness, fixtureToken);
       if (witness.invocation.kind === 'create')
         return this.#createInput(
           entityId,
           fixtureToken,
           formulaValues(witness.values),
-          {},
+          relations,
           [],
           operation,
         );
@@ -1618,6 +1647,7 @@ class SemanticVerificationExecutor {
         entityId,
         fixtureToken,
         formulaValues(witness.previousValues ?? {}),
+        relations,
       );
       return {
         recordId: prior.recordId,
@@ -1631,7 +1661,7 @@ class SemanticVerificationExecutor {
             entityId,
             `${token}-accept`,
             formulaValues(satisfying.values),
-            {},
+            await arrangeRelations(satisfying, `${token}-accept`),
             [],
             operation,
           )
@@ -2197,26 +2227,6 @@ class SemanticVerificationExecutor {
             : verificationFieldValue(field, token, storageEntity),
         ]),
     );
-    if (
-      witness &&
-      observeValidationRefusals(this.#formulaBindings, {
-        operationId: operation.operationId,
-        businessDate: witness.invocation.businessDate,
-        values,
-      }).length
-    ) {
-      // Keep independent probes' original fixtures when those values satisfy
-      // the guards. Explicit per-invocation overrides always win.
-      for (const [fieldId, value] of Object.entries(
-        formulaValues(witness.values),
-      )) {
-        if (
-          Object.hasOwn(values, fieldId) &&
-          !Object.hasOwn(overrides, fieldId)
-        )
-          values[fieldId] = value;
-      }
-    }
     const fieldOriginRelations = this.#relations.filter(
       (relation) =>
         relation.sourceEntityId === entityId &&
@@ -2278,6 +2288,46 @@ class SemanticVerificationExecutor {
         nextArrangementPath,
       );
       relations[relationInput.relationId] = target.recordId;
+    }
+    if (witness) {
+      const pathValues = Object.fromEntries(
+        this.#formulaBindings
+          .filter(({ rule }) =>
+            rule.boundOperationIds.includes(operation.operationId),
+          )
+          .flatMap(({ paths }) => paths ?? [])
+          .flatMap<readonly [string, VerificationRecord['values'] | null]>(
+            ({ relationId, targetEntityId }) => {
+              const target = relations[relationId];
+              if (!target) return [[relationId, null]];
+              const record = this.#createdRecords.find(
+                ({ entityId, recordId }) =>
+                  entityId === targetEntityId && recordId === target,
+              );
+              return record ? [[relationId, record.values]] : [];
+            },
+          ),
+      );
+      if (
+        observeValidationRefusals(this.#formulaBindings, {
+          operationId: operation.operationId,
+          businessDate: witness.invocation.businessDate,
+          values,
+          pathValues,
+        }).length
+      ) {
+        // Preserve a probe's own values when they satisfy the guards with its
+        // arranged relations. Explicit formula example values take precedence.
+        for (const [fieldId, value] of Object.entries(
+          formulaValues(witness.values),
+        )) {
+          if (
+            Object.hasOwn(values, fieldId) &&
+            !Object.hasOwn(overrides, fieldId)
+          )
+            values[fieldId] = value;
+        }
+      }
     }
     const systemInput = operation.inputContract.systemInput;
     const systemArguments = systemInput
