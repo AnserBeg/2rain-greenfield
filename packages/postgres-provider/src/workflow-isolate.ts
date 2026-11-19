@@ -24,6 +24,12 @@ export type WorkflowIsolateOutcome =
       readonly cursor: number;
     };
 
+export class WorkflowWatchdogExpired extends Error {
+  constructor() {
+    super('Workflow isolate watchdog expired');
+  }
+}
+
 export interface WorkflowIsolateOptions {
   readonly cpuMs?: number;
   /** The supervisor arms this timer when the worker is ready to evaluate. */
@@ -79,7 +85,7 @@ export async function runWorkflowIsolate(
             if (message.kind === 'ready' && !cancelWatchdog) {
               clearTimeout(startupTimer);
               cancelWatchdog = (options.startWatchdog ?? startWatchdog)(() =>
-                reject(new Error('Workflow isolate watchdog expired')),
+                reject(new WorkflowWatchdogExpired()),
               );
             } else if (message.kind === 'outcome' && cancelWatchdog) {
               resolve(JSON.parse(message.outcome) as WorkflowIsolateOutcome);

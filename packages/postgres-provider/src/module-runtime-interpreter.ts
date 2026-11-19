@@ -221,7 +221,10 @@ export class PostgresModuleRuntimeInterpreter
     observePinnedStorageTargetCache:
       | ((observation: PinnedStorageTargetCacheObservation) => void)
       | undefined = undefined,
-    options: { readonly documentNumbers?: DocumentNumberMode; readonly workflowRunId?: string } = {},
+    options: {
+      readonly documentNumbers?: DocumentNumberMode;
+      readonly workflowRunId?: string;
+    } = {},
   ) {
     this.#documentNumbers = options.documentNumbers ?? 'sequence';
     this.#workflowRunId = options.workflowRunId;
@@ -1429,11 +1432,20 @@ async function assertWorkflowWriteFence(
       'Workflow policy changed before commit',
       request.definition.operationId,
     );
-  const runnable = runId && (await client.query<{ runnable: boolean }>(
-    'SELECT platform.workflow_lock_runnable_effect($1, $2, $3, $4, $5) AS runnable',
-    [runId, request.view.pointer.pointerId, request.view.release.releaseId,
-      request.view.pointer.fence, request.idempotencyKey],
-  )).rows[0]?.runnable;
+  const runnable =
+    runId &&
+    (
+      await client.query<{ runnable: boolean }>(
+        'SELECT platform.workflow_lock_runnable_effect($1, $2, $3, $4, $5) AS runnable',
+        [
+          runId,
+          request.view.pointer.pointerId,
+          request.view.release.releaseId,
+          request.view.pointer.fence,
+          request.idempotencyKey,
+        ],
+      )
+    ).rows[0]?.runnable;
   if (!runnable)
     throw failure(
       'WORKFLOW_RUN_NOT_RUNNABLE',

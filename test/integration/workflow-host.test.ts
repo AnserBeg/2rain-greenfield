@@ -365,29 +365,46 @@ test('the supervisor terminates a busy worker before it publishes a partial resp
   assert.equal(run.snapshot().pending, null);
 });
 
-
 test('workflow scheduling is opt-in and a failed pass does not stop polling', async () => {
   assert.equal(workflowSchedulerConfig({}), undefined);
-  assert.throws(() => workflowSchedulerConfig({ NORTH_STAR_WORKFLOW_SCHEDULER: 'on' }), /requires a database URL/);
-  assert.deepEqual(workflowSchedulerConfig({
-    NORTH_STAR_WORKFLOW_SCHEDULER: 'on',
-    NORTH_STAR_WORKFLOW_WORKER_DATABASE_URL: 'postgres://north_star_workflow_worker@localhost/postgres',
-    NORTH_STAR_WORKFLOW_RUNTIME_DATABASE_URL: 'postgres://north_star_runtime@localhost/postgres',
-  }), {
-    workerDatabaseUrl: 'postgres://north_star_workflow_worker@localhost/postgres',
-    runtimeDatabaseUrl: 'postgres://north_star_runtime@localhost/postgres',
-  });
+  assert.throws(
+    () => workflowSchedulerConfig({ NORTH_STAR_WORKFLOW_SCHEDULER: 'on' }),
+    /requires a database URL/,
+  );
+  assert.deepEqual(
+    workflowSchedulerConfig({
+      NORTH_STAR_WORKFLOW_SCHEDULER: 'on',
+      NORTH_STAR_WORKFLOW_WORKER_DATABASE_URL:
+        'postgres://north_star_workflow_worker@localhost/postgres',
+      NORTH_STAR_WORKFLOW_RUNTIME_DATABASE_URL:
+        'postgres://north_star_runtime@localhost/postgres',
+    }),
+    {
+      workerDatabaseUrl:
+        'postgres://north_star_workflow_worker@localhost/postgres',
+      runtimeDatabaseUrl: 'postgres://north_star_runtime@localhost/postgres',
+    },
+  );
   const next = Promise.withResolvers<void>();
   let failures = 0;
   let polls = 0;
-  const stop = superviseWorkflowPolls({
-    async poll() {
-      polls++;
-      if (polls === 1) throw new Error('test poll failure');
-      next.resolve();
+  const stop = superviseWorkflowPolls(
+    {
+      async poll() {
+        polls++;
+        if (polls === 1) throw new Error('test poll failure');
+        next.resolve();
+      },
     },
-  }, () => { failures++; }, 0);
-  const deadline = setTimeout(() => next.reject(new Error('scheduler did not resume')), 1_000);
+    () => {
+      failures++;
+    },
+    0,
+  );
+  const deadline = setTimeout(
+    () => next.reject(new Error('scheduler did not resume')),
+    1_000,
+  );
   try {
     await next.promise;
   } finally {

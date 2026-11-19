@@ -10390,6 +10390,20 @@
     },
     {
       "schema": "platform",
+      "relation": "workflow_activation_watermarks",
+      "ordinal_position": 10,
+      "column_name": "definition_bindings",
+      "data_type": "jsonb",
+      "is_nullable": false,
+      "column_default": "'{}'::jsonb",
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "platform",
       "relation": "workflow_body_blobs",
       "ordinal_position": 1,
       "column_name": "tenant_id",
@@ -11300,6 +11314,90 @@
     },
     {
       "schema": "platform",
+      "relation": "workflow_pending_approvals",
+      "ordinal_position": 11,
+      "column_name": "decision_request_id",
+      "data_type": "uuid",
+      "is_nullable": true,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_receipt_scan_positions",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_receipt_scan_positions",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_receipt_scan_positions",
+      "ordinal_position": 3,
+      "column_name": "pointer_id",
+      "data_type": "uuid",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_receipt_scan_positions",
+      "ordinal_position": 4,
+      "column_name": "fence",
+      "data_type": "bigint",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_receipt_scan_positions",
+      "ordinal_position": 5,
+      "column_name": "next_outbox_id",
+      "data_type": "uuid",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "platform",
       "relation": "workflow_runs",
       "ordinal_position": 1,
       "column_name": "tenant_id",
@@ -11552,6 +11650,48 @@
     },
     {
       "schema": "platform",
+      "relation": "workflow_unresolved_receipts",
+      "ordinal_position": 1,
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_unresolved_receipts",
+      "ordinal_position": 2,
+      "column_name": "environment_id",
+      "data_type": "uuid",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_unresolved_receipts",
+      "ordinal_position": 3,
+      "column_name": "outbox_id",
+      "data_type": "uuid",
+      "is_nullable": false,
+      "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "p",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "platform",
       "relation": "workflow_verification_evidence",
       "ordinal_position": 1,
       "column_name": "tenant_id",
@@ -11628,6 +11768,20 @@
       "data_type": "bytea",
       "is_nullable": false,
       "column_default": null,
+      "identity_kind": "",
+      "generated_kind": "",
+      "storage_kind": "x",
+      "compression": "",
+      "collation": null
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_verification_evidence",
+      "ordinal_position": 7,
+      "column_name": "unattended_operations",
+      "data_type": "jsonb",
+      "is_nullable": false,
+      "column_default": "'{}'::jsonb",
       "identity_kind": "",
       "generated_kind": "",
       "storage_kind": "x",
@@ -11719,8 +11873,386 @@
     },
     {
       "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "column_name": "action_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "column_name": "change_document_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "column_name": "domain_event_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "column_name": "environment_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "column_name": "execution_principal_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "column_name": "invocation_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "column_name": "outbox_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "column_name": "record_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "column_name": "record_type",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "column_name": "release_content_hash",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "column_name": "release_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_business_change_documents",
+      "column_name": "tenant_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "column_name": "action_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "column_name": "change_document_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "column_name": "domain_event_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "column_name": "environment_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "column_name": "event_schema_version",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "column_name": "event_type",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "column_name": "invocation_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "column_name": "outbox_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "column_name": "payload",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "column_name": "release_content_hash",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "column_name": "release_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_domain_events",
+      "column_name": "tenant_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "column_name": "action_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "column_name": "change_document_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "column_name": "domain_event_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "column_name": "environment_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "column_name": "event_schema_version",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "column_name": "event_type",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "column_name": "invocation_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "column_name": "outbox_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "column_name": "release_content_hash",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "column_name": "release_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "column_name": "tenant_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
       "relation": "workflow_pending_approvals",
-      "column_name": "decided_at",
+      "column_name": "cursor",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_pending_approvals",
+      "column_name": "environment_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_pending_approvals",
+      "column_name": "fence",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_pending_approvals",
+      "column_name": "plan",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_pending_approvals",
+      "column_name": "plan_digest",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_pending_approvals",
+      "column_name": "run_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_pending_approvals",
+      "column_name": "tenant_id",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_receipt_scan_positions",
+      "column_name": "fence",
       "grantor": "postgres",
       "grantee": "north_star_workflow_worker",
       "privilege_type": "UPDATE",
@@ -11728,8 +12260,8 @@
     },
     {
       "schema": "platform",
-      "relation": "workflow_pending_approvals",
-      "column_name": "decided_by",
+      "relation": "workflow_receipt_scan_positions",
+      "column_name": "next_outbox_id",
       "grantor": "postgres",
       "grantee": "north_star_workflow_worker",
       "privilege_type": "UPDATE",
@@ -11737,8 +12269,8 @@
     },
     {
       "schema": "platform",
-      "relation": "workflow_pending_approvals",
-      "column_name": "status",
+      "relation": "workflow_receipt_scan_positions",
+      "column_name": "pointer_id",
       "grantor": "postgres",
       "grantee": "north_star_workflow_worker",
       "privilege_type": "UPDATE",
@@ -16985,6 +17517,20 @@
       "schema": "platform",
       "relation": "workflow_activation_watermarks",
       "domain": null,
+      "name": "workflow_activation_watermarks_definition_bindings_check",
+      "type": "c",
+      "definition": "CHECK (jsonb_typeof(definition_bindings) = 'object'::text)",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": false,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_activation_watermarks",
+      "domain": null,
       "name": "workflow_activation_watermarks_fence_check",
       "type": "c",
       "definition": "CHECK (fence > 0)",
@@ -17615,6 +18161,20 @@
       "schema": "platform",
       "relation": "workflow_pending_approvals",
       "domain": null,
+      "name": "workflow_pending_approvals_check2",
+      "type": "c",
+      "definition": "CHECK ((status <> ALL (ARRAY['APPROVED'::text, 'DECLINED'::text])) OR decision_request_id IS NOT NULL)",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": false,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_pending_approvals",
+      "domain": null,
       "name": "workflow_pending_approvals_cursor_check",
       "type": "c",
       "definition": "CHECK (cursor >= 0 AND cursor <= 63)",
@@ -17688,6 +18248,34 @@
       "name": "workflow_pending_approvals_tenant_id_environment_id_run_id_fkey",
       "type": "f",
       "definition": "FOREIGN KEY (tenant_id, environment_id, run_id) REFERENCES platform.workflow_runs(tenant_id, environment_id, run_id)",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": true,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_receipt_scan_positions",
+      "domain": null,
+      "name": "workflow_receipt_scan_positio_tenant_id_environment_id_poi_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, pointer_id, fence) REFERENCES platform.workflow_activation_watermarks(tenant_id, environment_id, pointer_id, fence)",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": true,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_receipt_scan_positions",
+      "domain": null,
+      "name": "workflow_receipt_scan_positions_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id)",
       "deferrable": false,
       "initially_deferred": false,
       "validated": true,
@@ -17865,6 +18453,34 @@
     },
     {
       "schema": "platform",
+      "relation": "workflow_unresolved_receipts",
+      "domain": null,
+      "name": "workflow_unresolved_receipts_pkey",
+      "type": "p",
+      "definition": "PRIMARY KEY (tenant_id, environment_id, outbox_id)",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": true,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_unresolved_receipts",
+      "domain": null,
+      "name": "workflow_unresolved_receipts_tenant_id_environment_id_outb_fkey",
+      "type": "f",
+      "definition": "FOREIGN KEY (tenant_id, environment_id, outbox_id) REFERENCES platform.trust_outbox(tenant_id, environment_id, outbox_id)",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": true,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
+      "schema": "platform",
       "relation": "workflow_verification_evidence",
       "domain": null,
       "name": "workflow_verification_evidenc_tenant_id_environment_id_ver_fkey",
@@ -17912,6 +18528,20 @@
       "name": "workflow_verification_evidence_result_bytes_check",
       "type": "c",
       "definition": "CHECK (octet_length(result_bytes) >= 2 AND octet_length(result_bytes) <= 1048576)",
+      "deferrable": false,
+      "initially_deferred": false,
+      "validated": true,
+      "no_inherit": false,
+      "is_local": true,
+      "inheritance_count": 0
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_verification_evidence",
+      "domain": null,
+      "name": "workflow_verification_evidence_unattended_operations_check",
+      "type": "c",
+      "definition": "CHECK (jsonb_typeof(unattended_operations) = 'object'::text AND octet_length(unattended_operations::text) <= 65536)",
       "deferrable": false,
       "initially_deferred": false,
       "validated": true,
@@ -20591,6 +21221,25 @@
     },
     {
       "schema": "platform",
+      "relation": "workflow_receipt_scan_positions",
+      "name": "workflow_receipt_scan_positions_pkey",
+      "owner": "postgres",
+      "access_method": "btree",
+      "definition": "CREATE UNIQUE INDEX workflow_receipt_scan_positions_pkey ON platform.workflow_receipt_scan_positions USING btree (tenant_id, environment_id)",
+      "is_unique": true,
+      "is_primary": true,
+      "is_exclusion": false,
+      "is_immediate": true,
+      "is_clustered": false,
+      "is_valid": true,
+      "is_ready": true,
+      "is_live": true,
+      "is_replica_identity": false,
+      "expressions": null,
+      "predicate": null
+    },
+    {
+      "schema": "platform",
       "relation": "workflow_runs",
       "name": "workflow_runs_pkey",
       "owner": "postgres",
@@ -20672,6 +21321,25 @@
       "owner": "postgres",
       "access_method": "btree",
       "definition": "CREATE UNIQUE INDEX workflow_timers_pkey ON platform.workflow_timers USING btree (tenant_id, environment_id, run_id, cursor)",
+      "is_unique": true,
+      "is_primary": true,
+      "is_exclusion": false,
+      "is_immediate": true,
+      "is_clustered": false,
+      "is_valid": true,
+      "is_ready": true,
+      "is_live": true,
+      "is_replica_identity": false,
+      "expressions": null,
+      "predicate": null
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_unresolved_receipts",
+      "name": "workflow_unresolved_receipts_pkey",
+      "owner": "postgres",
+      "access_method": "btree",
+      "definition": "CREATE UNIQUE INDEX workflow_unresolved_receipts_pkey ON platform.workflow_unresolved_receipts USING btree (tenant_id, environment_id, outbox_id)",
       "is_unique": true,
       "is_primary": true,
       "is_exclusion": false,
@@ -21522,7 +22190,7 @@
       "permissive": true,
       "roles": ["north_star_workflow_worker"],
       "command": "r",
-      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid AND (EXISTS ( SELECT 1\n   FROM platform.trust_domain_events e\n  WHERE e.tenant_id = trust_action_invocations.tenant_id AND e.environment_id = trust_action_invocations.environment_id AND e.invocation_id = trust_action_invocations.invocation_id))",
+      "using_expression": "(EXISTS ( SELECT 1\n   FROM platform.trust_domain_events e\n  WHERE e.tenant_id = trust_action_invocations.tenant_id AND e.environment_id = trust_action_invocations.environment_id AND e.invocation_id = trust_action_invocations.invocation_id))",
       "check_expression": null
     },
     {
@@ -21552,7 +22220,7 @@
       "permissive": true,
       "roles": ["north_star_workflow_worker"],
       "command": "r",
-      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid AND (EXISTS ( SELECT 1\n   FROM platform.trust_domain_events e\n  WHERE e.tenant_id = trust_business_change_documents.tenant_id AND e.environment_id = trust_business_change_documents.environment_id AND e.invocation_id = trust_business_change_documents.invocation_id))",
+      "using_expression": "(EXISTS ( SELECT 1\n   FROM platform.trust_outbox o\n  WHERE o.tenant_id = trust_business_change_documents.tenant_id AND o.environment_id = trust_business_change_documents.environment_id AND o.outbox_id = trust_business_change_documents.outbox_id AND o.change_document_id = trust_business_change_documents.change_document_id))",
       "check_expression": null
     },
     {
@@ -21582,7 +22250,7 @@
       "permissive": true,
       "roles": ["north_star_workflow_worker"],
       "command": "r",
-      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid AND (EXISTS ( SELECT 1\n   FROM platform.workflow_definitions d\n  WHERE d.tenant_id = trust_domain_events.tenant_id AND d.environment_id = trust_domain_events.environment_id AND d.event_type = trust_domain_events.event_type))",
+      "using_expression": "platform.workflow_subscribed_at_active_fence(tenant_id, environment_id, event_type)",
       "check_expression": null
     },
     {
@@ -21612,7 +22280,7 @@
       "permissive": true,
       "roles": ["north_star_workflow_worker"],
       "command": "r",
-      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid AND (EXISTS ( SELECT 1\n   FROM platform.workflow_definitions d\n  WHERE d.tenant_id = trust_outbox.tenant_id AND d.environment_id = trust_outbox.environment_id AND d.event_type = trust_outbox.event_type))",
+      "using_expression": "platform.workflow_subscribed_at_active_fence(tenant_id, environment_id, event_type)",
       "check_expression": null
     },
     {
@@ -21727,6 +22395,16 @@
     },
     {
       "schema": "platform",
+      "relation": "workflow_receipt_scan_positions",
+      "name": "workflow_worker_scan_position",
+      "permissive": true,
+      "roles": ["north_star_workflow_worker"],
+      "command": "*",
+      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid",
+      "check_expression": null
+    },
+    {
+      "schema": "platform",
       "relation": "workflow_runs",
       "name": "workflow_scoped_worker",
       "permissive": true,
@@ -21744,6 +22422,16 @@
       "command": "*",
       "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid",
       "check_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid"
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_unresolved_receipts",
+      "name": "workflow_worker_pending_sources",
+      "permissive": true,
+      "roles": ["north_star_workflow_worker"],
+      "command": "r",
+      "using_expression": "platform.workflow_subscribed_at_active_fence(tenant_id, environment_id, 'northstar.purchasing:event.receipt_posted'::text)",
+      "check_expression": null
     },
     {
       "schema": "platform",
@@ -23156,6 +23844,25 @@
     },
     {
       "schema": "platform",
+      "relation": "workflow_receipt_scan_positions",
+      "kind": "r",
+      "owner": "postgres",
+      "persistence": "p",
+      "row_level_security": true,
+      "force_row_level_security": true,
+      "is_partition": false,
+      "replica_identity": "d",
+      "access_method": "heap",
+      "tablespace": null,
+      "options": [],
+      "partition_key": null,
+      "partition_bound": null,
+      "view_definition": null,
+      "foreign_server": null,
+      "foreign_options": []
+    },
+    {
+      "schema": "platform",
       "relation": "workflow_runs",
       "kind": "r",
       "owner": "postgres",
@@ -23176,6 +23883,25 @@
     {
       "schema": "platform",
       "relation": "workflow_timers",
+      "kind": "r",
+      "owner": "postgres",
+      "persistence": "p",
+      "row_level_security": true,
+      "force_row_level_security": true,
+      "is_partition": false,
+      "replica_identity": "d",
+      "access_method": "heap",
+      "tablespace": null,
+      "options": [],
+      "partition_key": null,
+      "partition_bound": null,
+      "view_definition": null,
+      "foreign_server": null,
+      "foreign_options": []
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_unresolved_receipts",
       "kind": "r",
       "owner": "postgres",
       "persistence": "p",
@@ -27441,14 +28167,6 @@
       "schema": "platform",
       "relation": "trust_business_change_documents",
       "grantor": "postgres",
-      "grantee": "north_star_workflow_worker",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "trust_business_change_documents",
-      "grantor": "postgres",
       "grantee": "postgres",
       "privilege_type": "DELETE",
       "is_grantable": false
@@ -27514,14 +28232,6 @@
       "relation": "trust_domain_events",
       "grantor": "postgres",
       "grantee": "north_star_runtime",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "trust_domain_events",
-      "grantor": "postgres",
-      "grantee": "north_star_workflow_worker",
       "privilege_type": "SELECT",
       "is_grantable": false
     },
@@ -27657,14 +28367,6 @@
       "schema": "platform",
       "relation": "trust_outbox",
       "grantor": "postgres",
-      "grantee": "north_star_workflow_worker",
-      "privilege_type": "SELECT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "trust_outbox",
-      "grantor": "postgres",
       "grantee": "postgres",
       "privilege_type": "DELETE",
       "is_grantable": false
@@ -28298,14 +29000,6 @@
       "relation": "workflow_pending_approvals",
       "grantor": "postgres",
       "grantee": "north_star_workflow_worker",
-      "privilege_type": "INSERT",
-      "is_grantable": false
-    },
-    {
-      "schema": "platform",
-      "relation": "workflow_pending_approvals",
-      "grantor": "postgres",
-      "grantee": "north_star_workflow_worker",
       "privilege_type": "SELECT",
       "is_grantable": false
     },
@@ -28360,6 +29054,78 @@
     {
       "schema": "platform",
       "relation": "workflow_pending_approvals",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_receipt_scan_positions",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_receipt_scan_positions",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_receipt_scan_positions",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_receipt_scan_positions",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_receipt_scan_positions",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_receipt_scan_positions",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_receipt_scan_positions",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_receipt_scan_positions",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_receipt_scan_positions",
       "grantor": "postgres",
       "grantee": "postgres",
       "privilege_type": "UPDATE",
@@ -28504,6 +29270,70 @@
     {
       "schema": "platform",
       "relation": "workflow_timers",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "UPDATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_unresolved_receipts",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_unresolved_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "DELETE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_unresolved_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "INSERT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_unresolved_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "REFERENCES",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_unresolved_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "SELECT",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_unresolved_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRIGGER",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_unresolved_receipts",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "TRUNCATE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_unresolved_receipts",
       "grantor": "postgres",
       "grantee": "postgres",
       "privilege_type": "UPDATE",
@@ -29332,12 +30162,50 @@
       "language": "plpgsql",
       "owner": "postgres",
       "result_type": "trigger",
-      "definition": "CREATE OR REPLACE FUNCTION platform.workflow_capture_watermark()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$\nDECLARE\n  previous_id uuid;\n  subscribed_types text[]; BEGIN\n  SELECT swap.previous_release_id INTO STRICT previous_id\n    FROM platform.release_activation_swap_receipts AS swap\n   WHERE swap.tenant_id = NEW.tenant_id AND swap.environment_id = NEW.environment_id\n     AND swap.activation_attempt_id = NEW.activation_attempt_id\n     AND swap.pointer_id = NEW.pointer_id AND swap.fence = NEW.fence\n     AND swap.activated_release_id = NEW.activated_release_id;\n\n  SELECT array_agg(DISTINCT d.event_type) INTO subscribed_types\n    FROM platform.workflow_definitions AS d\n   WHERE d.tenant_id = NEW.tenant_id AND d.environment_id = NEW.environment_id\n     AND d.release_id IN (NEW.activated_release_id, previous_id);\n  IF subscribed_types IS NULL THEN RETURN NEW; END IF;\n\n  INSERT INTO platform.workflow_activation_watermarks (\n    tenant_id, environment_id, pointer_id, fence, release_id, release_root,\n    activation_attempt_id, approver_id, approver_grants\n  )\n  SELECT NEW.tenant_id, NEW.environment_id, NEW.pointer_id, NEW.fence, NEW.activated_release_id,\n         r.content_hash, NEW.activation_attempt_id, a.approving_human_id,\n         COALESCE((\n           SELECT jsonb_agg(DISTINCT jsonb_build_array(g.permission_id, g.resource_id, m.legal_entity_id))\n             FROM platform.current_policy_memberships AS m\n             JOIN platform.current_policy_roles AS role USING (tenant_id, environment_id, role_id)\n             JOIN platform.current_policy_permission_grants AS g USING (tenant_id, environment_id, role_id)\n            WHERE m.tenant_id = NEW.tenant_id AND m.environment_id = NEW.environment_id\n              AND m.principal_id = a.approving_human_id\n              AND m.revoked_at IS NULL AND role.revoked_at IS NULL AND g.revoked_at IS NULL\n         ), '[]'::jsonb)\n    FROM platform.release_activation_swap_receipts AS swap\n    JOIN platform.release_approvals AS a USING (tenant_id, environment_id, approval_id)\n    JOIN platform.tenant_releases AS r\n      ON r.tenant_id = swap.tenant_id AND r.environment_id = swap.environment_id\n     AND r.release_id = swap.activated_release_id\n   WHERE swap.tenant_id = NEW.tenant_id AND swap.environment_id = NEW.environment_id\n     AND swap.activation_attempt_id = NEW.activation_attempt_id;\n\n  -- This statement's snapshot is the activation boundary. A later commit with\n  -- an earlier UUID or recorded time is still visible to a subsequent sweep.\n  INSERT INTO platform.workflow_event_occurrences (tenant_id, environment_id, outbox_id, pointer_id, fence, disposition)\n  SELECT o.tenant_id, o.environment_id, o.outbox_id, NEW.pointer_id, NEW.fence, 'PRE_ACTIVATION'\n    FROM platform.trust_outbox AS o\n   WHERE o.tenant_id = NEW.tenant_id AND o.environment_id = NEW.environment_id\n     AND o.event_type = ANY(subscribed_types)\n     AND NOT EXISTS (\n       SELECT 1 FROM platform.workflow_event_occurrences AS e\n        WHERE e.tenant_id = o.tenant_id AND e.environment_id = o.environment_id\n          AND e.outbox_id = o.outbox_id\n     );\n\n  RETURN NEW; END\n$function$\n",
+      "definition": "CREATE OR REPLACE FUNCTION platform.workflow_capture_watermark()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$\nDECLARE\n  incoming jsonb;\n  outgoing jsonb; BEGIN\n  SELECT COALESCE(jsonb_object_agg(d.workflow_id, jsonb_build_object(\n           'digest', e.binding_digest, 'eventType', d.event_type,\n           'unattendedOperations', e.unattended_operations\n         )), '{}'::jsonb)\n    INTO incoming\n    FROM platform.release_activation_swap_receipts AS swap\n    JOIN platform.release_approvals AS approval USING (tenant_id, environment_id, approval_id)\n    JOIN platform.workflow_verification_evidence AS e\n      ON (e.tenant_id, e.environment_id, e.verification_evidence_id) =\n         (approval.tenant_id, approval.environment_id, approval.verification_evidence_id)\n    JOIN platform.workflow_definitions AS d\n      ON (d.tenant_id, d.environment_id, d.release_id, d.workflow_id) =\n         (swap.tenant_id, swap.environment_id, swap.activated_release_id, e.workflow_id)\n     AND e.binding_digest = platform.workflow_definition_digest(d)\n   WHERE swap.tenant_id = NEW.tenant_id AND swap.environment_id = NEW.environment_id\n     AND swap.activation_attempt_id = NEW.activation_attempt_id;\n\n  SELECT w.definition_bindings INTO outgoing\n    FROM platform.workflow_activation_watermarks AS w\n   WHERE w.tenant_id = NEW.tenant_id AND w.environment_id = NEW.environment_id\n     AND w.pointer_id = NEW.pointer_id AND w.fence = NEW.fence - 1;\n\n  IF NOT EXISTS (\n    SELECT 1 FROM jsonb_each(incoming) AS b WHERE b.value->>'eventType' = 'northstar.purchasing:event.receipt_posted'\n    UNION ALL\n    SELECT 1 FROM jsonb_each(outgoing) AS b WHERE b.value->>'eventType' = 'northstar.purchasing:event.receipt_posted'\n  ) THEN RETURN NEW; END IF;\n\n  INSERT INTO platform.workflow_activation_watermarks (\n    tenant_id, environment_id, pointer_id, fence, release_id, release_root,\n    activation_attempt_id, approver_id, approver_grants, definition_bindings\n  )\n  SELECT NEW.tenant_id, NEW.environment_id, NEW.pointer_id, NEW.fence, NEW.activated_release_id,\n         r.content_hash, NEW.activation_attempt_id, a.approving_human_id,\n         COALESCE((\n           SELECT jsonb_agg(DISTINCT jsonb_build_array(g.permission_id, g.resource_id, m.legal_entity_id))\n             FROM platform.current_policy_memberships AS m\n             JOIN platform.current_policy_roles AS role USING (tenant_id, environment_id, role_id)\n             JOIN platform.current_policy_permission_grants AS g USING (tenant_id, environment_id, role_id)\n            WHERE m.tenant_id = NEW.tenant_id AND m.environment_id = NEW.environment_id\n              AND m.principal_id = a.approving_human_id\n              AND m.revoked_at IS NULL AND role.revoked_at IS NULL AND g.revoked_at IS NULL\n         ), '[]'::jsonb), incoming\n    FROM platform.release_activation_swap_receipts AS swap\n    JOIN platform.release_approvals AS a USING (tenant_id, environment_id, approval_id)\n    JOIN platform.tenant_releases AS r\n      ON r.tenant_id = swap.tenant_id AND r.environment_id = swap.environment_id\n     AND r.release_id = swap.activated_release_id\n   WHERE swap.tenant_id = NEW.tenant_id AND swap.environment_id = NEW.environment_id\n     AND swap.activation_attempt_id = NEW.activation_attempt_id;\n\n  -- This statement's snapshot is the activation boundary. A later commit with\n  -- an earlier UUID or recorded time is still visible to a subsequent sweep.\n  INSERT INTO platform.workflow_event_occurrences (tenant_id, environment_id, outbox_id, pointer_id, fence, disposition)\n  SELECT o.tenant_id, o.environment_id, o.outbox_id, NEW.pointer_id, NEW.fence, 'PRE_ACTIVATION'\n    FROM platform.workflow_unresolved_receipts AS o\n   WHERE o.tenant_id = NEW.tenant_id AND o.environment_id = NEW.environment_id;\n\n  RETURN NEW; END\n$function$\n",
       "security_definer": true,
       "leakproof": false,
       "strict": false,
       "returns_set": false,
       "volatility": "v",
+      "parallel_safety": "u",
+      "cost": 100,
+      "estimated_rows": 0,
+      "configuration": ["search_path=pg_catalog, pg_temp"]
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_decide_approval",
+      "identity_arguments": "requested_run uuid, requested_cursor integer, requested_fence bigint, requested_plan_digest text, decision text",
+      "kind": "f",
+      "language": "plpgsql",
+      "owner": "postgres",
+      "result_type": "boolean",
+      "definition": "CREATE OR REPLACE FUNCTION platform.workflow_decide_approval(requested_run uuid, requested_cursor integer, requested_fence bigint, requested_plan_digest text, decision text)\n RETURNS boolean\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$\nDECLARE\n  tenant uuid := nullif(current_setting('north_star.tenant_id', true), '')::uuid;\n  environment uuid := nullif(current_setting('north_star.environment_id', true), '')::uuid;\n  principal uuid := nullif(current_setting('north_star.principal_id', true), '')::uuid;\n  active_pointer uuid;\n  active_release uuid; BEGIN\n  IF decision NOT IN ('APPROVED', 'DECLINED') OR decision IS NULL OR principal IS NULL\n     OR nullif(current_setting('north_star.request_id', true), '') IS NULL\n  THEN RETURN false; END IF;\n  PERFORM 1 FROM platform.release_activation_authority_epochs AS epoch WHERE epoch.tenant_id = tenant FOR SHARE;\n  IF NOT COALESCE((\n    SELECT e.eligible FROM platform.release_approver_eligibility_events AS e\n     WHERE e.tenant_id = tenant AND e.principal_id = principal\n     ORDER BY e.policy_version DESC LIMIT 1\n  ), false) THEN RETURN false; END IF;\n  IF EXISTS (\n    SELECT 1 FROM platform.workflow_definitions AS d\n     WHERE d.tenant_id = tenant AND d.automation_principal_id = principal\n  ) THEN RETURN false; END IF;\n  SELECT p.pointer_id, p.release_id INTO active_pointer, active_release\n    FROM platform.active_release_pointers AS p\n   WHERE p.tenant_id = tenant AND p.environment_id = environment AND p.fence = requested_fence\n   FOR SHARE;\n  IF NOT FOUND THEN RETURN false; END IF;\n  PERFORM 1 FROM platform.workflow_runs AS r\n    JOIN platform.workflow_definitions AS d USING (tenant_id, environment_id, release_id, workflow_id)\n   WHERE r.tenant_id = tenant AND r.environment_id = environment AND r.run_id = requested_run\n     AND r.pointer_id = active_pointer AND r.release_id = active_release\n     AND r.execution_fence = requested_fence AND r.status = 'WAITING'\n     AND d.automation_principal_id <> principal\n   FOR UPDATE OF r;\n  IF NOT FOUND THEN RETURN false; END IF;\n  UPDATE platform.workflow_pending_approvals AS a\n     SET status = decision, decided_by = principal, decided_at = clock_timestamp(),\n         decision_request_id = current_setting('north_star.request_id')::uuid\n   WHERE a.tenant_id = tenant AND a.environment_id = environment AND a.run_id = requested_run\n     AND a.cursor = requested_cursor AND a.fence = requested_fence\n     AND a.plan_digest = requested_plan_digest AND a.status = 'PENDING';\n  RETURN FOUND; END\n$function$\n",
+      "security_definer": true,
+      "leakproof": false,
+      "strict": false,
+      "returns_set": false,
+      "volatility": "v",
+      "parallel_safety": "u",
+      "cost": 100,
+      "estimated_rows": 0,
+      "configuration": ["search_path=pg_catalog, pg_temp"]
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_definition_digest",
+      "identity_arguments": "definition platform.workflow_definitions",
+      "kind": "f",
+      "language": "sql",
+      "owner": "postgres",
+      "result_type": "text",
+      "definition": "CREATE OR REPLACE FUNCTION platform.workflow_definition_digest(definition platform.workflow_definitions)\n RETURNS text\n LANGUAGE sql\n IMMUTABLE STRICT\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$\n  SELECT encode(sha256(convert_to(jsonb_build_array(\n    definition.tenant_id, definition.environment_id, definition.release_id, definition.workflow_id,\n    definition.event_type, definition.body_digest, definition.executable_digest, definition.sdk_digest,\n    definition.engine_build, definition.host_version, definition.sdk_version,\n    definition.automation_principal_id, definition.authored_by, definition.grants\n  )::text, 'UTF8')), 'hex')\n$function$\n",
+      "security_definer": false,
+      "leakproof": false,
+      "strict": true,
+      "returns_set": false,
+      "volatility": "i",
       "parallel_safety": "u",
       "cost": 100,
       "estimated_rows": 0,
@@ -29364,6 +30232,25 @@
     },
     {
       "schema": "platform",
+      "name": "workflow_index_unresolved_receipt",
+      "identity_arguments": "",
+      "kind": "f",
+      "language": "plpgsql",
+      "owner": "postgres",
+      "result_type": "trigger",
+      "definition": "CREATE OR REPLACE FUNCTION platform.workflow_index_unresolved_receipt()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$ BEGIN\n  INSERT INTO platform.workflow_unresolved_receipts VALUES (NEW.tenant_id, NEW.environment_id, NEW.outbox_id);\n  RETURN NEW; END\n$function$\n",
+      "security_definer": true,
+      "leakproof": false,
+      "strict": false,
+      "returns_set": false,
+      "volatility": "v",
+      "parallel_safety": "u",
+      "cost": 100,
+      "estimated_rows": 0,
+      "configuration": ["search_path=pg_catalog, pg_temp"]
+    },
+    {
+      "schema": "platform",
       "name": "workflow_lock_pointer",
       "identity_arguments": "",
       "kind": "f",
@@ -29379,6 +30266,82 @@
       "parallel_safety": "u",
       "cost": 100,
       "estimated_rows": 1000,
+      "configuration": ["search_path=pg_catalog, pg_temp"]
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_lock_runnable_effect",
+      "identity_arguments": "requested_run uuid, requested_pointer uuid, requested_release uuid, requested_fence bigint, requested_effect uuid",
+      "kind": "f",
+      "language": "plpgsql",
+      "owner": "postgres",
+      "result_type": "boolean",
+      "definition": "CREATE OR REPLACE FUNCTION platform.workflow_lock_runnable_effect(requested_run uuid, requested_pointer uuid, requested_release uuid, requested_fence bigint, requested_effect uuid)\n RETURNS boolean\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$ BEGIN\n  PERFORM 1\n    FROM platform.workflow_runs AS r\n    JOIN platform.workflow_effect_outbox AS e USING (tenant_id, environment_id, run_id)\n    JOIN platform.workflow_definitions AS d USING (tenant_id, environment_id, release_id, workflow_id)\n    JOIN platform.workflow_activation_watermarks AS w\n      ON (w.tenant_id, w.environment_id, w.pointer_id, w.fence) =\n         (r.tenant_id, r.environment_id, r.pointer_id, r.initial_fence)\n   WHERE r.tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid\n     AND r.environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid\n     AND d.automation_principal_id = nullif(current_setting('north_star.principal_id', true), '')::uuid\n     AND r.run_id = requested_run AND r.pointer_id = requested_pointer AND r.release_id = requested_release\n     AND r.execution_fence = requested_fence AND r.status = 'RUNNABLE'\n     AND e.idempotency_key = requested_effect\n     AND w.definition_bindings->d.workflow_id->>'digest' = platform.workflow_definition_digest(d)\n   FOR UPDATE OF r;\n  RETURN FOUND; END\n$function$\n",
+      "security_definer": true,
+      "leakproof": false,
+      "strict": false,
+      "returns_set": false,
+      "volatility": "v",
+      "parallel_safety": "u",
+      "cost": 100,
+      "estimated_rows": 0,
+      "configuration": ["search_path=pg_catalog, pg_temp"]
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_read_pointer",
+      "identity_arguments": "",
+      "kind": "f",
+      "language": "sql",
+      "owner": "postgres",
+      "result_type": "TABLE(pointer_id uuid, fence bigint, release_id uuid)",
+      "definition": "CREATE OR REPLACE FUNCTION platform.workflow_read_pointer()\n RETURNS TABLE(pointer_id uuid, fence bigint, release_id uuid)\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$\n  SELECT p.pointer_id, p.fence, p.release_id\n    FROM platform.active_release_pointers AS p\n   WHERE p.tenant_id = nullif(current_setting('north_star.tenant_id', true), '')::uuid\n     AND p.environment_id = nullif(current_setting('north_star.environment_id', true), '')::uuid\n$function$\n",
+      "security_definer": true,
+      "leakproof": false,
+      "strict": false,
+      "returns_set": true,
+      "volatility": "s",
+      "parallel_safety": "u",
+      "cost": 100,
+      "estimated_rows": 1000,
+      "configuration": ["search_path=pg_catalog, pg_temp"]
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_resolve_receipt",
+      "identity_arguments": "",
+      "kind": "f",
+      "language": "plpgsql",
+      "owner": "postgres",
+      "result_type": "trigger",
+      "definition": "CREATE OR REPLACE FUNCTION platform.workflow_resolve_receipt()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$ BEGIN\n  DELETE FROM platform.workflow_unresolved_receipts\n   WHERE (tenant_id, environment_id, outbox_id) = (NEW.tenant_id, NEW.environment_id, NEW.outbox_id);\n  RETURN NEW; END\n$function$\n",
+      "security_definer": true,
+      "leakproof": false,
+      "strict": false,
+      "returns_set": false,
+      "volatility": "v",
+      "parallel_safety": "u",
+      "cost": 100,
+      "estimated_rows": 0,
+      "configuration": ["search_path=pg_catalog, pg_temp"]
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_subscribed_at_active_fence",
+      "identity_arguments": "requested_tenant uuid, requested_environment uuid, requested_event text",
+      "kind": "f",
+      "language": "sql",
+      "owner": "postgres",
+      "result_type": "boolean",
+      "definition": "CREATE OR REPLACE FUNCTION platform.workflow_subscribed_at_active_fence(requested_tenant uuid, requested_environment uuid, requested_event text)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$\n  SELECT EXISTS (\n    SELECT 1 FROM platform.active_release_pointers AS p\n    JOIN platform.workflow_activation_watermarks AS w USING (tenant_id, environment_id, pointer_id, fence, release_id)\n    CROSS JOIN LATERAL jsonb_each(w.definition_bindings) AS binding(id, value)\n    WHERE p.tenant_id = requested_tenant AND p.environment_id = requested_environment\n      AND binding.value->>'eventType' = requested_event\n  )\n  AND requested_tenant = nullif(current_setting('north_star.tenant_id', true), '')::uuid\n  AND requested_environment = nullif(current_setting('north_star.environment_id', true), '')::uuid\n$function$\n",
+      "security_definer": true,
+      "leakproof": false,
+      "strict": false,
+      "returns_set": false,
+      "volatility": "s",
+      "parallel_safety": "u",
+      "cost": 100,
+      "estimated_rows": 0,
       "configuration": ["search_path=pg_catalog, pg_temp"]
     }
   ],
@@ -30042,6 +31005,42 @@
     },
     {
       "schema": "platform",
+      "name": "workflow_decide_approval",
+      "identity_arguments": "requested_run uuid, requested_cursor integer, requested_fence bigint, requested_plan_digest text, decision text",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_decide_approval",
+      "identity_arguments": "requested_run uuid, requested_cursor integer, requested_fence bigint, requested_plan_digest text, decision text",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_definition_digest",
+      "identity_arguments": "definition platform.workflow_definitions",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_definition_digest",
+      "identity_arguments": "definition platform.workflow_definitions",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
       "name": "workflow_environment_ids",
       "identity_arguments": "",
       "grantor": "postgres",
@@ -30052,6 +31051,15 @@
     {
       "schema": "platform",
       "name": "workflow_environment_ids",
+      "identity_arguments": "",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_index_unresolved_receipt",
       "identity_arguments": "",
       "grantor": "postgres",
       "grantee": "postgres",
@@ -30071,6 +31079,69 @@
       "schema": "platform",
       "name": "workflow_lock_pointer",
       "identity_arguments": "",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_lock_runnable_effect",
+      "identity_arguments": "requested_run uuid, requested_pointer uuid, requested_release uuid, requested_fence bigint, requested_effect uuid",
+      "grantor": "postgres",
+      "grantee": "north_star_runtime",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_lock_runnable_effect",
+      "identity_arguments": "requested_run uuid, requested_pointer uuid, requested_release uuid, requested_fence bigint, requested_effect uuid",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_read_pointer",
+      "identity_arguments": "",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_read_pointer",
+      "identity_arguments": "",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_resolve_receipt",
+      "identity_arguments": "",
+      "grantor": "postgres",
+      "grantee": "postgres",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_subscribed_at_active_fence",
+      "identity_arguments": "requested_tenant uuid, requested_environment uuid, requested_event text",
+      "grantor": "postgres",
+      "grantee": "north_star_workflow_worker",
+      "privilege_type": "EXECUTE",
+      "is_grantable": false
+    },
+    {
+      "schema": "platform",
+      "name": "workflow_subscribed_at_active_fence",
+      "identity_arguments": "requested_tenant uuid, requested_environment uuid, requested_event text",
       "grantor": "postgres",
       "grantee": "postgres",
       "privilege_type": "EXECUTE",
@@ -31213,6 +32284,24 @@
       "relation": "tenants",
       "name": "tenants_create_release_activation_authority_epoch",
       "definition": "CREATE TRIGGER tenants_create_release_activation_authority_epoch AFTER INSERT ON platform.tenants FOR EACH ROW EXECUTE FUNCTION platform.create_release_activation_authority_epoch_for_tenant()",
+      "enabled": "O",
+      "deferrable": false,
+      "initially_deferred": false
+    },
+    {
+      "schema": "platform",
+      "relation": "trust_outbox",
+      "name": "workflow_index_unresolved_receipt",
+      "definition": "CREATE TRIGGER workflow_index_unresolved_receipt AFTER INSERT ON platform.trust_outbox FOR EACH ROW WHEN (new.event_type = 'northstar.purchasing:event.receipt_posted'::text) EXECUTE FUNCTION platform.workflow_index_unresolved_receipt()",
+      "enabled": "O",
+      "deferrable": false,
+      "initially_deferred": false
+    },
+    {
+      "schema": "platform",
+      "relation": "workflow_event_occurrences",
+      "name": "workflow_resolve_receipt",
+      "definition": "CREATE TRIGGER workflow_resolve_receipt AFTER INSERT ON platform.workflow_event_occurrences FOR EACH ROW EXECUTE FUNCTION platform.workflow_resolve_receipt()",
       "enabled": "O",
       "deferrable": false,
       "initially_deferred": false

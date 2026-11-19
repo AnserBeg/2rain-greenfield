@@ -20,7 +20,10 @@ import {
   type WorkflowPointer,
   type WorkflowScope,
 } from './workflow-consumer.js';
-import { MAXIMUM_WORKFLOW_EFFECT_BYTES } from './workflow-isolate.js';
+import {
+  MAXIMUM_WORKFLOW_EFFECT_BYTES,
+  WorkflowWatchdogExpired,
+} from './workflow-isolate.js';
 import { InMemoryWorkflowRun, WorkflowGuestError } from './workflow-run.js';
 import {
   generateWorkflowSdk,
@@ -195,7 +198,6 @@ export class PostgresWorkflowExecution {
           );
           return null;
         }
-        if (decision.kind !== 'call') return null;
         const { call, cursor } = decision;
         if (call.kind !== 'query' && call.kind !== 'operation') {
           await setStatus(
@@ -478,7 +480,10 @@ export class PostgresWorkflowExecution {
     } catch (error) {
       if (error instanceof WorkflowEffectRefusal)
         return { kind: 'SUSPENDED' as const, reason: error.message };
-      if (error instanceof WorkflowGuestError)
+      if (
+        error instanceof WorkflowGuestError ||
+        error instanceof WorkflowWatchdogExpired
+      )
         return {
           kind: 'QUARANTINED' as const,
           reason: 'permanent-guest-failure',

@@ -162,19 +162,30 @@ test(
           const grants = { queries: [], operations: [operation] };
           const view = await gateways.loadView(automation);
           const sdk = generateWorkflowSdk(view, grants);
-          const receivingReadModel = 'northstar.app:query.receiving_receipt_lines';
-          assert.ok(registeredSemanticQueryFromPinnedView(view, receivingReadModel)?.readModel);
+          const receivingReadModel =
+            'northstar.app:query.receiving_receipt_lines';
+          assert.ok(
+            registeredSemanticQueryFromPinnedView(view, receivingReadModel)
+              ?.readModel,
+          );
           assert.throws(
-            () => generateWorkflowSdk(view, { queries: [receivingReadModel], operations: [] }),
+            () =>
+              generateWorkflowSdk(view, {
+                queries: [receivingReadModel],
+                operations: [],
+              }),
             /Workflow query grant does not resolve/,
           );
-          const operationDefinition = parsePinnedOperationCatalog(view.projections.operation.payload)
-            .find((definition) => definition.operationId === operation)!;
+          const operationDefinition = parsePinnedOperationCatalog(
+            view.projections.operation.payload,
+          ).find((definition) => definition.operationId === operation)!;
           const proof = {
             [operation]: {
               releaseRoot: view.release.contentHash,
               operationDigest: sha256(canonicalize(operationDefinition)),
-              inputContractDigest: sha256(canonicalize(operationDefinition.inputContract)),
+              inputContractDigest: sha256(
+                canonicalize(operationDefinition.inputContract),
+              ),
               reachableWriteEntities: [entity],
               tierBIntersections: [],
             },
@@ -217,7 +228,12 @@ test(
               JSON.stringify(grants),
             ],
           );
-          await verifyFixtureDefinition(pool, enrolled.releaseId, 'receipt-review', proof);
+          await verifyFixtureDefinition(
+            pool,
+            enrolled.releaseId,
+            'receipt-review',
+            proof,
+          );
           await service.approve(draft.patchId);
           await service.activate(draft.patchId);
           await cloneDefinition(pool, enrolled.releaseId, 'late-definition');
@@ -240,8 +256,16 @@ test(
               WHERE tenant_id = $1 AND environment_id = $2`,
             [tenantId, environmentId],
           );
-          assert.equal(await new PostgresWorkflowConsumer(workerPool).claim(scope), 0, 'fresh worker resumes the persisted scan position');
-          assert.equal(await new PostgresWorkflowConsumer(workerPool).claim(scope), 1, 'wrap catches the earlier receipt and excludes definitions appended after activation');
+          assert.equal(
+            await new PostgresWorkflowConsumer(workerPool).claim(scope),
+            0,
+            'fresh worker resumes the persisted scan position',
+          );
+          assert.equal(
+            await new PostgresWorkflowConsumer(workerPool).claim(scope),
+            1,
+            'wrap catches the earlier receipt and excludes definitions appended after activation',
+          );
           assert.equal(
             await new PostgresWorkflowConsumer(workerPool).claim(scope),
             0,
@@ -316,16 +340,23 @@ test(
           const pendingAtRollback = await latestReceipt(pool, tenantId);
           const replayEntered = Promise.withResolvers<void>();
           const resumeReplay = Promise.withResolvers<void>();
-          const delayedReplay = new PostgresWorkflowExecution(workerPool, runtimePool, wrapGateway(gateways, {
-            async loadView(context) {
-              replayEntered.resolve();
-              await resumeReplay.promise;
-              return gateways.loadView(context);
-            },
-          })).step(scope, secondRun);
-          await Promise.race([replayEntered.promise, delayedReplay.then(() => {
-            throw new Error('replay did not reach the runtime load');
-          })]);
+          const delayedReplay = new PostgresWorkflowExecution(
+            workerPool,
+            runtimePool,
+            wrapGateway(gateways, {
+              async loadView(context) {
+                replayEntered.resolve();
+                await resumeReplay.promise;
+                return gateways.loadView(context);
+              },
+            }),
+          ).step(scope, secondRun);
+          await Promise.race([
+            replayEntered.promise,
+            delayedReplay.then(() => {
+              throw new Error('replay did not reach the runtime load');
+            }),
+          ]);
           try {
             await Promise.race([
               service.rollback(),
@@ -376,63 +407,109 @@ test(
           const dispatchEntered = Promise.withResolvers<void>();
           const resumeDispatch = Promise.withResolvers<void>();
           let dispatchPin: WorkflowRunPin | undefined;
-          const delayedDispatch = new PostgresWorkflowExecution(workerPool, runtimePool, wrapGateway(gateways, {
-            async dispatch(...args) {
-              dispatchPin = args[0];
-              dispatchEntered.resolve();
-              await resumeDispatch.promise;
-              return gateways.dispatch(...args);
-            },
-          })).step(scope, cancelledRun);
-          await Promise.race([dispatchEntered.promise, delayedDispatch.then(() => {
-            throw new Error('effect did not reach dispatch');
-          })]);
-          try {
-            await new PostgresWorkflowExecution(workerPool, runtimePool, wrapGateway(gateways, {
-              async dispatch(pin, call, key) {
-                await assert.rejects(
-                  gateways.dispatch({ ...pin, unattended_operations: {} }, call, key),
-                  /confirmation-required/,
-                );
-                throw new WorkflowEffectRefusal('confirmation-required');
+          const delayedDispatch = new PostgresWorkflowExecution(
+            workerPool,
+            runtimePool,
+            wrapGateway(gateways, {
+              async dispatch(...args) {
+                dispatchPin = args[0];
+                dispatchEntered.resolve();
+                await resumeDispatch.promise;
+                return gateways.dispatch(...args);
               },
-            })).step(scope, cancelledRun);
-            assert.deepEqual(await restarted.remedy(operator, [cancelledRun], 'cancel'), [
-              { runId: cancelledRun, outcome: 'cancelled' },
-            ]);
+            }),
+          ).step(scope, cancelledRun);
+          await Promise.race([
+            dispatchEntered.promise,
+            delayedDispatch.then(() => {
+              throw new Error('effect did not reach dispatch');
+            }),
+          ]);
+          try {
+            await new PostgresWorkflowExecution(
+              workerPool,
+              runtimePool,
+              wrapGateway(gateways, {
+                async dispatch(pin, call, key) {
+                  await assert.rejects(
+                    gateways.dispatch(
+                      { ...pin, unattended_operations: {} },
+                      call,
+                      key,
+                    ),
+                    /confirmation-required/,
+                  );
+                  throw new WorkflowEffectRefusal('confirmation-required');
+                },
+              }),
+            ).step(scope, cancelledRun);
+            assert.deepEqual(
+              await restarted.remedy(operator, [cancelledRun], 'cancel'),
+              [{ runId: cancelledRun, outcome: 'cancelled' }],
+            );
           } finally {
             resumeDispatch.resolve();
             await delayedDispatch;
           }
-          assert.equal(await operationReceiptCount(pool, cancelledRun), 0, 'late dispatch cannot commit after cancellation');
+          assert.equal(
+            await operationReceiptCount(pool, cancelledRun),
+            0,
+            'late dispatch cannot commit after cancellation',
+          );
 
           assert.ok(dispatchPin);
           const queryId = 'northstar.app:query.purchase_order_list';
-          const companyParameter = registeredSemanticQueryFromPinnedView(view, queryId)?.legalEntityScope?.operand.parameterId;
+          const companyParameter = registeredSemanticQueryFromPinnedView(
+            view,
+            queryId,
+          )?.legalEntityScope?.operand.parameterId;
           assert.ok(companyParameter);
-          await assert.rejects(gateways.dispatch(dispatchPin, {
-            kind: 'query',
-            id: queryId,
-            input: { [companyParameter]: dispatchPin.legal_entity_id },
-          }, randomUUID()), /current-policy-refused/);
-          assert.equal((await pool.query(
-            `SELECT 1 FROM platform.trust_action_invocations WHERE action_id = $1
+          await assert.rejects(
+            gateways.dispatch(
+              dispatchPin,
+              {
+                kind: 'query',
+                id: queryId,
+                input: { [companyParameter]: dispatchPin.legal_entity_id },
+              },
+              randomUUID(),
+            ),
+            /current-policy-refused/,
+          );
+          assert.equal(
+            (
+              await pool.query(
+                `SELECT 1 FROM platform.trust_action_invocations WHERE action_id = $1
               AND execution_principal_id = $2 AND outcome = 'DENIED' AND channel = 'WORKFLOW'`,
-            [queryId, automation.principalId],
-          )).rowCount, 1);
+                [queryId, automation.principalId],
+              )
+            ).rowCount,
+            1,
+          );
 
           const oversized = await newRun();
           await stageOversizedReceipt(pool, oversized);
           await restarted.step(scope, oversized);
           assert.equal(await runStatus(pool, oversized), 'SUSPENDED');
           assert.equal(await journalCount(pool, oversized, 'RESULT'), 0);
-          assert.equal((await pool.query(
-            `SELECT 1 FROM platform.workflow_journal
+          assert.equal(
+            (
+              await pool.query(
+                `SELECT 1 FROM platform.workflow_journal
               WHERE run_id = $1 AND kind = 'CONTROL'
                 AND convert_from(canonical_bytes, 'UTF8')::jsonb->'receipt'->>'idempotencyKey' IS NOT NULL`,
-            [oversized],
-          )).rowCount, 1);
-          await assertApprovalBoundary(pool, workerPool, runtimePool, operator, oversized);
+                [oversized],
+              )
+            ).rowCount,
+            1,
+          );
+          await assertApprovalBoundary(
+            pool,
+            workerPool,
+            runtimePool,
+            operator,
+            oversized,
+          );
 
           await service.rollback();
           await withWorkflowTransaction(workerPool, scope, async (client) => {
@@ -440,37 +517,74 @@ test(
               'SELECT count(*)::int AS count FROM platform.trust_outbox WHERE event_type = $1',
               [RECEIPT_POSTED_TYPE],
             );
-            assert.equal(rows[0]?.count, 0, 'a historical subscription gives no source access after rollback');
+            assert.equal(
+              rows[0]?.count,
+              0,
+              'a historical subscription gives no source access after rollback',
+            );
           });
-          await cloneDefinition(pool, enrolled.releaseId, 'permanent-guest-error',
-            compileWorkflowBody("throw new Error('permanent guest failure');", sdk).executable,
+          await cloneDefinition(
+            pool,
+            enrolled.releaseId,
+            'permanent-guest-error',
+            compileWorkflowBody(
+              "throw new Error('permanent guest failure');",
+              sdk,
+            ).executable,
           );
-          await verifyFixtureDefinition(pool, enrolled.releaseId, 'permanent-guest-error', {});
+          await verifyFixtureDefinition(
+            pool,
+            enrolled.releaseId,
+            'permanent-guest-error',
+            {},
+          );
           await service.approve(draft.patchId);
           await service.activate(draft.patchId);
 
           await postReceipt(world);
           const batchReceipt = await latestReceipt(pool, tenantId);
           assert.equal(await consumer.claim(scope), 2);
-          const batch = await pool.query<{ run_id: string; workflow_id: string }>(
+          const batch = await pool.query<{
+            run_id: string;
+            workflow_id: string;
+          }>(
             `SELECT r.run_id, r.workflow_id FROM platform.workflow_runs AS r
               JOIN platform.workflow_instances AS i USING (tenant_id, environment_id, instance_id)
-             WHERE i.outbox_id = $1`, [batchReceipt.outbox_id],
+             WHERE i.outbox_id = $1`,
+            [batchReceipt.outbox_id],
           );
-          const bad = batch.rows.find((entry) => entry.workflow_id === 'permanent-guest-error')!.run_id;
-          const good = batch.rows.find((entry) => entry.workflow_id === 'receipt-review')!.run_id;
-          await pool.query("UPDATE platform.workflow_runs SET created_at = '2000-01-01' WHERE run_id = $1", [bad]);
+          const bad = batch.rows.find(
+            (entry) => entry.workflow_id === 'permanent-guest-error',
+          )!.run_id;
+          const good = batch.rows.find(
+            (entry) => entry.workflow_id === 'receipt-review',
+          )!.run_id;
+          await pool.query(
+            "UPDATE platform.workflow_runs SET created_at = '2000-01-01' WHERE run_id = $1",
+            [bad],
+          );
           let firstView = true;
-          await assert.rejects(new PostgresWorkflowExecution(workerPool, runtimePool, wrapGateway(gateways, {
-            async loadView(context) {
-              if (firstView) {
-                firstView = false;
-                throw new Error('temporary runtime pool failure');
-              }
-              return gateways.loadView(context);
-            },
-          })).tick(scope), /run batch failed/);
-          assert.equal(await journalCount(pool, good, 'REQUEST'), 1, 'later run progressed despite earlier failure');
+          await assert.rejects(
+            new PostgresWorkflowExecution(
+              workerPool,
+              runtimePool,
+              wrapGateway(gateways, {
+                async loadView(context) {
+                  if (firstView) {
+                    firstView = false;
+                    throw new Error('temporary runtime pool failure');
+                  }
+                  return gateways.loadView(context);
+                },
+              }),
+            ).tick(scope),
+            /run batch failed/,
+          );
+          assert.equal(
+            await journalCount(pool, good, 'REQUEST'),
+            1,
+            'later run progressed despite earlier failure',
+          );
           await restarted.tick(scope);
           assert.equal(await runStatus(pool, bad), 'QUARANTINED');
           await restarted.tick(scope);
@@ -503,38 +617,61 @@ test(
             port: 0,
             seedProfile: 'distributor',
             workflowScheduler: {
-              workerDatabaseUrl: databaseUrl.replace('postgres@', 'north_star_workflow_worker@'),
-              runtimeDatabaseUrl: databaseUrl.replace('postgres@', 'north_star_runtime@'),
+              workerDatabaseUrl: databaseUrl.replace(
+                'postgres@',
+                'north_star_workflow_worker@',
+              ),
+              runtimeDatabaseUrl: databaseUrl.replace(
+                'postgres@',
+                'north_star_runtime@',
+              ),
             },
           });
           try {
             const { rows } = await pool.query<{ run_id: string }>(
               `SELECT r.run_id FROM platform.workflow_runs AS r
                 JOIN platform.workflow_instances AS i USING (tenant_id, environment_id, instance_id)
-               WHERE i.outbox_id = $1 AND r.workflow_id = 'permanent-guest-error'`, [refused.outbox_id],
+               WHERE i.outbox_id = $1 AND r.workflow_id = 'permanent-guest-error'`,
+              [refused.outbox_id],
             );
             const runId = rows[0]!.run_id;
             const start = performance.now();
-            while (await runStatus(pool, runId) === 'RUNNABLE' && performance.now() - start < 10_000) {
+            while (
+              (await runStatus(pool, runId)) === 'RUNNABLE' &&
+              performance.now() - start < 10_000
+            ) {
               await delay(50);
             }
-            assert.equal(await runStatus(pool, runId), 'QUARANTINED', 'the composed server polls workflow runs');
+            assert.equal(
+              await runStatus(pool, runId),
+              'QUARANTINED',
+              'the composed server polls workflow runs',
+            );
           } finally {
             await scheduled.close();
           }
 
-          const revokeDuringBulk = new PostgresWorkflowExecution(workerPool, runtimePool, wrapGateway(gateways, {
-            async withRemedyAuthority(operator, work) {
-              const result = await gateways.withRemedyAuthority(operator, work);
-              await pool.query(
-                'SELECT platform.set_release_approver_eligibility($1, $2, false, $2, $3)',
-                [tenantId, operator.principalId, randomUUID()],
-              );
-              return result;
-            },
-          }));
-          await assert.rejects(revokeDuringBulk.remedy(operator, [refusedRun, firstRun], 'cancel'), /permission refused/);
-
+          const revokeDuringBulk = new PostgresWorkflowExecution(
+            workerPool,
+            runtimePool,
+            wrapGateway(gateways, {
+              async withRemedyAuthority(operator, work) {
+                const result = await gateways.withRemedyAuthority(
+                  operator,
+                  work,
+                );
+                await pool.query(
+                  'SELECT platform.set_release_approver_eligibility($1, $2, false, $2, $3)',
+                  [tenantId, operator.principalId, randomUUID()],
+                );
+                return result;
+              },
+            }),
+          );
+          await assert.rejects(
+            revokeDuringBulk.remedy(operator, [refusedRun, firstRun], 'cancel'),
+            /permission refused/,
+          );
         } finally {
           await workerPool.end();
           await runtimePool.end();
@@ -660,9 +797,14 @@ async function assertBoundedPoll(
     `,
       [sample],
     );
-    assert.equal((await client.query<{ count: number }>(
-      'SELECT count(*)::int AS count FROM platform.workflow_unresolved_receipts',
-    )).rows[0]?.count, 80);
+    assert.equal(
+      (
+        await client.query<{ count: number }>(
+          'SELECT count(*)::int AS count FROM platform.workflow_unresolved_receipts',
+        )
+      ).rows[0]?.count,
+      80,
+    );
     await client.query('ANALYZE platform.workflow_unresolved_receipts');
     await client.query('ANALYZE platform.trust_outbox');
     await client.query('ANALYZE platform.workflow_event_occurrences');
@@ -696,11 +838,7 @@ async function assertBoundedPoll(
     assert.ok(scan, JSON.stringify(plan));
     assert.equal(scan['Actual Rows'], WORKFLOW_POLL_BATCH_SIZE + 1);
     assert.ok(
-      nodes.every(
-        (node) =>
-          node['Actual Rows'] * node['Actual Loops'] <=
-          80,
-      ),
+      nodes.every((node) => node['Actual Rows'] * node['Actual Loops'] <= 80),
       JSON.stringify(plan),
     );
   } finally {
@@ -777,7 +915,12 @@ function wrapGateway(
   };
 }
 
-async function cloneDefinition(pool: pg.Pool, releaseId: string, id: string, executable?: string) {
+async function cloneDefinition(
+  pool: pg.Pool,
+  releaseId: string,
+  id: string,
+  executable?: string,
+) {
   await pool.query(
     `INSERT INTO platform.workflow_definitions
      SELECT tenant_id, environment_id, release_id, $2, event_type, body_digest,
@@ -785,7 +928,12 @@ async function cloneDefinition(pool: pg.Pool, releaseId: string, id: string, exe
             sdk_digest, engine_build, host_version, sdk_version,
             automation_principal_id, authored_by, grants
        FROM platform.workflow_definitions WHERE release_id = $1 AND workflow_id = 'receipt-review'`,
-    [releaseId, id, executable === undefined ? null : Buffer.from(executable), executable === undefined ? null : sha256(executable)],
+    [
+      releaseId,
+      id,
+      executable === undefined ? null : Buffer.from(executable),
+      executable === undefined ? null : sha256(executable),
+    ],
   );
 }
 
@@ -809,18 +957,26 @@ async function verifyFixtureDefinition(
   );
 }
 
-async function operationReceiptCount(pool: pg.Pool, runId: string): Promise<number> {
-  return (await pool.query<{ count: number }>(
-    `SELECT count(*)::int AS count
+async function operationReceiptCount(
+  pool: pg.Pool,
+  runId: string,
+): Promise<number> {
+  return (
+    await pool.query<{ count: number }>(
+      `SELECT count(*)::int AS count
        FROM platform.semantic_operation_receipts AS r
        JOIN platform.workflow_effect_outbox AS e USING (tenant_id, environment_id, idempotency_key)
       WHERE e.run_id = $1`,
-    [runId],
-  )).rows[0]!.count;
+      [runId],
+    )
+  ).rows[0]!.count;
 }
 
 async function stageOversizedReceipt(pool: pg.Pool, runId: string) {
-  const { rows } = await pool.query<{ canonical_bytes: Buffer; idempotency_key: string }>(
+  const { rows } = await pool.query<{
+    canonical_bytes: Buffer;
+    idempotency_key: string;
+  }>(
     `SELECT j.canonical_bytes, e.idempotency_key FROM platform.workflow_effect_outbox AS e
        JOIN platform.workflow_journal AS j
          ON (j.tenant_id, j.environment_id, j.run_id, j.journal_id) =
@@ -828,7 +984,9 @@ async function stageOversizedReceipt(pool: pg.Pool, runId: string) {
       WHERE e.run_id = $1`,
     [runId],
   );
-  const request = JSON.parse(rows[0]!.canonical_bytes.toString()) as { input: unknown };
+  const request = JSON.parse(rows[0]!.canonical_bytes.toString()) as {
+    input: unknown;
+  };
   const result = await pool.query(
     `INSERT INTO platform.semantic_operation_receipts
      SELECT tenant_id, environment_id, principal_id, release_id, release_content_hash, action_id,
@@ -847,38 +1005,73 @@ async function assertApprovalBoundary(
   operator: Awaited<ReturnType<typeof trustedContext>>,
   runId: string,
 ) {
-  const scope = { tenant_id: operator.tenantId, environment_id: operator.environmentId };
-  await pool.query("UPDATE platform.workflow_runs SET status = 'WAITING', reason = NULL WHERE run_id = $1", [runId]);
-  const fence = (await pool.query<{ execution_fence: string }>(
-    'SELECT execution_fence FROM platform.workflow_runs WHERE run_id = $1', [runId],
-  )).rows[0]!.execution_fence;
+  const scope = {
+    tenant_id: operator.tenantId,
+    environment_id: operator.environmentId,
+  };
+  await pool.query(
+    "UPDATE platform.workflow_runs SET status = 'WAITING', reason = NULL WHERE run_id = $1",
+    [runId],
+  );
+  const fence = (
+    await pool.query<{ execution_fence: string }>(
+      'SELECT execution_fence FROM platform.workflow_runs WHERE run_id = $1',
+      [runId],
+    )
+  ).rows[0]!.execution_fence;
   const digest = sha256('{"summary":"Escalate"}');
   await withWorkflowTransaction(workerPool, scope, async (client) => {
-    const { rows } = await client.query<{ insert_status: boolean; update_decision: boolean; read_changes: boolean }>(`
+    const { rows } = await client.query<{
+      insert_status: boolean;
+      update_decision: boolean;
+      read_changes: boolean;
+    }>(`
       SELECT has_column_privilege('platform.workflow_pending_approvals', 'status', 'INSERT') AS insert_status,
              has_column_privilege('platform.workflow_pending_approvals', 'decided_by', 'UPDATE') AS update_decision,
              has_column_privilege('platform.trust_business_change_documents', 'changes', 'SELECT') AS read_changes
     `);
-    assert.deepEqual(rows[0], { insert_status: false, update_decision: false, read_changes: false });
+    assert.deepEqual(rows[0], {
+      insert_status: false,
+      update_decision: false,
+      read_changes: false,
+    });
     await client.query(
       `INSERT INTO platform.workflow_pending_approvals
         (tenant_id, environment_id, run_id, cursor, fence, plan, plan_digest)
        VALUES ($1, $2, $3, 0, $4, $5, $6)`,
-      [scope.tenant_id, scope.environment_id, runId, fence, Buffer.from('{"summary":"Escalate"}'), digest],
+      [
+        scope.tenant_id,
+        scope.environment_id,
+        runId,
+        fence,
+        Buffer.from('{"summary":"Escalate"}'),
+        digest,
+      ],
     );
   });
   const decide = (planDigest: string, activeFence: string) =>
-    withTrustedRequestTransaction(runtimePool, operator, async (client) =>
-      (await client.query<{ decided: boolean }>(
-        "SELECT platform.workflow_decide_approval($1, 0, $2, $3, 'APPROVED') AS decided",
-        [runId, activeFence, planDigest],
-      )).rows[0]!.decided,
+    withTrustedRequestTransaction(
+      runtimePool,
+      operator,
+      async (client) =>
+        (
+          await client.query<{ decided: boolean }>(
+            "SELECT platform.workflow_decide_approval($1, 0, $2, $3, 'APPROVED') AS decided",
+            [runId, activeFence, planDigest],
+          )
+        ).rows[0]!.decided,
     );
   assert.equal(await decide(sha256('{}'), fence), false);
   assert.equal(await decide(digest, String(Number(fence) - 1)), false);
   assert.equal(await decide(digest, fence), true);
   assert.equal(await decide(digest, fence), false);
-  assert.equal((await pool.query<{ decided_by: string }>(
-    'SELECT decided_by FROM platform.workflow_pending_approvals WHERE run_id = $1', [runId],
-  )).rows[0]?.decided_by, operator.principalId);
+  assert.equal(
+    (
+      await pool.query<{ decided_by: string }>(
+        'SELECT decided_by FROM platform.workflow_pending_approvals WHERE run_id = $1',
+        [runId],
+      )
+    ).rows[0]?.decided_by,
+    operator.principalId,
+  );
 }
