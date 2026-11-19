@@ -10,7 +10,7 @@ Run `node --import tsx --test --test-name-pattern='company-owned tenant record m
 
 ```record-claim
 {
-  "schemaVersion":"northstar.record-claim/v1","packet":"CRITFIX-F","base":"5402386557abd00c633b1930724e91e1fe586762","head":"bd628478e7a9c33190a87558e092200c21cc8881",
+  "schemaVersion":"northstar.record-claim/v1","packet":"CRITFIX-F","base":"e0bb8e9582cb9a7eca95f520fb2d4fabe47a7803","head":"54e7d2477648d0bfc82835f5efbe293663f233e0",
   "changedPaths":["packages/postgres-provider/src/module-runtime-interpreter.ts","test/postgres/customization.test.ts","test/postgres/module-runtime.test.ts"],
   "symbols":[{"path":"packages/postgres-provider/src/module-runtime-interpreter.ts","name":"readRecordCompany"}]
 }
