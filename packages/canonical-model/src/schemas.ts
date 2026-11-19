@@ -1471,9 +1471,15 @@ export const SurfaceDocumentEditorSchema = z.strictObject({
       z.strictObject({
         fieldId: CanonicalIdSchema,
         label: LabelSchema,
-        reference: editorField.shape.reference.unwrap().required({
-          getQueryId: true,
-        }),
+        reference: editorField.shape.reference
+          .unwrap()
+          .pick({
+            queryId: true,
+            getQueryId: true,
+            labelFieldIds: true,
+            detailFieldIds: true,
+          })
+          .required({ getQueryId: true }),
       }),
     )
     .min(1)

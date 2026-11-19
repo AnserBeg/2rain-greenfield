@@ -785,6 +785,13 @@ export function validateSurfaceWorkspaces(
     checkFields(editor.lineFields, lineQuery!.sourceEntity.targetId);
     const headerEntityId = headerQuery!.sourceEntity.targetId;
     const declaredHeaderRelations = editor.headerRelations ?? [];
+    const createsHeader = model.operations.some(
+      (operation) =>
+        operation.effect.kind === 'createRecordEffect' &&
+        'entity' in operation.effect &&
+        operation.effect.entity.targetId === headerEntityId &&
+        operation.lifecycle === 'active',
+    );
     const headerInputIds = new Set(
       editor.headerFields.map((field) => String(field.fieldId)),
     );
@@ -799,6 +806,7 @@ export function validateSurfaceWorkspaces(
       ];
       if (
         headerInputIds.has(input.fieldId) ||
+        !createsHeader ||
         relation?.sourceEntity.targetId !== headerEntityId ||
         relation.ownership !== 'reference' ||
         relation.lifecycle !== 'active' ||
@@ -808,11 +816,7 @@ export function validateSurfaceWorkspaces(
           input.reference.getQueryId,
           input.reference.queryId,
           pickerFields,
-        ) ||
-        input.reference.eligibility ||
-        input.reference.within ||
-        input.reference.searchChildren ||
-        input.reference.create
+        )
       ) {
         fail(
           surface.surfaceId,
@@ -821,6 +825,22 @@ export function validateSurfaceWorkspaces(
       }
       headerInputIds.add(input.fieldId);
     }
+    if (
+      (editor.headerRelations ||
+        editor.scope === 'tenantShared' ||
+        !editor.stateFieldId) &&
+      model.relations.some(
+        (candidate) =>
+          candidate.sourceEntity.targetId === headerEntityId &&
+          candidate.lifecycle === 'active' &&
+          candidate.required &&
+          !headerInputIds.has(candidate.relationId),
+      )
+    )
+      fail(
+        surface.surfaceId,
+        'an editor must offer a picker for each required header relation',
+      );
     if (
       fields.get(editor.lineNumberFieldId)?.entity.targetId !==
       lineQuery!.sourceEntity.targetId
@@ -858,19 +878,12 @@ export function validateSurfaceWorkspaces(
     // text that fits, an option of its enumeration, the document's own record
     // id or the saving principal into text long enough to hold one, or the
     // save's instant into a UTC instant.
-    const headerEntity = headerQuery!.sourceEntity.targetId;
     const offered = new Set(
       [...editor.headerFields, ...editor.lineFields].map((value) =>
         String(value.fieldId),
       ),
     );
     const createValues = editor.createValues ?? [];
-    const createsHeader = model.operations.some(
-      (operation) =>
-        operation.effect.kind === 'createRecordEffect' &&
-        'entity' in operation.effect &&
-        operation.effect.entity.targetId === headerEntity,
-    );
     if (
       new Set(createValues.map((value) => value.fieldId)).size !==
       createValues.length
@@ -893,7 +906,7 @@ export function validateSurfaceWorkspaces(
                 type.options.some((option) => option.optionId === value.value);
       if (
         !createsHeader ||
-        fields.get(entry.fieldId)?.entity.targetId !== headerEntity ||
+        fields.get(entry.fieldId)?.entity.targetId !== headerEntityId ||
         offered.has(String(entry.fieldId)) ||
         !admissible
       )

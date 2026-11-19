@@ -394,6 +394,14 @@ test('tenant line tables use the document editor with or without company scope a
     label: 'Goods receipt',
     target: 'northstar.app:entity.goods_receipt',
   };
+  const links = [
+    link,
+    ...(['party', 'item', 'location'] as const).map((target) => ({
+      ...link,
+      label: target,
+      target: `northstar.app:entity.${target}`,
+    })),
+  ];
   const accepted = await compileInSandbox(
     sandboxRequest([change([header, lifecycle, lines])]),
   );
@@ -459,7 +467,7 @@ test('tenant line tables use the document editor with or without company scope a
     [header, lines],
     [{ ...header, companyOwnership: 'tenantShared' }, lifecycle, lines],
     [{ ...header, companyOwnership: 'tenantShared' }, lines],
-    [header, link, lines, lifecycle],
+    [header, ...links, lines, lifecycle],
   ]) {
     const extended = await compileInSandbox(sandboxRequest([change(members)]));
     assert.equal(
@@ -487,12 +495,26 @@ test('tenant line tables use the document editor with or without company scope a
     assert.equal(unsupportedRuntimeCapability(family, requirement), null);
   }
   const visual = await compileInSandbox(
-    sandboxRequest([patch(header), change([link, lines, lifecycle])]),
+    sandboxRequest([patch(header), change([...links, lines, lifecycle])]),
   );
   assert.equal(
     visual.status,
     'compiled',
     JSON.stringify(visual.status === 'compiled' ? [] : visual),
+  );
+  const uncovered = applyCustomizationPatches(authored, [
+    change([header, { ...link, required: true }, lines]),
+  ]);
+  assert.equal(uncovered.status, 'applied');
+  const form = (uncovered.authored.surfaces as Record<string, unknown>[]).find(
+    (surface) =>
+      String(surface.surfaceId).endsWith('.custom_quality_review_form'),
+  )!;
+  delete (form.documentEditor as Record<string, unknown>).headerRelations;
+  assert.throws(
+    () => normalizeApplicationPackage(uncovered.authored),
+    (error: unknown) =>
+      /picker for each required header relation/u.test(JSON.stringify(error)),
   );
 });
 

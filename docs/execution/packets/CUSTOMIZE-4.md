@@ -14,6 +14,7 @@ Status — build checkpoint over `99371b43`. Integration depends on CUSTOMIZE-3'
 
 - Floor 24 admits create-time header links and shared or lifecycle-less editors, including their declared List relation columns. The first-party re-baseline reproduced the checked-in release byte for byte. See ADR-0072.
 - Links are chosen at creation and restrict archiving a target with active dependents. Multiple inspections can refer to the same receipt, so Inspection needs no new uniqueness rule.
+- List search matches linked labels. Selecting a linked value narrows the list by that record's ID.
 - The editor uses sequential per-row saves and refuses parent archive while there are active lines. Company ownership follows ADR-0015.
 - The visual path publishes a record type, then drafts its lines, links and lifecycle together. A plain-English request can draft both steps as one change set.
 - Approved 0034 replaces the SQL kind allowlist with a bounded identifier check. The versioned parser still refuses unknown kinds at write and replay.
