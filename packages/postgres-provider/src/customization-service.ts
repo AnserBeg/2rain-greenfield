@@ -37,6 +37,7 @@ import pg from 'pg';
 import type { PostgresCapabilityOperationExecutorFactory } from './capability-operation-executor-factory.js';
 import {
   activateWithExactSwapTrigger,
+  assertAgentOperationsPlannable,
   PersistedReleaseConflict,
   reconcileInventoryScopeToPointer,
   withReleaseScopeLock,
@@ -1397,6 +1398,10 @@ export class PostgresCustomizationService {
         );
       }
       await this.#assertUpgradeBase(context, upgrade);
+      // The persisted candidate may have been approved by a previous host.
+      assertAgentOperationsPlannable(
+        await this.#loadRelease(context, record.resultingReleaseId),
+      );
       if (approved.transition_plan_digest !== null) {
         const generation = await admin.query<{
           generation_id: string;
@@ -1481,6 +1486,7 @@ export class PostgresCustomizationService {
           );
         const targetReleaseId = reverse.targetReleaseId;
         const parent = await this.#loadRelease(context, targetReleaseId);
+        assertAgentOperationsPlannable(parent);
         const candidate = await this.#loadRelease(context, pointer.releaseId);
         const target = await this.#identity(context, targetReleaseId);
         await assertExactSwapTriggerEnabled(admin);

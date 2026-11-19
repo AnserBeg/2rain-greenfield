@@ -91,6 +91,7 @@ const TENANT_SLUG = 'agent-world';
 export async function withAgentWorlds<T>(
   label: string,
   run: (worlds: AgentWorlds) => Promise<T>,
+  prepare?: (base: AgentWorld) => Promise<void>,
 ): Promise<T> {
   return withEphemeralPostgres(
     label,
@@ -104,7 +105,18 @@ export async function withAgentWorlds<T>(
         seedProfile: 'distributor',
         tenantSlug: TENANT_SLUG,
       });
-      await base.close();
+      try {
+        await prepare?.(
+          worldOver(
+            base.runtime,
+            BASE_DATABASE,
+            url(BASE_DATABASE),
+            TENANT_SLUG,
+          ),
+        );
+      } finally {
+        await base.close();
+      }
       return run({
         async fresh(name) {
           const databaseName = `agent_${name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '_')}_${randomUUID().slice(0, 8)}`;

@@ -33,7 +33,13 @@ import {
   type AgentRunResult,
 } from '../../packages/operations-agent/src/index.js';
 
+import * as deployment from '../../packages/operations-agent/src/index.js';
 import { BUSINESS_CALENDAR, COMPANY, withAgentWorlds } from './agent-world.js';
+import {
+  generatedProof,
+  installProof,
+  type ProofTask,
+} from './generated-modules.js';
 import { snapshot } from './arrange.js';
 import { attemptsFor, DEV_TASKS, type DevTask } from './dev-tasks.js';
 
@@ -44,6 +50,7 @@ async function main(): Promise<void> {
     options: {
       model: { type: 'string', default: DEFAULT_ANTHROPIC_MODEL },
       effort: { type: 'string', default: 'high' },
+      routed: { type: 'boolean', default: false },
       'price-input': { type: 'string' },
       'price-output': { type: 'string' },
       'price-cache-read': { type: 'string' },
@@ -54,6 +61,7 @@ async function main(): Promise<void> {
       // `ten`: the pre-registered ten, one attempt each; `dev`: the AGENT-3
       // development set, three attempts per write task.
       set: { type: 'string', default: 'ten' },
+      'proof-seed': { type: 'string' },
       tasks: { type: 'string' },
       attempts: { type: 'string' },
       out: { type: 'string', default: 'docs/execution/evidence' },
@@ -80,10 +88,19 @@ async function main(): Promise<void> {
     throw new Error('--price-source and --price-date are required');
   const cap = Number(args.cap);
   const dev = args.set === 'dev';
+  if (!['ten', 'dev', 'proof'].includes(String(args.set)))
+    throw new Error('unknown eval set');
+  if (args.set === 'proof' && !args['proof-seed'])
+    throw new Error('proof requires the frozen --proof-seed');
+  const proof =
+    args.set === 'proof'
+      ? generatedProof(String(args['proof-seed']))
+      : undefined;
+  const available: readonly DevTask[] = proof?.tasks ?? DEV_TASKS;
   const selected = new Set(
     (
       args.tasks ??
-      (dev ? DEV_TASKS : DEV_TASKS.slice(0, 10))
+      (dev || proof ? available : available.slice(0, 10))
         .map((task) => task.id)
         .join(',')
     )
@@ -101,7 +118,7 @@ async function main(): Promise<void> {
     throw new Error('--cap must be positive and finite');
   if (
     !selected.size ||
-    [...selected].some((id) => !DEV_TASKS.some((task) => task.id === id))
+    [...selected].some((id) => !available.some((task) => task.id === id))
   )
     throw new Error('unknown eval task');
   const attempts = (task: DevTask) => repeat ?? (dev ? attemptsFor(task) : 1);
@@ -112,7 +129,7 @@ async function main(): Promise<void> {
   await mkdir(runDirectory, { recursive: true });
 
   const key = await loadModelKey('anthropic');
-  const model = anthropicModel({
+  const fixedModel = anthropicModel({
     key,
     modelId: String(args.model),
     effort: args.effort as 'high',
@@ -135,6 +152,13 @@ async function main(): Promise<void> {
     tokensOut: number;
     usd: number;
     seconds: number;
+    timing?: {
+      cardSeconds: number | null;
+      verifiedSeconds: number[];
+      elapsedSeconds: number;
+      modelCalls: number;
+      group?: ProofTask['group'];
+    };
     calls: Record<string, number>;
     answer: string;
     record: string;
@@ -142,238 +166,286 @@ async function main(): Promise<void> {
   const rows: Row[] = [];
   const log = (line: string) => process.stdout.write(`${line}\n`);
 
-  await withAgentWorlds('agent-eval', async (worlds) => {
-    for (const task of DEV_TASKS.filter((candidate) =>
-      selected.has(candidate.id),
-    ))
-      for (let attempt = 1; attempt <= attempts(task); attempt += 1) {
-        const record = join(
-          runDirectory,
-          `task-${String(task.id).padStart(2, '0')}${attempts(task) > 1 ? `-a${String(attempt)}` : ''}.jsonl`,
-        );
-        // Appends are queued so lines land in call order; `at` is read when the
-        // event happens, not when its write runs.
-        let queue: Promise<void> = Promise.resolve();
-        let started = 0;
-        const granted = new Map<string, number>();
-        const confirmed = new Set<string>();
-        const verifiedSeconds: number[] = [];
-        let cardSeconds: number | null = null;
-        const append = (entry: Record<string, unknown>): Promise<void> => {
-          const line = `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`;
-          queue = queue.then(() => appendFile(record, line));
-          return queue;
-        };
-        if (meter.exhausted()) {
-          rows.push({
-            task: task.id,
-            attempt,
-            kind: task.kind,
-            title: task.title,
-            pass: false,
-            reason: 'not run: spend cap reached',
-            stop: 'not-run',
-            toolCalls: 0,
-            approvals: 0,
-            tokensIn: 0,
-            cacheRead: 0,
-            cacheWrite: 0,
-            tokensOut: 0,
-            usd: 0,
-            seconds: 0,
-            calls: {},
-            answer: '',
-            record,
-          });
-          continue;
-        }
-        log(
-          `task ${String(task.id)}${attempts(task) > 1 ? ` attempt ${String(attempt)}` : ''}: ${task.title}`,
-        );
-        const world = await worlds.fresh(
-          `eval-${String(task.id)}-${String(attempt)}`,
-        );
-        try {
-          const context = await task.arrange(world);
-          const before = await snapshot(world);
-          const request = task.request(context);
-          await append({
-            kind: 'task',
-            task: task.id,
-            request,
-            attempt,
-            actor: task.actor ?? 'buyer',
-            database: world.databaseName,
-            model: model.modelId,
-          });
-          const session = new OperationsAgentSession({
-            // The panel's act-then-undo (a host option since the end review X6).
-            autoApproveReversible: true,
-            runtime: world.runtime,
-            personHeaders: {
-              cookie: `northstar-demo-actor=${task.actor ?? 'buyer'}`,
-            },
-            companyId: COMPANY,
-            businessCalendar: BUSINESS_CALENDAR,
-            approve: async (plan) => {
-              cardSeconds ??= (performance.now() - started) / 1000;
-              await append({
-                kind: 'approval',
-                granted: true,
-                by: 'harness',
-                planId: plan.planId,
-                steps: plan.steps.map((step) => step.operationId),
-              });
-              granted.set(plan.planId, performance.now());
-              return true;
-            },
-          });
-          const calls: Record<string, number> = {};
-          started = performance.now();
-          const run = await runOperationsAgent({
-            model,
-            executeAfterApproval: true,
-            session,
-            request,
-            meter,
-            ...(args.preamble === 'off'
-              ? {}
-              : {
-                  preamble: await agentPreamble(
-                    session,
-                    'screen' in task && typeof task.screen === 'function'
-                      ? task.screen(context)
-                      : null,
-                  ),
-                }),
-            onEvent: (event) => {
-              if (event.kind === 'model')
-                void append({
-                  kind: 'model',
-                  messages: event.messages,
-                  stop: event.stop,
-                  tokensIn: event.usage.inputTokens,
-                  cacheRead: event.usage.cacheReadTokens,
-                  cacheWrite: event.usage.cacheWriteTokens,
-                  tokensOut: event.usage.outputTokens,
-                  usd: event.usd,
-                });
-              if (event.kind === 'tool') {
-                const name = callName(event.name, event.input);
-                calls[name] = (calls[name] ?? 0) + 1;
-              }
-              if (event.kind === 'tool')
-                void append({
-                  kind: 'tool',
-                  tool: event.name,
-                  arguments: loggedArguments(event.input),
-                });
-              if (
-                event.kind === 'result' &&
-                event.name === 'erp_verify' &&
-                !event.isError
-              ) {
-                const report = event.content as {
-                  operationSessionId?: string;
-                  verified?: boolean;
-                } | null;
-                const id = report?.operationSessionId;
-                if (
-                  id &&
-                  report.verified &&
-                  granted.has(id) &&
-                  !confirmed.has(id)
-                ) {
-                  confirmed.add(id);
-                  verifiedSeconds.push(
-                    (performance.now() - granted.get(id)!) / 1000,
-                  );
-                }
-              }
-              if (event.kind === 'result')
-                void append({
-                  kind: 'tool-result',
-                  tool: event.name,
-                  status: event.isError ? 'refused' : 'ok',
-                  result: event.content,
-                });
-            },
-          });
-          const elapsedSeconds = (performance.now() - started) / 1000;
-          await append({
-            kind: 'timing',
-            cardSeconds,
-            verifiedSeconds,
-            elapsedSeconds,
-            modelCalls: run.turns,
-            toolCalls: run.toolCalls,
-            usd: run.usd,
-          });
-          await queue;
-          const verdict = await task.check(world, context, before, run);
-          await append({
-            kind: 'verdict',
-            pass: verdict.pass,
-            reason: verdict.reason,
-            stop: run.stop,
-            answer: run.answer,
-            ...(run.error ? { error: run.error } : {}),
-          });
-          rows.push({
-            task: task.id,
-            attempt,
-            kind: task.kind,
-            title: task.title,
-            pass: verdict.pass,
-            reason: verdict.reason,
-            stop: run.stop,
-            toolCalls: run.toolCalls,
-            approvals: session.approvals.length,
-            tokensIn: run.usage.inputTokens,
-            cacheRead: run.usage.cacheReadTokens,
-            cacheWrite: run.usage.cacheWriteTokens,
-            tokensOut: run.usage.outputTokens,
-            usd: run.usd,
-            seconds: run.seconds,
-            calls,
-            answer: run.answer,
-            record,
-          });
-          log(
-            `  ${verdict.pass ? 'PASS' : 'FAIL'} ${verdict.reason} · ${String(run.toolCalls)} tool calls (${String(discoveryCalls(calls))} discovery) · ${run.seconds.toFixed(1)} s · $${run.usd.toFixed(4)} (total $${meter.usd.toFixed(4)})`,
+  await withAgentWorlds(
+    'agent-eval',
+    async (worlds) => {
+      for (const task of available.filter((candidate) =>
+        selected.has(candidate.id),
+      ))
+        for (let attempt = 1; attempt <= attempts(task); attempt += 1) {
+          const record = join(
+            runDirectory,
+            `task-${String(task.id).padStart(2, '0')}${attempts(task) > 1 ? `-a${String(attempt)}` : ''}.jsonl`,
           );
-        } catch (error) {
-          const message =
-            error instanceof Error
-              ? `${error.name}: ${error.message}`
-              : String(error);
-          await append({ kind: 'harness-error', error: message });
-          rows.push({
-            task: task.id,
-            attempt,
-            kind: task.kind,
-            title: task.title,
-            pass: false,
-            reason: `harness error: ${message}`,
-            stop: 'harness-error',
-            toolCalls: 0,
-            approvals: 0,
-            tokensIn: 0,
-            cacheRead: 0,
-            cacheWrite: 0,
-            tokensOut: 0,
-            usd: 0,
-            seconds: 0,
-            calls: {},
-            answer: '',
-            record,
-          });
-          log(`  HARNESS ERROR ${message}`);
-        } finally {
-          await world.close();
+          // Appends are queued so lines land in call order; `at` is read when the
+          // event happens, not when its write runs.
+          let queue: Promise<void> = Promise.resolve();
+          let started = 0;
+          const granted = new Map<string, number>();
+          const confirmed = new Set<string>();
+          const verifiedSeconds: number[] = [];
+          let cardSeconds: number | null = null;
+          const append = (entry: Record<string, unknown>): Promise<void> => {
+            const line = `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`;
+            queue = queue.then(() => appendFile(record, line));
+            return queue;
+          };
+          if (meter.exhausted()) {
+            rows.push({
+              task: task.id,
+              attempt,
+              kind: task.kind,
+              title: task.title,
+              pass: false,
+              reason: 'not run: spend cap reached',
+              stop: 'not-run',
+              toolCalls: 0,
+              approvals: 0,
+              tokensIn: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              tokensOut: 0,
+              usd: 0,
+              seconds: 0,
+              calls: {},
+              answer: '',
+              record,
+            });
+            continue;
+          }
+          log(
+            `task ${String(task.id)}${attempts(task) > 1 ? ` attempt ${String(attempt)}` : ''}: ${task.title}`,
+          );
+          const world = await worlds.fresh(
+            `eval-${String(task.id)}-${String(attempt)}`,
+          );
+          const initialSpend = meter.usd;
+          const calls: Record<string, number> = {};
+          try {
+            const proofTask = proof?.tasks.find((t) => t.id === task.id);
+            const context = await task.arrange(world);
+            const before = await snapshot(world);
+            const request = task.request(context);
+            const route = args.routed
+              ? deployment.assistantRoute(request)
+              : undefined;
+            const model = route
+              ? anthropicModel({ key, ...route })
+              : fixedModel;
+            const runMeter =
+              route?.modelId === deployment.SONNET_MODEL && route
+                ? meter.atPrices(deployment.SONNET_PRICES)
+                : meter;
+            await append({
+              kind: 'task',
+              task: task.id,
+              request,
+              attempt,
+              ...(proofTask
+                ? {
+                    group: proofTask.group,
+                    shape: proofTask.shape,
+                    seed: args['proof-seed'],
+                  }
+                : {}),
+              actor: task.actor ?? 'buyer',
+              database: world.databaseName,
+              model: model.modelId,
+              effort: route?.effort ?? args.effort,
+            });
+            const session = new OperationsAgentSession({
+              // The panel's act-then-undo (a host option since the end review X6).
+              autoApproveReversible: true,
+              runtime: world.runtime,
+              personHeaders: {
+                cookie: `northstar-demo-actor=${task.actor ?? 'buyer'}`,
+              },
+              companyId: COMPANY,
+              businessCalendar: BUSINESS_CALENDAR,
+              approve: async (plan) => {
+                cardSeconds ??= (performance.now() - started) / 1000;
+                await append({
+                  kind: 'approval',
+                  granted: true,
+                  by: 'harness',
+                  planId: plan.planId,
+                  steps: plan.steps.map((step) => step.operationId),
+                });
+                granted.set(plan.planId, performance.now());
+                return true;
+              },
+            });
+            started = performance.now();
+            const run = await runOperationsAgent({
+              model,
+              executeAfterApproval: true,
+              session,
+              request,
+              meter: runMeter,
+              ...(args.preamble === 'off'
+                ? {}
+                : {
+                    preamble: await agentPreamble(
+                      session,
+                      'screen' in task && typeof task.screen === 'function'
+                        ? task.screen(context)
+                        : null,
+                    ),
+                  }),
+              onEvent: (event) => {
+                if (event.kind === 'model')
+                  void append({
+                    kind: 'model',
+                    messages: event.messages,
+                    stop: event.stop,
+                    tokensIn: event.usage.inputTokens,
+                    cacheRead: event.usage.cacheReadTokens,
+                    cacheWrite: event.usage.cacheWriteTokens,
+                    tokensOut: event.usage.outputTokens,
+                    usd: event.usd,
+                  });
+                if (event.kind === 'tool') {
+                  const name = callName(event.name, event.input);
+                  calls[name] = (calls[name] ?? 0) + 1;
+                }
+                if (event.kind === 'tool')
+                  void append({
+                    kind: 'tool',
+                    tool: event.name,
+                    arguments: loggedArguments(event.input),
+                  });
+                if (
+                  event.kind === 'result' &&
+                  event.name === 'erp_verify' &&
+                  !event.isError
+                ) {
+                  const report = event.content as {
+                    operationSessionId?: string;
+                    verified?: boolean;
+                  } | null;
+                  const id = report?.operationSessionId;
+                  if (
+                    id &&
+                    report.verified &&
+                    granted.has(id) &&
+                    !confirmed.has(id)
+                  ) {
+                    confirmed.add(id);
+                    verifiedSeconds.push(
+                      (performance.now() - granted.get(id)!) / 1000,
+                    );
+                  }
+                }
+                if (event.kind === 'result')
+                  void append({
+                    kind: 'tool-result',
+                    tool: event.name,
+                    status: event.isError ? 'refused' : 'ok',
+                    result: event.content,
+                  });
+              },
+            });
+            const elapsedSeconds = (performance.now() - started) / 1000;
+            const timing = {
+              cardSeconds,
+              verifiedSeconds,
+              elapsedSeconds,
+              modelCalls: run.turns,
+              ...(proofTask ? { group: proofTask.group } : {}),
+            };
+            await append({
+              kind: 'timing',
+              ...timing,
+              toolCalls: run.toolCalls,
+              usd: run.usd,
+            });
+            await queue;
+            let verdict = await task.check(world, context, before, run);
+            if (proofTask) {
+              const steps = session
+                .executedPlans()
+                .flatMap((plan) => plan.results);
+              if (
+                run.stop !== 'answered' ||
+                granted.size !== 1 ||
+                confirmed.size !== 1 ||
+                steps.length !== 1 ||
+                steps[0]?.outcome !== 'succeeded' ||
+                steps[0]?.operationId !== proofTask.expectedOperation
+              ) {
+                verdict = {
+                  pass: false,
+                  reason: `${verdict.reason}; expected exactly one approved and verified ${proofTask.expectedOperation}`,
+                };
+              }
+            }
+            await append({
+              kind: 'verdict',
+              pass: verdict.pass,
+              reason: verdict.reason,
+              stop: run.stop,
+              answer: run.answer,
+              ...(run.error ? { error: run.error } : {}),
+            });
+            rows.push({
+              task: task.id,
+              attempt,
+              kind: task.kind,
+              title: task.title,
+              pass: verdict.pass,
+              reason: verdict.reason,
+              stop: run.stop,
+              toolCalls: run.toolCalls,
+              approvals: session.approvals.length,
+              tokensIn: run.usage.inputTokens,
+              cacheRead: run.usage.cacheReadTokens,
+              cacheWrite: run.usage.cacheWriteTokens,
+              tokensOut: run.usage.outputTokens,
+              usd: run.usd,
+              seconds: run.seconds,
+              timing,
+              calls,
+              answer: run.answer,
+              record,
+            });
+            log(
+              `  ${verdict.pass ? 'PASS' : 'FAIL'} ${verdict.reason} · ${String(run.toolCalls)} tool calls (${String(discoveryCalls(calls))} discovery) · ${run.seconds.toFixed(1)} s · $${run.usd.toFixed(4)} (total $${meter.usd.toFixed(4)})`,
+            );
+          } catch (error) {
+            const message =
+              error instanceof Error
+                ? `${error.name}: ${error.message}`
+                : String(error);
+            const usd = meter.usd - initialSpend;
+            await append({ kind: 'harness-error', error: message, usd });
+            rows.push({
+              task: task.id,
+              attempt,
+              kind: task.kind,
+              title: task.title,
+              pass: false,
+              reason: `harness error: ${message}`,
+              stop: 'harness-error',
+              toolCalls: Object.values(calls).reduce((sum, n) => sum + n, 0),
+              approvals: granted.size,
+              tokensIn: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              tokensOut: 0,
+              usd,
+              seconds: 0,
+              calls,
+              answer: '',
+              record,
+            });
+            log(`  HARNESS ERROR ${message}`);
+          } finally {
+            await world.close();
+          }
         }
-      }
-  });
+    },
+    proof ? (world) => installProof(world, proof.changes) : undefined,
+  );
 
   const passed = rows.filter((row) => row.pass).length;
   const byTask = new Map<number, Row[]>();
@@ -398,8 +470,8 @@ async function main(): Promise<void> {
   const report = [
     `# Agent eval — ${date}`,
     '',
-    `Model \`${model.modelId}\` (effort ${String(args.effort)}), acting as the demo buyer (task 34: the manager) on channel AGENT, business map ${args.preamble === 'off' ? 'off' : 'on'}, task set ${dev ? 'dev (AGENT-3 development set; write, multi-step and customized tasks three attempts)' : 'selected'}. Model effort and attempts are reported per run below. Each attempt on a fresh database; the harness granted every confirmation it was asked for and recorded it. Seconds are the agent run on a monotonic clock (arrangement excluded).`,
-    `Prices (USD per million tokens) from ${String(args['price-source'])}, read ${String(args['price-date'])}: input ${String(prices.input)}, output ${String(prices.output)}, cache read ${String(prices.cacheRead)}, cache write ${String(prices.cacheWrite)}. Spend cap USD ${String(cap)}.`,
+    `Model \`${args.routed ? 'deployed routing (per attempt in JSONL)' : fixedModel.modelId}\` (default effort ${String(args.effort)}), acting as each task’s declared demo actor on channel AGENT, business map ${args.preamble === 'off' ? 'off' : 'on'}, task set ${String(args.set)}. The JSONL records the model, effort and attempt for each task. Each attempt on a fresh database; the harness granted every confirmation it was asked for and recorded it. Seconds are the agent run on a monotonic clock (arrangement excluded).`,
+    `Prices (USD per million tokens) from ${String(args['price-source'])}, read ${String(args['price-date'])}: input ${String(prices.input)}, output ${String(prices.output)}, cache read ${String(prices.cacheRead)}, cache write ${String(prices.cacheWrite)}.${args.routed ? ` Routed Sonnet prices (input/output/cache read/cache write): ${Object.values(deployment.SONNET_PRICES).join('/')}.` : ''} Spend cap USD ${String(cap)}.`,
     '',
     '| task | kind | attempt | result | stop | tool calls | approvals | tokens in (uncached / cache read / cache write) | tokens out | USD | reason |',
     '|---|---|---|---|---|---|---|---|---|---|---|',
@@ -427,6 +499,18 @@ async function main(): Promise<void> {
           .join(', ')} |`,
     ),
     '',
+    '## Monotonic timing',
+    '',
+    '| task | attempt | elapsed s | first card s | yes to verified s (each card) | model calls |',
+    '|---|---|---|---|---|---|',
+    ...rows.flatMap((row) =>
+      row.timing
+        ? [
+            `| ${row.task} | ${row.attempt} | ${row.timing.elapsedSeconds.toFixed(3)} | ${row.timing.cardSeconds?.toFixed(3) ?? '—'} | ${row.timing.verifiedSeconds.map((v) => v.toFixed(3)).join(', ') || '—'} | ${row.timing.modelCalls} |`,
+          ]
+        : [],
+    ),
+    '',
     '## Final answers',
     '',
     ...rows.map(
@@ -435,6 +519,54 @@ async function main(): Promise<void> {
     ),
     '',
   ].join('\n');
+  const parity = proof
+    ? (['first-party', 'generated'] as const).map((group) => {
+        const cohort = rows.filter(
+          (row) =>
+            proof.tasks.find((task) => task.id === row.task)?.group === group,
+        );
+        const timed = cohort.flatMap((row) => (row.timing ? [row.timing] : []));
+        return {
+          group,
+          attempts: cohort.length,
+          passed: cohort.filter((row) => row.pass).length,
+          timed: timed.length,
+          elapsed: median(timed.map((t) => t.elapsedSeconds)),
+          card: median(
+            timed.flatMap((t) =>
+              t.cardSeconds === null ? [] : [t.cardSeconds],
+            ),
+          ),
+          verified: median(timed.flatMap((t) => t.verifiedSeconds)),
+          calls: median(cohort.map((row) => row.toolCalls)),
+          modelCalls: median(timed.map((t) => t.modelCalls)),
+          usdPerTask:
+            cohort.reduce((sum, row) => sum + row.usd, 0) / cohort.length,
+        };
+      })
+    : undefined;
+  if (parity) {
+    await writeFile(
+      join(outDirectory, `${stamp}-parity.json`),
+      JSON.stringify({ seed: args['proof-seed'], cohorts: parity }, null, 2) +
+        '\n',
+      { flag: 'wx' },
+    );
+    const [first, generated] = parity;
+    const complete =
+      selected.size === proof!.tasks.length &&
+      parity.every((c) => c.timed === c.attempts && c.attempts > 0) &&
+      proof!.tasks.every((t) => byTask.get(t.id)?.some((r) => r.pass));
+    if (
+      !complete ||
+      generated!.passed / generated!.attempts <
+        first!.passed / first!.attempts ||
+      generated!.elapsed > first!.elapsed
+    ) {
+      log('Generated-module parity gate failed.');
+      process.exitCode = 1;
+    }
+  }
   const reportPath = join(outDirectory, `${stamp}-agent-eval.md`);
   await writeFile(reportPath, report, { flag: 'wx' });
   log(
