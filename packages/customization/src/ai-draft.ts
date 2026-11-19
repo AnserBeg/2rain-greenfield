@@ -12,6 +12,10 @@ import {
   unsupported,
 } from './patch.js';
 import {
+  calculatedDisplayDraft,
+  DISPLAY_OPERATIONS,
+} from './calculated-display-draft.js';
+import {
   fieldComparisonValidationDraft,
   literalValidationDraft,
   VALIDATION_COMPARISONS,
@@ -178,6 +182,20 @@ const toolSchema = {
       type: 'string',
       enum: [...CUSTOMIZATION_PATCH_KINDS, 'unsupported'],
     },
+    calculation: {
+      type: 'object',
+      properties: {
+        label: { type: 'string' },
+        operator: {
+          type: 'string',
+          enum: DISPLAY_OPERATIONS.map(([operator]) => operator),
+        },
+        leftFieldId: { type: 'string' },
+        rightFieldId: { type: 'string' },
+        listSurfaceId: { type: 'string' },
+      },
+      required: ['label', 'operator', 'leftFieldId', 'rightFieldId'],
+    },
     validation: {
       type: 'object',
       properties: {
@@ -266,15 +284,25 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
     "- arrangeLayout {kind, surface, order?, hide?, relabel?}: add, reorder, hide or rename columns of a list. surface is one of the list ids below; order, hide and relabel[].field use that list's available field ids. Include an available hidden field in order to show it. At most 16 visible columns.",
     '- saveListView {kind, surface, label, columns:[column ID], sort:[{column, direction}], filters:[{field, value}]}: add a tab on one of the lists in Saved view targets below. List the columns in the desired order and include the required record title. Sort by at most three selected sortable columns using ascending or descending. Pin at most three of the declared filter values. Use an empty array for no filters or no sort.',
     '- addMetricCard {kind, surface, label, view?, sumField?}: add a card to Today using a list in Metric card targets below. Omit sumField to count rows. Use a declared sum field for a sum. Omit view to use the default list view.',
+    '- addCalculatedDisplayField {kind, surface, calculation:{label, operator, leftFieldId, rightFieldId, listSurfaceId?}}: show an exact decimal value on a record page. Choose add, subtract or multiply and fields from the calculated display targets below. Only include a list when both fields are available on it.',
     '- addValidation {kind, entity, validation:{fieldId, check, limit?, operator?, otherFieldId?, relationId?, message}}: guard create and changes to watched fields. Use required, minimum, maximum, maximumLength, notBeforeToday, or compareFields. For a literal bound supply limit as a string. For compareFields supply a typed operator and otherFieldId. Use relationId only for a listed related field. Include the message to show when saving.',
     '- narrowPermission {kind, roleKey, target:{kind:"operation", id}}: remove the named role\'s grant for one action. Use an exact role key and an action id shown below.',
     '- unNarrowPermission {kind, roleKey, target:{kind:"operation", id}}: remove an existing restriction for exactly the role key and action id listed below.',
+    'A calculated display needs its own draft. If a request combines it with another patch, report missingCapability "calculated displays in a grouped draft".',
     'Validation needs its own draft. If a request combines validation with another patch, report missingCapability "validation in a grouped draft".',
     'Action permission patches need their own draft. If a request combines one with any other patch, report missingCapability "action permission changes in a grouped draft".',
     `For links on an existing record type, report missingCapability "${ADD_LINK_LATER_CAPABILITY}".`,
     'If any requested part needs an unsupported capability, call the tool with {kind: "unsupported", missingCapability: "<name the exact missing capability>"}. Never omit or approximate part of a request. For example, name "goods receipt event subscription" for starting an inspection automatically when goods are received.',
     'Write labels the way the person would read them, with an initial capital. Do not invent ids.',
     '',
+    ...(targets.calculatedDisplayTargets?.length
+      ? [
+          'Calculated display targets:',
+          ...targets.calculatedDisplayTargets.map((target) =>
+            JSON.stringify(target),
+          ),
+        ]
+      : []),
     ...(targets.permissionRoleKeys?.length && targets.permissionActions?.length
       ? [
           'Role keys for action restrictions:',
@@ -539,6 +567,42 @@ function readToolInput(
       };
     } catch (error) {
       return { status: 'invalid', issues: [(error as Error).message] };
+    }
+  }
+  if (
+    input &&
+    typeof input === 'object' &&
+    'kind' in input &&
+    input.kind === 'addCalculatedDisplayField'
+  ) {
+    const surface = 'surface' in input ? input.surface : undefined;
+    const target = targets.calculatedDisplayTargets?.find(
+      ({ recordSurfaceId }) => surface === recordSurfaceId,
+    );
+    const calculation = 'calculation' in input ? input.calculation : undefined;
+    if (!target || !calculation || typeof calculation !== 'object')
+      return {
+        status: 'invalid',
+        issues: ['Choose a record page from the calculated display targets.'],
+      };
+    try {
+      const choice = calculation as Record<string, unknown>;
+      input = calculatedDisplayDraft(target, {
+        label: String(choice.label ?? ''),
+        operator: String(choice.operator ?? ''),
+        leftFieldId: String(choice.leftFieldId ?? ''),
+        rightFieldId: String(choice.rightFieldId ?? ''),
+        listSurfaceId: String(choice.listSurfaceId ?? ''),
+      });
+    } catch (error) {
+      return {
+        status: 'invalid',
+        issues: [
+          error instanceof Error
+            ? error.message
+            : 'Choose an exact decimal calculation.',
+        ],
+      };
     }
   }
   const parsed = parseCustomizationPatch(input);

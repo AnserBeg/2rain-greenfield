@@ -1,7 +1,9 @@
 import { LayoutRevisionSchema } from './layout-revision.js';
 import {
+  CalculatedDisplayFieldDefinitionSchema,
   FormulaValidationRuleDefinitionSchema,
   OperationRoleKeySchema,
+  type CalculatedDisplayField,
   type FormulaValidationRule,
 } from '@north-star/canonical-model';
 import { z } from 'zod';
@@ -236,10 +238,28 @@ const validationPatch: z.ZodObject<
   kind: z.literal('addValidation'),
   rule: FormulaValidationRuleDefinitionSchema,
 });
+const calculatedDisplayPatch: z.ZodObject<
+  {
+    kind: z.ZodLiteral<'addCalculatedDisplayField'>;
+    field: z.ZodType<CalculatedDisplayField>;
+  },
+  z.core.$strict
+> = z.strictObject({
+  kind: z.literal('addCalculatedDisplayField'),
+  field: CalculatedDisplayFieldDefinitionSchema,
+});
 const SinglePatchSchema: z.ZodDiscriminatedUnion<
-  [...typeof singlePatchKinds, typeof validationPatch],
+  [
+    ...typeof singlePatchKinds,
+    typeof validationPatch,
+    typeof calculatedDisplayPatch,
+  ],
   'kind'
-> = z.discriminatedUnion('kind', [...singlePatchKinds, validationPatch]);
+> = z.discriminatedUnion('kind', [
+  ...singlePatchKinds,
+  validationPatch,
+  calculatedDisplayPatch,
+]);
 type ParsedPatch = z.infer<typeof SinglePatchSchema>;
 export type SingleCustomizationPatch =
   ParsedPatch | (Extract<ParsedPatch, { kind: 'addField' }> & { legacy: true });
@@ -270,6 +290,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'addLayoutRevision',
   'saveListView',
   'addValidation',
+  'addCalculatedDisplayField',
   'addMetricCard',
   'narrowPermission',
   'unNarrowPermission',
@@ -311,6 +332,11 @@ export function parseCustomizationPatch(
     ) {
       for (const patch of patches) {
         const memberKind = patchKind(patch);
+        if (memberKind === 'addCalculatedDisplayField')
+          return unsupported(
+            'calculated displays in a grouped draft',
+            'A calculated display needs its own draft.',
+          );
         if (memberKind === 'addValidation')
           return unsupported(
             'validation in a grouped draft',

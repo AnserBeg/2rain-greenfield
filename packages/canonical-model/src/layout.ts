@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { CalculatedDisplayField } from './calculated-display-schema.js';
 import { canonicalize, canonicalizeAndHash } from './canonicalize.js';
 import type {
   SurfaceComposition,
@@ -78,6 +79,8 @@ export interface LayoutDefinition {
   readonly operations?: readonly Row[];
   readonly relations?: readonly Row[];
   readonly languageVersion?: string;
+  readonly calculatedDisplayFields?:
+    readonly CalculatedDisplayField[] | undefined;
 }
 const ref = (value: unknown) =>
   (value as { targetId?: string } | undefined)?.targetId;
@@ -162,6 +165,7 @@ export function baseLayout(
     required: boolean,
     more: boolean,
     into = members,
+    calculation?: CalculatedDisplayField,
   ) {
     into.push({
       id: fieldId,
@@ -175,6 +179,7 @@ export function baseLayout(
         field: fieldId,
         binding,
         type: definitions.get(fieldId)?.fieldType ?? null,
+        ...(calculation && { calculation }),
         reference: form?.references?.find((r) => r.field === fieldId) ?? null,
         editor:
           [
@@ -236,6 +241,25 @@ export function baseLayout(
         !!header && members.length >= 8,
         groups.get(col.columnId),
       );
+    }
+    for (const calculation of def.calculatedDisplayFields ?? []) {
+      if (
+        calculation.entityId === entity &&
+        calculation.displaySinks.some(
+          (sink) => sink.kind === 'record' && sink.surfaceId === surfaceId,
+        )
+      ) {
+        add(
+          calculation.fieldId,
+          calculation.fieldId,
+          'query:calculatedDisplay',
+          calculation.label,
+          false,
+          !!header && members.length >= 8,
+          members,
+          calculation,
+        );
+      }
     }
     if (c.presentation?.progression)
       blocks.push({

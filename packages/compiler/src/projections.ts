@@ -1,5 +1,9 @@
 import { LAYOUT_READER } from '@north-star/canonical-model';
 import {
+  CALCULATED_DISPLAY_QUERY_READER,
+  type CalculatedDisplayProjectionEntry,
+} from '../../canonical-model/src/calculated-display-projection.js';
+import {
   DEFAULT_DISCLOSURE_TIER,
   LANGUAGE_VERSION,
   languageHasMaterializedStateFields,
@@ -161,6 +165,7 @@ export function lowerBaseProjectionPayloads(
   // caller that does not pass one gets the oldest shape rather than the newest.
   compilerSemanticProfileVersion: CompilerSemanticProfileVersion = COMPILER_SEMANTIC_PROFILE_VERSION,
   formulaRules: FormulaRulePayload | null = null,
+  calculatedFields: readonly CalculatedDisplayProjectionEntry[] = [],
 ): ProjectionPayloadPlan[] {
   const namespace = packageRevision.package.namespace;
   const packageScope: LogicalScope = {
@@ -189,6 +194,7 @@ export function lowerBaseProjectionPayloads(
     queryById,
     compilerSemanticProfileVersion,
     verificationPackageRevision,
+    calculatedFields,
   );
   const confirmationRequiredFor = [
     ...verificationPackageRevision.entities
@@ -241,6 +247,13 @@ export function lowerBaseProjectionPayloads(
       namespace,
       packageScope,
       queryCatalogPayload(packageRevision, currentStorageTarget),
+      undefined,
+      calculatedFields.length > 0
+        ? {
+            ...runtimeCapabilities[PROJECTION_FAMILY_IDS.queryCatalog],
+            minimumVersion: CALCULATED_DISPLAY_QUERY_READER,
+          }
+        : undefined,
     ),
     plan(
       PROJECTION_FAMILY_IDS.operationCatalog,
@@ -305,14 +318,14 @@ export function lowerBaseProjectionPayloads(
       ),
     );
   }
-  if (formulaRules) {
+  if (formulaRules || calculatedFields.length > 0) {
     plans.push(
-      plan(
-        PROJECTION_FAMILY_IDS.formulaRule,
-        namespace,
-        packageScope,
-        formulaRules,
-      ),
+      plan(PROJECTION_FAMILY_IDS.formulaRule, namespace, packageScope, {
+        kind: 'formulaRulePayload',
+        schemaVersion: FORMULA_RULE_PAYLOAD_VERSION,
+        ...formulaRules,
+        ...(calculatedFields.length > 0 ? { calculatedFields } : {}),
+      }),
     );
   }
   return plans;
@@ -783,11 +796,26 @@ function surfaceManifestField(field: NormalizedField): {
   };
 }
 
+function appendCalculatedColumns<T extends { readonly orderKey: number }, U>(
+  columns: readonly T[],
+  displays: readonly U[],
+): readonly (T | (U & { readonly orderKey: number }))[] {
+  const last = Math.max(0, ...columns.map(({ orderKey }) => orderKey));
+  return [
+    ...columns,
+    ...displays.map((display, index) => ({
+      ...display,
+      orderKey: last + index + 1,
+    })),
+  ];
+}
+
 function surfaceManifestPayload(
   packageRevision: NormalizedApplicationPackage,
   queryById: Map<string, NormalizedApplicationPackage['queries'][number]>,
   compilerSemanticProfileVersion: CompilerSemanticProfileVersion,
   original: VersionedNormalizedApplicationPackage,
+  calculatedFields: readonly CalculatedDisplayProjectionEntry[],
 ): {
   readonly payload: unknown;
   readonly payloadSchemaVersion:
@@ -909,6 +937,22 @@ function surfaceManifestPayload(
         const declared = original.surfaces.find(
           (item) => item.surfaceId === surface.surfaceId,
         );
+        const calculatedColumns = calculatedFields.flatMap(
+          ({ declaration, readSinks }) =>
+            readSinks.some(({ surfaceId }) => surfaceId === surface.surfaceId)
+              ? [
+                  {
+                    field: declaration.fieldId,
+                    label: declaration.label,
+                    columnId: declaration.fieldId,
+                  },
+                ]
+              : [],
+        );
+        const composition = compositions.get(surface.surfaceId);
+        const list = (
+          declared && 'list' in declared ? declared.list : undefined
+        ) as SurfaceList | undefined;
         const fieldIds =
           queryById
             .get(surface.dataSource.targetId)
@@ -922,14 +966,44 @@ function surfaceManifestPayload(
           declared.documentEditor
             ? { documentEditor: declared.documentEditor }
             : {}),
-          ...(compositions.get(surface.surfaceId)
-            ? { composition: compositions.get(surface.surfaceId) }
-            : {}),
+          ...(composition && {
+            composition:
+              calculatedColumns.length === 0
+                ? composition
+                : {
+                    ...composition,
+                    fields: appendCalculatedColumns(
+                      composition.fields,
+                      calculatedColumns,
+                    ).map((column) => ({
+                      ...column,
+                      ...(calculatedColumns.some(
+                        ({ columnId }) => column.columnId === columnId,
+                      )
+                        ? { showWhenEmpty: true }
+                        : {}),
+                    })),
+                  },
+          }),
+          ...(list && {
+            list:
+              calculatedColumns.length === 0
+                ? list
+                : {
+                    ...list,
+                    columns: appendCalculatedColumns(
+                      list.columns,
+                      calculatedColumns.map((column) => ({
+                        ...column,
+                        role: 'value' as const,
+                        priority: 0,
+                        sortable: false,
+                      })),
+                    ),
+                  },
+          }),
           ...(declared && 'layouts' in declared && declared.layouts
             ? { layouts: declared.layouts }
-            : {}),
-          ...(declared && 'list' in declared && declared.list
-            ? { list: declared.list }
             : {}),
           ...(declared && 'form' in declared && declared.form
             ? { form: declared.form }

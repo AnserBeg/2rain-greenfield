@@ -1979,3 +1979,74 @@ test('tenant inspection edit sections share the extended header bindings and the
     )!.requiredRuntimeCapability.minimumVersion;
   assert.deepEqual([floor(0), floor(1)], [26, 27]);
 });
+
+test('composed detail keeps calculated display values readable and outside edit and create inputs', async () => {
+  const record = 'northstar.app:surface.item_detail';
+  const { calculatedDisplayDraft, layoutCommand } =
+    await import('../../packages/customization/src/index.js');
+  const { projectionPayload } = await import('../compiler/helpers.js');
+  const target = customizationTargets(
+    normalizeApplicationPackage(authored),
+  ).calculatedDisplayTargets?.find((t) => t.recordSurfaceId === record);
+  assert.ok(target);
+  const patch = calculatedDisplayDraft(target, {
+    label: 'Margin CAD',
+    operator: 'subtract',
+    leftFieldId: 'northstar.app:field.item_price_cad',
+    rightFieldId: 'northstar.app:field.item_standard_cost_cad',
+  });
+  const applied = applyCustomizationPatches(authored, [patch]);
+  assert.ok(applied.status === 'applied');
+  const normalized = normalizeApplicationPackage(applied.authored);
+  const layouts = customizationTargets(normalized).layouts!;
+  const detail = layouts.find(({ body }) => body.surfaceId === record)!;
+  const section = detail.body.sections.find((s) =>
+    s.fields.some((f) => f.id === patch.field.fieldId),
+  )!;
+  assert.ok(section, 'the calculated value has a stable detail placement');
+  assert.ok(
+    layouts
+      .filter((l) => l.body.mode !== 'detail')
+      .every((l) =>
+        l.body.sections.every((s) =>
+          s.fields.every((f) => f.id !== patch.field.fieldId),
+        ),
+      ),
+  );
+  const relabel = layoutCommand(detail, {
+    action: 'rename',
+    member: patch.field.fieldId,
+    label: 'Margin shown',
+  });
+  const result = await compileInSandbox(sandboxRequest([patch, relabel]));
+  assert.ok(
+    result.status === 'compiled',
+    JSON.stringify(result.status === 'compiled' ? null : result),
+  );
+  const mixed = parseSerializedRelease(result.steps[1]!.release).compiled;
+  const mixedRefs = mixed.bundle.releaseManifest.projections;
+  assert.equal(
+    mixedRefs.find((r) => r.familyId === PROJECTION_FAMILY_IDS.surfaceManifest)
+      ?.requiredRuntimeCapability.minimumVersion,
+    27,
+  );
+  assert.equal(
+    mixedRefs.find((r) => r.familyId === PROJECTION_FAMILY_IDS.queryCatalog)
+      ?.requiredRuntimeCapability.minimumVersion,
+    4,
+  );
+  const mixedPage = projectionPayload<{
+    surfaces: CompiledSurfaceDefinition[];
+  }>(mixed, PROJECTION_FAMILY_IDS.surfaceManifest).surfaces.find(
+    (s) => s.surfaceId === record,
+  )!;
+  const placed = mixedPage.layouts?.[0]?.body.sections
+    .flatMap((s) => s.fields)
+    .find((f) => f.id === patch.field.fieldId);
+  assert.equal(placed?.label.text, 'Margin shown');
+  assert.ok(
+    mixedPage.composition?.fields.some(
+      (c) => c.columnId === placed?.binding && c.field === patch.field.fieldId,
+    ),
+  );
+});

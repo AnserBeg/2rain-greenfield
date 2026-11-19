@@ -1,5 +1,6 @@
 import { verifiedGenerationsSql } from './verified-release-generation.js';
 import { createHash, randomUUID } from 'node:crypto';
+import { retypedCalculatedDisplayField } from '../../canonical-model/src/calculated-display-bindings.js';
 import { retypedFormulaRule } from '../../canonical-model/src/formula-validation-bindings.js';
 
 import {
@@ -92,6 +93,7 @@ export type AuthoringChannel = (typeof AUTHORING_CHANNELS)[number];
 
 const UPGRADE_PATCH_KINDS: ReadonlySet<string> = new Set([
   'addValidation',
+  'addCalculatedDisplayField',
   'addField',
   'arrangeLayout',
   'saveListView',
@@ -464,6 +466,11 @@ export class PostgresCustomizationService {
         'CUSTOMIZE_BASE_MOVED',
         `The upgrade retires or retypes a target of validation rule ${retiredRule}.`,
       );
+    assertCalculatedDisplayCompatibility(
+      sourceDefinition,
+      targetBase,
+      sourceBase,
+    );
     const replay = await this.#compile(
       await this.#readPatches(context, active.chain),
       this.#tip,
@@ -474,12 +481,14 @@ export class PostgresCustomizationService {
     if (replay.status !== 'compiled') return replay;
     const step = replay.steps[0]!;
     const candidate = parseSerializedRelease(step.release);
+    const candidateDefinition = parseNormalizedApplicationPackageJson(
+      candidate.normalizedDefinitionBytes,
+    );
     const retypedRule = retypedFormulaRule(
       sourceDefinition,
-      parseNormalizedApplicationPackageJson(
-        candidate.normalizedDefinitionBytes,
-      ),
+      candidateDefinition,
     );
+    assertCalculatedDisplayCompatibility(sourceDefinition, candidateDefinition);
     if (retypedRule)
       throw new CustomizationServiceRefusal(
         'CUSTOMIZE_BASE_MOVED',
@@ -2350,6 +2359,17 @@ export async function openCustomizationService(
   }
 }
 
+function assertCalculatedDisplayCompatibility(
+  ...comparison: Parameters<typeof retypedCalculatedDisplayField>
+) {
+  const retyped = retypedCalculatedDisplayField(...comparison);
+  if (retyped)
+    throw new CustomizationServiceRefusal(
+      'CUSTOMIZE_BASE_MOVED',
+      `The upgrade retires or retypes a target of calculated display field ${retyped}.`,
+    );
+}
+
 interface PatchRow {
   compiler_acknowledgement: AcknowledgementInput | null;
   base_release_root: string;
@@ -2381,6 +2401,8 @@ function patchDisplayLabel(patch: CustomizationPatch): string | null {
       return patch.field.label;
     case 'addChoice':
       return patch.option;
+    case 'addCalculatedDisplayField':
+      return patch.field.label;
     case 'addValidation':
       return patch.rule.message;
     case 'addRecordType':

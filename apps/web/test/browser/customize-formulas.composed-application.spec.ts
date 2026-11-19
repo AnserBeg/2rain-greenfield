@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 
 import { startComposedApplication } from '../../../api/src/composition-root.js';
 import {
@@ -113,6 +114,128 @@ test('Customize compares a location name with its declared parent on the live fo
         await fillLocation('GUARD-BACK', parentName, parentRecord);
         await save();
         await expect(page.getByRole('status')).toContainText('Create complete');
+      } finally {
+        await app.close();
+      }
+    },
+    LINEAGE_INSTALL_VOLUME,
+  );
+});
+
+test('Customize shows exact margin on Stock by item, its CSV and the item page, and removes it on rollback', async ({
+  page,
+}) => {
+  test.setTimeout(600_000);
+  page.setDefaultTimeout(30_000);
+  await withEphemeralPostgres(
+    'customize-calculated-display-browser',
+    async ({ connection }) => {
+      const app = await startComposedApplication({
+        databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+        tenantSlug: 'customize-calculated-display-browser',
+        port: 0,
+      });
+      try {
+        const customize = `${app.baseUrl}/?customize`;
+        const surface = (id: string) =>
+          `${app.baseUrl}/?surface=${encodeURIComponent('northstar.app:surface.' + id)}`;
+        const title = 'Margin CAD';
+        const itemName = 'Margin example item';
+        const margin = '0.999999999999999999';
+        await page.goto(surface('item_form'));
+        const itemField = (name: string) =>
+          page.locator(`[name="value:northstar.app:field.item_${name}"]`);
+        await itemField('sku').fill('MARGIN-WEB');
+        await itemField('name').fill(itemName);
+        await itemField('base_unit').fill('EA');
+        if (!(await itemField('price_cad').isVisible()))
+          await page.locator('details.draft-more summary').click();
+        await itemField('price_cad').fill('1.230000000000000001');
+        await itemField('standard_cost_cad').fill('0.230000000000000002');
+        await page.getByRole('button', { name: 'Save', exact: true }).click();
+        await expect(page.getByRole('status')).toContainText('Create complete');
+
+        await page.goto(customize);
+        const builder = page.locator(
+          '[data-customize-form="calculatedDisplayPicker"]',
+        );
+        await builder
+          .getByLabel('Record page')
+          .selectOption('northstar.app:surface.item_detail');
+        await builder
+          .getByRole('button', { name: 'Set up calculation' })
+          .click();
+        const form = page.locator('[data-customize-form="calculatedDisplay"]');
+        await form.getByLabel('Field name').fill(title);
+        await form
+          .getByLabel('First field')
+          .selectOption('northstar.app:field.item_price_cad');
+        await form.getByLabel('Operation').selectOption('subtract');
+        await form
+          .getByLabel('Second field')
+          .selectOption('northstar.app:field.item_standard_cost_cad');
+        await form
+          .getByLabel('Also show on a list')
+          .selectOption('northstar.app:surface.item_stock_list');
+        await form
+          .getByRole('button', { name: 'Draft calculation' })
+          .click({ timeout: 180_000 });
+        await expect(page.locator('[data-customize-diff]')).toContainText(
+          'Price (CAD) − Standard cost (CAD)',
+        );
+        await page
+          .getByRole('button', { name: 'Approve', exact: true })
+          .click({ timeout: 180_000 });
+        await expect(page.locator('[data-customize-screen]')).toContainText(
+          'Activate now',
+          { timeout: 180_000 },
+        );
+        await page
+          .getByRole('button', { name: 'Activate now' })
+          .click({ timeout: 180_000 });
+        await expect(
+          page.locator('[data-customize-result="activated"]'),
+        ).toBeVisible({ timeout: 180_000 });
+
+        const list = surface('item_stock_list');
+        await page.goto(list);
+        await expect(
+          page.getByRole('columnheader', { name: title }),
+        ).toBeVisible();
+        const row = page
+          .getByRole('row')
+          .filter({ has: page.getByRole('link', { name: /MARGIN-WEB/u }) });
+        await expect(row).toContainText(margin);
+        const downloaded = page.waitForEvent('download');
+        await page.getByRole('link', { name: /^Export CSV/u }).click();
+        const csv = await readFile(await (await downloaded).path(), 'utf8');
+        expect(csv).toContain(title);
+        expect(csv).toContain(margin);
+        await page.goto(surface('item_list'));
+        await page.getByRole('link', { name: /MARGIN-WEB/u }).click();
+        await expect(
+          page.getByRole('heading', { name: itemName, exact: true, level: 1 }),
+        ).toBeVisible();
+        const marginLabel = page.getByText(title, { exact: true });
+        await expect(marginLabel).toHaveCount(1);
+        if (!(await marginLabel.isVisible()))
+          await page.locator('details.composition-more-fields summary').click();
+        await expect(marginLabel).toBeVisible();
+        await expect(page.getByText(margin, { exact: true })).toBeVisible();
+        const record = page.url();
+        await page.goto(customize);
+        await page
+          .getByRole('button', { name: 'Roll back the latest change' })
+          .click({ timeout: 180_000 });
+        await expect(
+          page.locator('[data-customize-result="rolledBack"]'),
+        ).toBeVisible({ timeout: 180_000 });
+        await page.goto(record);
+        await expect(page.getByText(title, { exact: true })).toHaveCount(0);
+        await page.goto(list);
+        await expect(
+          page.getByRole('columnheader', { name: title }),
+        ).toHaveCount(0);
       } finally {
         await app.close();
       }

@@ -224,6 +224,29 @@ function applyOne(
       return saveListView(authored, patch);
     case 'addMetricCard':
       return addMetricCard(authored, patch);
+    case 'addCalculatedDisplayField': {
+      if (
+        !isTenantId(patch.field.fieldId) ||
+        !patch.field.fieldId.startsWith(`${namespaceOf(authored)}:field.`)
+      ) {
+        return refusal(
+          'CUSTOMIZE_TARGET_NOT_FOUND',
+          'Use a tenant field ID in the application namespace.',
+        );
+      }
+      const fields =
+        authored.calculatedDisplayFields === undefined
+          ? []
+          : list(authored, 'calculatedDisplayFields');
+      if (fields.some((field) => field.fieldId === patch.field.fieldId)) {
+        return refusal(
+          'CUSTOMIZE_DUPLICATE_LABEL',
+          'A calculated display field already uses that ID.',
+        );
+      }
+      authored.calculatedDisplayFields = [...fields, patch.field];
+      return null;
+    }
     case 'addValidation': {
       if (
         !isTenantId(patch.rule.ruleId) ||
