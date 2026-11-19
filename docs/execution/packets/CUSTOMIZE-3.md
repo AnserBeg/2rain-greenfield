@@ -17,7 +17,7 @@ Slice 1 includes the tested list-column work and saved list views in [PR #95](ht
 - Slice 2 needs a Critical ruling. The approval verifier's `#createInput` supplies fixed generated values through the real create operation. Literal bounds need a satisfying witness, and a no-past-date rule needs the same captured business date as the gateway.
 - Slice 4 needs the Formula IR projection admission in ADR-0012. A calculated display value requires resolved dependencies and server, query, reporting and assistant projections.
 - Slice 5 is open. First-party operations such as Close and Reopen share a permission ID, so an action restriction must identify the operation. Field visibility must also govern query and read-back results.
-- Slice 6's independent candidate `f606d596` uses the governed list count and exact top-level sums. CAD, USD and EUR are separate Items measures. Its focused compiler, assistant and upgrade-replay tests pass. PostgreSQL and browser evidence is pending.
+- Slice 6's independent candidate `e97ebd9f` uses the governed list count and exact top-level sums. CAD, USD and EUR are separate Items measures. Its focused compiler, assistant and upgrade-replay tests pass. PostgreSQL and browser evidence is pending.
 
 ## Gates
 
@@ -26,6 +26,7 @@ Slice 1 includes the tested list-column work and saved list views in [PR #95](ht
 - [CI 44441030550](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44441030550) caught a declaration emit error in the list-count helper. The explicit return type passed local declaration emit.
 - [CI 44442711383](https://github.com/rainerp-com/2rain-greenfield/actions/runs/44442711383) passed the live saved-view PostgreSQL test and found that boot's UPGRADE-1 admission omitted `saveListView`. The replay gate now admits that kind.
 - The targeted upgrade reproduction passed locally. [CI 44445972885](https://github.com/rainerp-com/2rain-greenfield/actions/runs/44445972885) passed all 71 shard-2 tests. The combined packet includes the later activation recovery changes from `main` and needs CI on that tree.
+- CI attempt 2 exposed an ambiguous form label. Saved-view selects now have explicit label associations. The browser journey checks the order of data columns outside the bulk-selection header and passed locally in 3.8 minutes on the combined UPGRADE-1 tree.
 - The migration control `unrecognized-patch-kind-admitted` checks that the database refuses a new unknown kind even with a matching digest.
 
 ## Filed
@@ -37,7 +38,7 @@ Slice 1 includes the tested list-column work and saved list views in [PR #95](ht
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
   "base": "7df1ea960f03528926be71e55cbbea7cfcbb77a3",
-  "head": "b8502283d5df9d7a05d7a1efc0580a2de04efa2e",
+  "head": "70bc029de235d52e74adecbc67c62f5712609a26",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts",
     "apps/web/src/list-declaration.ts", "apps/web/src/surface-launcher.ts",
