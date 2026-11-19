@@ -18,6 +18,7 @@ import { openCustomizeService } from '../src/composition-root.js';
  *   customize approve <change-id>  approve a drafted change (shows the diff again)
  *   customize activate <change-id> make an approved change live; no restart
  *   customize rollback             hide the live change again; its records stay
+ *   customize recover              verify an interrupted activation and reconcile scopes
  *   customize status               the active release and every drafted change
  */
 const usage = [
@@ -27,10 +28,19 @@ const usage = [
   '  approve <change-id>    approve a drafted change',
   '  activate <change-id>   make an approved change live (no restart)',
   '  rollback               hide the live change; its records are kept',
+  '  recover                verify the live activation and reconcile scopes',
   '  status                 show the active release and every recorded change',
 ].join('\n');
 
-const commands = ['draft', 'ask', 'approve', 'activate', 'rollback', 'status'];
+const commands = [
+  'draft',
+  'ask',
+  'approve',
+  'activate',
+  'rollback',
+  'recover',
+  'status',
+];
 const [command, ...rest] = process.argv.slice(2);
 const argument = command === 'ask' ? rest.join(' ').trim() : rest[0];
 if (
@@ -79,6 +89,11 @@ try {
     const activated = await opened.service.activate(argument!);
     process.stdout.write(
       `Live: release ${activated.releaseRoot.slice(0, 12)}. A running corepack pnpm dev shows it on the next page load.\n`,
+    );
+  } else if (command === 'recover') {
+    const recovered = await opened.service.recover();
+    process.stdout.write(
+      `Recovered live release ${recovered.releaseRoot.slice(0, 12)}. Its activation is verified and inventory scopes are reconciled.\n`,
     );
   } else if (command === 'rollback') {
     const rolledBack = await opened.service.rollback();
