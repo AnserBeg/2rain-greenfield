@@ -14,6 +14,10 @@ import {
   type VersionedNormalizedApplicationPackage,
 } from '@north-star/canonical-model';
 
+import {
+  FORMULA_RULE_PAYLOAD_VERSION,
+  type FormulaRulePayload,
+} from './formula-validation-plan.js';
 import { hashCanonical } from './hash.js';
 import { lowerQueryPredicate } from './predicate-lowering.js';
 import {
@@ -72,12 +76,16 @@ export function verificationAssertionEntityId(
   )?.sourceEntity.targetId;
 }
 
-const payloadSchemaVersions: Record<
-  Exclude<ProjectionFamilyId, typeof PROJECTION_FAMILY_IDS.storageTransition>,
-  string
-> = {
+type LoweredProjectionFamily = Exclude<
+  ProjectionFamilyId,
+  | typeof PROJECTION_FAMILY_IDS.storageTransition
+  | typeof PROJECTION_FAMILY_IDS.workflow
+>;
+
+const payloadSchemaVersions: Record<LoweredProjectionFamily, string> = {
   [PROJECTION_FAMILY_IDS.agentDiscovery]:
     'northstar.agent-discovery-payload/v0-provisional',
+  [PROJECTION_FAMILY_IDS.formulaRule]: FORMULA_RULE_PAYLOAD_VERSION,
   [PROJECTION_FAMILY_IDS.operationCatalog]:
     'northstar.operation-catalog-payload/v0-provisional',
   [PROJECTION_FAMILY_IDS.policyReferences]:
@@ -97,11 +105,15 @@ const payloadSchemaVersions: Record<
 const MAX_PRIMARY_NAVIGATION_ENTRIES = 5;
 
 const runtimeCapabilities: Record<
-  Exclude<ProjectionFamilyId, typeof PROJECTION_FAMILY_IDS.storageTransition>,
+  LoweredProjectionFamily,
   RuntimeCapabilityRequirement
 > = {
   [PROJECTION_FAMILY_IDS.agentDiscovery]: {
     capabilityId: 'northstar.runtime:capability.agent-discovery',
+    minimumVersion: 1,
+  },
+  [PROJECTION_FAMILY_IDS.formulaRule]: {
+    capabilityId: 'northstar.runtime:capability.formula-rule',
     minimumVersion: 1,
   },
   [PROJECTION_FAMILY_IDS.operationCatalog]: {
@@ -146,6 +158,7 @@ export function lowerBaseProjectionPayloads(
   // consumer, so it is also the packet that wires it. Defaults to v0 so a
   // caller that does not pass one gets the oldest shape rather than the newest.
   compilerSemanticProfileVersion: CompilerSemanticProfileVersion = COMPILER_SEMANTIC_PROFILE_VERSION,
+  formulaRules: FormulaRulePayload | null = null,
 ): ProjectionPayloadPlan[] {
   const namespace = packageRevision.package.namespace;
   const packageScope: LogicalScope = {
@@ -199,6 +212,12 @@ export function lowerBaseProjectionPayloads(
     hasSavedListLayouts(verificationPackageRevision) ? 3 : 1,
     hasMetrics(verificationPackageRevision) ? 4 : 1,
   );
+  const operationFloor = formulaRules
+    ? 3
+    : 'operationRoleNarrowings' in verificationPackageRevision &&
+        verificationPackageRevision.operationRoleNarrowings
+      ? 2
+      : 1;
   const plans = [
     plan(
       PROJECTION_FAMILY_IDS.semanticModel,
@@ -230,11 +249,10 @@ export function lowerBaseProjectionPayloads(
         verificationPackageRevision,
       ),
       undefined,
-      'operationRoleNarrowings' in verificationPackageRevision &&
-        verificationPackageRevision.operationRoleNarrowings
+      operationFloor > 1
         ? {
             ...runtimeCapabilities[PROJECTION_FAMILY_IDS.operationCatalog],
-            minimumVersion: 2,
+            minimumVersion: operationFloor,
           }
         : undefined,
     ),
@@ -270,7 +288,7 @@ export function lowerBaseProjectionPayloads(
       PROJECTION_FAMILY_IDS.verificationPlan,
       namespace,
       packageScope,
-      verificationPlanPayload(verificationPackageRevision),
+      verificationPlanPayload(verificationPackageRevision, formulaRules),
     ),
   ];
   if (isModuleV1) {
@@ -280,6 +298,16 @@ export function lowerBaseProjectionPayloads(
         namespace,
         packageScope,
         reportingPayload(packageRevision),
+      ),
+    );
+  }
+  if (formulaRules) {
+    plans.push(
+      plan(
+        PROJECTION_FAMILY_IDS.formulaRule,
+        namespace,
+        packageScope,
+        formulaRules,
       ),
     );
   }
@@ -337,10 +365,7 @@ export function requiredProjectionFamily(
 }
 
 function plan(
-  familyId: Exclude<
-    ProjectionFamilyId,
-    typeof PROJECTION_FAMILY_IDS.storageTransition
-  >,
+  familyId: LoweredProjectionFamily,
   namespace: string,
   logicalScope: LogicalScope,
   payload: unknown,
@@ -1849,6 +1874,7 @@ function agentFigureLabels(figures: SurfaceListFigures) {
 
 function verificationPlanPayload(
   packageRevision: VersionedNormalizedApplicationPackage,
+  formulaRules: FormulaRulePayload | null,
 ): unknown {
   const scenarios: Array<Record<string, unknown>> = [];
   const addScenario = (scenario: Record<string, unknown>) => {
@@ -1863,6 +1889,21 @@ function verificationPlanPayload(
       schemaVersion: VERIFICATION_SCENARIO_VERSION,
     });
   };
+  for (const witness of formulaRules?.witnesses ?? []) {
+    const operationId = witness.satisfying.invocation.operationId;
+    const binding = formulaRules?.bindings.find(({ rule }) =>
+      rule.boundOperationIds.includes(operationId),
+    );
+    if (!binding) throw new TypeError('Formula witness has no bound rule.');
+    addScenario({
+      entityId: binding.rule.targetId,
+      formulaWitnesses: witness,
+      kind: 'formulaValidation',
+      probePolarity: 'positiveAndNegative',
+      provider: 'realPostgresql',
+      subjectId: operationId,
+    });
+  }
   for (const assertion of packageRevision.assertions.filter(
     (entry) => entry.lifecycle === 'active',
   )) {

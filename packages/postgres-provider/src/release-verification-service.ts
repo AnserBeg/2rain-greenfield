@@ -36,9 +36,12 @@ import {
   type TrustedRequestContext,
 } from '@north-star/runtime';
 import type { RequestRuntimeView as IssuedRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
+import type { FormulaRulePayload } from '../../compiler/src/formula-validation-plan.js';
+import type { ValidationWitness } from '../../compiler/src/formula-validation-witness.js';
 import {
   AuthenticatedRequestRuntimeEntryAdapter,
   CURRENT_POLICY_DECISION_VERSION,
+  REQUEST_RUNTIME_FORMULA_RULE_FAMILY,
   REQUEST_RUNTIME_PROJECTION_FAMILIES,
   issueLegalEntityReadScope,
   type CurrentPolicyDecisionRequest,
@@ -1193,6 +1196,11 @@ class CandidateDefinitionLoader implements RequestRuntimeDefinitionLoader {
         return { fence: Number(row.fence), pointerId: row.pointer_id };
       },
     );
+    const formulaRule = this.compiled.bundle.releaseManifest.projections.some(
+      ({ familyId }) => familyId === REQUEST_RUNTIME_FORMULA_RULE_FAMILY,
+    )
+      ? runtimeProjection(this.compiled, REQUEST_RUNTIME_FORMULA_RULE_FAMILY)
+      : null;
     return Object.freeze({
       environmentId: context.environmentId,
       pointer,
@@ -1205,6 +1213,7 @@ class CandidateDefinitionLoader implements RequestRuntimeDefinitionLoader {
           this.compiled,
           REQUEST_RUNTIME_PROJECTION_FAMILIES.catalog,
         ),
+        ...(formulaRule ? { formulaRule } : {}),
         operation: runtimeProjection(
           this.compiled,
           REQUEST_RUNTIME_PROJECTION_FAMILIES.operation,
@@ -1243,7 +1252,22 @@ class VerificationAllowPolicy implements CurrentPolicyGateway {
   }
 }
 
+type FormulaWitnesses = FormulaRulePayload['witnesses'][number];
+
+function formulaValues(values: ValidationWitness['values']) {
+  return Object.fromEntries(
+    Object.entries(values).map(([fieldId, scalar]) => [
+      fieldId,
+      scalar?.value ?? null,
+    ]),
+  );
+}
+
 class SemanticVerificationExecutor {
+  readonly #formulaCreateDefaults = new Map<
+    string,
+    Readonly<Record<string, unknown>>
+  >();
   readonly #arrangedLegalEntityIds = new Set<string>();
   readonly #createdRecords: VerificationRecord[] = [];
   readonly #excludedFieldsByEntity = new Map<string, Set<string>>();
@@ -1306,6 +1330,15 @@ class SemanticVerificationExecutor {
         : [],
     );
     for (const scenario of plan.scenarios) {
+      if (scenario.kind === 'formulaValidation') {
+        const { satisfying } = scenario.formulaWitnesses as FormulaWitnesses;
+        if (satisfying.invocation.kind === 'create')
+          this.#formulaCreateDefaults.set(
+            satisfying.invocation.operationId,
+            formulaValues(satisfying.values),
+          );
+        continue;
+      }
       if (scenario.kind !== 'searchableExclusion') continue;
       const excluded = this.#excludedFieldsByEntity.get(scenario.entityId);
       if (excluded) excluded.add(scenario.subjectId);
@@ -1325,6 +1358,8 @@ class SemanticVerificationExecutor {
         return this.#declaredEvidence(scenario, token);
       case 'enumReject':
         return this.#enumReject(scenario, token);
+      case 'formulaValidation':
+        return this.#formulaValidation(scenario, token);
       case 'resolverAuthority':
         return this.#resolverAuthority(scenario, token);
       case 'searchableExclusion':
@@ -1554,6 +1589,69 @@ class SemanticVerificationExecutor {
       },
     );
     return { negativeProbe: rejected, positiveProbe: accepted };
+  }
+
+  async #formulaValidation(scenario: VerificationScenario, token: string) {
+    const { satisfying, violating } =
+      scenario.formulaWitnesses as FormulaWitnesses;
+    const operation = this.#requiredOperation(
+      satisfying.invocation.operationId,
+    );
+    const entityId = scenario.entityId;
+    const prepare = async (
+      witness: ValidationWitness,
+      fixtureToken: string,
+    ) => {
+      if (witness.invocation.kind === 'create')
+        return this.#createInput(
+          entityId,
+          fixtureToken,
+          formulaValues(witness.values),
+          {},
+          [],
+          operation,
+        );
+      const prior = await this.#create(
+        entityId,
+        fixtureToken,
+        formulaValues(witness.previousValues ?? {}),
+      );
+      return {
+        recordId: prior.recordId,
+        expectedRevision: 1,
+        patch: formulaValues(witness.values),
+      };
+    };
+    const positiveProbe =
+      satisfying.invocation.kind === 'create'
+        ? await this.#create(
+            entityId,
+            `${token}-accept`,
+            formulaValues(satisfying.values),
+            {},
+            [],
+            operation,
+          )
+        : await this.#invokeOperation(
+            operation,
+            await prepare(satisfying, `${token}-accept`),
+          );
+    const negativeProbe = [];
+    for (const [index, example] of violating.entries()) {
+      const input = await prepare(example, `${token}-refuse-${index}`);
+      const refused = await this.#captureRejection(
+        this.#invokeOperation(operation, input),
+        [example.refusalCode],
+        example.message,
+      );
+      if (refused.subjectId !== example.ruleId)
+        throw failure(
+          'VERIFICATION_FORMULA_RULE_MISMATCH',
+          `Verification refused a different rule for ${operation.operationId}.`,
+        );
+      negativeProbe.push(refused);
+    }
+    return { positiveProbe, negativeProbe };
   }
 
   async #resolverAuthority(scenario: VerificationScenario, token: string) {
@@ -1926,6 +2024,7 @@ class SemanticVerificationExecutor {
     overrides: Readonly<Record<string, unknown>> = {},
     relationOverrides: Readonly<Record<string, string>> = {},
     arrangementPath: readonly string[] = [],
+    operation = this.#createOperation(entityId),
   ): Promise<VerificationRecord> {
     const input = await this.#createInput(
       entityId,
@@ -1933,8 +2032,8 @@ class SemanticVerificationExecutor {
       overrides,
       relationOverrides,
       arrangementPath,
+      operation,
     );
-    const operation = this.#createOperation(entityId);
     const systemInput = operation.inputContract.systemInput;
     const legalEntityId = systemInput ? input[systemInput.argumentKey] : null;
     if (legalEntityId !== null && typeof legalEntityId !== 'string') {
@@ -2070,6 +2169,7 @@ class SemanticVerificationExecutor {
     overrides: Readonly<Record<string, unknown>> = {},
     relationOverrides: Readonly<Record<string, string>> = {},
     arrangementPath: readonly string[] = [],
+    operation = this.#createOperation(entityId),
   ): Promise<Record<string, unknown>> {
     const cycleStart = arrangementPath.indexOf(entityId);
     if (cycleStart >= 0) {
@@ -2082,7 +2182,8 @@ class SemanticVerificationExecutor {
       );
     }
     const nextArrangementPath = [...arrangementPath, entityId];
-    const operation = this.#createOperation(entityId);
+    const satisfyingDefaults =
+      this.#formulaCreateDefaults.get(operation.operationId) ?? {};
     const storageEntity = this.#requiredStorageEntity(entityId);
     const values = Object.fromEntries(
       operation.inputContract.fields
@@ -2091,7 +2192,9 @@ class SemanticVerificationExecutor {
           field.fieldId,
           Object.hasOwn(overrides, field.fieldId)
             ? overrides[field.fieldId]
-            : verificationFieldValue(field, token, storageEntity),
+            : Object.hasOwn(satisfyingDefaults, field.fieldId)
+              ? satisfyingDefaults[field.fieldId]
+              : verificationFieldValue(field, token, storageEntity),
         ]),
     );
     const fieldOriginRelations = this.#relations.filter(
@@ -2354,6 +2457,7 @@ class SemanticVerificationExecutor {
   async #captureRejection(
     operation: Promise<unknown>,
     expectedCodes: readonly string[] = [],
+    expectedMessage?: string,
   ) {
     try {
       await operation;
@@ -2366,7 +2470,9 @@ class SemanticVerificationExecutor {
             : null;
       if (
         !code ||
-        (expectedCodes.length > 0 && !expectedCodes.includes(code))
+        (expectedCodes.length > 0 && !expectedCodes.includes(code)) ||
+        (expectedMessage !== undefined &&
+          (!(error instanceof Error) || error.message !== expectedMessage))
       ) {
         throw error;
       }

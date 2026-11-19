@@ -146,6 +146,29 @@ function applyOne(
       return saveListView(authored, patch);
     case 'addMetricCard':
       return addMetricCard(authored, patch);
+    case 'addValidation': {
+      if (
+        !isTenantId(patch.rule.ruleId) ||
+        !patch.rule.ruleId.startsWith(`${namespaceOf(authored)}:rule.`)
+      ) {
+        return refusal(
+          'CUSTOMIZE_TARGET_NOT_FOUND',
+          'Use a tenant rule ID in the application namespace.',
+        );
+      }
+      const rules =
+        authored.formulaRules === undefined
+          ? []
+          : list(authored, 'formulaRules');
+      if (rules.some((rule) => rule.ruleId === patch.rule.ruleId)) {
+        return refusal(
+          'CUSTOMIZE_DUPLICATE_LABEL',
+          'A validation rule already uses that ID.',
+        );
+      }
+      authored.formulaRules = [...rules, patch.rule];
+      return null;
+    }
     case 'narrowPermission':
     case 'unNarrowPermission': {
       if (

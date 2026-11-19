@@ -10,6 +10,88 @@ import {
 
 const equipmentList = 'northstar.app:surface.custom_equipment_list';
 
+test('a rule drafted in Customize refuses an empty field on the live form until rollback', async ({
+  page,
+}) => {
+  test.setTimeout(600_000);
+  await withEphemeralPostgres(
+    'customize-validation-browser',
+    async ({ connection }) => {
+      const app = await startComposedApplication({
+        databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+        tenantSlug: 'customize-validation-browser',
+        port: 0,
+      });
+      try {
+        const customize = `${app.baseUrl}/?customize`;
+        const form = `${app.baseUrl}/?surface=${encodeURIComponent('northstar.app:surface.item_form')}`;
+        const message = 'Enter a description before saving the item.';
+        await page.goto(customize);
+        const builder = page.locator('[data-customize-form="addValidation"]');
+        await builder
+          .getByLabel('Record type')
+          .selectOption('northstar.app:entity.item');
+        await builder
+          .getByRole('button', { name: 'Set up validation' })
+          .click();
+        await page
+          .getByLabel('Field', { exact: true })
+          .selectOption('northstar.app:field.item_description');
+        await page.getByLabel('Rule', { exact: true }).selectOption('required');
+        await page.getByLabel('Message shown when saving').fill(message);
+        await page
+          .getByRole('button', { name: 'Draft validation rule' })
+          .click({ timeout: 180_000 });
+        await expect(page.locator('[data-customize-diff]')).toContainText(
+          message,
+        );
+        await page
+          .getByRole('button', { name: 'Approve', exact: true })
+          .click({ timeout: 180_000 });
+        await page
+          .getByRole('button', { name: 'Activate now' })
+          .click({ timeout: 180_000 });
+        await expect(
+          page.locator('[data-customize-result="activated"]'),
+        ).toBeVisible({ timeout: 180_000 });
+
+        const makeItem = async (sku: string) => {
+          await page.goto(form);
+          await page.getByLabel('SKU').fill(sku);
+          await page
+            .getByLabel('Name', { exact: true })
+            .fill('Item with a validation witness');
+          await page.getByLabel('Base unit', { exact: true }).fill('EA');
+          await page.getByRole('button', { name: 'Save', exact: true }).click();
+        };
+        await makeItem('GUARD-WEB');
+        await expect(page.locator('[data-form-validation-refusal]')).toHaveText(
+          message,
+        );
+        await expect(page.getByLabel('SKU')).toHaveValue('GUARD-WEB');
+        const description = page.getByLabel('Description', { exact: true });
+        await expect(description).toHaveAttribute('aria-invalid', 'true');
+        await description.fill('Reviewed at receiving.');
+        await page.getByRole('button', { name: 'Save', exact: true }).click();
+        await expect(page.getByRole('status')).toContainText('Create complete');
+
+        await page.goto(customize);
+        await page
+          .getByRole('button', { name: 'Roll back the latest change' })
+          .click({ timeout: 180_000 });
+        await expect(
+          page.locator('[data-customize-result="rolledBack"]'),
+        ).toBeVisible({ timeout: 180_000 });
+        await makeItem('GUARD-WEB-BACK');
+        await expect(page.getByRole('status')).toContainText('Create complete');
+      } finally {
+        await app.close();
+      }
+    },
+    LINEAGE_INSTALL_VOLUME,
+  );
+});
+
 test('Customize restricts the Archive action on a Location and rollback restores it', async ({
   page,
 }) => {

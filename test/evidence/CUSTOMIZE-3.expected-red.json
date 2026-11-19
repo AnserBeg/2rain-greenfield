@@ -57,6 +57,24 @@
       ]
     },
     {
+      "name": "validation-refusal-does-not-veto",
+      "claim": "A changed watched value that violates a tenant guard is refused before the record changes.",
+      "file": "packages/postgres-provider/src/module-runtime-interpreter.ts",
+      "original": "  const first = observeValidationRefusals(bindings, {",
+      "replacement": "  const first = observeValidationRefusals([], {",
+      "test": {
+        "files": ["test/postgres/customization.test.ts"],
+        "namePattern": "literal validation checks changed values, keeps old records and refuses an older serving reader"
+      },
+      "kills": [
+        {
+          "file": "test/postgres/customization.test.ts",
+          "name": "literal validation checks changed values, keeps old records and refuses an older serving reader",
+          "expected": "the compiled witness or the live invocation detects that the invalid write did not refuse"
+        }
+      ]
+    },
+    {
       "name": "customize-role-directory-shows-another-environment",
       "claim": "A Customize author's role directory is limited to their environment.",
       "file": "db/migrations/0040_customization_permission_directory.sql",

@@ -43,6 +43,55 @@ const equipment = {
   label: 'Equipment',
 };
 
+test('plain English drafts a governed literal validation on the selected field', async () => {
+  const entityId = 'northstar.app:entity.item';
+  const fieldId = 'northstar.app:field.item_description';
+  const message = 'Enter an inspection description.';
+  const operations = [
+    'northstar.app:operation.item_create',
+    'northstar.app:operation.item_update',
+  ];
+  const seen: { system: string; toolNames: string[]; turns: number }[] = [];
+  const result = await draftPatchFromRequest(
+    scripted(
+      [
+        {
+          toolInput: {
+            kind: 'addValidation',
+            entity: entityId,
+            validation: { fieldId, check: 'required', message },
+          },
+        },
+      ],
+      seen,
+    ),
+    'Require an inspection description before saving items.',
+    {
+      ...targets,
+      validationTargets: [
+        {
+          entityId,
+          label: 'Item',
+          operationIds: operations,
+          fields: [
+            { fieldId, label: 'Description', valueType: { kind: 'text' } },
+          ],
+        },
+      ],
+    },
+  );
+  assert.match(
+    seen[0]?.system ?? '',
+    /Record types and fields that support validation/u,
+  );
+  assert.ok(
+    result.status === 'parsed' && result.patch.kind === 'addValidation',
+  );
+  assert.equal(result.patch.rule.message, message);
+  assert.deepEqual(result.patch.rule.boundOperationIds, operations);
+  assert.deepEqual(result.patch.rule.fieldAnchors, [fieldId]);
+});
+
 /** A model that answers each turn from a script and records what it saw. */
 function scripted(
   turns: readonly ({ text?: string; toolInput?: unknown } | null)[],

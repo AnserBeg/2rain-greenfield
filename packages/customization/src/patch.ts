@@ -1,4 +1,7 @@
-import { OperationRoleKeySchema } from '@north-star/canonical-model';
+import {
+  FormulaValidationRuleDefinitionSchema,
+  OperationRoleKeySchema,
+} from '@north-star/canonical-model';
 import { z } from 'zod';
 
 /**
@@ -142,6 +145,10 @@ export const CustomizationPatchSchema = z.discriminatedUnion('kind', [
   arrangeLayout,
   saveListView,
   z.strictObject({
+    kind: z.literal('addValidation'),
+    rule: FormulaValidationRuleDefinitionSchema,
+  }),
+  z.strictObject({
     kind: z.literal('narrowPermission'),
     target: z.strictObject({
       kind: z.literal('operation'),
@@ -175,6 +182,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'addChoice',
   'arrangeLayout',
   'saveListView',
+  'addValidation',
   'addMetricCard',
   'narrowPermission',
   'unNarrowPermission',

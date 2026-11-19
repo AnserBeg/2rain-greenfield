@@ -60,6 +60,7 @@ import {
   type ReferenceLookup,
 } from './editor-controls.js';
 import { escapeHtml as h } from './html.js';
+import { validationRefusalForOperation } from './validation-refusal.js';
 import { operationMessageRef } from './gateway-error-codes.js';
 import {
   messageBody,
@@ -2619,17 +2620,27 @@ async function editorResponse(
                     buffer.recordId = result.readBack.recordId;
                   }
                 } catch (error) {
-                  buffer.notice = warning(operationMessageRef(error));
+                  const rule = validationRefusalForOperation(
+                    view,
+                    step.operation.operationId,
+                    error,
+                  );
+                  buffer.notice = rule
+                    ? `<p role="alert" data-form-validation-refusal>${h(rule.message)}</p>`
+                    : warning(operationMessageRef(error));
+                  if (rule?.fieldAnchors[0])
+                    buffer.focus = controlId(step.row.id, rule.fieldAnchors[0]);
                   statusCode = 422;
                   if (
-                    error instanceof Error &&
-                    error.name === 'ModuleRuntimeInterpreterError' &&
-                    'code' in error &&
-                    [
-                      'MODULE_FIELD_VALUE_INVALID',
-                      'MODULE_ENUM_VALUE_INVALID',
-                      'MODULE_REQUIRED_FIELD_MISSING',
-                    ].includes(String(error.code))
+                    rule ||
+                    (error instanceof Error &&
+                      error.name === 'ModuleRuntimeInterpreterError' &&
+                      'code' in error &&
+                      [
+                        'MODULE_FIELD_VALUE_INVALID',
+                        'MODULE_ENUM_VALUE_INVALID',
+                        'MODULE_REQUIRED_FIELD_MISSING',
+                      ].includes(String(error.code)))
                   ) {
                     const completed = buffer.pending.filter(
                       (value) => value.done,

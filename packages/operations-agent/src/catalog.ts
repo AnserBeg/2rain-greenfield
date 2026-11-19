@@ -12,6 +12,8 @@ import type {
   ImmutableJsonValue,
   RequestRuntimeView,
 } from '../../runtime/src/request-runtime-view.js';
+import { parseFormulaValidationBindings } from '../../canonical-model/src/formula-validation-projection.js';
+import type { FormulaValidationRule } from '../../canonical-model/src/formula-validation-schema.js';
 import {
   parsePinnedOperationCatalog,
   type RegisteredOperationDefinition,
@@ -101,6 +103,7 @@ export interface PinnedCatalog {
   readonly queries: readonly QueryCatalogEntry[];
   readonly presets: readonly ListPreset[];
   readonly metricCards?: readonly MetricCard[];
+  readonly validationRules?: readonly FormulaValidationRule[];
   operation(operationId: string): RegisteredOperationDefinition | undefined;
   query(queryId: string): QueryCatalogEntry | undefined;
   preset(queryId: string): ListPreset | undefined;
@@ -169,6 +172,13 @@ export function pinnedCatalog(view: RequestRuntimeView): PinnedCatalog {
     queries,
     presets: agent.listPresets ?? [],
     ...(agent.metricCards ? { metricCards: agent.metricCards } : {}),
+    ...(view.projections.formulaRule
+      ? {
+          validationRules: parseFormulaValidationBindings(
+            view.projections.formulaRule.payload,
+          ).map(({ rule }) => rule),
+        }
+      : {}),
     operation: (id) =>
       operationById.get(id) ??
       operationById.get(matchId(id, operationById.keys()) ?? ''),
@@ -256,6 +266,15 @@ export function operationContract(
       : null,
   }));
   const usesPatch = argumentKeys.includes('patch');
+  const validationRules = catalog.validationRules
+    ?.filter((rule) => rule.boundOperationIds.includes(operation.operationId))
+    .map((rule) => ({
+      ruleId: rule.ruleId,
+      predicate: rule.predicate as unknown as ImmutableJsonValue,
+      fieldIds: rule.fieldAnchors,
+      message: rule.message,
+      existingRecords: rule.existingRecords,
+    }));
   return {
     operationId: operation.operationId,
     ...(operation.label ? { label: operation.label } : {}),
@@ -266,6 +285,7 @@ export function operationContract(
         ? 'the person must approve it (every plan is shown for approval anyway)'
         : 'none beyond plan approval',
     precondition: describePredicate(operation.precondition),
+    ...(validationRules?.length ? { validationRules } : {}),
     readBackQueryId: operation.readBackQueryId,
     target: argumentKeys.includes('expectedRevision')
       ? 'required: the recordId of an existing record (or {"fromStep": n})'

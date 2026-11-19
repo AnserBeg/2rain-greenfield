@@ -206,12 +206,24 @@ export type SurfaceDataRenderState =
       readonly status: 'DIAGNOSTIC';
     };
 
-export interface SurfaceOperationFeedback {
+interface SurfaceOperationReceipt {
   readonly intent: SurfaceOperationIntent;
   readonly label: string;
   readonly record: SemanticRecordDto;
   readonly trustLinked: boolean;
 }
+
+interface SurfaceValidationRefusal {
+  readonly validation: {
+    readonly fieldIds: readonly string[];
+    readonly message: string;
+    readonly proposedValues: Readonly<Record<string, unknown>>;
+  };
+}
+
+export type SurfaceOperationFeedback =
+  SurfaceOperationReceipt | SurfaceValidationRefusal;
+const validationMessageId = 'record-form-validation';
 
 export interface SurfaceDataComponentContext {
   readonly data: SurfaceDataRenderState;
@@ -1786,6 +1798,9 @@ function slotPanel(
 function feedbackHtml(
   feedback: SurfaceOperationFeedback | null | undefined,
 ): string {
+  if (feedback && 'validation' in feedback) {
+    return `<section class="operation-feedback" role="alert" id="${validationMessageId}" data-form-validation-refusal>${escapeHtml(feedback.validation.message)}</section>`;
+  }
   return feedback
     ? `<section class="operation-feedback" role="status" data-operation-intent="${feedback.intent}" data-trust-linked="${String(feedback.trustLinked)}"><strong>${escapeHtml(feedback.label)} complete.</strong> The saved record is reflected below${feedback.trustLinked ? ' and its trust evidence is linked' : ''}.</section>`
     : '';
@@ -2062,6 +2077,11 @@ function renderFormFields(
   const presentation = new Map(
     (surface.form?.fields ?? []).map((field) => [String(field.fieldId), field]),
   );
+  const validation =
+    context.feedback && 'validation' in context.feedback
+      ? context.feedback.validation
+      : null;
+  const invalid = new Set(validation?.fieldIds ?? []);
   const more: string[] = [];
   const moreLabels: string[] = [];
   const first = formFieldIds(surface)
@@ -2073,7 +2093,10 @@ function renderFormFields(
       const declared = presentation.get(fieldId);
       const label =
         declared?.label ?? fieldLabel(fieldId, surfaceEntityId(context));
-      const value = record ? record.values[fieldId] : undefined;
+      const value =
+        validation && Object.hasOwn(validation.proposedValues, fieldId)
+          ? validation.proposedValues[fieldId]
+          : record?.values[fieldId];
       const field = fieldsById.get(fieldId);
       const inputField = inputFieldsById.get(fieldId);
       // A stored decimal is shown in canonical spelling -- `12.5`, not
@@ -2092,7 +2115,19 @@ function renderFormFields(
       const control =
         choices?.status === 'ready'
           ? renderFormReferenceControl(choices.options, fieldId, value)
-          : renderFormControl(field, inputField, fieldId, index, shown);
+          : renderFormControl(
+              field,
+              inputField,
+              fieldId,
+              index,
+              shown,
+              invalid.has(fieldId)
+                ? {
+                    attributes: ' aria-invalid="true"',
+                    describedBy: validationMessageId,
+                  }
+                : {},
+            );
       const emptyIntent = renderEmptyIntentControl(
         inputField,
         fieldId,
@@ -2111,8 +2146,11 @@ function renderFormFields(
       return '';
     })
     .join('');
+  const showMore = [...invalid].some(
+    (fieldId) => presentation.get(fieldId)?.disclosure === 'more',
+  );
   return more.length
-    ? `${first}<details class="draft-more form-field--wide"><summary>More details <span class="draft-more__names">${moreLabels.join(', ')}</span></summary><div class="form-fields">${more.join('')}</div></details>`
+    ? `${first}<details class="draft-more form-field--wide"${showMore ? ' open' : ''}><summary>More details <span class="draft-more__names">${moreLabels.join(', ')}</span></summary><div class="form-fields">${more.join('')}</div></details>`
     : first;
 }
 
@@ -2234,7 +2272,11 @@ export function renderFormControl(
   fieldId: string,
   index: number,
   value: unknown,
-  control: { readonly name?: string; readonly attributes?: string } = {},
+  control: {
+    readonly name?: string;
+    readonly attributes?: string;
+    readonly describedBy?: string;
+  } = {},
 ): RenderedFormControl {
   const name =
     control.name === undefined
@@ -2252,8 +2294,12 @@ export function renderFormControl(
   // Make the unavailable state deterministic in the rendered HTML rather than
   // relying on each browser to sanitize the value after parsing the attribute.
   const renderedValue = storedValueUnavailable ? undefined : value;
-  const describedBy = storedValueUnavailable
-    ? ` aria-describedby="${unavailableStoredValueId(index)}"`
+  const descriptions = [
+    storedValueUnavailable ? unavailableStoredValueId(index) : undefined,
+    control.describedBy,
+  ].filter(Boolean);
+  const describedBy = descriptions.length
+    ? ` aria-describedby="${escapeHtml(descriptions.join(' '))}"`
     : '';
   if (!field) {
     return {

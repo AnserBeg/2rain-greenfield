@@ -13,6 +13,7 @@ import {
   SURFACE_ARCHETYPES,
   type CanonicalLanguageVersion,
 } from './constants.js';
+import { formulaValidationRuleSchema } from './formula-validation-schema.js';
 import { LEGAL_ENTITY_SCOPE_CONTRACT_V1 } from './legal-entity-scope-kernel.js';
 
 const nodeVersion = z.enum(SUPPORTED_LANGUAGE_VERSIONS);
@@ -2658,11 +2659,27 @@ const operationRoleNarrowings = z
   .max(128)
   .optional();
 
+export const FormulaValidationRuleDefinitionSchema =
+  formulaValidationRuleSchema({
+    canonicalId: CanonicalIdSchema,
+    currencyCode: CurrencyCodeSchema,
+    date: IsoDateValueSchema,
+    decimal: CanonicalSignedDecimalStringSchema,
+    integer: CanonicalIntegerStringSchema,
+  });
+
+const formulaRules = z
+  .array(FormulaValidationRuleDefinitionSchema)
+  .min(1)
+  .max(128)
+  .optional();
+
 const v6NormalizedShape = {
   ...v5NormalizedShape,
   entities: z.array(normalizedEntityDefinition.extend(assistantConfirmation)),
   fields: z.array(normalizedV6FieldDefinition),
   operations: z.array(normalizedV6OperationDefinition),
+  formulaRules,
   operationRoleNarrowings,
   queries: z.array(normalizedV6QueryDefinition),
   languageVersion: v6NodeVersion,
@@ -2792,6 +2809,7 @@ const v6AuthoredShape = {
   entities: z.array(authoredEntityDefinition.extend(assistantConfirmation)),
   fields: z.array(authoredV6FieldDefinition),
   operations: z.array(authoredV6OperationDefinition),
+  formulaRules,
   operationRoleNarrowings,
   queries: z.array(authoredV6QueryDefinition),
   languageVersion: v6NodeVersion,

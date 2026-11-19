@@ -97,6 +97,7 @@ export {
   type VersionedAuthoredApplicationPackage,
   type VersionedNormalizedApplicationPackage,
   type VersionedPredicateExpression,
+  FormulaValidationRuleDefinitionSchema,
   OperationRoleKeySchema,
   isNarrowableOperationId,
 } from './schemas.js';

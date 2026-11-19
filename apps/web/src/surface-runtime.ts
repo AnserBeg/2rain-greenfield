@@ -34,6 +34,7 @@ import {
   type DeclaredListState,
 } from './list-declaration.js';
 import type { SurfaceList } from '../../../packages/canonical-model/src/index.js';
+import { validationRefusalForOperation } from './validation-refusal.js';
 import { assertRequestRuntimeView } from '@north-star/runtime/request-runtime-view';
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
 import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../../packages/runtime/src/semantic-operation-gateway.js';
@@ -1359,6 +1360,35 @@ export async function submitSurfaceRuntimeIntent(
       gateways.operationMediation.issueInvocation(view, 'UI'),
     );
   } catch (error) {
+    const rule = validationRefusalForOperation(
+      view,
+      operation.operationId,
+      error,
+    );
+    if (selection.selected.surfaceRole === 'form' && rule) {
+      const proposedValues = input.values ?? input.patch;
+      if (
+        proposedValues &&
+        typeof proposedValues === 'object' &&
+        !Array.isArray(proposedValues)
+      ) {
+        const page = await renderSurfaceRuntimeWithData(
+          view,
+          requestUrl,
+          gateways,
+          {
+            validation: {
+              fieldIds: rule.fieldAnchors,
+              message: rule.message,
+              proposedValues: proposedValues as Readonly<
+                Record<string, unknown>
+              >,
+            },
+          },
+        );
+        return { ...page, statusCode: 422 };
+      }
+    }
     const ref = operationMessageRef(error);
     return renderApplicationDiagnostic(
       ref.code === 'OPERATION_PERMISSION_DENIED' ? 403 : 422,
