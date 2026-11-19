@@ -915,15 +915,28 @@ test(
           assert.equal(await journalCount(pool, accepted, 'REQUEST'), 2);
 
           const ordinary = await startApproval();
+          await assertApprovalBoundary(
+            pool,
+            workerPool,
+            runtimePool,
+            operator,
+            ordinary,
+            'APPROVED',
+          );
+          assert.equal(await journalCount(pool, ordinary, 'RESULT'), 1);
+          await restarted.step(scope, ordinary);
+          assert.equal(await journalCount(pool, ordinary, 'REQUEST'), 2);
+
           await t.test(
             'a release approver needs live grants for the plan company and exact action',
             async () => {
-              const plan = await pendingApproval(pool, ordinary);
+              const authorityProbe = await startApproval();
+              const plan = await pendingApproval(pool, authorityProbe);
               const decide = () =>
                 decideApproval(
                   runtimePool,
                   operator,
-                  ordinary,
+                  authorityProbe,
                   plan.plan_digest,
                   plan.fence,
                   'APPROVED',
@@ -936,7 +949,7 @@ test(
                     (
                       await client.query<{ run_id: string }>(
                         'SELECT run_id FROM platform.workflow_approval_worklist($1)',
-                        [ordinary],
+                        [authorityProbe],
                       )
                     ).rows,
                 );
@@ -979,27 +992,19 @@ test(
                   'a release approver without the exact action grant recorded a decision',
                 );
                 assert.deepEqual(await list(), []);
-                assert.equal(await journalCount(pool, ordinary, 'RESULT'), 0);
-                assert.equal(await runStatus(pool, ordinary), 'WAITING');
+                assert.equal(
+                  await journalCount(pool, authorityProbe, 'RESULT'),
+                  0,
+                );
+                assert.equal(await runStatus(pool, authorityProbe), 'WAITING');
                 await setCreateGrant(false);
-                assert.deepEqual(await list(), [{ run_id: ordinary }]);
+                assert.deepEqual(await list(), [{ run_id: authorityProbe }]);
               } finally {
                 await setCreateGrant(false);
                 await setCompany(null);
               }
             },
           );
-          await assertApprovalBoundary(
-            pool,
-            workerPool,
-            runtimePool,
-            operator,
-            ordinary,
-            'APPROVED',
-          );
-          assert.equal(await journalCount(pool, ordinary, 'RESULT'), 1);
-          await restarted.step(scope, ordinary);
-          assert.equal(await journalCount(pool, ordinary, 'REQUEST'), 2);
 
           await t.test(
             'R2 a definition verified after approval cannot enter replay',
