@@ -25,15 +25,15 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 - Exact-minute browser fills canonicalize zero seconds without changing the instant (CI reproduction passed).
 - Mid-packet checkpoint: no whole-app review trigger; no new correctness domain or fan-out.
 
-- CI 44499550504: only actually counted queues are reused; Reorder retains its independent count.
-- Accepted workflow and activation-recovery corrections are inherited unchanged; compiler inputs match.
+- The unpublished integration was preserved when main advanced; published history is unchanged.
+- Action-permission narrowing and row defaults share the merged runtime; artifacts and coverage are re-derived.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "INTERACT-1",
-  "base": "bae7e49e88bfde2257b4a0cb499af9fb9f121e74",
-  "head": "4da3f438505f08ff871c8f2108c38a1c74b72a77",
+  "base": "fc56f4a0af8b4dfbff4692906c5b45c34eae4bbc",
+  "head": "44ef1248e6d089db33255aa3b9e758307d81396f",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
