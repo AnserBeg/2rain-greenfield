@@ -63,14 +63,14 @@
       "original": "  const first = observeValidationRefusals(bindings, {",
       "replacement": "  const first = observeValidationRefusals([], {",
       "test": {
-        "files": ["test/postgres/customization.test.ts"],
+        "files": ["test/postgres/customization-validation.test.ts"],
         "namePattern": "literal validation checks changed values, keeps old records and refuses an older serving reader"
       },
       "kills": [
         {
-          "file": "test/postgres/customization.test.ts",
+          "file": "test/postgres/customization-validation.test.ts",
           "name": "literal validation checks changed values, keeps old records and refuses an older serving reader",
-          "expected": "the compiled witness or the live invocation detects that the invalid write did not refuse"
+          "expected": "verification negative probe unexpectedly succeeded"
         }
       ]
     },
