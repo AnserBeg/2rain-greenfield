@@ -32,6 +32,10 @@ import {
 } from '@north-star/postgres-provider/customization-service';
 import { createRequestWorkProbe } from '@north-star/postgres-provider/request-work-meter';
 import {
+  startWorkflowScheduler,
+  type WorkflowSchedulerConfig,
+} from '@north-star/postgres-provider/workflow-worker';
+import {
   assistantCompany,
   createSurfaceRuntimeServer,
 } from '@north-star/web/app-server';
@@ -61,6 +65,7 @@ export interface ComposedApplicationServerOptions {
   readonly host?: string;
   readonly port?: number;
   readonly rollbackReleaseRoot?: string;
+  readonly workflowScheduler?: WorkflowSchedulerConfig;
   /**
    * Which authored seed to install. Defaults to `demo`, the small fixed
    * fixture the browser suite asserts against; the dev entry point asks for
@@ -166,8 +171,9 @@ export async function startComposedApplication(
   // one previously threw past an open runtime, leaving the caller with no
   // object to close and its pools and container still held.
   let seededRecords: readonly ComposedApplicationSeedReceipt[];
-  let server: Server;
+  let server: Server | undefined;
   let assistant: AssistantEndpoint | undefined;
+  let stopWorkflowScheduler: (() => Promise<void>) | undefined;
   // The Host values the assistant answers to, known once the server listens;
   // nothing is accepted before then (end review X10).
   let authorities: readonly string[] = [];
@@ -259,14 +265,25 @@ export async function startComposedApplication(
         ...(assistant ? { assistant } : {}),
       },
     );
+    const listener = server;
     await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(options.port ?? 4174, host, () => {
-        server.off('error', reject);
+      listener.once('error', reject);
+      listener.listen(options.port ?? 4174, host, () => {
+        listener.off('error', reject);
         resolve();
       });
     });
+    if (options.workflowScheduler) {
+      stopWorkflowScheduler = startWorkflowScheduler(
+        options.workflowScheduler,
+        () => {
+          process.stderr.write('WORKFLOW_SCHEDULER_POLL_FAILED\n');
+        },
+      );
+    }
   } catch (error) {
+    server?.close();
+    assistant?.close();
     await closeCustomization();
     await runtime.close();
     throw error;
@@ -278,6 +295,8 @@ export async function startComposedApplication(
         resolve();
       });
     });
+    await stopWorkflowScheduler?.();
+    await closeCustomization();
     await runtime.close();
     throw new Error('composed application server has no TCP address');
   }
@@ -289,6 +308,7 @@ export async function startComposedApplication(
       if (closed) return;
       closed = true;
       assistant?.close();
+      await stopWorkflowScheduler?.();
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
       });
