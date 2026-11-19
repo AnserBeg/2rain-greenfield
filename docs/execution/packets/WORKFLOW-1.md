@@ -1,6 +1,6 @@
 # WORKFLOW-1 — goods receipt workflows
 
-Slices 1 and 2 and the first correction landed. Round 2 closes the five open verification findings with one Critical migration. The next step is the orchestrator's narrow verification before slice 3.
+Slices 1 and 2 and the first correction landed. Round 2 addresses the five open verification findings with Critical migration 0041. Hosted CI timeouts block integration. The orchestrator's narrow verification follows integration before slice 3.
 
 ## Claims
 
@@ -22,7 +22,7 @@ Slices 1 and 2 and the first correction landed. Round 2 closes the five open ver
 ## Gates
 
 - Slice 1 [CI 44456002463](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44456002463), slice 2 [CI 44477729782](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44477729782), and round 1 [CI 44497680722](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44497680722).
-- Round 2 adds a compiler control and extends the PostgreSQL receipt journey. The integration CI run is recorded in the ledger.
+- Round 2's receipt journey and quality checks passed at `c551826d`. The dependency and secret scan, PostgreSQL inventory, PostgreSQL shard 2, and composed browser jobs timed out. [CI 44539741235](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44539741235).
 
 ```record-claim
 {
