@@ -22,7 +22,7 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 - Normal git metadata is read-only; isolated metadata in `/tmp` tracks this chartered worktree.
 - Exact-minute browser fills canonicalize zero seconds without changing the instant (CI reproduction passed).
 - CI 44426260000 measured stock preview open/review at 2/46/3/0; +5 statements buys the governed stock/location reads. Confirmation budget unchanged.
-- Current main merged cleanly; PANEL-2 and UPGRADE-1 retain their accepted changes, with no owned Critical diff.
+- Compiler negative cases require canonical-schema decode diagnostics in the existing failed-compilation protocol (CI 44435048993).
 - Mid-packet checkpoint: no whole-app review trigger; no new correctness domain or fan-out.
 
 ```record-claim
@@ -30,7 +30,7 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "INTERACT-1",
   "base": "99371b437fdf45c51cf8ecfb3b7cf4c95459409a",
-  "head": "f6086000107a6cb02ee20e3586bc542f6b586f1b",
+  "head": "e9ac4736a672c2521ac6125f45935123c5e45dc3",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
