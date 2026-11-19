@@ -46,16 +46,16 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
   "base": "e0bb8e9582cb9a7eca95f520fb2d4fabe47a7803",
-  "head": "c9bae9f7e75f8a804fd1f5782f8e9584deb805f4",
+  "head": "d543844a3f57c5e38ebee4a2b7b4271d745f6696",
   "changedPaths": [
-    "apps/web/src/customize-screen.ts", "apps/web/test/browser/customize-formulas.composed-application.spec.ts", "package.json", "packages/canonical-model/src/calculated-display-bindings.ts", "packages/canonical-model/src/calculated-display-projection.ts",
-    "packages/canonical-model/src/calculated-display-schema.ts", "packages/canonical-model/src/calculated-display.ts", "packages/canonical-model/src/formula-validation-projection.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts",
-    "packages/canonical-model/src/schemas.ts", "packages/compiler/src/calculated-display-plan.ts", "packages/compiler/src/compiler.ts", "packages/compiler/src/projections.ts", "packages/customization/src/ai-draft.ts",
-    "packages/customization/src/apply.ts", "packages/customization/src/calculated-display-draft.ts", "packages/customization/src/index.ts", "packages/customization/src/patch.ts", "packages/customization/src/render.ts",
-    "packages/customization/src/targets.ts", "packages/operations-agent/src/catalog.ts", "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/release-repository.ts",
-    "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/calculated-display.ts", "packages/runtime/src/request-runtime-view.ts", "test/architecture/repository-hygiene.test.ts", "test/evidence/CUSTOMIZE-3.expected-red.json",
-    "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts", "test/helpers/language-coverage-packages.ts", "test/helpers/reachability-producers.ts", "test/postgres/customization-display.test.ts",
-    "test/postgres/customization-validation.test.ts", "test/postgres/releases.test.ts", "test/unit/calculated-display.test.ts", "test/unit/customization-ai-draft.test.ts"
+    "apps/web/src/customize-screen.ts", "apps/web/src/surface-composition.ts", "apps/web/test/browser/customize-formulas.composed-application.spec.ts", "package.json", "packages/canonical-model/src/calculated-display-bindings.ts",
+    "packages/canonical-model/src/calculated-display-projection.ts", "packages/canonical-model/src/calculated-display-schema.ts", "packages/canonical-model/src/calculated-display.ts", "packages/canonical-model/src/formula-validation-projection.ts", "packages/canonical-model/src/index.ts",
+    "packages/canonical-model/src/normalize.ts", "packages/canonical-model/src/schemas.ts", "packages/compiler/src/calculated-display-plan.ts", "packages/compiler/src/compiler.ts", "packages/compiler/src/projections.ts",
+    "packages/customization/src/ai-draft.ts", "packages/customization/src/apply.ts", "packages/customization/src/calculated-display-draft.ts", "packages/customization/src/index.ts", "packages/customization/src/patch.ts",
+    "packages/customization/src/render.ts", "packages/customization/src/targets.ts", "packages/operations-agent/src/catalog.ts", "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts",
+    "packages/postgres-provider/src/release-repository.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/calculated-display.ts", "packages/runtime/src/request-runtime-view.ts", "test/architecture/repository-hygiene.test.ts",
+    "test/evidence/CUSTOMIZE-3.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts", "test/helpers/language-coverage-packages.ts", "test/helpers/reachability-producers.ts",
+    "test/postgres/customization-display.test.ts", "test/postgres/customization-validation.test.ts", "test/postgres/releases.test.ts", "test/unit/calculated-display.test.ts", "test/unit/customization-ai-draft.test.ts"
   ],
   "symbols": [
     {"path":"packages/canonical-model/src/calculated-display-bindings.ts","name":"bindCalculatedDisplayField"},
