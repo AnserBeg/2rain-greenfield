@@ -1356,7 +1356,14 @@ export async function submitSurfaceRuntimeIntent(
     });
   }
 
+  const feedback = {
+    intent,
+    label: operation.label,
+    record: result.readBack,
+    trustLinked: result.trust !== null,
+  };
   if (
+    (intent === 'command' && selection.selected.composition) ||
     gateways.applicationExtension?.refreshAfterOperation({
       binding,
       intent,
@@ -1364,26 +1371,15 @@ export async function submitSurfaceRuntimeIntent(
       surfaces: selection.surfaces,
     }) === true
   )
-    // An explicitly composed application contribution may request an
-    // authoritative refresh. Ordinary lifecycle results retain their read-back
-    // below: an archive must not query its now-inactive record as active.
-    return renderSurfaceRuntimeWithData(view, requestUrl, gateways, {
-      intent,
-      label: operation.label,
-      record: result.readBack,
-      trustLinked: result.trust !== null,
-    });
+    // A composed record's status, links and child tables come from its bound
+    // reads. Archive responses use the operation read-back for the inactive row.
+    return renderSurfaceRuntimeWithData(view, requestUrl, gateways, feedback);
 
   return renderSelectedSurface(
     view,
     selection,
     { records: [result.readBack], status: 'READY' },
-    {
-      intent,
-      label: operation.label,
-      record: result.readBack,
-      trustLinked: result.trust !== null,
-    },
+    feedback,
     binding.operations,
     200,
     legalEntitySelectionForSurface(

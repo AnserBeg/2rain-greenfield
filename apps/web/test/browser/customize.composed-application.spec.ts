@@ -355,6 +355,9 @@ test('a person builds Goods Receipt Inspection with the Customize screen and use
         await expect(
           page.getByRole('cell', { name: 'Width', exact: true }),
         ).toHaveCount(0);
+        await expect(page.locator('.composition-business-status')).toHaveText(
+          'Pending',
+        );
         await page.getByLabel('Record actions', { exact: true }).click();
         await expect(
           page.getByRole('button', { name: 'Quarantine', exact: true }),

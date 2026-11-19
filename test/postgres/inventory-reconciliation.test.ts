@@ -1,3 +1,4 @@
+import { activateInventoryFixture } from '../helpers/verified-fixture-release.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -230,7 +231,13 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
         [fixture.empty, fixture.emptyDefinition],
         [fixture.inventory, fixture.inventoryDefinition],
       ]);
-      await setPointer(database.pool, scopeA, releases[0]!);
+      await activateInventoryFixture(
+        database.pool,
+        runtimePool,
+        scopeA.context,
+        releases[0]!,
+        fixture.empty,
+      );
       await grantExecutorAuthority(database.pool, scopeA);
       const prepared = await new PostgresModuleStorageMaterializer(
         materializerPool,
@@ -244,7 +251,13 @@ test('reconciliation names divergence, confirms consistency, repairs nothing, an
         targetReleaseId: releases[1]!,
       });
       assert.equal(prepared.schemaState, 'APPLIED');
-      await setPointer(database.pool, scopeA, releases[1]!);
+      await activateInventoryFixture(
+        database.pool,
+        runtimePool,
+        scopeA.context,
+        releases[1]!,
+        fixture.inventory,
+      );
       await seedFoundation(runtimePool, scopeA, binding, {
         legalEntityIds: [legalEntityA, quietLegalEntityA, witnessLegalEntityA],
       });
@@ -3624,28 +3637,6 @@ function releaseCommand(
     tenantId: context.tenantId,
     verificationEvidenceId: evidenceId,
   };
-}
-
-async function setPointer(
-  pool: Pool,
-  scope: TenantScope,
-  releaseId: MintedUuid,
-): Promise<void> {
-  await pool.query(
-    'ALTER TABLE platform.active_release_pointers DISABLE TRIGGER active_release_pointer_exact_swap',
-  );
-  try {
-    const result = await pool.query(
-      `UPDATE platform.active_release_pointers SET release_id=$3, fence=fence+1
-        WHERE tenant_id=$1 AND environment_id=$2`,
-      [scope.tenantId, scope.environmentId, releaseId],
-    );
-    assert.equal(result.rowCount, 1);
-  } finally {
-    await pool.query(
-      'ALTER TABLE platform.active_release_pointers ENABLE TRIGGER active_release_pointer_exact_swap',
-    );
-  }
 }
 
 async function grantExecutorAuthority(

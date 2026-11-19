@@ -1,3 +1,4 @@
+import { activateInventoryFixture } from '../helpers/verified-fixture-release.js';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -300,7 +301,13 @@ test(
           [fixture.empty, fixture.emptyDefinition],
           [fixture.inventory, fixture.inventoryDefinition],
         ]);
-        await setPointer(database.pool, releases[0]!);
+        await activateInventoryFixture(
+          database.pool,
+          sourceRuntimePool,
+          context,
+          releases[0]!,
+          fixture.empty,
+        );
         await grantExecutorAuthority(database.pool);
         const prepared = await new PostgresModuleStorageMaterializer(
           materializerPool,
@@ -314,7 +321,13 @@ test(
           targetReleaseId: releases[1]!,
         });
         assert.equal(prepared.schemaState, 'APPLIED');
-        await setPointer(database.pool, releases[1]!);
+        await activateInventoryFixture(
+          database.pool,
+          sourceRuntimePool,
+          context,
+          releases[1]!,
+          fixture.inventory,
+        );
         await seedFoundation(sourceRuntimePool, context, binding);
         await assertDerivedStoreRosterIsComplete(database.pool);
 
@@ -2139,24 +2152,6 @@ function releaseCommand(
     tenantId: context.tenantId,
     verificationEvidenceId: evidenceId,
   };
-}
-
-async function setPointer(pool: Pool, releaseId: MintedUuid): Promise<void> {
-  await pool.query(
-    'ALTER TABLE platform.active_release_pointers DISABLE TRIGGER active_release_pointer_exact_swap',
-  );
-  try {
-    const result = await pool.query(
-      `UPDATE platform.active_release_pointers SET release_id=$3, fence=fence+1
-        WHERE tenant_id=$1 AND environment_id=$2`,
-      [tenantId, environmentId, releaseId],
-    );
-    assert.equal(result.rowCount, 1);
-  } finally {
-    await pool.query(
-      'ALTER TABLE platform.active_release_pointers ENABLE TRIGGER active_release_pointer_exact_swap',
-    );
-  }
 }
 
 async function grantExecutorAuthority(pool: Pool): Promise<void> {

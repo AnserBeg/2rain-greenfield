@@ -297,6 +297,10 @@ test(
           await opened.service.approve(drafted.patchId);
           await opened.service.activate(drafted.patchId);
           await assertScopesNamePointer(pool, runtime);
+          const rollbackPin = await runtime.entry.run({}, (view) => ({
+            releaseId: view.release.releaseId,
+            fence: view.pointer.fence,
+          }));
           const cutRollbackVerification = await openCustomizationService({
             ...serviceOptions,
             activationKernel: (runtimePool) =>
@@ -312,13 +316,29 @@ test(
           } finally {
             await cutRollbackVerification.close();
           }
-          await openComposedApplicationRuntime({
+          const rollbackBoot = await openComposedApplicationRuntime({
             databaseUrl,
             tenantSlug,
-          }).then(
-            (restarted) => restarted.close(),
-            () => undefined,
-          );
+          });
+          try {
+            assert.equal(
+              rollbackBoot.activeReleaseId,
+              rollbackPin.releaseId,
+              'boot must serve the last verified generation',
+            );
+            for (const process of [runtime, rollbackBoot]) {
+              assert.deepEqual(
+                await process.entry.run({}, (view) => ({
+                  releaseId: view.release.releaseId,
+                  fence: view.pointer.fence,
+                })),
+                rollbackPin,
+                'requests stay pinned across the swap/verification cut',
+              );
+            }
+          } finally {
+            await rollbackBoot.close();
+          }
           assert.deepEqual(
             await scopeRoots(pool, runtime),
             [drafted.releaseRoot],
@@ -394,6 +414,10 @@ test(
           // verification. A retry is refused, never "activated", until the
           // kernel itself verifies that activation; then it repairs.
           const approvedVehicle = await opened.service.approve(vehicle.patchId);
+          const activationPin = await runtime.entry.run({}, (view) => ({
+            releaseId: view.release.releaseId,
+            fence: view.pointer.fence,
+          }));
           const cutActivation = await openCustomizationService({
             ...serviceOptions,
             activationKernel: (runtimePool) =>
@@ -420,13 +444,29 @@ test(
           }
           // A restart does not bless it either: boot leaves the scopes on
           // the last proven release (or refuses to start).
-          await openComposedApplicationRuntime({
+          const activationBoot = await openComposedApplicationRuntime({
             databaseUrl,
             tenantSlug,
-          }).then(
-            (restarted) => restarted.close(),
-            () => undefined,
-          );
+          });
+          try {
+            assert.equal(
+              activationBoot.activeReleaseId,
+              activationPin.releaseId,
+              'boot must serve the last verified generation',
+            );
+            for (const process of [runtime, activationBoot]) {
+              assert.deepEqual(
+                await process.entry.run({}, (view) => ({
+                  releaseId: view.release.releaseId,
+                  fence: view.pointer.fence,
+                })),
+                activationPin,
+                'requests stay pinned across the swap/verification cut',
+              );
+            }
+          } finally {
+            await activationBoot.close();
+          }
           assert.ok(
             (await scopeMismatches(pool, runtime)) > 0,
             'a restart did not set the scopes to an unverified release',

@@ -1,3 +1,4 @@
+import { activateFixtureRelease } from '../helpers/verified-fixture-release.js';
 import { withoutInventoryValuation } from '../helpers/without-inventory-valuation.js';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
@@ -181,7 +182,8 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
           '0034_customization_launch_patch_kinds.sql',
           '0035_customization_upgrade_bindings.sql',
           '0036_workflow_substrate.sql',
-          '0037_customization_patch_kind_identifier.sql',
+          '0037_verified_release_history.sql',
+          '0038_customization_patch_kind_identifier.sql',
         ]);
         assert.equal(migrationResult.verified.length, allMigrations.length);
         await seedScope(admin);
@@ -216,7 +218,7 @@ test('compiled module materialization is isolated, convergent, and provenance-cl
           target,
           targetBytes,
         );
-        await installSourcePointers(pool, releases);
+        await installSourcePointers(pool, runtimePool, releases);
         await grantExecutorAuthority(pool);
 
         const materializer = new PostgresModuleStorageMaterializer(
@@ -2134,7 +2136,7 @@ test('ABI function checks compose additively across live roots and conflicting d
           conflicting,
           definitionBytes(mountedDefinition),
         );
-        await installSourcePointers(pool, releases);
+        await installSourcePointers(pool, runtimePool, releases);
         await grantExecutorAuthority(pool);
         const materializer = new PostgresModuleStorageMaterializer(
           materializerPool,
@@ -2150,7 +2152,12 @@ test('ABI function checks compose additively across live roots and conflicting d
           targetReleaseId: releases.a.target,
         });
         assert.equal(priorPreparation.schemaState, 'APPLIED');
-        await setActiveReleasePointer(pool, releases.a.target);
+        await activatePreparedFixture(
+          pool,
+          runtimePool,
+          contexts.a,
+          releases.a,
+        );
 
         const mountedGenerationId = randomUUID();
         const mountedPreparationId = randomUUID();
@@ -2309,7 +2316,7 @@ test('standalone inventory materialization fails closed when Item and Location t
           target,
           definitionBytes(targetDefinition),
         );
-        await installSourcePointers(pool, releases);
+        await installSourcePointers(pool, runtimePool, releases);
         await grantExecutorAuthority(pool);
         const materializer = new PostgresModuleStorageMaterializer(
           materializerPool,
@@ -2529,7 +2536,7 @@ test('inventory v3 targets materialize the compiled legal master, fact partition
           target,
           definitionBytes(targetDefinition),
         );
-        await installSourcePointers(pool, releases);
+        await installSourcePointers(pool, runtimePool, releases);
         await grantExecutorAuthority(pool);
         const materializer = new PostgresModuleStorageMaterializer(
           materializerPool,
@@ -3524,7 +3531,7 @@ test('fold-function drift surfaces the specific diagnostic before a terminal cla
           target,
           definitionBytes(currentDefinition),
         );
-        await installSourcePointers(pool, releases);
+        await installSourcePointers(pool, runtimePool, releases);
         await grantExecutorAuthority(pool);
         const materializer = new PostgresModuleStorageMaterializer(
           materializerPool,
@@ -3686,7 +3693,7 @@ test('a pre-existing relation index executes as atomic locking DDL and rejects i
           upgrade,
           currentBytes,
         );
-        await installSourcePointers(pool, releases);
+        await installSourcePointers(pool, runtimePool, releases);
         await grantExecutorAuthority(pool);
         const materializer = new PostgresModuleStorageMaterializer(
           materializerPool,
@@ -3706,7 +3713,12 @@ test('a pre-existing relation index executes as atomic locking DDL and rejects i
         assert.equal(legacyPreparation.schemaState, 'APPLIED');
         await assertIndexPresence(pool, relationIndex.physicalName, false);
 
-        await setActiveReleasePointer(pool, releases.a.target);
+        await activatePreparedFixture(
+          pool,
+          runtimePool,
+          contexts.a,
+          releases.a,
+        );
         const generationId = randomUUID();
         const preparationId = randomUUID();
         const prepared = await materializer.prepare({
@@ -4004,7 +4016,7 @@ test('a released required relation is widened by executed DDL, and a mixed live-
           optional,
           definitionBytes(optionalDefinition),
         );
-        await installSourcePointers(pool, releases);
+        await installSourcePointers(pool, runtimePool, releases);
         await grantExecutorAuthority(pool);
         const materializer = new PostgresModuleStorageMaterializer(
           materializerPool,
@@ -4036,7 +4048,12 @@ test('a released required relation is widened by executed DDL, and a mixed live-
         });
         assert.equal(await readNullability(pool), 'NO');
 
-        await setActiveReleasePointer(pool, releases.a.target);
+        await activatePreparedFixture(
+          pool,
+          runtimePool,
+          contexts.a,
+          releases.a,
+        );
         const generationId = randomUUID();
         const prepared = await materializer.prepare({
           context: contexts.a,
@@ -4115,7 +4132,12 @@ test('a released required relation is widened by executed DDL, and a mixed live-
           optional,
           definitionBytes(optionalDefinition),
         );
-        await setActiveReleasePointerFor(pool, tenantB, releases.b.target);
+        await activatePreparedFixture(
+          pool,
+          runtimePool,
+          contexts.b,
+          releases.b,
+        );
         await materializer.prepare({
           context: contexts.b,
           expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -4597,7 +4619,7 @@ test('a released enum domain is widened by one atomic CHECK replacement, observe
           previous,
           definitionBytes(previousDefinition),
         );
-        await installSourcePointers(pool, releases);
+        await installSourcePointers(pool, runtimePool, releases);
         await grantExecutorAuthority(pool);
         const materializer = new PostgresModuleStorageMaterializer(
           materializerPool,
@@ -4695,7 +4717,12 @@ test('a released enum domain is widened by one atomic CHECK replacement, observe
           // stale CHECK -- before any transition is prepared -- does not admit
           // the candidate. Verification is not the gap; the missing element
           // was.
-          await setActiveReleasePointer(pool, releases.a.target);
+          await activatePreparedFixture(
+            pool,
+            runtimePool,
+            contexts.a,
+            releases.a,
+          );
           const next = await persistNextRelease(
             runtimePool,
             contexts.a,
@@ -4741,7 +4768,12 @@ test('a released enum domain is widened by one atomic CHECK replacement, observe
           // envelope installs none of them, and the addColumn it still carries
           // is what gets preparation as far as catalog verification. Expected
           // is the merged superset; actual is the untouched two-option CHECK.
-          await setActiveReleasePointerFor(pool, tenantB, releases.b.target);
+          await activatePreparedFixture(
+            pool,
+            runtimePool,
+            contexts.b,
+            releases.b,
+          );
           const tamperedB = await persistNextRelease(
             runtimePool,
             contexts.b,
@@ -5180,6 +5212,10 @@ test('a pre-existing generated fold and prefix index record their measured locki
     (field) => field.fieldId === FIXTURE_IDS.fieldIds.parentNotes,
   );
   assert.ok(searchableNotes);
+  const legacyBytes = definitionBytes(currentDefinition);
+  const legacy = mustCompile(
+    moduleInput(currentDefinition, expectedActiveReleaseFrom(source)),
+  );
   searchableNotes.searchable = true;
   assert.equal('businessKey' in searchableNotes, false);
   assert.equal(
@@ -5192,13 +5228,6 @@ test('a pre-existing generated fold and prefix index record their measured locki
     'the notes fixture must remain outside resolve-match authority',
   );
   const currentBytes = definitionBytes(currentDefinition);
-  const originallyCompiled = mustCompile(
-    moduleInput(currentDefinition, expectedActiveReleaseFrom(source)),
-  );
-  const legacy = withoutFoldedColumn(
-    originallyCompiled,
-    FIXTURE_IDS.fieldIds.parentNotes,
-  );
   const upgrade = mustCompile(
     moduleInput(currentDefinition, expectedActiveReleaseFrom(legacy)),
   );
@@ -5289,7 +5318,7 @@ test('a pre-existing generated fold and prefix index record their measured locki
           source,
           definitionBytes(emptyDefinition),
           legacy,
-          currentBytes,
+          legacyBytes,
         );
         const next = await persistNextRelease(
           runtimePool,
@@ -5298,7 +5327,7 @@ test('a pre-existing generated fold and prefix index record their measured locki
           upgrade,
           currentBytes,
         );
-        await installSourcePointers(pool, releases);
+        await installSourcePointers(pool, runtimePool, releases);
         await grantExecutorAuthority(pool);
         const materializer = new PostgresModuleStorageMaterializer(
           materializerPool,
@@ -5361,7 +5390,12 @@ test('a pre-existing generated fold and prefix index record their measured locki
           [tenantA, environmentA, pr6cMeasurementRows],
         );
 
-        await setActiveReleasePointer(pool, releases.a.target);
+        await activatePreparedFixture(
+          pool,
+          runtimePool,
+          contexts.a,
+          releases.a,
+        );
         const generationId = randomUUID();
         const preparationId = randomUUID();
         const prepared = await materializer.prepare({
@@ -5473,7 +5507,7 @@ test('a pre-existing generated fold and prefix index record their measured locki
           mismatches: string;
           observed: string;
         }>(
-          `SELECT count(*)::text AS observed,
+          `SELECT count(*) FILTER (WHERE ${quoteTestIdentifier(numberColumn.physicalName)} LIKE 'MEASURE-%')::text AS observed,
                   count(*) FILTER (
                     WHERE ${quoteTestIdentifier(foldedColumn.physicalName)}
                       IS DISTINCT FROM
@@ -6003,66 +6037,6 @@ function withConflictingAbiFunctionCheck(
   return clone;
 }
 
-function withoutFoldedColumn(
-  compiled: CompileSuccess,
-  canonicalFieldId: string,
-): CompileSuccess {
-  const clone = structuredClone(compiled);
-  const storage = projectionPayload<StorageTargetPayloadV1>(
-    clone,
-    PROJECTION_FAMILY_IDS.storageTarget,
-  );
-  const removedPhysicalNames = new Set<string>();
-  for (const entity of storage.entities) {
-    const removedColumns = entity.foldedColumns.filter(
-      (column) => column.canonicalFieldId === canonicalFieldId,
-    );
-    for (const column of removedColumns) {
-      removedPhysicalNames.add(column.physicalName);
-      for (const index of entity.indexes.filter((candidate) =>
-        candidate.columnNames.includes(column.physicalName),
-      )) {
-        removedPhysicalNames.add(index.physicalName);
-      }
-    }
-    entity.foldedColumns = entity.foldedColumns.filter(
-      (column) => column.canonicalFieldId !== canonicalFieldId,
-    );
-    entity.indexes = entity.indexes.filter(
-      (index) => !removedPhysicalNames.has(index.physicalName),
-    );
-  }
-  assert.ok(
-    removedPhysicalNames.size > 0,
-    `compiled storage has no folded column for ${canonicalFieldId}`,
-  );
-  storage.physicalMapping.records = storage.physicalMapping.records.filter(
-    (record) => !removedPhysicalNames.has(record.physicalName),
-  );
-  rewriteProjectionPayload(clone, PROJECTION_FAMILY_IDS.storageTarget, storage);
-
-  const storageReference = clone.bundle.releaseManifest.projections.find(
-    (reference) => reference.familyId === PROJECTION_FAMILY_IDS.storageTarget,
-  );
-  assert.ok(storageReference);
-  const transition = projectionPayload<StorageTransitionEnvelope>(
-    clone,
-    PROJECTION_FAMILY_IDS.storageTransition,
-  );
-  transition.elements = transition.elements.filter(
-    (element) => !removedPhysicalNames.has(element.physicalObjectName),
-  );
-  transition.toStorageTargetArtifactRoot = storageReference.artifactRoot;
-  transition.toStorageTargetSemanticDigest = storageReference.semanticDigest;
-  rewriteProjectionPayload(
-    clone,
-    PROJECTION_FAMILY_IDS.storageTransition,
-    transition,
-  );
-  rebuildReleaseRoot(clone);
-  return clone;
-}
-
 function rewriteProjectionPayload(
   compiled: CompileSuccess,
   familyId: string,
@@ -6352,53 +6326,6 @@ async function waitForTableLock(
   throw new Error(
     `did not observe ${applicationName} ${granted ? 'holding' : 'waiting for'} ${mode} on ${tableName}`,
   );
-}
-
-async function setActiveReleasePointer(
-  pool: pg.Pool,
-  releaseId: MintedUuid,
-): Promise<void> {
-  await pool.query(
-    'ALTER TABLE platform.active_release_pointers DISABLE TRIGGER active_release_pointer_exact_swap',
-  );
-  try {
-    await pool.query(
-      `UPDATE platform.active_release_pointers
-          SET release_id = $3
-        WHERE tenant_id = $1 AND environment_id = $2`,
-      [tenantA, environmentA, releaseId],
-    );
-  } finally {
-    await pool.query(
-      'ALTER TABLE platform.active_release_pointers ENABLE TRIGGER active_release_pointer_exact_swap',
-    );
-  }
-}
-
-/**
- * `setActiveReleasePointer` is hard-wired to tenant A. The relaxation test needs
- * tenant B moved too, to present the merge with the reverse root pairing.
- */
-async function setActiveReleasePointerFor(
-  pool: pg.Pool,
-  tenantId: string,
-  releaseId: MintedUuid,
-): Promise<void> {
-  await pool.query(
-    'ALTER TABLE platform.active_release_pointers DISABLE TRIGGER active_release_pointer_exact_swap',
-  );
-  try {
-    await pool.query(
-      `UPDATE platform.active_release_pointers
-          SET release_id = $2
-        WHERE tenant_id = $1`,
-      [tenantId, releaseId],
-    );
-  } finally {
-    await pool.query(
-      'ALTER TABLE platform.active_release_pointers ENABLE TRIGGER active_release_pointer_exact_swap',
-    );
-  }
 }
 
 /**
@@ -6975,41 +6902,54 @@ function releaseCommand(
   };
 }
 
+async function activatePreparedFixture(
+  admin: pg.Pool,
+  runtime: pg.Pool,
+  context: TrustedRequestContext,
+  release: ReleasePair,
+): Promise<void> {
+  await admitPreparedTarget(runtime, context, release);
+  await activateFixtureRelease(
+    admin,
+    runtime,
+    context.tenantId,
+    context.environmentId,
+    release.target,
+  );
+}
+
 async function installSourcePointers(
-  pool: pg.Pool,
+  admin: pg.Pool,
+  runtime: pg.Pool,
   releases: { a: ReleasePair; b: ReleasePair },
 ): Promise<void> {
-  await pool.query(
-    'ALTER TABLE platform.active_release_pointers DISABLE TRIGGER active_release_pointer_exact_swap',
+  await activateFixtureRelease(
+    admin,
+    runtime,
+    tenantA,
+    environmentA,
+    releases.a.source,
   );
-  try {
-    await pool.query(
-      `UPDATE platform.active_release_pointers SET release_id = CASE tenant_id
-         WHEN $1 THEN $2::uuid WHEN $3 THEN $4::uuid END
-       WHERE tenant_id IN ($1,$3)`,
-      [tenantA, releases.a.source, tenantB, releases.b.source],
-    );
-  } finally {
-    await pool.query(
-      'ALTER TABLE platform.active_release_pointers ENABLE TRIGGER active_release_pointer_exact_swap',
-    );
-  }
+  await activateFixtureRelease(
+    admin,
+    runtime,
+    tenantB,
+    environmentB,
+    releases.b.source,
+  );
 }
 
 async function grantExecutorAuthority(pool: pg.Pool): Promise<void> {
   await pool.query(
     `SELECT platform.set_release_executor_authority($1,$2,true,$2,$3),
             platform.set_release_executor_authority($4,$5,true,$5,$6),
-            platform.set_release_executor_authority($1,$7,true,$7,$8),
-            platform.set_release_approver_eligibility($1,$9,true,$9,$10)`,
+            platform.set_release_approver_eligibility($1,$7,true,$7,$8)`,
     [
       tenantA,
       principalA,
       randomUUID(),
       tenantB,
       principalB,
-      randomUUID(),
-      SYSTEM_EXECUTION_PRINCIPAL.principalId,
       randomUUID(),
       approverA,
       randomUUID(),

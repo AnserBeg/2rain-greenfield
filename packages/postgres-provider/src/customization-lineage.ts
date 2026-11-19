@@ -1,3 +1,4 @@
+import { verifiedGenerationsSql } from './verified-release-generation.js';
 import type { MintedUuid } from '@north-star/platform-runtime';
 import type { Pool, PoolClient } from 'pg';
 
@@ -10,6 +11,7 @@ export interface CustomizationLineageStep {
   readonly via_upgrade: MintedUuid | null;
   readonly fence_limit: string | null;
   readonly cycle: boolean;
+  readonly ambiguous: boolean;
 }
 
 export class CustomizationLineageError extends Error {
@@ -35,19 +37,19 @@ export async function readCustomizationLineage(
   },
 ): Promise<readonly CustomizationLineageStep[]> {
   const result = await client.query<CustomizationLineageStep>(
-    `WITH RECURSIVE chain(release_id, via_upgrade, fence_limit, depth) AS (
-       SELECT $3::uuid, NULL::uuid, $4::bigint, 0
+    `WITH RECURSIVE chain(release_id, via_upgrade, fence_limit, depth, ambiguous) AS (
+       SELECT $3::uuid, NULL::uuid, $4::bigint, 0, false
        UNION ALL
        SELECT COALESCE(u.base_release_id, forward.previous_release_id),
-              forward.customization_upgrade_id, forward.fence, chain.depth + 1
+              forward.customization_upgrade_id, forward.fence, chain.depth + 1, forward.customization_reconciliation_required
          FROM chain
          JOIN platform.tenant_releases AS r
            ON r.tenant_id = $1 AND r.environment_id = $2 AND r.release_id = chain.release_id
          JOIN platform.app_package_revisions AS revision
            ON revision.tenant_id = r.tenant_id AND revision.revision_id = r.app_package_revision_id
          JOIN LATERAL (
-           SELECT swap.previous_release_id, approval.customization_upgrade_id, swap.fence
-             FROM platform.release_activation_swap_receipts AS swap
+           SELECT swap.previous_release_id, approval.customization_upgrade_id, approval.customization_reconciliation_required, swap.fence
+             FROM ${verifiedGenerationsSql} AS swap
              JOIN platform.release_approvals AS approval
                ON approval.tenant_id = swap.tenant_id AND approval.environment_id = swap.environment_id
               AND approval.approval_id = swap.approval_id
@@ -63,9 +65,9 @@ export async function readCustomizationLineage(
          LEFT JOIN platform.customization_upgrades AS u
            ON u.tenant_id = r.tenant_id AND u.environment_id = r.environment_id
           AND u.upgrade_id = forward.customization_upgrade_id
-        WHERE revision.provenance = 'tenantAuthored'
+        WHERE revision.provenance = 'tenantAuthored' AND NOT chain.ambiguous
      ) CYCLE release_id SET cycle USING path
-     SELECT chain.release_id, chain.via_upgrade, chain.fence_limit, chain.cycle,
+     SELECT chain.release_id, chain.via_upgrade, chain.fence_limit, chain.cycle, chain.ambiguous,
             r.app_package_revision_id AS revision_id, r.content_hash, revision.provenance
        FROM chain JOIN platform.tenant_releases AS r
          ON r.tenant_id = $1 AND r.environment_id = $2 AND r.release_id = chain.release_id
@@ -79,6 +81,11 @@ export async function readCustomizationLineage(
       origin.beforeFence ?? null,
     ],
   );
+  if (result.rows.some((step) => step.ambiguous))
+    throw new CustomizationLineageError(
+      'The original approval action requires reconciliation before replay.',
+      result.rows[0],
+    );
   if (result.rows.some((step) => step.cycle))
     throw new CustomizationLineageError(
       'the customization lineage contains a cycle',
