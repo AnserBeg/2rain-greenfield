@@ -12,7 +12,7 @@ Status — Integrated from `9b33df3d`. The approved patch-kind migration is the 
 
 ## Decisions
 
-- Floor 25 admits create-time header links and shared or lifecycle-less editors, including their declared List relation columns. CUSTOMIZE-3 uses floor 24 for saved views. See ADR-0072.
+- Floor 26 admits create-time header links and shared or lifecycle-less editors, including their declared List relation columns. CUSTOMIZE-3 uses floor 24 for saved views and 25 for Today metrics. See ADR-0072.
 - Links are chosen at creation and restrict archiving a target with active dependents. Multiple inspections can refer to the same receipt, so Inspection needs no new uniqueness rule.
 - List search matches linked labels. Selecting a linked value narrows the list by that record's ID.
 - Sequential save (ADR-0072) leaves the header and each successful row change committed if a later step fails. Use **Retry save** to resume pending operations, or correct the flagged values and save the remaining changes. If read-back was withheld, reopen the existing record after read access is restored and verify the saved rows before continuing. Archive the lines before archiving their parent.

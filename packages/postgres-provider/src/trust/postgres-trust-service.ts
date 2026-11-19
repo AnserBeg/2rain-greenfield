@@ -167,6 +167,7 @@ export class PostgresTrustService {
     binding: IdempotentMutationBinding,
     mutate: IdempotentBusinessMutation<TMutationResult>,
     serializeBeforeIdempotency?: BusinessMutation<void>,
+    authorizeBeforeReplay?: BusinessMutation<void>,
   ): Promise<AcceptedMutationReceipt<TMutationResult>> {
     assertExecutionAuthority(context, actorEnvelope);
     validateIdempotencyBinding(binding);
@@ -176,6 +177,7 @@ export class PostgresTrustService {
       // omit this hook and retain the existing transaction order.
       await serializeBeforeIdempotency?.(client);
       await lockIdempotencyBinding(client, context, binding);
+      await authorizeBeforeReplay?.(client);
       const existing = await findIdempotencyReceipt<TMutationResult>(
         client,
         context,

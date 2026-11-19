@@ -19,7 +19,7 @@ import { literalValidationDraft } from '../../packages/customization/src/validat
 import { OperationsAgentSession } from '../../packages/operations-agent/src/session.js';
 import { COMPANY, worldOver } from '../agent/agent-world.js';
 import {
-  archivedRuntimeRead,
+  archivedServingRead,
   withArchivedCustomizationRuntime,
 } from '../helpers/archived-customization-runtime.js';
 import {
@@ -147,10 +147,14 @@ test(
                 'the tenant compiler reproduces the entire v6 envelope with validation absent',
               );
               const read = () =>
-                archivedRuntimeRead(run, {
+                run(archivedServingRead, {
                   databaseUrl: options.databaseUrl,
                   identity: app.runtime.identity,
-                });
+                }) as Promise<{
+                  outcome: string;
+                  code?: string;
+                  message?: string;
+                }>;
               assert.equal((await read()).outcome, 'loaded');
               await opened.service.activate(draft.patchId);
               const refused = await read();

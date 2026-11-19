@@ -560,8 +560,7 @@ test('tenant line tables use the document editor with or without company scope a
     ).compiled.bundle.releaseManifest.projections.find(
       (projection) => projection.familyId === family,
     )!.requiredRuntimeCapability;
-    assert.equal(requirement.minimumVersion, 25);
-    for (const maximumSupportedVersion of [23, 24]) {
+    for (const maximumSupportedVersion of [25, 24, 23, 22]) {
       assert.match(
         unsupportedRuntimeCapability(family, requirement, {
           [family]: {
@@ -569,9 +568,10 @@ test('tenant line tables use the document editor with or without company scope a
             maximumSupportedVersion,
           },
         }) ?? '',
-        /25/u,
+        /26/u,
       );
     }
+    assert.equal(requirement.minimumVersion, 26);
     assert.equal(unsupportedRuntimeCapability(family, requirement), null);
   }
   const visual = await compileInSandbox(

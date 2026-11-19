@@ -42,8 +42,8 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
-  "base": "d618fa3fa9f8ce51b3b05a70b990cdb411fe8909",
-  "head": "c5c361e6d629b334a08999113c47588d8ab3ba9c",
+  "base": "a1a7236a909e026d56fadd12337823115b0116d5",
+  "head": "b17e4ac5031c76b62cf56c65b3b9802f70beed9e",
   "changedPaths": [
     ".github/workflows/evidence.yml", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/surface-runtime.ts", "apps/web/test/browser/customize-formulas.composed-application.spec.ts",
     "apps/web/test/browser/customize.composed-application.spec.ts", "package.json", "packages/canonical-model/src/formula-validation-bindings.ts", "packages/canonical-model/src/formula-validation-path.ts", "packages/canonical-model/src/formula-validation-projection.ts",
@@ -51,8 +51,7 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
     "packages/compiler/src/projections.ts", "packages/customization/src/ai-draft.ts", "packages/customization/src/targets.ts", "packages/customization/src/validation-draft.ts", "packages/postgres-provider/src/composed-application-runtime.ts",
     "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/release-repository.ts", "packages/postgres-provider/src/release-verification-service.ts", "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/formula-validation.ts",
     "packages/runtime/src/request-runtime-view.ts", "packages/runtime/src/semantic-query-gateway.ts", "test/architecture/repository-hygiene.test.ts", "test/evidence/CUSTOMIZE-3.expected-red.json", "test/helpers/archived-customization-runtime.ts",
-    "test/helpers/language-coverage-packages.ts", "test/helpers/reachability-producers.ts", "test/postgres/customization-formulas.test.ts", "test/postgres/customization-validation.test.ts", "test/unit/customization-ai-draft.test.ts",
-    "test/unit/field-validation.test.ts"
+    "test/helpers/language-coverage-packages.ts", "test/helpers/reachability-producers.ts", "test/postgres/customization-formulas.test.ts", "test/unit/customization-ai-draft.test.ts", "test/unit/field-validation.test.ts"
   ],
   "symbols": [
     {"path":"packages/canonical-model/src/formula-validation-path.ts","name":"resolveValidationPath"},

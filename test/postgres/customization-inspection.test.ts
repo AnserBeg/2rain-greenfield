@@ -13,6 +13,10 @@ import {
   inspectionChange,
   inspectionLinkRecords,
 } from '../fixtures/inspection-customization.js';
+import {
+  archivedServingRead,
+  withArchivedCustomizationRuntime,
+} from '../helpers/archived-customization-runtime.js';
 import { recordedPatch } from '../helpers/customization-patch-record.js';
 import {
   LINEAGE_INSTALL_VOLUME,
@@ -77,7 +81,28 @@ test(
           );
           assert.equal((await opened.service.status()).patches.length, 1);
           await opened.service.approve(drafted.patchId);
-          await opened.service.activate(drafted.patchId);
+          // The last main before Inspection included the floor-25 Today reader.
+          await withArchivedCustomizationRuntime(
+            '8839f668293dc06f9d9ba4def3611697323f3760',
+            async (run) => {
+              const read = () =>
+                run(archivedServingRead, {
+                  databaseUrl: options.databaseUrl,
+                  identity: app.runtime.identity,
+                });
+              assert.deepEqual(await read(), {
+                outcome: 'loaded',
+                root: app.runtime.releaseRoot,
+              });
+              await opened.service.activate(drafted.patchId);
+              assert.deepEqual(await read(), {
+                outcome: 'refused',
+                code: 'UNSUPPORTED_RUNTIME_CAPABILITY',
+                message:
+                  'runtime capability northstar.runtime:capability.surface-manifest requires version 26 and this runtime supports 25',
+              });
+            },
+          );
           const world = worldOver(app.runtime, String(connection.database));
           const { receipt, supplier, item, location } =
             await inspectionLinkRecords(world.create, seededId);
