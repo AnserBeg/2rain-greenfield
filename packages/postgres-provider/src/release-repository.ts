@@ -19,6 +19,7 @@ import {
   INCREMENTAL_EQUIVALENCE_INVARIANT,
   OUTPUT_PROTOCOL_VERSION,
   POLICY_MODEL_VERSION,
+  PROJECTION_FAMILY_IDS,
   PROJECTION_MANIFEST_VERSION,
   RELEASE_MANIFEST_VERSION,
   type CompileSuccess,
@@ -27,6 +28,8 @@ import {
   type ProjectionReference,
   type ReleaseManifestEnvelope,
 } from '@north-star/compiler';
+import { bindLiteralValidation } from '../../canonical-model/src/formula-validation-bindings.js';
+import { parseFormulaValidationBindings } from '../../canonical-model/src/formula-validation-projection.js';
 import type {
   AppPackageRevision,
   ImmutableReleaseRepository,
@@ -546,6 +549,7 @@ function verifyCompiledRelease(
   }
   verifyReleaseManifestEnvelope(manifest, revision);
   verifyAttestation(compiled, manifest);
+  const formulaBindings = verifyFormulaProjectionReference(manifest, revision);
 
   const artifactByHash = new Map(
     artifacts.map((artifact) => [artifact.contentHash, artifact]),
@@ -646,6 +650,24 @@ function verifyCompiledRelease(
       projectionManifest,
       projectionPayloadBytes,
     );
+    if (reference.familyId === PROJECTION_FAMILY_IDS.formulaRule) {
+      try {
+        const [payload] = projectionPayloadBytes;
+        if (projectionPayloadBytes.length !== 1 || !payload) {
+          throw new Error('invalid formula projection chunk count');
+        }
+        const actual = parseFormulaValidationBindings(
+          decodeCanonicalObject(payload, 'PROJECTION_CHUNK_NOT_CANONICAL'),
+        );
+        if (canonicalize(actual) === canonicalize(formulaBindings)) continue;
+      } catch {
+        // Both malformed chunks and mismatched declarations fail admission.
+      }
+      throw integrity(
+        'FORMULA_PROJECTION_CONTRACT_MISMATCH',
+        'the formula/rule projection does not bind the declared validation rules',
+      );
+    }
   }
 
   const closureArtifacts = artifacts.filter(
@@ -675,6 +697,59 @@ function verifyCompiledRelease(
     manifest,
     projections,
   };
+}
+
+function verifyFormulaProjectionReference(
+  manifest: ReleaseManifestEnvelope,
+  revision: AppPackageRevision,
+) {
+  // The repository has already checked these immutable bytes when it stored
+  // the revision. Absent declarations do not need another normalization pass.
+  const normalized: unknown =
+    revision.languageVersion === 'v6'
+      ? JSON.parse(new TextDecoder().decode(revision.desiredState))
+      : null;
+  const definition =
+    isRecord(normalized) && Object.hasOwn(normalized, 'formulaRules')
+      ? parseNormalizedApplicationPackageJson(revision.desiredState)
+      : null;
+  const declaring =
+    definition?.languageVersion === 'v6' && definition.formulaRules
+      ? definition
+      : null;
+  const references = manifest.projections.filter(
+    ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.formulaRule,
+  );
+  const operation = manifest.projections.find(
+    ({ familyId }) => familyId === PROJECTION_FAMILY_IDS.operationCatalog,
+  );
+  const floor = operation?.requiredRuntimeCapability.minimumVersion ?? 0;
+  const reference = references[0];
+  if (
+    references.length !== Number(Boolean(declaring)) ||
+    (declaring ? floor !== 3 : floor >= 3) ||
+    (declaring &&
+      (reference?.instanceId !==
+        `${declaring.package.namespace}:projection.formula-rule` ||
+        reference.payloadSchemaVersion !==
+          'northstar.formula-rule-payload/v1' ||
+        reference.requiredRuntimeCapability.capabilityId !==
+          'northstar.runtime:capability.formula-rule' ||
+        reference.requiredRuntimeCapability.minimumVersion !== 1))
+  ) {
+    throw integrity(
+      'FORMULA_PROJECTION_CONTRACT_MISMATCH',
+      'the formula/rule declaration and mandatory operation reader floor disagree',
+    );
+  }
+  if (!declaring) return [];
+  return declaring.formulaRules!.map((rule) => {
+    const binding = bindLiteralValidation(rule, declaring);
+    if (binding.status === 'refused') {
+      throw integrity('FORMULA_PROJECTION_CONTRACT_MISMATCH', binding.message);
+    }
+    return binding.binding;
+  });
 }
 
 function verifyReleaseManifestEnvelope(

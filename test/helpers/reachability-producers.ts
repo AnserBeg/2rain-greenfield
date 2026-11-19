@@ -43,6 +43,7 @@ export const reachabilityProducers = [
     'test/unit/customization.test.ts',
     'test/unit/customize-screen.test.ts',
     'test/unit/dev-environment.test.ts',
+    'test/unit/formula-validation.test.ts',
     'test/unit/inventory-definition.test.ts',
     'test/unit/inventory-valuation.test.ts',
     'test/unit/language-conformance-ledger.test.ts',
@@ -99,20 +100,22 @@ export const reachabilityProducers = [
     'apps/web/package.json',
   ),
   nodeProducer('postgres-1', 'postgres', 'test:postgres:1', [
+    'test/postgres/catalog-extras.test.ts',
+    'test/postgres/customization-governed-reads.test.ts',
+    'test/postgres/customization-inspection.test.ts',
     'test/postgres/customization-world.test.ts',
     'test/postgres/document-numbering.test.ts',
     'test/postgres/locations.test.ts',
     'test/postgres/module-index-conformance.test.ts',
-  ]),
-  nodeProducer('postgres-2', 'postgres', 'test:postgres:2', [
-    'test/postgres/catalog-extras.test.ts',
-    'test/postgres/customization.test.ts',
-    'test/postgres/module-runtime.test.ts',
     'test/postgres/module-storage-transition.test.ts',
     'test/postgres/releases.test.ts',
   ]),
+  nodeProducer('postgres-2', 'postgres', 'test:postgres:2', [
+    'test/postgres/customization.test.ts',
+    'test/postgres/module-runtime.test.ts',
+  ]),
   nodeProducer('postgres-3', 'postgres', 'test:postgres:3', [
-    'test/postgres/{!(catalog-extras|commercial-totals|composed-application|counter-sale|customer-credit|customization|customization-world|document-numbering|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|locations|module-index-conformance|module-runtime|module-storage-transition|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|releases|replenishment|stock-serializer),*/**/*}.test.ts',
+    'test/postgres/{!(catalog-extras|commercial-totals|composed-application|counter-sale|customer-credit|customization|customization-governed-reads|customization-inspection|customization-world|document-numbering|expected-receipts|fulfillment|inventory-backdate-policy|inventory-backup-restore|inventory-dimension-set-replay|inventory-documents|inventory-onhand|inventory-posting|inventory-reconciliation|inventory-stock-count|inventory-storage|inventory-terminal-state|inventory-valuation|item-stock|locations|module-index-conformance|module-runtime|module-storage-transition|order-lists|order-lists-supply|order-pages|packing-retrieval|payables|period-lock-commands|price-lists|purchase-approvals|purchase-order-ending|receivables|receiving-authorization|releases|replenishment|stock-serializer),*/**/*}.test.ts',
   ]),
   nodeProducer(
     'postgres-composed',
@@ -170,7 +173,7 @@ export const reachabilityProducers = [
       'test/postgres/stock-serializer.test.ts',
     ],
   ),
-  // The browser suite runs as four jobs under the same bound, split by file
+  // The browser suite runs as five jobs under the same bound, split by file
   // name (apps/web/playwright.shared.ts): the Sales and platform specs, the
   // operations specs, the inventory specs, and the composed application's
   // journeys.
@@ -193,6 +196,11 @@ export const reachabilityProducers = [
     'browser-composed',
     'test:browser:composed',
     'apps/web/playwright.composed.config.ts',
+  ),
+  playwrightProducer(
+    'browser-customization',
+    'test:browser:customization',
+    'apps/web/playwright.customization.config.ts',
   ),
   {
     id: 'observability',

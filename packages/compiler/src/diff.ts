@@ -30,6 +30,7 @@ interface SurfaceManifestPayload {
 
 const impactByFamily: Record<ProjectionFamilyId, ReleaseImpactCode> = {
   [PROJECTION_FAMILY_IDS.agentDiscovery]: 'agent-discovery-changed',
+  [PROJECTION_FAMILY_IDS.formulaRule]: 'operation-contract-changed',
   [PROJECTION_FAMILY_IDS.operationCatalog]: 'operation-contract-changed',
   [PROJECTION_FAMILY_IDS.policyReferences]: 'policy-reference-changed',
   [PROJECTION_FAMILY_IDS.queryCatalog]: 'query-contract-changed',
@@ -39,6 +40,7 @@ const impactByFamily: Record<ProjectionFamilyId, ReleaseImpactCode> = {
   [PROJECTION_FAMILY_IDS.storageTransition]: 'storage-transition-required',
   [PROJECTION_FAMILY_IDS.surfaceManifest]: 'surface-only',
   [PROJECTION_FAMILY_IDS.verificationPlan]: 'verification-plan-changed',
+  [PROJECTION_FAMILY_IDS.workflow]: 'operation-contract-changed',
 };
 
 export function diffCompiledReleases(

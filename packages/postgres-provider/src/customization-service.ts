@@ -1,5 +1,6 @@
 import { verifiedGenerationsSql } from './verified-release-generation.js';
 import { createHash, randomUUID } from 'node:crypto';
+import { retypedFormulaRule } from '../../canonical-model/src/formula-validation-bindings.js';
 
 import {
   canonicalAuthoredProjection,
@@ -91,6 +92,7 @@ export const AUTHORING_CHANNELS = [
 export type AuthoringChannel = (typeof AUTHORING_CHANNELS)[number];
 
 const UPGRADE_PATCH_KINDS: ReadonlySet<string> = new Set([
+  'addValidation',
   'addField',
   'arrangeLayout',
   'saveListView',
@@ -450,6 +452,19 @@ export class PostgresCustomizationService {
       );
     }
     const source = (await this.#reproduce(context, active)).candidate;
+    const sourceDefinition = parseNormalizedApplicationPackageJson(
+      source.normalizedDefinitionBytes,
+    );
+    const retiredRule = retypedFormulaRule(
+      sourceDefinition,
+      targetBase,
+      sourceBase,
+    );
+    if (retiredRule)
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_BASE_MOVED',
+        `The upgrade retires or retypes a target of validation rule ${retiredRule}.`,
+      );
     const replay = await this.#compile(
       await this.#readPatches(context, active.chain),
       this.#tip,
@@ -460,6 +475,17 @@ export class PostgresCustomizationService {
     if (replay.status !== 'compiled') return replay;
     const step = replay.steps[0]!;
     const candidate = parseSerializedRelease(step.release);
+    const retypedRule = retypedFormulaRule(
+      sourceDefinition,
+      parseNormalizedApplicationPackageJson(
+        candidate.normalizedDefinitionBytes,
+      ),
+    );
+    if (retypedRule)
+      throw new CustomizationServiceRefusal(
+        'CUSTOMIZE_BASE_MOVED',
+        `The upgrade retires or retypes a target of validation rule ${retypedRule}.`,
+      );
     await this.#assertActiveRestrictionRoles(
       admin,
       context,
@@ -2359,6 +2385,8 @@ function patchDisplayLabel(patch: CustomizationPatch): string | null {
       return patch.field.label;
     case 'addChoice':
       return patch.option;
+    case 'addValidation':
+      return patch.rule.message;
     case 'addRecordType':
     case 'addLink':
     case 'addLineTable':

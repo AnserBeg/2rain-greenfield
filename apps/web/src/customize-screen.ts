@@ -5,6 +5,11 @@ import { recordTypeEntityId } from '@north-star/customization';
  * apps/web never imports the provider (surface-data-binding gate); the
  * composition hands in the service, whose results are structurally these.
  */
+import {
+  literalValidationDraft,
+  type LiteralValidationTarget,
+} from '../../../packages/customization/src/validation-draft.js';
+
 interface PatchSummary {
   readonly kind: string;
   readonly displayLabel: string | null;
@@ -37,6 +42,7 @@ interface CustomizationStatus {
   readonly patches: readonly ScreenPatch[];
 }
 interface CustomizationTargets {
+  readonly validationTargets?: readonly LiteralValidationTarget[];
   readonly linkTargets?: readonly {
     readonly entityId: string;
     readonly label: string;
@@ -220,13 +226,26 @@ export async function renderCustomizeScreen(
       const metric = url.searchParams.get('metric');
       if (metric)
         return page('Add a metric card', await metricForm(loadTargets, metric));
+      const validation = url.searchParams.get('validation');
+      if (validation)
+        return page(
+          'Add validation',
+          validationForm(await loadTargets(), validation),
+        );
       return page('Customize', await overview(service, loadTargets));
     }
     switch (submission.action) {
       case 'draft':
         return drafted(
           await service.draft(
-            patchFromForm(submission),
+            patchFromForm(
+              submission,
+              submission.kind === 'addValidation'
+                ? (await loadTargets()).validationTargets?.find(
+                    ({ entityId }) => entityId === submission.entity,
+                  )
+                : undefined,
+            ),
             'visualBuilder',
             undefined,
             actor,
@@ -374,6 +393,7 @@ async function overview(
     savedViewPicker(targets),
     metricPicker(targets),
     permissionForm(targets),
+    validationSelector(targets),
     ...(targets.forms ?? []).map(
       (form) =>
         `<form method="post"><fieldset><legend>Show fields up front on ${escapeHtml(form.label)}</legend><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="arrangeLayout"><input type="hidden" name="surface" value="${escapeHtml(form.surfaceId)}"><input type="hidden" name="formLayout" value="1">${form.fields.map((f) => `<label><input type="checkbox" name="front:${escapeHtml(f.fieldId)}"${f.upFront ? ' checked' : ''}> ${escapeHtml(f.label)}</label>`).join(' ')}<button>Draft form arrangement</button></fieldset></form>`,
@@ -485,6 +505,34 @@ async function arrangeForm(
     })
     .join('');
   return `<p class="eyebrow">Customize</p><h1>Arrange ${escapeHtml(list.label)}</h1><form method="post" data-customize-form="arrangeColumns"><table><thead><tr><th>Position</th><th>Heading</th><th>Hide</th></tr></thead><tbody>${rows}</tbody></table><input type="hidden" name="surface" value="${escapeHtml(list.surfaceId)}"><input type="hidden" name="columns" value="${String(list.columns.length)}"><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="arrangeLayout"><p><button type="submit">Draft this arrangement</button></p></form>${backLink()}`;
+}
+
+function validationSelector(targets: CustomizationTargets): string {
+  if (!targets.validationTargets?.length) return '';
+  const options = targets.validationTargets
+    .map(
+      ({ entityId, label }) =>
+        `<option value="${escapeHtml(entityId)}">${escapeHtml(label)}</option>`,
+    )
+    .join('');
+  return `<form method="get" data-customize-form="addValidation"><fieldset><legend>Add validation</legend><input type="hidden" name="customize" value=""><label>Record type <select name="validation" required>${options}</select></label><p><button>Set up validation</button></p></fieldset></form>`;
+}
+
+function validationForm(
+  targets: CustomizationTargets,
+  entityId: string,
+): string {
+  const target = targets.validationTargets?.find(
+    (option) => option.entityId === entityId,
+  );
+  if (!target) return `<h1>Choose a record type</h1>${backLink()}`;
+  const fields = target.fields
+    .map(
+      ({ fieldId, label }) =>
+        `<option value="${escapeHtml(fieldId)}">${escapeHtml(label)}</option>`,
+    )
+    .join('');
+  return `<h1>Add validation for ${escapeHtml(target.label)}</h1><form method="post"><input type="hidden" name="action" value="draft"><input type="hidden" name="kind" value="addValidation"><input type="hidden" name="entity" value="${escapeHtml(entityId)}"><label>Field <select name="fieldId" required>${fields}</select></label><label>Rule <select name="check"><option value="required">Require a value</option><option value="minimum">Minimum number</option><option value="maximum">Maximum number</option><option value="maximumLength">Maximum text length</option><option value="notBeforeToday">Today or later</option></select></label><label>Limit for numbers or text length <input name="limit" maxlength="40"></label><label>Message shown when saving <input name="message" maxlength="240" required></label><p><button>Draft validation rule</button></p></form>${backLink()}`;
 }
 
 function permissionForm(targets: CustomizationTargets): string {
@@ -616,7 +664,10 @@ async function savedViewForm(
 }
 
 /** The typed patch a form describes; the service validates it. */
-export function patchFromForm(form: CustomizeScreenSubmission): unknown {
+export function patchFromForm(
+  form: CustomizeScreenSubmission,
+  validationTarget?: LiteralValidationTarget,
+): unknown {
   const field = (n: number, prefix = 'field') => {
     const key = `${prefix}_${n}`;
     const label = String(form[`${key}_label`] ?? '').trim();
@@ -634,6 +685,14 @@ export function patchFromForm(form: CustomizeScreenSubmission): unknown {
     };
   };
   switch (form.kind) {
+    case 'addValidation':
+      if (!validationTarget) throw new Error('Choose an eligible record type.');
+      return literalValidationDraft(validationTarget, {
+        fieldId: String(form.fieldId ?? ''),
+        check: String(form.check ?? ''),
+        limit: String(form.limit ?? ''),
+        message: String(form.message ?? ''),
+      });
     case 'narrowPermission':
     case 'unNarrowPermission':
       return {
@@ -852,6 +911,8 @@ function describe(patch: PatchSummary): string {
       return `Saved list view "${label}"`;
     case 'addMetricCard':
       return `Metric card "${label}"`;
+    case 'addValidation':
+      return `Validation rule "${label}"`;
     case 'narrowPermission':
       return `Action restriction for "${label}"`;
     case 'unNarrowPermission':

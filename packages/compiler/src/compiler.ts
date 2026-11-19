@@ -25,6 +25,10 @@ import {
 } from './conformance.js';
 import { compilerDiagnostic, finalizeDiagnostics } from './diagnostics.js';
 import {
+  compileLiteralFormulaRules,
+  FORMULA_RULE_PAYLOAD_VERSION,
+} from './formula-validation-plan.js';
+import {
   canonicalBytes,
   equalBytes,
   hashBytes,
@@ -396,6 +400,20 @@ function compileApplicationInternal(
     }
   }
 
+  const formula = compileLiteralFormulaRules(packageRevision);
+  if (formula.status === 'refused') {
+    const diagnostic = compilerDiagnostic(
+      'COMPILER_TYPE_INVALID',
+      'typeCheck',
+      '$.formulaRules',
+      formula.subjectId,
+    );
+    return failure(
+      [{ ...diagnostic, rule: formula.message }],
+      maximumDiagnostics,
+    );
+  }
+
   const semanticProfileDigest = hashCanonical(
     HASH_DOMAINS.profile,
     input.profile,
@@ -435,6 +453,7 @@ function compileApplicationInternal(
       isStorageTargetV1(previousStorageTarget) ? previousStorageTarget : null,
       packageRevision,
       input.profile.compilerSemanticProfileVersion,
+      formula.status === 'compiled' ? formula.payload : null,
     ),
     packageRevision,
   );
@@ -2149,6 +2168,37 @@ function verifyCompleteness(
     }
   }
 
+  const ruleProjection = emitted.filter(
+    ({ reference }) => reference.familyId === PROJECTION_FAMILY_IDS.formulaRule,
+  );
+  const ruleDeclared =
+    packageRevision.languageVersion === 'v6' &&
+    Boolean(packageRevision.formulaRules);
+  const ruleReference = ruleProjection[0]?.reference;
+  const operationReference = emitted.find(
+    ({ reference }) =>
+      reference.familyId === PROJECTION_FAMILY_IDS.operationCatalog,
+  )?.reference;
+  if (
+    ruleProjection.length !== Number(ruleDeclared) ||
+    (ruleDeclared &&
+      (ruleReference?.instanceId !==
+        `${packageRevision.package.namespace}:projection.formula-rule` ||
+        ruleReference.payloadSchemaVersion !== FORMULA_RULE_PAYLOAD_VERSION ||
+        ruleReference.requiredRuntimeCapability.capabilityId !==
+          'northstar.runtime:capability.formula-rule' ||
+        ruleReference.requiredRuntimeCapability.minimumVersion !== 1 ||
+        operationReference?.requiredRuntimeCapability.minimumVersion !== 3))
+  ) {
+    diagnostics.push(
+      compilerDiagnostic(
+        'COMPILER_PROJECTION_INVARIANT_FAILED',
+        'verifyCompleteness',
+        '$.projections.formulaRule',
+        packageRevision.package.packageId,
+      ),
+    );
+  }
   const byFamily = new Map(
     emitted.map((entry) => [entry.reference.familyId, entry.payload] as const),
   );
