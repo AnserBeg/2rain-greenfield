@@ -148,6 +148,42 @@ export function validateSurfaceWorkspaces(
     const relation = model.relations.find(
       (value) => value.relationId === editor.parentRelationId,
     );
+    if (editor.saveThen) {
+      const operation = model.operations.find(
+        (candidate) => candidate.operationId === editor.saveThen!.operationId,
+      );
+      const readBack = operation && queries.get(operation.readBack.targetId);
+      const argumentBindings = editor.saveThen.arguments ?? [];
+      const recordFields = new Set(
+        recordQuery && recordQuery.queryType !== 'aggregate'
+          ? recordQuery.selections.map((selection) =>
+              String(selection.field.targetId),
+            )
+          : [],
+      );
+      if (
+        !operation ||
+        operation.lifecycle !== 'active' ||
+        !['transitionStateEffect', 'registeredCapabilityEffect'].includes(
+          operation.effect.kind,
+        ) ||
+        readBack?.sourceEntity.targetId !==
+          headerQuery!.sourceEntity.targetId ||
+        (argumentBindings.length > 0 &&
+          operation.effect.kind !== 'registeredCapabilityEffect') ||
+        new Set(argumentBindings.map((binding) => binding.name)).size !==
+          argumentBindings.length ||
+        argumentBindings.some(
+          (binding) =>
+            ['constructor', 'prototype', '__proto__'].includes(binding.name) ||
+            !recordFields.has(binding.fieldId),
+        )
+      )
+        fail(
+          surface.surfaceId,
+          'saveThen requires one active document operation and declared scalar record arguments',
+        );
+    }
     if (
       relation?.ownership !== 'parentScopedChild' ||
       relation.sourceEntity.targetId !== lineQuery!.sourceEntity.targetId ||

@@ -1539,6 +1539,25 @@ export const SurfaceDocumentEditorSchema = z.strictObject({
   lineFields: z.array(editorField).min(1).max(15),
   lineNumberFieldId: CanonicalIdSchema,
   saveMode: z.literal('sequential'),
+  /** One governed operation after every draft save step verifies. Optional v6 key. */
+  saveThen: z
+    .strictObject({
+      operationId: CanonicalIdSchema,
+      label: LabelSchema,
+      arguments: z
+        .array(
+          z.strictObject({
+            name: z
+              .string()
+              .regex(/^[a-z][A-Za-z0-9]*$/u)
+              .max(80),
+            fieldId: CanonicalIdSchema,
+          }),
+        )
+        .max(8)
+        .optional(),
+    })
+    .optional(),
   /**
    * Values a never-saved document's first create also writes, in header
    * fields the editor does not offer: a literal (a draft state, a source
