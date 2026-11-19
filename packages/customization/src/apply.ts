@@ -160,7 +160,10 @@ function applyOne(
           'CUSTOMIZE_TARGET_NOT_FOUND',
           'Choose an active action to restrict.',
         );
-      const restrictions = list(authored, 'operationRoleNarrowings');
+      const restrictions =
+        authored.operationRoleNarrowings === undefined
+          ? []
+          : list(authored, 'operationRoleNarrowings');
       const matches = (existing: Json) =>
         existing.operationId === patch.target.id &&
         existing.roleKey === patch.roleKey;
