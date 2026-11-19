@@ -6,16 +6,19 @@ import test from 'node:test';
 
 import type pg from 'pg';
 
+import { readActiveRelease } from '../../packages/postgres-provider/src/active-release-root.js';
 import { OperationsAgentSession } from '../../packages/operations-agent/src/session.js';
 import { COMPANY, worldOver, seededId } from '../agent/agent-world.js';
 import {
   COMPOSED_APPLICATION_INVENTORY_SCOPE,
+  openComposedApplicationRuntime,
   openCustomizeService,
   startComposedApplication,
 } from '../../apps/api/src/composition-root.js';
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import {
   createComposedApplicationRuntime,
+  ensureScope,
   parseCompiledApplication,
   rolePool,
   trustedContext,
@@ -27,6 +30,17 @@ import { INVENTORY_PROVIDER_ERROR_MAPPINGS } from '../../packages/postgres-provi
 import { PURCHASE_ORDER_APPROVAL_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/purchase-order-approval-executor.js';
 import { RECEIVING_CAPABILITY_EXECUTOR_FACTORY } from '../../packages/postgres-provider/src/receiving-capability-executor.js';
 import { withTrustedRequestTransaction } from '../../packages/postgres-provider/src/request-context.js';
+import { serializeRelease } from '../../packages/customization/src/index.js';
+import {
+  canonicalize,
+  normalizeApplicationPackage,
+} from '../../packages/canonical-model/src/index.js';
+import {
+  compileApplicationRelease,
+  expectedActiveReleaseFrom,
+  DEFAULT_COMPILER_LIMITS,
+  MODULE_COMPILER_PROFILE,
+} from '../../packages/compiler/src/index.js';
 import { renderedDiffDigest } from '../../packages/customization/src/index.js';
 import { SHARED_LIST_QUERY_VERSION } from '../../packages/runtime/src/list-behavior/index.js';
 import { SEMANTIC_OPERATION_REQUEST_VERSION } from '../../packages/runtime/src/semantic-operation-gateway.js';
@@ -816,3 +830,389 @@ test(
     );
   },
 );
+
+test(
+  'a platform label upgrade preserves the field and layout, waits for approval, activates and rolls back',
+  { timeout: 900_000 },
+  async () => {
+    await withEphemeralPostgres(
+      'customize-upgrade',
+      async ({ connection, pool }) => {
+        const databaseUrl = `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`;
+        const tenantSlug = 'upgrade-proof';
+        const options = { databaseUrl, tenantSlug };
+        let runtime = await openComposedApplicationRuntime(options);
+        const old = await openCustomizeService(options);
+        const fieldId = 'northstar.app:field.custom_item_shelf_code';
+        let sourceRoot: string;
+        let sourceFence: string;
+        try {
+          for (const patch of [
+            {
+              kind: 'addField',
+              entity: 'northstar.app:entity.item',
+              field: { label: 'Shelf code', type: 'text' },
+            },
+            {
+              kind: 'arrangeLayout',
+              surface: 'northstar.app:surface.item_list',
+              relabel: [
+                {
+                  field: 'northstar.app:field.item_name',
+                  label: 'Warehouse name',
+                },
+              ],
+            },
+          ]) {
+            const drafted = await old.service.draft(patch, 'declarativeEditor');
+            assert.equal(drafted.status, 'drafted');
+            if (drafted.status !== 'drafted') return;
+            await old.service.approve(drafted.patchId);
+            await old.service.activate(drafted.patchId);
+          }
+          sourceRoot = (await old.service.status()).activeReleaseRoot;
+          sourceFence = await pointerFence(pool, runtime.identity.tenantId);
+        } finally {
+          await old.close();
+          await runtime.close();
+        }
+        // The first-party field now collides with the tenant's field label.
+        const conflict = platformLabelVariant('Shelf code');
+        runtime = await openComposedApplicationRuntime({
+          ...options,
+          compiledApplication: conflict.envelope,
+        });
+        try {
+          assert.equal(runtime.releaseRoot, sourceRoot);
+          const diagnostic = runtime.customizationUpgrade;
+          assert.equal(diagnostic?.status, 'rejected');
+          assert.ok(diagnostic && diagnostic.status === 'rejected');
+          assert.equal(diagnostic.code, 'CUSTOMIZE_UPGRADE_CONFLICT');
+          assert.match(
+            JSON.stringify(diagnostic.issues),
+            /firstPartySubject.*northstar.app:field.item_sku/u,
+          );
+          assert.match(
+            JSON.stringify(diagnostic.issues),
+            /firstPartyBase.*tenantPatch.*Shelf code/u,
+          );
+          assert.equal(
+            await pointerFence(pool, runtime.identity.tenantId),
+            sourceFence,
+          );
+          const again = await openComposedApplicationRuntime({
+            ...options,
+            compiledApplication: conflict.envelope,
+          });
+          try {
+            assert.deepEqual(again.customizationUpgrade, diagnostic);
+          } finally {
+            await again.close();
+          }
+        } finally {
+          await runtime.close();
+        }
+
+        const upgraded = platformLabelVariant('Stock number');
+        runtime = await openComposedApplicationRuntime({
+          ...options,
+          compiledApplication: upgraded.envelope,
+        });
+        const service = await openCustomizeService({
+          ...options,
+          compiledApplication: upgraded.envelope,
+        });
+        try {
+          const prepared = runtime.customizationUpgrade;
+          assert.ok(prepared && prepared.status === 'drafted');
+          assert.equal(
+            await pointerFence(pool, runtime.identity.tenantId),
+            sourceFence,
+            'boot must not activate a replay',
+          );
+          const state = await service.service.status();
+          assert.equal(state.upgrades.length, 1);
+          const upgrade = state.upgrades[0]!;
+          assert.equal(upgrade.upgradeId, prepared.upgradeId);
+          assert.equal(upgrade.state, 'drafted');
+          await assert.rejects(
+            service.service.activate(upgrade.upgradeId),
+            /approve it first/u,
+          );
+          const candidate = await pool.query<{ desired_state: Buffer }>(
+            `SELECT desired_state FROM platform.app_package_revisions WHERE revision_id = $1`,
+            [upgrade.candidateRevisionId],
+          );
+          const definition = JSON.parse(
+            candidate.rows[0]!.desired_state.toString('utf8'),
+          ) as {
+            fields: { fieldId: string; label: string }[];
+            surfaces: {
+              surfaceId: string;
+              list?: { columns: { label: string }[] };
+            }[];
+          };
+          assert.equal(
+            definition.fields.find((field) => field.fieldId === fieldId)?.label,
+            'Shelf code',
+          );
+          assert.equal(
+            definition.fields.find(
+              (field) => field.fieldId === 'northstar.app:field.item_sku',
+            )?.label,
+            'Stock number',
+          );
+          assert.ok(
+            definition.surfaces
+              .find(
+                (surface) =>
+                  surface.surfaceId === 'northstar.app:surface.item_list',
+              )
+              ?.list?.columns.some(
+                (column) => column.label === 'Warehouse name',
+              ),
+          );
+          await assertUpgradePersistence(
+            pool,
+            databaseUrl,
+            tenantSlug,
+            upgrade.upgradeId,
+          );
+          const approval = await service.service.approve(upgrade.upgradeId);
+          assert.match(approval.renderedDiff, /Stock number/u);
+          assert.equal(
+            await pointerFence(pool, runtime.identity.tenantId),
+            sourceFence,
+          );
+          await service.service.activate(upgrade.upgradeId);
+          assert.equal(
+            (await service.service.status()).activeReleaseRoot,
+            prepared.releaseRoot,
+          );
+          assert.equal(
+            (await readActiveRelease(options))?.baseReleaseRoot,
+            parseCompiledApplication(upgraded.envelope).application.compiled
+              .releaseRoot,
+            'the agent guard follows the new first-party base after activation',
+          );
+          const restarted = await openComposedApplicationRuntime({
+            ...options,
+            compiledApplication: upgraded.envelope,
+          });
+          try {
+            assert.equal(restarted.releaseRoot, prepared.releaseRoot);
+            assert.equal(restarted.customizationUpgrade?.status, 'current');
+          } finally {
+            await restarted.close();
+          }
+          // A later pre-tenant baseline omits the old first-party releases from
+          // the file. Their immutable database artifacts still reproduce intent.
+          const nextBase = platformLabelVariant('Platform stock number', true);
+          const nextRuntime = await openComposedApplicationRuntime({
+            ...options,
+            compiledApplication: nextBase.envelope,
+          });
+          const nextService = await openCustomizeService({
+            ...options,
+            compiledApplication: nextBase.envelope,
+          });
+          try {
+            assert.equal(nextRuntime.customizationUpgrade?.status, 'drafted');
+            assert.equal(
+              (await nextService.service.status()).activeReleaseRoot,
+              prepared.releaseRoot,
+            );
+            await nextService.service.rollback();
+          } finally {
+            await nextService.close();
+            await nextRuntime.close();
+          }
+          assert.equal(
+            (await service.service.status()).activeReleaseRoot,
+            sourceRoot,
+            'rollback must restore the exact prior tenant release',
+          );
+          assert.notEqual(
+            await pointerFence(pool, runtime.identity.tenantId),
+            sourceFence,
+            'rollback advances the fence',
+          );
+        } finally {
+          await service.close();
+          await runtime.close();
+        }
+      },
+      LINEAGE_INSTALL_VOLUME,
+    );
+  },
+);
+
+function platformLabelVariant(label: string, baseline = false) {
+  const authored = structuredClone(firstPartyAuthored) as Record<
+    string,
+    unknown
+  >;
+  const fields = authored.fields as { fieldId: string; label: string }[];
+  fields.find(
+    (field) => field.fieldId === 'northstar.app:field.item_sku',
+  )!.label = label;
+  const original = parseCompiledApplication(compiledApplication);
+  const parent = baseline ? original.bootstrap : original.application;
+  const normalized = normalizeApplicationPackage(authored);
+  const normalizedDefinitionBytes = new TextEncoder().encode(
+    canonicalize(normalized),
+  );
+  const compiled = compileApplicationRelease(
+    {
+      dependencies: [],
+      expectedActiveRelease: expectedActiveReleaseFrom(parent.compiled),
+      kind: 'compilerInput',
+      limits: { ...DEFAULT_COMPILER_LIMITS },
+      normalizedDefinitionBytes,
+      profile: {
+        ...MODULE_COMPILER_PROFILE,
+        languageVersion: normalized.languageVersion,
+        normalizationProfileVersion: normalized.normalizationProfileVersion,
+      },
+    },
+    readUnboundPermissionAcknowledgementFor(
+      authoredPath,
+      'northstar.app:package.application',
+    ),
+  );
+  assert.equal(
+    compiled.status,
+    'compiled',
+    JSON.stringify(compiled.diagnostics),
+  );
+  if (compiled.status !== 'compiled') throw new Error('base did not compile');
+  const parsed = parseCompiledApplication(compiledApplication);
+  return {
+    authored,
+    envelope: {
+      schemaVersion: 'northstar.web:compiled-application-release/v2',
+      bootstrap: serializeRelease(parsed.bootstrap),
+      applications: [
+        ...(baseline ? [] : parsed.applications.map(serializeRelease)),
+        serializeRelease({ compiled, normalizedDefinitionBytes }),
+      ],
+    },
+  };
+}
+
+async function assertUpgradePersistence(
+  pool: pg.Pool,
+  databaseUrl: string,
+  tenantSlug: string,
+  upgradeId: string,
+) {
+  const identities = await ensureScope(pool, tenantSlug, 'production');
+  const foreign = await ensureScope(pool, 'upgrade-foreign', 'production');
+  const otherEnvironment = await ensureScope(pool, tenantSlug, 'staging');
+  const runtimePool = rolePool(databaseUrl, 'north_star_runtime', 2);
+  try {
+    for (const identity of [foreign.runtime, otherEnvironment.runtime]) {
+      await withTrustedRequestTransaction(
+        runtimePool,
+        await trustedContext(identity),
+        async (client) => {
+          const rows = await client.query(
+            'SELECT * FROM platform.customization_upgrades',
+          );
+          assert.equal(
+            rows.rowCount,
+            0,
+            'upgrade rows must be tenant and environment scoped',
+          );
+        },
+      );
+    }
+    await withTrustedRequestTransaction(
+      runtimePool,
+      await trustedContext(identities.runtime),
+      async (client) => {
+        assert.equal(
+          (
+            await client.query(
+              'SELECT * FROM platform.customization_upgrades WHERE upgrade_id = $1',
+              [upgradeId],
+            )
+          ).rowCount,
+          1,
+        );
+      },
+    );
+    const original = await pool.query<{
+      tenant_id: string;
+      environment_id: string;
+      source_release_id: string;
+      base_release_id: string;
+      candidate_release_id: string;
+      candidate_revision_id: string;
+      payload: Buffer;
+      payload_digest: string;
+      authored_by: string;
+    }>('SELECT * FROM platform.customization_upgrades WHERE upgrade_id = $1', [
+      upgradeId,
+    ]);
+    const row = original.rows[0]!;
+    for (const identity of [foreign.runtime, otherEnvironment.runtime]) {
+      await assert.rejects(
+        withTrustedRequestTransaction(
+          runtimePool,
+          await trustedContext(identity),
+          async (client) => {
+            await client.query(
+              `INSERT INTO platform.customization_upgrades (
+             tenant_id, environment_id, upgrade_id, source_release_id, base_release_id,
+             candidate_release_id, candidate_revision_id, payload, payload_digest, authored_by
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+              [
+                row.tenant_id,
+                row.environment_id,
+                randomUUID(),
+                row.source_release_id,
+                row.base_release_id,
+                row.candidate_release_id,
+                row.candidate_revision_id,
+                row.payload,
+                row.payload_digest,
+                identity.principalId,
+              ],
+            );
+          },
+        ),
+        /row-level security/u,
+      );
+    }
+    for (const query of [
+      'UPDATE platform.customization_upgrades SET payload_digest = payload_digest',
+      'DELETE FROM platform.customization_upgrades',
+    ])
+      await assert.rejects(
+        pool.query(query),
+        /immutable_release_write_guard_reject/u,
+      );
+    await assert.rejects(
+      pool.query(
+        `INSERT INTO platform.customization_upgrades
+       SELECT tenant_id, environment_id, gen_random_uuid(), source_release_id, base_release_id,
+              candidate_release_id, candidate_revision_id, payload, repeat('0',64), authored_by, created_at
+         FROM platform.customization_upgrades WHERE upgrade_id = $1`,
+        [upgradeId],
+      ),
+      /customization_upgrades_binding/u,
+    );
+    const grants = await pool.query<{ privilege_type: string }>(
+      `SELECT privilege_type FROM information_schema.role_table_grants
+        WHERE table_schema = 'platform' AND table_name = 'customization_upgrades' AND grantee = 'north_star_runtime'
+        ORDER BY privilege_type`,
+    );
+    assert.deepEqual(
+      grants.rows.map((row) => row.privilege_type),
+      ['INSERT', 'SELECT'],
+    );
+  } finally {
+    await runtimePool.end();
+  }
+}

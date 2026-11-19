@@ -8,9 +8,16 @@ import type pg from 'pg';
 import { renderCompositionFields } from '../../apps/web/src/surface-composition.js';
 import type { CompiledSurfaceDefinition } from '../../apps/web/src/surface-contract.js';
 import {
+  canonicalize,
   normalizeApplicationPackage,
   type SurfaceList,
 } from '../../packages/canonical-model/src/index.js';
+import {
+  compileApplicationRelease,
+  expectedActiveReleaseFrom,
+  DEFAULT_COMPILER_LIMITS,
+  MODULE_COMPILER_PROFILE,
+} from '../../packages/compiler/src/index.js';
 
 import { readUnboundPermissionAcknowledgementFor } from '../../apps/web/scripts/unbound-permission-acknowledgement.js';
 import {
@@ -677,5 +684,111 @@ test('an owner can publish screens for a previously live query-only field while 
   assert.equal(
     applyCustomizationPatches(authored, [old, change, change]).status,
     'refused',
+  );
+});
+
+test('upgrade diagnostics name the missing tenant target and the new first-party base deterministically', async () => {
+  const base = structuredClone(authored);
+  const surface = 'northstar.app:surface.item_list';
+  base.surfaces = (base.surfaces as { surfaceId: string }[]).filter(
+    (entry) => entry.surfaceId !== surface,
+  );
+  const request = {
+    acknowledgement,
+    base,
+    chain: [
+      patch({
+        kind: 'arrangeLayout',
+        surface,
+        relabel: [
+          { field: 'northstar.app:field.item_name', label: 'Warehouse name' },
+        ],
+      }),
+    ],
+    tip: serializeRelease(tip),
+    upgradeBaseRoot: tip.compiled.releaseRoot,
+  };
+  const first = await compileInSandbox(request);
+  const second = await compileInSandbox(request);
+  assert.deepEqual(first, second);
+  assert.equal(first.status, 'rejected');
+  assert.ok(first.status === 'rejected');
+  assert.equal(first.code, 'CUSTOMIZE_UPGRADE_CONFLICT');
+  assert.match(
+    JSON.stringify(first.diagnostics),
+    /firstPartyBase.*tenantPatch.*item_list.*There is no screen/u,
+  );
+});
+
+test('an upgrade compiles field and layout intent as one transition from the prior live tenant release', async () => {
+  const chain = [
+    patch({
+      kind: 'addField',
+      entity: 'northstar.app:entity.item',
+      screens: 'record',
+      field: { label: 'Shelf code', type: 'text' },
+    }),
+    patch({
+      kind: 'arrangeLayout',
+      surface: 'northstar.app:surface.item_list',
+      relabel: [
+        { field: 'northstar.app:field.item_name', label: 'Warehouse name' },
+      ],
+    }),
+  ];
+  const original = await compileInSandbox(sandboxRequest(chain));
+  assert.ok(original.status === 'compiled');
+  const source = original.steps.at(-1)!.release;
+  const base = structuredClone(authored);
+  (base.fields as { fieldId: string; label: string }[]).find(
+    (field) => field.fieldId === 'northstar.app:field.item_sku',
+  )!.label = 'Stock number';
+  const normalized = normalizeApplicationPackage(base);
+  const normalizedDefinitionBytes = new TextEncoder().encode(
+    canonicalize(normalized),
+  );
+  const compiled = compileApplicationRelease(
+    {
+      kind: 'compilerInput',
+      dependencies: [],
+      expectedActiveRelease: expectedActiveReleaseFrom(tip.compiled),
+      limits: { ...DEFAULT_COMPILER_LIMITS },
+      normalizedDefinitionBytes,
+      profile: {
+        ...MODULE_COMPILER_PROFILE,
+        languageVersion: normalized.languageVersion,
+        normalizationProfileVersion: normalized.normalizationProfileVersion,
+      },
+    },
+    acknowledgement,
+  );
+  assert.ok(compiled.status === 'compiled');
+  const replay = await compileInSandbox({
+    acknowledgement,
+    base,
+    chain,
+    tip: source,
+    upgradeBaseRoot: compiled.releaseRoot,
+  });
+  assert.ok(replay.status === 'compiled', JSON.stringify(replay));
+  assert.equal(replay.steps.length, 1);
+  assert.equal(replay.steps[0]!.diff.fromManifestRoot, source.releaseRoot);
+  const next = JSON.parse(
+    Buffer.from(
+      replay.steps[0]!.release.normalizedDefinitionBytesBase64,
+      'base64',
+    ).toString('utf8'),
+  ) as {
+    fields: { label: string }[];
+    surfaces: { surfaceId: string; list?: { columns: { label: string }[] } }[];
+  };
+  assert.ok(next.fields.some((field) => field.label === 'Stock number'));
+  assert.ok(next.fields.some((field) => field.label === 'Shelf code'));
+  assert.ok(
+    next.surfaces
+      .find(
+        (surface) => surface.surfaceId === 'northstar.app:surface.item_list',
+      )
+      ?.list?.columns.some((column) => column.label === 'Warehouse name'),
   );
 });

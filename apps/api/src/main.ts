@@ -77,6 +77,10 @@ try {
 announce(application!);
 
 function announce(running: RunningComposedApplication): void {
+  const upgrade = running.runtime.customizationUpgrade;
+  if (upgrade && upgrade.status !== 'current') {
+    process.stdout.write(`CUSTOMIZATION_UPGRADE ${JSON.stringify(upgrade)}\n`);
+  }
   process.stdout.write(
     `COMPOSED_APPLICATION_READY ${JSON.stringify({
       baseUrl: running.baseUrl,
