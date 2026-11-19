@@ -185,6 +185,7 @@ const suiteDefinitions = [
       'test/postgres/catalog-extras.test.ts',
       'test/postgres/catalog-runtime.test.ts',
       'test/postgres/current-policy.test.ts',
+      'test/postgres/customization-display.test.ts',
       'test/postgres/customization-formulas.test.ts',
       'test/postgres/customization-validation.test.ts',
       'test/postgres/customization-world.test.ts',
