@@ -763,6 +763,7 @@ test('CI runs every scaffold gate from a frozen install', () => {
     'corepack pnpm test:browser:operations',
     'corepack pnpm test:browser:inventory',
     'corepack pnpm test:browser:composed',
+    'corepack pnpm test:browser:customization',
     'corepack pnpm check:reachability',
   ];
 
@@ -781,6 +782,7 @@ test('CI runs every scaffold gate from a frozen install', () => {
   assert.match(workflow, /^ {2}browser-operations:$/mu);
   assert.match(workflow, /^ {2}browser-inventory:$/mu);
   assert.match(workflow, /^ {2}browser-composed:$/mu);
+  assert.match(workflow, /^ {2}browser-customization:$/mu);
   assert.match(workflow, /uses: actions\/upload-artifact@/u);
   assert.match(workflow, /retention-days: 7/u);
 });

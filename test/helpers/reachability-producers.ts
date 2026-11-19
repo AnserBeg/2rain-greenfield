@@ -171,7 +171,7 @@ export const reachabilityProducers = [
       'test/postgres/stock-serializer.test.ts',
     ],
   ),
-  // The browser suite runs as four jobs under the same bound, split by file
+  // The browser suite runs as five jobs under the same bound, split by file
   // name (apps/web/playwright.shared.ts): the Sales and platform specs, the
   // operations specs, the inventory specs, and the composed application's
   // journeys.
@@ -194,6 +194,11 @@ export const reachabilityProducers = [
     'browser-composed',
     'test:browser:composed',
     'apps/web/playwright.composed.config.ts',
+  ),
+  playwrightProducer(
+    'browser-customization',
+    'test:browser:customization',
+    'apps/web/playwright.customization.config.ts',
   ),
   {
     id: 'observability',
