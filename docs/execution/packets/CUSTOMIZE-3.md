@@ -40,7 +40,7 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
   "base": "129e59c4a5cfbefcad42b9c14efa164b18b797e7",
-  "head": "43c42fed9cba5d4accd2b6c1d66ec8f44e47da81",
+  "head": "8236ed85c28724c962bd46da6dacb94eae37ab9d",
   "changedPaths": [
     ".github/scripts/run-security-scans.sh", ".github/workflows/ci.yml", ".github/workflows/evidence.yml", "apps/web/playwright.composed.config.ts", "apps/web/playwright.customization.config.ts",
     "apps/web/playwright.shared.ts", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/document-editor.ts", "apps/web/src/surface-composition.ts",
@@ -52,7 +52,8 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
     "packages/operations-agent/src/catalog.ts", "packages/postgres-provider/src/customization-service.ts", "packages/postgres-provider/src/module-runtime-interpreter.ts", "packages/postgres-provider/src/release-repository.ts", "packages/postgres-provider/src/release-verification-service.ts",
     "packages/postgres-provider/src/request-runtime-view-service.ts", "packages/runtime/src/formula-validation.ts", "packages/runtime/src/request-runtime-view.ts", "test/architecture/repository-hygiene.test.ts", "test/architecture/test-reachability.test.ts",
     "test/evidence/CUSTOMIZE-3.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json", "test/helpers/archived-customization-runtime.ts", "test/helpers/check-language-coverage.ts", "test/helpers/language-coverage-packages.ts",
-    "test/helpers/reachability-producers.ts", "test/postgres/customization-validation.test.ts", "test/postgres/customization.test.ts", "test/unit/customization-ai-draft.test.ts", "test/unit/formula-validation.test.ts"
+    "test/helpers/reachability-producers.ts", "test/integration/security-scan-contract.test.ts", "test/postgres/customization-validation.test.ts", "test/postgres/customization.test.ts", "test/unit/customization-ai-draft.test.ts",
+    "test/unit/formula-validation.test.ts"
   ],
   "symbols": [
     {"path":"packages/canonical-model/src/formula-validation-bindings.ts","name":"bindLiteralValidation"},
