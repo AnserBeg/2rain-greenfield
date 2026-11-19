@@ -115,7 +115,7 @@ export function withLocalDemoIdentity(
   if (!response.html.includes(menu))
     return {
       ...response,
-      html: response.html.replace('<body>', `<body>${bar}`),
+      html: response.html.replace(/<body\b[^>]*>/u, (body) => `${body}${bar}`),
     };
   return {
     ...response,

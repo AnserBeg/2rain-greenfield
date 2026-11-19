@@ -71,18 +71,24 @@ test('Customize restricts the Archive action on a Location and rollback restores
         ).toBeVisible({ timeout: 180_000 });
         await page.goto(record);
         await expect(archive).toHaveCount(1);
+        await page.goto(customize);
         await actor.selectOption('buyer');
         await page.getByRole('button', { name: 'Switch person' }).click();
         await expect(actor).toHaveValue('buyer');
+        await page.goto(record);
         await expect(archive).toHaveCount(0);
 
         await page.goto(customize);
+        await actor.selectOption('manager');
+        await page.getByRole('button', { name: 'Switch person' }).click();
         await page
           .getByRole('button', { name: 'Roll back the latest change' })
           .click({ timeout: 180_000 });
         await expect(
           page.locator('[data-customize-result="rolledBack"]'),
         ).toBeVisible({ timeout: 180_000 });
+        await actor.selectOption('buyer');
+        await page.getByRole('button', { name: 'Switch person' }).click();
         await page.goto(record);
         await expect(archive).toHaveCount(1);
       } finally {
