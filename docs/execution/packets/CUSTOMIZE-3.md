@@ -27,7 +27,7 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 - Saved views and columns passed [CI 44457971677](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44457971677) and the closed patch-kind [control 44457971797](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44457971797).
 - Today metrics passed [CI 44471090769](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44471090769) and the sum-before-pagination [control 44472880285](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44472880285).
 - The ADR amendment passed [CI 44481530303](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44481530303) and the record checker. GitHub canceled the merge run when CRITFIX-C advanced main.
-- Slice 5 candidate uses migration 0038, a snapshot rebuilt from 38 migrations and the re-derived v6 ledger. The scripted assistant unit test passed. The AUTH unknown-permission control follows the updated denial guard. The hosted matrix and controls gate integration. Staging uses the release service identity and the patch audit row records the author.
+- Slice 5 candidate uses migration 0040, a snapshot rebuilt from 40 migrations and the re-derived v6 ledger. The scripted assistant unit test passed. The AUTH unknown-permission control follows the updated denial guard. The hosted matrix and controls gate integration. Standard surface actions check current permission before being offered. The service stages the release and the patch audit row records the author.
 
 ## Filed
 
@@ -37,12 +37,12 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
-  "base": "d31e28314923c793a2f7458c86a8d682cf62b4b2",
-  "head": "2a296531a1b1fde788a941029a53bc0cecd65345",
+  "base": "bae7e49e88bfde2257b4a0cb499af9fb9f121e74",
+  "head": "556fdda186083c636da8d15d6fef5debb911aab6",
   "changedPaths": [
     "apps/api/src/assistant-endpoint.ts", "apps/api/src/composition-root.ts", "apps/web/src/app-server.ts",
-    "apps/web/src/customize-screen.ts", "apps/web/src/surface-runtime.ts", "apps/web/test/browser/customize.composed-application.spec.ts",
-    "db/migrations/0038_customization_permission_directory.sql", "db/schema.snapshot.json",
+    "apps/web/src/customize-screen.ts", "apps/web/src/surface-contract.ts", "apps/web/src/surface-runtime.ts",
+    "apps/web/test/browser/customize.composed-application.spec.ts", "db/migrations/0040_customization_permission_directory.sql", "db/schema.snapshot.json",
     "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts",
     "packages/canonical-model/src/schemas.ts", "packages/compiler/src/projections.ts",
     "packages/customization/src/ai-draft.ts", "packages/customization/src/apply.ts",
