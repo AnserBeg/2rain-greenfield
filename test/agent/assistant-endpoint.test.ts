@@ -586,6 +586,11 @@ async function shownSteps(model: ModelAdapter) {
       }
       buffer = buffer.slice(buffer.lastIndexOf('\n') + 1);
     }
+    const replay = await fetch(`${url}/?assistant=history`, {
+      method: 'POST',
+      headers: headers('buyer', url),
+      body: JSON.stringify({ conversation, page: '' }),
+    });
     await fetch(`${url}/?assistant=decide`, {
       method: 'POST',
       headers: headers('buyer', url),
@@ -597,6 +602,15 @@ async function shownSteps(model: ModelAdapter) {
       }),
     });
     while (!(await reader.read()).done);
+    const history = (await replay.json()) as {
+      pending: unknown;
+      transcript: { type: string }[];
+    };
+    assert.deepEqual(history.pending, plan);
+    assert.deepEqual(
+      history.transcript.find((event) => event.type === 'plan'),
+      plan,
+    );
     return plan.steps as { text: string; target: string; inputs: InputRow[] }[];
   } finally {
     server.close();
