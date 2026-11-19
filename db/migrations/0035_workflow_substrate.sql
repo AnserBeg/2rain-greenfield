@@ -18,7 +18,7 @@ CREATE TABLE platform.workflow_definitions (
   environment_id uuid NOT NULL,
   release_id uuid NOT NULL,
   workflow_id text NOT NULL CHECK (workflow_id ~ '^[a-z][a-z0-9_.:-]{0,159}$'),
-  event_type text NOT NULL CHECK (event_type = 'northstar.inventory:event.receipt_posted'),
+  event_type text NOT NULL CHECK (event_type ~ '^[a-z][a-z0-9.]{0,95}:event\.[a-z0-9_.-]{1,63}$'),
   body_digest text NOT NULL,
   executable bytea NOT NULL CHECK (octet_length(executable) BETWEEN 1 AND 1048576),
   executable_digest text NOT NULL CHECK (executable_digest = encode(sha256(executable), 'hex')),
@@ -169,7 +169,7 @@ CREATE TABLE platform.workflow_event_waits (
   environment_id uuid NOT NULL,
   run_id uuid NOT NULL,
   cursor integer NOT NULL CHECK (cursor BETWEEN 0 AND 63),
-  event_type text NOT NULL CHECK (event_type = 'northstar.inventory:event.receipt_posted'),
+  event_type text NOT NULL CHECK (event_type ~ '^[a-z][a-z0-9.]{0,95}:event\.[a-z0-9_.-]{1,63}$'),
   correlation jsonb NOT NULL CHECK (jsonb_typeof(correlation) = 'object'),
   visible_baseline jsonb NOT NULL CHECK (jsonb_typeof(visible_baseline) = 'array'),
   PRIMARY KEY (tenant_id, environment_id, run_id, cursor),
@@ -260,17 +260,22 @@ DECLARE
     ); END LOOP;
   FOREACH table_name IN ARRAY ARRAY['trust_outbox', 'trust_domain_events'] LOOP
     EXECUTE format(
-      'CREATE POLICY workflow_scoped_source ON platform.%I FOR SELECT TO north_star_workflow_worker USING ((%s) AND event_type = %L)',
-      table_name, scoped, 'northstar.inventory:event.receipt_posted'
+      'CREATE POLICY workflow_scoped_source ON platform.%I FOR SELECT TO north_star_workflow_worker USING ((%s) AND EXISTS (
+        SELECT 1 FROM platform.workflow_definitions AS d
+         WHERE d.tenant_id = %I.tenant_id AND d.environment_id = %I.environment_id
+           AND d.event_type = %I.event_type
+       ))',
+      table_name, scoped, table_name, table_name, table_name
     ); END LOOP;
-  EXECUTE format(
-    'CREATE POLICY workflow_scoped_source ON platform.trust_business_change_documents FOR SELECT TO north_star_workflow_worker USING ((%s) AND record_type = %L)',
-    scoped, 'northstar.inventory:record.goods_receipt'
-  );
-  EXECUTE format(
-    'CREATE POLICY workflow_scoped_source ON platform.trust_action_invocations FOR SELECT TO north_star_workflow_worker USING ((%s) AND action_id = %L)',
-    scoped, 'northstar.inventory:capability.posting'
-  ); END
+  FOREACH table_name IN ARRAY ARRAY['trust_business_change_documents', 'trust_action_invocations'] LOOP
+    EXECUTE format(
+      'CREATE POLICY workflow_scoped_source ON platform.%I FOR SELECT TO north_star_workflow_worker USING ((%s) AND EXISTS (
+        SELECT 1 FROM platform.trust_domain_events AS e
+         WHERE e.tenant_id = %I.tenant_id AND e.environment_id = %I.environment_id
+           AND e.invocation_id = %I.invocation_id
+       ))',
+      table_name, scoped, table_name, table_name, table_name
+    ); END LOOP; END
 $workflow_policies$;
 
 GRANT SELECT, INSERT ON platform.workflow_body_blobs, platform.workflow_definitions,

@@ -16820,7 +16820,7 @@
       "domain": null,
       "name": "workflow_definitions_event_type_check",
       "type": "c",
-      "definition": "CHECK (event_type = 'northstar.inventory:event.receipt_posted'::text)",
+      "definition": "CHECK (event_type ~ '^[a-z][a-z0-9.]{0,95}:event\\.[a-z0-9_.-]{1,63}$'::text)",
       "deferrable": false,
       "initially_deferred": false,
       "validated": true,
@@ -17100,7 +17100,7 @@
       "domain": null,
       "name": "workflow_event_waits_event_type_check",
       "type": "c",
-      "definition": "CHECK (event_type = 'northstar.inventory:event.receipt_posted'::text)",
+      "definition": "CHECK (event_type ~ '^[a-z][a-z0-9.]{0,95}:event\\.[a-z0-9_.-]{1,63}$'::text)",
       "deferrable": false,
       "initially_deferred": false,
       "validated": true,
@@ -21214,7 +21214,7 @@
       "permissive": true,
       "roles": ["north_star_workflow_worker"],
       "command": "r",
-      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid AND action_id = 'northstar.inventory:capability.posting'::text",
+      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid AND (EXISTS ( SELECT 1\n   FROM platform.trust_domain_events e\n  WHERE e.tenant_id = trust_action_invocations.tenant_id AND e.environment_id = trust_action_invocations.environment_id AND e.invocation_id = trust_action_invocations.invocation_id))",
       "check_expression": null
     },
     {
@@ -21244,7 +21244,7 @@
       "permissive": true,
       "roles": ["north_star_workflow_worker"],
       "command": "r",
-      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid AND record_type = 'northstar.inventory:record.goods_receipt'::text",
+      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid AND (EXISTS ( SELECT 1\n   FROM platform.trust_domain_events e\n  WHERE e.tenant_id = trust_business_change_documents.tenant_id AND e.environment_id = trust_business_change_documents.environment_id AND e.invocation_id = trust_business_change_documents.invocation_id))",
       "check_expression": null
     },
     {
@@ -21274,7 +21274,7 @@
       "permissive": true,
       "roles": ["north_star_workflow_worker"],
       "command": "r",
-      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid AND event_type = 'northstar.inventory:event.receipt_posted'::text",
+      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid AND (EXISTS ( SELECT 1\n   FROM platform.workflow_definitions d\n  WHERE d.tenant_id = trust_domain_events.tenant_id AND d.environment_id = trust_domain_events.environment_id AND d.event_type = trust_domain_events.event_type))",
       "check_expression": null
     },
     {
@@ -21304,7 +21304,7 @@
       "permissive": true,
       "roles": ["north_star_workflow_worker"],
       "command": "r",
-      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid AND event_type = 'northstar.inventory:event.receipt_posted'::text",
+      "using_expression": "tenant_id = NULLIF(current_setting('north_star.tenant_id'::text, true), ''::text)::uuid AND environment_id = NULLIF(current_setting('north_star.environment_id'::text, true), ''::text)::uuid AND (EXISTS ( SELECT 1\n   FROM platform.workflow_definitions d\n  WHERE d.tenant_id = trust_outbox.tenant_id AND d.environment_id = trust_outbox.environment_id AND d.event_type = trust_outbox.event_type))",
       "check_expression": null
     },
     {

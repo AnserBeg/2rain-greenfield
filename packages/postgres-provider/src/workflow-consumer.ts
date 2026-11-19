@@ -2,10 +2,9 @@ import { randomUUID } from 'node:crypto';
 
 import type { Pool, PoolClient } from 'pg';
 
-export const RECEIPT_POSTED_TYPE = 'northstar.inventory:event.receipt_posted';
-const RECEIPT_POSTED_VERSION = 'northstar.inventory-receipt-posted/v1';
-const RECEIPT_RECORD_TYPE = 'northstar.inventory:record.goods_receipt';
-const POSTING_ACTION = 'northstar.inventory:capability.posting';
+import { RECEIPT_POSTED_EVENT } from '../../domain/src/purchasing/receipt-posted-event.js';
+
+export const RECEIPT_POSTED_TYPE = RECEIPT_POSTED_EVENT.eventType;
 const FIRST_UUID = '00000000-0000-0000-0000-000000000000';
 export const WORKFLOW_POLL_BATCH_SIZE = 64;
 
@@ -42,7 +41,7 @@ export const WORKFLOW_RECEIPT_PAGE_SQL = `
     SELECT o.*
       FROM platform.trust_outbox AS o
      WHERE o.tenant_id = $1 AND o.environment_id = $2
-       AND o.event_type = 'northstar.inventory:event.receipt_posted' AND o.outbox_id >= $3
+       AND o.event_type = $8 AND o.outbox_id >= $3
      ORDER BY o.outbox_id
      LIMIT $4
   )
@@ -130,9 +129,10 @@ export class PostgresWorkflowConsumer {
             ...scopeKeys,
             after,
             WORKFLOW_POLL_BATCH_SIZE + 1,
-            POSTING_ACTION,
-            RECEIPT_POSTED_VERSION,
-            RECEIPT_RECORD_TYPE,
+            RECEIPT_POSTED_EVENT.postingAction,
+            RECEIPT_POSTED_EVENT.schemaVersion,
+            RECEIPT_POSTED_EVENT.recordType,
+            RECEIPT_POSTED_TYPE,
           ],
         );
         let count = 0;

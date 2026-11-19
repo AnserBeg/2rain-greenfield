@@ -4,6 +4,8 @@ import test from 'node:test';
 
 import type pg from 'pg';
 
+import { RECEIPT_POSTED_EVENT } from '../../packages/domain/src/purchasing/receipt-posted-event.js';
+
 import {
   openComposedApplicationRuntime,
   openCustomizeService,
@@ -464,9 +466,10 @@ async function assertBoundedPoll(
           scope.environment_id,
           '00000000-0000-0000-0000-000000000000',
           WORKFLOW_POLL_BATCH_SIZE + 1,
-          'northstar.inventory:capability.posting',
-          'northstar.inventory-receipt-posted/v1',
-          'northstar.inventory:record.goods_receipt',
+          RECEIPT_POSTED_EVENT.postingAction,
+          RECEIPT_POSTED_EVENT.schemaVersion,
+          RECEIPT_POSTED_EVENT.recordType,
+          RECEIPT_POSTED_TYPE,
         ],
       )
     ).rows[0]!['QUERY PLAN'][0]!.Plan;

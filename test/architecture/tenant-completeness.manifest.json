@@ -1,7 +1,7 @@
 {
   "schemaVersion": "northstar.tenant-completeness-manifest/v1",
   "tenantIndependentDefinition": "A table is tenant-independent only when its rows represent a database-wide kernel mechanism or immutable content deliberately shared across tenants; business records are never tenant-independent, and absence of a tenant column is not evidence.",
-  "expectedTableCount": 63,
+  "expectedTableCount": 75,
   "tables": [
     {
       "schema": "north_star_internal",
@@ -386,6 +386,78 @@
       "schema": "platform",
       "table": "trust_outbox",
       "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "classification": "tenant-scoped",
+      "schema": "platform",
+      "table": "workflow_activation_watermarks",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "classification": "tenant-scoped",
+      "schema": "platform",
+      "table": "workflow_body_blobs",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "classification": "tenant-scoped",
+      "schema": "platform",
+      "table": "workflow_definitions",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "classification": "tenant-scoped",
+      "schema": "platform",
+      "table": "workflow_effect_outbox",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "classification": "tenant-scoped",
+      "schema": "platform",
+      "table": "workflow_event_occurrences",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "classification": "tenant-scoped",
+      "schema": "platform",
+      "table": "workflow_event_waits",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "classification": "tenant-scoped",
+      "schema": "platform",
+      "table": "workflow_instances",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "classification": "tenant-scoped",
+      "schema": "platform",
+      "table": "workflow_journal",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "classification": "tenant-scoped",
+      "schema": "platform",
+      "table": "workflow_pending_approvals",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "classification": "tenant-scoped",
+      "schema": "platform",
+      "table": "workflow_runs",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "classification": "tenant-scoped",
+      "schema": "platform",
+      "table": "workflow_timers",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "classification": "tenant-scoped",
+      "schema": "platform",
+      "table": "workflow_verification_evidence",
       "tenantColumn": "tenant_id"
     }
   ]
