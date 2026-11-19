@@ -10,6 +10,7 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 - Stock impact rows use existing server read models and exact decimal arithmetic.
 - Task defaults derive from selected rows; pickers show declared figures and stage counts share the batched loader.
 - Today reads five To receive rows in the page snapshot.
+- Save and place finishes verified draft saves before placement and retains plain recovery.
 
 ## Slices and gates
 
@@ -18,6 +19,7 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 - 2: merged `ca9812e7`, PR #96, [CI 44488258241](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44488258241) green.
 - 3: merged `b21f3851`, PR #106, [CI 44522209346](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44522209346) green.
 - 4: merged `e0242bc9`, PR #108, [CI 44529083449](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44529083449) green.
+- 5: ready for full CI. Focused units pass; GitHub CI is the acceptance gate.
 
 ## Decisions
 
@@ -27,33 +29,37 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 - Exact-minute browser fills canonicalize zero seconds without changing the instant (CI reproduction passed).
 - Mid-packet checkpoint: no whole-app review trigger; no new correctness domain or fan-out.
 
-- Home: CI 44510567072/job 135513434195 measured 4/43/6/0 and 50 bindings; one page read and one record binding.
+- Save draft resets earlier placement intent; narrowed-role offers are checked live and invocation still authorizes.
+- CI found line details intercepting Save draft; the save bar stays above them, with both actions checked.
+- Inherited docs-only DECLUTTER; canonical inputs and prepared release bytes are unchanged.
 
 ```record-claim
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "INTERACT-1",
-  "base": "feffa1b9390e867c5f36f3005bbd70e8bc551bde",
-  "head": "986293901451914d6d8ed721c20880e73d19fe60",
+  "base": "129e59c4a5cfbefcad42b9c14efa164b18b797e7",
+  "head": "76cd99593132558f23394634408eb0bf25788d3c",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
-    "apps/web/src/component-registry.ts",
-    "apps/web/src/surface-launcher.ts",
-    "apps/web/src/surface-runtime.ts",
-    "apps/web/test/browser/look.composed-application.spec.ts",
+    "apps/web/src/document-editor.ts",
+    "apps/web/src/ledger-styles.ts",
+    "apps/web/test/browser/loop-scorecard.composed-application.spec.ts",
+    "apps/web/test/browser/loop-scorecard.ts",
+    "apps/web/test/browser/order-entry.spec.ts",
+    "apps/web/test/browser/purchase-pricing.spec.ts",
     "packages/canonical-model/src/schemas.ts",
-    "packages/canonical-model/src/surface-launcher.ts",
-    "packages/domain/src/app/today.ts",
+    "packages/canonical-model/src/surface-workspace.ts",
+    "packages/domain/src/app/order-entry.ts",
     "test/compiler/g2-module-conformance.test.ts",
     "test/fixtures/g2/language-conformance/coverage-decisions.json",
-    "test/performance/page-budgets.ts",
+    "test/integration/surface-data-binding.test.ts",
     "test/unit/canonical-model/surface-launcher.test.ts"
   ],
   "symbols": [
     {
-      "path": "apps/web/src/surface-launcher.ts",
-      "name": "launcherTiles"
+      "path": "apps/web/src/document-editor.ts",
+      "name": "documentEditor"
     }
   ]
 }
@@ -66,3 +72,4 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 - 2: inspect each receipt line’s On hand, Reserved and Available changes; edit quantity and confirm the current prepared action. Try a signed adjustment.
 - 3: inspect ordered cost and preferred location defaults, picker price and availability, and worklist stage counts. Clear a receipt line’s quantity to omit it.
 - 4: open Today and follow a To receive row; compare it with the queue.
+- 5: fill a new PO or SO and use Save and place. Use Save draft when placement should wait; placement failure links to the saved draft.
