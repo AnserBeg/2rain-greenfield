@@ -197,8 +197,9 @@ export const SUPPORTED_RUNTIME_CAPABILITIES: Readonly<
     // INTEGRATION after its ADR-0066 re-baseline).
     // 23 adds declared Record form fields and empty Detail values.
     // 24 adds tenant-authored saved List layouts.
-    // 25 adds header relation inputs and shared or lifecycle-less editors, and Today metric cards.
-    maximumSupportedVersion: 25,
+    // 25 adds Today metric cards.
+    // 26 adds header relations, relation List columns and shared or lifecycle-less editors.
+    maximumSupportedVersion: 26,
   },
 });
 
