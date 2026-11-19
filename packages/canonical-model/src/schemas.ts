@@ -2557,6 +2557,13 @@ const normalizedV6FieldDefinition = normalizedV3FieldDefinition.extend({
 const authoredV6FieldDefinition = authoredV3FieldDefinition.extend({
   numbering: FieldNumberingSchema.optional(),
 });
+const companyOwnership = z.enum(['entityOwned', 'tenantShared']).optional();
+const normalizedV6EntityDefinition = normalizedEntityDefinition.extend({
+  companyOwnership,
+});
+const authoredV6EntityDefinition = authoredEntityDefinition.extend({
+  companyOwnership,
+});
 // A list query may declare the most rows one export statement returns. It is a
 // query property, not a screen one, because the agent path reads the query.
 const exportMaximumResultCount = z.int().min(1).max(10_000).optional();
@@ -2577,6 +2584,7 @@ const authoredV6QueryDefinition = z.union([
 
 const v6NormalizedShape = {
   ...v5NormalizedShape,
+  entities: z.array(normalizedV6EntityDefinition),
   fields: z.array(normalizedV6FieldDefinition),
   operations: z.array(normalizedV6OperationDefinition),
   queries: z.array(normalizedV6QueryDefinition),
@@ -2704,6 +2712,7 @@ const v5AuthoredShape = {
 
 const v6AuthoredShape = {
   ...v5AuthoredShape,
+  entities: z.array(authoredV6EntityDefinition),
   fields: z.array(authoredV6FieldDefinition),
   operations: z.array(authoredV6OperationDefinition),
   queries: z.array(authoredV6QueryDefinition),

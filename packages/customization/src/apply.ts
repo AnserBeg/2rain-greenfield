@@ -139,21 +139,175 @@ function applyOne(
 ): Outcome | null {
   switch (patch.kind) {
     case 'addRecordType':
-      return addRecordType(authored, patch.label, patch.fields);
+      return addRecordType(authored, patch);
     case 'addField':
       return addField(authored, patch, previous);
     case 'addChoice':
       return addChoice(authored, patch.enumField, patch.option);
+    case 'declareLifecycle':
+      return declareLifecycle(authored, patch);
     case 'arrangeLayout':
       return arrangeLayout(authored, patch);
   }
 }
 
+function declareLifecycle(
+  authored: Json,
+  patch: Extract<SingleCustomizationPatch, { kind: 'declareLifecycle' }>,
+): Outcome | null {
+  const entity = list(authored, 'entities').find(
+    (candidate) => candidate.entityId === patch.entity,
+  );
+  if (!entity)
+    return refusal(
+      'CUSTOMIZE_TARGET_NOT_FOUND',
+      `There is no record type ${patch.entity}.`,
+    );
+  if (!isTenantId(patch.entity))
+    return unsupported(
+      'first-party lifecycle changes',
+      'Choose a tenant record type for this lifecycle.',
+    );
+  if (
+    list(authored, 'stateMachines').some(
+      (machine) => (machine.entity as Json).targetId === patch.entity,
+    )
+  ) {
+    return unsupported(
+      'editing a declared lifecycle',
+      'This record type already has a lifecycle.',
+    );
+  }
+  const stateSlugs = patch.states.map((state) => slug(state.label));
+  const transitionSlugs = patch.transitions.map((transition) =>
+    slug(transition.label),
+  );
+  if (firstDuplicate(stateSlugs) || firstDuplicate(transitionSlugs))
+    return refusal(
+      'CUSTOMIZE_DUPLICATE_LABEL',
+      'Use distinct names for the states and for the actions.',
+    );
+  const initial = slug(patch.initial);
+  const stateNames = new Set(stateSlugs);
+  if (
+    !stateNames.has(initial) ||
+    patch.transitions.some(
+      (transition) =>
+        !stateNames.has(slug(transition.from)) ||
+        !stateNames.has(slug(transition.to)) ||
+        slug(transition.from) === slug(transition.to),
+    )
+  ) {
+    return unsupported(
+      'invalid lifecycle state',
+      'The initial state and both ends of every action must be declared, and actions must move to a different state.',
+    );
+  }
+  const namespace = namespaceOf(authored);
+  const local = localOf(patch.entity);
+  const id = (kind: string, suffix = '') =>
+    `${namespace}:${kind}.${local}${suffix}`;
+  const reference = (kind: string, targetId: string) => ({
+    kind,
+    schemaVersion: version,
+    targetId,
+  });
+  const stateRef = (name: string) =>
+    reference('stateReference', id('state', `_${name}`));
+  const machineId = id('machine');
+  const stateFieldId = `${namespace}:derived_state_field.${machineId.split(':')[1]}`;
+  const entityRef = reference('entityReference', patch.entity);
+  push(authored, 'stateMachines', {
+    entity: entityRef,
+    initialState: stateRef(initial),
+    kind: 'stateMachineDefinition',
+    machineId,
+    schemaVersion: version,
+    states: patch.states.map((state, index) => ({
+      kind: 'stateDefinition',
+      label: state.label,
+      orderKey: (index + 1) * 10,
+      schemaVersion: version,
+      stateId: stateRef(stateSlugs[index]!).targetId,
+      terminal: !patch.transitions.some(
+        (transition) => slug(transition.from) === stateSlugs[index],
+      ),
+    })),
+    transitions: patch.transitions.map((transition, index) => ({
+      fromState: stateRef(slug(transition.from)),
+      kind: 'transitionDefinition',
+      label: transition.label,
+      orderKey: (index + 1) * 10,
+      permission: reference(
+        'permissionReference',
+        id('permission', `_action_${transitionSlugs[index]}`),
+      ),
+      schemaVersion: version,
+      toState: stateRef(slug(transition.to)),
+      transitionId: id('transition', `_${transitionSlugs[index]}`),
+    })),
+  });
+  for (const [index, transition] of patch.transitions.entries()) {
+    const localAction = transitionSlugs[index]!;
+    const permissionId = id('permission', `_action_${localAction}`);
+    push(authored, 'permissions', {
+      action: 'transition',
+      kind: 'permissionDefinition',
+      label: transition.label,
+      permissionId,
+      resource: entityRef,
+      schemaVersion: version,
+    });
+    push(authored, 'operations', {
+      confirmation: 'humanRequired',
+      effect: {
+        kind: 'transitionStateEffect',
+        schemaVersion: version,
+        transition: reference(
+          'transitionReference',
+          id('transition', `_${localAction}`),
+        ),
+      },
+      kind: 'operationDefinition',
+      label: transition.label,
+      module: entity.module,
+      operationId: id('operation', `_action_${localAction}`),
+      permission: reference('permissionReference', permissionId),
+      precondition: {
+        field: reference('fieldReference', stateFieldId),
+        kind: 'fieldComparisonPredicate',
+        operator: 'equals',
+        schemaVersion: version,
+        value: {
+          kind: 'textValue',
+          schemaVersion: version,
+          value: stateRef(slug(transition.from)).targetId,
+        },
+      },
+      readBack: reference('queryReference', id('query', '_get')),
+      schemaVersion: version,
+      tier: 'o0',
+    });
+  }
+  for (const query of list(authored, 'queries')) {
+    if ((query.sourceEntity as Json).targetId !== patch.entity) continue;
+    const selections = query.selections as Json[];
+    selections.push({
+      field: reference('fieldReference', stateFieldId),
+      kind: 'querySelection',
+      orderKey: nextOrder(selections),
+      schemaVersion: version,
+      selectionId: id('selection', `_${String(query.queryType)}_state`),
+    });
+  }
+  return null;
+}
+
 function addRecordType(
   authored: Json,
-  label: string,
-  fields: readonly CustomField[],
+  patch: Extract<SingleCustomizationPatch, { kind: 'addRecordType' }>,
 ): Outcome | null {
+  const { companyOwnership, fields, label } = patch;
   const namespace = namespaceOf(authored);
   const local = `${TENANT_LOCAL_PREFIX}${slug(label)}`;
   const id = (kind: string, suffix = '') =>
@@ -234,6 +388,7 @@ function addRecordType(
     schemaVersion: version,
   });
   push(authored, 'entities', {
+    ...(companyOwnership === undefined ? {} : { companyOwnership }),
     entityId,
     kind: 'entityDefinition',
     label: label.trim(),
@@ -265,38 +420,63 @@ function addRecordType(
   push(
     authored,
     'queries',
-    ...['get', 'list', 'search', 'resolve'].map((queryType) => ({
-      kind: 'queryDefinition',
-      maximumResultCount: queryType === 'get' ? 1 : 100,
-      module: reference('moduleReference', moduleId),
-      permission: reference('permissionReference', id('permission', '_read')),
-      queryId: id('query', `_${queryType}`),
-      queryType,
-      ...(queryType === 'resolve'
-        ? {
-            resolveMatchKeys: [
-              {
-                authority: 'advisory',
-                field: reference('fieldReference', fieldIds[0]!),
-                kind: 'resolveMatchKey',
-                matchKeyId: id('resolve-key', '_name'),
-                orderKey: 10,
+    ...['get', 'list', 'search', 'resolve'].map((queryType) => {
+      const parameterId = id('parameter', `_${queryType}_legal_entity_scope`);
+      return {
+        kind: 'queryDefinition',
+        ...(companyOwnership === 'entityOwned'
+          ? {
+              legalEntityScope: {
+                cardinality: 'exactlyOne',
+                kind: 'queryLegalEntityScope',
+                operand: {
+                  kind: 'queryParameterReference',
+                  parameterId,
+                  schemaVersion: version,
+                },
                 schemaVersion: version,
               },
-            ],
-          }
-        : {}),
-      schemaVersion: version,
-      selections: fieldIds.map((fieldId, index) => ({
-        field: reference('fieldReference', fieldId),
-        kind: 'querySelection',
-        orderKey: (index + 1) * 10,
+              parameters: [
+                {
+                  kind: 'queryParameterDefinition',
+                  orderKey: 10,
+                  parameterId,
+                  schemaVersion: version,
+                },
+              ],
+            }
+          : {}),
+        maximumResultCount: queryType === 'get' ? 1 : 100,
+        module: reference('moduleReference', moduleId),
+        permission: reference('permissionReference', id('permission', '_read')),
+        queryId: id('query', `_${queryType}`),
+        queryType,
+        ...(queryType === 'resolve'
+          ? {
+              resolveMatchKeys: [
+                {
+                  authority: 'advisory',
+                  field: reference('fieldReference', fieldIds[0]!),
+                  kind: 'resolveMatchKey',
+                  matchKeyId: id('resolve-key', '_name'),
+                  orderKey: 10,
+                  schemaVersion: version,
+                },
+              ],
+            }
+          : {}),
         schemaVersion: version,
-        selectionId: id('selection', `_${queryType}_${String(index + 1)}`),
-      })),
-      sourceEntity: reference('entityReference', entityId),
-      tier: 'q0',
-    })),
+        selections: fieldIds.map((fieldId, index) => ({
+          field: reference('fieldReference', fieldId),
+          kind: 'querySelection',
+          orderKey: (index + 1) * 10,
+          schemaVersion: version,
+          selectionId: id('selection', `_${queryType}_${String(index + 1)}`),
+        })),
+        sourceEntity: reference('entityReference', entityId),
+        tier: 'q0',
+      };
+    }),
   );
   push(
     authored,

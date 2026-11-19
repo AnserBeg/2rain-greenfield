@@ -259,6 +259,103 @@ test('Equipment drafts deterministically into a new table and a plain diff namin
   assert.equal(candidate.compiled.releaseRoot, step.release.releaseRoot);
 });
 
+test('a company-owned tenant record compiles scoped queries and explains the choice in the diff', async () => {
+  const outcome = await compileInSandbox(
+    sandboxRequest([
+      patch({
+        companyOwnership: 'entityOwned',
+        fields: [{ label: 'Name', type: 'text' }],
+        kind: 'addRecordType',
+        label: 'Site review',
+      }),
+    ]),
+  );
+  assert.equal(
+    outcome.status,
+    'compiled',
+    JSON.stringify(outcome.status === 'compiled' ? [] : outcome),
+  );
+  if (outcome.status !== 'compiled') return;
+  assert.match(
+    outcome.steps[0]!.rendered.text,
+    /each record belongs to one company/iu,
+  );
+});
+
+test('a tenant-shared source cannot compile a link to a company-owned receipt', async () => {
+  const relationId = 'northstar.app:relation.custom_site_review_receipt';
+  const reference = (targetId: string) => ({
+    kind: 'entityReference',
+    schemaVersion: 'v6',
+    targetId,
+  });
+  const base = structuredClone(authored);
+  (base.relations as unknown[]).push({
+    archiveBehavior: 'retainReference',
+    cardinality: 'manyToOne',
+    joinEligibility: 'query',
+    kind: 'relationDefinition',
+    orderKey: 10,
+    ownership: 'reference',
+    relationId,
+    required: false,
+    schemaVersion: 'v6',
+    sourceEntity: reference('northstar.app:entity.custom_site_review'),
+    targetEntity: reference('northstar.app:entity.goods_receipt'),
+  });
+  const compile = (companyOwnership: 'entityOwned' | 'tenantShared') =>
+    compileInSandbox({
+      ...sandboxRequest([
+        patch({
+          companyOwnership,
+          fields: [{ label: 'Name', type: 'text' }],
+          kind: 'addRecordType',
+          label: 'Site review',
+        }),
+      ]),
+      base,
+    });
+  const [accepted, rejected] = await Promise.all([
+    compile('entityOwned'),
+    compile('tenantShared'),
+  ]);
+  assert.equal(
+    accepted.status,
+    'compiled',
+    JSON.stringify(accepted.status === 'compiled' ? [] : accepted),
+  );
+  assert.match(
+    JSON.stringify(rejected),
+    /INVENTORY_RELATION_ENTITY_SEMANTICS_UNDECLARED/u,
+  );
+  assert.match(JSON.stringify(rejected), new RegExp(relationId, 'u'));
+});
+
+test('a tenant lifecycle compiles guarded operations and refuses an undeclared state', async () => {
+  const lifecycle = {
+    entity: 'northstar.app:entity.custom_equipment',
+    initial: 'Pending',
+    kind: 'declareLifecycle',
+    states: [{ label: 'Pending' }, { label: 'Passed' }],
+    transitions: [{ from: 'Pending', label: 'Pass', to: 'Passed' }],
+  };
+  const accepted = await compileInSandbox(
+    sandboxRequest([
+      patch({ kind: 'changeSet', patches: [equipment, lifecycle] }),
+    ]),
+  );
+  assert.equal(
+    accepted.status,
+    'compiled',
+    JSON.stringify(accepted.status === 'compiled' ? [] : accepted),
+  );
+  const refused = applyCustomizationPatches(authored, [
+    equipment,
+    patch({ ...lifecycle, initial: 'Undeclared' }),
+  ]);
+  assert.equal(refused.status, 'unsupported');
+});
+
 test('a chain re-applies its recorded prefix exactly and the next patch builds on it', async () => {
   const choice = patch({
     enumField: 'northstar.app:field.custom_equipment_status',

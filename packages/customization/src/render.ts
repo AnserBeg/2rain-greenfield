@@ -66,6 +66,9 @@ export function renderReleaseDiff(input: {
   );
   for (const entityId of [...newEntities].sort()) {
     const label = entityLabel(to, entityId);
+    const ownership = to.entities.find(
+      (entity) => entity.entityId === entityId,
+    )?.companyOwnership;
     const fields = to.fields
       .filter((field) => (field.entity as Json).targetId === entityId)
       .sort((left, right) => Number(left.orderKey) - Number(right.orderKey));
@@ -73,6 +76,10 @@ export function renderReleaseDiff(input: {
       `New record type "${label}" with ${String(fields.length)} field${fields.length === 1 ? '' : 's'}:`,
     );
     for (const field of fields) lines.push(`  - ${describeField(field)}`);
+    if (ownership === 'entityOwned')
+      lines.push('  Each record belongs to one company.');
+    if (ownership === 'tenantShared')
+      lines.push('  Records are shared by all companies in this tenant.');
     lines.push(
       `  It gets its own menu entry "${label}" with a list, a record page and a form.`,
       `  People who can use the rest of the application can create, change, archive and restore ${label} records.`,

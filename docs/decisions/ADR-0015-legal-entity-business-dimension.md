@@ -115,6 +115,19 @@ one entity at creation, so the single-entity customer never sees the concept.
 entity from the first posted movement. The two ADRs are one decision expressed at two
 altitudes and must be read together.
 
+## Tenant record types — 2026-11-18 amendment
+
+A tenant record type declares `companyOwnership` at creation. This optional
+v6 key preserves revisions and patches that predate the declaration. Their
+tenant record types keep tenant-shared storage. A tenant cannot change a
+first-party family's pinned ownership or change an existing type's ownership.
+
+A company-owned tenant type uses the existing generated legal-entity column,
+create operand and scoped queries. Its line types inherit the same company as
+their parent. Links between company-owned records use a company-qualified
+foreign key. Tenant-shared types can link only to tenant-shared targets. These
+links do not extend the tenant's write authority to the target.
+
 ## Consequences
 
 - Multi-entity support becomes a capability addition over an existing dimension rather

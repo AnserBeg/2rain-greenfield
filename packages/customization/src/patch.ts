@@ -65,6 +65,7 @@ const addRecordType = z
     kind: z.literal('addRecordType'),
     label,
     fields: z.array(CustomFieldSchema).min(1).max(24),
+    companyOwnership: z.enum(['entityOwned', 'tenantShared']).optional(),
   })
   .superRefine((patch, context) => {
     if (patch.fields[0]?.type !== 'text') {
@@ -88,6 +89,23 @@ const addChoice = z.strictObject({
   kind: z.literal('addChoice'),
   enumField: canonicalId,
   option: label,
+});
+
+const declareLifecycle = z.strictObject({
+  kind: z.literal('declareLifecycle'),
+  entity: canonicalId,
+  initial: label,
+  states: z.array(z.strictObject({ label })).min(2).max(8),
+  transitions: z
+    .array(
+      z.strictObject({
+        label,
+        from: label,
+        to: label,
+      }),
+    )
+    .min(1)
+    .max(12),
 });
 
 const arrangeLayout = z
@@ -115,6 +133,7 @@ const SinglePatchSchema = z.discriminatedUnion('kind', [
   addRecordType,
   addField,
   addChoice,
+  declareLifecycle,
   arrangeLayout,
 ]);
 type ParsedPatch = z.infer<typeof SinglePatchSchema>;
@@ -140,6 +159,7 @@ export const CUSTOMIZATION_PATCH_KINDS = Object.freeze([
   'addRecordType',
   'addField',
   'addChoice',
+  'declareLifecycle',
   'arrangeLayout',
   'changeSet',
 ] as const satisfies readonly CustomizationPatchKind[]);
