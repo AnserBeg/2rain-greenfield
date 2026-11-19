@@ -31,6 +31,43 @@ Status — rebased from checkpoint `c8110053` onto the CUSTOMIZE-3 trunk. Critic
 - Next packet — receiving event subscription (rung 4) for automatically starting an inspection. Keep the resulting writes inside Tier A.
 - Tenant-authored validation predicates for transition guards await CUSTOMIZE-3’s Formula Rule projection. Current transitions enforce their declared source state.
 
+```record-claim
+{
+  "schemaVersion": "northstar.record-claim/v1",
+  "packet": "CUSTOMIZE-4",
+  "base": "4efe21f72b91dc51f1f9528dc47f600c05f0f3a3",
+  "head": "6813a93265a16da5c0d0963be738d49b1900f1f5",
+  "changedPaths": [
+    "apps/web/release/app.compiled.json", "apps/web/src/component-registry.ts",
+    "apps/web/src/customize-screen.ts", "apps/web/src/document-editor.ts",
+    "apps/web/src/gateway-error-codes.ts", "apps/web/src/list-declaration.ts",
+    "apps/web/src/message-catalog.ts", "apps/web/src/surface-runtime.ts",
+    "apps/web/test/browser/customize.composed-application.spec.ts", "apps/web/test/browser/message-catalog.spec.ts",
+    "db/migrations/0035_customization_patch_kind_identifier.sql", "db/schema.snapshot.json",
+    "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-list.ts",
+    "packages/canonical-model/src/surface-workspace.ts", "packages/compiler/src/conformance.ts",
+    "packages/compiler/src/projections.ts", "packages/compiler/src/storage.ts",
+    "packages/customization/src/ai-draft.ts", "packages/customization/src/apply.ts",
+    "packages/customization/src/candidate.ts", "packages/customization/src/patch.ts",
+    "packages/customization/src/render.ts", "packages/customization/src/targets.ts",
+    "packages/operations-agent/src/catalog.ts", "packages/operations-agent/src/session.ts",
+    "packages/postgres-provider/src/customization-service.ts", "packages/runtime/src/request-runtime-view.ts",
+    "test/architecture/release-persistence-boundary.test.ts", "test/evidence/CUSTOMIZE-3.expected-red.json",
+    "test/evidence/CUSTOMIZE-4.expected-red.json", "test/fixtures/g2/language-conformance/coverage-decisions.json",
+    "test/fixtures/inspection-customization.ts", "test/postgres/customization.test.ts",
+    "test/postgres/inventory-storage.test.ts", "test/postgres/migrations.test.ts",
+    "test/postgres/module-storage-transition.test.ts", "test/postgres/request-runtime-view.test.ts",
+    "test/postgres/trust-substrate.test.ts", "test/unit/customization-ai-draft.test.ts",
+    "test/unit/customization.test.ts"
+  ],
+  "symbols": [
+    {"path": "packages/customization/src/patch.ts", "name": "parseCustomizationPatch"},
+    {"path": "packages/customization/src/apply.ts", "name": "applyCustomizationPatches"},
+    {"path": "packages/runtime/src/request-runtime-view.ts", "name": "SUPPORTED_RUNTIME_CAPABILITIES"}
+  ]
+}
+```
+
 ## Test it yourself
 
 After integration, open Customize, add a company-owned **Goods Receipt Inspection** with a **Name** field, approve and activate it. From **Lines, links and actions**, give it an **Inspection results** table and add **Goods receipt**, **Supplier**, **Item** and **Location** links. Declare **Pending**, **Quarantined** and **Released**, then add **Quarantine** and **Release** with those endpoints. Approve and activate. Create an inspection with a receipt and a result line. The record shows the linked receipt and result. Confirm **Quarantine** and check that **Release** appears.
