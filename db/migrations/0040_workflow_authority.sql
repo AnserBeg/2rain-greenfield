@@ -257,4 +257,3 @@ DECLARE
 
   RETURN NEW; END
 $$;
-
