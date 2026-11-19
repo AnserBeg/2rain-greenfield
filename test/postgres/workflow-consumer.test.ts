@@ -804,6 +804,19 @@ test(
           await restarted.step(scope, accepted);
           assert.equal(await journalCount(pool, accepted, 'REQUEST'), 2);
 
+          const ordinary = await startApproval();
+          await assertApprovalBoundary(
+            pool,
+            workerPool,
+            runtimePool,
+            operator,
+            ordinary,
+            'APPROVED',
+          );
+          assert.equal(await journalCount(pool, ordinary, 'RESULT'), 1);
+          await restarted.step(scope, ordinary);
+          assert.equal(await journalCount(pool, ordinary, 'REQUEST'), 2);
+
           const revokeDuringBulk = new PostgresWorkflowExecution(
             workerPool,
             runtimePool,

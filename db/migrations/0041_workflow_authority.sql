@@ -172,10 +172,16 @@ DECLARE
      AND a.cursor = requested_cursor AND a.fence = requested_fence
      AND a.plan_digest = requested_plan_digest AND a.status = 'PENDING';
   IF NOT FOUND THEN RETURN false; END IF;
+  -- The run lock serializes journal completion. An existing result is
+  -- retained for audit; replay takes the outcome from the decision above.
   INSERT INTO platform.workflow_journal (tenant_id, environment_id, run_id, cursor, kind, canonical_bytes)
-    VALUES (tenant, environment, requested_run, requested_cursor, 'RESULT',
-            convert_to((decision = 'APPROVED')::text, 'UTF8'))
-    ON CONFLICT DO NOTHING;
+  SELECT tenant, environment, requested_run, requested_cursor, 'RESULT',
+         convert_to((decision = 'APPROVED')::text, 'UTF8')
+   WHERE NOT EXISTS (
+     SELECT 1 FROM platform.workflow_journal AS j
+      WHERE (j.tenant_id, j.environment_id, j.run_id, j.cursor, j.kind) =
+            (tenant, environment, requested_run, requested_cursor, 'RESULT')
+   );
   UPDATE platform.workflow_runs SET status = 'RUNNABLE', reason = NULL
    WHERE tenant_id = tenant AND environment_id = environment AND run_id = requested_run;
   RETURN true; END
