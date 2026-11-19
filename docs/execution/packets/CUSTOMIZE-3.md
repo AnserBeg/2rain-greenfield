@@ -16,12 +16,12 @@ Slice 1 includes the list-column work and saved list views in [PR #95](https://g
 - The next-free migration rule assigns 0034 after CRITFIX-A at the candidate base. The migration retains the patch table's existing policies, grants and append-only rules.
 - The orchestrator approved compiler-proved validation examples and the verifier change that reads them. Plan §5.12 and ADR-0012 still require the dedicated Formula Rule projection for tenant validation and calculated fields. The v3 adoption explicitly deferred that family to a tenant-customization language event ([4c](4c.md#adoption-boundary)).
 - Slice 5 is open. First-party operations such as Close and Reopen share a permission ID, so an action restriction must identify the operation. Field visibility must also govern query and read-back results.
-- Slice 6's independent candidate `e97ebd9f` uses the governed list count and exact top-level sums. CAD, USD and EUR are separate Items measures. Its focused compiler, assistant and upgrade-replay tests pass. PostgreSQL and browser evidence is pending.
+- Slice 6's preserved candidate `e97ebd9f` uses governed list counts and exact top-level sums, with separate CAD, USD and EUR measures. It requires surface reader 25. PostgreSQL and browser evidence is pending.
 
 ## Gates
 
 - Slice 0 passed all 16 jobs at `81e5937b`. [CI 44429125715](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44429125715). The candidate refreshed on UPGRADE-1 is in [CI 44434963983](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44434963983).
-- Slice 1 passed focused compiler, reader refusal, export and scripted drafting tests, typecheck and lint. GitHub CI will run the PostgreSQL and browser journeys and upgrade replay.
+- Slice 1 passed 24 focused tests, typecheck, lint and format. Regenerating the snapshot from 34 migrations reproduced the checked-in bytes.
 - [CI 44441030550](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44441030550) caught a declaration emit error in the list-count helper. The explicit return type passed local declaration emit.
 - Earlier CI passed the live saved-view PostgreSQL test and exposed the missing boot replay admission. The updated test passed locally and with all 71 shard-2 tests in [CI 44445972885](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44445972885).
 - CI attempt 2 exposed an ambiguous form label. Saved-view selects now have explicit label associations. The browser journey checks the order of data columns outside the bulk-selection header and passed locally in 3.8 minutes on the combined UPGRADE-1 tree.
@@ -35,8 +35,8 @@ Slice 1 includes the list-column work and saved list views in [PR #95](https://g
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
-  "base": "ef080dad017f0662bca31d7e3155d43d47922a4c",
-  "head": "dc51f9e8b192092a3e2482883b83d29338136b86",
+  "base": "8ffab635ac7e6ca5c288ed4e3265bebf79654141",
+  "head": "ad901f54b5392cfd59657e435447d325f842499c",
   "changedPaths": [
     "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/list-declaration.ts",
     "apps/web/src/surface-launcher.ts", "apps/web/src/surface-runtime.ts", "apps/web/test/browser/customize.composed-application.spec.ts",
