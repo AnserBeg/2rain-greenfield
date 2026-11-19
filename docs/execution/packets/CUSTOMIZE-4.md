@@ -23,12 +23,12 @@ Status — Candidate for integration. The orchestrator approved the patch-kind m
 
 ## Gates
 
-- [CI 44485274087](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44485274087) passed the linked receipt, line editing and archive refusal steps before the command response lost the status badge. Composed record commands now refresh the declared record on its own URL. The [complete Inspection browser journey](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44489745075/job/135442045268) passed, and its suite exposed a surface-only stock replay regression and stale migration-tip assertions. The follow-up preserves replay read-back and corrects the assertions. Migration 0038 and the PostgreSQL 16 snapshot follow verified release history.
+- [CI 44485274087](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44485274087) passed the linked receipt, line editing and archive refusal steps before the command response lost the status badge. Composed record commands now refresh the declared record on its own URL. The [complete Inspection browser journey](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44489745075/job/135442045268) passed, and its suite exposed a surface-only stock replay regression and stale migration-tip assertions. The follow-up preserves replay read-back and corrects the assertions. Migration 0039 follows the workflow corrective migration. The PostgreSQL 16 snapshot was regenerated from all 39 migrations.
 
 - [CI 44480152260](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44480152260) passed compiler, PostgreSQL and schema checks. The browser activated one draft and saved the lines, then failed the receipt link assertion. The follow-up waits for server-confirmed selections and opens the exact linked receipt. Migration 0037 follows the workflow migration and the snapshot was regenerated on PostgreSQL 16.
 
 - [Hosted PostgreSQL](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44467955198) passed at `19e8d8e0`, including the one-request draft, linked records, owned lines and an assistant-confirmed Quarantine with unchanged stock movements. The source scan found no Inspection-specific first-party branches.
-- [CI 44493620240](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44493620240) passed all 16 jobs at `d41e1085`, including the complete Inspection journey and the first-party stock replay. The posting impact changes on main required a new compiled release and language coverage ledger.
+- [CI 44500470480](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44500470480) passed all 16 jobs at `9b3107b1` over posting impacts, including the complete Inspection journey and first-party stock replay. Workflow review fixes on main took migration 0038.
 - The first-party release uses an ADR-0066 re-baseline. The prior pushed checkpoint is preserved by an annotated tag and remains in branch history.
 
 ## Gaps
@@ -41,8 +41,8 @@ Status — Candidate for integration. The orchestrator approved the patch-kind m
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-4",
-  "base": "d31e28314923c793a2f7458c86a8d682cf62b4b2",
-  "head": "cc3ab10fb43e6227994d74c702b0ca358da0bbce",
+  "base": "1d64f6977728c4829a68780a1308a3da2323c555",
+  "head": "674d801a0dc4acb4b01c637f26b1126c0fa2115b",
   "changedPaths": [
     "apps/web/package.json", "apps/web/src/component-registry.ts",
     "apps/web/src/customize-screen.ts", "apps/web/src/document-editor.ts",
@@ -50,7 +50,7 @@ Status — Candidate for integration. The orchestrator approved the patch-kind m
     "apps/web/src/message-catalog.ts", "apps/web/src/surface-composition.ts",
     "apps/web/src/surface-runtime.ts", "apps/web/test/browser/customize.composed-application.spec.ts",
     "apps/web/test/browser/message-catalog.spec.ts", "apps/web/test/surface-runtime-contract.test.ts",
-    "db/migrations/0038_customization_patch_kind_identifier.sql", "db/schema.snapshot.json",
+    "db/migrations/0039_customization_patch_kind_identifier.sql", "db/schema.snapshot.json",
     "packages/canonical-model/src/schemas.ts", "packages/canonical-model/src/surface-list.ts",
     "packages/canonical-model/src/surface-workspace.ts", "packages/compiler/src/conformance.ts",
     "packages/compiler/src/projections.ts", "packages/compiler/src/storage.ts",
