@@ -12,7 +12,8 @@ import {
   resolvePinnedInventoryMovementFieldRole,
   resolvePinnedInventoryPeriodLockStorage,
   resolvePinnedInventoryStorageReference,
-  resolvePinnedLegalEntityRelationSemantics,
+  resolveLegalEntityFamily,
+  resolveLegalEntityRelationSemantics,
   resolvePinnedLegalEntityMasterFieldRole,
   resolvePinnedLegalEntityFamily,
 } from './conformance.js';
@@ -637,9 +638,9 @@ export function lowerStorageTargetV1(
 
   const entities = packageRevision.entities.map(
     (entity): StorageEntityTarget => {
-      const legalEntityFamily = resolvePinnedLegalEntityFamily(
+      const legalEntityFamily = resolveLegalEntityFamily(
         packageRevision.package.packageId,
-        entity.entityId,
+        entity,
       );
       if (legalEntityFamily.status === 'undeclared') {
         throw new Error(
@@ -1054,6 +1055,9 @@ export function lowerStorageTargetV1(
   const entityById = new Map(
     entities.map((entity) => [entity.entityId, entity]),
   );
+  const authoredEntitiesById = new Map(
+    packageRevision.entities.map((entity) => [entity.entityId, entity]),
+  );
   const factEntity = entities.find(
     (entity) => entity.factStorage !== undefined,
   );
@@ -1211,22 +1215,11 @@ export function lowerStorageTargetV1(
     if (!source || !target) {
       throw new Error('validated relation target is missing');
     }
-    const sourceFamily = resolvePinnedLegalEntityFamily(
+    const semantics = resolveLegalEntityRelationSemantics(
       packageRevision.package.packageId,
-      source.entityId,
+      authoredEntitiesById.get(relation.sourceEntity.targetId)!,
+      authoredEntitiesById.get(relation.targetEntity.targetId)!,
     );
-    const targetFamily = resolvePinnedLegalEntityFamily(
-      packageRevision.package.packageId,
-      target.entityId,
-    );
-    const semantics =
-      sourceFamily.status === 'classified' &&
-      targetFamily.status === 'classified'
-        ? resolvePinnedLegalEntityRelationSemantics(
-            sourceFamily.familyId,
-            targetFamily.familyId,
-          )
-        : null;
     registerRelation({
       archiveBehavior: relation.archiveBehavior,
       nullable: !relation.required,

@@ -301,25 +301,36 @@ test(
               /customization_patches_shape/u,
               'a payload whose digest does not match is refused by the database',
             );
-            const unknownPatchBytes = Buffer.from(
-              JSON.stringify({ kind: 'unrecognizedTestKind' }),
-            );
-            await assert.rejects(
-              pool.query(
+            const insertPatch = (kind: string, payload: object) =>
+              pool.query<{ patch_id: string }>(
                 `INSERT INTO platform.customization_patches
                    SELECT tenant_id, environment_id, gen_random_uuid(),
-                          patch_version, 'unrecognizedTestKind', $1::bytea,
-                          encode(sha256($1::bytea), 'hex'), channel, authored_by,
+                          patch_version, $2, $3::bytea,
+                          encode(sha256($3::bytea), 'hex'), channel, authored_by,
                           base_package_id, base_package_version,
                           base_revision_id, base_release_root,
                           parent_revision_id, resulting_revision_id,
                           resulting_release_id, language_version,
                           normalization_profile_version, created_at
-                     FROM platform.customization_patches`,
-                [unknownPatchBytes],
-              ),
+                     FROM platform.customization_patches WHERE patch_id = $1
+                     RETURNING patch_id`,
+                [drafted.patchId, kind, Buffer.from(JSON.stringify(payload))],
+              );
+            const invalidKind = 'a'.repeat(65);
+            await assert.rejects(
+              insertPatch(invalidKind, { kind: invalidKind }),
               /customization_patches_shape/u,
-              'the database refuses an unrecognized patch kind with a valid digest',
+              'the database refuses an identifier over 64 characters',
+            );
+            await assert.rejects(
+              insertPatch('addField', { kind: 'addChoice' }),
+              /customization_patches_shape/u,
+              'the database refuses an identifier that differs from the payload',
+            );
+            await assert.rejects(
+              insertPatch('addField', {}),
+              /customization_patches_shape/u,
+              'the database refuses a missing payload kind',
             );
             assert.equal(await patchCount(pool), 1);
 
@@ -376,6 +387,38 @@ test(
               (visible.rows[0] as { count: number }).count,
               0,
               'another tenant sees no patch',
+            );
+
+            const unknownKind = 'unrecognizedTestKind';
+            const unknownPatch = { ...vehicle, kind: unknownKind };
+            const refusedKind = await opened.service.draft(
+              unknownPatch,
+              'declarativeEditor',
+            );
+            assert.equal(
+              refusedKind.status,
+              'unsupported',
+              'the write parser refuses the unrecognized patch kind',
+            );
+            assert.equal(
+              refusedKind.status === 'unsupported' &&
+                refusedKind.missingCapability,
+              unknownKind,
+            );
+            assert.equal(await patchCount(pool), 2);
+
+            // Model a newer writer's row with valid structural checks and digest.
+            const {
+              rows: [unknown],
+            } = await insertPatch(unknownKind, unknownPatch);
+            assert.ok(unknown);
+            await assert.rejects(
+              opened.service.approve(unknown.patch_id),
+              {
+                code: 'CUSTOMIZE_LINEAGE_NOT_REPRODUCIBLE',
+                message: /unrecognizedTestKind/u,
+              },
+              'replay names the unsupported kind and refuses approval',
             );
           } finally {
             await opened.close();

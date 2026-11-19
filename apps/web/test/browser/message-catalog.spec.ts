@@ -748,6 +748,8 @@ const DECLARED_NO_REAL_PATH_DRIVER: Readonly<
     'shows committed success, trust IDs and no retry form. That spec owns the ' +
     'governed release and PostgreSQL revocation fixture; this census also ' +
     'observes the registered message text.',
+  OPERATION_ARCHIVE_HAS_DEPENDENTS:
+    'The Customize browser journey attempts to archive a parent that still has active result lines.',
   INVALID_SURFACE_BINDING:
     'Reachable, and driven by a real request in surface-data-binding.spec.ts ' +
     'beside unsupported-query and unavailable-runtime-view controls. That ' +

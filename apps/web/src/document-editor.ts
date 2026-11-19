@@ -95,7 +95,7 @@ type Buffer = {
   id: string;
   owner: string;
   release: string;
-  scope: string;
+  scope: string | null;
   definition: SurfaceDocumentEditor;
   recordId: string | null;
   openedRecordId: string | null;
@@ -134,9 +134,10 @@ const editable = (
   definition: SurfaceDocumentEditor,
   record: SemanticRecordDto,
 ) =>
-  definition.editableStateIds.some(
-    (value) => value === record.values[definition.stateFieldId],
-  );
+  definition.stateFieldId === undefined ||
+  definition.editableStateIds?.some(
+    (state) => state === record.values[definition.stateFieldId!],
+  ) === true;
 const inputName = (row: DraftRow, field: string) => `draft:${row.id}:${field}`;
 /** An exact decimal as units at its own scale, or `null`. */
 function exactDecimal(value: string): { units: bigint; scale: number } | null {
@@ -162,13 +163,13 @@ async function getRecord(
   gateways: SurfaceRuntimeGateways,
   surface: CompiledSurfaceDefinition,
   id: string,
-  scope: string,
+  scope: string | null,
 ) {
   const definition = registeredSemanticQueryFromPinnedView(
     view,
     surface.dataSourceQueryId,
   );
-  if (!definition?.legalEntityScope)
+  if (!definition || (definition.legalEntityScope && scope === null))
     throw new Error('Explicit document scope unavailable');
   const result = await gateways.queryGateway.invoke(view, {
     schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
@@ -176,7 +177,9 @@ async function getRecord(
     arguments: {
       recordId: id,
       includeArchived: false,
-      [definition.legalEntityScope.operand.parameterId]: scope,
+      ...(definition.legalEntityScope
+        ? { [definition.legalEntityScope.operand.parameterId]: scope }
+        : {}),
     },
   });
   if (result.outcome !== 'exact' || result.records.length !== 1)
@@ -254,7 +257,7 @@ export async function documentEditor(
   surface: CompiledSurfaceDefinition,
   surfaces: readonly CompiledSurfaceDefinition[],
   url: URL,
-  scope: string,
+  scope: string | null,
   gateways: SurfaceRuntimeGateways,
   submission: SurfaceRuntimeSubmission | null = null,
   mode: 'page' | 'fragment' = 'page',
@@ -283,7 +286,7 @@ async function editorResponse(
   surface: CompiledSurfaceDefinition,
   surfaces: readonly CompiledSurfaceDefinition[],
   url: URL,
-  scope: string,
+  scope: string | null,
   gateways: SurfaceRuntimeGateways,
   submission: SurfaceRuntimeSubmission | null,
   mode: 'page' | 'fragment',
@@ -448,9 +451,16 @@ async function editorResponse(
     else buffer.lines.push(withDefaults(row(), definition.lineFields, now));
     buffers.set(buffer.id, buffer);
   }
+  const headerFields: SurfaceDocumentEditor['headerFields'] = [
+    ...definition.headerFields,
+    ...(buffer.header.record ? [] : (definition.headerRelations ?? [])),
+  ];
+  const headerRelations = definition.headerRelations
+    ? headerRelationInputs(view, recordRead)
+    : new Map();
   const rowsOf = (fieldId: string) =>
-    definition.headerFields.some((value) => value.fieldId === fieldId)
-      ? { rows: [buffer.header], fields: definition.headerFields }
+    headerFields.some((value) => value.fieldId === fieldId)
+      ? { rows: [buffer.header], fields: headerFields }
       : { rows: buffer.lines, fields: definition.lineFields };
   const findRow = (rowId: string) =>
     buffer.header.id === rowId
@@ -1283,10 +1293,9 @@ async function editorResponse(
     }
     return known;
   };
-  const referenceFields = [
-    ...definition.headerFields,
-    ...definition.lineFields,
-  ].filter((field) => field.reference);
+  const referenceFields = [...headerFields, ...definition.lineFields].filter(
+    (field) => field.reference,
+  );
   /**
    * Lookup results read in THIS request. An action's read is reused by the
    * render that follows it; a later request reads again under its own current
@@ -1467,13 +1476,28 @@ async function editorResponse(
     return null;
   };
   /** The create operation's declared inputs for one of the editor's surfaces. */
-  const inputsOf = (surfaceId: string) =>
-    new Map(
-      (
+  const inputsOf = (
+    surfaceId: string,
+  ): Map<string, CompiledSurfaceInputField> =>
+    new Map([
+      ...(
         operationFor(view, surfaceFor(surfaces, surfaceId), 'create')
           .inputFields ?? []
-      ).map((value) => [value.fieldId, value]),
-    );
+      ).map((value) => [value.fieldId, value] as const),
+      ...(surfaceId === definition.headerFormSurfaceId
+        ? [...headerRelations].map(
+            ([fieldId, relation]) =>
+              [
+                fieldId,
+                {
+                  fieldId,
+                  kind: 'textFieldType' as const,
+                  required: relation.required,
+                },
+              ] as const,
+          )
+        : []),
+    ]);
   /**
    * Required values still empty and decimals the contract cannot hold, named
    * the way the editor labels them. Save reports these together, beside each
@@ -1521,12 +1545,7 @@ async function editorResponse(
         }
       }
     };
-    check(
-      buffer.header,
-      definition.headerFields,
-      definition.headerFormSurfaceId,
-      '',
-    );
+    check(buffer.header, headerFields, definition.headerFormSurfaceId, '');
     for (const [index, line] of buffer.lines.entries())
       if (!line.removed)
         check(
@@ -1947,8 +1966,9 @@ async function editorResponse(
     const action = new URL(url);
     if (buffer.recordId) action.searchParams.set('record', buffer.recordId);
     const scopeQuery = readCompiledSurfaceDataBinding(view, surface).query
-      .legalEntityScope!;
-    action.searchParams.set(scopeQuery.operand.parameterId, scope);
+      .legalEntityScope;
+    if (scopeQuery && scope !== null)
+      action.searchParams.set(scopeQuery.operand.parameterId, scope);
     return action.pathname + action.search;
   };
   const shapes = new Map<
@@ -1962,14 +1982,11 @@ async function editorResponse(
     let known = shapes.get(surfaceId);
     if (!known) {
       const target = surfaceFor(surfaces, surfaceId);
-      const operation = operationFor(view, target, 'create');
       known = {
         compiled: new Map(
           (target.fields ?? []).map((value) => [value.fieldId, value]),
         ),
-        inputs: new Map(
-          (operation.inputFields ?? []).map((value) => [value.fieldId, value]),
-        ),
+        inputs: inputsOf(surfaceId),
       };
       shapes.set(surfaceId, known);
     }
@@ -2478,7 +2495,7 @@ async function editorResponse(
       let refused = false;
       try {
         if (!buffer.pending && buffer.withheld === 'none' && !buffer.create) {
-          const sources = referenceSources(definition);
+          const sources = referenceSources(headerFields, definition.lineFields);
           const before = snapshot(buffer, sources);
           const prior = new Map(
             [buffer.header, ...buffer.lines].map((row) => [
@@ -2489,12 +2506,7 @@ async function editorResponse(
           const headerInputs = inputsOf(definition.headerFormSurfaceId);
           const lineInputs = inputsOf(definition.lineFormSurfaceId);
           const refusedLabels = [
-            ...capture(
-              buffer.header,
-              definition.headerFields,
-              headerInputs,
-              submission,
-            ),
+            ...capture(buffer.header, headerFields, headerInputs, submission),
           ];
           for (const line of buffer.lines)
             if (!line.removed)
@@ -2732,10 +2744,11 @@ async function editorResponse(
                   view,
                   recordSurface,
                 );
-                params.set(
-                  binding.query.legalEntityScope!.operand.parameterId,
-                  scope,
-                );
+                if (binding.query.legalEntityScope && scope !== null)
+                  params.set(
+                    binding.query.legalEntityScope.operand.parameterId,
+                    scope,
+                  );
                 const location = `/?${params}`;
                 if (buffer.saveThen?.requested) {
                   try {
@@ -2954,7 +2967,7 @@ async function editorResponse(
     const required = (surfaceId: string, fieldId: string) =>
       shape(surfaceId).inputs.get(fieldId)?.required ? ' *' : '';
     const headerParts = await Promise.all(
-      definition.headerFields.map(async (field, index) => {
+      headerFields.map(async (field, index) => {
         const html = await control(
           definition.headerFormSurfaceId,
           buffer.header,
@@ -2984,17 +2997,13 @@ async function editorResponse(
     // whose summary names them (LOOK-1 round 2; never a required field). It
     // opens itself when one of its fields has a problem to show.
     const first = headerParts
-      .filter(
-        (_, index) => definition.headerFields[index]!.disclosure !== 'more',
-      )
+      .filter((_, index) => headerFields[index]!.disclosure !== 'more')
       .join('');
-    const moreFields = definition.headerFields.filter(
+    const moreFields = headerFields.filter(
       (field) => field.disclosure === 'more',
     );
     const more = headerParts
-      .filter(
-        (_, index) => definition.headerFields[index]!.disclosure === 'more',
-      )
+      .filter((_, index) => headerFields[index]!.disclosure === 'more')
       .join('');
     const header = more
       ? `${first}<details class="draft-more form-field--wide"${more.includes('aria-invalid="true"') ? ' open' : ''}><summary>More details <span class="draft-more__names">${h(moreFields.map((field) => field.label).join(', '))}</span></summary><div class="form-fields draft-header">${more}</div></details>`
@@ -3212,14 +3221,17 @@ function operationById(
   return null;
 }
 /** Every reference field, per row list: each is verified and derived from. */
-function referenceSources(definition: SurfaceDocumentEditor) {
+function referenceSources(
+  header: SurfaceDocumentEditor['headerFields'],
+  lines: SurfaceDocumentEditor['lineFields'],
+) {
   const sources = (fields: SurfaceDocumentEditor['headerFields']) =>
     new Set(
       fields.flatMap((field) => (field.reference ? [field.fieldId] : [])),
     );
   return {
-    header: sources(definition.headerFields),
-    lines: sources(definition.lineFields),
+    header: sources(header),
+    lines: sources(lines),
   };
 }
 function snapshot(
@@ -3270,6 +3282,21 @@ export function createValuesFor(
   );
 }
 
+function headerRelationInputs(
+  view: RequestRuntimeView,
+  surface: CompiledSurfaceDefinition,
+) {
+  const authority = readCompiledSurfaceDataBinding(
+    view,
+    surface,
+  ).relationInputs;
+  if (authority.status !== 'known')
+    throw new Error('Editor relation inputs unavailable');
+  return new Map(
+    authority.relationInputs.map((relation) => [relation.relationId, relation]),
+  );
+}
+
 function plan(
   view: RequestRuntimeView,
   surfaces: readonly CompiledSurfaceDefinition[],
@@ -3287,9 +3314,10 @@ function plan(
     fields: SurfaceDocumentEditor['headerFields'],
     label: string,
   ) => {
+    const surface = surfaceFor(surfaces, surfaceId);
     const operation = operationFor(
       view,
-      surfaceFor(surfaces, surfaceId),
+      surface,
       row.removed ? 'archive' : row.record ? 'update' : 'create',
     );
     const allowed = new Map(
@@ -3326,6 +3354,25 @@ function plan(
       if (!allowed.has(fieldId)) throw new Error('Editor field unavailable');
       values[fieldId] = value;
     }
+    const relations: Values = {};
+    if (!row.record && row !== buffer.header) {
+      relations[definition.parentRelationId] = buffer.header.id;
+    } else if (!row.record && definition.headerRelations) {
+      const admitted = headerRelationInputs(view, surface);
+      for (const field of definition.headerRelations) {
+        if (!admitted.has(field.fieldId))
+          throw new Error('Editor relation input unavailable');
+        const value = row.values[field.fieldId];
+        if (typeof value === 'string' && value)
+          relations[field.fieldId] = value;
+      }
+    }
+    if (
+      !row.record &&
+      operation.systemInputArgumentKey &&
+      buffer.scope === null
+    )
+      throw new Error('Explicit document scope unavailable');
     const input: Values = row.record
       ? {
           recordId: row.id,
@@ -3338,9 +3385,7 @@ function plan(
           ...(operation.systemInputArgumentKey
             ? { [operation.systemInputArgumentKey]: buffer.scope }
             : {}),
-          ...(row !== buffer.header
-            ? { relations: { [definition.parentRelationId]: buffer.header.id } }
-            : {}),
+          ...(Object.keys(relations).length ? { relations } : {}),
         };
     if (
       row.record &&
