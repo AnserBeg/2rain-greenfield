@@ -104,7 +104,10 @@ test('the v1 patch vocabulary is add-only', () => {
   ];
   assert.deepEqual([...CUSTOMIZATION_PATCH_KINDS].sort(), schemaKinds.sort());
   for (const kind of releasedKinds)
-    assert.ok(schemaKinds.some((current) => current === kind), kind);
+    assert.ok(
+      schemaKinds.some((current) => current === kind),
+      kind,
+    );
 });
 
 test('an unknown patch kind is unsupported and named, including inside a change set', () => {
