@@ -1,17 +1,25 @@
 import type * as RuntimeViewContract from '@north-star/runtime/request-runtime-view';
-import type { SurfaceLauncher } from '../../../packages/canonical-model/src/index.js';
+import type {
+  SurfaceLauncher,
+  SurfaceList,
+} from '../../../packages/canonical-model/src/index.js';
 import type { SharedListCoverage } from '../../../packages/runtime/src/list-behavior/index.js';
 import {
   registeredSemanticQueryFromPinnedView,
   SEMANTIC_QUERY_REQUEST_VERSION,
   type SemanticQueryGateway,
+  type SemanticRecordDto,
 } from '../../../packages/runtime/src/semantic-query-gateway.js';
+import { requireSharedListResult } from '../../../packages/runtime/src/list-behavior/index.js';
 
 import { escapeHtml as h } from './html.js';
 import { declaredIcon } from './navigation-icons.js';
+import { displayFieldValue } from './surface-composition.js';
 import {
   declaredListArguments,
   readDeclaredListState,
+  orderedColumns,
+  declaredCellText,
 } from './list-declaration.js';
 import { messageAttributes, messageBody } from './message-render.js';
 import {
@@ -39,6 +47,13 @@ export interface LauncherTile {
   readonly count: number | null;
   /** The opened view's own label, read beside its count. */
   readonly viewLabel: string | null;
+  readonly preview?: {
+    readonly list: SurfaceList;
+    readonly viewId: string | null;
+    readonly rows:
+      | readonly { readonly record: SemanticRecordDto; readonly href: string }[]
+      | null;
+  };
 }
 
 export interface LauncherRenderData {
@@ -184,6 +199,7 @@ export async function launcherTiles(
   now: Date,
   counted: ReadonlySet<string> | null = null,
   omitIneligible = true,
+  includePreviews = false,
 ): Promise<readonly LauncherTile[]> {
   const ordered = [...launcher.tiles].sort(
     (left, right) =>
@@ -199,6 +215,7 @@ export async function launcherTiles(
     const parameters = new URLSearchParams({ surface: tile.surface });
     if (tile.view) parameters.set('view', tile.view);
     let count: number | null = null;
+    let preview: LauncherTile['preview'];
     if (surface && list) {
       try {
         const binding = readCompiledSurfaceDataBinding(view, surface);
@@ -232,9 +249,48 @@ export async function launcherTiles(
             );
             count = coverage?.totalCount ?? null;
           }
+          if (eligible && includePreviews && tile.preview) {
+            const page = surfaces.find(
+              (candidate) =>
+                candidate.surfaceId === tile.preview!.recordSurface,
+            )!;
+            const targetParameter = companyParameterFor(view, page);
+            preview = { list, viewId: state.viewId, rows: null };
+            const result = requireSharedListResult(
+              await queryGateway.invoke(view, {
+                arguments: declaredListArguments(
+                  { ...list, pageSize: 5 },
+                  state,
+                  {
+                    mode: 'page',
+                    now,
+                    queryId: binding.query.queryId,
+                    scopeArguments: scope ? { [scope]: company } : {},
+                    viewId: state.viewId,
+                  },
+                ),
+                queryId: binding.query.queryId,
+                schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
+              }),
+            );
+            preview = {
+              list,
+              viewId: state.viewId,
+              rows: result.records.map((record) => {
+                const parameters = new URLSearchParams({
+                  surface: page.surfaceId,
+                  record: record.recordId,
+                });
+                if (targetParameter && company)
+                  parameters.set(targetParameter, company);
+                return { record, href: `/?${parameters}` };
+              }),
+            };
+          }
         }
       } catch {
-        count = null;
+        // A failed preview keeps the count already read from the same queue.
+        if (!preview) count = null;
       }
     }
     tiles.push(
@@ -244,6 +300,7 @@ export async function launcherTiles(
         description: tile.description,
         href: `/?${parameters.toString()}`,
         count,
+        ...(preview ? { preview } : {}),
         viewLabel:
           list?.views.find((candidate) => candidate.viewId === tile.view)
             ?.label ?? null,
@@ -367,7 +424,15 @@ function declaresPrimaryAction(surface: CompiledSurfaceDefinition): boolean {
 export function renderLauncherTiles(
   surface: CompiledSurfaceDefinition,
   data: LauncherRenderData,
+  view?: RuntimeViewContract.RequestRuntimeView,
 ): string {
+  const present = view
+    ? (
+        record: SemanticRecordDto,
+        fieldId: string,
+        value: Parameters<typeof displayFieldValue>[3],
+      ) => displayFieldValue(view, record, fieldId, value)
+    : undefined;
   // Each tile shows its declared icon (LOOK-1 round 3), as its queue does.
   const icons = new Map<string, string | undefined>(
     (surface.launcher?.tiles ?? []).map((tile) => [
@@ -375,6 +440,32 @@ export function renderLauncherTiles(
       tile.icon,
     ]),
   );
+  const previews = data.tiles
+    .filter((tile) => tile.preview)
+    .map((tile) => {
+      const preview = tile.preview!;
+      const columns = orderedColumns(preview.list, preview.viewId);
+      const body =
+        preview.rows === null
+          ? '<p role="status">Queue rows are unavailable. Open the queue to try again.</p>'
+          : preview.rows.length === 0
+            ? '<p>No work is waiting in this queue.</p>'
+            : `<div class="data-table-wrap"><table><thead><tr>${columns.map((column) => `<th scope="col">${h(column.label)}</th>`).join('')}</tr></thead><tbody>${preview.rows
+                .map(
+                  ({ record, href }) =>
+                    `<tr data-record-id="${h(record.recordId)}">${columns
+                      .map((column) => {
+                        const value = h(
+                          declaredCellText(column, record, present) ?? '—',
+                        );
+                        return `<td data-column-label="${h(column.label)}">${column.role === 'title' ? `<a class="record-link" href="${h(href)}">${value}</a>` : value}</td>`;
+                      })
+                      .join('')}</tr>`,
+                )
+                .join('')}</tbody></table></div>`;
+      return `<section class="panel launcher-queue-preview" aria-label="${h(tile.label)}"><header class="panel__heading"><h2>${h(tile.label)}</h2><a href="${h(tile.href)}">View queue</a></header>${body}</section>`;
+    })
+    .join('');
   return `<nav class="launcher-tiles" aria-label="${h(surface.label)}"><ul>${data.tiles
     .map(
       (tile) =>
@@ -390,12 +481,12 @@ export function renderLauncherTiles(
           .join('')}</ul></section>`
       : ''
   }${
-    // A launcher searched from the top bar (Today) says where to start,
-    // centred under its queues (LOOK-1 round 3, ruling: no list query here).
-    declaresPrimaryAction(surface)
+    // A declared queue preview supplies the work under the tiles.
+    // A launcher without one keeps its short starting instruction.
+    declaresPrimaryAction(surface) || previews
       ? ''
       : '<p class="launcher-empty">Pick a queue to start, or search for any order, document or item above.</p>'
-  }`;
+  }${previews}`;
 }
 
 /**
