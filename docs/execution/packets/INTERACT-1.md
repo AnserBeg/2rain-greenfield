@@ -21,6 +21,7 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
 - Additive v6 keys have compiler accept/refuse coverage; release lineage and coverage are re-derived (ADR-0066).
 - Normal git metadata is read-only; isolated metadata in `/tmp` tracks this chartered worktree.
 - Exact-minute browser fills canonicalize zero seconds without changing the instant (CI reproduction passed).
+- CI 44423202139 exposed the old no-action harness assumption; its replacement pins the governed Post and rejects a forged generic update in focused units.
 - Mid-packet checkpoint: no whole-app review trigger; no new correctness domain or fan-out.
 
 ```record-claim
@@ -28,7 +29,7 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "INTERACT-1",
   "base": "c31f17df1ebc3bfca7819ef34e60e0fb43160cba",
-  "head": "0d5da9e164a20cbab400ae0dd235191346141ab8",
+  "head": "220398ebee612a9906190d9b2c60d43555c3d689",
   "changedPaths": [
     "apps/web/release/app.authored.json",
     "apps/web/release/app.compiled.json",
@@ -44,12 +45,18 @@ No owned Critical-path changes. Phase 3 of the loop UX plan.
     "packages/domain/src/sales/workspace.ts",
     "test/compiler/g2-module-conformance.test.ts",
     "test/fixtures/g2/language-conformance/coverage-decisions.json",
-    "test/unit/canonical-model/surface-composition.test.ts"
+    "test/helpers/assert-composed-inventory.ts",
+    "test/unit/canonical-model/surface-composition.test.ts",
+    "test/unit/inventory-definition.test.ts"
   ],
   "symbols": [
     {
       "path": "apps/web/src/surface-composition.ts",
       "name": "stockImpactRows"
+    },
+    {
+      "path": "test/helpers/assert-composed-inventory.ts",
+      "name": "assertStockPostingActions"
     }
   ]
 }
