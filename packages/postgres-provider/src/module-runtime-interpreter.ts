@@ -6479,7 +6479,9 @@ function optionalBoolean(
   return value;
 }
 
-function requiredSearchText(value: ImmutableJsonValue | undefined): string {
+export function requiredSearchText(
+  value: ImmutableJsonValue | undefined,
+): string {
   if (typeof value !== 'string' || value.trim() === '' || value.length > 240) {
     throw failure('MODULE_INPUT_MALFORMED', 'text must be non-blank');
   }
@@ -6504,7 +6506,7 @@ function optionalUuid(
   return value === undefined ? null : requiredUuid(value, name);
 }
 
-function requiredUuid(value: unknown, name: string): string {
+export function requiredUuid(value: unknown, name: string): string {
   if (typeof value !== 'string' || !uuidPattern.test(value)) {
     throw failure('MODULE_INPUT_MALFORMED', `${name} must be a UUID`);
   }
