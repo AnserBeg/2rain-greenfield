@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { RECEIVING_CAPABILITY_ID } from '../../packages/postgres-provider/src/goods-receipt.js';
 import { fulfillmentTable } from '../../packages/postgres-provider/src/fulfillment.js';
 import { parseServerTiming } from '../../packages/postgres-provider/src/request-work-meter.js';
 import { governedStorageTarget } from '../helpers/governed-storage-target.js';
@@ -215,22 +216,26 @@ test(
       // A Confirm whose receipt commits together with a policy change: the
       // step is answered with the session's own retry, nothing of the record,
       // and the retry finishes with the same request keys -- one receipt.
-      const opened = await serve(truckPage, { compositionAction: action });
-      const token = hidden(opened.html, 'taskToken');
-      assert.ok(token, 'the task opens');
-      const review = await serve(truckPage, {
-        compositionAction: action,
-        taskStage: 'prepare',
-        taskToken: token,
-        [input('receive_lines_location')]: scenario.location,
-        [input('receive_lines_currency')]: 'CAD',
-        [input('receive_lines_packing_slip')]: 'PS-RECOVER',
-        [input('receive_lines_notes')]: '',
-        [`${input('receive_lines_quantity')}@${first}`]: '1',
-        [`${input('receive_lines_cost')}@${first}`]: '2.40',
-      });
-      const prepared = hidden(review.html, 'preparedId');
-      assert.ok(prepared, 'the task reviews');
+      const prepareReceipt = async (packingSlip: string) => {
+        const opened = await serve(truckPage, { compositionAction: action });
+        const token = hidden(opened.html, 'taskToken');
+        assert.ok(token, 'the task opens');
+        const review = await serve(truckPage, {
+          compositionAction: action,
+          taskStage: 'prepare',
+          taskToken: token,
+          [input('receive_lines_location')]: scenario.location,
+          [input('receive_lines_currency')]: 'CAD',
+          [input('receive_lines_packing_slip')]: packingSlip,
+          [input('receive_lines_notes')]: '',
+          [`${input('receive_lines_quantity')}@${first}`]: '1',
+          [`${input('receive_lines_cost')}@${first}`]: '2.40',
+        });
+        const prepared = hidden(review.html, 'preparedId');
+        assert.ok(prepared, 'the task reviews');
+        return { token, prepared };
+      };
+      const { token, prepared } = await prepareReceipt('PS-RECOVER');
       await fixture.pool.query(
         `CREATE FUNCTION public.speed_bump_policy() RETURNS trigger
            LANGUAGE plpgsql SECURITY DEFINER AS $$ BEGIN
@@ -275,6 +280,62 @@ test(
       });
       assert.match(retried.html, /Receive: done/u);
       assert.equal(await receipts(), committed, 'the retry reuses its keys');
+
+      // Revoke read permission with the posting commit, after preflight. A
+      // sequence witnesses the specific read-back denial even after rollback.
+      const next = await prepareReceipt('PS-EVIDENCE');
+      await fixture.pool.query(`
+        CREATE FUNCTION public.revoke_receipt_read() RETURNS trigger
+          LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$ BEGIN
+            UPDATE platform.current_policy_permission_grants SET revoked_at = now()
+             WHERE tenant_id = NEW.tenant_id AND environment_id = NEW.environment_id
+               AND permission_id = '${ns}:permission.goods_receipt_read' AND revoked_at IS NULL;
+            RETURN NEW; END $$;
+        CREATE TRIGGER revoke_receipt_read AFTER INSERT ON platform.semantic_operation_receipts
+          FOR EACH ROW WHEN (NEW.action_id = '${RECEIVING_CAPABILITY_ID}')
+          EXECUTE FUNCTION public.revoke_receipt_read();
+        CREATE SEQUENCE public.receipt_denial_attempt;
+        CREATE FUNCTION public.refuse_receipt_denial() RETURNS trigger
+          LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$ BEGIN
+            PERFORM nextval('public.receipt_denial_attempt');
+            RAISE EXCEPTION 'receipt denial evidence refused'; END $$;
+        CREATE TRIGGER refuse_receipt_denial BEFORE INSERT ON platform.trust_action_invocations
+          FOR EACH ROW WHEN (NEW.outcome = 'DENIED' AND NEW.action_id = '${ns}:query.goods_receipt_get')
+          EXECUTE FUNCTION public.refuse_receipt_denial()`);
+      const postCount = async () =>
+        (
+          await fixture.pool.query<{ count: number }>(
+            'SELECT count(*)::int FROM platform.semantic_operation_receipts WHERE action_id = $1',
+            [RECEIVING_CAPABILITY_ID],
+          )
+        ).rows[0]!.count;
+      const before = await postCount();
+      const failed = await serve(truckPage, {
+        compositionAction: action,
+        preparedId: next.prepared,
+        taskStage: 'confirm',
+        taskToken: next.token,
+      });
+      assert.equal(
+        await postCount(),
+        before + 1,
+        'Confirm committed the posting',
+      );
+      assert.equal(
+        (
+          await fixture.pool.query(
+            'SELECT is_called FROM public.receipt_denial_attempt',
+          )
+        ).rows[0]?.is_called,
+        true,
+        'the read-back denial write was attempted',
+      );
+      assert.equal(
+        failed.status,
+        500,
+        'missing denial evidence must fail Confirm',
+      );
+      assert.doesNotMatch(failed.html, /data-task-recovery/u);
     });
   },
 );
