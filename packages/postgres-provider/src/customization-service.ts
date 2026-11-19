@@ -81,6 +81,12 @@ export const AUTHORING_CHANNELS = [
 ] as const;
 export type AuthoringChannel = (typeof AUTHORING_CHANNELS)[number];
 
+const UPGRADE_PATCH_KINDS: ReadonlySet<CustomizationPatch['kind']> = new Set([
+  'addField',
+  'arrangeLayout',
+  'saveListView',
+]);
+
 export type CustomizationRefusalCode =
   | 'CUSTOMIZE_NOT_STARTED'
   | 'CUSTOMIZE_BASE_STALE'
@@ -270,14 +276,11 @@ export class PostgresCustomizationService {
       if (
         !baseReleaseId ||
         active.chain.length === 0 ||
-        active.chain.some(
-          (record) =>
-            record.kind !== 'addField' && record.kind !== 'arrangeLayout',
-        )
+        active.chain.some((record) => !UPGRADE_PATCH_KINDS.has(record.kind))
       ) {
         throw new CustomizationServiceRefusal(
           'CUSTOMIZE_BASE_MOVED',
-          'this patch chain is outside the supported field and layout upgrade',
+          'this patch chain contains a kind that cannot be replayed on a new first-party base',
         );
       }
       const sourceBase = parseNormalizedApplicationPackageJson(

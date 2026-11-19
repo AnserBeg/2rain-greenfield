@@ -10,6 +10,108 @@ import {
 
 const equipmentList = 'northstar.app:surface.custom_equipment_list';
 
+test('a saved Location view keeps its columns, ordering and filtered count until rollback', async ({
+  page,
+}) => {
+  test.setTimeout(600_000);
+  page.setDefaultTimeout(30_000);
+  await withEphemeralPostgres(
+    'customize-saved-view',
+    async ({ connection }) => {
+      const app = await startComposedApplication({
+        databaseUrl: `postgresql://${String(connection.user)}@${String(connection.host)}:${String(connection.port)}/${String(connection.database)}`,
+        tenantSlug: 'customize-view',
+        seedProfile: 'distributor',
+        port: 0,
+      });
+      try {
+        const surfaceId = 'northstar.app:surface.location_list';
+        const listUrl = `${app.baseUrl}/?surface=${encodeURIComponent(surfaceId)}`;
+        const warehouse = 'northstar.app:option.warehouse';
+        await page.goto(listUrl);
+        const grid = page.locator('[data-declared-list="true"]');
+        await grid.getByLabel('Type', { exact: true }).selectOption(warehouse);
+        await grid.getByRole('button', { name: 'Apply', exact: true }).click();
+        const expected = await grid
+          .locator('[data-list-total]')
+          .getAttribute('data-list-total');
+        expect(Number(expected)).toBeGreaterThan(0);
+
+        await page.goto(`${app.baseUrl}/?customize`);
+        const choose = page.locator('[data-customize-form="saveListView"]');
+        await choose.getByLabel('List').selectOption(surfaceId);
+        await choose.getByRole('button', { name: 'Set up view' }).click();
+        const editor = page.locator('[data-customize-form="savedView"]');
+        await editor.getByLabel('View name').fill('Managed warehouses');
+        await editor.getByLabel('Position of Code').fill('2');
+        await editor.getByLabel('Position of Name').fill('1');
+        await editor.getByLabel('Hide Type').check();
+        await editor.getByLabel('Hide Status reason').check();
+        await editor
+          .getByLabel('Sort by', { exact: true })
+          .selectOption({ label: 'Name' });
+        await editor
+          .locator('[name="view_sort_direction_1"]')
+          .selectOption('descending');
+        await editor
+          .getByLabel('Type', { exact: true })
+          .selectOption(warehouse);
+        await editor
+          .getByRole('button', { name: 'Draft view' })
+          .click({ timeout: 180_000 });
+        await expect(page.locator('[data-customize-diff]')).toContainText(
+          'Type is Warehouse',
+        );
+        await page
+          .getByRole('button', { name: 'Approve', exact: true })
+          .click({ timeout: 180_000 });
+        await page
+          .getByRole('button', { name: 'Activate now' })
+          .click({ timeout: 180_000 });
+        await expect(
+          page.locator('[data-customize-result="activated"]'),
+        ).toBeVisible({ timeout: 180_000 });
+
+        await page.goto(listUrl);
+        const saved = page
+          .getByRole('navigation', { name: 'Views' })
+          .getByRole('link', { name: /^Managed warehouses\b/u });
+        await expect(saved.locator('[data-view-count]')).toHaveText(expected!);
+        await saved.click();
+        await expect(saved).toHaveAttribute('aria-current', 'page');
+        await expect(grid.locator('[data-list-total]')).toHaveAttribute(
+          'data-list-total',
+          expected!,
+        );
+        const headings = grid
+          .getByRole('columnheader')
+          .filter({ hasNotText: /^(?:Select|Actions)$/u });
+        await expect(headings.first()).toHaveAccessibleName(/^Name\b/u);
+        await expect(headings.nth(1)).toHaveAccessibleName(/^Code\b/u);
+        await expect(headings.first()).toHaveAttribute(
+          'aria-sort',
+          'descending',
+        );
+        await expect(headings.filter({ hasText: /^Type\b/u })).toHaveCount(0);
+
+        await page.goto(`${app.baseUrl}/?customize`);
+        await page
+          .getByRole('button', { name: 'Roll back the latest change' })
+          .click({ timeout: 180_000 });
+        await expect(
+          page.locator('[data-customize-result="rolledBack"]'),
+        ).toBeVisible({ timeout: 180_000 });
+        await page.goto(listUrl);
+        await expect(saved).toHaveCount(0);
+        await expect(headings.first()).toHaveAccessibleName(/^Code\b/u);
+      } finally {
+        await app.close();
+      }
+    },
+    LINEAGE_INSTALL_VOLUME,
+  );
+});
+
 /**
  * The non-developer path (CUSTOMIZE slices 3 and 5): on the Customize screen a
  * person describes Equipment, reads the plain diff, approves and activates it,
@@ -204,6 +306,60 @@ for (const target of ['purchase_order', 'party'] as const) {
           await expect(
             panel.getByText('Morgan Bell', { exact: true }),
           ).toBeVisible();
+          if (target === 'purchase_order') {
+            await page.goto(app.baseUrl + '/?customize');
+            const chooser = page.locator(
+              '[data-customize-form="arrangeLayout"]',
+            );
+            await chooser
+              .locator('[name="arrange"]')
+              .selectOption('northstar.app:surface.purchase_order_list');
+            await chooser
+              .getByRole('button', { name: 'Choose columns' })
+              .click();
+            const arrangement = page.locator(
+              '[data-customize-form="arrangeColumns"]',
+            );
+            for (const label of ['Person ordering', 'Notes']) {
+              await arrangement
+                .getByLabel('Hide ' + label, { exact: true })
+                .uncheck();
+            }
+            await arrangement
+              .getByRole('button', { name: 'Draft this arrangement' })
+              .click();
+            await page
+              .getByRole('button', { name: 'Approve', exact: true })
+              .click({ timeout: 180_000 });
+            await page
+              .getByRole('button', { name: 'Activate now' })
+              .click({ timeout: 180_000 });
+            await expect(
+              page.locator('[data-customize-result="activated"]'),
+            ).toBeVisible({ timeout: 180_000 });
+            await page.goto(surface('list'));
+            const grid = page.locator('[data-declared-list="true"]');
+            const personOrdering = grid.getByRole('columnheader', {
+              name: /^Person ordering\b/u,
+            });
+            const notes = grid.getByRole('columnheader', { name: /^Notes\b/u });
+            await expect(personOrdering).toBeVisible();
+            await expect(notes).toBeVisible();
+            await expect(
+              grid.getByRole('cell', { name: 'Morgan Bell', exact: true }),
+            ).toBeVisible();
+            await page.goto(app.baseUrl + '/?customize');
+            await page
+              .getByRole('button', { name: 'Roll back the latest change' })
+              .click();
+            await expect(
+              page.locator('[data-customize-result="rolledBack"]'),
+            ).toBeVisible({ timeout: 180_000 });
+            await page.goto(surface('list'));
+            await expect(grid.getByRole('columnheader').first()).toBeVisible();
+            await expect(personOrdering).toHaveCount(0);
+            await expect(notes).toHaveCount(0);
+          }
         } finally {
           await app.close();
         }

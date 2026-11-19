@@ -3,10 +3,17 @@ import test from 'node:test';
 
 import {
   DRAFT_CUSTOMIZATION_TOOL,
+  applyCustomizationPatches,
+  customizationTargets,
   draftPatchFromRequest,
   draftingSystemPrompt,
   type DraftingModel,
 } from '../../packages/customization/src/index.js';
+import { readFileSync } from 'node:fs';
+import {
+  normalizeApplicationPackage,
+  type SurfaceList,
+} from '../../packages/canonical-model/src/index.js';
 
 const targets = Object.freeze({
   choiceFields: [],
@@ -142,4 +149,92 @@ test('the prompt names only targets the §10.6 rules allow', () => {
   assert.match(prompt, /northstar\.app:surface\.party_list/u);
   assert.match(prompt, /\(none yet\)/u);
   assert.doesNotMatch(prompt, /inventory_movement/u);
+});
+
+test('a scripted request to add a standard field as a list column uses its offered target', async () => {
+  const base = JSON.parse(
+    readFileSync('apps/web/release/app.authored.json', 'utf8'),
+  ) as Record<string, unknown>;
+  const offered = customizationTargets(
+    normalizeApplicationPackage(base) as unknown as Parameters<
+      typeof customizationTargets
+    >[0],
+  );
+  const input = {
+    kind: 'arrangeLayout',
+    surface: 'northstar.app:surface.item_list',
+    order: ['northstar.app:field.item_standard_cost_usd'],
+  };
+  const seen: { system: string; toolNames: string[]; turns: number }[] = [];
+  const outcome = await draftPatchFromRequest(
+    scripted([{ toolInput: input }], seen),
+    'Show standard cost in US dollars first on the product list',
+    offered,
+  );
+  assert.equal(outcome.status, 'parsed');
+  assert.match(
+    seen[0]!.system,
+    /item_standard_cost_usd "Standard cost \(USD\)" \(available, hidden\)/u,
+  );
+  if (outcome.status !== 'parsed') return;
+  const applied = applyCustomizationPatches(base, [outcome.patch]);
+  assert.equal(applied.status, 'applied');
+  if (applied.status !== 'applied') return;
+  const model = normalizeApplicationPackage(applied.authored);
+  const surface = model.surfaces.find((s) => s.surfaceId === input.surface)!;
+  assert.equal(
+    'list' in surface && (surface.list as SurfaceList).columns[0]?.field,
+    input.order[0],
+  );
+});
+
+test('a scripted request to save a warehouse view uses its declared columns and filter option', async () => {
+  const definition = JSON.parse(
+    readFileSync('apps/web/release/app.authored.json', 'utf8'),
+  ) as Record<string, unknown>;
+  const offered = customizationTargets(
+    normalizeApplicationPackage(definition) as unknown as Parameters<
+      typeof customizationTargets
+    >[0],
+  );
+  const input = {
+    kind: 'saveListView' as const,
+    surface: 'northstar.app:surface.location_list',
+    label: 'Warehouses',
+    columns: [
+      'northstar.app:list_column.location_list_name',
+      'northstar.app:list_column.location_list_code',
+    ],
+    sort: [
+      {
+        column: 'northstar.app:list_column.location_list_name',
+        direction: 'descending' as const,
+      },
+    ],
+    filters: [
+      {
+        field: 'northstar.app:field.location_type',
+        value: 'northstar.app:option.warehouse',
+      },
+    ],
+  };
+  const seen: { system: string; toolNames: string[]; turns: number }[] = [];
+  const outcome = await draftPatchFromRequest(
+    scripted([{ toolInput: input }], seen),
+    'Give me a Warehouses tab on Locations with name then code, names from Z to A.',
+    offered,
+  );
+  assert.deepEqual(outcome, { status: 'parsed', patch: input });
+  assert.match(
+    seen[0]!.system,
+    /location_list_code "Code" \(required title\)/u,
+  );
+  assert.match(
+    seen[0]!.system,
+    /location_type "Type": northstar.app:option.warehouse "Warehouse"/u,
+  );
+  assert.equal(
+    applyCustomizationPatches(definition, [outcome.patch]).status,
+    'applied',
+  );
 });
