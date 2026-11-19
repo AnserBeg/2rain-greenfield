@@ -236,7 +236,31 @@ export class PostgresWorkflowExecution {
         }
         const { call, cursor } = decision;
         if (call.kind === 'requestApproval') {
-          const plan = canonicalize(call);
+          if (
+            !('operationId' in call) ||
+            (typeof call.input === 'object' &&
+              call.input !== null &&
+              'legalEntityId' in call.input &&
+              call.input.legalEntityId !== scopedRun.legal_entity_id)
+          ) {
+            await setStatus(
+              client,
+              current,
+              'SUSPENDED',
+              'approval-action-or-company-refused',
+            );
+            return null;
+          }
+          const plan = canonicalize({
+            request: call,
+            companyId: scopedRun.legal_entity_id,
+            cursor,
+            fence: current.execution_fence,
+            pointerId: current.pointer_id,
+            releaseId: current.release_id,
+            releaseRoot: current.release_root,
+            runId: current.run_id,
+          });
           if (!journal.pending)
             await insertJournal(client, current, cursor, 'REQUEST', call);
           await client.query(
@@ -520,6 +544,8 @@ export class PostgresWorkflowExecution {
       let sdk: ReturnType<typeof generateWorkflowSdk>;
       try {
         sdk = generateWorkflowSdk(view, run.grants);
+        if (sha256(sdk.declarations) !== run.sdk_digest)
+          sdk = generateWorkflowSdk(view, run.grants, true);
       } catch (cause) {
         throw new WorkflowEffectRefusal('unavailable-sdk-artifact', { cause });
       }
@@ -715,7 +741,7 @@ async function loadJournal(
          ON (a.tenant_id, a.environment_id, a.run_id, a.cursor) =
             (j.tenant_id, j.environment_id, j.run_id, j.cursor)
         AND a.fence = $4 AND j.kind = 'REQUEST'
-        AND a.plan_digest = encode(sha256(j.canonical_bytes), 'hex') AND a.plan = j.canonical_bytes
+        AND convert_from(a.plan, 'UTF8')::jsonb->'request' = convert_from(j.canonical_bytes, 'UTF8')::jsonb
         AND a.decision_request_id IS NOT NULL AND a.status IN ('APPROVED', 'DECLINED')
       WHERE j.tenant_id = $1 AND j.environment_id = $2 AND j.run_id = $3 AND j.kind <> 'CONTROL'
       ORDER BY j.cursor, j.kind`,

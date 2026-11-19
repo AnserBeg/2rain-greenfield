@@ -182,10 +182,11 @@ test(
               }),
             /Workflow query grant does not resolve/,
           );
-          const body = `sdk.operation('${operation}', { recordId: event.receiptId, values: {
+          const createReviewInput = `{ recordId: event.receiptId, values: {
         'northstar.app:field.custom_receipt_review_name': 'Pending',
         'northstar.app:field.custom_receipt_review_receipt_reference': event.receiptId
-      }});`;
+      }}`;
+          const body = `sdk.operation('${operation}', ${createReviewInput});`;
           const compiled = compileWorkflowBody(body, sdk);
           // Fixture admission uses privileged storage until the verifier slice.
           assert.equal(await consumer.claim(scope), 0);
@@ -841,7 +842,7 @@ test(
             enrolled.releaseId,
             'human-approval',
             compileWorkflowBody(
-              `if (sdk.requestApproval('Escalate')) { ${body} }`,
+              `if (sdk.requestApproval('Escalate', '${operation}', ${createReviewInput})) { ${body} }`,
               sdk,
             ).executable,
           );
@@ -925,6 +926,85 @@ test(
           assert.equal(await journalCount(pool, ordinary, 'RESULT'), 1);
           await restarted.step(scope, ordinary);
           assert.equal(await journalCount(pool, ordinary, 'REQUEST'), 2);
+
+          await t.test(
+            'a release approver needs live grants for the plan company and exact action',
+            async () => {
+              const authorityProbe = await startApproval();
+              const plan = await pendingApproval(pool, authorityProbe);
+              const decide = () =>
+                decideApproval(
+                  runtimePool,
+                  operator,
+                  authorityProbe,
+                  plan.plan_digest,
+                  plan.fence,
+                  'APPROVED',
+                );
+              const list = () =>
+                withTrustedRequestTransaction(
+                  runtimePool,
+                  operator,
+                  async (client) =>
+                    (
+                      await client.query<{ run_id: string }>(
+                        'SELECT run_id FROM platform.workflow_approval_worklist($1)',
+                        [authorityProbe],
+                      )
+                    ).rows,
+                );
+              const setCompany = (company: string | null) =>
+                pool.query(
+                  `UPDATE platform.current_policy_memberships SET legal_entity_id = $4
+                WHERE tenant_id = $1 AND environment_id = $2 AND principal_id = $3`,
+                  [tenantId, environmentId, operator.principalId, company],
+                );
+              const setCreateGrant = (revoked: boolean) =>
+                pool.query(
+                  `UPDATE platform.current_policy_permission_grants AS grant_row
+                  SET revoked_at = CASE WHEN $5 THEN clock_timestamp() ELSE NULL END
+                 FROM platform.current_policy_memberships AS membership
+                WHERE (grant_row.tenant_id, grant_row.environment_id, grant_row.role_id) =
+                      (membership.tenant_id, membership.environment_id, membership.role_id)
+                  AND membership.tenant_id = $1 AND membership.environment_id = $2
+                  AND membership.principal_id = $3 AND grant_row.permission_id = $4`,
+                  [
+                    tenantId,
+                    environmentId,
+                    operator.principalId,
+                    bindings[0]!.permissionId,
+                    revoked,
+                  ],
+                );
+              try {
+                await setCompany(randomUUID());
+                assert.equal(
+                  await decide(),
+                  false,
+                  'a release approver for another company recorded a decision',
+                );
+                assert.deepEqual(await list(), []);
+                await setCompany(COMPANY);
+                await setCreateGrant(true);
+                assert.equal(
+                  await decide(),
+                  false,
+                  'a release approver without the exact action grant recorded a decision',
+                );
+                assert.deepEqual(await list(), []);
+                assert.equal(
+                  await journalCount(pool, authorityProbe, 'RESULT'),
+                  0,
+                );
+                assert.equal(await runStatus(pool, authorityProbe), 'WAITING');
+                await setCreateGrant(false);
+                assert.deepEqual(await list(), [{ run_id: authorityProbe }]);
+              } finally {
+                await setCreateGrant(false);
+                await setCompany(null);
+              }
+            },
+          );
 
           await t.test(
             'R2 a definition verified after approval cannot enter replay',
@@ -1419,15 +1499,7 @@ async function assertApprovalBoundary(
     tenant_id: operator.tenantId,
     environment_id: operator.environmentId,
   };
-  const fence = (
-    await pool.query<{ execution_fence: string }>(
-      'SELECT execution_fence FROM platform.workflow_runs WHERE run_id = $1',
-      [runId],
-    )
-  ).rows[0]!.execution_fence;
-  const digest = sha256(
-    canonicalize({ kind: 'requestApproval', summary: 'Escalate' }),
-  );
+  const { fence, plan_digest: digest } = await pendingApproval(pool, runId);
   await withWorkflowTransaction(workerPool, scope, async (client) => {
     const { rows } = await client.query<{
       insert_status: boolean;
@@ -1445,16 +1517,13 @@ async function assertApprovalBoundary(
     });
   });
   const decide = (planDigest: string, activeFence: string) =>
-    withTrustedRequestTransaction(
+    decideApproval(
       runtimePool,
       operator,
-      async (client) =>
-        (
-          await client.query<{ decided: boolean }>(
-            'SELECT platform.workflow_decide_approval($1, 0, $2, $3, $4) AS decided',
-            [runId, activeFence, planDigest, decision],
-          )
-        ).rows[0]!.decided,
+      runId,
+      planDigest,
+      activeFence,
+      decision,
     );
   assert.equal(await decide(sha256('{}'), fence), false);
   assert.equal(await decide(digest, String(Number(fence) - 1)), false);
@@ -1468,5 +1537,35 @@ async function assertApprovalBoundary(
       )
     ).rows[0]?.decided_by,
     operator.principalId,
+  );
+}
+
+async function pendingApproval(pool: pg.Pool, runId: string) {
+  const result = await pool.query<{ fence: string; plan_digest: string }>(
+    'SELECT fence, plan_digest FROM platform.workflow_pending_approvals WHERE run_id = $1',
+    [runId],
+  );
+  assert.equal(result.rows.length, 1);
+  return result.rows[0]!;
+}
+
+async function decideApproval(
+  runtimePool: pg.Pool,
+  operator: Awaited<ReturnType<typeof trustedContext>>,
+  runId: string,
+  digest: string,
+  fence: string,
+  decision: 'APPROVED' | 'DECLINED',
+) {
+  return withTrustedRequestTransaction(
+    runtimePool,
+    operator,
+    async (client) =>
+      (
+        await client.query<{ decided: boolean }>(
+          'SELECT platform.workflow_decide_approval($1, 0, $2, $3, $4) AS decided',
+          [runId, fence, digest, decision],
+        )
+      ).rows[0]!.decided,
   );
 }

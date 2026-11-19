@@ -129,7 +129,12 @@ const fixture: WorkflowVerificationFixture = {
       result: null,
     },
     {
-      call: { kind: 'requestApproval', summary: 'Escalate inspection' },
+      call: {
+        kind: 'requestApproval',
+        summary: 'Escalate inspection',
+        operationId,
+        input: { recordId: event.receiptId, values: recordValues },
+      },
       result: true,
     },
   ],
@@ -141,7 +146,11 @@ const receiptBody = `
   const created = sdk.operation(${JSON.stringify(operationId)}, { values: ${JSON.stringify(recordValues)}, recordId: event.receiptId });
   if (created.outcome !== 'succeeded') return;
   sdk.sleep(172_800_000);
-  if (!sdk.waitForEvent('goodsReceiptPosted', 1)) sdk.requestApproval('Escalate inspection');
+  if (!sdk.waitForEvent('goodsReceiptPosted', 1)) {
+    sdk.requestApproval('Escalate inspection', ${JSON.stringify(operationId)}, {
+      recordId: event.receiptId, values: ${JSON.stringify(recordValues)}
+    });
+  }
 `;
 
 test('generated SDK type-checks against pinned catalogs, then verifies mocked calls in two runs', async () => {
