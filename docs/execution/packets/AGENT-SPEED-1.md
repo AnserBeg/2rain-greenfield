@@ -1,6 +1,6 @@
 # AGENT-SPEED-1 — assistant speed across user-built modules
 
-All four held-out module shapes passed. The packet changes no Critical path. The first integration candidate exposed a rollback-refusal ordering regression. The correction keeps ADR-0047 eligibility ahead of the structural activation check. [Candidate CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44582109972).
+Merge held. On the integrated code all four module shapes passed the accuracy gate. Generated tasks missed the registered latency gate by 1.23 seconds. The first CI candidate exposed a rollback refusal ordering regression. Its correction preserves the ADR-0047 refusal. [Integration-candidate CI](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44600285707).
 
 ## Results
 
@@ -12,12 +12,16 @@ All four held-out module shapes passed. The packet changes no Critical path. The
 | Matched first-party, after | 4.43 | 0.12 | 4.5 | 12/12 | 0.0274 |
 | Matched generated, before | 2.89 | 2.71 | 3 | 12/12 | 0.0357 |
 | Matched generated, after | 4.47 | 0.11 | 4 | 12/12 | 0.0205 |
+| Integrated first-party | 5.36 | 0.18 | 4.5 | 12/12 | 0.0270 |
+| Integrated generated | 6.52 | 0.25 | 4 | 12/12 | 0.0200 |
 
 Times and calls are medians. Time to the first card includes the screen preamble. Yes ends at the first successful read-back for that plan. Only tasks presenting a card contribute split timings. Costs and pass rates include every attempt. The ten-task baseline used `9ac017b9` and its legacy trace timestamps. Other split timings use a monotonic clock.
 
-The historical ten-task model-loop median was 15.0 s. The fresh baseline measured 11.1 s and the candidate 11.8 s. Model round trips fell from 4.5 to 4 while median discovery calls rose from 2 to 3. Total real-model spend was USD 3.9217 of USD 30. [Per-attempt measurements](../evidence/AGENT-SPEED-1.csv).
+The historical ten-task model-loop median was 15.0 s. The fresh baseline measured 11.1 s and the candidate 11.8 s. Model round trips fell from 4.5 to 4 while median discovery calls rose from 2 to 3. Total real-model spend was USD 4.4856 of USD 30. [Per-attempt measurements](../evidence/AGENT-SPEED-1.csv).
 
 Median end-to-end on the four matched journeys was 8.74 s first-party and 6.82 s generated on the baseline, then 5.77 s first-party and 5.66 s generated on the candidate. The gate compares candidate end-to-end medians and pass rates. On the candidate the generated card appeared 0.04 s later. Each attempt also requires the exact operation, one consent, successful read-back and independently observed record state.
+
+The repeat at `345ec2e5` includes company-bound record writes and the workflow authority fix. The same four modules and tasks measured 6.92 s first-party and 8.14 s generated end-to-end. The first installation attempt hit the compiler’s 90-second sandbox limit before any model calls. The repeat used the same limits.
 
 ## Decisions and controls
 
