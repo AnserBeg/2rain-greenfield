@@ -99,6 +99,70 @@ test('plain English drafts a governed literal validation on the selected field',
   assert.equal(grouped.missingCapability, 'validation in a grouped draft');
 });
 
+test('plain English drafts a comparison with the declared parent location field', async () => {
+  const entityId = 'northstar.app:entity.location';
+  const fieldId = 'northstar.app:field.location_name';
+  const relationId = 'northstar.app:relation.location_parent';
+  const message = 'Use a different name from the parent location.';
+  const seen: { system: string; toolNames: string[]; turns: number }[] = [];
+  const result = await draftPatchFromRequest(
+    scripted(
+      [
+        {
+          toolInput: {
+            kind: 'addValidation',
+            entity: entityId,
+            validation: {
+              fieldId,
+              check: 'compareFields',
+              operator: 'notEqual',
+              otherFieldId: fieldId,
+              relationId,
+              message,
+            },
+          },
+        },
+      ],
+      seen,
+    ),
+    'Do not allow a location inside another to have the same name.',
+    {
+      ...targets,
+      validationTargets: [
+        {
+          entityId,
+          label: 'Location',
+          operationIds: [
+            'northstar.app:operation.location_create',
+            'northstar.app:operation.location_update',
+          ],
+          fields: [{ fieldId, label: 'Name', valueType: { kind: 'text' } }],
+          relatedFields: [
+            {
+              relationId,
+              fieldId,
+              label: 'Parent location name',
+              valueType: { kind: 'text' },
+            },
+          ],
+        },
+      ],
+    },
+  );
+  assert.match(
+    seen[0]?.system ?? '',
+    /location_parent → northstar\.app:field\.location_name/u,
+  );
+  assert.ok(
+    result.status === 'parsed' && result.patch.kind === 'addValidation',
+  );
+  const predicate = result.patch.rule.predicate;
+  assert.ok(predicate.kind === 'comparison' && predicate.right.kind === 'path');
+  assert.deepEqual(predicate.right.relationIds, [relationId]);
+  assert.equal(predicate.right.fieldId, fieldId);
+  assert.equal(result.patch.rule.message, message);
+});
+
 /** A model that answers each turn from a script and records what it saw. */
 function scripted(
   turns: readonly ({ text?: string; toolInput?: unknown } | null)[],

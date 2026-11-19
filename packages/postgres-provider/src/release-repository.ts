@@ -30,6 +30,10 @@ import {
 } from '@north-star/compiler';
 import { bindLiteralValidation } from '../../canonical-model/src/formula-validation-bindings.js';
 import { parseFormulaValidationBindings } from '../../canonical-model/src/formula-validation-projection.js';
+import {
+  LITERAL_VALIDATION_OPERATION_READER,
+  requiredFormulaValidationOperationReader,
+} from '../../canonical-model/src/formula-validation-reader.js';
 import type {
   AppPackageRevision,
   ImmutableReleaseRepository,
@@ -727,7 +731,10 @@ function verifyFormulaProjectionReference(
   const reference = references[0];
   if (
     references.length !== Number(Boolean(declaring)) ||
-    (declaring ? floor !== 3 : floor >= 3) ||
+    (declaring
+      ? floor !==
+        requiredFormulaValidationOperationReader(declaring.formulaRules!)
+      : floor >= LITERAL_VALIDATION_OPERATION_READER) ||
     (declaring &&
       (reference?.instanceId !==
         `${declaring.package.namespace}:projection.formula-rule` ||

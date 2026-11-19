@@ -5,13 +5,23 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 const execute = promisify(execFile);
+type ArchivedRunner = (source: string, input: unknown) => Promise<unknown>;
+
+export function archivedRuntimeRead(
+  run: ArchivedRunner,
+  input: { readonly databaseUrl: string; readonly identity: unknown },
+): Promise<{ outcome: string; code?: string; message?: string }> {
+  return run(archivedServingRead, input) as Promise<{
+    outcome: string;
+    code?: string;
+    message?: string;
+  }>;
+}
 
 /** Runs the serving reader and tenant compiler from an unmodified prior tree. */
 export async function withArchivedCustomizationRuntime<T>(
   revision: string,
-  work: (
-    run: (source: string, input: unknown) => Promise<unknown>,
-  ) => Promise<T>,
+  work: (run: ArchivedRunner) => Promise<T>,
 ): Promise<T> {
   const temporary = await mkdtemp(join(tmpdir(), 'north-star-old-reader-'));
   const workspace = join(temporary, 'workspace');

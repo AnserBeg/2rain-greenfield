@@ -10,7 +10,11 @@ import {
   parseCustomizationPatch,
   unsupported,
 } from './patch.js';
-import { literalValidationDraft } from './validation-draft.js';
+import {
+  fieldComparisonValidationDraft,
+  literalValidationDraft,
+  VALIDATION_COMPARISONS,
+} from './validation-draft.js';
 import type { CustomizationPatch, UnsupportedCustomization } from './patch.js';
 import type { CustomizationTargets } from './targets.js';
 
@@ -185,10 +189,17 @@ const toolSchema = {
             'maximum',
             'maximumLength',
             'notBeforeToday',
+            'compareFields',
           ],
         },
         limit: { type: 'string' },
         message: { type: 'string' },
+        operator: {
+          type: 'string',
+          enum: VALIDATION_COMPARISONS.map(([value]) => value),
+        },
+        otherFieldId: { type: 'string' },
+        relationId: { type: 'string' },
       },
       required: ['fieldId', 'check', 'message'],
     },
@@ -239,7 +250,7 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
     "- arrangeLayout {kind, surface, order?, hide?, relabel?}: add, reorder, hide or rename columns of a list. surface is one of the list ids below; order, hide and relabel[].field use that list's available field ids. Include an available hidden field in order to show it. At most 16 visible columns.",
     '- saveListView {kind, surface, label, columns:[column ID], sort:[{column, direction}], filters:[{field, value}]}: add a tab on one of the lists in Saved view targets below. List the columns in the desired order and include the required record title. Sort by at most three selected sortable columns using ascending or descending. Pin at most three of the declared filter values. Use an empty array for no filters or no sort.',
     '- addMetricCard {kind, surface, label, view?, sumField?}: add a card to Today using a list in Metric card targets below. Omit sumField to count rows. Use a declared sum field for a sum. Omit view to use the default list view.',
-    '- addValidation {kind, entity, validation:{fieldId, check, limit?, message}}: check a field when creating or changing its value. Use a listed record type and field. Use required, minimum, maximum, maximumLength, or notBeforeToday. Supply an exact number or text length as a string in limit where applicable, and the message to show when saving.',
+    '- addValidation {kind, entity, validation:{fieldId, check, limit?, operator?, otherFieldId?, relationId?, message}}: guard create and changes to watched fields. Use required, minimum, maximum, maximumLength, notBeforeToday, or compareFields. For a literal bound supply limit as a string. For compareFields supply a typed operator and otherFieldId. Use relationId only for a listed related field. Include the message to show when saving.',
     '- narrowPermission {kind, roleKey, target:{kind:"operation", id}}: remove the named role\'s grant for one action. Use an exact role key and an action id shown below.',
     '- unNarrowPermission {kind, roleKey, target:{kind:"operation", id}}: remove an existing restriction for exactly the role key and action id listed below.',
     'Validation needs its own draft. If a request combines validation with another patch, report missingCapability "validation in a grouped draft".',
@@ -289,8 +300,8 @@ export function draftingSystemPrompt(targets: CustomizationTargets): string {
       ? [
           'Record types and fields that support validation:',
           ...targets.validationTargets.map(
-            ({ entityId, label, fields }) =>
-              `- ${entityId} — ${label}: ${fields.map(({ fieldId, label: fieldLabel, valueType }) => `${fieldId} "${fieldLabel}" (${valueType.kind})`).join(', ')}`,
+            ({ entityId, label, fields, relatedFields }) =>
+              `- ${entityId} — ${label}: ${fields.map(({ fieldId, label: fieldLabel, valueType }) => `${fieldId} "${fieldLabel}" (${valueType.kind})`).join(', ')}${relatedFields?.length ? `. Related fields ${relatedFields.map(({ fieldId, relationId, label: fieldLabel, valueType }) => `${relationId} → ${fieldId} "${fieldLabel}" (${valueType.kind})`).join(', ')}` : ''}`,
           ),
         ]
       : []),
@@ -437,12 +448,25 @@ function readToolInput(
       };
     try {
       const choice = selection as Record<string, unknown>;
-      input = literalValidationDraft(target, {
-        fieldId: String(choice.fieldId ?? ''),
-        check: String(choice.check ?? ''),
-        limit: String(choice.limit ?? ''),
-        message: String(choice.message ?? ''),
-      });
+      const fieldId = String(choice.fieldId ?? '');
+      const message = String(choice.message ?? '');
+      input =
+        choice.check === 'compareFields'
+          ? fieldComparisonValidationDraft(target, {
+              fieldId,
+              message,
+              operator: String(choice.operator ?? ''),
+              otherFieldId: String(choice.otherFieldId ?? ''),
+              ...(typeof choice.relationId === 'string'
+                ? { relationId: choice.relationId }
+                : {}),
+            })
+          : literalValidationDraft(target, {
+              fieldId,
+              check: String(choice.check ?? ''),
+              limit: String(choice.limit ?? ''),
+              message,
+            });
     } catch (error) {
       return {
         status: 'invalid',

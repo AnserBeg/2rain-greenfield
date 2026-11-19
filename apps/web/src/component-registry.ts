@@ -218,6 +218,7 @@ interface SurfaceValidationRefusal {
     readonly fieldIds: readonly string[];
     readonly message: string;
     readonly proposedValues: Readonly<Record<string, unknown>>;
+    readonly proposedRelations?: Readonly<Record<string, unknown>>;
   };
 }
 
@@ -1443,13 +1444,17 @@ function renderRelationPicker(
   picker: SurfaceRelationPicker,
 ): string {
   const label = fieldLabel(picker.relationId, surfaceEntityId(context));
+  const proposed =
+    context.feedback && 'validation' in context.feedback
+      ? context.feedback.validation.proposedRelations?.[picker.relationId]
+      : undefined;
   const first = picker.required
     ? `<option value="">Choose ${escapeHtml(label)}</option>`
     : '<option value="">None</option>';
   const options = picker.options
     .map(
       (option) =>
-        `<option value="${escapeHtml(option.recordId)}">${escapeHtml(option.label)}</option>`,
+        `<option value="${escapeHtml(option.recordId)}"${proposed === option.recordId ? ' selected' : ''}>${escapeHtml(option.label)}</option>`,
     )
     .join('');
   return `<div class="form-field relation-picker" data-relation-id="${escapeHtml(picker.relationId)}"><label><span>${escapeHtml(label)}</span><select name="relation:${escapeHtml(picker.relationId)}" autocomplete="off"${picker.required ? ' required' : ''}>${first}${options}</select></label></div>`;

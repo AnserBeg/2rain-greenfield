@@ -25,6 +25,7 @@ import { POLICY_DECISION_EVIDENCE_VERSION } from '../../platform-runtime/src/tru
 import {
   BUSINESS_DATE_FIELD_ID,
   type BoundFormulaValidation,
+  type BoundValidationPath,
 } from '../../canonical-model/src/formula-validation-bindings.js';
 import {
   formulaVerificationBusinessDate,
@@ -59,13 +60,17 @@ import type {
   SemanticRecordDto,
 } from '../../runtime/src/semantic-query-gateway.js';
 import {
+  QUERY_BOUNDARY_PERMISSION_ID,
+  QUERY_POLICY_INPUT_VERSION,
   SEMANTIC_AGGREGATE_RESULT_VERSION,
   SEMANTIC_QUERY_RESULT_VERSION,
 } from '../../runtime/src/semantic-query-gateway.js';
 import type {
+  CurrentPolicyGateway,
   ImmutableJsonValue,
   LegalEntityReadScope,
 } from '../../runtime/src/request-runtime-view.js';
+import { authorizeCurrentPolicy } from '../../runtime/src/request-runtime-view.js';
 import {
   encodeSharedListCursor,
   SHARED_LIST_RESULT_VERSION,
@@ -221,6 +226,11 @@ export class PostgresModuleRuntimeInterpreter
   readonly #trust: PostgresTrustService;
   readonly #documentNumbers: DocumentNumberMode;
   readonly #workflowRunId: string | undefined;
+  readonly #validationReadPolicy:
+    | ((
+        releaseId: string,
+      ) => CurrentPolicyGateway | Promise<CurrentPolicyGateway>)
+    | undefined;
 
   constructor(
     private readonly pool: Pool,
@@ -235,10 +245,14 @@ export class PostgresModuleRuntimeInterpreter
     options: {
       readonly documentNumbers?: DocumentNumberMode;
       readonly workflowRunId?: string;
+      readonly validationReadPolicy?: (
+        releaseId: string,
+      ) => CurrentPolicyGateway | Promise<CurrentPolicyGateway>;
     } = {},
   ) {
     this.#documentNumbers = options.documentNumbers ?? 'sequence';
     this.#workflowRunId = options.workflowRunId;
+    this.#validationReadPolicy = options.validationReadPolicy;
     this.#pinnedStorageTargets = new ValidatedPinnedStorageTargetCache(
       observePinnedStorageTargetCache,
     );
@@ -415,6 +429,10 @@ export class PostgresModuleRuntimeInterpreter
   ): Promise<SemanticOperationResultEnvelope> {
     let policyVersion = request.policyVersion;
     const parsedInput = parseMutationInput(request.definition, request.input);
+    const authorizedValidationReads = await this.#authorizeValidationReads(
+      request,
+      parsedInput,
+    );
     const actor = await this.actorIssuer.issue(request.context);
     const receipt = await this.#trust.executeIdempotentAcceptedMutation(
       request.context,
@@ -429,6 +447,12 @@ export class PostgresModuleRuntimeInterpreter
       async (client) => {
         if (request.channel === 'WORKFLOW')
           await assertWorkflowWriteFence(client, request, this.#workflowRunId);
+        if (
+          authorizedValidationReads.size &&
+          this.#documentNumbers !== 'verificationSentinel' &&
+          (await lockedPolicyVersion(client, request)) !== request.policyVersion
+        )
+          authorizedValidationReads.clear();
         const currentStorage = await this.#loadPinnedStorageTarget(
           client,
           request,
@@ -463,9 +487,11 @@ export class PostgresModuleRuntimeInterpreter
             const preparation = await prepareMutation(
               client,
               request,
+              currentStorage,
               currentEntity,
               input,
               this.#documentNumbers === 'verificationSentinel',
+              authorizedValidationReads,
             );
             const ids = {
               changeDocumentId: randomUUID(),
@@ -535,6 +561,62 @@ export class PostgresModuleRuntimeInterpreter
       }),
       unsupportedReason: null,
     });
+  }
+
+  async #authorizeValidationReads(
+    request: SemanticOperationExecutionRequest,
+    input: MutationInput,
+  ) {
+    const { view } = request;
+    const projection = view.projections.formulaRule;
+    const authorized = new Set<string>();
+    if (!projection) return authorized;
+    const reads = new Map<string, string>();
+    for (const binding of validationBindingsFor(request, input)) {
+      for (const path of binding.paths ?? [])
+        reads.set(path.readQueryId, path.readPermissionId);
+    }
+    if (!reads.size) return authorized;
+    if (this.#documentNumbers === 'verificationSentinel')
+      return new Set(reads.keys());
+    if (!this.#validationReadPolicy) return authorized;
+    try {
+      const policy = await this.#validationReadPolicy(view.release.releaseId);
+      const allow = (permissionId: string, queryId: string, kind: string) =>
+        authorizeCurrentPolicy(policy, view, permissionId, {
+          kind,
+          queryId,
+          schemaVersion: QUERY_POLICY_INPUT_VERSION,
+          requestId: view.requestId,
+          arguments: {},
+        });
+      for (const [queryId, permissionId] of reads) {
+        const boundary = await allow(
+          QUERY_BOUNDARY_PERMISSION_ID,
+          queryId,
+          'semanticQueryPolicyInput',
+        );
+        if (
+          boundary.decision !== 'ALLOW' ||
+          boundary.policyVersion !== request.policyVersion
+        )
+          continue;
+        const decision = await allow(
+          permissionId,
+          queryId,
+          'registeredSemanticQueryPolicyInput',
+        );
+        if (
+          decision.decision === 'ALLOW' &&
+          decision.policyVersion === request.policyVersion
+        )
+          authorized.add(queryId);
+      }
+    } catch {
+      // Keep these reads unavailable if current policy cannot be established.
+      authorized.clear();
+    }
+    return authorized;
   }
 
   #loadPinnedStorageTarget(
@@ -677,17 +759,15 @@ async function readRecordCompany(
 async function prepareMutation(
   client: PoolClient,
   request: SemanticOperationExecutionRequest,
+  storage: StorageTargetPayloadV1,
   entity: StorageEntity,
   input: MutationInput,
   verifying: boolean,
+  authorizedValidationReads: ReadonlySet<string>,
 ): Promise<MutationPreparation> {
   const kind = request.definition.effect.kind;
   const formula = request.view.projections.formulaRule;
-  const bindings = formula
-    ? parseFormulaValidationBindings(formula.payload).filter(({ rule }) =>
-        rule.boundOperationIds.includes(request.definition.operationId),
-      )
-    : [];
+  const bindings = validationBindingsFor(request, input);
   const pinnedBusinessDate =
     formula && verifying
       ? formulaVerificationBusinessDate(formula.payload)
@@ -704,10 +784,12 @@ async function prepareMutation(
       await requireFormulaValidation(
         client,
         request,
+        storage,
         entity,
         input,
         bindings,
         pinnedBusinessDate,
+        authorizedValidationReads,
       );
     return {
       changes: createChanges(request.definition.inputContract, input),
@@ -749,10 +831,12 @@ async function prepareMutation(
       await requireFormulaValidation(
         client,
         request,
+        storage,
         entity,
         input,
         bindings,
         pinnedBusinessDate,
+        authorizedValidationReads,
         prior,
       );
     if (entity.periodLock)
@@ -795,13 +879,34 @@ async function prepareMutation(
   };
 }
 
+function validationBindingsFor(
+  request: SemanticOperationExecutionRequest,
+  input: MutationInput,
+): readonly BoundFormulaValidation[] {
+  const projection = request.view.projections.formulaRule;
+  if (!projection) return [];
+  return parseFormulaValidationBindings(projection.payload).filter(
+    (binding) =>
+      binding.rule.boundOperationIds.includes(request.definition.operationId) &&
+      (request.definition.effect.kind !== 'updateRecordEffect' ||
+        Object.keys(binding.watchedFields).some((fieldId) =>
+          Object.hasOwn(input.patch, fieldId),
+        ) ||
+        (binding.watchedRelationIds ?? []).some((relationId) =>
+          Object.hasOwn(input.relations, relationId),
+        )),
+  );
+}
+
 async function requireFormulaValidation(
   client: PoolClient,
   request: SemanticOperationExecutionRequest,
+  storage: StorageTargetPayloadV1,
   entity: StorageEntity,
   input: MutationInput,
   bindings: readonly BoundFormulaValidation[],
   pinnedBusinessDate: string | null,
+  authorizedValidationReads: ReadonlySet<string>,
   prior?: RawRecord,
 ): Promise<void> {
   const watched = new Map(
@@ -876,6 +981,15 @@ async function requireFormulaValidation(
     operationId: request.definition.operationId,
     businessDate,
     values,
+    ...(await loadFormulaPaths(
+      client,
+      storage,
+      entity,
+      input,
+      bindings,
+      authorizedValidationReads,
+      prior,
+    )),
     ...(previousValues
       ? { previousValues, updatedFieldIds: Object.keys(input.patch) }
       : {}),
@@ -884,6 +998,91 @@ async function requireFormulaValidation(
     throw failure(first.code, first.message, first.ruleId, {
       fieldAnchors: JSON.stringify(first.fieldAnchors),
     });
+}
+
+async function loadFormulaPaths(
+  client: PoolClient,
+  storage: StorageTargetPayloadV1,
+  source: StorageEntity,
+  input: MutationInput,
+  bindings: readonly BoundFormulaValidation[],
+  authorizedQueries: ReadonlySet<string>,
+  prior?: RawRecord,
+) {
+  const pathsByRelation = new Map<string, BoundValidationPath[]>();
+  for (const path of bindings.flatMap(({ paths }) => paths ?? [])) {
+    const priorPaths = pathsByRelation.get(path.relationId) ?? [];
+    priorPaths.push(path);
+    pathsByRelation.set(path.relationId, priorPaths);
+  }
+  if (!pathsByRelation.size) return {};
+  const relations = storage.relations.filter(
+    ({ relationId, sourceEntityId }) =>
+      sourceEntityId === source.entityId && pathsByRelation.has(relationId),
+  );
+  const previousRelationKeys: Record<string, string | null> = {};
+  const relationKeys: Record<string, string | null> = {};
+  const pathValues: Record<string, Record<string, unknown> | null> = {};
+  for (const relation of relations) {
+    const relationId = relation.relationId;
+    const recordId = prior
+      ? (
+          await client.query<{ target: string | null }>(
+            `SELECT ${quoted(relation.relationColumn.physicalName)} AS target
+             FROM north_star_module.${quoted(source.physicalTableName)}
+            WHERE ${quoted(source.recordIdentity.column)} = $1`,
+            [prior.recordId],
+          )
+        ).rows[0]?.target
+      : (input.relations[relationId] ?? null);
+    if (recordId === undefined) continue;
+    if (prior) previousRelationKeys[relationId] = recordId;
+    relationKeys[relationId] = recordId;
+    if (recordId === null) {
+      pathValues[relationId] = null;
+      continue;
+    }
+    const target = requiredEntity(storage, relation.targetEntityId);
+    const selected = new Map<string, string>();
+    for (const path of pathsByRelation.get(relationId) ?? []) {
+      if (
+        path.targetEntityId !== target.entityId ||
+        !authorizedQueries.has(path.readQueryId)
+      )
+        continue;
+      const column = target.columns.find(
+        ({ canonicalFieldId }) => canonicalFieldId === path.fieldId,
+      );
+      if (!column) continue;
+      const physical = quoted(column.physicalName);
+      const value =
+        path.fieldType.kind === 'date'
+          ? `to_char(${physical}, 'YYYY-MM-DD')`
+          : path.fieldType.kind === 'integer' ||
+              path.fieldType.kind === 'decimal'
+            ? `${physical}::text`
+            : physical;
+      selected.set(path.fieldId, `${value} AS ${physical}`);
+    }
+    if (!selected.size) continue;
+    const values = await client.query(
+      `SELECT ${[...selected.values()].join(', ')}
+         FROM north_star_module.${quoted(target.physicalTableName)}
+        WHERE ${quoted(target.recordIdentity.column)} = $1 AND ${archivePredicate(target, false).join(' AND ')}
+        FOR SHARE`,
+      [recordId],
+    );
+    const row = values.rows[0];
+    if (row)
+      pathValues[relationId] = Object.fromEntries(
+        target.columns.flatMap((column) =>
+          selected.has(column.canonicalFieldId)
+            ? [[column.canonicalFieldId, row[column.physicalName]]]
+            : [],
+        ),
+      );
+  }
+  return { pathValues, previousRelationKeys, relationKeys };
 }
 
 /**
@@ -1612,14 +1811,7 @@ async function assertWorkflowWriteFence(
       'Workflow write fence changed',
       request.definition.operationId,
     );
-  const policy = await client.query<{ policy_version: string }>(
-    'SELECT platform.lock_current_policy_epoch($1, $2) AS policy_version',
-    [tenantId, environmentId],
-  );
-  if (
-    currentPolicyVersionOf(policy.rows[0]?.policy_version) !==
-    request.policyVersion
-  )
+  if ((await lockedPolicyVersion(client, request)) !== request.policyVersion)
     throw failure(
       'WORKFLOW_POLICY_CHANGED',
       'Workflow policy changed before commit',
@@ -1645,6 +1837,18 @@ async function assertWorkflowWriteFence(
       'Workflow run changed before commit',
       request.definition.operationId,
     );
+}
+
+async function lockedPolicyVersion(
+  client: PoolClient,
+  request: SemanticOperationExecutionRequest,
+): Promise<string> {
+  const { tenantId, environmentId } = request.context;
+  const policy = await client.query<{ policy_version: string }>(
+    'SELECT platform.lock_current_policy_epoch($1, $2) AS policy_version',
+    [tenantId, environmentId],
+  );
+  return currentPolicyVersionOf(policy.rows[0]?.policy_version);
 }
 
 /**

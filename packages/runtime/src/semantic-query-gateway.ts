@@ -66,7 +66,7 @@ export const SEMANTIC_AGGREGATE_RESULT_VERSION =
 
 const QUERY_CATALOG_PAYLOAD_VERSION =
   'northstar.query-catalog-payload/v0-provisional' as const;
-const QUERY_POLICY_INPUT_VERSION =
+export const QUERY_POLICY_INPUT_VERSION =
   'northstar.semantic-query-policy-input/v1' as const;
 export const QUERY_BOUNDARY_PERMISSION_ID =
   'northstar.runtime:permission.semantic-query-boundary' as const;
