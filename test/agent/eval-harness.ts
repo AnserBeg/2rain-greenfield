@@ -55,6 +55,7 @@ async function main(): Promise<void> {
       // development set, three attempts per write task.
       set: { type: 'string', default: 'ten' },
       tasks: { type: 'string' },
+      attempts: { type: 'string' },
       out: { type: 'string', default: 'docs/execution/evidence' },
       // `off` runs without the business map (the pre-AGENT-3 start).
       preamble: { type: 'string', default: 'on' },
@@ -89,7 +90,21 @@ async function main(): Promise<void> {
       .split(',')
       .map(Number),
   );
-  const attempts = (task: DevTask) => (dev ? attemptsFor(task) : 1);
+  const repeat =
+    args.attempts === undefined ? undefined : Number(args.attempts);
+  if (
+    repeat !== undefined &&
+    (!Number.isSafeInteger(repeat) || repeat < 1 || repeat > 3)
+  )
+    throw new Error('--attempts must be 1, 2, or 3');
+  if (!Number.isFinite(cap) || cap <= 0)
+    throw new Error('--cap must be positive and finite');
+  if (
+    !selected.size ||
+    [...selected].some((id) => !DEV_TASKS.some((task) => task.id === id))
+  )
+    throw new Error('unknown eval task');
+  const attempts = (task: DevTask) => repeat ?? (dev ? attemptsFor(task) : 1);
   const date = new Date().toISOString().slice(0, 10);
   const stamp = new Date().toISOString().replaceAll(/[:.]/gu, '-');
   const outDirectory = resolve(String(args.out));
@@ -139,6 +154,11 @@ async function main(): Promise<void> {
         // Appends are queued so lines land in call order; `at` is read when the
         // event happens, not when its write runs.
         let queue: Promise<void> = Promise.resolve();
+        let started = 0;
+        const granted = new Map<string, number>();
+        const confirmed = new Set<string>();
+        const verifiedSeconds: number[] = [];
+        let cardSeconds: number | null = null;
         const append = (entry: Record<string, unknown>): Promise<void> => {
           const line = `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`;
           queue = queue.then(() => appendFile(record, line));
@@ -196,6 +216,7 @@ async function main(): Promise<void> {
             companyId: COMPANY,
             businessCalendar: BUSINESS_CALENDAR,
             approve: async (plan) => {
+              cardSeconds ??= (performance.now() - started) / 1000;
               await append({
                 kind: 'approval',
                 granted: true,
@@ -203,12 +224,15 @@ async function main(): Promise<void> {
                 planId: plan.planId,
                 steps: plan.steps.map((step) => step.operationId),
               });
+              granted.set(plan.planId, performance.now());
               return true;
             },
           });
           const calls: Record<string, number> = {};
+          started = performance.now();
           const run = await runOperationsAgent({
             model,
+            executeAfterApproval: true,
             session,
             request,
             meter,
@@ -244,6 +268,28 @@ async function main(): Promise<void> {
                   tool: event.name,
                   arguments: loggedArguments(event.input),
                 });
+              if (
+                event.kind === 'result' &&
+                event.name === 'erp_verify' &&
+                !event.isError
+              ) {
+                const report = event.content as {
+                  operationSessionId?: string;
+                  verified?: boolean;
+                } | null;
+                const id = report?.operationSessionId;
+                if (
+                  id &&
+                  report.verified &&
+                  granted.has(id) &&
+                  !confirmed.has(id)
+                ) {
+                  confirmed.add(id);
+                  verifiedSeconds.push(
+                    (performance.now() - granted.get(id)!) / 1000,
+                  );
+                }
+              }
               if (event.kind === 'result')
                 void append({
                   kind: 'tool-result',
@@ -252,6 +298,16 @@ async function main(): Promise<void> {
                   result: event.content,
                 });
             },
+          });
+          const elapsedSeconds = (performance.now() - started) / 1000;
+          await append({
+            kind: 'timing',
+            cardSeconds,
+            verifiedSeconds,
+            elapsedSeconds,
+            modelCalls: run.turns,
+            toolCalls: run.toolCalls,
+            usd: run.usd,
           });
           await queue;
           const verdict = await task.check(world, context, before, run);
@@ -342,7 +398,7 @@ async function main(): Promise<void> {
   const report = [
     `# Agent eval — ${date}`,
     '',
-    `Model \`${model.modelId}\` (effort ${String(args.effort)}), acting as the demo buyer (task 34: the manager) on channel AGENT, business map ${args.preamble === 'off' ? 'off' : 'on'}, task set ${dev ? 'dev (AGENT-3 development set; write, multi-step and customized tasks three attempts)' : 'ten (one attempt per task)'}. Each attempt on a fresh database; the harness granted every confirmation it was asked for and recorded it. Seconds are the agent run on a monotonic clock (arrangement excluded).`,
+    `Model \`${model.modelId}\` (effort ${String(args.effort)}), acting as the demo buyer (task 34: the manager) on channel AGENT, business map ${args.preamble === 'off' ? 'off' : 'on'}, task set ${dev ? 'dev (AGENT-3 development set; write, multi-step and customized tasks three attempts)' : 'selected'}. Model effort and attempts are reported per run below. Each attempt on a fresh database; the harness granted every confirmation it was asked for and recorded it. Seconds are the agent run on a monotonic clock (arrangement excluded).`,
     `Prices (USD per million tokens) from ${String(args['price-source'])}, read ${String(args['price-date'])}: input ${String(prices.input)}, output ${String(prices.output)}, cache read ${String(prices.cacheRead)}, cache write ${String(prices.cacheWrite)}. Spend cap USD ${String(cap)}.`,
     '',
     '| task | kind | attempt | result | stop | tool calls | approvals | tokens in (uncached / cache read / cache write) | tokens out | USD | reason |',

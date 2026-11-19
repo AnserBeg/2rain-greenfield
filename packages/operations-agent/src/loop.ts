@@ -190,6 +190,8 @@ export interface AgentRunOptions {
   readonly request: string;
   readonly meter: SpendMeter;
   readonly maximumTurns?: number;
+  /** Complete a person's approved card in the host before requesting a summary. */
+  readonly executeAfterApproval?: boolean;
   readonly onEvent?: (event: AgentEvent) => void;
   /**
    * The session's preamble (`agentPreamble`): the business map, appended to
@@ -264,7 +266,14 @@ export async function runOperationsAgent(
         : options.request,
     },
   ];
-  const system = systemPrompt(options.preamble);
+  const system = [
+    systemPrompt(options.preamble),
+    ...(options.executeAfterApproval
+      ? [
+          "After the person's yes the host immediately executes and verifies that plan. Its tool result contains execution and verification. Do not execute it again. Report the verified change in one line, or explain what stopped. If more of the person's request remains, continue from the observed result.",
+        ]
+      : []),
+  ].join('\n');
   // The person's own words: currencies they name are theirs to use.
   if (typeof options.session.noteRequest === 'function')
     options.session.noteRequest(options.request);
@@ -312,6 +321,17 @@ export async function runOperationsAgent(
       seconds: (performance.now() - started) / 1000,
       ...(error ? { error } : {}),
     };
+  };
+  const invoke = async (name: string, input: unknown) => {
+    toolCalls += 1;
+    options.onEvent?.({ kind: 'tool', name, input });
+    const outcome = await options.session.call(
+      name,
+      input,
+      options.signal ? { signal: options.signal } : {},
+    );
+    options.onEvent?.({ kind: 'result', name, ...outcome });
+    return outcome;
   };
   const maximumTurns = options.maximumTurns ?? 40;
   while (turns < maximumTurns) {
@@ -408,13 +428,11 @@ export async function runOperationsAgent(
         });
         continue;
       }
-      toolCalls += 1;
-      options.onEvent?.({ kind: 'tool', name: call.name, input: call.input });
-      const outcome = await options.session.call(
-        call.name,
-        call.input,
-        options.signal ? { signal: options.signal } : {},
-      );
+      const approvalIndex =
+        options.executeAfterApproval && call.name === 'erp_plan'
+          ? options.session.approvals.length
+          : undefined;
+      const outcome = await invoke(call.name, call.input);
       if (
         turn.toolCalls.length === 1 &&
         call.name === 'erp_plan' &&
@@ -423,15 +441,36 @@ export async function runOperationsAgent(
         outcome.content.outcome === 'customization-request'
       )
         customization = true;
-      options.onEvent?.({
-        kind: 'result',
-        name: call.name,
-        isError: outcome.isError,
-        content: outcome.content,
-      });
+      // Only the approval produced by this call may start a host execution.
+      // The raw erp_plan remains non-mutating; risk-class approvals retain Undo.
+      const grant =
+        approvalIndex === undefined
+          ? undefined
+          : options.session.approvals[approvalIndex];
+      let content = outcome.content;
+      if (
+        grant?.approved &&
+        grant.by === 'person' &&
+        !options.signal?.aborted
+      ) {
+        const execution = await invoke('erp_execute', {
+          planId: grant.planId,
+          executionIdempotencyKey: grant.planId,
+        });
+        // Even on Stop or a partial failure, verify the writes that did commit.
+        const verification = await invoke('erp_verify', {
+          operationSessionId: grant.planId,
+        });
+        content = {
+          planId: grant.planId,
+          approval: 'approved by the person',
+          execution: execution.content,
+          verification: verification.content,
+        };
+      }
       results.push({
         id: call.id,
-        content: JSON.stringify(outcome.content),
+        content: JSON.stringify(content),
         isError: outcome.isError,
       });
     }
