@@ -45,8 +45,8 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
-  "base": "5402386557abd00c633b1930724e91e1fe586762",
-  "head": "9aa2db3daef552426b707b9d377e6a53fbb4c7ae",
+  "base": "e0bb8e9582cb9a7eca95f520fb2d4fabe47a7803",
+  "head": "c9bae9f7e75f8a804fd1f5782f8e9584deb805f4",
   "changedPaths": [
     "apps/web/src/customize-screen.ts", "apps/web/test/browser/customize-formulas.composed-application.spec.ts", "package.json", "packages/canonical-model/src/calculated-display-bindings.ts", "packages/canonical-model/src/calculated-display-projection.ts",
     "packages/canonical-model/src/calculated-display-schema.ts", "packages/canonical-model/src/calculated-display.ts", "packages/canonical-model/src/formula-validation-projection.ts", "packages/canonical-model/src/index.ts", "packages/canonical-model/src/normalize.ts",
