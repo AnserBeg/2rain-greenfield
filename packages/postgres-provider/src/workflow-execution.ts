@@ -20,7 +20,8 @@ import {
   type WorkflowPointer,
   type WorkflowScope,
 } from './workflow-consumer.js';
-import { InMemoryWorkflowRun } from './workflow-run.js';
+import { MAXIMUM_WORKFLOW_EFFECT_BYTES } from './workflow-isolate.js';
+import { InMemoryWorkflowRun, WorkflowGuestError } from './workflow-run.js';
 import {
   generateWorkflowSdk,
   type WorkflowCall,
@@ -33,6 +34,14 @@ export const WORKFLOW_HOST_VERSION = 'northstar.workflow-host/v1';
 export const WORKFLOW_SDK_VERSION = 'northstar.workflow-sdk/v1';
 
 type EffectCall = Extract<WorkflowCall, { kind: 'query' | 'operation' }>;
+
+interface WorkflowUnattendedProof {
+  readonly releaseRoot: string;
+  readonly operationDigest: string;
+  readonly inputContractDigest: string;
+  readonly reachableWriteEntities: readonly string[];
+  readonly tierBIntersections: readonly string[];
+}
 
 export interface WorkflowRunPin extends WorkflowScope {
   readonly run_id: string;
@@ -48,6 +57,9 @@ export interface WorkflowRunPin extends WorkflowScope {
   readonly receipt_id: string;
   readonly event_id: string;
   readonly approver_id: string;
+  readonly unattended_operations: Readonly<
+    Record<string, WorkflowUnattendedProof>
+  >;
   readonly approver_grants: readonly [
     permission: string,
     resource: string,
@@ -56,6 +68,7 @@ export interface WorkflowRunPin extends WorkflowScope {
 }
 
 interface Run extends WorkflowRunPin {
+  readonly workflow_id: string;
   readonly status:
     | 'RUNNABLE'
     | 'WAITING'
@@ -65,6 +78,7 @@ interface Run extends WorkflowRunPin {
     | 'QUARANTINED';
   readonly reason: string | null;
   readonly executable: Buffer;
+  readonly verified_digest: string | null;
   readonly sdk_digest: string;
   readonly grants: WorkflowGrants;
   readonly engine_build: string;
@@ -86,7 +100,10 @@ export interface WorkflowGateway {
     call: EffectCall,
     idempotencyKey: string,
   ): Promise<ImmutableJsonValue>;
-  authorizeRemedy(operator: TrustedRequestContext): Promise<boolean>;
+  withRemedyAuthority<T>(
+    operator: TrustedRequestContext,
+    work: () => Promise<T>,
+  ): Promise<T>;
 }
 
 export class WorkflowEffectRefusal extends Error {
@@ -99,6 +116,8 @@ type Dispatch = {
   readonly call: EffectCall;
   readonly idempotencyKey: string;
 };
+
+type Journal = Awaited<ReturnType<typeof loadJournal>>;
 
 export class PostgresWorkflowExecution {
   constructor(
@@ -122,62 +141,131 @@ export class PostgresWorkflowExecution {
           )
         ).rows,
     );
-    for (const { run_id } of candidates) await this.step(scope, run_id);
+    const failures: unknown[] = [];
+    for (const { run_id } of candidates) {
+      try {
+        await this.step(scope, run_id);
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    if (failures.length)
+      throw new AggregateError(failures, 'Workflow run batch failed');
   }
 
   async step(scope: WorkflowScope, runId: string): Promise<void> {
-    // Commit a request and its outbox before dispatch. The operation commits
-    // independently. An exact semantic receipt bridges that second boundary.
-    const dispatch = await withWorkflowTransaction(
-      this.workerPool,
-      scope,
-      (client) => this.#prepare(client, scope, runId),
+    // Read and replay without holding the pointer or run lock. The short
+    // transaction below validates the snapshot before recording its decision.
+    const snapshot = await this.#snapshot(scope, runId);
+    if (!snapshot || snapshot.run.status !== 'RUNNABLE') return;
+    const { run, journal } = snapshot;
+    const pending = journal.pending && { ...journal.pending, run };
+    const recovered = pending && (await this.#readReceipt(pending));
+    const decision =
+      recovered || !matchesPin(run, snapshot.pointer)
+        ? null
+        : await this.#replay(run, journal);
+    const dispatch = await this.#withCurrent(
+      run,
+      journal,
+      async (client, current, pointer) => {
+        if (pending && recovered) {
+          await persistEffectResult(client, current, pending, recovered);
+          return null;
+        }
+        if (!matchesPin(current, pointer)) {
+          await setStatus(client, current, 'SUSPENDED', 'stale-release-pin');
+          return null;
+        }
+        if (!decision) return null;
+        if (decision.kind === 'SUSPENDED' || decision.kind === 'QUARANTINED') {
+          await setStatus(client, current, decision.kind, decision.reason);
+          return null;
+        }
+        if (decision.kind === 'done') {
+          await setStatus(client, current, 'COMPLETED', null);
+          return null;
+        }
+        if (decision.kind === 'quarantined') {
+          await setStatus(
+            client,
+            current,
+            'QUARANTINED',
+            `${decision.reason}:${decision.cursor}`,
+          );
+          return null;
+        }
+        if (decision.kind !== 'call') return null;
+        const { call, cursor } = decision;
+        if (call.kind !== 'query' && call.kind !== 'operation') {
+          await setStatus(
+            client,
+            current,
+            'SUSPENDED',
+            'durable-call-unavailable',
+          );
+          return null;
+        }
+        if (pending) return { ...pending, call };
+        const requestId = await insertJournal(
+          client,
+          current,
+          cursor,
+          'REQUEST',
+          call,
+        );
+        await client.query(
+          `INSERT INTO platform.workflow_effect_outbox (
+           tenant_id, environment_id, run_id, cursor, request_journal_id, idempotency_key
+         ) VALUES ($1, $2, $3, $4, $5, $6)`,
+          [
+            ...runKey(current),
+            cursor,
+            requestId,
+            workflowEffectId(current.instance_id, cursor),
+          ],
+        );
+        return null;
+      },
     );
     if (!dispatch) return;
-    const { run, call, cursor, idempotencyKey } = dispatch;
+    await this.#dispatch(dispatch, journal);
+  }
+
+  async #dispatch(dispatch: Dispatch, journal: Journal): Promise<void> {
+    const { run, call, idempotencyKey } = dispatch;
     let result: ImmutableJsonValue;
     try {
       result = await this.gateway.dispatch(run, call, idempotencyKey);
     } catch (error) {
       if (!(error instanceof WorkflowEffectRefusal)) throw error;
-      await withWorkflowTransaction(this.workerPool, scope, async (client) => {
-        const pointer = await lockWorkflowPointer(client);
-        const current = await loadRun(client, scope, runId);
-        if (
-          current?.status !== 'RUNNABLE' ||
-          current.execution_fence !== run.execution_fence
-        )
-          return;
-        if (await this.#recover(client, current, dispatch)) return;
-        await setStatus(
-          client,
-          current,
-          'SUSPENDED',
-          matchesPin(current, pointer) ? error.message : 'stale-release-pin',
-        );
-      });
+      const recovered = await this.#readReceipt(dispatch);
+      await this.#withCurrent(
+        run,
+        journal,
+        async (client, current, pointer) => {
+          if (recovered)
+            await persistEffectResult(client, current, dispatch, recovered);
+          else
+            await setStatus(
+              client,
+              current,
+              'SUSPENDED',
+              matchesPin(current, pointer)
+                ? error.message
+                : 'stale-release-pin',
+            );
+        },
+      );
       return;
     }
     if (call.kind === 'operation') await this.afterOperationCommit?.();
-    await withWorkflowTransaction(this.workerPool, scope, async (client) => {
-      const pointer =
-        call.kind === 'query' ? await lockWorkflowPointer(client) : null;
-      const current = await loadRun(client, scope, runId);
-      if (!current) return;
-      if (
-        call.kind === 'query' &&
-        (!matchesPin(current, pointer) ||
-          current.status !== 'RUNNABLE' ||
-          current.execution_fence !== run.execution_fence)
-      )
+    await this.#withCurrent(run, journal, async (client, current, pointer) => {
+      if (call.kind === 'query' && !matchesPin(current, pointer)) {
+        await setStatus(client, current, 'SUSPENDED', 'stale-release-pin');
         return;
-      await insertResult(
-        client,
-        current,
-        cursor,
-        result,
-        call.kind === 'query',
-      );
+      }
+      await persistEffectResult(client, current, dispatch, result);
     });
   }
 
@@ -194,8 +282,6 @@ export class PostgresWorkflowExecution {
     assertTrustedRequestContext(operator);
     if (runIds.length > 100)
       throw new RangeError('Select at most 100 workflow runs');
-    if (!(await this.gateway.authorizeRemedy(operator)))
-      throw new Error('Workflow remedy permission refused');
     const scope = {
       tenant_id: operator.tenantId,
       environment_id: operator.environmentId,
@@ -205,67 +291,88 @@ export class PostgresWorkflowExecution {
       outcome: 'retried' | 'cancelled' | 'ineligible';
     }[] = [];
     for (const runId of new Set(runIds)) {
-      const outcome = await withWorkflowTransaction(
-        this.workerPool,
-        scope,
-        async (client) => {
-          const pointer = await lockWorkflowPointer(client);
-          const run = await loadRun(client, scope, runId);
-          if (!run) return 'ineligible';
-          if (run.status !== 'SUSPENDED') {
-            await recordControl(
-              client,
-              run,
-              `${action}-ineligible`,
-              operator.principalId,
-            );
-            return 'ineligible';
-          }
-          const { pending } = await loadJournal(client, run);
-          if (pending && pending.call.kind === 'operation')
-            await this.#recover(client, run, { ...pending, run });
-          const watermark =
-            pointer &&
-            (await verifiedWorkflowWatermark(client, scope, pointer));
-          const canRetry =
-            pointer &&
-            pointer.pointer_id === run.pointer_id &&
-            pointer.release_id === run.release_id &&
-            watermark?.release_root === run.release_root &&
-            runtimeAvailable(run) &&
-            run.reason === 'stale-release-pin';
-          if (action === 'retry' && !canRetry) {
-            await recordControl(
-              client,
-              run,
-              'retry-ineligible',
-              operator.principalId,
-            );
-            return 'ineligible';
-          }
-          if (action === 'cancel') {
-            await setStatus(
-              client,
-              run,
-              'CANCELLED',
-              'operator-cancelled',
-              operator.principalId,
-            );
-            return 'cancelled';
-          }
-          await client.query(
-            `UPDATE platform.workflow_runs SET status = 'RUNNABLE', reason = NULL, execution_fence = $4
+      const snapshot = await this.#snapshot(scope, runId);
+      const pending =
+        snapshot?.run.status === 'SUSPENDED' &&
+        snapshot.run.reason !== 'oversized-effect-result' &&
+        snapshot.journal.pending
+          ? { ...snapshot.journal.pending, run: snapshot.run }
+          : null;
+      const recovered = pending && (await this.#readReceipt(pending));
+      // Hold current operator authority through each committed transition.
+      const outcome = await this.gateway.withRemedyAuthority(
+        operator,
+        async () => {
+          if (!snapshot) return 'ineligible' as const;
+          const applied = await this.#withCurrent(
+            snapshot.run,
+            snapshot.journal,
+            async (client, run, pointer) => {
+              if (run.status !== 'SUSPENDED') {
+                await recordControl(
+                  client,
+                  run,
+                  `${action}-ineligible`,
+                  operator.principalId,
+                );
+                return 'ineligible' as const;
+              }
+              const parked =
+                pending &&
+                recovered &&
+                (await persistEffectResult(client, run, pending, recovered));
+              const watermark =
+                pointer &&
+                (await verifiedWorkflowWatermark(client, scope, pointer));
+              const canRetry =
+                !parked &&
+                pointer?.pointer_id === run.pointer_id &&
+                pointer.release_id === run.release_id &&
+                watermark?.release_root === run.release_root &&
+                run.verified_digest !== null &&
+                watermark.definition_bindings[run.workflow_id]?.digest ===
+                  run.verified_digest &&
+                canonicalize(
+                  watermark.definition_bindings[run.workflow_id]
+                    ?.unattendedOperations,
+                ) === canonicalize(run.unattended_operations) &&
+                runtimeAvailable(run) &&
+                run.reason === 'stale-release-pin';
+              if (action === 'retry' && !canRetry) {
+                await recordControl(
+                  client,
+                  run,
+                  'retry-ineligible',
+                  operator.principalId,
+                );
+                return 'ineligible' as const;
+              }
+              if (action === 'cancel') {
+                await setStatus(
+                  client,
+                  run,
+                  'CANCELLED',
+                  'operator-cancelled',
+                  operator.principalId,
+                );
+                return 'cancelled' as const;
+              }
+              await client.query(
+                `UPDATE platform.workflow_runs SET status = 'RUNNABLE', reason = NULL, execution_fence = $4
             WHERE tenant_id = $1 AND environment_id = $2 AND run_id = $3`,
-            [...runKey(run), pointer!.fence],
+                [...runKey(run), pointer!.fence],
+              );
+              await recordControl(
+                client,
+                run,
+                'same-pin-retry',
+                operator.principalId,
+                pointer!.fence,
+              );
+              return 'retried' as const;
+            },
           );
-          await recordControl(
-            client,
-            run,
-            'same-pin-retry',
-            operator.principalId,
-            pointer!.fence,
-          );
-          return 'retried';
+          return applied ?? 'ineligible';
         },
       );
       results.push({ runId, outcome });
@@ -273,32 +380,71 @@ export class PostgresWorkflowExecution {
     return results;
   }
 
-  async #prepare(
-    client: PoolClient,
-    scope: WorkflowScope,
-    runId: string,
-  ): Promise<Dispatch | null> {
-    const pointer = await lockWorkflowPointer(client);
-    const run = await loadRun(client, scope, runId);
-    if (run?.status !== 'RUNNABLE') return null;
+  async #snapshot(scope: WorkflowScope, runId: string) {
+    return withWorkflowTransaction(this.workerPool, scope, async (client) => {
+      const pointer =
+        (
+          await client.query<WorkflowPointer>(
+            'SELECT * FROM platform.workflow_read_pointer()',
+          )
+        ).rows[0] ?? null;
+      const run = await loadRun(client, scope, runId);
+      return run && { pointer, run, journal: await loadJournal(client, run) };
+    });
+  }
 
-    const journal = await loadJournal(client, run);
-    if (
-      journal.pending &&
-      (await this.#recover(client, run, { ...journal.pending, run }))
-    ) {
-      return null;
-    }
-    if (!matchesPin(run, pointer)) {
-      await setStatus(client, run, 'SUSPENDED', 'stale-release-pin');
-      return null;
-    }
-    if (!runtimeAvailable(run)) {
-      await setStatus(client, run, 'SUSPENDED', 'unavailable-runtime-version');
-      return null;
-    }
+  async #withCurrent<T>(
+    snapshot: Run,
+    journal: Journal,
+    work: (
+      client: PoolClient,
+      run: Run,
+      pointer: WorkflowPointer | null,
+    ) => Promise<T>,
+  ): Promise<T | null> {
+    return withWorkflowTransaction(
+      this.workerPool,
+      snapshot,
+      async (client) => {
+        const pointer = await lockWorkflowPointer(client);
+        const { rows } = await client.query<
+          Pick<Run, 'status' | 'reason' | 'execution_fence'>
+        >(
+          `SELECT status, reason, execution_fence
+           FROM platform.workflow_runs
+          WHERE tenant_id = $1 AND environment_id = $2 AND run_id = $3 FOR UPDATE`,
+          runKey(snapshot),
+        );
+        const run = rows[0];
+        if (
+          !run ||
+          run.status !== snapshot.status ||
+          run.reason !== snapshot.reason ||
+          run.execution_fence !== snapshot.execution_fence
+        )
+          return null;
+        // Requests and results are immutable and appended at contiguous cursors.
+        const { rows: counts } = await client.query<{ count: number }>(
+          `SELECT count(*)::int AS count FROM platform.workflow_journal
+          WHERE tenant_id = $1 AND environment_id = $2 AND run_id = $3 AND kind IN ('REQUEST', 'RESULT')`,
+          runKey(snapshot),
+        );
+        if (
+          counts[0]?.count !==
+          journal.prefix.length * 2 + Number(journal.pending !== null)
+        )
+          return null;
+        return work(client, snapshot, pointer);
+      },
+    );
+  }
 
+  async #replay(run: Run, journal: Journal) {
     try {
+      if (!run.verified_digest)
+        throw new WorkflowEffectRefusal('unverified-definition');
+      if (!runtimeAvailable(run))
+        throw new WorkflowEffectRefusal('unavailable-runtime-version');
       const view = await this.gateway.loadView(await automationContext(run));
       if (
         view.release.releaseId !== run.release_id ||
@@ -308,7 +454,12 @@ export class PostgresWorkflowExecution {
       ) {
         throw new WorkflowEffectRefusal('runtime-release-pin-mismatch');
       }
-      const sdk = generateWorkflowSdk(view, run.grants);
+      let sdk: ReturnType<typeof generateWorkflowSdk>;
+      try {
+        sdk = generateWorkflowSdk(view, run.grants);
+      } catch (cause) {
+        throw new WorkflowEffectRefusal('unavailable-sdk-artifact', { cause });
+      }
       if (sha256(sdk.declarations) !== run.sdk_digest)
         throw new WorkflowEffectRefusal('unavailable-sdk-artifact');
       const event: WorkflowEvent = {
@@ -317,69 +468,31 @@ export class PostgresWorkflowExecution {
         legalEntityId: run.legal_entity_id,
         receiptId: run.receipt_id,
       };
-      const base = new InMemoryWorkflowRun(
-        { executable: run.executable.toString(), sdk },
-        event,
-      );
-      const replay = new InMemoryWorkflowRun(
-        { executable: run.executable.toString(), sdk },
-        event,
-        {
-          ...base.snapshot(),
-          prefix: journal.prefix,
-          pending: journal.pending && canonicalize(journal.pending.call),
-        },
-      );
-      const step = await replay.step();
-      if (step.kind === 'done') {
-        await setStatus(client, run, 'COMPLETED', null);
-        return null;
-      }
-      if (step.kind === 'quarantined') {
-        await setStatus(
-          client,
-          run,
-          'QUARANTINED',
-          `${step.reason}:${step.cursor}`,
-        );
-        return null;
-      }
-      const { cursor, call } = step;
-      if (call.kind !== 'query' && call.kind !== 'operation')
-        throw new WorkflowEffectRefusal('durable-call-unavailable');
-      if (journal.pending) return { ...journal.pending, call, run };
-      const requestId = await insertJournal(
-        client,
-        run,
-        cursor,
-        'REQUEST',
-        call,
-      );
-      const idempotencyKey = workflowEffectId(run.instance_id, cursor);
-      await client.query(
-        `INSERT INTO platform.workflow_effect_outbox (
-           tenant_id, environment_id, run_id, cursor, request_journal_id, idempotency_key
-         ) VALUES ($1, $2, $3, $4, $5, $6)`,
-        [...runKey(run), cursor, requestId, idempotencyKey],
-      );
-      // A later tick will see the committed outbox.
-      return null;
+      const workflow = { executable: run.executable.toString(), sdk };
+      const base = new InMemoryWorkflowRun(workflow, event);
+      return await new InMemoryWorkflowRun(workflow, event, {
+        ...base.snapshot(),
+        prefix: journal.prefix,
+        pending: journal.pending && canonicalize(journal.pending.call),
+      }).step();
     } catch (error) {
-      if (error instanceof WorkflowEffectRefusal) {
-        await setStatus(client, run, 'SUSPENDED', error.message);
-        return null;
-      }
+      if (error instanceof WorkflowEffectRefusal)
+        return { kind: 'SUSPENDED' as const, reason: error.message };
+      if (error instanceof WorkflowGuestError)
+        return {
+          kind: 'QUARANTINED' as const,
+          reason: 'permanent-guest-failure',
+        };
       throw error;
     }
   }
 
-  async #recover(
-    client: PoolClient,
-    run: Run,
-    dispatch: Dispatch,
-  ): Promise<boolean> {
-    if (dispatch.call.kind !== 'operation') return false;
-    const call = dispatch.call;
+  async #readReceipt({
+    run,
+    call,
+    idempotencyKey,
+  }: Dispatch): Promise<ImmutableJsonValue | null> {
+    if (call.kind !== 'operation') return null;
     const receipt = await withTrustedRequestTransaction(
       this.runtimePool,
       await automationContext(run),
@@ -399,20 +512,43 @@ export class PostgresWorkflowExecution {
               run.release_id,
               run.release_root,
               call.id,
-              dispatch.idempotencyKey,
+              idempotencyKey,
             ],
           )
         ).rows[0],
     );
-    if (!receipt) return false;
+    if (!receipt) return null;
     if (receipt.input_digest !== sha256(canonicalize(call.input)))
       throw new Error('Workflow operation receipt input digest mismatch');
-    await insertResult(client, run, dispatch.cursor, {
-      outcome: 'succeeded',
-      readBack: receipt.mutation_result,
-    });
-    return true;
+    return { outcome: 'succeeded', readBack: receipt.mutation_result };
   }
+}
+
+async function persistEffectResult(
+  client: PoolClient,
+  run: Run,
+  dispatch: Dispatch,
+  value: ImmutableJsonValue,
+): Promise<boolean> {
+  if (Buffer.byteLength(canonicalize(value)) <= MAXIMUM_WORKFLOW_EFFECT_BYTES) {
+    await insertJournal(client, run, dispatch.cursor, 'RESULT', value);
+    return false;
+  }
+  const reason = 'oversized-effect-result';
+  await setStatus(client, run, 'SUSPENDED', reason);
+  if (dispatch.call.kind === 'operation') {
+    await insertJournal(client, run, dispatch.cursor, 'CONTROL', {
+      reason,
+      receipt: {
+        actionId: dispatch.call.id,
+        idempotencyKey: dispatch.idempotencyKey,
+        principalId: run.automation_principal_id,
+        releaseId: run.release_id,
+        releaseRoot: run.release_root,
+      },
+    });
+  }
+  return true;
 }
 
 async function loadRun(
@@ -425,15 +561,17 @@ async function loadRun(
       await client.query<Run>(
         `SELECT r.*, d.executable, d.sdk_digest, d.grants, d.engine_build, d.host_version, d.sdk_version,
              d.automation_principal_id, i.legal_entity_id, i.receipt_id, i.event_id, i.trigger_principal_id,
-             w.approver_id, w.approver_grants
+             w.approver_id, w.approver_grants,
+             CASE WHEN w.definition_bindings->d.workflow_id->>'digest' = platform.workflow_definition_digest(d)
+                  THEN w.definition_bindings->d.workflow_id->>'digest' END AS verified_digest,
+             COALESCE(w.definition_bindings->d.workflow_id->'unattendedOperations', '{}'::jsonb) AS unattended_operations
         FROM platform.workflow_runs AS r
         JOIN platform.workflow_instances AS i USING (tenant_id, environment_id, instance_id, workflow_id)
         JOIN platform.workflow_definitions AS d USING (tenant_id, environment_id, release_id, workflow_id)
         JOIN platform.workflow_activation_watermarks AS w
           ON w.tenant_id = r.tenant_id AND w.environment_id = r.environment_id
          AND w.pointer_id = r.pointer_id AND w.fence = r.initial_fence
-       WHERE r.tenant_id = $1 AND r.environment_id = $2 AND r.run_id = $3
-       FOR UPDATE OF r`,
+       WHERE r.tenant_id = $1 AND r.environment_id = $2 AND r.run_id = $3`,
         [scope.tenant_id, scope.environment_id, runId],
       )
     ).rows[0] ?? null
@@ -486,27 +624,6 @@ async function loadJournal(
     });
   }
   return { prefix, pending: null };
-}
-
-async function insertResult(
-  client: PoolClient,
-  run: Run,
-  cursor: number,
-  value: ImmutableJsonValue,
-  useFirstResult = false,
-): Promise<void> {
-  const encoded = canonicalize(value);
-  const old = await client.query<{ canonical_bytes: Buffer }>(
-    `SELECT canonical_bytes FROM platform.workflow_journal
-      WHERE tenant_id = $1 AND environment_id = $2 AND run_id = $3 AND cursor = $4 AND kind = 'RESULT'`,
-    [...runKey(run), cursor],
-  );
-  if (old.rows[0]) {
-    if (!useFirstResult && old.rows[0].canonical_bytes.toString() !== encoded)
-      throw new Error('Workflow effect already has a different durable result');
-    return;
-  }
-  await insertJournal(client, run, cursor, 'RESULT', value);
 }
 
 async function insertJournal(

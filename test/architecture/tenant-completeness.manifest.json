@@ -450,6 +450,12 @@
     },
     {
       "schema": "platform",
+      "table": "workflow_receipt_scan_positions",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
       "table": "workflow_runs",
       "classification": "tenant-scoped",
       "tenantColumn": "tenant_id"
@@ -457,6 +463,12 @@
     {
       "schema": "platform",
       "table": "workflow_timers",
+      "classification": "tenant-scoped",
+      "tenantColumn": "tenant_id"
+    },
+    {
+      "schema": "platform",
+      "table": "workflow_unresolved_receipts",
       "classification": "tenant-scoped",
       "tenantColumn": "tenant_id"
     },

@@ -274,6 +274,7 @@ export class PostgresSemanticQueryDenialRecorder implements SemanticQueryDenialR
      * snapshot on `pool` or competing with the page for a connection.
      */
     evidencePool: Pool = pool,
+    private readonly channel: 'UI' | 'WORKFLOW' = 'UI',
   ) {
     this.#trust = new PostgresTrustService(evidencePool);
   }
@@ -310,7 +311,7 @@ export class PostgresSemanticQueryDenialRecorder implements SemanticQueryDenialR
       Object.freeze({
         actionId: request.queryId,
         causationId: null,
-        channel: 'UI',
+        channel: this.channel,
         correlationId: randomUUID(),
         failureCode: 'SEMANTIC_QUERY_POLICY_DENIED',
         invocationId: randomUUID(),

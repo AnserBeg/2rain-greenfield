@@ -209,6 +209,7 @@ export class PostgresModuleRuntimeInterpreter
   readonly #providerErrorMappings: readonly ModuleProviderErrorMapping[];
   readonly #trust: PostgresTrustService;
   readonly #documentNumbers: DocumentNumberMode;
+  readonly #workflowRunId: string | undefined;
 
   constructor(
     private readonly pool: Pool,
@@ -220,9 +221,10 @@ export class PostgresModuleRuntimeInterpreter
     observePinnedStorageTargetCache:
       | ((observation: PinnedStorageTargetCacheObservation) => void)
       | undefined = undefined,
-    options: { readonly documentNumbers?: DocumentNumberMode } = {},
+    options: { readonly documentNumbers?: DocumentNumberMode; readonly workflowRunId?: string } = {},
   ) {
     this.#documentNumbers = options.documentNumbers ?? 'sequence';
+    this.#workflowRunId = options.workflowRunId;
     this.#pinnedStorageTargets = new ValidatedPinnedStorageTargetCache(
       observePinnedStorageTargetCache,
     );
@@ -403,7 +405,7 @@ export class PostgresModuleRuntimeInterpreter
       }),
       async (client) => {
         if (request.channel === 'WORKFLOW')
-          await assertWorkflowWriteFence(client, request);
+          await assertWorkflowWriteFence(client, request, this.#workflowRunId);
         const currentStorage = await this.#loadPinnedStorageTarget(
           client,
           request,
@@ -1392,6 +1394,7 @@ async function assertRestorableRelations(
 async function assertWorkflowWriteFence(
   client: PoolClient,
   request: SemanticOperationExecutionRequest,
+  runId: string | undefined,
 ): Promise<void> {
   const { tenantId, environmentId } = request.context;
   const result = await client.query<{ fence: string }>(
@@ -1424,6 +1427,17 @@ async function assertWorkflowWriteFence(
     throw failure(
       'WORKFLOW_POLICY_CHANGED',
       'Workflow policy changed before commit',
+      request.definition.operationId,
+    );
+  const runnable = runId && (await client.query<{ runnable: boolean }>(
+    'SELECT platform.workflow_lock_runnable_effect($1, $2, $3, $4, $5) AS runnable',
+    [runId, request.view.pointer.pointerId, request.view.release.releaseId,
+      request.view.pointer.fence, request.idempotencyKey],
+  )).rows[0]?.runnable;
+  if (!runnable)
+    throw failure(
+      'WORKFLOW_RUN_NOT_RUNNABLE',
+      'Workflow run changed before commit',
       request.definition.operationId,
     );
 }

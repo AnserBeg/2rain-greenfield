@@ -1,5 +1,7 @@
-import { parseNormalizedApplicationPackageJson } from '@north-star/canonical-model';
-import { isTenantId } from '@north-star/customization';
+import {
+  canonicalize,
+  parseNormalizedApplicationPackageJson,
+} from '@north-star/canonical-model';
 import {
   AuthenticatedRequestEntryAdapter,
   type TrustedRequestContext,
@@ -30,6 +32,7 @@ import {
   CURRENT_POLICY_RUNTIME_BINDINGS,
   currentPolicyBindingsFromPermissions,
   PostgresCurrentPolicyGateway,
+  PostgresSemanticQueryDenialRecorder,
 } from './current-policy.js';
 import {
   ModuleRuntimeInterpreterError,
@@ -39,13 +42,12 @@ import { withTrustedRequestTransaction } from './request-context.js';
 import { PostgresRequestRuntimeViewService } from './request-runtime-view-service.js';
 import { TrustedActorEnvelopeIssuer } from './trust/trusted-actor-envelope.js';
 import {
+  sha256,
   WorkflowEffectRefusal,
   type WorkflowGateway,
   type WorkflowRunPin,
 } from './workflow-execution.js';
 import type { WorkflowCall } from './workflow-sdk.js';
-
-const GOODS_RECEIPT_ENTITY = 'northstar.app:entity.goods_receipt';
 
 /** The worker gets only the same Semantic gateways a request would use. */
 export class PostgresWorkflowGateway implements WorkflowGateway {
@@ -71,20 +73,28 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
     return entry.run({}, (view) => view);
   }
 
-  async authorizeRemedy(operator: TrustedRequestContext): Promise<boolean> {
+  async withRemedyAuthority<T>(
+    operator: TrustedRequestContext,
+    work: () => Promise<T>,
+  ): Promise<T> {
     return withTrustedRequestTransaction(
       this.pool,
       operator,
-      async (client) =>
-        (
-          await client.query<{ eligible: boolean }>(
-            `SELECT eligible FROM platform.release_approver_eligibility_events
-          WHERE tenant_id = $1 AND principal_id = $2
-            AND authority_policy_contract_version = 'northstar.release-approver-authority/v1'
-          ORDER BY policy_version DESC LIMIT 1`,
-            [operator.tenantId, operator.principalId],
-          )
-        ).rows[0]?.eligible === true,
+      async (client) => {
+        await client.query(
+          'SELECT * FROM platform.lock_release_activation_authority_epoch($1)',
+          [operator.tenantId],
+        );
+        const { rows } = await client.query<{ eligible: boolean }>(
+          `SELECT eligible FROM platform.release_approver_eligibility_events
+           WHERE tenant_id = $1 AND principal_id = $2
+           ORDER BY policy_version DESC LIMIT 1`,
+          [operator.tenantId, operator.principalId],
+        );
+        if (!rows[0]?.eligible)
+          throw new Error('Workflow remedy permission refused');
+        return work();
+      },
     );
   }
 
@@ -159,24 +169,29 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
         };
       },
     };
+    const actorIssuer = new TrustedActorEnvelopeIssuer({
+      async resolve(context) {
+        if (context.principalId !== run.automation_principal_id)
+          throw new Error('Workflow attribution principal mismatch');
+        return {
+          executionPrincipal: {
+            kind: 'AUTOMATION',
+            principalId: context.principalId,
+          },
+          subject: null,
+          initiatingHumanId: null,
+          approvingHumanId: null,
+          delegation: null,
+        };
+      },
+    });
     const interpreter = new PostgresModuleRuntimeInterpreter(
       this.pool,
-      new TrustedActorEnvelopeIssuer({
-        async resolve(context) {
-          if (context.principalId !== run.automation_principal_id)
-            throw new Error('Workflow attribution principal mismatch');
-          return {
-            executionPrincipal: {
-              kind: 'AUTOMATION',
-              principalId: context.principalId,
-            },
-            subject: null,
-            initiatingHumanId: null,
-            approvingHumanId: null,
-            delegation: null,
-          };
-        },
-      }),
+      actorIssuer,
+      [],
+      undefined,
+      undefined,
+      { workflowRunId: run.run_id },
     );
     try {
       if (call.kind === 'query') {
@@ -184,6 +199,8 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
           actor,
           call.id,
         );
+        if (definition?.readModel)
+          throw new WorkflowEffectRefusal('unsupported-read-model');
         const company = definition?.legalEntityScope?.operand.parameterId;
         const selected = company && asObject(call.input)[company];
         if (
@@ -197,7 +214,16 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
         ) {
           throw new WorkflowEffectRefusal('query-company-scope-refused');
         }
-        const gateway = new SemanticQueryGateway(intersection, interpreter);
+        const gateway = new SemanticQueryGateway(
+          intersection,
+          interpreter,
+          new PostgresSemanticQueryDenialRecorder(
+            this.pool,
+            actorIssuer,
+            this.pool,
+            'WORKFLOW',
+          ),
+        );
         const request = {
           schemaVersion: SEMANTIC_QUERY_REQUEST_VERSION,
           queryId: call.id,
@@ -214,22 +240,25 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
         ) as ImmutableJsonValue;
       }
 
-      // This slice proves tenant-created records. A first-party entity, a
-      // transition, an undeclared relation target, or a wider write requires
-      // confirmation until its complete Tier B intersection has been proven.
       const operation = parsePinnedOperationCatalog(
         actor.projections.operation.payload,
       ).find((definition) => definition.operationId === call.id);
+      const proof = run.unattended_operations[call.id];
       if (
         operation?.tier !== 'o0' ||
         operation.confirmation !== 'none' ||
         operation.effect.kind !== 'createRecordEffect' ||
-        !isTenantId(operation.effect.entity.targetId) ||
         !operation.inputContract ||
-        operation.inputContract.assignedFields?.length ||
-        operation.inputContract.relationInputs.some(
-          (relation) => relation.targetEntityId !== GOODS_RECEIPT_ENTITY,
-        )
+        !proof ||
+        proof.releaseRoot !== run.release_root ||
+        proof.operationDigest !== sha256(canonicalize(operation)) ||
+        proof.inputContractDigest !==
+          sha256(canonicalize(operation.inputContract)) ||
+        !Array.isArray(proof.reachableWriteEntities) ||
+        proof.reachableWriteEntities.length !== 1 ||
+        proof.reachableWriteEntities[0] !== operation.effect.entity.targetId ||
+        !Array.isArray(proof.tierBIntersections) ||
+        proof.tierBIntersections.length !== 0
       ) {
         throw new WorkflowEffectRefusal('confirmation-required');
       }
@@ -276,12 +305,15 @@ export class PostgresWorkflowGateway implements WorkflowGateway {
       if (
         error instanceof ModuleRuntimeInterpreterError &&
         (error.code === 'WORKFLOW_STALE_FENCE' ||
-          error.code === 'WORKFLOW_POLICY_CHANGED')
+          error.code === 'WORKFLOW_POLICY_CHANGED' ||
+          error.code === 'WORKFLOW_RUN_NOT_RUNNABLE')
       )
         throw new WorkflowEffectRefusal(
           error.code === 'WORKFLOW_STALE_FENCE'
             ? 'stale-release-pin'
-            : 'current-policy-refused',
+            : error.code === 'WORKFLOW_RUN_NOT_RUNNABLE'
+              ? 'run-not-runnable'
+              : 'current-policy-refused',
         );
       throw error;
     }

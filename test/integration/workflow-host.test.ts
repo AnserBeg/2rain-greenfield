@@ -17,6 +17,10 @@ import {
   type WorkflowEvent,
   type WorkflowSdk,
 } from '../../packages/postgres-provider/src/workflow-sdk.js';
+import {
+  superviseWorkflowPolls,
+  workflowSchedulerConfig,
+} from '../../packages/postgres-provider/src/workflow-worker.js';
 import { AuthenticatedRequestEntryAdapter } from '../../packages/runtime/src/request-context.js';
 import {
   AuthenticatedRequestRuntimeEntryAdapter,
@@ -359,4 +363,37 @@ test('the supervisor terminates a busy worker before it publishes a partial resp
   assert.equal(armed, true);
   assert.equal(cancelled, true);
   assert.equal(run.snapshot().pending, null);
+});
+
+
+test('workflow scheduling is opt-in and a failed pass does not stop polling', async () => {
+  assert.equal(workflowSchedulerConfig({}), undefined);
+  assert.throws(() => workflowSchedulerConfig({ NORTH_STAR_WORKFLOW_SCHEDULER: 'on' }), /requires a database URL/);
+  assert.deepEqual(workflowSchedulerConfig({
+    NORTH_STAR_WORKFLOW_SCHEDULER: 'on',
+    NORTH_STAR_WORKFLOW_WORKER_DATABASE_URL: 'postgres://north_star_workflow_worker@localhost/postgres',
+    NORTH_STAR_WORKFLOW_RUNTIME_DATABASE_URL: 'postgres://north_star_runtime@localhost/postgres',
+  }), {
+    workerDatabaseUrl: 'postgres://north_star_workflow_worker@localhost/postgres',
+    runtimeDatabaseUrl: 'postgres://north_star_runtime@localhost/postgres',
+  });
+  const next = Promise.withResolvers<void>();
+  let failures = 0;
+  let polls = 0;
+  const stop = superviseWorkflowPolls({
+    async poll() {
+      polls++;
+      if (polls === 1) throw new Error('test poll failure');
+      next.resolve();
+    },
+  }, () => { failures++; }, 0);
+  const deadline = setTimeout(() => next.reject(new Error('scheduler did not resume')), 1_000);
+  try {
+    await next.promise;
+  } finally {
+    clearTimeout(deadline);
+    await stop();
+  }
+  assert.equal(failures, 1);
+  assert.equal(polls, 2);
 });

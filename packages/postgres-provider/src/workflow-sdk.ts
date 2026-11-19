@@ -62,7 +62,7 @@ export function generateWorkflowSdk(
   const queries = new Map(
     grants.queries.map((id) => {
       const query = registeredSemanticQueryFromPinnedView(view, id);
-      if (query?.lifecycle !== 'active')
+      if (query?.lifecycle !== 'active' || query.readModel)
         throw new Error(`Workflow query grant does not resolve: ${id}`);
       return [id, query] as const;
     }),
