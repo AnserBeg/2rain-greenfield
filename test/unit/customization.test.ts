@@ -1994,6 +1994,7 @@ test('composed detail keeps calculated display values readable and outside edit 
     operator: 'subtract',
     leftFieldId: 'northstar.app:field.item_price_cad',
     rightFieldId: 'northstar.app:field.item_standard_cost_cad',
+    listSurfaceId: 'northstar.app:surface.item_list',
   });
   const applied = applyCustomizationPatches(authored, [patch]);
   assert.ok(applied.status === 'applied');
