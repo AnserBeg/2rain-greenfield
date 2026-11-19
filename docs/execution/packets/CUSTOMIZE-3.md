@@ -32,7 +32,7 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 - The ADR amendment passed [CI 44481530303](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44481530303) and the record checker. GitHub canceled the merge run when CRITFIX-C advanced main.
 - Slice 2 passed [CI 44583050908](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44583050908) and [control 44583050933](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44583050933). PostgreSQL exercised the previous serving reader, tenant-runner envelope equality, grandfathering, and rollback. The browser and assistant exercised the same pinned rule.
 - Slice 5 passed [CI 44510381381](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44510381381) and [four mutation controls](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44510308624). Migration 0040 follows activation recovery and the snapshot was rebuilt from all 40 migrations. Standard surface actions check current permission before being offered. The service stages the release and the patch audit row records the author.
-- Slice 3 candidate evidence is pending.
+- Slice 3 passed [CI 44600403784](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44600403784) and [control 44600403727](https://github.com/AnserBeg/2rain-greenfield/actions/runs/44600403727). The actual older reader refused operation reader 4. The compiler, PostgreSQL, Customize and assistant exercised the field and path positions.
 
 ## Filed
 
@@ -42,8 +42,8 @@ Slice 1 integrated the list-column work and saved list views from [PR #95](https
 {
   "schemaVersion": "northstar.record-claim/v1",
   "packet": "CUSTOMIZE-3",
-  "base": "a1a7236a909e026d56fadd12337823115b0116d5",
-  "head": "b17e4ac5031c76b62cf56c65b3b9802f70beed9e",
+  "base": "37c80f93b1f5d46e0f191122ccb71de8aeae23e2",
+  "head": "c6d6ebbf24cbd656afc19f57efd9b32056406e34",
   "changedPaths": [
     ".github/workflows/evidence.yml", "apps/web/src/component-registry.ts", "apps/web/src/customize-screen.ts", "apps/web/src/surface-runtime.ts", "apps/web/test/browser/customize-formulas.composed-application.spec.ts",
     "apps/web/test/browser/customize.composed-application.spec.ts", "package.json", "packages/canonical-model/src/formula-validation-bindings.ts", "packages/canonical-model/src/formula-validation-path.ts", "packages/canonical-model/src/formula-validation-projection.ts",

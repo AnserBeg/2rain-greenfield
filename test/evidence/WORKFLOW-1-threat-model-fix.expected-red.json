@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "packet": "WORKFLOW-1-threat-model-fix",
+  "entries": [
+    {
+      "name": "workflow-missing-dependency-proof",
+      "claim": "An unattended write with unknown dependencies commits no semantic operation receipt.",
+      "file": "packages/postgres-provider/src/workflow-gateway.ts",
+      "original": "      if (\n        operation?.tier !== 'o0' ||\n        operation.confirmation !== 'none' ||\n        operation.effect.kind !== 'createRecordEffect' ||\n        !operation.inputContract ||\n        !proof ||\n        proof.releaseRoot !== run.release_root ||\n        proof.operationDigest !== sha256(canonicalize(operation)) ||\n        proof.inputContractDigest !==\n          sha256(canonicalize(operation.inputContract)) ||\n        !Array.isArray(proof.reachableWriteEntities) ||\n        proof.reachableWriteEntities.length !== 1 ||\n        proof.reachableWriteEntities[0] !== operation.effect.entity.targetId ||\n        !Array.isArray(proof.tierBIntersections) ||\n        proof.tierBIntersections.length !== 0\n      ) {\n",
+      "replacement": "      if (false) {\n",
+      "test": {
+        "files": ["test/postgres/workflow-consumer.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-consumer.test.ts",
+          "name": "R1 a create with unknown dependencies cannot write without approval",
+          "expected": "a proof-free create must leave no committed operation receipt"
+        }
+      ]
+    },
+    {
+      "name": "workflow-verify-before-approval",
+      "claim": "A definition verified after approval never enters guest replay.",
+      "file": "packages/postgres-provider/src/workflow-execution.ts",
+      "original": "      if (!run.verified_digest)",
+      "replacement": "      if (false)",
+      "test": {
+        "files": ["test/postgres/workflow-consumer.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-consumer.test.ts",
+          "name": "R2 a definition verified after approval cannot enter replay",
+          "expected": "a definition verified after approval reached replay"
+        }
+      ]
+    },
+    {
+      "name": "workflow-revoked-automation-grant",
+      "claim": "A workflow write leaves no semantic operation receipt after the automation actor loses its current grant.",
+      "file": "packages/postgres-provider/src/workflow-gateway.ts",
+      "original": "        if (!inSnapshot || actorDecision.decision !== 'ALLOW')\n",
+      "replacement": "        if (!inSnapshot || (call.kind === 'query' && actorDecision.decision !== 'ALLOW'))\n",
+      "test": {
+        "files": ["test/postgres/workflow-consumer.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-consumer.test.ts",
+          "name": "R3 a workflow write cannot outlive the automation actor’s grants",
+          "expected": "an actor without a current grant must leave no committed operation receipt"
+        }
+      ]
+    },
+    {
+      "name": "workflow-substituted-receipt-scope",
+      "claim": "Dispatch and the committed write use the scope of the source receipt event.",
+      "file": "packages/postgres-provider/src/workflow-execution.ts",
+      "original": "               'legal_entity_id', event.payload #>> '{legalEntityId,value}',\n               'receipt_id', change.record_id,",
+      "replacement": "               'legal_entity_id', i.legal_entity_id,\n               'receipt_id', i.receipt_id,",
+      "test": {
+        "files": ["test/postgres/workflow-consumer.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-consumer.test.ts",
+          "name": "dispatch derives company and receipt from the source event",
+          "expected": "worker instance operands must not change the dispatched company or written receipt"
+        }
+      ]
+    },
+    {
+      "name": "workflow-stalled-replay-release-lock",
+      "claim": "A stalled workflow replay holds no release pointer lock during activation or rollback.",
+      "file": "packages/postgres-provider/src/workflow-execution.ts",
+      "original": "      const view = await this.gateway.loadView(await automationContext(run));",
+      "replacement": "      const view = await withWorkflowTransaction(this.workerPool, run, async (client) => {\n        await lockWorkflowPointer(client);\n        return this.gateway.loadView(await automationContext(run));\n      });",
+      "test": {
+        "files": ["test/postgres/workflow-consumer.test.ts"]
+      },
+      "kills": [
+        {
+          "file": "test/postgres/workflow-consumer.test.ts",
+          "name": "R4 activation and rollback finish while workflow replay is stalled",
+          "expected": "activation and rollback must complete before workflow replay resumes"
+        }
+      ]
+    }
+  ]
+}

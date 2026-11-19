@@ -1,6 +1,6 @@
 # ADR-0076: Same-record comparisons and bounded to-one validation
 
-Status: Implementation draft for CUSTOMIZE-3. ADR-0074 and ADR-0075 govern admission and the validation position.
+Status: Accepted for CUSTOMIZE-3. ADR-0074 and ADR-0075 govern admission and the validation position.
 
 ## §5.11 contract
 

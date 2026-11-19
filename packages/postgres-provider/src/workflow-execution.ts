@@ -12,6 +12,7 @@ import type {
 } from '@north-star/runtime/request-runtime-view';
 import type { Pool, PoolClient } from 'pg';
 
+import { RECEIPT_POSTED_EVENT } from '../../domain/src/purchasing/receipt-posted-event.js';
 import { withTrustedRequestTransaction } from './request-context.js';
 import {
   lockWorkflowPointer,
@@ -46,7 +47,14 @@ interface WorkflowUnattendedProof {
   readonly tierBIntersections: readonly string[];
 }
 
-export interface WorkflowRunPin extends WorkflowScope {
+interface ReceiptScope {
+  readonly trigger_principal_id: string;
+  readonly legal_entity_id: string;
+  readonly receipt_id: string;
+  readonly event_id: string;
+}
+
+export interface WorkflowRunPin extends WorkflowScope, ReceiptScope {
   readonly run_id: string;
   readonly instance_id: string;
   readonly pointer_id: string;
@@ -55,10 +63,6 @@ export interface WorkflowRunPin extends WorkflowScope {
   readonly initial_fence: string;
   readonly execution_fence: string;
   readonly automation_principal_id: string;
-  readonly trigger_principal_id: string;
-  readonly legal_entity_id: string;
-  readonly receipt_id: string;
-  readonly event_id: string;
   readonly approver_id: string;
   readonly unattended_operations: Readonly<
     Record<string, WorkflowUnattendedProof>
@@ -70,7 +74,8 @@ export interface WorkflowRunPin extends WorkflowScope {
   ][];
 }
 
-interface Run extends WorkflowRunPin {
+interface Run extends Omit<WorkflowRunPin, keyof ReceiptScope> {
+  readonly receipt_scope: ReceiptScope | null;
   readonly workflow_id: string;
   readonly status:
     | 'RUNNABLE'
@@ -175,12 +180,16 @@ export class PostgresWorkflowExecution {
     const snapshot = await this.#snapshot(scope, runId);
     if (!snapshot || snapshot.run.status !== 'RUNNABLE') return;
     const { run, journal } = snapshot;
+    const scopedRun = run.receipt_scope && { ...run, ...run.receipt_scope };
     const pending = pendingDispatch(run, journal);
     const recovered = pending && (await this.#readReceipt(pending));
     const decision =
-      journal.invalid || recovered || !matchesPin(run, snapshot.pointer)
+      journal.invalid ||
+      recovered ||
+      !scopedRun ||
+      !matchesPin(run, snapshot.pointer)
         ? null
-        : await this.#replay(run, journal);
+        : await this.#replay(scopedRun, journal);
     const dispatch = await this.#withCurrent(
       run,
       journal,
@@ -195,6 +204,16 @@ export class PostgresWorkflowExecution {
         }
         if (!matchesPin(current, pointer)) {
           await setStatus(client, current, 'SUSPENDED', 'stale-release-pin');
+          return null;
+        }
+        if (!scopedRun) {
+          if (matchesPin(run, snapshot.pointer))
+            await setStatus(
+              client,
+              current,
+              'SUSPENDED',
+              'unavailable-receipt-source',
+            );
           return null;
         }
         if (!decision) return null;
@@ -245,7 +264,7 @@ export class PostgresWorkflowExecution {
           );
           return null;
         }
-        if (pending) return { ...pending, call };
+        if (pending) return { ...pending, run: scopedRun, call };
         const requestId = await insertJournal(
           client,
           current,
@@ -271,7 +290,10 @@ export class PostgresWorkflowExecution {
     await this.#dispatch(dispatch, journal);
   }
 
-  async #dispatch(dispatch: Dispatch, journal: Journal): Promise<void> {
+  async #dispatch(
+    dispatch: Dispatch & { readonly run: Run & ReceiptScope },
+    journal: Journal,
+  ): Promise<void> {
     const { run, call, idempotencyKey } = dispatch;
     let result: ImmutableJsonValue;
     try {
@@ -480,7 +502,7 @@ export class PostgresWorkflowExecution {
     );
   }
 
-  async #replay(run: Run, journal: Journal) {
+  async #replay(run: Run & ReceiptScope, journal: Journal) {
     try {
       if (!run.verified_digest)
         throw new WorkflowEffectRefusal('unverified-definition');
@@ -611,11 +633,19 @@ async function loadRun(
   scope: WorkflowScope,
   runId: string,
 ): Promise<Run | null> {
+  // The worker's active-fence policy can hide historical source rows. Keep the
+  // run visible so it can suspend or reconcile an already committed effect.
   return (
     (
       await client.query<Run>(
         `SELECT r.*, d.executable, d.sdk_digest, d.grants, d.engine_build, d.host_version, d.sdk_version,
-             d.automation_principal_id, i.legal_entity_id, i.receipt_id, i.event_id, i.trigger_principal_id,
+             d.automation_principal_id,
+             CASE WHEN change.record_id IS NOT NULL THEN jsonb_build_object(
+               'legal_entity_id', event.payload #>> '{legalEntityId,value}',
+               'receipt_id', change.record_id,
+               'event_id', event.domain_event_id,
+               'trigger_principal_id', change.execution_principal_id
+             ) END AS receipt_scope,
              w.approver_id, w.approver_grants,
              CASE WHEN w.verified_approval_binding AND active.verified_approval_binding
                     AND w.definition_bindings->d.workflow_id->>'digest' = platform.workflow_definition_digest(d)
@@ -625,6 +655,22 @@ async function loadRun(
         FROM platform.workflow_runs AS r
         JOIN platform.workflow_instances AS i USING (tenant_id, environment_id, instance_id, workflow_id)
         JOIN platform.workflow_definitions AS d USING (tenant_id, environment_id, release_id, workflow_id)
+        LEFT JOIN platform.trust_domain_events AS event
+          ON (event.tenant_id, event.environment_id, event.domain_event_id, event.outbox_id) =
+             (r.tenant_id, r.environment_id, i.event_id, i.outbox_id)
+         AND (event.release_id, event.release_content_hash) = (r.release_id, r.release_root)
+         AND event.event_type = $4 AND event.event_type = d.event_type
+         AND event.action_id = $5 AND event.event_schema_version = $6
+         AND event.payload #>> '{legalEntityId,representation}' = 'VALUE'
+         AND event.payload #>> '{legalEntityId,value}' IS NOT NULL
+        LEFT JOIN platform.trust_business_change_documents AS change
+          ON (change.tenant_id, change.environment_id, change.change_document_id) =
+             (event.tenant_id, event.environment_id, event.change_document_id)
+         AND (change.invocation_id, change.outbox_id, change.domain_event_id) =
+             (event.invocation_id, event.outbox_id, event.domain_event_id)
+         AND (change.release_id, change.release_content_hash, change.action_id) =
+             (event.release_id, event.release_content_hash, event.action_id)
+         AND change.record_type = $7
         JOIN platform.workflow_activation_watermarks AS w
           ON w.tenant_id = r.tenant_id AND w.environment_id = r.environment_id
          AND w.pointer_id = r.pointer_id AND w.fence = r.initial_fence
@@ -632,7 +678,15 @@ async function loadRun(
           ON (active.tenant_id, active.environment_id, active.pointer_id, active.fence, active.release_id, active.release_root) =
              (r.tenant_id, r.environment_id, r.pointer_id, r.execution_fence, r.release_id, r.release_root)
        WHERE r.tenant_id = $1 AND r.environment_id = $2 AND r.run_id = $3`,
-        [scope.tenant_id, scope.environment_id, runId],
+        [
+          scope.tenant_id,
+          scope.environment_id,
+          runId,
+          RECEIPT_POSTED_EVENT.eventType,
+          RECEIPT_POSTED_EVENT.postingAction,
+          RECEIPT_POSTED_EVENT.schemaVersion,
+          RECEIPT_POSTED_EVENT.recordType,
+        ],
       )
     ).rows[0] ?? null
   );
@@ -809,7 +863,10 @@ export function workflowEffectId(instanceId: string, cursor: number): string {
 }
 
 async function automationContext(
-  run: WorkflowRunPin,
+  run: Pick<
+    WorkflowRunPin,
+    'tenant_id' | 'environment_id' | 'automation_principal_id'
+  >,
 ): Promise<TrustedRequestContext> {
   return new AuthenticatedRequestEntryAdapter(async () => ({
     tenantId: run.tenant_id,

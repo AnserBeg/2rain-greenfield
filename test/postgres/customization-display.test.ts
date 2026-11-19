@@ -68,7 +68,7 @@ test(
           );
           await opened.service.approve(draft.patchId);
           await withArchivedCustomizationRuntime(
-            'feffa1b9390e867c5f36f3005bbd70e8bc551bde',
+            '61c8afb1dd760c854bc5bc33890f1e85fc2a0e99',
             async (run) => {
               const read = () =>
                 archivedRuntimeRead(run, {
