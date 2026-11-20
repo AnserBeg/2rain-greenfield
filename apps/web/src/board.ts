@@ -394,10 +394,12 @@ export async function boardTask(
     JSON.stringify(unseal(frame, form.boardTicket ?? '')) ===
     JSON.stringify([...intent, suffix]);
   const opId = form.operationId ?? '';
+  // A confirm or choice without this server's ticket for this exact intent is
+  // forged or replayed across principals, companies or releases.
   if (form.boardAction === 'confirm' && !valid(opId))
-    return refuse('Open the move again.');
+    return refuse('Open the move again.', 403);
   if (form.boardAction === 'choose' && !valid('choose'))
-    return refuse('Open the move again.');
+    return refuse('Open the move again.', 403);
   const permissions = await authorizedMoves(
     c,
     body.grouping.moves.filter((m) => m.fromStateId === state),
